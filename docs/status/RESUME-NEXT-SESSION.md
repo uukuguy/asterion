@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-24 19:19. **Session remains active — not a final handoff.**
+> Updated: 2026-07-24 20:41. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -37,6 +37,12 @@
   every runtime tool call must have a matching result before termination.
 - Built-in Claude and Pi capability mappers now emit sorted, deduplicated
   capabilities, closing the regression found during Task 1 review.
+- Protocol Tasks 3–6 are implemented and independently reviewed clean:
+  TypeScript results are deeply immutable; package catalogs store frozen
+  snapshots; composition rejects every provider ambiguity; and composed runs
+  transport one immutable host/upstream evidence snapshot.
+- Task 6 intentionally exposes three product tests whose assemblies declare
+  fictional runtime-internal host edges. Approved Task 7 owns that cleanup.
 
 ## Next steps
 
@@ -46,7 +52,7 @@ Execute, in order:
 2. `docs/superpowers/plans/2026-07-24-asterion-application-authority.md`
 3. `docs/superpowers/plans/2026-07-24-dci-provenance-reproduction.md`
 
-Resume with Task 3 of the protocol plan using TDD. Tasks 1–2 are recorded in
+Resume with Task 7 of the protocol plan using TDD. Tasks 1–6 are recorded in
 `.superpowers/sdd/progress.md`; keep commits atomic as specified by each task.
 
 ## Don't go down these paths again

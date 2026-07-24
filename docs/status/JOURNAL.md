@@ -26,3 +26,5 @@
 - 19:27 Rejected duplicate and host-overlapping package providers to preserve unambiguous composition [fe7097b]
 - 19:32 Froze discovered package manifests to prevent catalog snapshot mutation [f3ea8ee]
 - 20:18 Aligned catalog mutability types with fresh-selection guarantees [71ce81f]
+- 20:41 Transported immutable upstream and host evidence through composed runs [799f8c8]
+- 20:41 Snapshotted host evidence before preflight to close mutation races [0ed58fd]
