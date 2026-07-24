@@ -14,3 +14,6 @@
 - 17:30 Added bounded DCI launchers and Make targets for repeatable operator-authorized examples [19c0a67]
 - 17:31 Refreshed live checkpoint with focused commits and the bounded verification result.
 - 17:31 Initialized repository-native project state for durable recovery and handoff [5e555e6]
+- 18:43 Audited DCI paper/GitHub claims, Asterion package reachability,
+  protocol counterexamples, and reproduction semantics; approved three-source
+  provenance design and three implementation plans.

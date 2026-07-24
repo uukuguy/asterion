@@ -16,6 +16,9 @@ read architecture documents when extending the framework.
 
 ## Understand and extend Asterion
 
+- [DCI capability architecture and gap audit](architecture/dci-capability-audit.md)
+  — paper/README claim mapping, installed reachability, protocol
+  counterexamples, experiment provenance, and the prioritized delivery route.
 - [Agent application framework](architecture/agent-framework.md) — the layer
   model, public boundaries, delivery strategy, and non-goals.
 - [Framework and capability integration](architecture/asterion-framework-capability-integration.md)
@@ -27,6 +30,12 @@ read architecture documents when extending the framework.
   execution and composition contracts.
 - [Controlled executor operations](operator/rust-executor.md) — Rust sidecar
   policy and process boundaries.
+
+## Implementation plans
+
+- [Protocol and composition hardening](superpowers/plans/2026-07-24-asterion-protocol-composition-hardening.md)
+- [Application authority and executable closure](superpowers/plans/2026-07-24-asterion-application-authority.md)
+- [DCI provenance and reproduction](superpowers/plans/2026-07-24-dci-provenance-reproduction.md)
 
 ## Promote or extract the project
 

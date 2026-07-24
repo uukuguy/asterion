@@ -1,34 +1,59 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-24 17:31. **Session remains active — not a final handoff.**
+> Updated: 2026-07-24 18:43. DCI capability audit and implementation design are
+> approved; implementation has not started.
 
 ## TL;DR
 
-- Repository contribution guardrails and bounded DCI example targets are committed as `e7ed49e` and `19c0a67`.
-- Changed-surface verification passed; full `make check` remains red on four unrelated CLI/CI assertions.
+- `docs/architecture/dci-capability-audit.md` is the authoritative mapping from
+  paper/GitHub claims to Asterion code, reachability, evidence, and gaps.
+- The user approved separate `paper-reference`, exact
+  `upstream-github/<commit>`, and `asterion-safe` experiment families.
+- Work is split into three independently testable plans: protocol/composition,
+  application authority, then DCI provenance/reproduction.
+- No provider-backed benchmark or published score was rerun.
 
 ## Where things stand
 
-- `make docs-check`, shell syntax checks, three targeted Makefile tests, dry-run targets, and diff checks passed.
-- Full `make check` failed on three existing runtime-selection CLI tests and the CI Node-version assertion.
-- The failed runtime-context run made zero tool calls and retried after 2, 4, and 8 seconds before settling failed.
-- The later successful basic run saw the same transient `fetch failed` pattern but recovered after retrying.
-- Project route remains direct; no new implementation objective is recorded.
+- Installed acceptance passes with zero provider operations, but it currently
+  proves inventory counts rather than every executable assembly.
+- Read-only counterexamples prove unresolved tool calls, noncanonical runtime
+  IDs/arrays, host/package overlap, multi-provider event/artifact edges, and
+  mutable catalog state are accepted.
+- Asterion deduplicated NDCG intentionally differs from the inspected GitHub
+  implementation; paper duplicate semantics are unreported.
+- Prompt, Judge, trajectory alignment, context behavior, and full
+  authorization/reproduction differences are recorded in the audit.
+- Full `make check` remains red on three `.env`-contaminated generic CLI tests
+  and one Node-version CI assertion. Do not report it as passing.
 
-## Next steps (immediate, action-level)
+## Next steps
 
-1. Decide whether the four existing `make check` failures become the next bounded repair objective.
-2. Rerun `make dci-runtime-context-example` only when the operator authorizes another provider-backed attempt.
+Execute, in order:
 
-## Don't go down these paths again (ruled out)
+1. `docs/superpowers/plans/2026-07-24-asterion-protocol-composition-hardening.md`
+2. `docs/superpowers/plans/2026-07-24-asterion-application-authority.md`
+3. `docs/superpowers/plans/2026-07-24-dci-provenance-reproduction.md`
 
-- Do not report the full provider-free gate as passing; only the changed-surface checks are green.
-- Do not attribute this run to the level-3 context contract, CLI argument validation, corpus path, or packaged extension integrity.
-- Do not treat the completed `docs/superpowers/plans/2026-07-24-agents-guide.md` checklist as an active roadmap.
+Start with Task 1 of the protocol plan using TDD. Keep commits atomic as
+specified by each task.
 
-## Ready-to-paste commands / configs
+## Don't go down these paths again
+
+- Do not treat packaged, bound, composed, executable, and verified as synonyms.
+- Do not claim `dci.complete-application` is a full dataset benchmark; it is a
+  one-question five-stage chain.
+- Do not label Asterion-safe prompt, Judge, NDCG, or localization parameters as
+  paper semantics.
+- Do not make full execution authority persist through `.env`, cache, or prior
+  evidence.
+- Do not rerun a provider-backed example without explicit operator
+  authorization and a finite positive budget.
+
+## Ready-to-paste commands
 
 ```bash
-make check
 git status --short
+sed -n '1,220p' docs/architecture/dci-capability-audit.md
+sed -n '1,220p' docs/superpowers/plans/2026-07-24-asterion-protocol-composition-hardening.md
 ```
