@@ -24,3 +24,5 @@
 - 19:16 Require matched runtime tool lifecycle before terminal completion [3571121]
 - 19:20 Returned deeply frozen TypeScript validation snapshots, preventing caller mutation after validation [175a5d1]
 - 19:27 Rejected duplicate and host-overlapping package providers to preserve unambiguous composition [fe7097b]
+- 19:32 Froze discovered package manifests to prevent catalog snapshot mutation [f3ea8ee]
+- 20:18 Aligned catalog mutability types with fresh-selection guarantees [71ce81f]
