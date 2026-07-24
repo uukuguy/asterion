@@ -101,7 +101,7 @@ class PiProtocolAdapter:
             if not isinstance(tool_name, str) or not tool_name:
                 raise ProtocolError("Pi tool_execution_start lacks toolName")
             if call_id in self.tool_calls:
-                raise ProtocolError(f"Pi emitted duplicate toolCallId {call_id}")
+                raise ProtocolError("Pi emitted duplicate tool call")
             self.tool_calls.add(call_id)
             raw_args = raw_event.get("args")
             arguments = (
@@ -123,9 +123,9 @@ class PiProtocolAdapter:
             if not isinstance(is_error, bool):
                 raise ProtocolError("Pi tool_execution_end lacks boolean isError")
             if call_id not in self.tool_calls:
-                raise ProtocolError(f"Pi tool result has no matching call {call_id}")
+                raise ProtocolError("Pi tool result has no matching call")
             if call_id in self.tool_results:
-                raise ProtocolError(f"Pi emitted duplicate tool result {call_id}")
+                raise ProtocolError("Pi emitted duplicate tool result")
             self.tool_results.add(call_id)
             self._emit(
                 "tool.result",

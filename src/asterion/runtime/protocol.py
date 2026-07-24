@@ -48,9 +48,7 @@ def _require_keys(
         raise ProtocolError(f"{label} missing fields: {', '.join(sorted(missing))}")
     unexpected = value.keys() - required - optional
     if unexpected:
-        raise ProtocolError(
-            f"{label} has unknown fields: {', '.join(sorted(unexpected))}"
-        )
+        raise ProtocolError(f"{label} has unknown fields")
 
 
 def _require_non_empty_string(value: object, label: str) -> str:
@@ -254,14 +252,14 @@ def validate_event_stream(events: Iterable[Mapping[str, object]]) -> None:
         if event_type == "tool.call":
             call_id = payload["call_id"]  # type: ignore[index]
             if call_id in calls:
-                raise ProtocolError(f"duplicate tool.call call_id {call_id}")
+                raise ProtocolError("duplicate tool.call call_id")
             calls.add(call_id)  # type: ignore[arg-type]
         elif event_type == "tool.result":
             call_id = payload["call_id"]  # type: ignore[index]
             if call_id not in calls:
-                raise ProtocolError(f"tool.result has no matching call_id {call_id}")
+                raise ProtocolError("tool.result has no matching call_id")
             if call_id in results:
-                raise ProtocolError(f"duplicate tool.result call_id {call_id}")
+                raise ProtocolError("duplicate tool.result call_id")
             results.add(call_id)  # type: ignore[arg-type]
         if event_type in TERMINAL_EVENT_TYPES:
             terminal_seen = True

@@ -113,7 +113,7 @@ class ClaudeCodeProtocolAdapter:
                 if not isinstance(name, str) or not name:
                     raise ProtocolError("Claude Code tool_use lacks name")
                 if call_id in self.tool_calls:
-                    raise ProtocolError(f"Claude Code emitted duplicate tool id {call_id}")
+                    raise ProtocolError("Claude Code emitted duplicate tool_use")
                 self.tool_calls.add(call_id)
                 normalized_arguments = (
                     dict(deepcopy(arguments))
@@ -142,7 +142,7 @@ class ClaudeCodeProtocolAdapter:
             if not isinstance(call_id, str) or call_id not in self.tool_calls:
                 raise ProtocolError("Claude Code tool_result has no matching tool_use")
             if call_id in self.tool_results:
-                raise ProtocolError(f"Claude Code emitted duplicate tool_result {call_id}")
+                raise ProtocolError("Claude Code emitted duplicate tool_result")
             is_error = block.get("is_error", False)
             if not isinstance(is_error, bool):
                 raise ProtocolError("Claude Code tool_result is_error must be boolean")
