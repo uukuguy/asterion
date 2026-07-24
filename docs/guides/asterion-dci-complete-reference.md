@@ -25,6 +25,8 @@ uv run asterion list
 uv run asterion describe --provider dci-agent-lite
 ```
 
+准备或运行锁定的外部 Pi checkout 还需要 Node.js 22.19.0+ 与 npm；Rust 只用于相应的跨语言门禁。
+
 外部 Pi 由 `DCI_PI_DIR` 定位，启动器的数据和 corpus 根由 `ASTERION_DCI_RESOURCE_ROOT` 定位。正常配置面是根目录 `.env`：CLI 显式值 > 已导出环境 > `.env` > runtime/Judge 默认值。
 
 ```dotenv

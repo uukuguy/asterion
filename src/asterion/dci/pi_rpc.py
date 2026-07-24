@@ -15,6 +15,9 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, TextIO
 
+from asterion.dci.config import PI_MIN_NODE_VERSION, PI_MIN_NODE_VERSION_TEXT
+from asterion.dci.config import parse_node_version
+
 
 _STDOUT_EOF = object()
 FINAL_ANSWER_RECOVERY_PROMPT = (
@@ -23,7 +26,10 @@ FINAL_ANSWER_RECOVERY_PROMPT = (
 )
 
 
-_NODE_FAILURE = "compatible Node runtime is unavailable (Node >=20 required)"
+_NODE_FAILURE = (
+    "compatible Node runtime is unavailable "
+    f"(Node >={PI_MIN_NODE_VERSION_TEXT} required)"
+)
 _DCI_ENTRY_KEYS = {"id", "parentId", "timestamp", "type", "customType", "data"}
 _DCI_STATE_KEYS = {
     "accumulatedOriginalToolCharacters",
@@ -49,16 +55,6 @@ _DCI_CUMULATIVE_KEYS = {
 }
 
 
-def _node_major(version: str) -> int | None:
-    value = version.strip()
-    if not value.startswith("v"):
-        return None
-    major, separator, _rest = value[1:].partition(".")
-    if not separator or not major.isdecimal():
-        return None
-    return int(major)
-
-
 def _probe_node(candidate: str, environment: Mapping[str, str]) -> bool:
     try:
         result = subprocess.run(
@@ -71,12 +67,12 @@ def _probe_node(candidate: str, environment: Mapping[str, str]) -> bool:
         )
     except (OSError, subprocess.SubprocessError, UnicodeError, ValueError):
         return False
-    major = (
-        _node_major(result.stdout)
+    version = (
+        parse_node_version(result.stdout)
         if result.returncode == 0 and isinstance(result.stdout, str)
         else None
     )
-    return major is not None and major >= 20
+    return version is not None and version >= PI_MIN_NODE_VERSION
 
 
 def _nvm_node_candidates(environment: Mapping[str, str]) -> tuple[str, ...]:

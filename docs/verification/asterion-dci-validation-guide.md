@@ -27,7 +27,8 @@ Provider-free work requires Python 3.10 or newer and `uv`:
 uv sync --frozen
 ```
 
-Node.js and Rust are required only for cross-language checks. Pi, corpora,
+Node.js 22.19.0 or newer plus npm are required to provision and run the locked
+Pi checkout; Rust is required only for its cross-language checks. Pi, corpora,
 datasets, and credentials are external:
 
 ```dotenv

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import tempfile
 import unittest
 from importlib import resources
@@ -14,8 +15,11 @@ from asterion.applications.controlled_code import (
 from asterion.applications.dci_agent_lite import create_provider as create_dci_provider
 from asterion.applications.product import VerificationRequest
 from asterion.applications.provider import validate_installed_provider
-from asterion.dci.verification import DciProductVerifier
-from asterion.dci.verification import create_dci_product
+from asterion.dci.verification import (
+    DciProductVerifier,
+    LocalDciVerificationBackend,
+    create_dci_product,
+)
 from asterion.dci.config import resolve_dci_paths
 
 
@@ -33,7 +37,7 @@ EXPECTED_CHECKS = (
 
 
 class ExplodingBackend:
-    def node_major_version(self) -> int | None:
+    def node_version(self) -> tuple[int, int, int] | None:
         raise AssertionError("acceptance called the backend")
 
     def run_research_case(self, *args, **kwargs):
@@ -46,12 +50,14 @@ class ExplodingBackend:
 
 
 class PreflightBackend:
-    def __init__(self, node_major: int | None = 20) -> None:
-        self.node_major = node_major
+    def __init__(
+        self, node_version: tuple[int, int, int] | None = (22, 19, 0)
+    ) -> None:
+        self.node = node_version
         self.calls: list[object] = []
 
-    def node_major_version(self) -> int | None:
-        return self.node_major
+    def node_version(self) -> tuple[int, int, int] | None:
+        return self.node
 
     def run_research_case(self, *args, **kwargs):
         self.calls.append((args, kwargs))
@@ -152,7 +158,7 @@ class FirstRunPreflightTests(unittest.TestCase):
     def test_missing_first_run_prerequisites_have_stable_repairs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            backend = PreflightBackend(node_major=19)
+            backend = PreflightBackend(node_version=(22, 18, 0))
             verifier = DciProductVerifier(repo_root=root, backend=backend)
             with patch.dict(
                 os.environ,
@@ -186,6 +192,45 @@ class FirstRunPreflightTests(unittest.TestCase):
         self.assertIn("cp .env.template .env", summaries["environment"])
         self.assertIn("make setup-resources-basic", summaries["resources-basic"])
         self.assertNotIn(temp_dir, repr(result))
+
+    def test_preflight_requires_the_locked_pi_node_version(self) -> None:
+        cases = (
+            ("v22.18.0\n", "FAIL"),
+            ("v22.19.0\n", "PASS"),
+            ("v23.11.0\n", "PASS"),
+        )
+        for version, expected in cases:
+            with self.subTest(version=version):
+                completed = subprocess.CompletedProcess(
+                    ["node", "--version"],
+                    0,
+                    stdout=version,
+                    stderr="",
+                )
+                with (
+                    tempfile.TemporaryDirectory() as temp_dir,
+                    patch(
+                        "asterion.dci.verification.subprocess.run",
+                        return_value=completed,
+                    ),
+                    patch.dict(
+                        os.environ,
+                        {"DCI_PI_AGENT_DIR": "./missing-agent"},
+                        clear=True,
+                    ),
+                ):
+                    root = Path(temp_dir)
+                    result = DciProductVerifier(
+                        repo_root=root,
+                        backend=LocalDciVerificationBackend(),
+                    ).preflight(
+                        env_file=root / ".env",
+                        corpus_root=root / "corpus",
+                    )
+
+                checks = {check.check_id: check for check in result.checks}
+                self.assertEqual(checks["node"].status, expected)
+                self.assertIn("22.19.0", checks["node"].summary)
 
     def test_complete_fixture_passes_without_agent_or_judge_work(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

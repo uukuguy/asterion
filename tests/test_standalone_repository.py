@@ -397,7 +397,7 @@ class StandaloneRepositoryTests(unittest.TestCase):
         self.assertIn("push:", text)
         self.assertIn("contents: read", text)
         self.assertIn("python-version: '3.10'", text)
-        self.assertIn("node-version: '20'", text)
+        self.assertIn("node-version: '22.19.0'", text)
         self.assertIn("toolchain: stable", text)
         self.assertIn("make promotion-check", text)
         self.assertIn("make first-run-check", text)
@@ -443,6 +443,10 @@ class StandaloneRepositoryTests(unittest.TestCase):
             "global `pi`",
             "DCI_PI_AGENT_DIR",
             "setup-resources-benchmark",
+            "Node.js 22.19.0",
+            "`npm ci`",
+            "checked-in model catalogs",
+            "dirty checkout",
             "zero Agent",
             "zero Judge",
         ):

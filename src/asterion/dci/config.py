@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -20,6 +21,21 @@ PI_DEFAULT_AGENT_DIR = "~/.pi/agent"
 PI_DEFAULT_TOOLS = "read,bash"
 PI_DEFAULT_MAX_TURNS = 100
 PI_DEFAULT_TIMEOUT_SECONDS = 3600.0
+PI_MIN_NODE_VERSION = (22, 19, 0)
+PI_MIN_NODE_VERSION_TEXT = ".".join(str(part) for part in PI_MIN_NODE_VERSION)
+
+
+def parse_node_version(value: str) -> tuple[int, int, int] | None:
+    """Parse the exact semver form emitted by ``node --version``."""
+
+    match = re.fullmatch(r"v([0-9]+)\.([0-9]+)\.([0-9]+)\s*", value)
+    if match is None:
+        return None
+    return (
+        int(match.group(1)),
+        int(match.group(2)),
+        int(match.group(3)),
+    )
 
 
 @dataclass(frozen=True)

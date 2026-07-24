@@ -50,14 +50,35 @@ class PiSetupTests(unittest.TestCase):
 
         self.bin_dir = self.root / "bin"
         self.bin_dir.mkdir()
+        self.fake_node = self.bin_dir / "node"
+        self.set_node_version("v22.19.0")
         self.npm_log = self.root / "npm.log"
+        fake_tsgo = self.bin_dir / "tsgo"
+        fake_tsgo.write_text(
+            "#!/bin/sh\n"
+            f"printf 'tsgo:%s:%s\\n' \"$PWD\" \"$*\" >> {self.npm_log!s}\n",
+            encoding="utf-8",
+        )
+        fake_tsgo.chmod(fake_tsgo.stat().st_mode | stat.S_IXUSR)
         fake_npm = self.bin_dir / "npm"
         fake_npm.write_text(
             "#!/bin/sh\n"
-            f"printf '%s:%s\\n' \"$PWD\" \"$*\" >> {self.npm_log!s}\n",
+            f"printf '%s:%s\\n' \"$PWD\" \"$*\" >> {self.npm_log!s}\n"
+            'if [ "$1" = "ci" ]; then\n'
+            '  mkdir -p "$PWD/node_modules/.bin"\n'
+            f'  cp "{fake_tsgo!s}" "$PWD/node_modules/.bin/tsgo"\n'
+            '  chmod +x "$PWD/node_modules/.bin/tsgo"\n'
+            "fi\n",
             encoding="utf-8",
         )
         fake_npm.chmod(fake_npm.stat().st_mode | stat.S_IXUSR)
+
+    def set_node_version(self, version: str) -> None:
+        self.fake_node.write_text(
+            f"#!/bin/sh\nprintf '%s\\n' '{version}'\n",
+            encoding="utf-8",
+        )
+        self.fake_node.chmod(self.fake_node.stat().st_mode | stat.S_IXUSR)
 
     def git(self, *args: str, cwd: Path) -> str:
         completed = subprocess.run(
@@ -112,6 +133,30 @@ class PiSetupTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.git("rev-parse", "HEAD", cwd=self.pi_dir), self.commit_a)
 
+    def test_unsupported_node_fails_before_clone_or_npm(self) -> None:
+        self.set_node_version("v22.18.0")
+
+        result = self.run_setup()
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("22.19.0", result.stderr)
+        self.assertFalse(self.pi_dir.exists())
+        self.assertFalse(self.npm_log.exists())
+
+    def test_build_uses_lockfile_and_checked_in_ai_catalogs(self) -> None:
+        result = self.run_setup()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        commands = self.npm_log.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(commands[0], f"{self.pi_dir}:ci --include=dev")
+        self.assertIn(
+            f"tsgo:{self.pi_dir / 'packages/ai'}:-p tsconfig.build.json",
+            commands,
+        )
+        self.assertNotIn(f"{self.pi_dir / 'packages/ai'}:run build", commands)
+        self.assertFalse(any(":exec " in command for command in commands))
+        self.assertFalse(any("generate-models" in command for command in commands))
+
     def test_built_checkout_at_pin_is_idempotent(self) -> None:
         self.clone_at(self.commit_a)
 
@@ -141,6 +186,18 @@ class PiSetupTests(unittest.TestCase):
         self.assertIn("dirty", result.stderr.lower())
         self.assertEqual(self.git("rev-parse", "HEAD", cwd=self.pi_dir), before)
         self.assertEqual(marker.read_text(encoding="utf-8"), "keep me\n")
+        self.assertFalse(self.npm_log.exists())
+
+    def test_dirty_checkout_without_cli_is_rejected_before_build(self) -> None:
+        self.clone_at(self.commit_a)
+        cli = self.pi_dir / "packages/coding-agent/dist/cli.js"
+        cli.unlink()
+
+        result = self.run_setup()
+
+        self.assertEqual(result.returncode, 3)
+        self.assertIn("dirty", result.stderr.lower())
+        self.assertIn("another checkout", result.stderr)
         self.assertFalse(self.npm_log.exists())
 
     def test_revision_override_selects_exact_commit(self) -> None:

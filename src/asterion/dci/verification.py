@@ -41,7 +41,10 @@ from asterion.dci.config import (
     PI_DEFAULT_AGENT_DIR,
     PI_DEFAULT_MODEL,
     PI_DEFAULT_PROVIDER,
+    PI_MIN_NODE_VERSION,
+    PI_MIN_NODE_VERSION_TEXT,
     load_asterion_dci_env,
+    parse_node_version,
     resolve_dci_paths,
     resolve_dci_runtime_options,
 )
@@ -991,7 +994,7 @@ def paper_benchmark_acceptance_main(
 
 
 class DciVerificationBackend(Protocol):
-    def node_major_version(self) -> int | None: ...
+    def node_version(self) -> tuple[int, int, int] | None: ...
 
     def run_research_case(
         self, paths: DciPaths, request: DciRunRequest, *, output_dir: Path
@@ -1009,7 +1012,7 @@ class DciVerificationBackend(Protocol):
 class LocalDciVerificationBackend:
     """Read-only local prerequisite adapter."""
 
-    def node_major_version(self) -> int | None:
+    def node_version(self) -> tuple[int, int, int] | None:
         try:
             completed = subprocess.run(
                 ["node", "--version"],
@@ -1022,8 +1025,7 @@ class LocalDciVerificationBackend:
             return None
         if completed.returncode != 0:
             return None
-        match = re.fullmatch(r"v([0-9]+)(?:\.[0-9]+){2}\s*", completed.stdout)
-        return None if match is None else int(match.group(1))
+        return parse_node_version(completed.stdout)
 
     def run_research_case(
         self, paths: DciPaths, request: DciRunRequest, *, output_dir: Path
@@ -1375,7 +1377,7 @@ class DciProductVerifier:
             judge_ready = bool(JudgeConfig.from_env().api_key)
         except (TypeError, ValueError):
             judge_ready = False
-        node_major = self.backend.node_major_version()
+        node_version = self.backend.node_version()
         pi_checkout_ready = (
             paths.pi.repo_dir.is_dir()
             and not paths.pi.repo_dir.is_symlink()
@@ -1425,9 +1427,9 @@ class DciProductVerifier:
             ),
             _readiness_check(
                 "node",
-                "Node.js major version is at least 20",
-                "Install Node.js 20 or newer",
-                node_major is not None and node_major >= 20,
+                f"Node.js version is at least {PI_MIN_NODE_VERSION_TEXT}",
+                f"Install Node.js {PI_MIN_NODE_VERSION_TEXT} or newer",
+                node_version is not None and node_version >= PI_MIN_NODE_VERSION,
             ),
             _readiness_check(
                 "pi-checkout",

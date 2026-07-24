@@ -107,7 +107,7 @@ standalone-repository-root/
 
 1. 创建空仓库、许可证、README、忽略规则和最小 uv workspace。
 2. 建立上面的目标目录，但不创建无构建清单的“独立能力包”目录。
-3. 初始化独立 CI：Python 版本矩阵、Node 20+、Rust stable，缓存仅用于依赖。
+3. 初始化独立 CI：Python 版本矩阵、Node 22.19.0+、Rust stable，缓存仅用于依赖。
 4. 建立 secret scanning、wheel/sdist 内容检查和本地 Markdown link check。
 5. 写新项目自己的状态与贡献规则，不能携带 mixed-repository status 历史冒充产品文档。
 
