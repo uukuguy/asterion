@@ -12,10 +12,10 @@ from types import MappingProxyType
 from asterion.dci.pi_rpc import FINAL_ANSWER_RECOVERY_PROMPT
 
 
-_PAPER_CONTRACT = "dci.paper-prompt/arxiv:2605.05242v1/v1"
+PAPER_REFERENCE_PROMPT_CONTRACT = "dci.paper-prompt/arxiv:2605.05242v1/v1"
 _UPSTREAM_COMMIT = "271f37e71f053bf0c99c05ce6d2fb53b841d922e"
-_UPSTREAM_CONTRACT = f"dci.upstream-github-prompt/{_UPSTREAM_COMMIT}/v1"
-_SAFE_CONTRACT = "asterion.dci.prompt/safe/v1"
+UPSTREAM_GITHUB_PROMPT_CONTRACT = f"dci.upstream-github-prompt/{_UPSTREAM_COMMIT}/v1"
+ASTERION_SAFE_PROMPT_CONTRACT = "asterion.dci.prompt/safe/v1"
 _CANONICAL_QUERY = "__DCI_QUERY__"
 _CANONICAL_CORPUS = Path("/__dci_prompt_contract_corpus__")
 _CANONICAL_HINT = "__DCI_CORPUS_HINT__"
@@ -120,22 +120,22 @@ def _unreported_ir(
 
 PROMPT_CONTRACTS: Mapping[str, PromptContract] = MappingProxyType(
     {
-        _SAFE_CONTRACT: PromptContract(
-            contract_id=_SAFE_CONTRACT,
+        ASTERION_SAFE_PROMPT_CONTRACT: PromptContract(
+            contract_id=ASTERION_SAFE_PROMPT_CONTRACT,
             source_family="asterion-safe",
             qa_builder=_safe_qa,
             ir_builder=_upstream_ir,
             final_answer_recovery=FINAL_ANSWER_RECOVERY_PROMPT,
         ),
-        _PAPER_CONTRACT: PromptContract(
-            contract_id=_PAPER_CONTRACT,
+        PAPER_REFERENCE_PROMPT_CONTRACT: PromptContract(
+            contract_id=PAPER_REFERENCE_PROMPT_CONTRACT,
             source_family="paper-reference",
             qa_builder=_paper_qa,
             ir_builder=_unreported_ir,
             final_answer_recovery=None,
         ),
-        _UPSTREAM_CONTRACT: PromptContract(
-            contract_id=_UPSTREAM_CONTRACT,
+        UPSTREAM_GITHUB_PROMPT_CONTRACT: PromptContract(
+            contract_id=UPSTREAM_GITHUB_PROMPT_CONTRACT,
             source_family="upstream-github",
             qa_builder=_upstream_qa,
             ir_builder=_upstream_ir,
@@ -182,9 +182,12 @@ def prompt_contract_sha256(contract: PromptContract, prompt_kind: str) -> str:
 
 
 __all__ = [
+    "ASTERION_SAFE_PROMPT_CONTRACT",
+    "PAPER_REFERENCE_PROMPT_CONTRACT",
     "PROMPT_CONTRACTS",
     "PromptContract",
     "PromptContractError",
+    "UPSTREAM_GITHUB_PROMPT_CONTRACT",
     "prompt_contract_sha256",
     "resolve_prompt_contract",
 ]

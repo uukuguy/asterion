@@ -114,6 +114,12 @@ class PromotionCheckTests(unittest.TestCase):
             packaged_pi = source / "src/product/resources/pi"
             packaged_pi.mkdir(parents=True)
             (packaged_pi / "manifest.json").write_text("{}\n", encoding="utf-8")
+            local_sdd = source / ".superpowers/sdd"
+            local_sdd.mkdir(parents=True)
+            (local_sdd / "report.md").write_text("local artifact\n", encoding="utf-8")
+            (source / ".superpowers/keep.md").write_text(
+                "retained metadata\n", encoding="utf-8"
+            )
 
             observed_roots: list[Path] = []
 
@@ -128,6 +134,8 @@ class PromotionCheckTests(unittest.TestCase):
                 self.assertTrue(
                     (cwd / "src/product/resources/pi/manifest.json").is_file()
                 )
+                self.assertFalse((cwd / ".superpowers/sdd").exists())
+                self.assertTrue((cwd / ".superpowers/keep.md").is_file())
                 for name in excluded:
                     self.assertFalse((cwd / name).exists(), name)
                 return completed(command, acceptance_stdout(command))

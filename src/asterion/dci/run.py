@@ -271,6 +271,7 @@ def resume_request_from_output_dir(
     *,
     extra_args: tuple[str, ...] | None = None,
     timeout_seconds: float | None | object = _RESUME_TIMEOUT_UNSET,
+    final_answer_recovery: str | None = None,
     _directory_fd: int | None = None,
 ) -> DciRunRequest:
     """Reconstruct a safe immutable resume request from native run state."""
@@ -400,6 +401,7 @@ def resume_request_from_output_dir(
         pi_session_id=pi_session_id,
         resume=True,
         stream_text=stream_text,
+        final_answer_recovery=final_answer_recovery,
     )
     try:
         validate_dci_run_request(candidate)

@@ -168,6 +168,7 @@ FORBIDDEN = (
     "../tools/" + "verify_asterion_dci_product.py",
 )
 DCI_PARENT_PATTERN = re.compile(r"\.\./src/dci(?=$|[/\s`'\"\)])")
+LOCAL_SDD_ARTIFACTS = (".superpowers", "sdd")
 
 
 class PromotionError(RuntimeError):
@@ -206,6 +207,7 @@ def _is_excluded(relative: Path) -> bool:
         bool(relative.parts)
         and relative.parts[0] in ROOT_EXCLUDED_NAMES
         or any(part in RECURSIVE_EXCLUDED_NAMES for part in relative.parts)
+        or relative.parts[:2] == LOCAL_SDD_ARTIFACTS
     )
 
 
@@ -215,6 +217,8 @@ def _copy_ignore(source_root: Path) -> Callable[[str, list[str]], set[str]]:
         excluded = set(names) & RECURSIVE_EXCLUDED_NAMES
         if relative == Path("."):
             excluded.update(set(names) & ROOT_EXCLUDED_NAMES)
+        if relative.parts == (".superpowers",):
+            excluded.add("sdd")
         return excluded
 
     return ignore

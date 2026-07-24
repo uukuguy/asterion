@@ -76,6 +76,11 @@ from asterion.dci.paper_benchmarks import (
     resolve_paper_benchmark,
     resolve_paper_experiment_scope,
 )
+from asterion.dci.prompts import (
+    ASTERION_SAFE_PROMPT_CONTRACT,
+    PAPER_REFERENCE_PROMPT_CONTRACT,
+    resolve_prompt_contract,
+)
 from asterion.dci.run import DciRunRequest, DciRunResult, run_pi_research
 from asterion.dci.reproduction import (
     compare_reproduction_runs,
@@ -899,6 +904,9 @@ def _paper_default_operation_runner(
         node_max_old_space_size_mb=options.node_max_old_space_size_mb,
         keep_session=True,
         stream_text=False,
+        final_answer_recovery=resolve_prompt_contract(
+            PAPER_REFERENCE_PROMPT_CONTRACT
+        ).final_answer_recovery,
     )
     result = run_pi_research(
         readiness.paths,
@@ -1738,6 +1746,9 @@ def _basic_request(
         pi_package_dir=paths.pi.package_dir,
         pi_agent_dir=paths.pi.agent_dir,
         stream_text=False,
+        final_answer_recovery=resolve_prompt_contract(
+            ASTERION_SAFE_PROMPT_CONTRACT
+        ).final_answer_recovery,
     )
 
 

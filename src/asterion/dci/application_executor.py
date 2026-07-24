@@ -19,6 +19,10 @@ from asterion.dci.run import (
     request_from_runtime_options,
     run_pi_research,
 )
+from asterion.dci.prompts import (
+    ASTERION_SAFE_PROMPT_CONTRACT,
+    resolve_prompt_contract,
+)
 
 
 class EnvironmentDciRunExecutor:
@@ -52,6 +56,9 @@ class EnvironmentDciRunExecutor:
                 question=request.question,
                 cwd=cwd,
                 stream_text=False,
+                final_answer_recovery=resolve_prompt_contract(
+                    ASTERION_SAFE_PROMPT_CONTRACT
+                ).final_answer_recovery,
             ),
             max_turns=request.max_turns,
             show_tools=request.show_tools,

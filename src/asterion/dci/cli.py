@@ -52,6 +52,10 @@ from asterion.dci.judge import (
     JudgeConfig,
 )
 from asterion.dci.pi_rpc import run_pi_terminal, validate_terminal_cwd
+from asterion.dci.prompts import (
+    ASTERION_SAFE_PROMPT_CONTRACT,
+    resolve_prompt_contract,
+)
 from asterion.dci.run import (
     DciRunError,
     DciRunResult,
@@ -699,7 +703,12 @@ def main(
             output_dir = _output_path_from_invocation(args.output_dir, invocation_cwd)
             if _path_has_symlink(output_dir):
                 raise ValueError("run destination is unsafe")
-            request = resume_request_from_output_dir(output_dir)
+            request = resume_request_from_output_dir(
+                output_dir,
+                final_answer_recovery=resolve_prompt_contract(
+                    ASTERION_SAFE_PROMPT_CONTRACT
+                ).final_answer_recovery,
+            )
             result = run_pi_research(paths, request, output_dir=output_dir)
         except (DciRunError, OSError, ValueError):
             stderr.write("DCI Pi execution failed\n")
@@ -800,6 +809,9 @@ def main(
                 run_id=args.run_id or "pending-generated-run-id",
                 question=question,
                 cwd=run_cwd,
+                final_answer_recovery=resolve_prompt_contract(
+                    ASTERION_SAFE_PROMPT_CONTRACT
+                ).final_answer_recovery,
             ),
             max_turns=args.max_turns,
             show_tools=args.show_tools,
