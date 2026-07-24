@@ -6,14 +6,27 @@ The controlled-code reference graph challenges `dci.package/v1` with a shape
 that is independent of DCI research:
 
 ```text
-policy.controlled-code-check
-  → workflow.code-quality
-      → evaluation.code-quality
-      → observability.execution-audit
+runtime: filesystem.read ───────┐
+host: executor.controlled ──────┼─→ workflow.code-quality
+runner: input_text ─────────────┘
+
+policy.controlled-code-check ───┬─→ workflow.code-quality
+                                ├─→ evaluation.code-quality
+                                └─→ observability.execution-audit
+
+workflow.code-quality ──────────┬─→ evaluation.code-quality
+                                └─→ observability.execution-audit
+workflow.code-quality.completed ┬─→ evaluation.code-quality
+                                └─→ observability.execution-audit
+application/vnd.dci.code-quality+json
+                                ├─→ evaluation.code-quality
+                                └─→ observability.execution-audit
 ```
 
-The graph exercises the `workflow` package kind and links policy, capabilities,
-events, and artifacts. It proves the package contract can describe code-quality
+The graph exercises the `workflow` package kind and real package-produced
+capability, policy, event, and artifact edges. `input_text` is runner input
+carried directly on each `PackageInvocation`; it is not modeled as a fictional
+host artifact. The graph proves the package contract can describe code-quality
 validation without adding a scheduler.
 
 ## Static composition, not code execution
@@ -29,11 +42,14 @@ the executor's trusted startup policy.
 ## Package roles
 
 - `policy.controlled-code-check` supplies the required policy identity.
-- `workflow.code-quality` consumes source input and portable host capabilities,
-  then declares a code-quality report and completion event.
-- `evaluation.code-quality` consumes the report and declares a verdict artifact.
-- `observability.execution-audit` consumes the report plus portable lifecycle
-  events and declares an execution-audit artifact.
+- `workflow.code-quality` receives the runner's direct `input_text`, uses the
+  runtime-provided `filesystem.read` capability and injected
+  `executor.controlled` service, then produces a code-quality report and
+  package completion event.
+- `evaluation.code-quality` consumes that report and completion event, then
+  produces a verdict artifact.
+- `observability.execution-audit` consumes the same package-produced report and
+  completion event, then produces an execution-audit artifact and audit event.
 
 The workflow manifest is a closed portable declaration:
 
@@ -47,31 +63,46 @@ The workflow manifest is a closed portable declaration:
   "requires_capabilities": ["executor.controlled", "filesystem.read"],
   "requires_policies": ["policy.controlled-code-check"],
   "emits_events": ["workflow.code-quality.completed"],
-  "consumes_events": ["run.started", "tool.result"],
+  "consumes_events": [],
   "produces_artifacts": ["application/vnd.dci.code-quality+json"],
-  "consumes_artifacts": ["text/x-source"]
+  "consumes_artifacts": []
 }
 ```
 
 ## Shared host service boundary
 
 Pi and Claude Code normalize their native read capability to `filesystem.read`.
-The host adds `executor.controlled` from the same shared host service; neither
-runtime claims the executor capability natively:
+The assembly declares `executor.controlled` as its only host capability; neither
+runtime claims the executor capability natively. The resolver combines the
+selected runtime capability with the declared host capability:
 
 ```python
-from dci.framework.adapters.pi import map_pi_capabilities
-from dci.framework.packages import compose_packages
+from asterion.adapters.pi import map_pi_capabilities
+from asterion.packages.composition import compose_packages
 
 runtime_capabilities = set(map_pi_capabilities("read"))
 host_capabilities = runtime_capabilities | {"executor.controlled"}
 composition = compose_packages(
     manifests,
     host_capabilities=host_capabilities,
-    host_events={"run.started", "tool.result"},
-    host_artifacts={"text/x-source"},
 )
 print(composition.package_ids)
+```
+
+Execution receives source selection as direct input and the already-authorized
+service as an explicit injection:
+
+```python
+from asterion.runner import run_composed_application
+
+result = await run_composed_application(
+    plan,
+    implementations=implementations,
+    runtime=runtime,
+    run_id="controlled-run",
+    input_text="src/example.py",
+    host_services={"executor.controlled": executor},
+)
 ```
 
 This capability injection does not make Pi or Claude Code a sandbox. The local
@@ -80,10 +111,17 @@ system isolation and the package graph does not strengthen that claim.
 
 ## Rejection boundaries
 
-Composition fails closed when either host capability is absent, the policy
-package is missing, `tool.result` is unavailable, source input is unavailable,
-or the workflow stops declaring the completion event or report artifact. Input
-permutation does not change a successful result.
+Composition fails closed when `filesystem.read` or `executor.controlled` is
+unavailable, the policy package is missing, or the workflow stops declaring the
+completion event or report artifact required by its downstream packages. The
+assembly declares empty host event and host artifact arrays because neither is
+an external dependency of this graph. Input permutation does not change a
+successful composition.
+
+Execution preflight rejects a missing `executor.controlled` service or invalid
+application request before package work. The workflow converts its direct
+`input_text` into a controlled-execution target; an absolute or escaping target
+is rejected without invoking the executor.
 
 Manifests must not contain commands, executable paths, argument vectors,
 environment values, workspace paths, prompts, credentials, providers, mutable

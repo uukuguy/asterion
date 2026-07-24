@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import shutil
@@ -552,6 +553,58 @@ class StandaloneRepositoryTests(unittest.TestCase):
                         f"# Root\n\n[unsafe]({target})\n", encoding="utf-8"
                     )
                     self.assertNotEqual(run().returncode, 0)
+
+    def test_docs_checker_validates_asterion_import_snippets(self) -> None:
+        checker = PROJECT / "tools/check_docs.py"
+        self.assertTrue(checker.is_file(), "standalone docs checker is missing")
+        if not checker.is_file():
+            return
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            (root / "tools").mkdir()
+            shutil.copy2(checker, root / "tools/check_docs.py")
+            (root / "docs").mkdir()
+            package = root / "src/asterion"
+            package.mkdir(parents=True)
+            (package / "__init__.py").write_text("", encoding="utf-8")
+            (package / "fixture.py").write_text(
+                "DOCUMENTED_API = object()\n",
+                encoding="utf-8",
+            )
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = str(root / "src")
+
+            def run() -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    ["python3", "tools/check_docs.py"],
+                    cwd=root,
+                    env=environment,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+
+            (root / "README.md").write_text(
+                "# Root\n\n"
+                "```python\n"
+                "from asterion.fixture import MISSING_API\n"
+                "```\n",
+                encoding="utf-8",
+            )
+            invalid = run()
+            self.assertNotEqual(invalid.returncode, 0)
+            self.assertIn("documented import is unavailable", invalid.stderr)
+
+            (root / "README.md").write_text(
+                "# Root\n\n"
+                "```python\n"
+                "from asterion.fixture import DOCUMENTED_API\n"
+                "```\n",
+                encoding="utf-8",
+            )
+            valid = run()
+            self.assertEqual(valid.returncode, 0, valid.stderr)
 
 
 if __name__ == "__main__":

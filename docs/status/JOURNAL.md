@@ -36,3 +36,5 @@
 - 21:44 Marked hardened protocol and CLI audit gaps closed while retaining history [5aaa0b4]
 - 21:44 Closed line-terminator surrogate escapes in canonical schemas [0317323]
 - 21:44 Recorded final canonical-ordering closure evidence for durable review [6ccd5fb]
+- 22:07 Pinned catalog roots/documents to descriptor objects, closing symlink replacement TOCTOU [798591b]
+- 22:09 Redacted provider-controlled keys and call IDs while retaining structural protocol rejection [71dff6a]

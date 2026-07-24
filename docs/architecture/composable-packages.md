@@ -66,7 +66,7 @@ Load manifests as JSON mappings and pass only portable host edges to the pure
 resolver:
 
 ```python
-from dci.framework.packages import compose_packages
+from asterion.packages.composition import compose_packages
 
 composition = compose_packages(
     manifests,

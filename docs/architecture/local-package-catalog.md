@@ -27,8 +27,8 @@ and returned as deep-fresh manifest mappings.
 ```python
 from pathlib import Path
 
-from dci.framework.package_catalog import PackageRef, discover_packages
-from dci.framework.packages import compose_packages
+from asterion.packages.catalog import PackageRef, discover_packages
+from asterion.packages.composition import compose_packages
 
 catalog = discover_packages(
     [
@@ -63,10 +63,19 @@ artifact, and cycle relationships.
 
 ## Filesystem and execution boundary
 
-Symlinks are rejected for both roots and manifest files before canonicalization
-can hide them. Missing roots, file roots, duplicate roots, unreadable or malformed
-documents, non-object JSON, protocol-invalid manifests, and duplicate identities
-fail the whole discovery operation.
+Roots are opened and pinned without following a final symlink. Direct child
+names are enumerated relative to that directory descriptor, each JSON child is
+opened relative to the same descriptor with no-follow semantics, its regular
+file identity is validated with `fstat`, and its body is read only from the
+pinned descriptor. Source provenance is constructed from the pinned root path
+and enumerated child name; discovery never re-resolves the child pathname after
+opening it.
+
+Platforms without descriptor-relative open/list/stat, no-follow directory and
+file opens, or pinned-descriptor path provenance fail closed rather than using
+an unsafe path-based fallback. Missing roots, file roots, duplicate roots,
+unreadable or malformed documents, non-object JSON, protocol-invalid manifests,
+and duplicate identities fail the whole discovery operation.
 
 Public errors identify the structural class and may name a local path or exact
 identity, but do not echo document contents. Underlying local exceptions remain

@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import ast
+import importlib
 import re
 import sys
+import textwrap
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 
 LINK_PATTERN = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
+PYTHON_BLOCK_PATTERN = re.compile(
+    r"^[ \t]*```python[ \t]*\n(.*?)^[ \t]*```[ \t]*$",
+    re.MULTILINE | re.DOTALL,
+)
 COUNT_PATTERN = re.compile(r"\b(?:533/533|538/538)\b")
 FORBIDDEN_LITERALS = (
     "uv run --project " + "asterion",
@@ -21,6 +28,7 @@ FORBIDDEN_LITERALS = (
     "uv run ruff check asterion/",
     "uv build asterion",
     "make -C ..",
+    "from dci.framework.",
 )
 
 
@@ -64,6 +72,7 @@ def check_docs(root: Path) -> tuple[int, int, tuple[str, ...]]:
                 errors.append(
                     f"{relative}:{line_number}: integration count lacks history label"
                 )
+        errors.extend(_check_asterion_imports(relative, text))
 
         for match in LINK_PATTERN.finditer(text):
             target = _link_target(match.group(1))
@@ -85,6 +94,46 @@ def check_docs(root: Path) -> tuple[int, int, tuple[str, ...]]:
                 errors.append(f"{relative}: local link target is missing")
 
     return len(documents), local_links, tuple(errors)
+
+
+def _check_asterion_imports(document: Path, text: str) -> tuple[str, ...]:
+    errors: list[str] = []
+    for match in PYTHON_BLOCK_PATTERN.finditer(text):
+        snippet = textwrap.dedent(match.group(1))
+        try:
+            trees = (ast.parse(snippet),)
+        except SyntaxError:
+            trees = tuple(
+                ast.parse(line.strip())
+                for line in snippet.splitlines()
+                if line.strip().startswith("from asterion")
+            )
+        for tree in trees:
+            for node in ast.walk(tree):
+                if (
+                    not isinstance(node, ast.ImportFrom)
+                    or node.level != 0
+                    or node.module is None
+                    or not (
+                        node.module == "asterion"
+                        or node.module.startswith("asterion.")
+                    )
+                ):
+                    continue
+                try:
+                    module = importlib.import_module(node.module)
+                except (ImportError, AttributeError):
+                    errors.append(
+                        f"{document}: documented import is unavailable: {node.module}"
+                    )
+                    continue
+                for name in node.names:
+                    if name.name != "*" and not hasattr(module, name.name):
+                        errors.append(
+                            f"{document}: documented import is unavailable: "
+                            f"{node.module}.{name.name}"
+                        )
+    return tuple(errors)
 
 
 def main() -> int:
