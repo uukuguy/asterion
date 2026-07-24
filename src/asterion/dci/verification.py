@@ -56,7 +56,10 @@ from asterion.dci.judge import (
     JudgeConfig,
     build_judge_request,
 )
-from asterion.dci.context_profiles import context_profile_names
+from asterion.dci.context_profiles import (
+    context_profile_names,
+    resolve_context_profile,
+)
 from asterion.dci.experiment_profiles import (
     EXPERIMENT_AUTHORIZATION_SCHEMA,
     authorize_full_execution,
@@ -103,6 +106,46 @@ _EXPECTED_BOUND_ASSEMBLIES = tuple(
     identity
     for identity in _EXPECTED_PACKAGED_ASSEMBLIES
     if not identity.endswith("/dci-local-research.json")
+)
+_EXPECTED_CONTEXT_PROFILES = ("level0", "level1", "level2", "level3", "level4")
+_EXPECTED_PAPER_BENCHMARK_IDS = (
+    "beir.arguana",
+    "beir.scifact",
+    "bright.biology",
+    "bright.earth-science",
+    "bright.economics",
+    "bright.robotics",
+    "browsecomp-plus",
+    "qa.2wikimultihopqa",
+    "qa.bamboogle",
+    "qa.hotpotqa",
+    "qa.musique",
+    "qa.nq",
+    "qa.triviaqa",
+)
+_EXPECTED_PAPER_SCOPE_IDS = (
+    "beir.arguana.main.random50",
+    "beir.scifact.main.random50",
+    "bright.biology.main.full",
+    "bright.earth-science.main.full",
+    "bright.economics.main.full",
+    "bright.robotics.main.full",
+    "browsecomp-plus.analysis.n100",
+    "browsecomp-plus.appendix-a1.random50",
+    "browsecomp-plus.context-ablation.random100",
+    "browsecomp-plus.main.all830",
+    "qa.2wikimultihopqa.main.random50",
+    "qa.bamboogle.main.full",
+    "qa.hotpotqa.main.random50",
+    "qa.musique.main.random50",
+    "qa.nq.main.random50",
+    "qa.triviaqa.main.random50",
+)
+_EXPECTED_PAPER_BENCHMARK_SHA256 = (
+    "64c74b4d0beca7672c279f9c4713e0f53e63e578e0709a087e4a5e43a779dece"
+)
+_EXPECTED_PAPER_SCOPES_SHA256 = (
+    "f34cbb93380f297e5680108ab294bd9d6e4b4f1df73e3d2fb98b2d5b991cfb0c"
 )
 
 
@@ -1207,21 +1250,68 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
         sorted(set(packaged_assemblies) - set(bound_assemblies))
     )
 
-    profiles = context_profile_names()
-    if profiles != ("level0", "level1", "level2", "level3", "level4"):
-        raise RuntimeError("context profile closure is invalid")
+    try:
+        profiles = tuple(context_profile_names())
+    except (KeyError, OSError, RuntimeError, TypeError, ValueError):
+        profiles = ()
+    profiles_exact = profiles == _EXPECTED_CONTEXT_PROFILES
+    if profiles_exact:
+        for profile_name in profiles:
+            try:
+                profile = resolve_context_profile(profile_name)
+            except (KeyError, OSError, RuntimeError, TypeError, ValueError):
+                profiles_exact = False
+                break
+            if getattr(profile, "name", None) != profile_name:
+                profiles_exact = False
+                break
 
-    datasets = paper_benchmark_ids()
-    scopes = paper_experiment_scope_ids()
-    for dataset_id in datasets:
-        resolve_paper_benchmark(dataset_id)
-    for scope_id in scopes:
-        resolve_paper_experiment_scope(scope_id)
-    if (
-        _SHA256.fullmatch(paper_benchmark_inventory_sha256()) is None
-        or _SHA256.fullmatch(paper_experiment_scopes_sha256()) is None
-    ):
-        raise RuntimeError("paper identity closure is invalid")
+    try:
+        datasets = tuple(paper_benchmark_ids())
+    except (KeyError, OSError, RuntimeError, TypeError, ValueError):
+        datasets = ()
+    datasets_exact = datasets == _EXPECTED_PAPER_BENCHMARK_IDS
+    if datasets_exact:
+        for dataset_id in datasets:
+            try:
+                dataset = resolve_paper_benchmark(dataset_id)
+            except (KeyError, OSError, RuntimeError, TypeError, ValueError):
+                datasets_exact = False
+                break
+            if getattr(dataset, "dataset_id", None) != dataset_id:
+                datasets_exact = False
+                break
+    try:
+        benchmark_sha256 = paper_benchmark_inventory_sha256()
+    except (KeyError, OSError, RuntimeError, TypeError, ValueError):
+        benchmark_sha256 = None
+    datasets_exact = (
+        datasets_exact
+        and benchmark_sha256 == _EXPECTED_PAPER_BENCHMARK_SHA256
+    )
+
+    try:
+        scopes = tuple(paper_experiment_scope_ids())
+    except (KeyError, OSError, RuntimeError, TypeError, ValueError):
+        scopes = ()
+    scopes_exact = scopes == _EXPECTED_PAPER_SCOPE_IDS
+    if scopes_exact:
+        for scope_id in scopes:
+            try:
+                scope = resolve_paper_experiment_scope(scope_id)
+            except (KeyError, OSError, RuntimeError, TypeError, ValueError):
+                scopes_exact = False
+                break
+            if getattr(scope, "scope_id", None) != scope_id:
+                scopes_exact = False
+                break
+    try:
+        scopes_sha256 = paper_experiment_scopes_sha256()
+    except (KeyError, OSError, RuntimeError, TypeError, ValueError):
+        scopes_sha256 = None
+    scopes_exact = (
+        scopes_exact and scopes_sha256 == _EXPECTED_PAPER_SCOPES_SHA256
+    )
 
     return tuple(
         sorted(
@@ -1260,6 +1350,7 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
                     "Context profile closure is valid",
                     actual=len(profiles),
                     expected=5,
+                    exact=profiles_exact,
                 ),
                 _acceptance_check(
                     "executable-assemblies",
@@ -1283,12 +1374,14 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
                     "Paper benchmark identity closure is valid",
                     actual=len(datasets),
                     expected=13,
+                    exact=datasets_exact,
                 ),
                 _acceptance_check(
                     "paper-scopes",
                     "Paper scope identity closure is valid",
                     actual=len(scopes),
                     expected=16,
+                    exact=scopes_exact,
                 ),
                 _acceptance_check(
                     "provider-requests",

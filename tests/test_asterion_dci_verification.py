@@ -390,6 +390,33 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
         self.assertEqual(checks["executable-assemblies"].status, executable)
         self.assertEqual(result.provider_backed_operation_count, 0)
 
+    def assert_only_named_failure(
+        self,
+        result,
+        *,
+        check_id: str,
+        actual: int,
+    ) -> None:
+        checks = {check.check_id: check for check in result.checks}
+        self.assertNotIn("installed-closure", checks)
+        self.assertEqual(
+            tuple(
+                identity
+                for identity, check in checks.items()
+                if check.status == "FAIL"
+            ),
+            (check_id,),
+        )
+        self.assertEqual(dict(checks[check_id].counts)["actual"], actual)
+        for application_check in (
+            "packaged-assemblies",
+            "bound-assemblies",
+            "composed-assemblies",
+            "executable-assemblies",
+        ):
+            self.assertEqual(checks[application_check].status, "PASS")
+        self.assertEqual(result.provider_backed_operation_count, 0)
+
     def test_acceptance_ignores_source_evidence_path(self) -> None:
         verifier = DciProductVerifier(repo_root=PROJECT, backend=ExplodingBackend())
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -530,6 +557,77 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
                 bound="PASS",
                 composed="PASS",
                 executable="FAIL",
+            )
+
+    def test_acceptance_reports_profile_and_paper_damage_independently(
+        self,
+    ) -> None:
+        verifier = DciProductVerifier(repo_root=PROJECT, backend=ExplodingBackend())
+
+        cases = (
+            (
+                "same-cardinality-profile-substitution",
+                "context_profile_names",
+                ("level0", "level1", "level2", "level3", "substitute"),
+                "context-profiles",
+                5,
+            ),
+            (
+                "profile-enumeration-failure",
+                "context_profile_names",
+                RuntimeError("profile enumeration failed"),
+                "context-profiles",
+                0,
+            ),
+            (
+                "profile-resolver-failure",
+                "resolve_context_profile",
+                RuntimeError("profile resolver failed"),
+                "context-profiles",
+                5,
+            ),
+            (
+                "benchmark-resolver-failure",
+                "resolve_paper_benchmark",
+                RuntimeError("benchmark resolver failed"),
+                "paper-benchmarks",
+                13,
+            ),
+            (
+                "benchmark-checksum-failure",
+                "paper_benchmark_inventory_sha256",
+                "invalid",
+                "paper-benchmarks",
+                13,
+            ),
+            (
+                "scope-resolver-failure",
+                "resolve_paper_experiment_scope",
+                RuntimeError("scope resolver failed"),
+                "paper-scopes",
+                16,
+            ),
+            (
+                "scope-checksum-failure",
+                "paper_experiment_scopes_sha256",
+                "invalid",
+                "paper-scopes",
+                16,
+            ),
+        )
+        for case, target, outcome, check_id, actual in cases:
+            kwargs = (
+                {"side_effect": outcome}
+                if isinstance(outcome, Exception)
+                else {"return_value": outcome}
+            )
+            with self.subTest(case=case), patch(
+                f"asterion.dci.verification.{target}", **kwargs
+            ):
+                result = verifier(acceptance_request())
+
+            self.assert_only_named_failure(
+                result, check_id=check_id, actual=actual
             )
 
 
