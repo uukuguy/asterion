@@ -66,7 +66,17 @@ class FailingRuntime(FixtureRuntime):
         raise RuntimeError("SECRET-PROVIDER-PAYLOAD")
 
 
-def invocation(runtime: FixtureRuntime, *, signal: object | None = None):
+class FixtureCorpusService:
+    root = PROJECT
+    identity_sha256 = "a" * 64
+
+
+def invocation(
+    runtime: FixtureRuntime,
+    *,
+    signal: object | None = None,
+    host_services: dict[str, object] | None = None,
+):
     return PackageInvocation(
         package_ref=PackageRef("dci.research", "1.0.0"),
         manifest=json.loads(MANIFEST_PATH.read_text()),
@@ -78,7 +88,11 @@ def invocation(runtime: FixtureRuntime, *, signal: object | None = None):
             "value": {"text": "Read the corpus"},
         },),
         runtime=runtime,
-        host_services={},
+        host_services=(
+            {"corpus.local-root": FixtureCorpusService()}
+            if host_services is None
+            else host_services
+        ),
         signal=signal,
     )
 
@@ -108,6 +122,19 @@ class DciResearchCapabilityTests(unittest.IsolatedAsyncioTestCase):
             result.artifacts[0]["value"]["answer_artifact_uri"], "final.txt"
         )
 
+    async def test_missing_corpus_service_fails_before_runtime_invocation(
+        self,
+    ) -> None:
+        runtime = FixtureRuntime()
+
+        with self.assertRaises(PackageExecutionError) as raised:
+            await DciLocalResearchImplementation().execute(
+                invocation(runtime, host_services={})
+            )
+
+        self.assertEqual(runtime.requests, [])
+        self.assertNotIn("SECRET", str(raised.exception))
+
     async def test_pi_and_claude_fixtures_share_the_same_package_behavior(self) -> None:
         results = []
         for runtime_id in ("pi.reference", "claude-code.reference"):
@@ -128,9 +155,12 @@ class DciResearchCapabilityTests(unittest.IsolatedAsyncioTestCase):
     async def test_pi_invocation_uses_exactly_the_selected_runtime(self) -> None:
         runtime = FixtureRuntime("pi.reference")
 
-        with patch(
-            "asterion.dci.application_executor.EnvironmentDciRunExecutor.run",
-            side_effect=AssertionError("native bypass"),
+        with (
+            patch(
+                "asterion.dci.application_executor.EnvironmentDciRunExecutor.run",
+                side_effect=AssertionError("native bypass"),
+            ),
+            patch.object(Path, "cwd", side_effect=AssertionError("cwd access")),
         ):
             result = await DciLocalResearchImplementation().execute(invocation(runtime))
 

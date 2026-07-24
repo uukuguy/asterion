@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
+from asterion.dci.services import LocalCorpusService
 from asterion.packages.execution import (
     PackageExecutionError,
     PackageExecutionResult,
@@ -19,6 +21,7 @@ class DciLocalResearchImplementation:
     async def execute(
         self, invocation: PackageInvocation
     ) -> PackageExecutionResult:
+        _require_local_corpus(invocation)
         required = invocation.manifest["requires_capabilities"]
         if not isinstance(required, tuple) or not all(
             isinstance(capability, str) for capability in required
@@ -52,6 +55,20 @@ class DciLocalResearchImplementation:
                 },
             ),
         )
+
+
+def _require_local_corpus(invocation: PackageInvocation) -> Path:
+    try:
+        service = invocation.host_services.get("corpus.local-root")
+        if not isinstance(service, LocalCorpusService):
+            raise TypeError
+        root = service.root
+    except Exception:
+        raise PackageExecutionError("local corpus service is unavailable") from None
+    if not isinstance(root, Path):
+        raise PackageExecutionError("local corpus service is unavailable")
+    return root
+
 
 def _answer_artifact_uri(events: Sequence[Mapping[str, object]]) -> str:
     for event in events:

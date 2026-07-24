@@ -68,6 +68,15 @@ ARTIFACTS = (
 )
 
 
+class _CorpusService:
+    root = PROJECT
+    identity_sha256 = "a" * 64
+
+
+def _host_services() -> dict[str, object]:
+    return {"corpus.local-root": _CorpusService()}
+
+
 def plan(runtime_id: str):
     suffix = "claude" if runtime_id == "claude-code.reference" else "pi"
     assembly = json.loads(
@@ -90,6 +99,19 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
                 assembly = json.loads(assembly_path.read_text())
                 self.assertEqual(assembly["host_events"], [])
                 self.assertEqual(assembly["host_artifacts"], [])
+
+    def test_only_provider_bound_dci_assemblies_declare_local_corpus(self) -> None:
+        bound = {
+            "dci-complete-application-claude.json",
+            "dci-complete-application-pi.json",
+            "dci-research-capability-claude.json",
+            "dci-research-capability.json",
+        }
+        for assembly_path in sorted(ASSEMBLIES.glob("dci-*.json")):
+            with self.subTest(assembly=assembly_path.name):
+                assembly = json.loads(assembly_path.read_text())
+                expected = ["corpus.local-root"] if assembly_path.name in bound else []
+                self.assertEqual(assembly["host_capabilities"], expected)
 
     def test_pi_and_claude_share_the_exact_five_stage_graph(self) -> None:
         pi = plan("pi.reference")
@@ -240,6 +262,31 @@ class _CompletedRuntime:
 
 
 class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_research_requires_corpus_before_runtime_invocation(self) -> None:
+        store = DciCompleteAttemptStore()
+        runtime = _CompletedRuntime("pi.reference", PROJECT / "unused-run")
+        invocation = PackageInvocation(
+            package_ref=PackageRef("dci.research", "1.0.0"),
+            manifest=json.loads((MANIFESTS / "dci-research.json").read_text()),
+            run_id="missing-corpus",
+            input_text=json.dumps(
+                {
+                    "protocol": INPUT_PROTOCOL,
+                    "question": "SECRET QUESTION",
+                    "gold_answer": "SECRET GOLD",
+                }
+            ),
+            upstream_artifacts=(),
+            runtime=runtime,
+            host_services={},
+        )
+
+        with self.assertRaises(PackageExecutionError) as raised:
+            await DciCompleteResearchImplementation(store=store).execute(invocation)
+
+        self.assertEqual(runtime.calls, 0)
+        self.assertNotIn("SECRET", str(raised.exception))
+
     async def test_stage_rejects_wrong_upstream_schema_or_implementation(self) -> None:
         implementation = DciCompleteBenchmarkImplementation()
         for value in (
@@ -311,7 +358,7 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
                     },
                 ),
                 runtime=_UnusedPiRuntime(),
-                host_services={},
+                host_services=_host_services(),
                 signal=signal,
             )
             task = asyncio.create_task(implementation.execute(invocation))
@@ -347,7 +394,7 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
                 runtime=runtime,
                 run_id="claude-complete",
                 input_text=json.dumps({"protocol": INPUT_PROTOCOL, "question": "PRIVATE QUESTION", "gold_answer": "PRIVATE GOLD"}),
-                host_services={},
+                host_services=_host_services(),
             )
 
         self.assertEqual(
@@ -393,7 +440,7 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
                             "gold_answer": "PRIVATE GOLD",
                         }
                     ),
-                    host_services={},
+                    host_services=_host_services(),
                 )
 
         self.assertEqual(runtime.calls, 1)

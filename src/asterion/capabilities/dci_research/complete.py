@@ -16,6 +16,7 @@ from typing import Awaitable, Callable
 from asterion.dci.analysis import aggregate_results
 from asterion.dci.evaluation import evaluate_run_directory_async
 from asterion.dci.judge import JudgeConfig, judge_answer_async
+from asterion.dci.services import LocalCorpusService
 from asterion.packages.execution import (
     PackageExecutionError,
     PackageExecutionResult,
@@ -166,6 +167,7 @@ class DciCompleteResearchImplementation:
         self._store = store
 
     async def execute(self, invocation: PackageInvocation) -> PackageExecutionResult:
+        _require_local_corpus(invocation)
         question, gold = _envelope(invocation.input_text)
         try:
             required = invocation.manifest["requires_capabilities"]
@@ -232,6 +234,19 @@ class DciCompleteResearchImplementation:
             media_type="application/vnd.dci.research+json",
             value={"answer_artifact_uri": answer},
         )
+
+
+def _require_local_corpus(invocation: PackageInvocation) -> Path:
+    try:
+        service = invocation.host_services.get("corpus.local-root")
+        if not isinstance(service, LocalCorpusService):
+            raise TypeError
+        root = service.root
+    except Exception:
+        raise PackageExecutionError("local corpus service is unavailable") from None
+    if not isinstance(root, Path):
+        raise PackageExecutionError("local corpus service is unavailable")
+    return root
 
 
 Evaluator = Callable[..., Awaitable[dict[str, object]]]

@@ -7,7 +7,7 @@
     {"package_id": "dci.research", "version": "1.0.0"},
     {"package_id": "policy.local-corpus", "version": "1.0.0"}
   ],
-  "host_capabilities": [],
+  "host_capabilities": ["corpus.local-root"],
   "host_policies": [],
   "host_events": [],
   "host_artifacts": []

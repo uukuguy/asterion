@@ -405,6 +405,102 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
         self.assertEqual(runtime._context_profile, "level3")
         self.assertEqual(runtime._evidence_root, (root / "evidence").resolve())
 
+    def test_pi_reference_factory_can_bind_cwd_to_one_exact_host_service(
+        self,
+    ) -> None:
+        from asterion.runtime.defaults import default_runtime_factory_registry
+
+        class CorpusService:
+            def __init__(self, root: Path) -> None:
+                self.root = root
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            corpus = root / "corpus"
+            corpus.mkdir()
+            executable = Path(sys.executable).resolve()
+            context = RuntimeFactoryContext(
+                provider_id="dci-agent-lite",
+                application_id="dci.research-capability",
+                application_version="1.0.0",
+                runtime_id="pi.reference",
+                assembly_path=root / "assembly.json",
+                options={
+                    "command": json.dumps(
+                        [str(executable), "-u", "-c", "pass"],
+                        separators=(",", ":"),
+                    ),
+                    "cwd_host_capability": "corpus.local-root",
+                    "environment": "{}",
+                    "evidence_root": str(root / "evidence"),
+                    "max_turns": "4",
+                    "tools": "read,grep",
+                },
+                host_services={"corpus.local-root": CorpusService(corpus)},
+            )
+            runtime = default_runtime_factory_registry().select(
+                "pi.reference"
+            ).factory(context)
+
+        self.assertEqual(runtime._cwd, corpus)
+        self.assertEqual(context.host_services["corpus.local-root"].root, corpus)
+        with self.assertRaises(TypeError):
+            context.host_services["service.other"] = object()
+
+    def test_pi_host_bound_cwd_rejects_missing_ambiguous_or_invalid_service(
+        self,
+    ) -> None:
+        from asterion.runtime.defaults import default_runtime_factory_registry
+        from asterion.runtime.factory import RuntimeFactoryError
+
+        class Service:
+            def __init__(self, root: object) -> None:
+                self.root = root
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            corpus = root / "corpus"
+            corpus.mkdir()
+            executable = Path(sys.executable).resolve()
+            base = {
+                "command": json.dumps(
+                    [str(executable), "-u", "-c", "pass"],
+                    separators=(",", ":"),
+                ),
+                "cwd_host_capability": "corpus.local-root",
+                "environment": "{}",
+                "evidence_root": str(root / "evidence"),
+                "max_turns": "4",
+                "tools": "read,grep",
+            }
+            cases = (
+                ({}, {}),
+                (
+                    {**base, "cwd": str(corpus)},
+                    {"corpus.local-root": Service(corpus)},
+                ),
+                (base, {"corpus.local-root": Service("SECRET-NOT-A-PATH")}),
+                (base, {"service.other": Service(corpus)}),
+            )
+            binding = default_runtime_factory_registry().select("pi.reference")
+            for options, services in cases:
+                with (
+                    self.subTest(options=tuple(options)),
+                    self.assertRaises(RuntimeFactoryError) as raised,
+                ):
+                    binding.factory(
+                        RuntimeFactoryContext(
+                            provider_id="dci-agent-lite",
+                            application_id="dci.research-capability",
+                            application_version="1.0.0",
+                            runtime_id="pi.reference",
+                            assembly_path=root / "assembly.json",
+                            options=options or base,
+                            host_services=services,
+                        )
+                    )
+                self.assertNotIn("SECRET", str(raised.exception))
+
     def test_pi_factory_rejects_every_noncanonical_authority_value(self) -> None:
         from asterion.runtime.defaults import default_runtime_factory_registry
 

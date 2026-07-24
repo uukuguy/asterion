@@ -28,6 +28,7 @@ from asterion.applications.product import (
     VerificationResult,
 )
 from asterion.dci.verification import create_dci_product
+from asterion.dci.services import create_local_corpus_service_factory
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 from asterion.services.controlled_executor import ControlledExecutionResult
@@ -175,6 +176,22 @@ def fail_if_unselected_runtime_is_created(context):
     raise AssertionError("unselected runtime factory was called")
 
 
+def dci_host_entry() -> FakeEntryPoint:
+    return FakeEntryPoint(
+        name="corpus.local-root",
+        group="asterion.host_services",
+        factory=create_local_corpus_service_factory,
+    )
+
+
+def dci_host_arguments() -> tuple[str, str]:
+    return (
+        "--host-option",
+        "corpus.local-root:root="
+        + str(Path(__file__).resolve().parents[1]),
+    )
+
+
 def provider(root: Path) -> InstalledApplicationProvider:
     value = installed_provider_fixture(root)
     for application in value.applications:
@@ -215,6 +232,171 @@ class AsterionCliTests(unittest.TestCase):
             getattr(args, "runtime_option", None),
             ["model=fixture-model", "empty="],
         )
+
+    def test_run_parser_accepts_repeatable_exact_host_options(self) -> None:
+        args = _parser().parse_args(
+            [
+                "run",
+                "--provider",
+                "fixture",
+                "--host-option",
+                "corpus.local-root:root=/private/corpus",
+                "--application",
+                "fixture.app@1.0.0",
+            ]
+        )
+
+        self.assertEqual(
+            args.host_option, ["corpus.local-root:root=/private/corpus"]
+        )
+
+    def test_dci_host_service_is_resolved_before_runtime_and_adjacent_is_not_loaded(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            corpus = Path(temp_dir).resolve() / "corpus"
+            corpus.mkdir()
+            seen_roots: list[Path] = []
+
+            def create_runtime(context):
+                seen_roots.append(context.host_services["corpus.local-root"].root)
+                self.assertEqual(
+                    context.options["cwd_host_capability"],
+                    "corpus.local-root",
+                )
+                return DciPiFixtureRuntime()
+
+            registry = RuntimeFactoryRegistry(
+                (
+                    RuntimeFactoryBinding(
+                        runtime_id="claude-code.reference",
+                        capabilities=("filesystem.read", "shell"),
+                        factory=fail_if_unselected_runtime_is_created,
+                    ),
+                    RuntimeFactoryBinding(
+                        runtime_id="pi.reference",
+                        capabilities=("filesystem.read", "shell"),
+                        factory=create_runtime,
+                    ),
+                )
+            )
+            selected = FakeEntryPoint(
+                name="corpus.local-root",
+                group="asterion.host_services",
+                factory=create_local_corpus_service_factory,
+            )
+            adjacent = FakeEntryPoint(
+                name="service.adjacent",
+                group="asterion.host_services",
+                factory=lambda: (_ for _ in ()).throw(
+                    AssertionError("adjacent loaded")
+                ),
+            )
+            code = main(
+                [
+                    "run",
+                    "--provider",
+                    "dci-agent-lite",
+                    "--runtime",
+                    "pi.reference",
+                    "--runtime-option",
+                    "cwd_host_capability=corpus.local-root",
+                    "--host-option",
+                    f"corpus.local-root:root={corpus}",
+                    "--application",
+                    "dci.research-capability@1.0.0",
+                    "--input",
+                    "research",
+                ],
+                entry_points=(
+                    FakeEntryPoint(
+                        name="dci-agent-lite", factory=create_dci_provider
+                    ),
+                ),
+                host_service_entry_points=(adjacent, selected),
+                runtime_factories=registry,
+                stdout=io.StringIO(),
+                stderr=io.StringIO(),
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(seen_roots, [corpus])
+        self.assertEqual(selected.loads, 1)
+        self.assertEqual(adjacent.loads, 0)
+
+    def test_missing_or_invalid_host_authority_fails_before_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            corpus = Path(temp_dir).resolve() / "SECRET-CORPUS"
+            corpus.mkdir()
+            calls: list[object] = []
+            registry = RuntimeFactoryRegistry(
+                (
+                    RuntimeFactoryBinding(
+                        runtime_id="pi.reference",
+                        capabilities=("filesystem.read", "shell"),
+                        factory=lambda context: calls.append(context),
+                    ),
+                    RuntimeFactoryBinding(
+                        runtime_id="claude-code.reference",
+                        capabilities=("filesystem.read", "shell"),
+                        factory=fail_if_unselected_runtime_is_created,
+                    ),
+                )
+            )
+            selected = FakeEntryPoint(
+                name="corpus.local-root",
+                group="asterion.host_services",
+                factory=create_local_corpus_service_factory,
+            )
+            cases = (
+                ((), ()),
+                (
+                    (
+                        "--host-option",
+                        f"service.undeclared:root={corpus}",
+                    ),
+                    (selected,),
+                ),
+                (
+                    (
+                        "--host-option",
+                        f"corpus.local-root:root={corpus}",
+                        "--host-option",
+                        "corpus.local-root:root=/replacement",
+                    ),
+                    (selected,),
+                ),
+            )
+            for arguments, host_entries in cases:
+                stderr = io.StringIO()
+                with self.subTest(arguments=arguments):
+                    code = main(
+                        [
+                            "run",
+                            "--provider",
+                            "dci-agent-lite",
+                            "--runtime",
+                            "pi.reference",
+                            *arguments,
+                            "--application",
+                            "dci.research-capability@1.0.0",
+                            "--input",
+                            "research",
+                        ],
+                        entry_points=(
+                            FakeEntryPoint(
+                                name="dci-agent-lite",
+                                factory=create_dci_provider,
+                            ),
+                        ),
+                        host_service_entry_points=host_entries,
+                        runtime_factories=registry,
+                        stdout=io.StringIO(),
+                        stderr=stderr,
+                    )
+                    self.assertEqual(code, 2)
+                    self.assertNotIn("SECRET-CORPUS", stderr.getvalue())
+            self.assertEqual(calls, [])
 
     def test_dci_describe_json_reports_effective_first_run_defaults(self) -> None:
         entry = FakeEntryPoint(name="dci-agent-lite", factory=create_dci_provider)
@@ -444,10 +626,18 @@ class AsterionCliTests(unittest.TestCase):
                 name="other-app",
                 factory=lambda: (_ for _ in ()).throw(AssertionError("loaded")),
             )
+            host_entry = FakeEntryPoint(
+                name="service.unselected",
+                group="asterion.host_services",
+                factory=lambda: (_ for _ in ()).throw(
+                    AssertionError("host service loaded")
+                ),
+            )
             stdout = io.StringIO()
             code = main(
                 ["describe", "--provider", "example-app", "--json"],
                 entry_points=(selected, adjacent),
+                host_service_entry_points=(host_entry,),
                 stdout=stdout,
                 stderr=io.StringIO(),
             )
@@ -455,6 +645,7 @@ class AsterionCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(selected.loads, 1)
         self.assertEqual(adjacent.loads, 0)
+        self.assertEqual(host_entry.loads, 0)
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload["product_id"], "example-product")
         self.assertEqual(payload["functions"][0]["argv"], ["example", "run"])
@@ -644,11 +835,19 @@ class AsterionCliTests(unittest.TestCase):
 
     def test_list_reports_metadata_without_loading_provider(self) -> None:
         entry = FakeEntryPoint(name="example-app", factory=lambda: None)
+        host_entry = FakeEntryPoint(
+            name="service.unselected",
+            group="asterion.host_services",
+            factory=lambda: (_ for _ in ()).throw(
+                AssertionError("host service loaded")
+            ),
+        )
         stdout = io.StringIO()
 
         code = main(
             ["list"],
             entry_points=(entry,),
+            host_service_entry_points=(host_entry,),
             runtime_factories=RuntimeFactoryRegistry(()),
             stdout=stdout,
             stderr=io.StringIO(),
@@ -656,6 +855,7 @@ class AsterionCliTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(entry.loads, 0)
+        self.assertEqual(host_entry.loads, 0)
         payload = json.loads(stdout.getvalue())
         self.assertEqual(payload[0]["provider_id"], "example-app")
         self.assertNotIn("SECRET-MODULE-PATH", stdout.getvalue())
@@ -1047,12 +1247,14 @@ class AsterionCliTests(unittest.TestCase):
                 "claude-code.reference",
                 "--application",
                 "dci.research-capability@1.0.0",
+                *dci_host_arguments(),
                 "--input",
                 "SECRET-INPUT",
             ],
             entry_points=(
                 FakeEntryPoint(name="dci-agent-lite", factory=create_dci_provider),
             ),
+            host_service_entry_points=(dci_host_entry(),),
             runtime_factories=registry,
             stdout=stdout,
             stderr=stderr,
@@ -1100,12 +1302,14 @@ class AsterionCliTests(unittest.TestCase):
                 "dci.research-capability@1.0.0",
                 "--run-id",
                 "native-cli-run",
+                *dci_host_arguments(),
                 "--input",
                 "SECRET-INPUT",
             ],
             entry_points=(
                 FakeEntryPoint(name="dci-agent-lite", factory=create_dci_provider),
             ),
+            host_service_entry_points=(dci_host_entry(),),
             runtime_factories=registry,
             stdout=stdout,
             stderr=stderr,
@@ -1152,6 +1356,7 @@ class AsterionCliTests(unittest.TestCase):
                     "dci.research-capability@1.0.0",
                     "--run-id",
                     "native-cli-run",
+                    *dci_host_arguments(),
                     "--input",
                     "SECRET-INPUT",
                 ],
@@ -1160,6 +1365,7 @@ class AsterionCliTests(unittest.TestCase):
                         name="dci-agent-lite", factory=create_dci_provider
                     ),
                 ),
+                host_service_entry_points=(dci_host_entry(),),
                 runtime_factories=registry,
                 stdout=stdout,
                 stderr=io.StringIO(),
@@ -1204,12 +1410,14 @@ class AsterionCliTests(unittest.TestCase):
                 "pi.reference",
                 "--application",
                 "dci.research-capability@1.0.0",
+                *dci_host_arguments(),
                 "--input",
                 "SECRET-INPUT",
             ],
             entry_points=(
                 FakeEntryPoint(name="dci-agent-lite", factory=create_dci_provider),
             ),
+            host_service_entry_points=(dci_host_entry(),),
             runtime_factories=registry,
             stdout=stdout,
             stderr=stderr,

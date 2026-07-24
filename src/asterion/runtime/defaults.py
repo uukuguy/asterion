@@ -84,6 +84,7 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
         "command",
         "context_profile",
         "cwd",
+        "cwd_host_capability",
         "environment",
         "evidence_root",
         "max_turns",
@@ -93,18 +94,26 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
     }
     required = {
         "command",
-        "cwd",
         "environment",
         "evidence_root",
         "max_turns",
         "tools",
     }
-    if set(context.options) - allowed or not required.issubset(context.options):
+    has_cwd = "cwd" in context.options
+    has_host_cwd = "cwd_host_capability" in context.options
+    if (
+        set(context.options) - allowed
+        or not required.issubset(context.options)
+        or has_cwd == has_host_cwd
+    ):
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
     command = list(_pi_command(context.options["command"]))
-    runtime_cwd = _pi_exact_path(
-        context.options["cwd"], require_directory=True
-    )
+    if has_host_cwd:
+        runtime_cwd = _pi_host_service_path(context)
+    else:
+        runtime_cwd = _pi_exact_path(
+            context.options["cwd"], require_directory=True
+        )
     evidence_root_path = _pi_exact_path(
         context.options["evidence_root"], require_directory=False
     )
@@ -155,6 +164,26 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
         tools=normalized_tools,
         context_profile=context_profile,
     )
+
+
+def _pi_host_service_path(context: RuntimeFactoryContext) -> Path:
+    capability_id = context.options["cwd_host_capability"]
+    if (
+        type(capability_id) is not str
+        or re.fullmatch(r"[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*", capability_id)
+        is None
+    ):
+        raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
+    try:
+        service = context.host_services[capability_id]
+        root = service.root
+    except Exception:
+        raise RuntimeFactoryError(
+            "Pi reference runtime host service is unavailable"
+        ) from None
+    if not isinstance(root, Path):
+        raise RuntimeFactoryError("Pi reference runtime host service is invalid")
+    return _pi_exact_path(str(root), require_directory=True)
 
 
 def _pi_command(value: str) -> tuple[str, ...]:

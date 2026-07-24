@@ -47,12 +47,18 @@ from asterion.services.managed_controlled_executor import (
     OperatorExecutorConfig,
     load_operator_executor_config,
 )
+from asterion.services.registry import (
+    HostServiceFactoryRegistry,
+    HostServiceRegistryError,
+    parse_host_service_options,
+)
 
 
 def main(
     argv: list[str] | None = None,
     *,
     entry_points: Iterable[object] | None = None,
+    host_service_entry_points: Iterable[object] | None = None,
     runtime_factories: RuntimeFactoryRegistry | None = None,
     stdin: TextIO | None = None,
     stdout: TextIO | None = None,
@@ -69,6 +75,7 @@ def main(
         if runtime_factories is None
         else runtime_factories
     )
+    host_service_registry = HostServiceFactoryRegistry(host_service_entry_points)
     executor_factory = (
         ManagedControlledExecutor
         if managed_executor_factory is None
@@ -167,6 +174,7 @@ def main(
                 args,
                 entry_points=entry_points,
                 registry=registry,
+                host_service_registry=host_service_registry,
                 managed_executor_factory=executor_factory,
                 stdin=stdin,
                 stdout=stdout,
@@ -178,6 +186,7 @@ def main(
         AssemblyError,
         PackageExecutionError,
         RuntimeFactoryError,
+        HostServiceRegistryError,
         OSError,
         TypeError,
         ValueError,
@@ -191,6 +200,7 @@ async def _run(
     *,
     entry_points: Iterable[object] | None,
     registry: RuntimeFactoryRegistry,
+    host_service_registry: HostServiceFactoryRegistry,
     managed_executor_factory: Callable[[OperatorExecutorConfig], object],
     stdin: TextIO,
     stdout: TextIO,
@@ -228,38 +238,44 @@ async def _run(
         raise ApplicationProviderError("application assembly selection is invalid")
     assembly_path = assembly.path
     runtime_options = _runtime_options(args.runtime_option)
+    host_options = parse_host_service_options(args.host_option)
     runtime_binding = registry.select(runtime_id)
     plan = assembly.plan
     operator_config = _operator_executor_config(args, plan.host_capabilities)
-    context = RuntimeFactoryContext(
+    managed_services = (
+        {}
+        if operator_config is None
+        else {
+            "executor.controlled": managed_executor_factory(operator_config)
+        }
+    )
+    async with host_service_registry.open(
         provider_id=provider.provider_id,
         application_id=application.application_id,
         application_version=application.version,
-        runtime_id=runtime_id,
-        assembly_path=assembly_path,
-        options=runtime_options,
-    )
-    runtime = runtime_binding.factory(context)
-    input_text = args.input if args.input is not None else stdin.read()
-    if operator_config is None:
+        capability_ids=plan.host_capabilities,
+        options=host_options,
+        managed=managed_services,
+    ) as host_services:
+        context = RuntimeFactoryContext(
+            provider_id=provider.provider_id,
+            application_id=application.application_id,
+            application_version=application.version,
+            runtime_id=runtime_id,
+            assembly_path=assembly_path,
+            options=runtime_options,
+            host_services=host_services,
+        )
+        runtime = runtime_binding.factory(context)
+        input_text = args.input if args.input is not None else stdin.read()
         result = await run_composed_application(
             plan,
             implementations=application.implementations,
             runtime=runtime,
             run_id=args.run_id,
             input_text=input_text,
-            host_services={},
+            host_services=host_services,
         )
-    else:
-        async with managed_executor_factory(operator_config) as executor:
-            result = await run_composed_application(
-                plan,
-                implementations=application.implementations,
-                runtime=runtime,
-                run_id=args.run_id,
-                input_text=input_text,
-                host_services={"executor.controlled": executor},
-            )
     stdout.write(json.dumps(_thaw(result.__dict__), sort_keys=True) + "\n")
     return 0
 
@@ -317,6 +333,12 @@ def _parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         metavar="KEY=VALUE",
+    )
+    run.add_argument(
+        "--host-option",
+        action="append",
+        default=[],
+        metavar="CAPABILITY:KEY=VALUE",
     )
     run.add_argument("--run-id", default="asterion-run")
     run.add_argument("--input")

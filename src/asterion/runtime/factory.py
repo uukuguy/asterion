@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
@@ -22,9 +22,13 @@ class RuntimeFactoryContext:
     runtime_id: str
     assembly_path: Path
     options: Mapping[str, str]
+    host_services: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "options", MappingProxyType(dict(self.options)))
+        object.__setattr__(
+            self, "host_services", MappingProxyType(dict(self.host_services))
+        )
 
 
 RuntimeFactory = Callable[[RuntimeFactoryContext], AgentRuntimeClient]
