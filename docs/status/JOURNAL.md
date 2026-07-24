@@ -28,3 +28,5 @@
 - 20:18 Aligned catalog mutability types with fresh-selection guarantees [71ce81f]
 - 20:41 Transported immutable upstream and host evidence through composed runs [799f8c8]
 - 20:41 Snapshotted host evidence before preflight to close mutation races [0ed58fd]
+- 20:44 Removed fictional product host evidence; retained real package edges, restoring strict preflight execution [26a53e1]
+- 20:54 Replaced root instruction symlink and pinned CI Node for portable promotion source [f601777]
