@@ -26,6 +26,7 @@ from asterion.dci.verification import (
     create_dci_product,
 )
 from asterion.dci.config import resolve_dci_paths
+from asterion.runtime.factory import RuntimeFactoryError
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -629,6 +630,46 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
             self.assert_only_named_failure(
                 result, check_id=check_id, actual=actual
             )
+
+    def test_acceptance_reports_registry_construction_as_composition_damage(
+        self,
+    ) -> None:
+        verifier = DciProductVerifier(repo_root=PROJECT, backend=ExplodingBackend())
+        with (
+            patch(
+                "asterion.runtime.defaults.default_runtime_factory_registry",
+                side_effect=RuntimeFactoryError(
+                    "runtime factory binding is invalid"
+                ),
+            ),
+            patch(
+                "asterion.runtime.defaults._create_pi_runtime",
+                side_effect=AssertionError("acceptance constructed Pi"),
+            ) as pi_factory,
+            patch(
+                "asterion.runtime.defaults._create_claude_code_runtime",
+                side_effect=AssertionError("acceptance constructed Claude"),
+            ) as claude_factory,
+        ):
+            result = verifier(acceptance_request())
+
+        self.assert_named_layers(
+            result,
+            packaged="PASS",
+            bound="PASS",
+            composed="FAIL",
+            executable="FAIL",
+        )
+        self.assertEqual(
+            tuple(
+                check.check_id
+                for check in result.checks
+                if check.status == "FAIL"
+            ),
+            ("composed-assemblies", "executable-assemblies"),
+        )
+        pi_factory.assert_not_called()
+        claude_factory.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -1144,6 +1144,8 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
         validate_implementation_bindings,
     )
     from asterion.runtime.defaults import default_runtime_factory_registry
+    from asterion.runtime.factory import RuntimeFactoryError
+    from asterion.runtime.protocol import ProtocolError
 
     providers = (
         validate_installed_provider(
@@ -1185,17 +1187,21 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
         )
     )
 
-    runtime_factories = default_runtime_factory_registry()
     composed_providers = []
-    for provider in providers:
-        try:
-            composed_providers.append(
-                compose_installed_provider(
-                    provider, runtime_factories=runtime_factories
+    try:
+        runtime_factories = default_runtime_factory_registry()
+    except (ProtocolError, RuntimeFactoryError):
+        pass
+    else:
+        for provider in providers:
+            try:
+                composed_providers.append(
+                    compose_installed_provider(
+                        provider, runtime_factories=runtime_factories
+                    )
                 )
-            )
-        except ApplicationProviderError:
-            continue
+            except ApplicationProviderError:
+                continue
     composed_assemblies = tuple(
         sorted(
             identity
