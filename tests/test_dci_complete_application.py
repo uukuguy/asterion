@@ -87,6 +87,13 @@ def plan(runtime_id: str):
 
 
 class DciCompleteApplicationContractTests(unittest.TestCase):
+    def test_dci_assemblies_do_not_declare_runtime_internal_host_evidence(self) -> None:
+        for assembly_path in sorted(ASSEMBLIES.glob("dci-*.json")):
+            with self.subTest(assembly=assembly_path.name):
+                assembly = json.loads(assembly_path.read_text())
+                self.assertEqual(assembly["host_events"], [])
+                self.assertEqual(assembly["host_artifacts"], [])
+
     def test_pi_and_claude_share_the_exact_five_stage_graph(self) -> None:
         pi = plan("pi.reference")
         claude = plan("claude-code.reference")
@@ -123,6 +130,12 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
                     self.assertEqual(
                         manifest["consumes_artifacts"], (ARTIFACTS[index - 1],)
                     )
+
+    def test_research_consumes_the_direct_request_without_host_evidence(self) -> None:
+        manifest = json.loads((MANIFESTS / "dci-research.json").read_text())
+
+        self.assertEqual(manifest["consumes_events"], [])
+        self.assertEqual(manifest["consumes_artifacts"], [])
 
     def test_complete_graph_does_not_require_shell_web_or_subagents(self) -> None:
         for runtime_id in ("pi.reference", "claude-code.reference"):

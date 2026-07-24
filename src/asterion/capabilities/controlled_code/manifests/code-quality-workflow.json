@@ -7,7 +7,7 @@
   "requires_capabilities": ["executor.controlled", "filesystem.read"],
   "requires_policies": ["policy.controlled-code-check"],
   "emits_events": ["workflow.code-quality.completed"],
-  "consumes_events": ["run.started", "tool.result"],
+  "consumes_events": [],
   "produces_artifacts": ["application/vnd.dci.code-quality+json"],
-  "consumes_artifacts": ["text/x-source"]
+  "consumes_artifacts": []
 }

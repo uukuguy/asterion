@@ -24,6 +24,8 @@ ASSEMBLY = (
     SOURCE
     / "applications/controlled_code/assemblies/controlled-code-validation.json"
 )
+WORKFLOW_MANIFEST = MANIFESTS / "code-quality-workflow.json"
+AUDIT_MANIFEST = MANIFESTS / "execution-audit-observability.json"
 
 
 class FixtureRuntime:
@@ -68,6 +70,22 @@ def plan():
 
 
 class ControlledCodeApplicationTests(unittest.IsolatedAsyncioTestCase):
+    def test_declarations_use_only_real_package_edges(self) -> None:
+        workflow = json.loads(WORKFLOW_MANIFEST.read_text())
+        audit = json.loads(AUDIT_MANIFEST.read_text())
+        assembly = json.loads(ASSEMBLY.read_text())
+
+        self.assertEqual(workflow["consumes_events"], [])
+        self.assertEqual(workflow["consumes_artifacts"], [])
+        self.assertEqual(
+            audit["consumes_events"], ["workflow.code-quality.completed"]
+        )
+        self.assertEqual(
+            audit["consumes_artifacts"], ["application/vnd.dci.code-quality+json"]
+        )
+        self.assertEqual(assembly["host_events"], [])
+        self.assertEqual(assembly["host_artifacts"], [])
+
     async def test_three_implementations_make_one_executor_call(self) -> None:
         executor = FixtureExecutor()
         result = await run_composed_application(

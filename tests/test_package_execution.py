@@ -196,6 +196,14 @@ def host_artifacts():
     },)
 
 
+class DciResearchManifestDeclarationTests(unittest.TestCase):
+    def test_research_does_not_consume_runtime_internal_host_evidence(self) -> None:
+        manifest = json.loads((MANIFEST_ROOT / "dci-research.json").read_text())
+
+        self.assertEqual(manifest["consumes_events"], [])
+        self.assertEqual(manifest["consumes_artifacts"], [])
+
+
 class PackageImplementationBindingTests(unittest.TestCase):
     def test_exact_bindings_require_every_executable_package(self) -> None:
         implementation = RecordingImplementation()

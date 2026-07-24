@@ -11,6 +11,6 @@
   ],
   "host_capabilities": ["executor.controlled"],
   "host_policies": [],
-  "host_events": ["run.started", "tool.result"],
-  "host_artifacts": ["text/x-source"]
+  "host_events": [],
+  "host_artifacts": []
 }

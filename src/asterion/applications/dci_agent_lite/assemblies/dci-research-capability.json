@@ -9,6 +9,6 @@
   ],
   "host_capabilities": [],
   "host_policies": [],
-  "host_events": ["artifact.created", "run.completed", "run.started", "tool.result"],
-  "host_artifacts": ["text/plain"]
+  "host_events": [],
+  "host_artifacts": []
 }
