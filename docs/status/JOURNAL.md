@@ -19,3 +19,5 @@
   provenance design and three implementation plans.
 - 18:49 Documented DCI capability audit and roadmap to preserve approved architecture and implementation sequence [bf4bbfe]
 - 19:00 Resolved plan gates, fake host edges, and exact host-service registry before implementation [775710b]
+- 19:04 Enforced canonical runtime IDs and sorted capability arrays across validators and schemas [9094aaa]
+- 19:14 Canonicalized built-in adapter capabilities to prevent validator regressions [99a8e68]
