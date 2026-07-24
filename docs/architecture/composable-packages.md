@@ -15,7 +15,11 @@ declared policy requirements, and protocol boundaries established here.
 ## Manifest contract
 
 Every manifest is a closed JSON object. Its edge arrays contain non-empty strings
-in sorted, duplicate-free order. For example, a research capability can declare:
+in sorted, duplicate-free order. Package IDs use the canonical identifier grammar
+and versions are exact semantic versions; assembly package references are likewise
+sorted, unique, and exact `package_id@version` selections. Canonical ordering is
+part of the v1 contract, not a convenience that a resolver may normalize after
+acceptance. For example, a research capability can declare:
 
 ```json
 {
@@ -39,6 +43,14 @@ fixtures live in `tests/fixtures/packages/v1/`. The reference manifests under
 `src/asterion/capabilities/dci_research/manifests/` form the policy → research → evaluation → observability
 DCI graph.
 
+Manifests are compatibility allowlists, not output guarantees or execution
+authority. `emits_events` and `produces_artifacts` permit an implementation to
+emit those types, but v1 permits an empty result and does not require one value
+per declared type. A v1 manifest cannot add artifact-identity, cardinality, or
+richer routing declarations. Those semantics require a future protocol version
+with matching schemas and validators rather than an extension field that old v1
+readers might ignore.
+
 ## Resolving a graph
 
 Load manifests as JSON mappings and pass only portable host edges to the pure
@@ -56,9 +68,19 @@ composition = compose_packages(
 print(composition.package_ids)
 ```
 
-The resolver rejects duplicate IDs, ambiguous capability providers, missing
-capability/policy/event/artifact edges, and cycles. Input order does not change
-the resulting `composition.package_ids` or normalized edge summary.
+The resolver rejects duplicate IDs, missing capability/policy/event/artifact
+edges, and cycles. It also requires exactly one provider for every portable
+capability, policy, event, and artifact edge: two packages providing the same
+edge, or a package provider overlapping the corresponding host edge, is
+ambiguous and fails closed. Runtime capabilities are composed as host
+capabilities, so runtime/package overlap fails closed too. Input order does not
+change the resulting `composition.package_ids` or normalized edge summary.
+
+Catalog discovery takes a deep immutable snapshot of each direct JSON-child
+manifest under its explicit local root. A later `select()` returns a fresh,
+mutable JSON-shaped copy; mutating it cannot affect the stored snapshot or a
+subsequent selection. This preserves deterministic composition without exposing
+mutable contract state.
 
 ## Adding a package
 
@@ -84,6 +106,9 @@ still requires the applicable runtime and executor policy checks.
 Run these checks from the standalone repository root:
 
 ```bash
-uv run python -m unittest -v tests.test_package_execution
-make test-typescript
+uv run python -m unittest -v \
+  tests.test_package_composition \
+  tests.test_package_catalog \
+  tests.test_package_execution
+npm --prefix packages/typescript/asterion-runtime test
 ```

@@ -149,9 +149,10 @@ The following boundary gaps remain:
 
 ## Protocol and composition audit
 
-Read-only minimal counterexamples on 2026-07-24 produced these results:
+The following read-only counterexamples were the pre-hardening findings that
+motivated the protocol/composition plan. They are not the current behavior:
 
-| Counterexample | Current result | Required invariant |
+| Counterexample | Prior result | Hardened v1 invariant |
 | --- | --- | --- |
 | `tool.call` followed by terminal event without a result | Accepted | Every call has exactly one result before terminal |
 | Runtime ID `../runtime` | Accepted | IDs use the canonical identifier grammar |
@@ -163,30 +164,38 @@ Read-only minimal counterexamples on 2026-07-24 produced these results:
 | Package declares output but returns none | Accepted | v1 must define whether declarations are allowed or guaranteed output |
 | Duplicate event instances or multiple artifacts of one media type | Accepted | Cardinality must be explicit |
 
-The TypeScript runtime validator consumes shared fixtures. Python lacks a
-direct shared-fixture protocol test, and the composer and catalog lack direct
-unit-test surfaces. The existing unmatched-tool fixture checks a result with no
-call; it does not check a call that remains unresolved at terminal.
+The Python and TypeScript runtime validators now reject the shared invalid
+fixtures, including an unmatched call at terminal. Direct composition and
+catalog suites cover ambiguity and snapshot behavior; the older gaps described
+above are retained only as audit provenance.
 
 ### Approved v1 interpretation
 
-The implementation plans use these semantics:
+The implemented v1 semantics are:
 
-- Runtime, application, package, capability, policy, event, and media-type IDs
-  use their contract's canonical grammar.
-- Arrays documented as canonical are sorted and unique in schema-adjacent
-  validators in both languages.
-- Every tool call has exactly one later result before the terminal event.
-- Provider overlap across host, runtime, and packages is ambiguity and fails
-  closed.
+- Runtime IDs/capabilities and assembly/package IDs use their contracts'
+  canonical identifier grammars. Package and assembly edge values, including
+  event and media-type names, are non-empty strings in canonical arrays; v1 does
+  not impose the runtime identifier grammar on those values.
+- Runtime capabilities, requested capabilities, `run.started` capabilities,
+  package edge arrays, and assembly arrays/references are sorted and unique;
+  validators reject noncanonical input rather than silently reordering it.
+- A runtime stream has one run ID, contiguous sequences, one terminal event,
+  and every tool call has exactly one later matching result before terminal.
+- Provider overlap across host, runtime (as host capability), and packages is
+  ambiguity and fails closed; composition has one provider per consumed edge.
 - `emits_events` and `produces_artifacts` describe allowed output types.
   Cardinality remains implementation-specific in v1; empty output is allowed
   unless a package-specific implementation contract requires an output.
-- Artifact IDs are unique across one complete application result.
-- Package inputs and results, catalog snapshots, resolved plans, and validated
-  TypeScript values must not expose mutable contract state.
-- Adding manifest fields for artifact IDs, cardinality, or richer routing
-  requires a new protocol version rather than silently extending v1.
+- Artifact IDs are unique within a `PackageExecutionResult` and globally across
+  package-produced results in one composed `ApplicationRunResult`. Host
+  artifacts are separate inputs; they are unique within their input collection
+  and do not participate in that result-ID set.
+- Package evidence inputs/results, catalog snapshots, resolved plans, and
+  validated TypeScript values are immutable snapshots. The composed runner
+  transports actual compatible upstream and host evidence, not declarations.
+- Adding manifest fields for artifact identity, cardinality, or richer routing
+  requires a future protocol version rather than silently extending v1.
 
 ## Paper, GitHub, and Asterion experiment semantics
 
@@ -316,28 +325,33 @@ start until authority and cost boundaries are explicit.
 
 ## Verification snapshot
 
-Provider-free checks observed during the audit:
+Provider-free hardened-protocol evidence (2026-07-24):
 
 ```text
-uv run asterion list
-  PASS: controlled-code and dci-agent-lite discovered
+uv run python -m unittest -v \
+  tests.test_runtime_protocol \
+  tests.test_package_composition \
+  tests.test_package_catalog \
+  tests.test_package_execution \
+  tests.test_dci_complete_application \
+  tests.test_dci_research_capability \
+  tests.test_controlled_code_application
+  PASS: focused provider-free protocol/composition/application suites
 
-uv run asterion describe --provider dci-agent-lite
-  PASS: product description rendered without provider requests
+npm --prefix packages/typescript/asterion-runtime test
+  PASS: TypeScript runtime and shared-contract validation
 
-uv run asterion verify --provider dci-agent-lite --level acceptance
-  PASS: inventory closure; provider-backed operations 0; full dataset no
-
-uv run asterion-dci paper describe
-  PASS: 13 datasets, 16 scopes, 20 ablation rows, 5 context profiles
-  paper_full_executable=false
+make lint
+make docs-check
+make promotion-check
+  PASS: provider-free lint, documentation, and packaged-promotion gates
 ```
 
-Focused Python and TypeScript suites passed earlier in this audit. The full
-`make check` was not green: three generic CLI tests were contaminated by the
-repository `.env`, and one CI assertion expected Node 22.19 while the active
-environment exposed Node 20. These failures remain open and must not be
-reported as PASS.
+`make test` and `make check` are intentionally reserved for the
+application-authority plan's final repository-wide gate, because later
+application work changes that boundary. This audit does not promote either
+command as Task 8 evidence. The generic CLI `.env` isolation and Node 22.19.0
+corrections are already verified and are not current failures.
 
 No provider-backed benchmark or published paper score was rerun for this
 audit.

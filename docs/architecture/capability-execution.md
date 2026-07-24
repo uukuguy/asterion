@@ -38,7 +38,32 @@ result = await run_composed_application(
 AF-110 execution is deterministic and sequential. The runner traverses the
 resolved package order, skips declarative policy packages, supplies only
 compatible upstream artifacts, validates declared event and artifact outputs,
-and stops before later packages after failure or cancellation.
+and stops before later packages after failure or cancellation. The composition
+has one provider for every package-consumed capability, policy, event, or
+artifact edge; provider overlap between packages or between a package and the
+host is an ambiguity, not precedence.
+
+## Evidence and result semantics
+
+An assembly declares sorted, unique host event types and artifact media types.
+At invocation, the host supplies the actual values, not synthetic manifest
+stand-ins. The runner preflights their closed shapes and requires their observed
+types to match the assembly declarations exactly before it validates bindings or
+starts package work. It snapshots them deeply, then independently passes each
+package only the compatible package-produced `upstream_events` and
+`upstream_artifacts`, plus compatible caller-owned `host_events` and
+`host_artifacts`. All four invocation evidence collections are deeply immutable.
+
+Package result declarations are v1 allowlists: an emitted event type or artifact
+media type must be declared, but a package may emit no values and there is no
+per-type cardinality guarantee. Artifact IDs must be non-empty and unique
+inside each `PackageExecutionResult`. Across package-produced results, the
+composed runner maintains one ID set and rejects a duplicate before returning
+the aggregate `ApplicationRunResult`. Host artifacts are separate application
+inputs: their IDs must be unique among host inputs, but they neither enter nor
+seed the package-result/ApplicationRunResult global ID set. Future declarations
+for cross-boundary identity, minimum/maximum cardinality, or richer artifact
+routing require a new protocol version; they cannot be added silently to v1.
 
 The runner does not discover modules, import capability implementations,
 resolve version ranges, start services, retry work, persist state, schedule
