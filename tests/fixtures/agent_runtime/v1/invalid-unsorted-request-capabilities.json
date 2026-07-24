@@ -1,0 +1,6 @@
+{
+  "protocol": "dci.agent-runtime/v1",
+  "run_id": "fixture-run",
+  "input": {"text": "Inspect the runtime"},
+  "requested_capabilities": ["z.capability", "a.capability"]
+}

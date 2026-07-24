@@ -20,6 +20,7 @@ EVENT_TYPES = {
 }
 TERMINAL_EVENT_TYPES = {"run.completed", "run.failed"}
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 
 
 class ProtocolError(ValueError):
@@ -58,6 +59,12 @@ def _require_non_empty_string(value: object, label: str) -> str:
     return value
 
 
+def _require_identifier(value: object, label: str) -> str:
+    if not isinstance(value, str) or IDENTIFIER.fullmatch(value) is None:
+        raise ProtocolError(f"{label} is invalid")
+    return value
+
+
 def _require_non_negative_integer(value: object, label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise ProtocolError(f"{label} must be a non-negative integer")
@@ -65,12 +72,15 @@ def _require_non_negative_integer(value: object, label: str) -> int:
 
 
 def _validate_string_list(value: object, label: str) -> None:
-    if not isinstance(value, list):
-        raise ProtocolError(f"{label} must be an array")
-    if any(not isinstance(item, str) or not item for item in value):
-        raise ProtocolError(f"{label} entries must be non-empty strings")
-    if len(set(value)) != len(value):
-        raise ProtocolError(f"{label} entries must be unique")
+    if (
+        not isinstance(value, list)
+        or any(
+            not isinstance(item, str) or IDENTIFIER.fullmatch(item) is None
+            for item in value
+        )
+        or value != sorted(set(value))
+    ):
+        raise ProtocolError(f"{label} must be a sorted unique identifier array")
 
 
 def validate_runtime_manifest(manifest: Mapping[str, object]) -> None:
@@ -84,7 +94,7 @@ def validate_runtime_manifest(manifest: Mapping[str, object]) -> None:
     )
     if manifest["protocol"] != PROTOCOL_VERSION:
         raise ProtocolError("runtime manifest protocol is not dci.agent-runtime/v1")
-    _require_non_empty_string(manifest["runtime_id"], "runtime manifest runtime_id")
+    _require_identifier(manifest["runtime_id"], "runtime manifest runtime_id")
     _validate_string_list(manifest["capabilities"], "runtime manifest capabilities")
 
 

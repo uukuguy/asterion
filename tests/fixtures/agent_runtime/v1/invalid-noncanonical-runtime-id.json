@@ -1,0 +1,5 @@
+{
+  "protocol": "dci.agent-runtime/v1",
+  "runtime_id": "../runtime",
+  "capabilities": ["filesystem.read"]
+}

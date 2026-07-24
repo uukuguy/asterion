@@ -52,8 +52,23 @@ function requireValid<T>(
   return value as T;
 }
 
+function requireSortedUnique(
+  label: string,
+  values: readonly string[],
+): void {
+  if (values.some((value, index) => index > 0 && values[index - 1]! >= value)) {
+    throw new ProtocolValidationError(label, null);
+  }
+}
+
 export function validateRuntimeManifest(value: unknown): RuntimeManifest {
-  return requireValid("runtime manifest", manifestValidator, value);
+  const manifest = requireValid<RuntimeManifest>(
+    "runtime manifest",
+    manifestValidator,
+    value,
+  );
+  requireSortedUnique("runtime manifest capabilities", manifest.capabilities);
+  return manifest;
 }
 
 const packageEdgeFields = [
@@ -110,7 +125,18 @@ export function validateAssemblyManifest(value: unknown): AssemblyManifest {
 }
 
 export function validateRunRequest(value: unknown): RunRequest {
-  return requireValid("run request", requestValidator, value);
+  const request = requireValid<RunRequest>(
+    "run request",
+    requestValidator,
+    value,
+  );
+  if (request.requested_capabilities) {
+    requireSortedUnique(
+      "run request requested_capabilities",
+      request.requested_capabilities,
+    );
+  }
+  return request;
 }
 
 export function validateEventStream(value: unknown): readonly RunEvent[] {
@@ -142,7 +168,9 @@ export function validateEventStream(value: unknown): readonly RunEvent[] {
     if (index > 0 && event.type === "run.started") {
       throw new ProtocolValidationError("event stream start", null);
     }
-    if (event.type === "tool.call") {
+    if (event.type === "run.started") {
+      requireSortedUnique("run.started capabilities", event.payload.capabilities);
+    } else if (event.type === "tool.call") {
       if (calls.has(event.payload.call_id)) {
         throw new ProtocolValidationError("tool.call call_id", null);
       }

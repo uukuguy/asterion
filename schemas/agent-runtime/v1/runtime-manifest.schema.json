@@ -7,10 +7,16 @@
   "required": ["protocol", "runtime_id", "capabilities"],
   "properties": {
     "protocol": {"const": "dci.agent-runtime/v1"},
-    "runtime_id": {"type": "string", "minLength": 1},
+    "runtime_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+    },
     "capabilities": {
       "type": "array",
-      "items": {"type": "string", "minLength": 1},
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+      },
       "uniqueItems": true
     }
   }

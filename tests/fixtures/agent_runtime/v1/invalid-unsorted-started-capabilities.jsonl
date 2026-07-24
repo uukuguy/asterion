@@ -1,0 +1,2 @@
+{"protocol":"dci.agent-runtime/v1","run_id":"fixture-run","sequence":1,"type":"run.started","payload":{"capabilities":["z.capability","a.capability"]}}
+{"protocol":"dci.agent-runtime/v1","run_id":"fixture-run","sequence":2,"type":"run.completed","payload":{"status":"completed"}}

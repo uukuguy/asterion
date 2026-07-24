@@ -63,10 +63,15 @@ test("validates the shared runtime manifest fixtures", async () => {
   }
 
   const valid = await readJson("valid-runtime-manifest.json");
-  const invalid = await readJson("invalid-runtime-manifest.json");
-
   assert.deepEqual(validateRuntimeManifest(valid), valid);
-  assert.throws(() => validateRuntimeManifest(invalid), ProtocolValidationError);
+  for (const name of [
+    "invalid-runtime-manifest.json",
+    "invalid-noncanonical-runtime-id.json",
+    "invalid-unsorted-runtime-capabilities.json",
+  ]) {
+    const invalid = await readJson(name);
+    assert.throws(() => validateRuntimeManifest(invalid), ProtocolValidationError);
+  }
 });
 
 test("validates shared requests and complete event streams", async () => {
@@ -81,6 +86,8 @@ test("validates shared requests and complete event streams", async () => {
     () => validateRunRequest({ ...request, requested_capabilities: ["shell", "shell"] }),
     ProtocolValidationError,
   );
+  const unsortedRequest = await readJson("invalid-unsorted-request-capabilities.json");
+  assert.throws(() => validateRunRequest(unsortedRequest), ProtocolValidationError);
 
   for (const name of [
     "valid-research.jsonl",
@@ -94,6 +101,7 @@ test("validates shared requests and complete event streams", async () => {
     "invalid-sequence-gap.jsonl",
     "invalid-unmatched-tool-result.jsonl",
     "invalid-post-terminal.jsonl",
+    "invalid-unsorted-started-capabilities.jsonl",
   ]) {
     const events = await readJsonl(name);
     assert.throws(() => validateEventStream(events), ProtocolValidationError);
