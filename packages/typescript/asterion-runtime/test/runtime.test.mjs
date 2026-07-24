@@ -45,6 +45,10 @@ async function readPackageJson(name) {
   return JSON.parse(await readFile(new URL(name, packageFixtures), "utf8"));
 }
 
+async function readAssemblyJson(name) {
+  return JSON.parse(await readFile(new URL(name, assemblyFixtures), "utf8"));
+}
+
 async function readJsonl(name) {
   return (await readFile(new URL(name, fixtures), "utf8"))
     .split("\n")
@@ -120,9 +124,13 @@ test("validates shared requests and complete event streams", async () => {
 });
 
 test("validates the shared package manifest fixture", async () => {
-  const valid = await readPackageJson("valid-capability.json");
-
-  assert.deepEqual(validatePackageManifest(valid), valid);
+  for (const name of [
+    "valid-capability.json",
+    "valid-unicode-scalar-order.json",
+  ]) {
+    const valid = await readPackageJson(name);
+    assert.deepEqual(validatePackageManifest(valid), valid);
+  }
 });
 
 test("rejects every shared invalid package manifest fixture", async () => {
@@ -131,6 +139,8 @@ test("rejects every shared invalid package manifest fixture", async () => {
     "invalid-duplicate-edge.json",
     "invalid-package-id.json",
     "invalid-forbidden-command.json",
+    "invalid-unicode-scalar-order.json",
+    "invalid-surrogate-edge.json",
   ]) {
     const invalid = await readPackageJson(name);
     assert.throws(() => validatePackageManifest(invalid), ProtocolValidationError);
@@ -191,14 +201,22 @@ test("keeps package composition outside the TypeScript host", async () => {
 });
 
 test("validates the shared assembly fixtures", async () => {
-  const valid = JSON.parse(
-    await readFile(new URL("valid-dci.json", assemblyFixtures), "utf8"),
-  );
-  const invalid = JSON.parse(
-    await readFile(new URL("invalid-unknown-field.json", assemblyFixtures), "utf8"),
-  );
-  assert.deepEqual(validateAssemblyManifest(valid), valid);
-  assert.throws(() => validateAssemblyManifest(invalid), ProtocolValidationError);
+  for (const name of [
+    "valid-dci.json",
+    "valid-canonical-order.json",
+  ]) {
+    const valid = await readAssemblyJson(name);
+    assert.deepEqual(validateAssemblyManifest(valid), valid);
+  }
+  for (const name of [
+    "invalid-unknown-field.json",
+    "invalid-interpolated-package-ref-order.json",
+    "invalid-unicode-scalar-order.json",
+    "invalid-surrogate-edge.json",
+  ]) {
+    const invalid = await readAssemblyJson(name);
+    assert.throws(() => validateAssemblyManifest(invalid), ProtocolValidationError);
+  }
 });
 
 test("validates every checked-in reference assembly", async () => {

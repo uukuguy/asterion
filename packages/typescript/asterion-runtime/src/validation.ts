@@ -70,8 +70,45 @@ function requireSortedUnique(
   label: string,
   values: readonly string[],
 ): void {
-  if (values.some((value, index) => index > 0 && values[index - 1]! >= value)) {
+  if (
+    values.some(hasSurrogateCodePoint) ||
+    values.some(
+      (value, index) =>
+        index > 0 &&
+        compareUnicodeScalarStrings(values[index - 1]!, value) >= 0,
+    )
+  ) {
     throw new ProtocolValidationError(label, null);
+  }
+}
+
+function hasSurrogateCodePoint(value: string): boolean {
+  for (const character of value) {
+    const codePoint = character.codePointAt(0)!;
+    if (codePoint >= 0xd800 && codePoint <= 0xdfff) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function compareUnicodeScalarStrings(left: string, right: string): number {
+  const leftScalars = left[Symbol.iterator]();
+  const rightScalars = right[Symbol.iterator]();
+  while (true) {
+    const leftScalar = leftScalars.next();
+    const rightScalar = rightScalars.next();
+    if (leftScalar.done || rightScalar.done) {
+      if (leftScalar.done && rightScalar.done) {
+        return 0;
+      }
+      return leftScalar.done ? -1 : 1;
+    }
+    const leftCodePoint = leftScalar.value.codePointAt(0)!;
+    const rightCodePoint = rightScalar.value.codePointAt(0)!;
+    if (leftCodePoint !== rightCodePoint) {
+      return leftCodePoint < rightCodePoint ? -1 : 1;
+    }
   }
 }
 
@@ -102,10 +139,7 @@ export function validatePackageManifest(value: unknown): PackageManifest {
     value,
   );
   for (const field of packageEdgeFields) {
-    const values = manifest[field];
-    if (values.some((entry, index) => index > 0 && values[index - 1]! >= entry)) {
-      throw new ProtocolValidationError(`package manifest ${field}`, null);
-    }
+    requireSortedUnique(`package manifest ${field}`, manifest[field]);
   }
   return manifest;
 }
@@ -123,17 +157,30 @@ export function validateAssemblyManifest(value: unknown): AssemblyManifest {
     assemblyManifestValidator,
     value,
   );
-  const refs = assembly.packages.map(
-    ({ package_id, version }) => `${package_id}@${version}`,
-  );
-  if (refs.some((entry, index) => index > 0 && refs[index - 1]! >= entry)) {
+  if (
+    assembly.packages.some(({ package_id, version }) =>
+      hasSurrogateCodePoint(package_id) || hasSurrogateCodePoint(version)
+    ) ||
+    assembly.packages.some((reference, index) => {
+      if (index === 0) {
+        return false;
+      }
+      const previous = assembly.packages[index - 1]!;
+      const packageIdOrder = compareUnicodeScalarStrings(
+        previous.package_id,
+        reference.package_id,
+      );
+      return (
+        packageIdOrder > 0 ||
+        (packageIdOrder === 0 &&
+          compareUnicodeScalarStrings(previous.version, reference.version) >= 0)
+      );
+    })
+  ) {
     throw new ProtocolValidationError("assembly manifest packages", null);
   }
   for (const field of assemblyEdgeFields) {
-    const values = assembly[field];
-    if (values.some((entry, index) => index > 0 && values[index - 1]! >= entry)) {
-      throw new ProtocolValidationError(`assembly manifest ${field}`, null);
-    }
+    requireSortedUnique(`assembly manifest ${field}`, assembly[field]);
   }
   return assembly;
 }

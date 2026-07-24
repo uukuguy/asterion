@@ -13,6 +13,7 @@ from asterion.packages.composition import (
     PackageCompositionError,
     compose_packages,
 )
+from asterion.protocol_ordering import is_sorted_unique_scalar_strings
 from asterion.runtime.protocol import ProtocolError, validate_runtime_manifest
 
 
@@ -102,7 +103,7 @@ def validate_assembly_manifest(value: Mapping[str, object]) -> None:
         if (
             not isinstance(edges, list)
             or any(not isinstance(edge, str) or not edge for edge in edges)
-            or edges != sorted(set(edges))
+            or not is_sorted_unique_scalar_strings(edges)
         ):
             raise AssemblyError(f"assembly {field} must be sorted unique strings")
 

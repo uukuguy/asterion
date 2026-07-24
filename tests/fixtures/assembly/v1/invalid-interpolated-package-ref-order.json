@@ -1,0 +1,14 @@
+{
+  "protocol": "dci.assembly/v1",
+  "application_id": "example.canonical-order",
+  "version": "1.0.0",
+  "runtime_id": "example.runtime",
+  "packages": [
+    {"package_id": "a.b", "version": "1.0.0"},
+    {"package_id": "a", "version": "1.0.0"}
+  ],
+  "host_capabilities": [],
+  "host_policies": [],
+  "host_events": [],
+  "host_artifacts": []
+}

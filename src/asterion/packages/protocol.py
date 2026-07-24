@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 
+from asterion.protocol_ordering import is_sorted_unique_scalar_strings
+
 
 PACKAGE_PROTOCOL_VERSION = "dci.package/v1"
 PACKAGE_KINDS = frozenset(
@@ -58,6 +60,6 @@ def validate_package_manifest(manifest: Mapping[str, object]) -> None:
         if (
             not isinstance(values, list)
             or any(not isinstance(value, str) or not value for value in values)
-            or values != sorted(set(values))
+            or not is_sorted_unique_scalar_strings(values)
         ):
             raise PackageProtocolError(f"{field} must be a sorted unique string array")

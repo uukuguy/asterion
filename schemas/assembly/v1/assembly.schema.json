@@ -37,7 +37,11 @@
     "version": {"type": "string", "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$"},
     "edges": {
       "type": "array",
-      "items": {"type": "string", "minLength": 1},
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^(?!.*[\\uD800-\\uDFFF])[\\s\\S]+$"
+      },
       "uniqueItems": true
     }
   }

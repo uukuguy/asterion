@@ -25,7 +25,11 @@
   "$defs": {
     "edges": {
       "type": "array",
-      "items": {"type": "string", "minLength": 1},
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "pattern": "^(?!.*[\\uD800-\\uDFFF])[\\s\\S]+$"
+      },
       "uniqueItems": true
     }
   }
