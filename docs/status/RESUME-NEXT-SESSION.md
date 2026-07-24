@@ -1,12 +1,12 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-24 18:43. DCI capability audit and implementation design are
-> approved; implementation has not started.
+> Updated: 2026-07-24 18:49. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
 - `docs/architecture/dci-capability-audit.md` is the authoritative mapping from
   paper/GitHub claims to Asterion code, reachability, evidence, and gaps.
+- Audit and three implementation plans are committed as `bf4bbfe`.
 - The user approved separate `paper-reference`, exact
   `upstream-github/<commit>`, and `asterion-safe` experiment families.
 - Work is split into three independently testable plans: protocol/composition,

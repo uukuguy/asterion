@@ -17,3 +17,4 @@
 - 18:43 Audited DCI paper/GitHub claims, Asterion package reachability,
   protocol counterexamples, and reproduction semantics; approved three-source
   provenance design and three implementation plans.
+- 18:49 Documented DCI capability audit and roadmap to preserve approved architecture and implementation sequence [bf4bbfe]
