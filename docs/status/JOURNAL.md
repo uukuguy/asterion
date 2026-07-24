@@ -1,0 +1,15 @@
+# Journal — append-only event log
+
+> One line per commit / verified result / dropped path. Never edit past lines.
+> Format: `## YYYY-MM-DD` date headers, then `- HH:MM <fact> [commit hash if any]`
+
+## 2026-07-24
+
+- 16:52 Bootstrap classified Asterion as direct; no active objective or canonical multi-package worklist.
+- 17:03 `make dci-basic-example` completed and produced a final answer artifact.
+- 17:03 `make dci-runtime-context-example` failed with generic DCI Pi execution error.
+- 17:09 Runtime-context failure exhausted 2/4/8-second retries on upstream `fetch failed`; local validation passed.
+- 17:30 `make check` exposed four unrelated CLI/CI failures; docs, shell syntax, and changed-surface tests passed.
+- 17:30 Added contributor architecture guardrails and Claude symlink; removed superseded design spec [e7ed49e]
+- 17:30 Added bounded DCI launchers and Make targets for repeatable operator-authorized examples [19c0a67]
+- 17:31 Refreshed live checkpoint with focused commits and the bounded verification result.
