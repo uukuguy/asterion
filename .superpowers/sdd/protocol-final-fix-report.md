@@ -410,6 +410,135 @@ PASS
 
 No provider-backed operation, benchmark, or full-dataset run was performed.
 
+## Third final re-review follow-up
+
+The third final re-review found one remaining false-positive class: source
+binding collection retained an imported alias name but discarded where it came
+from. A broken local re-export therefore looked identical to a valid public
+binding.
+
+Commit `3402675eeaf66e0706eea76dbd33b57eaaea584b`
+(`fix: validate documented reexport provenance`) closes this finding while
+preserving the concrete filesystem namespace resolver.
+
+### Provenance-preserving source bindings
+
+Every parsed top-level binding now retains one of four static forms:
+
+- direct function, class, or value assignment;
+- imported Asterion module and its exact target module;
+- imported symbol with its exact target module and target symbol;
+- unsupported external import.
+
+Relative `ImportFrom` targets are derived from the defining package, not the
+source pathname. A package `__init__.py` uses its own qualified module name as
+the package; a source module uses its parent. The import level retains the
+correct number of package components before appending the optional module
+suffix. Targets outside `asterion` fail closed.
+
+An explicit documented symbol is accepted only when:
+
+- its direct source binding exists;
+- its imported Asterion module resolves through the filesystem-only resolver;
+- its imported symbol recursively reaches a valid direct binding; or
+- Python's `from package import child` fallback finds an importable child
+  module.
+
+The recursive validator tracks `(module, symbol)` pairs. Revisiting a pair
+rejects a re-export cycle rather than recursing indefinitely. Missing modules,
+missing target symbols, invalid source, and cycles return the existing
+structural unavailable error with no traceback or module execution.
+
+Non-Asterion imports use one deliberate fail-closed rule. Their provenance is
+retained as unsupported, and they cannot certify a documented public symbol.
+The checker is source-only and cannot validate external import semantics
+without invoking import machinery. The current documentation exposes no such
+external re-export, so this rule introduces no checked-in docs failure.
+
+### Copied-tree and Python comparison
+
+The copied tree includes direct values, local and aliased re-exports,
+`from . import child`, an absolute Asterion re-export,
+`import asterion.valid.child as ChildAlias`, a valid multi-hop chain, and a
+cross-root namespace re-export. Separate packages contain a missing module,
+missing symbol, invalid target source, cycle, and external re-export.
+
+Representative `python -S` imports establish the fixture ground truth:
+
+- all seven supported valid forms import successfully;
+- missing module, missing symbol, invalid source, and cycle fail under Python;
+- the external import succeeds under Python but is rejected by the documented
+  source-only fail-closed policy.
+
+Every source package/module writes a marker if executed. The checker never
+creates that marker and never emits a traceback.
+
+Re-export RED:
+
+```text
+uv run python -m unittest -v \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_validates_reexport_provenance_without_importing
+FAILED: 1 test, 5 failing subtests
+- missing module, missing symbol, invalid source, cycle, and unsupported
+  external re-export all returned false success
+```
+
+Re-export GREEN:
+
+```text
+uv run python -m unittest -v \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_validates_asterion_import_snippets \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_resolves_namespace_packages_without_importing \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_validates_reexport_provenance_without_importing \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_handles_links_and_rejects_unsafe_targets
+PASS: 4 tests
+
+make docs-check
+PASS: 25 Markdown files, 39 local links
+
+uv run ruff check tools/check_docs.py tests/test_standalone_repository.py
+PASS
+```
+
+### Refreshed final provider-free verification
+
+```text
+expanded protocol/application gate
+PASS: 76 tests
+
+uv run python -m unittest -v tests.test_runtime_adapter_redaction
+PASS: 2 tests
+
+npm --prefix packages/typescript/asterion-runtime test
+PASS: 13 tests
+
+make test
+PASS: 258 tests
+
+make check
+PASS: 258 Python tests; compile/Ruff; 25 Markdown files and 39 links;
+      TypeScript 13 + 11 tests; Rust 19 tests plus fmt/clippy;
+      sdist and wheel build
+
+make lint
+PASS: compileall and Ruff
+
+make docs-check
+PASS: 25 Markdown files, 39 local links
+
+make promotion-check
+PASS: 18 commands, provider_operations=0, full_dataset=no
+
+git diff --check
+PASS
+```
+
+The cumulative live checkpoint now includes `3402675`, records 76/258 as the
+current test boundary, retains final re-review as the immediate next action,
+and keeps Application Authority Task 2 conditional on a clean verdict.
+
+No provider-backed operation, benchmark, or full-dataset run was performed.
+
 ## Second final re-review follow-up
 
 The second final re-review found one remaining implementation failure and one

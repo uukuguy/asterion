@@ -1,13 +1,13 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-24 23:03. **Session remains active — not a final handoff.**
+> Updated: 2026-07-24 23:21. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- Protocol/composition Tasks 1–8 and all three final-review corrective waves
-  are implemented. The second re-review found a PEP 420 namespace resolver gap;
-  `f9d7861` replaces lazy importlib namespace state with static concrete-root
-  traversal, and the complete provider-free gates pass.
+- Protocol/composition Tasks 1–8 and all four final-review corrective waves are
+  implemented. The third re-review found lossy re-export binding names;
+  `3402675` preserves provenance and validates it recursively, and the complete
+  provider-free gates pass.
 - A new final whole-branch re-review is still required. Do not call the review
   clean until that independent verdict is recorded.
 - Application Authority Task 1 is implemented. Approved Application Authority
@@ -58,16 +58,21 @@
   carry one child root; namespaces carry all matching roots in order. Missing,
   filesystem, and source-syntax failures become documentation errors without
   tracebacks or module execution.
-- `901c786` records the first two corrective waves and their provider-free
-  evidence. The full report is append-only and must be read through its end.
+- `3402675` preserves direct, imported-module, imported-symbol, and unsupported
+  external provenance. It validates Asterion re-exports recursively with exact
+  relative-import levels, child-module fallback, and cycle rejection.
+  Non-Asterion re-exports fail closed because the source-only checker cannot
+  validate their semantics without import execution.
+- `901c786` and `ca5c6b8` record the earlier corrective waves and provider-free
+  evidence. The full report is cumulative and must be read through its end.
 
 ## Verification boundary
 
 - The expanded protocol/application gate passes 76 tests.
 - The direct runtime-adapter redaction gate passes 2 tests.
 - TypeScript Agent Runtime passes 13 tests.
-- `make test` passes 257 Python tests.
-- `make check` passes 257 Python tests, compile/Ruff, 25 Markdown files and
+- `make test` passes 258 Python tests.
+- `make check` passes 258 Python tests, compile/Ruff, 25 Markdown files and
   39 links, TypeScript 13 + 11 tests, Rust 19 tests plus fmt/clippy, and sdist
   and wheel builds.
 - `make lint` and `make docs-check` pass.
@@ -79,7 +84,7 @@
 
 ## Immediate next actions
 
-1. Request a new final whole-branch re-review covering `f9d7861` and this
+1. Request a new final whole-branch re-review covering `3402675` and this
    cumulative checkpoint/report update.
 2. Only after a clean final verdict, resume Application Authority Task 2:
    prove runtime-to-assembly bijection and executable closure.
@@ -100,6 +105,8 @@
   symlink traversal to the catalog.
 - Do not make static documentation validation depend on `sys.modules`, import
   hooks, loader execution, or package side effects.
+- Do not accept a documented re-export by alias text alone; validate its target
+  provenance recursively and fail unsupported external imports closed.
 - Do not rerun provider-backed work without explicit operator authorization and
   a finite positive budget.
 

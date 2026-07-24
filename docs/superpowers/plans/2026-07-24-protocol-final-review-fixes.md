@@ -581,7 +581,7 @@ git commit -m "fix: validate documented reexport provenance"
 - Consumes: committed re-export validation and fresh provider-free evidence.
 - Produces: current cumulative recovery state and append-only closure evidence.
 
-- [ ] **Step 1: Run the complete final matrix**
+- [x] **Step 1: Run the complete final matrix**
 
 ```bash
 uv run python -m unittest -v \
@@ -606,14 +606,14 @@ git diff --check
 Expected: all commands pass provider-free. Capture any new focused and
 repository test totals from the fresh command output.
 
-- [ ] **Step 2: Refresh checkpoint and report**
+- [x] **Step 2: Refresh checkpoint and report**
 
 Update the live checkpoint timestamp, corrective commits, provenance validation
 rule, and exact final totals. Keep final re-review first and Application
 Authority Task 2 conditional on a clean verdict. Append RED/GREEN and complete
 gate evidence to the full fix report.
 
-- [ ] **Step 3: Verify and commit recovery**
+- [x] **Step 3: Verify and commit recovery**
 
 ```bash
 make docs-check
