@@ -1,0 +1,13 @@
+{
+  "protocol": "dci.package/v1",
+  "package_id": "policy.local-corpus",
+  "version": "1.0.0",
+  "kind": "policy",
+  "provides_capabilities": [],
+  "requires_capabilities": [],
+  "requires_policies": [],
+  "emits_events": [],
+  "consumes_events": [],
+  "produces_artifacts": [],
+  "consumes_artifacts": []
+}

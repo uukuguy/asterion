@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dci.gold-document-registry/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "dataset_id", "manifests"],
+  "properties": {
+    "schema": {"const": "dci.gold-document-registry/v1"},
+    "dataset_id": {"type": "string", "minLength": 1},
+    "manifests": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["query_id", "path", "sha256"],
+        "properties": {
+          "query_id": {"type": "string", "minLength": 1},
+          "path": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    }
+  }
+}

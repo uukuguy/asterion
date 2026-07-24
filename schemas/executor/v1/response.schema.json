@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dci.local/schemas/executor/v1/response.schema.json",
+  "title": "DCI Controlled Executor v1 Response",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "request_id", "type", "status", "exit_code", "stdout", "stderr", "stdout_truncated", "stderr_truncated", "code"],
+      "properties": {
+        "protocol": {"const": "dci.executor/v1"},
+        "request_id": {"type": "string", "minLength": 1},
+        "type": {"const": "execution.result"},
+        "status": {"enum": ["completed", "failed", "timed_out", "cancelled", "denied"]},
+        "exit_code": {"type": ["integer", "null"]},
+        "stdout": {"type": "string"},
+        "stderr": {"type": "string"},
+        "stdout_truncated": {"type": "boolean"},
+        "stderr_truncated": {"type": "boolean"},
+        "code": {"type": ["string", "null"]}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "request_id", "type", "target_request_id", "accepted"],
+      "properties": {
+        "protocol": {"const": "dci.executor/v1"},
+        "request_id": {"type": "string", "minLength": 1},
+        "type": {"const": "cancel.acknowledged"},
+        "target_request_id": {"type": "string", "minLength": 1},
+        "accepted": {"type": "boolean"}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "request_id", "type", "code", "message"],
+      "properties": {
+        "protocol": {"const": "dci.executor/v1"},
+        "request_id": {"type": "string", "minLength": 1},
+        "type": {"const": "protocol.error"},
+        "code": {"type": "string", "minLength": 1},
+        "message": {"type": "string", "minLength": 1}
+      }
+    }
+  ]
+}

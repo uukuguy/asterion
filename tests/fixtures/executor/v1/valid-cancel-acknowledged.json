@@ -1,0 +1,7 @@
+{
+  "protocol": "dci.executor/v1",
+  "request_id": "control-001",
+  "type": "cancel.acknowledged",
+  "target_request_id": "exec-001",
+  "accepted": true
+}

@@ -1,0 +1,11 @@
+{
+  "protocol": "dci.executor/v1",
+  "request_id": "exec-invalid",
+  "type": "execute",
+  "program_id": "search",
+  "arguments": [],
+  "cwd": ".",
+  "deadline_ms": 1000,
+  "max_output_bytes": 1024,
+  "environment": {"SECRET": "not-allowed"}
+}

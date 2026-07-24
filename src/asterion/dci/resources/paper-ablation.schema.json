@@ -1,0 +1,239 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dci.paper-ablation-matrix/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "rows"
+  ],
+  "properties": {
+    "schema": {
+      "const": "dci.paper-ablation-matrix/v1"
+    },
+    "rows": {
+      "type": "array",
+      "minItems": 20,
+      "maxItems": 20,
+      "items": {
+        "$ref": "#/$defs/row"
+      }
+    }
+  },
+  "$defs": {
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "row_id",
+        "ablation_kind",
+        "axis_value",
+        "execution_class",
+        "runtime_id",
+        "query_scope_id",
+        "query_fixture_id",
+        "query_selected_ids_sha256",
+        "context_profile",
+        "tools",
+        "corpus_manifest_id",
+        "corpus_manifest_sha256",
+        "fineweb_source",
+        "fineweb_target_count",
+        "fineweb_selection_status",
+        "fineweb_revision",
+        "fineweb_selection_seed",
+        "fineweb_selection_algorithm",
+        "fineweb_selected_ids_sha256",
+        "max_turns",
+        "provider",
+        "model",
+        "segment_characters",
+        "alignment_version",
+        "read_minimum_evidence_overlap",
+        "expected_artifact_schemas",
+        "cost_class",
+        "executable_default"
+      ],
+      "properties": {
+        "row_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ablation_kind": {
+          "enum": [
+            "context",
+            "corpus",
+            "tools"
+          ]
+        },
+        "axis_value": {
+          "type": "string",
+          "minLength": 1
+        },
+        "execution_class": {
+          "enum": [
+            "paper-full",
+            "bounded-fixture"
+          ]
+        },
+        "runtime_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "query_scope_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "query_fixture_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "query_selected_ids_sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "context_profile": {
+          "enum": [
+            "level0",
+            "level1",
+            "level2",
+            "level3",
+            "level4"
+          ]
+        },
+        "tools": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "enum": [
+              "read",
+              "grep",
+              "bash"
+            ]
+          }
+        },
+        "corpus_manifest_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "corpus_manifest_sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "fineweb_source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "fineweb_target_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "fineweb_selection_status": {
+          "enum": [
+            "not-applicable",
+            "paper-unreported"
+          ]
+        },
+        "fineweb_revision": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "fineweb_selection_seed": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "fineweb_selection_algorithm": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "fineweb_selected_ids_sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "max_turns": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "provider": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "segment_characters": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "alignment_version": {
+          "const": "dci.paper-alignment/v1"
+        },
+        "read_minimum_evidence_overlap": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1
+        },
+        "expected_artifact_schemas": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "cost_class": {
+          "enum": [
+            "paper-full",
+            "bounded-tiny"
+          ]
+        },
+        "executable_default": {
+          "const": false
+        }
+      }
+    }
+  }
+}

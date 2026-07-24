@@ -1,0 +1,13 @@
+{
+  "protocol": "dci.package/v1",
+  "package_id": "protocol.observability",
+  "version": "1.0.0",
+  "kind": "observability",
+  "provides_capabilities": [],
+  "requires_capabilities": ["research.local-corpus"],
+  "requires_policies": ["policy.local-corpus"],
+  "emits_events": ["audit.package-observed"],
+  "consumes_events": ["evaluation.completed", "research.completed"],
+  "produces_artifacts": [],
+  "consumes_artifacts": ["application/vnd.dci.research+json", "application/vnd.dci.verdict+json"]
+}

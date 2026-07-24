@@ -1,0 +1,2 @@
+{"protocol":"dci.agent-runtime/v1","run_id":"run-cancelled","sequence":1,"type":"run.started","payload":{"capabilities":[]}}
+{"protocol":"dci.agent-runtime/v1","run_id":"run-cancelled","sequence":2,"type":"run.completed","payload":{"status":"cancelled"}}

@@ -1,0 +1,1 @@
+"""Host-service protocol contracts."""

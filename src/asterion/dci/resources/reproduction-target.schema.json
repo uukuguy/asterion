@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dci.reproduction-target/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "targets"],
+  "properties": {
+    "schema": {"const": "dci.reproduction-target/v1"},
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {"$ref": "#/$defs/target"}
+    }
+  },
+  "$defs": {
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_id",
+        "profile_id",
+        "source_id",
+        "source_url",
+        "agentic_search_accuracy",
+        "qa_accuracy",
+        "ir_ndcg_at_10",
+        "dataset_targets"
+      ],
+      "properties": {
+        "target_id": {"const": "paper.2605.05242v1/dci-agent-cc/main"},
+        "profile_id": {"const": "paper-reference/claude-code"},
+        "source_id": {"const": "arxiv:2605.05242v1"},
+        "source_url": {"const": "https://arxiv.org/pdf/2605.05242v1"},
+        "agentic_search_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+        "qa_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
+        "ir_ndcg_at_10": {"type": "number", "minimum": 0, "maximum": 1},
+        "dataset_targets": {
+          "type": "object",
+          "minProperties": 13,
+          "maxProperties": 13,
+          "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}
+        }
+      }
+    }
+  }
+}

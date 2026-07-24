@@ -1,0 +1,3 @@
+{"protocol":"dci.agent-runtime/v1","run_id":"run-artifact","sequence":1,"type":"run.started","payload":{"capabilities":["artifact.write"]}}
+{"protocol":"dci.agent-runtime/v1","run_id":"run-artifact","sequence":2,"type":"artifact.created","payload":{"artifact":{"artifact_id":"artifact-1","kind":"evidence","media_type":"text/plain","uri":"artifacts/evidence.txt","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}}}
+{"protocol":"dci.agent-runtime/v1","run_id":"run-artifact","sequence":3,"type":"run.completed","payload":{"status":"completed"}}

@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dci.effective-config/v1",
+  "type": "object",
+  "required": ["schema", "product", "runtime", "agent", "context", "judge", "experiment", "sources", "identity_sha256"],
+  "properties": {
+    "schema": {"const": "dci.effective-config/v1"},
+    "product": {"const": "asterion-dci"},
+    "runtime": {"enum": ["pi", "claude-code"]},
+    "agent": {
+      "type": "object",
+      "required": ["provider", "model", "reasoning", "tools", "max_turns", "timeout_seconds"],
+      "properties": {
+        "provider": {"type": ["string", "null"], "minLength": 1},
+        "model": {"type": ["string", "null"], "minLength": 1},
+        "reasoning": {"type": ["string", "null"]},
+        "tools": {"type": "string", "minLength": 1},
+        "max_turns": {"type": "integer", "minimum": 1},
+        "timeout_seconds": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "authentication_mode": {"enum": ["subscription", "minimax-coding-plan", "minimax-cn-coding-plan"]}
+      },
+      "additionalProperties": false
+    },
+    "context": {"type": "object"},
+    "judge": {"type": "object"},
+    "experiment": {"type": "object"},
+    "sources": {"type": "object", "additionalProperties": {"enum": ["invocation", "environment", "runtime-default"]}},
+    "identity_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  },
+  "additionalProperties": false
+}

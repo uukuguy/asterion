@@ -1,0 +1,6 @@
+{"protocol":"dci.agent-runtime/v1","run_id":"run-research","sequence":1,"type":"run.started","payload":{"capabilities":["shell","filesystem.read"]}}
+{"protocol":"dci.agent-runtime/v1","run_id":"run-research","sequence":2,"type":"tool.call","payload":{"call_id":"call-1","name":"shell","arguments":{"command":"rg evidence corpus"}}}
+{"protocol":"dci.agent-runtime/v1","run_id":"run-research","sequence":3,"type":"tool.result","payload":{"call_id":"call-1","output":"corpus/doc.txt:42:evidence","is_error":false}}
+{"protocol":"dci.agent-runtime/v1","run_id":"run-research","sequence":4,"type":"text.delta","payload":{"text":"The evidence appears in corpus/doc.txt."}}
+{"protocol":"dci.agent-runtime/v1","run_id":"run-research","sequence":5,"type":"usage.reported","payload":{"input_tokens":120,"output_tokens":35}}
+{"protocol":"dci.agent-runtime/v1","run_id":"run-research","sequence":6,"type":"run.completed","payload":{"status":"completed"}}

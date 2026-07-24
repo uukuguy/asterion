@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dci.context-profile/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "profiles"],
+  "properties": {
+    "schema": {"const": "dci.context-profile/v1"},
+    "profiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level0", "level1", "level2", "level3", "level4"],
+      "properties": {
+        "level0": {"$ref": "#/$defs/profile"},
+        "level1": {"$ref": "#/$defs/profile"},
+        "level2": {"$ref": "#/$defs/profile"},
+        "level3": {"$ref": "#/$defs/profile"},
+        "level4": {"$ref": "#/$defs/profile"}
+      }
+    }
+  },
+  "$defs": {
+    "nullablePositiveInteger": {
+      "anyOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile",
+        "contract_version",
+        "tool_result_character_cap",
+        "compaction_character_trigger",
+        "retained_turns",
+        "summary_recent_token_target",
+        "summary_failure_limit"
+      ],
+      "properties": {
+        "profile": {"enum": ["level0", "level1", "level2", "level3", "level4"]},
+        "contract_version": {"const": "dci.context-profile/v1"},
+        "tool_result_character_cap": {"$ref": "#/$defs/nullablePositiveInteger"},
+        "compaction_character_trigger": {"$ref": "#/$defs/nullablePositiveInteger"},
+        "retained_turns": {"$ref": "#/$defs/nullablePositiveInteger"},
+        "summary_recent_token_target": {"$ref": "#/$defs/nullablePositiveInteger"},
+        "summary_failure_limit": {"$ref": "#/$defs/nullablePositiveInteger"}
+      }
+    }
+  }
+}

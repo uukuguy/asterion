@@ -1,0 +1,10 @@
+{
+  "protocol": "dci.executor/v1",
+  "request_id": "exec-001",
+  "type": "execute",
+  "program_id": "search",
+  "arguments": ["--files", "--hidden"],
+  "cwd": "corpus",
+  "deadline_ms": 30000,
+  "max_output_bytes": 65536
+}

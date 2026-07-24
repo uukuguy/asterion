@@ -1,0 +1,13 @@
+{
+  "protocol": "dci.package/v1",
+  "package_id": "observability.execution-audit",
+  "version": "1.0.0",
+  "kind": "observability",
+  "provides_capabilities": [],
+  "requires_capabilities": ["workflow.code-quality"],
+  "requires_policies": ["policy.controlled-code-check"],
+  "emits_events": ["audit.execution-recorded"],
+  "consumes_events": ["tool.result", "workflow.code-quality.completed"],
+  "produces_artifacts": ["application/vnd.dci.execution-audit+json"],
+  "consumes_artifacts": ["application/vnd.dci.code-quality+json"]
+}

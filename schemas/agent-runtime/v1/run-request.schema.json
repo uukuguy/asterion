@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dci.local/schemas/agent-runtime/v1/run-request.schema.json",
+  "title": "DCI Agent Runtime Protocol v1 Run Request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "run_id", "input"],
+  "properties": {
+    "protocol": {"const": "dci.agent-runtime/v1"},
+    "run_id": {"type": "string", "minLength": 1},
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": {
+        "text": {"type": "string", "minLength": 1}
+      }
+    },
+    "requested_capabilities": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    },
+    "deadline_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 86400000
+    }
+  }
+}

@@ -1,0 +1,2 @@
+This is the bounded DCI paper fixture document.
+The fixture answer is fixture answer.

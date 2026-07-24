@@ -1,0 +1,3 @@
+{"protocol":"dci.agent-runtime/v1","run_id":"run-unmatched","sequence":1,"type":"run.started","payload":{"capabilities":["shell"]}}
+{"protocol":"dci.agent-runtime/v1","run_id":"run-unmatched","sequence":2,"type":"tool.result","payload":{"call_id":"missing-call","output":"none","is_error":false}}
+{"protocol":"dci.agent-runtime/v1","run_id":"run-unmatched","sequence":3,"type":"run.completed","payload":{"status":"completed"}}

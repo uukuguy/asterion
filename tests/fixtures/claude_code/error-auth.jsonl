@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","tools":[]}
+{"type":"assistant","error":"authentication_failed","message":{"role":"assistant","content":[{"type":"text","text":"Not logged in"}]}}
+{"type":"result","subtype":"success","is_error":true,"result":"Not logged in","usage":{"input_tokens":0,"output_tokens":0}}

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dci.paper-benchmark-inventory/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "datasets"],
+  "properties": {
+    "schema": {"const": "dci.paper-benchmark-inventory/v1"},
+    "datasets": {"type": "array", "minItems": 13, "maxItems": 13, "items": {"$ref": "#/$defs/dataset"}}
+  },
+  "$defs": {
+    "dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dataset_id", "family", "mode", "source_split", "source_count", "exclusion_policy", "dataset_path", "corpus_path", "gold_field", "metric", "judge_contract", "bounded_fixture", "batch_profile", "launcher", "execution_class"],
+      "properties": {
+        "dataset_id": {"type": "string", "minLength": 1},
+        "family": {"enum": ["agentic-search", "knowledge-qa", "ir"]},
+        "mode": {"enum": ["qa", "ir"]},
+        "source_split": {"type": "string", "minLength": 1},
+        "source_count": {"type": "integer", "minimum": 1},
+        "exclusion_policy": {"type": "string", "minLength": 1},
+        "dataset_path": {"type": "string", "minLength": 1},
+        "corpus_path": {"type": "string", "minLength": 1},
+        "gold_field": {"enum": ["answer", "gold_ids"]},
+        "metric": {"enum": ["llm-answer-correctness", "ndcg@10-binary-deduplicated"]},
+        "judge_contract": {"type": ["string", "null"]},
+        "bounded_fixture": {"type": "string", "minLength": 1},
+        "batch_profile": {"type": ["string", "null"], "minLength": 1},
+        "launcher": {"type": ["string", "null"], "minLength": 1},
+        "execution_class": {"const": "paper-full"}
+      }
+    }
+  }
+}

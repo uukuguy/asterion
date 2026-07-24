@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dci.local/schemas/executor/v1/request.schema.json",
+  "title": "DCI Controlled Executor v1 Request",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "request_id", "type", "program_id", "arguments", "cwd", "deadline_ms", "max_output_bytes"],
+      "properties": {
+        "protocol": {"const": "dci.executor/v1"},
+        "request_id": {"type": "string", "minLength": 1},
+        "type": {"const": "execute"},
+        "program_id": {"type": "string", "minLength": 1},
+        "arguments": {"type": "array", "items": {"type": "string"}},
+        "cwd": {"type": "string", "minLength": 1},
+        "deadline_ms": {"type": "integer", "minimum": 1, "maximum": 86400000},
+        "max_output_bytes": {"type": "integer", "minimum": 1, "maximum": 16777216}
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocol", "request_id", "type", "target_request_id"],
+      "properties": {
+        "protocol": {"const": "dci.executor/v1"},
+        "request_id": {"type": "string", "minLength": 1},
+        "type": {"const": "cancel"},
+        "target_request_id": {"type": "string", "minLength": 1}
+      }
+    }
+  ]
+}

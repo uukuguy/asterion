@@ -1,0 +1,13 @@
+{
+  "protocol": "dci.package/v1",
+  "package_id": "DCI Research",
+  "version": "1.0.0",
+  "kind": "capability",
+  "provides_capabilities": [],
+  "requires_capabilities": [],
+  "requires_policies": [],
+  "emits_events": [],
+  "consumes_events": [],
+  "produces_artifacts": [],
+  "consumes_artifacts": []
+}

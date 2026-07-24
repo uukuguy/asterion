@@ -1,0 +1,12 @@
+{
+  "protocol": "dci.executor/v1",
+  "request_id": "exec-001",
+  "type": "execution.result",
+  "status": "completed",
+  "exit_code": 0,
+  "stdout": "corpus/document.txt\n",
+  "stderr": "",
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "code": null
+}

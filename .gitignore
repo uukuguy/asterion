@@ -1,0 +1,46 @@
+# Python and uv
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Credentials and local configuration
+.env
+.env.*
+!.env.template
+*.pem
+*.key
+
+# Node and Rust
+node_modules/
+packages/**/node_modules/
+target/
+packages/rust/**/target/
+
+# External dependencies and generated data
+/pi/
+/pi-mono/
+/corpus/
+/corpora/
+/data/
+/datasets/
+/outputs/
+/runs/
+/logs/
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Promotion/build scratch
+.promotion-*/
+tmp/

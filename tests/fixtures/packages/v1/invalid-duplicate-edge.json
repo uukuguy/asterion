@@ -1,0 +1,13 @@
+{
+  "protocol": "dci.package/v1",
+  "package_id": "dci.research",
+  "version": "1.0.0",
+  "kind": "capability",
+  "provides_capabilities": ["research.local-corpus", "research.local-corpus"],
+  "requires_capabilities": [],
+  "requires_policies": [],
+  "emits_events": [],
+  "consumes_events": [],
+  "produces_artifacts": [],
+  "consumes_artifacts": []
+}

@@ -1,0 +1,15 @@
+{
+  "name": "@asterion/dci-context-extension",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "../asterion-runtime/node_modules/.bin/tsc -p tsconfig.json",
+    "sync-resource": "node scripts/sync-runtime-resource.mjs",
+    "check-resource": "node scripts/sync-runtime-resource.mjs --check",
+    "test": "node --test test/*.test.mjs && npm run check-resource"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dci.paper-experiment-scopes/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "scopes"],
+  "properties": {
+    "schema": {"const": "dci.paper-experiment-scopes/v1"},
+    "scopes": {"type": "array", "minItems": 16, "maxItems": 16, "items": {"$ref": "#/$defs/scope"}}
+  },
+  "$defs": {
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope_id", "dataset_id", "experiment", "selection_mode", "selection_count", "selection_seed", "selection_seed_status", "selection_algorithm", "selected_ids_sha256", "execution_class"],
+      "properties": {
+        "scope_id": {"type": "string", "minLength": 1},
+        "dataset_id": {"type": "string", "minLength": 1},
+        "experiment": {"type": "string", "minLength": 1},
+        "selection_mode": {"enum": ["all", "deterministic-sample", "random-sample"]},
+        "selection_count": {"type": "integer", "minimum": 1},
+        "selection_seed": {"type": ["integer", "null"], "minimum": 0},
+        "selection_seed_status": {"enum": ["asterion-defined", "paper-unreported", "not-applicable"]},
+        "selection_algorithm": {"type": "string", "minLength": 1},
+        "selected_ids_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "execution_class": {"const": "paper-full"}
+      }
+    }
+  }
+}

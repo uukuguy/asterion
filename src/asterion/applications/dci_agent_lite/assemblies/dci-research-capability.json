@@ -1,0 +1,14 @@
+{
+  "protocol": "dci.assembly/v1",
+  "application_id": "dci.research-capability",
+  "version": "1.0.0",
+  "runtime_id": "pi.reference",
+  "packages": [
+    {"package_id": "dci.research", "version": "1.0.0"},
+    {"package_id": "policy.local-corpus", "version": "1.0.0"}
+  ],
+  "host_capabilities": [],
+  "host_policies": [],
+  "host_events": ["artifact.created", "run.completed", "run.started", "tool.result"],
+  "host_artifacts": ["text/plain"]
+}

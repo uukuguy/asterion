@@ -1,0 +1,26 @@
+{
+  "schema": "dci.paper-bounded-corpus-manifests/v1",
+  "manifests": [
+    {
+      "manifest_id": "tiny.base/v1",
+      "documents": [
+        {"resource": "paper-fixtures/corpora/base/doc.txt", "sha256": "00e2d7d245f21dbac78c921ad4042d57fe5deba7a257f745144c1b1e10cf2584"}
+      ]
+    },
+    {
+      "manifest_id": "tiny.base-plus-one/v1",
+      "documents": [
+        {"resource": "paper-fixtures/corpora/base-plus-one/doc.txt", "sha256": "00e2d7d245f21dbac78c921ad4042d57fe5deba7a257f745144c1b1e10cf2584"},
+        {"resource": "paper-fixtures/corpora/base-plus-one/distractor-1.txt", "sha256": "45590c0aa4fb7203526b62bda23744f88c7c49c3ebf6e69acbda46124b6d9660"}
+      ]
+    },
+    {
+      "manifest_id": "tiny.base-plus-two/v1",
+      "documents": [
+        {"resource": "paper-fixtures/corpora/base-plus-two/doc.txt", "sha256": "00e2d7d245f21dbac78c921ad4042d57fe5deba7a257f745144c1b1e10cf2584"},
+        {"resource": "paper-fixtures/corpora/base-plus-two/distractor-1.txt", "sha256": "45590c0aa4fb7203526b62bda23744f88c7c49c3ebf6e69acbda46124b6d9660"},
+        {"resource": "paper-fixtures/corpora/base-plus-two/distractor-2.txt", "sha256": "ff029454f2d33bb04697bfb2d9c2c26057e553d9675aed252e0e496d895055db"}
+      ]
+    }
+  ]
+}

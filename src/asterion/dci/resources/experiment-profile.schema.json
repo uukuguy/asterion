@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dci.experiment-profiles/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "profiles"],
+  "properties": {
+    "schema": {"const": "dci.experiment-profiles/v1"},
+    "profiles": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {"$ref": "#/$defs/profile"}
+    }
+  },
+  "$defs": {
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_id", "runtime", "provider", "model", "authentication_mode",
+        "reasoning", "tools", "max_turns", "context_profile", "judge",
+        "dataset_inventory_sha256", "experiment_scopes_sha256", "scope_ids",
+        "selected_ids_sha256", "paper_unreported_scope_ids", "corpus_identity",
+        "metric_identities", "aggregation_identity", "comparison",
+        "compatible_config_key"
+      ],
+      "properties": {
+        "profile_id": {"type": "string", "minLength": 1},
+        "runtime": {"enum": ["pi", "claude-code"]},
+        "provider": {"type": ["string", "null"]},
+        "model": {"type": ["string", "null"]},
+        "authentication_mode": {"type": "string", "minLength": 1},
+        "reasoning": {"type": ["string", "null"]},
+        "tools": {"type": "string", "minLength": 1},
+        "max_turns": {"type": "integer", "minimum": 1},
+        "context_profile": {"const": "level3"},
+        "judge": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "base_url", "api", "model", "key_source", "thinking", "json_object",
+            "request_shape_sha256", "output_shape_identity", "prompt_contract",
+            "prompt_contract_sha256", "pricing_identity"
+          ],
+          "properties": {
+            "base_url": {"type": "string", "minLength": 1},
+            "api": {"enum": ["chat-completions", "responses"]},
+            "model": {"type": "string", "minLength": 1},
+            "key_source": {"enum": ["DEEPSEEK_API_KEY", "OPENAI_API_KEY"]},
+            "thinking": {"type": "boolean"},
+            "json_object": {"type": "boolean"},
+            "request_shape_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "output_shape_identity": {"enum": ["json-object/v1", "json-schema/strict/v1"]},
+            "prompt_contract": {"type": "string", "minLength": 1},
+            "prompt_contract_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "pricing_identity": {"type": "string", "minLength": 1}
+          }
+        },
+        "dataset_inventory_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "experiment_scopes_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "scope_ids": {"type": "array", "minItems": 16, "maxItems": 16, "items": {"type": "string"}},
+        "selected_ids_sha256": {"type": "array", "minItems": 16, "maxItems": 16, "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+        "paper_unreported_scope_ids": {"type": "array", "items": {"type": "string"}},
+        "corpus_identity": {"const": "dci.paper-corpora/af-320-v1"},
+        "metric_identities": {"type": "array", "items": {"type": "string"}},
+        "aggregation_identity": {"const": "dci.paper-aggregation/query-preserving/v1"},
+        "comparison": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "accuracy_margin": {"const": -0.05},
+            "ndcg_margin": {"const": -0.02},
+            "published_target": {"enum": ["DCI-Agent-Lite", "DCI-Agent-CC"]},
+            "target_identity": {
+              "enum": [
+                "current-default/claude-subscription",
+                "current-default/claude-minimax"
+              ]
+            }
+          },
+          "oneOf": [
+            {
+              "required": ["accuracy_margin", "ndcg_margin"],
+              "properties": {
+                "accuracy_margin": {"const": -0.05},
+                "ndcg_margin": {"const": -0.02},
+                "published_target": {"const": "DCI-Agent-Lite"}
+              }
+            },
+            {
+              "required": ["target_identity"],
+              "properties": {
+                "target_identity": {
+                  "enum": [
+                    "current-default/claude-subscription",
+                    "current-default/claude-minimax"
+                  ]
+                }
+              }
+            },
+            {
+              "required": ["published_target"],
+              "properties": {"published_target": {"const": "DCI-Agent-CC"}}
+            }
+          ]
+        },
+        "compatible_config_key": {
+          "type": ["string", "null"],
+          "enum": [null, "MINIMAX_API_KEY", "MINIMAX_CN_API_KEY"]
+        }
+      }
+    }
+  }
+}

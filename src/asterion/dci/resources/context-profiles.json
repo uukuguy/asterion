@@ -1,0 +1,50 @@
+{
+  "schema": "dci.context-profile/v1",
+  "profiles": {
+    "level0": {
+      "profile": "level0",
+      "contract_version": "dci.context-profile/v1",
+      "tool_result_character_cap": null,
+      "compaction_character_trigger": null,
+      "retained_turns": null,
+      "summary_recent_token_target": null,
+      "summary_failure_limit": null
+    },
+    "level1": {
+      "profile": "level1",
+      "contract_version": "dci.context-profile/v1",
+      "tool_result_character_cap": 50000,
+      "compaction_character_trigger": null,
+      "retained_turns": null,
+      "summary_recent_token_target": null,
+      "summary_failure_limit": null
+    },
+    "level2": {
+      "profile": "level2",
+      "contract_version": "dci.context-profile/v1",
+      "tool_result_character_cap": 20000,
+      "compaction_character_trigger": null,
+      "retained_turns": null,
+      "summary_recent_token_target": null,
+      "summary_failure_limit": null
+    },
+    "level3": {
+      "profile": "level3",
+      "contract_version": "dci.context-profile/v1",
+      "tool_result_character_cap": 20000,
+      "compaction_character_trigger": 240000,
+      "retained_turns": 12,
+      "summary_recent_token_target": null,
+      "summary_failure_limit": null
+    },
+    "level4": {
+      "profile": "level4",
+      "contract_version": "dci.context-profile/v1",
+      "tool_result_character_cap": 20000,
+      "compaction_character_trigger": 240000,
+      "retained_turns": 12,
+      "summary_recent_token_target": 20000,
+      "summary_failure_limit": 3
+    }
+  }
+}

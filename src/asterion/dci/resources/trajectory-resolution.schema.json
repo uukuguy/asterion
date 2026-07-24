@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dci.trajectory-resolution/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "identity", "run", "dataset", "configuration", "documents", "metrics", "counts", "private"],
+  "properties": {
+    "schema": {"const": "dci.trajectory-resolution/v1"},
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256", "inputs"],
+      "properties": {
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "inputs": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["analysis_configuration", "analysis_configuration_sha256", "attempt", "completed_run_state", "corpus", "corpus_sha256", "externalized_tool_results", "final_model_context", "gold_manifest", "dataset_query_sha256", "derived_resolution_sha256", "protocol_event_stream", "protocol_request", "recorder_event_stream", "run_id"],
+          "properties": {
+            "analysis_configuration": {"$ref": "#/$defs/configuration"},
+            "analysis_configuration_sha256": {"$ref": "#/$defs/sha256"},
+            "attempt": {"type": "integer", "minimum": 1},
+            "completed_run_state": {"$ref": "#/$defs/snapshot"},
+            "corpus": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/snapshot"}},
+            "corpus_sha256": {"$ref": "#/$defs/sha256"},
+            "externalized_tool_results": {"type": "array", "items": {"$ref": "#/$defs/snapshot"}},
+            "final_model_context": {"$ref": "#/$defs/snapshot"},
+            "gold_manifest": {"$ref": "#/$defs/snapshot"},
+            "dataset_query_sha256": {"$ref": "#/$defs/sha256"},
+            "derived_resolution_sha256": {"$ref": "#/$defs/sha256"},
+            "protocol_event_stream": {"$ref": "#/$defs/snapshot"},
+            "protocol_request": {"$ref": "#/$defs/snapshot"},
+            "recorder_event_stream": {"$ref": "#/$defs/snapshot"},
+            "run_id": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "attempt"],
+      "properties": {
+        "run_id": {"type": "string", "minLength": 1},
+        "attempt": {"type": "integer", "minimum": 1}
+      }
+    },
+    "dataset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dataset_id", "query_id"],
+      "properties": {
+        "dataset_id": {"type": "string", "minLength": 1},
+        "query_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "configuration": {"$ref": "#/$defs/configuration"},
+    "documents": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "sha256", "full_characters"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "sha256": {"$ref": "#/$defs/sha256"},
+          "full_characters": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["coverage", "localization", "retained_coverage"],
+      "properties": {
+        "coverage": {"$ref": "#/$defs/coverage"},
+        "localization": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["value", "matched_gold_count", "unavailable_reason", "per_document"],
+          "properties": {
+            "value": {"oneOf": [{"$ref": "#/$defs/unit"}, {"type": "null"}]},
+            "matched_gold_count": {"type": "integer", "minimum": 0},
+            "unavailable_reason": {"enum": [null, "no-surfaced-gold"]},
+            "per_document": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["document_id", "value"],
+                "properties": {
+                  "document_id": {"type": "string", "minLength": 1},
+                  "value": {"$ref": "#/$defs/unit"}
+                }
+              }
+            }
+          }
+        },
+        "retained_coverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["value", "unavailable_reason"],
+          "properties": {
+            "value": {"oneOf": [{"$ref": "#/$defs/unit"}, {"type": "null"}]},
+            "unavailable_reason": {"enum": [null, "final-context-unavailable"]}
+          }
+        }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gold_documents", "surfaced_gold_documents", "tool_observations", "alignments"],
+      "properties": {
+        "gold_documents": {"type": "integer", "minimum": 1},
+        "surfaced_gold_documents": {"type": "integer", "minimum": 0},
+        "tool_observations": {"type": "integer", "minimum": 0},
+        "alignments": {"type": "integer", "minimum": 0}
+      }
+    },
+    "private": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alignments", "retained_alignments"],
+      "properties": {
+        "alignments": {"type": "array", "items": {"$ref": "#/$defs/alignment"}},
+        "retained_alignments": {"type": "array", "items": {"$ref": "#/$defs/alignment"}}
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "unit": {"type": "number", "minimum": 0, "maximum": 1},
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "sha256", "size"],
+      "properties": {
+        "label": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size": {"type": "integer", "minimum": 0}
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alignment_version", "read_minimum_evidence_overlap", "segment_characters"],
+      "properties": {
+        "alignment_version": {"const": "dci.paper-alignment/v1"},
+        "read_minimum_evidence_overlap": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "segment_characters": {"type": "integer", "minimum": 1}
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["any", "mean", "all"],
+      "properties": {
+        "any": {"$ref": "#/$defs/unit"},
+        "mean": {"$ref": "#/$defs/unit"},
+        "all": {"$ref": "#/$defs/unit"}
+      }
+    },
+    "alignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["document_id", "rule", "snippet_characters", "observation"],
+      "properties": {
+        "call_id": {"type": "string", "minLength": 1},
+        "tool": {"enum": ["read", "grep", "rg", "bash"]},
+        "document_id": {"type": "string", "minLength": 1},
+        "rule": {"enum": ["full-document-fallback", "read-returned-span", "grep-matched-line", "final-context-path", "final-context-evidence"]},
+        "snippet_characters": {"type": "integer", "minimum": 1},
+        "start": {"type": "integer", "minimum": 0},
+        "end": {"type": "integer", "minimum": 1},
+        "observation": {"type": "string"}
+      }
+    }
+  }
+}

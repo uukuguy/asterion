@@ -1,0 +1,13 @@
+{
+  "protocol": "dci.package/v1",
+  "package_id": "dci.export",
+  "version": "1.0.0",
+  "kind": "evaluation",
+  "provides_capabilities": [],
+  "requires_capabilities": ["research.local-corpus"],
+  "requires_policies": ["policy.local-corpus"],
+  "emits_events": ["export.completed"],
+  "consumes_events": ["analysis.completed"],
+  "produces_artifacts": ["application/vnd.dci.export+json"],
+  "consumes_artifacts": ["application/vnd.dci.analysis+json"]
+}

@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","tools":["Read","Bash"]}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"tool-1","name":"Read","input":{"file_path":"corpus.txt"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-1","content":"Evidence line","is_error":false}]}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Answer — corpus.txt"}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"Answer — corpus.txt","usage":{"input_tokens":20,"output_tokens":5}}

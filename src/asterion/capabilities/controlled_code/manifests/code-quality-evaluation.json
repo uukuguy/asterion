@@ -1,0 +1,13 @@
+{
+  "protocol": "dci.package/v1",
+  "package_id": "evaluation.code-quality",
+  "version": "1.0.0",
+  "kind": "evaluation",
+  "provides_capabilities": [],
+  "requires_capabilities": ["workflow.code-quality"],
+  "requires_policies": ["policy.controlled-code-check"],
+  "emits_events": [],
+  "consumes_events": ["workflow.code-quality.completed"],
+  "produces_artifacts": ["application/vnd.dci.code-quality-verdict+json"],
+  "consumes_artifacts": ["application/vnd.dci.code-quality+json"]
+}

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dci.local/schemas/packages/v1/package-manifest.schema.json",
+  "title": "DCI Framework Package Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol", "package_id", "version", "kind",
+    "provides_capabilities", "requires_capabilities", "requires_policies",
+    "emits_events", "consumes_events", "produces_artifacts", "consumes_artifacts"
+  ],
+  "properties": {
+    "protocol": {"const": "dci.package/v1"},
+    "package_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"},
+    "version": {"type": "string", "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$"},
+    "kind": {"enum": ["capability", "workflow", "policy", "memory", "observability", "evaluation"]},
+    "provides_capabilities": {"$ref": "#/$defs/edges"},
+    "requires_capabilities": {"$ref": "#/$defs/edges"},
+    "requires_policies": {"$ref": "#/$defs/edges"},
+    "emits_events": {"$ref": "#/$defs/edges"},
+    "consumes_events": {"$ref": "#/$defs/edges"},
+    "produces_artifacts": {"$ref": "#/$defs/edges"},
+    "consumes_artifacts": {"$ref": "#/$defs/edges"}
+  },
+  "$defs": {
+    "edges": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    }
+  }
+}

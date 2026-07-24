@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "asterion"
+version = "0.1.0"
+description = "Composable multi-runtime agent application framework"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = ["matplotlib>=3.8.0", "pyarrow>=18.0.0", "python-dotenv>=1.0.0"]
+
+[project.optional-dependencies]
+setup = ["huggingface-hub>=0.30.0"]
+
+[dependency-groups]
+dev = ["ruff>=0.12.0"]
+
+[project.scripts]
+asterion = "asterion.cli:main"
+asterion-dci = "asterion.dci.cli:main"
+
+[project.entry-points."asterion.applications"]
+controlled-code = "asterion.applications.controlled_code:create_provider"
+dci-agent-lite = "asterion.applications.dci_agent_lite:create_provider"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/asterion"]
+artifacts = ["src/asterion/dci/resources/pi/*.ts"]

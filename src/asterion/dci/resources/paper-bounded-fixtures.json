@@ -1,0 +1,110 @@
+{
+  "schema": "dci.paper-bounded-fixtures/v1",
+  "artifacts": {
+    "ir/v1": {
+      "dataset_resource": "paper-fixtures/ir.jsonl",
+      "dataset_sha256": "456d7e702c827c5a46d678eff528189b14e8ccc0f5ce5ca2d7609bcf12f73035",
+      "corpus_document_resource": "paper-fixtures/corpus/doc.txt",
+      "corpus_document_sha256": "60e871ee189c12b9ba2b5f4a70d660aa3faf95febc085012efe93eb304c350cb"
+    },
+    "qa/v1": {
+      "dataset_resource": "paper-fixtures/qa.jsonl",
+      "dataset_sha256": "e34e72aa9536a96d19805438c5e08343da28259a0435815a09fe264ddc107943",
+      "corpus_document_resource": "paper-fixtures/corpus/doc.txt",
+      "corpus_document_sha256": "60e871ee189c12b9ba2b5f4a70d660aa3faf95febc085012efe93eb304c350cb"
+    }
+  },
+  "fixtures": [
+    {
+      "fixture_id": "beir.arguana.tiny/v1",
+      "dataset_id": "beir.arguana",
+      "mode": "ir",
+      "artifact_id": "ir/v1",
+      "execution_class": "bounded-fixture"
+    },
+    {
+      "fixture_id": "beir.scifact.tiny/v1",
+      "dataset_id": "beir.scifact",
+      "mode": "ir",
+      "artifact_id": "ir/v1",
+      "execution_class": "bounded-fixture"
+    },
+    {
+      "fixture_id": "bright.biology.tiny/v1",
+      "dataset_id": "bright.biology",
+      "mode": "ir",
+      "artifact_id": "ir/v1",
+      "execution_class": "bounded-fixture"
+    },
+    {
+      "fixture_id": "bright.earth-science.tiny/v1",
+      "dataset_id": "bright.earth-science",
+      "mode": "ir",
+      "artifact_id": "ir/v1",
+      "execution_class": "bounded-fixture"
+    },
+    {
+      "fixture_id": "bright.economics.tiny/v1",
+      "dataset_id": "bright.economics",
+      "mode": "ir",
+      "artifact_id": "ir/v1",
+      "execution_class": "bounded-fixture"
+    },
+    {
+      "fixture_id": "bright.robotics.tiny/v1",
+      "dataset_id": "bright.robotics",
+      "mode": "ir",
+      "artifact_id": "ir/v1",
+      "execution_class": "bounded-fixture"
+    },
+    {
+      "fixture_id": "browsecomp-plus.tiny/v1",
+      "dataset_id": "browsecomp-plus",
+      "mode": "qa",
+      "artifact_id": "qa/v1",
+      "execution_class": "bounded-fixture"
+    },
+    {
+      "fixture_id": "qa.2wikimultihopqa.tiny/v1",
+      "dataset_id": "qa.2wikimultihopqa",
+      "mode": "qa",
+      "artifact_id": "qa/v1",
+      "execution_class": "bounded-fixture"
+    },
+    {
+      "fixture_id": "qa.bamboogle.tiny/v1",
+      "dataset_id": "qa.bamboogle",
+      "mode": "qa",
+      "artifact_id": "qa/v1",
+      "execution_class": "bounded-fixture"
+    },
+    {
+      "fixture_id": "qa.hotpotqa.tiny/v1",
+      "dataset_id": "qa.hotpotqa",
+      "mode": "qa",
+      "artifact_id": "qa/v1",
+      "execution_class": "bounded-fixture"
+    },
+    {
+      "fixture_id": "qa.musique.tiny/v1",
+      "dataset_id": "qa.musique",
+      "mode": "qa",
+      "artifact_id": "qa/v1",
+      "execution_class": "bounded-fixture"
+    },
+    {
+      "fixture_id": "qa.nq.tiny/v1",
+      "dataset_id": "qa.nq",
+      "mode": "qa",
+      "artifact_id": "qa/v1",
+      "execution_class": "bounded-fixture"
+    },
+    {
+      "fixture_id": "qa.triviaqa.tiny/v1",
+      "dataset_id": "qa.triviaqa",
+      "mode": "qa",
+      "artifact_id": "qa/v1",
+      "execution_class": "bounded-fixture"
+    }
+  ]
+}

@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dci.local/schemas/agent-runtime/v1/event.schema.json",
+  "title": "DCI Agent Runtime Protocol v1 Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "run_id", "sequence", "type", "payload"],
+  "properties": {
+    "protocol": {"const": "dci.agent-runtime/v1"},
+    "run_id": {"type": "string", "minLength": 1},
+    "sequence": {"type": "integer", "minimum": 1},
+    "type": {
+      "enum": [
+        "run.started",
+        "text.delta",
+        "tool.call",
+        "tool.result",
+        "usage.reported",
+        "artifact.created",
+        "run.completed",
+        "run.failed"
+      ]
+    },
+    "payload": {"type": "object"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"type": {"const": "run.started"}}},
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["capabilities"],
+            "properties": {
+              "capabilities": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 1},
+                "uniqueItems": true
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"type": {"const": "text.delta"}}},
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["text"],
+            "properties": {"text": {"type": "string", "minLength": 1}}
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"type": {"const": "tool.call"}}},
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["call_id", "name", "arguments"],
+            "properties": {
+              "call_id": {"type": "string", "minLength": 1},
+              "name": {"type": "string", "minLength": 1},
+              "arguments": {"type": "object"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"type": {"const": "tool.result"}}},
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["call_id", "output", "is_error"],
+            "properties": {
+              "call_id": {"type": "string", "minLength": 1},
+              "output": {},
+              "is_error": {"type": "boolean"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"type": {"const": "usage.reported"}}},
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["input_tokens", "output_tokens"],
+            "properties": {
+              "input_tokens": {"type": "integer", "minimum": 0},
+              "output_tokens": {"type": "integer", "minimum": 0}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"type": {"const": "artifact.created"}}},
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["artifact"],
+            "properties": {
+              "artifact": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["artifact_id", "kind", "media_type"],
+                "properties": {
+                  "artifact_id": {"type": "string", "minLength": 1},
+                  "kind": {"type": "string", "minLength": 1},
+                  "media_type": {"type": "string", "minLength": 1},
+                  "uri": {"type": "string", "minLength": 1},
+                  "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"type": {"const": "run.completed"}}},
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["status"],
+            "properties": {"status": {"enum": ["completed", "cancelled"]}}
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"type": {"const": "run.failed"}}},
+      "then": {
+        "properties": {
+          "payload": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["code", "message"],
+            "properties": {
+              "code": {"type": "string", "minLength": 1},
+              "message": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      }
+    }
+  ]
+}

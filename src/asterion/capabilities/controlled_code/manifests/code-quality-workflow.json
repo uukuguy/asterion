@@ -1,0 +1,13 @@
+{
+  "protocol": "dci.package/v1",
+  "package_id": "workflow.code-quality",
+  "version": "1.0.0",
+  "kind": "workflow",
+  "provides_capabilities": ["workflow.code-quality"],
+  "requires_capabilities": ["executor.controlled", "filesystem.read"],
+  "requires_policies": ["policy.controlled-code-check"],
+  "emits_events": ["workflow.code-quality.completed"],
+  "consumes_events": ["run.started", "tool.result"],
+  "produces_artifacts": ["application/vnd.dci.code-quality+json"],
+  "consumes_artifacts": ["text/x-source"]
+}
