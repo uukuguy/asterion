@@ -57,7 +57,7 @@ in one lifetime scope, then constructs the runtime with the immutable,
 redacted service mapping. Missing, ambiguous, or invalid service authority
 fails before package or runtime work.
 
-Complete DCI evidence also binds a 65-resource product implementation digest.
+Complete DCI evidence also binds a 66-resource product implementation digest.
 That digest covers the exact DCI product modules, selected manifests and
 assemblies, and their packaged resources. Generic framework/runtime source is
 an external contract boundary represented separately by exact package/runtime

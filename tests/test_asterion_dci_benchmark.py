@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import tempfile
 import unittest
 from importlib import resources
@@ -9,7 +10,12 @@ from pathlib import Path
 from types import MappingProxyType
 from unittest.mock import Mock, patch
 
-from asterion.dci.benchmark import BenchmarkRequest, DciBenchmarkError, run_benchmark
+from asterion.dci.benchmark import (
+    BenchmarkRequest,
+    DciBenchmarkError,
+    _prepare,
+    run_benchmark,
+)
 from asterion.dci.cli import main as dci_main
 from asterion.dci.config import DciRuntimeOptions, resolve_dci_paths
 from asterion.dci.experiment_profiles import (
@@ -20,6 +26,13 @@ from asterion.dci.experiment_profiles import (
 )
 from asterion.dci.judge import JudgeConfig
 from asterion.dci.paper_benchmarks import canonical_sha256
+from asterion.dci.pi_rpc import FINAL_ANSWER_RECOVERY_PROMPT
+from asterion.dci.prompts import (
+    PROMPT_CONTRACTS,
+    PromptContractError,
+    prompt_contract_sha256,
+    resolve_prompt_contract,
+)
 from asterion.dci.provenance import (
     DCI_COMPLETE_IMPLEMENTATION_RESOURCES,
     dci_complete_implementation_identity,
@@ -68,6 +81,202 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
 
         experiment_profiles._profiles.cache_clear()
         self.addCleanup(experiment_profiles._profiles.cache_clear)
+
+    def test_prompt_contracts_match_source_family_golden_fixtures(self) -> None:
+        fixture_root = Path(__file__).parent / "fixtures" / "dci_prompts"
+        corpus = Path("/__dci_prompt_contract_corpus__")
+        query = "__DCI_QUERY__"
+        hint = "__DCI_CORPUS_HINT__"
+        cases = (
+            (
+                "dci.paper-prompt/arxiv:2605.05242v1/v1",
+                "paper-reference",
+                "qa",
+                "paper-qa.txt",
+                "11466c7e3ce009558cfc23a3c2c6a4f7abb050164de9504e259c7da52fc331f5",
+                lambda contract: contract.qa_builder(query, corpus),
+            ),
+            (
+                "dci.upstream-github-prompt/271f37e71f053bf0c99c05ce6d2fb53b841d922e/v1",
+                "upstream-github",
+                "qa",
+                "upstream-github-qa.txt",
+                "e6b71b71aeb62fe43f097efe1a207ebe4ad0114d919460c574475e001823991e",
+                lambda contract: contract.qa_builder(query, corpus),
+            ),
+            (
+                "dci.upstream-github-prompt/271f37e71f053bf0c99c05ce6d2fb53b841d922e/v1",
+                "upstream-github",
+                "ir",
+                "upstream-github-ir.txt",
+                "24b6db054787487eec7286f6b20f416acbcafba8ba45cacc50d1dc4a4231a78c",
+                lambda contract: contract.ir_builder(query, corpus, hint),
+            ),
+            (
+                "asterion.dci.prompt/safe/v1",
+                "asterion-safe",
+                "qa",
+                "asterion-safe-qa.txt",
+                None,
+                lambda contract: contract.qa_builder(query, corpus),
+            ),
+        )
+        qa_hashes: set[str] = set()
+        for contract_id, source_family, kind, fixture_name, body_sha256, build in cases:
+            with self.subTest(contract=contract_id, kind=kind):
+                contract = resolve_prompt_contract(contract_id)
+                body = build(contract)
+                fixture = (fixture_root / fixture_name).read_text(encoding="utf-8")
+                self.assertEqual(contract.source_family, source_family)
+                self.assertEqual(body, fixture)
+                if body_sha256 is not None:
+                    self.assertEqual(hashlib.sha256(body.encode()).hexdigest(), body_sha256)
+                self.assertEqual(
+                    prompt_contract_sha256(contract, kind),
+                    canonical_sha256(
+                        {
+                            "source_family": source_family,
+                            "prompt_kind": kind,
+                            "body": fixture,
+                        }
+                    ),
+                )
+                if kind == "qa":
+                    qa_hashes.add(prompt_contract_sha256(contract, kind))
+        self.assertEqual(len(qa_hashes), 3)
+
+    def test_prompt_contract_selection_fails_closed_without_body_disclosure(self) -> None:
+        query = "SENTINEL-PRIVATE-QUESTION"
+        path = Path("/SENTINEL-PRIVATE-PATH")
+        with self.assertRaises(PromptContractError) as raised:
+            resolve_prompt_contract("unreported-contract")
+        self.assertNotIn(query, str(raised.exception))
+        self.assertNotIn(str(path), str(raised.exception))
+        paper = resolve_prompt_contract("dci.paper-prompt/arxiv:2605.05242v1/v1")
+        with self.assertRaises(PromptContractError) as raised:
+            paper.ir_builder(query, path, None)
+        self.assertNotIn(query, str(raised.exception))
+        self.assertNotIn(str(path), str(raised.exception))
+        self.assertEqual(
+            set(PROMPT_CONTRACTS),
+            {
+                "asterion.dci.prompt/safe/v1",
+                "dci.paper-prompt/arxiv:2605.05242v1/v1",
+                "dci.upstream-github-prompt/271f37e71f053bf0c99c05ce6d2fb53b841d922e/v1",
+            },
+        )
+
+    def test_benchmark_binds_the_profile_selected_prompt_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            corpus = root / "corpus"
+            corpus.mkdir()
+            request = replace(
+                _request(root),
+                profile="asterion-safe/pi",
+                corpus=corpus,
+            )
+            _rows, _output, config, items, _snapshots = _prepare(request)
+
+        contract = resolve_prompt_contract("asterion.dci.prompt/safe/v1")
+        expected_sha256 = prompt_contract_sha256(contract, "qa")
+        self.assertEqual(config["benchmark_prompt_contract"], contract.contract_id)
+        self.assertEqual(config["benchmark_prompt_contract_sha256"], expected_sha256)
+        self.assertEqual(items[0]["identity"]["benchmark_prompt_contract"], contract.contract_id)
+        self.assertEqual(
+            items[0]["identity"]["benchmark_prompt_contract_sha256"],
+            expected_sha256,
+        )
+
+    def test_benchmark_uses_minimax_invocation_identity_for_profile_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            corpus = root / "corpus"
+            corpus.mkdir()
+            request = replace(
+                _request(root),
+                profile="asterion-safe/claude-minimax",
+                corpus=corpus,
+                runtime_options=DciRuntimeOptions(
+                    provider="minimax", model="MiniMax-M2.7"
+                ),
+            )
+            _rows, _output, config, _items, _snapshots = _prepare(request)
+
+        self.assertEqual(
+            config["benchmark_prompt_contract"], "asterion.dci.prompt/safe/v1"
+        )
+
+    def test_benchmark_rejects_unreported_paper_ir_before_agent_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            corpus = root / "corpus"
+            corpus.mkdir()
+            dataset = root / "dataset.jsonl"
+            dataset.write_text(
+                json.dumps(
+                    {
+                        "query_id": "q-1",
+                        "query": "SENTINEL-PRIVATE-QUESTION",
+                        "gold_ids": ["doc.txt"],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            request = BenchmarkRequest(
+                dataset=dataset,
+                output_root=root / "out",
+                cwd=root,
+                judge_config=JudgeConfig(base_url="https://judge.example.test/v1"),
+                runtime_options=DciRuntimeOptions(provider=None, model=None),
+                profile="paper-reference/pi",
+                corpus=corpus,
+                mode="ir",
+                limit=1,
+            )
+            with patch(
+                "asterion.dci.benchmark.paper_scope_for_profile", return_value=None
+            ), patch("asterion.dci.benchmark.run_pi_research") as run:
+                with self.assertRaisesRegex(DciBenchmarkError, "prompt contract") as raised:
+                    run_benchmark(request, paths=Mock())
+
+        self.assertNotIn("SENTINEL-PRIVATE-QUESTION", str(raised.exception))
+        self.assertNotIn(str(corpus), str(raised.exception))
+        run.assert_not_called()
+
+    def test_benchmark_passes_only_the_selected_contract_recovery_to_runs(self) -> None:
+        for profile_id, expected_recovery in (
+            ("asterion-safe/pi", FINAL_ANSWER_RECOVERY_PROMPT),
+            (
+                "upstream-github/271f37e71f053bf0c99c05ce6d2fb53b841d922e/pi",
+                None,
+            ),
+        ):
+            with self.subTest(profile=profile_id), tempfile.TemporaryDirectory() as temporary_directory:
+                root = Path(temporary_directory).resolve()
+                corpus = root / "corpus"
+                corpus.mkdir()
+                request = replace(_request(root), profile=profile_id, corpus=corpus)
+                captured: list[object] = []
+
+                def recorded(paths: object, native_request: object, **kwargs: object) -> DciRunResult:
+                    captured.append(native_request)
+                    return _recorded_run(paths, native_request, **kwargs)
+
+                with patch(
+                    "asterion.dci.benchmark.run_pi_research", side_effect=recorded
+                ), patch(
+                    "asterion.dci.evaluation.judge_answer_sync",
+                    return_value=_verdict(request.judge_config),
+                ):
+                    run_benchmark(request, paths=Mock())
+
+                self.assertEqual(len(captured), 1)
+                self.assertEqual(
+                    captured[0].final_answer_recovery,
+                    expected_recovery,
+                )
 
     def test_experiment_profiles_separate_three_provenance_families(self) -> None:
         commit = "271f37e71f053bf0c99c05ce6d2fb53b841d922e"

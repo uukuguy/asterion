@@ -1,0 +1,4 @@
+Answer the following question. The answer is contained in the corpus directory at @/__dci_prompt_contract_corpus__. **Do Not use web search!** Use ripgrep (rg) instead of grep for fast searching. After using tools, always finish with a non-empty textual final answer.
+
+QUESTION:
+__DCI_QUERY__

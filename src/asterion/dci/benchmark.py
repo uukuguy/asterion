@@ -35,16 +35,18 @@ from asterion.dci.context_profiles import (
     resolve_context_profile,
 )
 from asterion.dci.datasets import (
-    BENCHMARK_PROMPT_CONTRACT,
-    BENCHMARK_PROMPT_CONTRACT_SHA256,
     BenchmarkRow,
     DatasetError,
-    build_ir_prompt,
-    build_qa_prompt,
     canonical_input_identity,
     load_benchmark_rows_bytes,
     load_beir_benchmark_rows_bytes,
     load_bright_benchmark_rows_bytes,
+)
+from asterion.dci.prompts import (
+    PromptContract,
+    PromptContractError,
+    prompt_contract_sha256,
+    resolve_prompt_contract,
 )
 from asterion.dci.evaluation import (
     _load_reusable_result,
@@ -498,6 +500,9 @@ def _prepare(
         raise DciBenchmarkError("DCI benchmark resume policy is invalid")
     if request.figures and not request.analysis:
         raise DciBenchmarkError("DCI benchmark figures require analysis")
+    prompt_contract, prompt_contract_sha256_value = _prompt_contract_for_request(
+        request
+    )
     ablation_identity: dict[str, object] | None = None
     if request.ablation_row is not None:
         from asterion.dci.ablation import (
@@ -670,8 +675,8 @@ def _prepare(
         "judge": judge,
         "judge_configuration_fingerprint": judge_fingerprint,
         "implementation_sha256": implementation_sha256,
-        "benchmark_prompt_contract": BENCHMARK_PROMPT_CONTRACT,
-        "benchmark_prompt_contract_sha256": BENCHMARK_PROMPT_CONTRACT_SHA256,
+        "benchmark_prompt_contract": prompt_contract.contract_id,
+        "benchmark_prompt_contract_sha256": prompt_contract_sha256_value,
         "prompt_resources": prompt_resources,
     }
     if bounded_paper_selection:
@@ -723,7 +728,7 @@ def _prepare(
     config["batch_fingerprint"] = _fingerprint(config)
     documents: list[dict[str, object]] = []
     for row in rows:
-        prompt = _prompt(request, row)
+        prompt = _prompt(request, row, prompt_contract)
         identity: dict[str, object] = {
             "schema": "asterion.dci.batch-row/v1",
             "row": row.as_dict(),
@@ -736,8 +741,8 @@ def _prepare(
             "runtime": runtime,
             "conversation_features": config["conversation_features"],
             "max_turns": request.max_turns,
-            "benchmark_prompt_contract": BENCHMARK_PROMPT_CONTRACT,
-            "benchmark_prompt_contract_sha256": BENCHMARK_PROMPT_CONTRACT_SHA256,
+            "benchmark_prompt_contract": prompt_contract.contract_id,
+            "benchmark_prompt_contract_sha256": prompt_contract_sha256_value,
             "prompt_resources": config["prompt_resources"],
             "implementation_sha256": implementation_sha256,
         }
@@ -790,6 +795,9 @@ async def _run_row(
     prior_timing: dict[str, Any] | None,
 ) -> dict[str, object]:
     query = authority.query
+    prompt_contract, _prompt_contract_sha256_value = _prompt_contract_for_request(
+        request
+    )
     agent_started_at: str | None = None
     agent_finished_at: str | None = None
     try:
@@ -889,6 +897,7 @@ async def _run_row(
                     question=str(item["prompt"]),
                     cwd=canonical_input_identity(request.cwd),
                     stream_text=False,
+                    final_answer_recovery=prompt_contract.final_answer_recovery,
                 )
                 native_request = replace(
                     native_request,
@@ -898,10 +907,13 @@ async def _run_row(
                     conversation_features=request.conversation_features,
                 )
                 if native_state in {"failed", "incomplete", "running"}:
-                    native_request = resume_request_from_output_dir(
-                        native_dir,
-                        extra_args=request.runtime_options.extra_args,
-                        _directory_fd=native_authority.fd,
+                    native_request = replace(
+                        resume_request_from_output_dir(
+                            native_dir,
+                            extra_args=request.runtime_options.extra_args,
+                            _directory_fd=native_authority.fd,
+                        ),
+                        final_answer_recovery=prompt_contract.final_answer_recovery,
                     )
                 agent_started_at = _utc_now()
                 try:
@@ -1149,9 +1161,7 @@ def _validate_config_document(
         not expected.issubset(value)
         or not set(value).issubset(expected | optional)
         or value.get("schema") != "asterion.dci.batch/v1"
-        or value.get("benchmark_prompt_contract") != BENCHMARK_PROMPT_CONTRACT
-        or value.get("benchmark_prompt_contract_sha256")
-        != BENCHMARK_PROMPT_CONTRACT_SHA256
+        or not _has_selected_prompt_contract(value)
         or re.fullmatch(
             r"[0-9a-f]{64}", str(value.get("implementation_sha256"))
         )
@@ -1298,9 +1308,7 @@ def _validate_item_document(value: dict[str, Any]) -> None:
     if not isinstance(identity, dict):
         raise DciBenchmarkError("DCI benchmark item evidence is invalid")
     if (
-        identity.get("benchmark_prompt_contract") != BENCHMARK_PROMPT_CONTRACT
-        or identity.get("benchmark_prompt_contract_sha256")
-        != BENCHMARK_PROMPT_CONTRACT_SHA256
+        not _has_selected_prompt_contract(identity)
         or re.fullmatch(
             r"[0-9a-f]{64}", str(value.get("implementation_sha256"))
         )
@@ -1364,12 +1372,83 @@ def _runtime_document(options: DciRuntimeOptions) -> dict[str, object]:
     }
 
 
-def _prompt(request: BenchmarkRequest, row: BenchmarkRow) -> str:
+def _prompt_contract_for_request(
+    request: BenchmarkRequest,
+) -> tuple[PromptContract, str]:
+    if request.profile is None:
+        if request.corpus is not None:
+            raise DciBenchmarkError("DCI benchmark prompt contract is invalid")
+        contract_id = "asterion.dci.prompt/safe/v1"
+        source_family = "asterion-safe"
+    else:
+        try:
+            profile = _resolve_prompt_profile(
+                request.profile,
+                provider=request.runtime_options.provider,
+                model=request.runtime_options.model,
+            )
+            contract_id = profile.prompt_contract
+            source_family = profile.source_family
+        except ValueError as error:
+            raise DciBenchmarkError("DCI benchmark prompt contract is invalid") from error
+    try:
+        contract = resolve_prompt_contract(contract_id)
+        if contract.source_family != source_family:
+            raise PromptContractError
+        return contract, prompt_contract_sha256(contract, request.mode)
+    except PromptContractError as error:
+        raise DciBenchmarkError("DCI benchmark prompt contract is invalid") from error
+
+
+def _has_selected_prompt_contract(value: Mapping[str, Any]) -> bool:
+    try:
+        profile_id = value.get("profile")
+        mode = value.get("mode")
+        if mode not in {"qa", "ir"}:
+            return False
+        if profile_id is None:
+            contract_id = "asterion.dci.prompt/safe/v1"
+            source_family = "asterion-safe"
+        else:
+            runtime = value.get("runtime")
+            provider = runtime.get("provider") if isinstance(runtime, dict) else None
+            model = runtime.get("model") if isinstance(runtime, dict) else None
+            profile = _resolve_prompt_profile(
+                profile_id, provider=provider, model=model
+            )
+            contract_id = profile.prompt_contract
+            source_family = profile.source_family
+        contract = resolve_prompt_contract(contract_id)
+        return (
+            contract.source_family == source_family
+            and value.get("benchmark_prompt_contract") == contract.contract_id
+            and value.get("benchmark_prompt_contract_sha256")
+            == prompt_contract_sha256(contract, mode)
+        )
+    except (PromptContractError, ValueError):
+        return False
+
+
+def _resolve_prompt_profile(
+    profile_id: object, *, provider: str | None, model: str | None
+):
+    if profile_id == "asterion-safe/claude-minimax":
+        return resolve_experiment_profile(
+            profile_id,
+            invocation_provider=provider,
+            invocation_model=model,
+        )
+    return resolve_experiment_profile(profile_id)
+
+
+def _prompt(
+    request: BenchmarkRequest, row: BenchmarkRow, contract: PromptContract
+) -> str:
     if request.corpus is None:
         return row.query
     if request.mode == "ir":
-        return build_ir_prompt(row.query, request.corpus, request.corpus_hint)
-    return build_qa_prompt(row.query, request.corpus)
+        return contract.ir_builder(row.query, request.corpus, request.corpus_hint)
+    return contract.qa_builder(row.query, request.corpus)
 
 
 def _qa_gold_answer(row: BenchmarkRow) -> str:

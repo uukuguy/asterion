@@ -684,7 +684,7 @@ class PiRpcClient:
         timeout_seconds: float | None = None,
         on_event: Callable[[dict[str, Any]], None] | None = None,
         cancel_event: threading.Event | None = None,
-        recover_empty_final: bool = False,
+        final_answer_recovery: str | None = None,
     ) -> str:
         if cancel_event is not None and cancel_event.is_set():
             raise RuntimeError("RPC prompt was cancelled")
@@ -846,14 +846,14 @@ class PiRpcClient:
                     "Pi RPC agent_settled postcondition failed: session is not idle"
                 )
         final_text = "".join(text_parts)
-        if recover_empty_final and not final_text.strip():
+        if final_answer_recovery is not None and not final_text.strip():
             remaining = None if deadline is None else deadline - time.monotonic()
             if remaining is not None and remaining <= 0:
                 raise RuntimeError(
                     f"RPC prompt timed out after {timeout_seconds:g} seconds"
                 )
             return final_text + self.prompt_and_wait(
-                FINAL_ANSWER_RECOVERY_PROMPT,
+                final_answer_recovery,
                 max_turns=1,
                 timeout_seconds=remaining,
                 on_event=on_event,

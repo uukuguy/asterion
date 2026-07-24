@@ -115,7 +115,7 @@ native run directories; aggregate package results contain references and public
 counts, not question, answer, credential, or provider-response bodies.
 
 The complete application and standalone benchmark share one deterministic
-65-resource DCI product identity. It covers the transitive product modules,
+66-resource DCI product identity. It covers the transitive product modules,
 the selected manifests and assemblies, and their packaged schemas, profiles,
 fixtures, and extension resources. The digest participates in run, batch, and
 row fingerprints and is recorded in item, terminal result, summary, analysis,

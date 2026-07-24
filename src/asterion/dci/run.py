@@ -52,6 +52,7 @@ class DciRunRequest:
     pi_session_id: str | None = None
     resume: bool = False
     stream_text: bool = True
+    final_answer_recovery: str | None = None
 
     @property
     def context_profile(self) -> DciContextProfile | None:
@@ -118,6 +119,7 @@ def validate_dci_run_request(
         resolve_context_profile(request.runtime_context_level)
     text(request.thinking_level, optional=True)
     text(request.pi_session_id, optional=True)
+    text(request.final_answer_recovery, optional=True)
     if request.thinking_level not in _THINKING_LEVELS | {None}:
         raise ValueError("DCI run request is invalid")
     if request.max_turns is not None and (
@@ -237,6 +239,7 @@ def request_from_runtime_options(
     question: str,
     cwd: Path,
     stream_text: bool = True,
+    final_answer_recovery: str | None = None,
 ) -> DciRunRequest:
     """Convert resolved shared runtime settings into one immutable native request."""
 
@@ -254,6 +257,7 @@ def request_from_runtime_options(
         keep_session=options.keep_session,
         extra_args=options.extra_args,
         stream_text=stream_text,
+        final_answer_recovery=final_answer_recovery,
     )
     try:
         validate_dci_run_request(request)
@@ -566,7 +570,11 @@ def run_pi_research(
                 timeout_seconds=remaining,
                 on_event=recorder.record_event,
                 cancel_event=_cancel_event,
-                recover_empty_final=prompt_index == len(prompts) - 1,
+                final_answer_recovery=(
+                    request.final_answer_recovery
+                    if prompt_index == len(prompts) - 1
+                    else None
+                ),
             )
         if not final_text.strip():
             raise RuntimeError("Pi provider returned no final answer")

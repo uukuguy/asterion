@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -13,14 +12,14 @@ from pathlib import Path
 from pathlib import PurePosixPath
 from typing import Any
 
-from asterion.dci.pi_rpc import FINAL_ANSWER_RECOVERY_PROMPT
+from asterion.dci.prompts import prompt_contract_sha256, resolve_prompt_contract
 
 
 class DatasetError(ValueError):
     """Safe public error for malformed or ambiguous benchmark input."""
 
 
-BENCHMARK_PROMPT_CONTRACT = "dci.benchmark-prompt/v1"
+BENCHMARK_PROMPT_CONTRACT = "asterion.dci.prompt/safe/v1"
 
 
 _ALLOWED_FIELDS = frozenset({"query_id", "query", "answer", "gold_docs", "gold_ids"})
@@ -543,14 +542,7 @@ def _safe_corpus_identity(path: Path) -> Path:
 def build_benchmark_prompt(query: str, corpus_dir: Path) -> str:
     query = _require_nonempty_string(query, field="query")
     corpus = _safe_corpus_identity(corpus_dir)
-    return (
-        "Answer the following question. "
-        f"The answer is contained in the corpus directory at @{corpus}. "
-        "**Do Not use web search!** Use ripgrep (rg) instead of grep for fast searching. "
-        "After using tools, always finish with a non-empty textual final answer.\n\n"
-        "QUESTION:\n"
-        f"{query}\n"
-    )
+    return resolve_prompt_contract(BENCHMARK_PROMPT_CONTRACT).qa_builder(query, corpus)
 
 
 def build_qa_prompt(query: str, corpus_dir: Path) -> str:
@@ -568,56 +560,14 @@ def build_ir_prompt(
         unicodedata.category(character) == "Cs" for character in corpus_hint
     ):
         raise DatasetError("DCI corpus_hint must contain Unicode scalar values")
-    corpus_hint_section = f"CORPUS STRUCTURE:\n{corpus_hint}\n\n" if corpus_hint else ""
-    return (
-        f"You are a careful research assistant. Answer the question below using ONLY documents in @{corpus}.\n"
-        "Do not use online search or any external tools beyond Grep and Bash.\n\n"
-        f"Question:\n{query}\n\n"
-        f"{corpus_hint_section}"
-        "SEARCH STRATEGY (follow exactly):\n"
-        "1. Use Grep/Bash ONLY — do NOT use the Agent tool, spawn subagents, or browse the web.\n"
-        "2. Run multiple Grep/Bash searches IN PARALLEL within a single response to save time.\n"
-        "3. Use diverse, targeted keywords to maximize recall before drawing conclusions.\n"
-        "4. After each round, reflect on gaps and launch follow-up searches to cover missing angles.\n"
-        "5. Do NOT stop after finding a few documents — exhaust all plausible search angles.\n\n"
-        "RETRIEVAL INSTRUCTIONS:\n"
-        "- Both recall AND precision matter equally — the output is evaluated with NDCG, which penalizes both missing relevant documents and including irrelevant ones.\n"
-        "- Find EVERY document that is genuinely relevant. Missing a gold document hurts recall.\n"
-        "- Read each candidate document carefully before including it. Including an irrelevant document hurts precision.\n"
-        "- A document is relevant only if it directly addresses the question or provides essential supporting evidence for the answer. Do NOT include tangential or loosely related documents.\n\n"
-        "RANKING INSTRUCTIONS:\n"
-        "- Rank the final list by relevance: the most directly useful document for answering the question goes first. Ranking quality affects NDCG score.\n\n"
-        "Your response MUST follow this exact format:\n"
-        "Relevant Documents (ranked by relevance, most relevant first; maximum 20):\n"
-        "1. {corpus}/path/to/doc1.txt\n"
-        "2. {corpus}/path/to/doc2.txt\n"
-        "3. {corpus}/path/to/doc3.txt\n"
-        "(use full relative paths from the working directory; list at most 20 documents; omit any document that is not directly relevant)\n\n"
-        "Explanation: {step-by-step reasoning with inline citations, e.g. [{corpus}/relative_path]}\n"
-        "Exact Answer: {concise final answer only}\n"
-        "Confidence: {0–100%; use below 50% if evidence is weak, ambiguous, or missing}\n"
+    return resolve_prompt_contract(BENCHMARK_PROMPT_CONTRACT).ir_builder(
+        query, corpus, corpus_hint
     )
 
 
-BENCHMARK_PROMPT_CONTRACT_SHA256 = hashlib.sha256(
-    json.dumps(
-        {
-            "schema": BENCHMARK_PROMPT_CONTRACT,
-            "qa": build_benchmark_prompt(
-                "__DCI_QUERY__", Path("/__dci_prompt_contract_corpus__")
-            ),
-            "ir": build_ir_prompt(
-                "__DCI_QUERY__",
-                Path("/__dci_prompt_contract_corpus__"),
-                "__DCI_CORPUS_HINT__",
-            ),
-            "final_answer_recovery": FINAL_ANSWER_RECOVERY_PROMPT,
-        },
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode()
-).hexdigest()
+BENCHMARK_PROMPT_CONTRACT_SHA256 = prompt_contract_sha256(
+    resolve_prompt_contract(BENCHMARK_PROMPT_CONTRACT), "qa"
+)
 
 
 __all__ = [

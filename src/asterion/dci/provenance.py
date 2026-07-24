@@ -39,6 +39,7 @@ DCI_COMPLETE_IMPLEMENTATION_RESOURCES: tuple[str, ...] = (
     "dci/metrics.py",
     "dci/paper_benchmarks.py",
     "dci/pi_rpc.py",
+    "dci/prompts.py",
     "dci/provenance.py",
     "dci/reproduction.py",
     "dci/resolution_metrics.py",

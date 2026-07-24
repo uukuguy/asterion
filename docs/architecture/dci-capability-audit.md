@@ -144,7 +144,7 @@ The following previously open application-authority gaps are now closed:
    only selected by the two complete assemblies.
 4. Local corpus authority is an explicit `corpus.local-root` host service and
    is never inferred from runtime cwd or environment configuration.
-5. `complete_application_identity()` hashes the full 65-resource transitive
+5. `complete_application_identity()` hashes the full 66-resource transitive
    implementation closure.
 6. Benchmark reuse identity includes the same transitive implementation digest
    and rejects mismatched evidence before Agent or Judge work begins.
