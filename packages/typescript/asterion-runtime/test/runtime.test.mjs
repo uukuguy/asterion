@@ -74,6 +74,16 @@ test("validates the shared runtime manifest fixtures", async () => {
   }
 });
 
+test("returns a deep immutable validation snapshot", async () => {
+  const source = await readJson("valid-runtime-manifest.json");
+  const validated = validateRuntimeManifest(source);
+  source.capabilities.push("z.changed");
+  assert.deepEqual(validated.capabilities, ["filesystem.read", "shell"]);
+  assert.ok(Object.isFrozen(validated));
+  assert.ok(Object.isFrozen(validated.capabilities));
+  assert.throws(() => validated.capabilities.push("z.changed"), TypeError);
+});
+
 test("validates shared requests and complete event streams", async () => {
   const request = {
     protocol: "dci.agent-runtime/v1",

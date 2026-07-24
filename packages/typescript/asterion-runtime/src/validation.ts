@@ -41,6 +41,20 @@ export class ProtocolValidationError extends Error {
   }
 }
 
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object") {
+    for (const child of Object.values(value as Record<string, unknown>)) {
+      deepFreeze(child);
+    }
+    Object.freeze(value);
+  }
+  return value;
+}
+
+function immutableSnapshot<T>(value: T): T {
+  return deepFreeze(structuredClone(value));
+}
+
 function requireValid<T>(
   label: string,
   validator: ValidateFunction,
@@ -49,7 +63,7 @@ function requireValid<T>(
   if (!validator(value)) {
     throw new ProtocolValidationError(label, validator.errors);
   }
-  return value as T;
+  return immutableSnapshot(value as T);
 }
 
 function requireSortedUnique(
@@ -192,5 +206,5 @@ export function validateEventStream(value: unknown): readonly RunEvent[] {
   if (calls.size !== results.size) {
     throw new ProtocolValidationError("event stream unmatched tool.call", null);
   }
-  return events;
+  return immutableSnapshot(events);
 }
