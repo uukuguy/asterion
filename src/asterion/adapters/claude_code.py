@@ -26,7 +26,7 @@ def map_claude_capabilities(tools: object) -> list[str]:
         capability = CLAUDE_CAPABILITY_MAP.get(tool, f"claude.tool.{tool.lower()}")
         if capability not in capabilities:
             capabilities.append(capability)
-    return capabilities
+    return sorted(capabilities)
 
 
 class ClaudeCodeProtocolAdapter:

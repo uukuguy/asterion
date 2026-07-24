@@ -26,7 +26,7 @@ def map_pi_capabilities(tools: str | None) -> list[str]:
         capability = PI_CAPABILITY_MAP.get(tool_name, f"pi.tool.{tool_name}")
         if capability not in capabilities:
             capabilities.append(capability)
-    return capabilities
+    return sorted(capabilities)
 
 
 class PiProtocolAdapter:

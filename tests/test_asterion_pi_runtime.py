@@ -6,8 +6,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from asterion.adapters.pi import map_pi_capabilities
 from asterion.runtime.host import RunRequest
-from asterion.runtime.protocol import ProtocolError
+from asterion.runtime.protocol import ProtocolError, validate_event_stream
 from asterion.runtimes.pi import PiRuntimeClient
 
 
@@ -52,6 +53,31 @@ class MutableSignal:
 
 
 class PiRuntimeClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reordered_tools_produce_canonical_request_and_started_capabilities(
+        self,
+    ) -> None:
+        capabilities = map_pi_capabilities("bash,read,bash")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            client = PiRuntimeClient(
+                command=(sys.executable, "-u", "-c", SUCCESS_SCRIPT),
+                cwd=Path(temp_dir),
+                capabilities=tuple(capabilities),
+            )
+            events = [
+                event
+                async for event in client.run(
+                    RunRequest(
+                        run_id="canonical-pi-tools",
+                        input_text="Read the corpus",
+                        requested_capabilities=tuple(capabilities),
+                    )
+                )
+            ]
+
+        self.assertEqual(capabilities, ["filesystem.read", "shell"])
+        self.assertEqual(events[0].payload["capabilities"], capabilities)
+        validate_event_stream([event.to_mapping() for event in events])
+
     async def test_translates_one_pi_rpc_run_to_normalized_events(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             client = PiRuntimeClient(

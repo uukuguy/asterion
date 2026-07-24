@@ -29,6 +29,43 @@ class MutableCancellation:
 
 
 class ClaudeCodeRuntimeClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_default_tools_produce_canonical_request_and_started_capabilities(
+        self,
+    ) -> None:
+        raw_events = FIXTURE.read_text().replace(
+            '"tools":[]', '"tools":["Read","Grep","Glob"]'
+        )
+        process = Mock(
+            return_value=subprocess.CompletedProcess([], 0, raw_events, "")
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "private"
+            runtime = ClaudeCodeRuntimeClient(
+                executable="claude",
+                cwd=Path(directory),
+                environment={},
+                evidence_root=root,
+                run_process=process,
+            )
+
+            events = [
+                event
+                async for event in runtime.run(RunRequest("canonical-tools", "question"))
+            ]
+            run_dir = runtime.completed_run_dir("canonical-tools")
+
+            assert run_dir is not None
+            request = json.loads((run_dir / "request.json").read_text())
+            self.assertEqual(
+                request["requested_capabilities"],
+                ["claude.tool.glob", "claude.tool.grep", "filesystem.read"],
+            )
+            self.assertEqual(
+                events[0].payload["capabilities"],
+                ["claude.tool.glob", "claude.tool.grep", "filesystem.read"],
+            )
+            validate_event_stream([event.to_mapping() for event in events])
+
     async def test_persistent_evidence_is_private_and_resolvable_after_completion(self) -> None:
         process = Mock(
             return_value=subprocess.CompletedProcess([], 0, FIXTURE.read_text(), "")
