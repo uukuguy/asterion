@@ -22,3 +22,4 @@
 - 19:04 Enforced canonical runtime IDs and sorted capability arrays across validators and schemas [9094aaa]
 - 19:14 Canonicalized built-in adapter capabilities to prevent validator regressions [99a8e68]
 - 19:16 Require matched runtime tool lifecycle before terminal completion [3571121]
+- 19:20 Returned deeply frozen TypeScript validation snapshots, preventing caller mutation after validation [175a5d1]
