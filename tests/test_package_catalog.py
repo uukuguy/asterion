@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+import asterion.packages.catalog as package_catalog
 from asterion.packages.catalog import (
     PackageCatalogError,
     PackageRef,
@@ -26,6 +29,16 @@ def manifest(package_id: str, *, version: str = "1.0.0") -> dict[str, object]:
         "produces_artifacts": [],
         "consumes_artifacts": [],
     }
+
+
+def _file_identity(path: Path) -> tuple[int, int]:
+    value = path.stat()
+    return value.st_dev, value.st_ino
+
+
+def _fd_identity(fd: int) -> tuple[int, int]:
+    value = os.fstat(fd)
+    return value.st_dev, value.st_ino
 
 
 class PackageCatalogTests(unittest.TestCase):
@@ -78,15 +91,142 @@ class PackageCatalogTests(unittest.TestCase):
         symlink = self.root.parent / "packages-link"
         symlink.symlink_to(self.root, target_is_directory=True)
 
-        with self.assertRaises(PackageCatalogError):
+        with self.assertRaises(PackageCatalogError) as caught:
             discover_packages((symlink,))
+
+        self.assertIn("catalog root is a symlink", str(caught.exception))
 
     def test_symlink_package_document_is_rejected(self) -> None:
         document = self.root / "linked.json"
         document.symlink_to(self.root / "capability.json")
 
-        with self.assertRaises(PackageCatalogError):
+        with self.assertRaises(PackageCatalogError) as caught:
             discover_packages((self.root,))
+
+        self.assertIn("package document is a symlink", str(caught.exception))
+
+    def test_document_replacement_cannot_open_external_manifest(self) -> None:
+        document = self.root / "capability.json"
+        original_document = self.root / "capability.original"
+        external_root = self.root.parent / "external-documents"
+        external_root.mkdir()
+        external_document = external_root / "external.json"
+        self.write_manifest(
+            external_document,
+            manifest("sentinel.external-document"),
+        )
+        external_identity = _file_identity(external_document)
+        original_is_symlink = Path.is_symlink
+        original_open = os.open
+        original_fdopen = os.fdopen
+        replaced = False
+
+        def replace_document() -> None:
+            nonlocal replaced
+            if replaced:
+                return
+            document.rename(original_document)
+            document.symlink_to(external_document)
+            replaced = True
+
+        def raced_is_symlink(path: Path) -> bool:
+            result = original_is_symlink(path)
+            if path == document and not result:
+                replace_document()
+            return result
+
+        def raced_open(
+            path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+            flags: int,
+            mode: int = 0o777,
+            *,
+            dir_fd: int | None = None,
+        ) -> int:
+            if dir_fd is not None and os.fsdecode(path) == document.name:
+                replace_document()
+            return original_open(path, flags, mode, dir_fd=dir_fd)
+
+        def guarded_fdopen(fd: int, *args: object, **kwargs: object):
+            self.assertNotEqual(_fd_identity(fd), external_identity)
+            return original_fdopen(fd, *args, **kwargs)
+
+        with (
+            patch.object(Path, "is_symlink", raced_is_symlink),
+            patch.object(os, "open", raced_open),
+            patch.object(os, "fdopen", guarded_fdopen),
+            self.assertRaises(PackageCatalogError) as caught,
+        ):
+            discover_packages((self.root,))
+
+        self.assertNotIn("sentinel.external-document", str(caught.exception))
+
+    def test_root_replacement_cannot_open_external_manifest(self) -> None:
+        original_root = self.root.parent / "packages-original"
+        external_root = self.root.parent / "external-root"
+        external_root.mkdir()
+        external_document = external_root / "external.json"
+        self.write_manifest(external_document, manifest("sentinel.external-root"))
+        external_identity = _file_identity(external_document)
+        original_is_symlink = Path.is_symlink
+        original_open = os.open
+        original_fdopen = os.fdopen
+        replaced = False
+
+        def replace_root() -> None:
+            nonlocal replaced
+            if replaced:
+                return
+            self.root.rename(original_root)
+            self.root.symlink_to(external_root, target_is_directory=True)
+            replaced = True
+
+        def raced_is_symlink(path: Path) -> bool:
+            result = original_is_symlink(path)
+            if path == self.root and not result:
+                replace_root()
+            return result
+
+        def raced_open(
+            path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+            flags: int,
+            mode: int = 0o777,
+            *,
+            dir_fd: int | None = None,
+        ) -> int:
+            if dir_fd is None and Path(os.fsdecode(path)) == self.root:
+                replace_root()
+            return original_open(path, flags, mode, dir_fd=dir_fd)
+
+        def guarded_fdopen(fd: int, *args: object, **kwargs: object):
+            self.assertNotEqual(_fd_identity(fd), external_identity)
+            return original_fdopen(fd, *args, **kwargs)
+
+        with (
+            patch.object(Path, "is_symlink", raced_is_symlink),
+            patch.object(os, "open", raced_open),
+            patch.object(os, "fdopen", guarded_fdopen),
+            self.assertRaises(PackageCatalogError) as caught,
+        ):
+            discover_packages((self.root,))
+
+        self.assertNotIn("sentinel.external-root", str(caught.exception))
+
+    def test_discovery_fails_closed_without_pinned_filesystem_primitives(self) -> None:
+        with (
+            patch.object(
+                package_catalog,
+                "_PINNED_DISCOVERY_AVAILABLE",
+                False,
+                create=True,
+            ),
+            self.assertRaises(PackageCatalogError) as caught,
+        ):
+            discover_packages((self.root,))
+
+        self.assertEqual(
+            str(caught.exception),
+            "secure package discovery is unavailable",
+        )
 
     def test_duplicate_package_identity_is_rejected(self) -> None:
         self.write_manifest(
