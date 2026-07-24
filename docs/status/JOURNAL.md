@@ -38,3 +38,4 @@
 - 21:44 Recorded final canonical-ordering closure evidence for durable review [6ccd5fb]
 - 22:07 Pinned catalog roots/documents to descriptor objects, closing symlink replacement TOCTOU [798591b]
 - 22:09 Redacted provider-controlled keys and call IDs while retaining structural protocol rejection [71dff6a]
+- 22:17 Aligned architecture imports/graph and recovery truth so documentation matches shipped protocol state [6168056]
