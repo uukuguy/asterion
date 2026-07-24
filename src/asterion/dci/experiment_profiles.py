@@ -24,26 +24,31 @@ from asterion.dci.paper_benchmarks import (
     paper_experiment_scopes_sha256,
     resolve_paper_experiment_scope,
 )
+from asterion.dci.provenance import dci_complete_implementation_identity
 
 EXPERIMENT_PROFILE_SCHEMA = "dci.experiment-profiles/v1"
 EXPERIMENT_AUTHORIZATION_SCHEMA = "asterion.dci.paper-full-authorization/v1"
 EXPERIMENT_PROFILE_SCHEMA_SHA256 = (
-    "d51246204504cabc348c5f35b5bfe3e13c7519aa4bc78c55cb2be7f49e71fb06"
+    "6c06ef8b0885433f660d008d35d988aaf0bc5f0d893c2ea8caec240cd3728c7b"
 )
+_UPSTREAM_COMMIT = "271f37e71f053bf0c99c05ce6d2fb53b841d922e"
 _PROFILE_IDS = (
-    "current-default/pi",
-    "current-default/claude-subscription",
-    "current-default/claude-minimax",
+    "asterion-safe/pi",
+    "asterion-safe/claude-subscription",
+    "asterion-safe/claude-minimax",
     "paper-reference/pi",
     "paper-reference/claude-code",
+    f"upstream-github/{_UPSTREAM_COMMIT}/pi",
 )
 _PUBLIC_IDENTITY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]*")
+_UPSTREAM_PROFILE_ID = re.compile(r"upstream-github/([0-9a-f]{40})/pi")
 _EXPECTED_PROFILE_SEMANTICS = {
-    "current-default/pi": ("pi", "openai-codex", "gpt-5.6-luna", "saved-auth-or-provider-key", None, "read,bash", 100, "deepseek-v4-flash"),
-    "current-default/claude-subscription": ("claude-code", None, None, "local-subscription", None, "read,grep", 100, "deepseek-v4-flash"),
-    "current-default/claude-minimax": ("claude-code", None, None, "invocation-minimax-coding-plan", None, "read,grep", 100, "deepseek-v4-flash"),
+    "asterion-safe/pi": ("pi", "openai-codex", "gpt-5.6-luna", "saved-auth-or-provider-key", None, "read,bash", 100, "deepseek-v4-flash"),
+    "asterion-safe/claude-subscription": ("claude-code", None, None, "local-subscription", None, "read,grep", 100, "deepseek-v4-flash"),
+    "asterion-safe/claude-minimax": ("claude-code", None, None, "invocation-minimax-coding-plan", None, "read,grep", 100, "deepseek-v4-flash"),
     "paper-reference/pi": ("pi", "openai", "gpt-5.4-nano", "saved-auth-or-provider-key", "high", "read,bash", 300, "gpt-4.1"),
     "paper-reference/claude-code": ("claude-code", None, "claude-sonnet-4-6", "local-subscription", "medium", "read,grep", 300, "gpt-4.1"),
+    f"upstream-github/{_UPSTREAM_COMMIT}/pi": ("pi", "openai", "gpt-5.4-nano", "saved-auth-or-provider-key", "low", "read,bash", 300, "gpt-5.4-nano"),
 }
 _CURRENT_JUDGE = {
     "base_url": "https://api.deepseek.com/v1", "api": "chat-completions",
@@ -65,11 +70,38 @@ _PAPER_JUDGE = {
     "prompt_contract_sha256": "883c0cbbc76c73ed265d956092cac08e9d35fc0191f1ad2fb73a1ec28b7339c9",
     "pricing_identity": "paper-unreported",
 }
+_UPSTREAM_JUDGE = {
+    "base_url": "https://api.openai.com/v1", "api": "responses",
+    "model": "gpt-5.4-nano", "key_source": "OPENAI_API_KEY",
+    "thinking": False, "json_object": True,
+    "request_shape_sha256": "ba473fe38dbc6469ba20402b0d35353962dee9d61c27e961b1c5d0f1ae4fbb34",
+    "output_shape_identity": "json-schema/strict/v1",
+    "prompt_contract": f"dci.upstream-answer-judge/{_UPSTREAM_COMMIT}/v1",
+    "prompt_contract_sha256": "d202be4eb6ca849d00768ad61cb4531e53194e5f0021c1f7c01029344248d020",
+    "pricing_identity": "upstream-unreported",
+}
+_PAPER_UNREPORTED_PARAMETERS = {
+    "duplicate_handling": "paper-unreported",
+    "read_minimum_evidence_overlap": "paper-unreported",
+    "segment_characters": "paper-unreported",
+    "selection_seeds": "paper-unreported",
+}
 
 
 @dataclass(frozen=True, slots=True)
 class ExperimentProfile:
     profile_id: str
+    source_family: str
+    source_identity: str | Mapping[str, str]
+    prompt_contract: str
+    judge_contract: str
+    metric_contracts: tuple[str, ...]
+    runtime_contract: str
+    context_contract: str
+    dataset_selection_contract: str
+    implementation_contract: str
+    implementation_sha256: str
+    paper_unreported_parameters: Mapping[str, str]
     runtime: str
     provider: str | None
     model: str | None
@@ -112,6 +144,23 @@ class ExperimentProfile:
     def to_canonical_dict(self) -> dict[str, object]:
         return {
             "profile_id": self.profile_id,
+            "source_family": self.source_family,
+            "source_identity": (
+                dict(self.source_identity)
+                if isinstance(self.source_identity, Mapping)
+                else self.source_identity
+            ),
+            "prompt_contract": self.prompt_contract,
+            "judge_contract": self.judge_contract,
+            "metric_contracts": list(self.metric_contracts),
+            "runtime_contract": self.runtime_contract,
+            "context_contract": self.context_contract,
+            "dataset_selection_contract": self.dataset_selection_contract,
+            "implementation_contract": self.implementation_contract,
+            "implementation_sha256": self.implementation_sha256,
+            "paper_unreported_parameters": dict(
+                self.paper_unreported_parameters
+            ),
             "runtime": self.runtime,
             "provider": self.provider,
             "model": self.model,
@@ -187,6 +236,8 @@ def _validate_profile_schema(schema: object, fields: set[str]) -> None:
         properties = profile["properties"]
         judge = properties["judge"]
         comparison = properties["comparison"]
+        source_identity = properties["source_identity"]
+        paper_unreported = properties["paper_unreported_parameters"]
     except (KeyError, TypeError):
         raise RuntimeError("DCI experiment profile contract is invalid") from None
     if (
@@ -203,6 +254,11 @@ def _validate_profile_schema(schema: object, fields: set[str]) -> None:
         or judge.get("additionalProperties") is not False
         or set(judge.get("required", ())) != set(_CURRENT_JUDGE)
         or set(judge.get("properties", {})) != set(_CURRENT_JUDGE)
+        or type(source_identity.get("oneOf")) is not list
+        or len(source_identity["oneOf"]) != 3
+        or paper_unreported.get("additionalProperties") is not False
+        or set(paper_unreported.get("properties", {}))
+        != set(_PAPER_UNREPORTED_PARAMETERS)
         or comparison.get("additionalProperties") is not False
         or set(comparison.get("properties", {}))
         != {"accuracy_margin", "ndcg_margin", "published_target", "target_identity"}
@@ -237,12 +293,83 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return value
 
 
+def _read_profile_resources() -> tuple[object, object]:
+    package = resources.files("asterion.dci.resources")
+    payload = json.loads(
+        package.joinpath("experiment-profiles.json").read_text(),
+        object_pairs_hook=_unique_object,
+    )
+    schema = json.loads(
+        package.joinpath("experiment-profile.schema.json").read_text(),
+        object_pairs_hook=_unique_object,
+    )
+    return payload, schema
+
+
+def _expected_source_contract(profile_id: str) -> dict[str, object]:
+    if profile_id.startswith("asterion-safe/"):
+        runtime = "pi" if profile_id.endswith("/pi") else "claude-code"
+        return {
+            "source_family": "asterion-safe",
+            "source_identity": {
+                "implementation_contract": "asterion.dci.complete-implementation/v1"
+            },
+            "prompt_contract": "asterion.dci.prompt/safe/v1",
+            "judge_contract": "asterion.dci.answer-judge/strict-json/v1",
+            "metric_contracts": [
+                "asterion.dci.answer-correctness/strict-json/v1",
+                "ndcg@10-binary-deduplicated/v1",
+            ],
+            "runtime_contract": f"asterion.runtime/{runtime}.reference/v1",
+            "context_contract": "dci.asterion-safe-context/level3/v1",
+            "dataset_selection_contract": "asterion.dci.dataset-selection/af-340/v1",
+            "implementation_contract": "asterion.dci.complete-implementation/v1",
+            "paper_unreported_parameters": {},
+        }
+    if profile_id.startswith("paper-reference/"):
+        runtime = "pi" if profile_id.endswith("/pi") else "claude-code"
+        return {
+            "source_family": "paper-reference",
+            "source_identity": "arxiv:2605.05242v1",
+            "prompt_contract": "dci.paper-prompt/arxiv:2605.05242v1/v1",
+            "judge_contract": "dci.paper-answer-judge/gpt-4.1/v1",
+            "metric_contracts": [
+                "dci.paper-answer-correctness/arxiv:2605.05242v1/v1",
+                "dci.paper-ndcg@10/arxiv:2605.05242v1/duplicate-handling-unreported/v1",
+            ],
+            "runtime_contract": f"dci.paper-runtime/{runtime}/v1",
+            "context_contract": "dci.paper-context/level3/v1",
+            "dataset_selection_contract": "dci.paper-dataset-selection/arxiv:2605.05242v1/v1",
+            "implementation_contract": "asterion.dci.paper-reference-execution/v1",
+            "paper_unreported_parameters": dict(_PAPER_UNREPORTED_PARAMETERS),
+        }
+    match = _UPSTREAM_PROFILE_ID.fullmatch(profile_id)
+    if match is None or match.group(1) != _UPSTREAM_COMMIT:
+        raise RuntimeError("DCI experiment profile contract is invalid")
+    return {
+        "source_family": "upstream-github",
+        "source_identity": {
+            "repository": "DCI-Agent/DCI-Agent-Lite",
+            "commit": _UPSTREAM_COMMIT,
+        },
+        "prompt_contract": f"dci.upstream-github-prompt/{_UPSTREAM_COMMIT}/v1",
+        "judge_contract": f"dci.upstream-answer-judge/{_UPSTREAM_COMMIT}/v1",
+        "metric_contracts": [
+            f"dci.upstream-answer-correctness/{_UPSTREAM_COMMIT}/v1",
+            "ndcg@10-binary-upstream-list/v1",
+        ],
+        "runtime_contract": f"dci.upstream-github-runtime/{_UPSTREAM_COMMIT}/pi/v1",
+        "context_contract": f"dci.upstream-github-context/{_UPSTREAM_COMMIT}/level3/v1",
+        "dataset_selection_contract": f"dci.upstream-github-dataset-selection/{_UPSTREAM_COMMIT}/v1",
+        "implementation_contract": f"asterion.dci.upstream-github-execution/{_UPSTREAM_COMMIT}/v1",
+        "paper_unreported_parameters": {},
+    }
+
+
 @lru_cache(maxsize=1)
 def _profiles() -> Mapping[str, ExperimentProfile]:
     try:
-        package = resources.files("asterion.dci.resources")
-        payload = json.loads(package.joinpath("experiment-profiles.json").read_text(), object_pairs_hook=_unique_object)
-        schema = json.loads(package.joinpath("experiment-profile.schema.json").read_text(), object_pairs_hook=_unique_object)
+        payload, schema = _read_profile_resources()
     except (OSError, UnicodeError, ValueError):
         raise RuntimeError("DCI experiment profile contract is invalid") from None
     if (type(payload) is not dict or set(payload) != {"schema", "profiles"}
@@ -254,8 +381,19 @@ def _profiles() -> Mapping[str, ExperimentProfile]:
     scope_ids = paper_experiment_scope_ids()
     selected = tuple(resolve_paper_experiment_scope(scope_id).selected_ids_sha256 for scope_id in scope_ids)
     unreported = tuple(scope_id for scope_id in scope_ids if resolve_paper_experiment_scope(scope_id).selection_seed_status == "paper-unreported")
-    fields = {"profile_id", "runtime", "provider", "model", "authentication_mode", "reasoning", "tools", "max_turns", "context_profile", "judge", "dataset_inventory_sha256", "experiment_scopes_sha256", "scope_ids", "selected_ids_sha256", "paper_unreported_scope_ids", "corpus_identity", "metric_identities", "aggregation_identity", "comparison", "compatible_config_key"}
+    fields = {
+        "profile_id", "source_family", "source_identity", "prompt_contract",
+        "judge_contract", "metric_contracts", "runtime_contract",
+        "context_contract", "dataset_selection_contract",
+        "implementation_contract", "paper_unreported_parameters", "runtime",
+        "provider", "model", "authentication_mode", "reasoning", "tools",
+        "max_turns", "context_profile", "judge", "dataset_inventory_sha256",
+        "experiment_scopes_sha256", "scope_ids", "selected_ids_sha256",
+        "paper_unreported_scope_ids", "corpus_identity", "metric_identities",
+        "aggregation_identity", "comparison", "compatible_config_key",
+    }
     _validate_profile_schema(schema, fields)
+    implementation_sha256 = dci_complete_implementation_identity()
     parsed: dict[str, ExperimentProfile] = {}
     for item in payload["profiles"]:
         if type(item) is not dict or set(item) != fields:
@@ -270,8 +408,36 @@ def _profiles() -> Mapping[str, ExperimentProfile]:
                 or type(item["max_turns"]) is not int or item["max_turns"] <= 0
                 or item["context_profile"] != "level3"):
             raise RuntimeError("DCI experiment profile contract is invalid")
+        source_contract = _expected_source_contract(profile_id)
+        if any(item.get(key) != value for key, value in source_contract.items()):
+            raise RuntimeError("DCI experiment profile contract is invalid")
+        raw_source_identity = item["source_identity"]
+        source_identity: str | Mapping[str, str]
+        if item["source_family"] == "asterion-safe":
+            source_identity = implementation_sha256
+        elif type(raw_source_identity) is dict:
+            if any(type(key) is not str or type(value) is not str for key, value in raw_source_identity.items()):
+                raise RuntimeError("DCI experiment profile contract is invalid")
+            source_identity = MappingProxyType(dict(raw_source_identity))
+        elif type(raw_source_identity) is str:
+            source_identity = raw_source_identity
+        else:
+            raise RuntimeError("DCI experiment profile contract is invalid")
         parsed[profile_id] = ExperimentProfile(
-            profile_id=profile_id, runtime=item["runtime"], provider=item["provider"], model=item["model"],
+            profile_id=profile_id, source_family=item["source_family"],
+            source_identity=source_identity,
+            prompt_contract=item["prompt_contract"],
+            judge_contract=item["judge_contract"],
+            metric_contracts=tuple(item["metric_contracts"]),
+            runtime_contract=item["runtime_contract"],
+            context_contract=item["context_contract"],
+            dataset_selection_contract=item["dataset_selection_contract"],
+            implementation_contract=item["implementation_contract"],
+            implementation_sha256=implementation_sha256,
+            paper_unreported_parameters=MappingProxyType(
+                dict(item["paper_unreported_parameters"])
+            ),
+            runtime=item["runtime"], provider=item["provider"], model=item["model"],
             authentication_mode=item["authentication_mode"], reasoning=item["reasoning"], tools=item["tools"],
             max_turns=item["max_turns"], context_profile=item["context_profile"], judge=MappingProxyType(dict(judge)),
             dataset_inventory_sha256=item["dataset_inventory_sha256"], experiment_scopes_sha256=item["experiment_scopes_sha256"],
@@ -291,13 +457,22 @@ def _profiles() -> Mapping[str, ExperimentProfile]:
         )
         if actual != expected:
             raise RuntimeError("DCI experiment profile contract is invalid")
-        expected_judge = _PAPER_JUDGE if name.startswith("paper-reference/") else _CURRENT_JUDGE
+        expected_judge = (
+            _PAPER_JUDGE
+            if name.startswith("paper-reference/")
+            else (
+                _UPSTREAM_JUDGE
+                if name.startswith("upstream-github/")
+                else _CURRENT_JUDGE
+            )
+        )
         expected_comparison = {
-            "current-default/pi": {"accuracy_margin": -0.05, "ndcg_margin": -0.02},
-            "current-default/claude-subscription": {"target_identity": "current-default/claude-subscription"},
-            "current-default/claude-minimax": {"target_identity": "current-default/claude-minimax"},
+            "asterion-safe/pi": {"accuracy_margin": -0.05, "ndcg_margin": -0.02},
+            "asterion-safe/claude-subscription": {"target_identity": "asterion-safe/claude-subscription"},
+            "asterion-safe/claude-minimax": {"target_identity": "asterion-safe/claude-minimax"},
             "paper-reference/pi": {"accuracy_margin": -0.05, "ndcg_margin": -0.02, "published_target": "DCI-Agent-Lite"},
             "paper-reference/claude-code": {"published_target": "DCI-Agent-CC"},
+            f"upstream-github/{_UPSTREAM_COMMIT}/pi": {"accuracy_margin": -0.05, "ndcg_margin": -0.02},
         }[name]
         if (
             dict(profile.judge) != expected_judge
@@ -341,7 +516,7 @@ def resolve_experiment_profile(profile_id: object, *, invocation_provider: str |
     if type(profile_id) is not str or profile_id not in _profiles():
         raise ValueError("DCI experiment profile is invalid")
     profile = _profiles()[profile_id]
-    if profile_id != "current-default/claude-minimax":
+    if profile_id != "asterion-safe/claude-minimax":
         if invocation_provider is not None or invocation_model is not None:
             raise ValueError("DCI experiment profile invocation identity is invalid")
         return profile

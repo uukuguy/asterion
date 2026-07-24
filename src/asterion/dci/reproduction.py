@@ -1877,16 +1877,16 @@ def _profile_digest(profile: ExperimentProfile) -> str:
     return experiment_profile_sha256(
         profile.profile_id,
         invocation_provider=profile.provider
-        if profile.profile_id == "current-default/claude-minimax"
+        if profile.profile_id == "asterion-safe/claude-minimax"
         else None,
         invocation_model=profile.model
-        if profile.profile_id == "current-default/claude-minimax"
+        if profile.profile_id == "asterion-safe/claude-minimax"
         else None,
     )
 
 
 def _resolve_report_profile(report: ComparisonReport) -> ExperimentProfile:
-    if report.profile_id == "current-default/claude-minimax":
+    if report.profile_id == "asterion-safe/claude-minimax":
         return resolve_experiment_profile(
             report.profile_id,
             invocation_provider=report.profile_provider,

@@ -62,6 +62,12 @@ from asterion.dci.run import (
 )
 from asterion.dci.system_prompt import render_pi_system_prompt
 
+_EXPERIMENT_PROFILE_CLI_ALIASES = {
+    "current-default/pi": "asterion-safe/pi",
+    "current-default/claude-subscription": "asterion-safe/claude-subscription",
+    "current-default/claude-minimax": "asterion-safe/claude-minimax",
+}
+
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="asterion-dci")
@@ -281,6 +287,10 @@ def main(
             return 0
         _write_command_failure(stderr, _requested_command(effective_argv))
         return 2
+    if args.command == "paper" and args.paper_command in {"compare", "reproduce"}:
+        args.profile = _EXPERIMENT_PROFILE_CLI_ALIASES.get(
+            args.profile, args.profile
+        )
     selected_ablation = None
     if args.command == "benchmark" and args.ablation_row is not None:
         try:

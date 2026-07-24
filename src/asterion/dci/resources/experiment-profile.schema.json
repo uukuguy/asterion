@@ -8,8 +8,8 @@
     "schema": {"const": "dci.experiment-profiles/v1"},
     "profiles": {
       "type": "array",
-      "minItems": 5,
-      "maxItems": 5,
+      "minItems": 6,
+      "maxItems": 6,
       "items": {"$ref": "#/$defs/profile"}
     }
   },
@@ -18,8 +18,12 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "profile_id", "runtime", "provider", "model", "authentication_mode",
-        "reasoning", "tools", "max_turns", "context_profile", "judge",
+        "profile_id", "source_family", "source_identity", "prompt_contract",
+        "judge_contract", "metric_contracts", "runtime_contract",
+        "context_contract", "dataset_selection_contract",
+        "implementation_contract", "paper_unreported_parameters", "runtime",
+        "provider", "model", "authentication_mode", "reasoning", "tools",
+        "max_turns", "context_profile", "judge",
         "dataset_inventory_sha256", "experiment_scopes_sha256", "scope_ids",
         "selected_ids_sha256", "paper_unreported_scope_ids", "corpus_identity",
         "metric_identities", "aggregation_identity", "comparison",
@@ -27,6 +31,56 @@
       ],
       "properties": {
         "profile_id": {"type": "string", "minLength": 1},
+        "source_family": {
+          "enum": ["paper-reference", "upstream-github", "asterion-safe"]
+        },
+        "source_identity": {
+          "oneOf": [
+            {"const": "arxiv:2605.05242v1"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["repository", "commit"],
+              "properties": {
+                "repository": {"const": "DCI-Agent/DCI-Agent-Lite"},
+                "commit": {"pattern": "^[0-9a-f]{40}$"}
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["implementation_contract"],
+              "properties": {
+                "implementation_contract": {
+                  "const": "asterion.dci.complete-implementation/v1"
+                }
+              }
+            }
+          ]
+        },
+        "prompt_contract": {"type": "string", "minLength": 1},
+        "judge_contract": {"type": "string", "minLength": 1},
+        "metric_contracts": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "runtime_contract": {"type": "string", "minLength": 1},
+        "context_contract": {"type": "string", "minLength": 1},
+        "dataset_selection_contract": {"type": "string", "minLength": 1},
+        "implementation_contract": {"type": "string", "minLength": 1},
+        "paper_unreported_parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "duplicate_handling": {"const": "paper-unreported"},
+            "read_minimum_evidence_overlap": {"const": "paper-unreported"},
+            "segment_characters": {"const": "paper-unreported"},
+            "selection_seeds": {"const": "paper-unreported"}
+          }
+        },
         "runtime": {"enum": ["pi", "claude-code"]},
         "provider": {"type": ["string", "null"]},
         "model": {"type": ["string", "null"]},
@@ -74,8 +128,8 @@
             "published_target": {"enum": ["DCI-Agent-Lite", "DCI-Agent-CC"]},
             "target_identity": {
               "enum": [
-                "current-default/claude-subscription",
-                "current-default/claude-minimax"
+                "asterion-safe/claude-subscription",
+                "asterion-safe/claude-minimax"
               ]
             }
           },
@@ -93,8 +147,8 @@
               "properties": {
                 "target_identity": {
                   "enum": [
-                    "current-default/claude-subscription",
-                    "current-default/claude-minimax"
+                    "asterion-safe/claude-subscription",
+                    "asterion-safe/claude-minimax"
                   ]
                 }
               }

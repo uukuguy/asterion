@@ -3,13 +3,23 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from importlib import resources
 from dataclasses import replace
 from pathlib import Path
+from types import MappingProxyType
 from unittest.mock import Mock, patch
 
 from asterion.dci.benchmark import BenchmarkRequest, DciBenchmarkError, run_benchmark
+from asterion.dci.cli import main as dci_main
 from asterion.dci.config import DciRuntimeOptions, resolve_dci_paths
+from asterion.dci.experiment_profiles import (
+    experiment_profile_ids,
+    experiment_profile_schema_sha256,
+    experiment_profiles_sha256,
+    resolve_experiment_profile,
+)
 from asterion.dci.judge import JudgeConfig
+from asterion.dci.paper_benchmarks import canonical_sha256
 from asterion.dci.provenance import (
     DCI_COMPLETE_IMPLEMENTATION_RESOURCES,
     dci_complete_implementation_identity,
@@ -53,6 +63,326 @@ def _recorded_run(_paths: object, request: object, **kwargs: object) -> DciRunRe
 
 
 class AsterionDciBenchmarkTests(unittest.TestCase):
+    def setUp(self) -> None:
+        from asterion.dci import experiment_profiles
+
+        experiment_profiles._profiles.cache_clear()
+        self.addCleanup(experiment_profiles._profiles.cache_clear)
+
+    def test_experiment_profiles_separate_three_provenance_families(self) -> None:
+        commit = "271f37e71f053bf0c99c05ce6d2fb53b841d922e"
+        self.assertEqual(
+            experiment_profile_ids(),
+            (
+                "asterion-safe/pi",
+                "asterion-safe/claude-subscription",
+                "asterion-safe/claude-minimax",
+                "paper-reference/pi",
+                "paper-reference/claude-code",
+                f"upstream-github/{commit}/pi",
+            ),
+        )
+        paper = resolve_experiment_profile("paper-reference/pi")
+        upstream = resolve_experiment_profile(f"upstream-github/{commit}/pi")
+        safe = resolve_experiment_profile("asterion-safe/pi")
+
+        self.assertEqual(paper.source_family, "paper-reference")
+        self.assertEqual(paper.source_identity, "arxiv:2605.05242v1")
+        self.assertIsNone(paper.compatible_config_key)
+        self.assertEqual(
+            dict(upstream.source_identity),
+            {
+                "repository": "DCI-Agent/DCI-Agent-Lite",
+                "commit": commit,
+            },
+        )
+        self.assertEqual(safe.source_family, "asterion-safe")
+        self.assertEqual(
+            safe.source_identity, dci_complete_implementation_identity()
+        )
+        self.assertEqual(
+            {
+                paper.implementation_sha256,
+                upstream.implementation_sha256,
+                safe.implementation_sha256,
+            },
+            {dci_complete_implementation_identity()},
+        )
+        self.assertNotEqual(paper.identity_sha256, upstream.identity_sha256)
+        self.assertNotEqual(upstream.identity_sha256, safe.identity_sha256)
+        self.assertNotEqual(paper.prompt_contract, upstream.prompt_contract)
+        self.assertNotEqual(upstream.judge_contract, safe.judge_contract)
+        self.assertNotEqual(paper.metric_contracts, safe.metric_contracts)
+        self.assertNotEqual(paper.runtime_contract, safe.runtime_contract)
+        self.assertNotEqual(paper.context_contract, upstream.context_contract)
+        self.assertNotEqual(
+            upstream.dataset_selection_contract,
+            safe.dataset_selection_contract,
+        )
+        self.assertIsInstance(paper.paper_unreported_parameters, MappingProxyType)
+        with self.assertRaises(TypeError):
+            paper.paper_unreported_parameters["unknown"] = "paper-unreported"
+        with self.assertRaises(TypeError):
+            upstream.source_identity["commit"] = "0" * 40
+        self.assertNotIn("prompt_body", json.dumps(paper.to_canonical_dict()))
+
+    def test_profile_resources_use_resolved_non_recursive_implementation_binding(
+        self,
+    ) -> None:
+        from asterion.dci import experiment_profiles
+
+        package = resources.files("asterion.dci.resources")
+        schema = json.loads(
+            package.joinpath("experiment-profile.schema.json").read_text()
+        )
+        payload = json.loads(
+            package.joinpath("experiment-profiles.json").read_text()
+        )
+        raw_text = json.dumps(payload, sort_keys=True)
+
+        self.assertEqual(
+            experiment_profile_schema_sha256(),
+            canonical_sha256(schema),
+        )
+        self.assertNotIn("implementation_sha256", raw_text)
+        self.assertNotIn(dci_complete_implementation_identity(), raw_text)
+        self.assertTrue(
+            all(
+                isinstance(item["implementation_contract"], str)
+                for item in payload["profiles"]
+            )
+        )
+        commit = "271f37e71f053bf0c99c05ce6d2fb53b841d922e"
+        upstream = next(
+            item
+            for item in payload["profiles"]
+            if item["profile_id"] == f"upstream-github/{commit}/pi"
+        )
+        self.assertEqual(
+            upstream["judge"]["request_shape_sha256"],
+            canonical_sha256(
+                {
+                    "api": "responses",
+                    "reasoning_effort": "low",
+                    "text_verbosity": "low",
+                    "max_output_tokens": 180,
+                    "output_keys": [
+                        "is_correct",
+                        "normalized_prediction",
+                        "reason",
+                    ],
+                }
+            ),
+        )
+        self.assertEqual(
+            upstream["judge"]["prompt_contract_sha256"],
+            canonical_sha256(
+                {
+                    "contract": f"dci.upstream-answer-judge/{commit}/v1",
+                    "source_identity": {
+                        "repository": "DCI-Agent/DCI-Agent-Lite",
+                        "commit": commit,
+                    },
+                }
+            ),
+        )
+        expected_profiles_sha256 = canonical_sha256(
+            {
+                "schema": "dci.experiment-profiles/v1",
+                "profiles": [
+                    {
+                        "profile_id": profile_id,
+                        "identity_sha256": experiment_profiles._profiles()[
+                            profile_id
+                        ].identity_sha256,
+                    }
+                    for profile_id in experiment_profile_ids()
+                ],
+            }
+        )
+        self.assertEqual(experiment_profiles_sha256(), expected_profiles_sha256)
+
+    def test_profile_identity_tracks_exact_implementation_resource_mutation(
+        self,
+    ) -> None:
+        resources_by_name = {
+            name: resources.files("asterion").joinpath(name).read_bytes()
+            for name in DCI_COMPLETE_IMPLEMENTATION_RESOURCES
+        }
+        baseline_implementation = dci_complete_implementation_identity(
+            resource_reader=resources_by_name.__getitem__
+        )
+        profile_resource = "dci/resources/experiment-profiles.json"
+        resources_by_name[profile_resource] += b"\n"
+        changed_implementation = dci_complete_implementation_identity(
+            resource_reader=resources_by_name.__getitem__
+        )
+        self.assertNotEqual(baseline_implementation, changed_implementation)
+
+        from asterion.dci import experiment_profiles
+
+        with patch.object(
+            experiment_profiles,
+            "dci_complete_implementation_identity",
+            return_value=baseline_implementation,
+        ):
+            experiment_profiles._profiles.cache_clear()
+            baseline_profile = resolve_experiment_profile("asterion-safe/pi")
+        with patch.object(
+            experiment_profiles,
+            "dci_complete_implementation_identity",
+            return_value=changed_implementation,
+        ):
+            experiment_profiles._profiles.cache_clear()
+            changed_profile = resolve_experiment_profile("asterion-safe/pi")
+
+        self.assertEqual(
+            baseline_profile.implementation_sha256, baseline_implementation
+        )
+        self.assertEqual(
+            changed_profile.implementation_sha256, changed_implementation
+        )
+        self.assertNotEqual(
+            baseline_profile.identity_sha256, changed_profile.identity_sha256
+        )
+
+    def test_profile_contract_rejects_cross_family_and_unknown_semantics(
+        self,
+    ) -> None:
+        commit = "271f37e71f053bf0c99c05ce6d2fb53b841d922e"
+        mutations = (
+            (
+                "paper-mixed-github-prompt",
+                "paper-reference/pi",
+                lambda item: item.__setitem__(
+                    "prompt_contract",
+                    f"dci.upstream-github-prompt/{commit}/v1",
+                ),
+            ),
+            (
+                "paper-mixed-asterion-judge",
+                "paper-reference/pi",
+                lambda item: item.__setitem__(
+                    "judge_contract",
+                    "asterion.dci.answer-judge/strict-json/v1",
+                ),
+            ),
+            (
+                "paper-mixed-asterion-metric",
+                "paper-reference/pi",
+                lambda item: item.__setitem__(
+                    "metric_contracts",
+                    [
+                        "asterion.dci.answer-correctness/strict-json/v1",
+                        "ndcg@10-binary-deduplicated/v1",
+                    ],
+                ),
+            ),
+            (
+                "upstream-noncanonical-commit",
+                f"upstream-github/{commit}/pi",
+                lambda item: item["source_identity"].__setitem__(
+                    "commit", commit.upper()
+                ),
+            ),
+            (
+                "safe-published-target",
+                "asterion-safe/pi",
+                lambda item: item["comparison"].__setitem__(
+                    "published_target", "DCI-Agent-Lite"
+                ),
+            ),
+            (
+                "unknown-paper-unreported-parameter",
+                "paper-reference/pi",
+                lambda item: item["paper_unreported_parameters"].__setitem__(
+                    "unknown", "paper-unreported"
+                ),
+            ),
+        )
+        for label, profile_id, mutate in mutations:
+            with self.subTest(label=label):
+                self._assert_invalid_profile_mutation(profile_id, mutate)
+
+    def test_current_default_alias_is_cli_only_and_never_enters_evidence(
+        self,
+    ) -> None:
+        aliases = (
+            ("current-default/pi", "asterion-safe/pi", ()),
+            (
+                "current-default/claude-subscription",
+                "asterion-safe/claude-subscription",
+                (),
+            ),
+            (
+                "current-default/claude-minimax",
+                "asterion-safe/claude-minimax",
+                ("--provider", "minimax", "--model", "minimax-test"),
+            ),
+        )
+        for alias, canonical, invocation in aliases:
+            with self.subTest(alias=alias):
+                with self.assertRaisesRegex(
+                    ValueError, "^DCI experiment profile is invalid$"
+                ):
+                    resolve_experiment_profile(alias)
+                with tempfile.TemporaryDirectory() as temporary_directory:
+                    stdout = __import__("io").StringIO()
+                    stderr = __import__("io").StringIO()
+                    code = dci_main(
+                        [
+                            "paper",
+                            "reproduce",
+                            "--profile",
+                            alias,
+                            "--output-root",
+                            str(Path(temporary_directory) / "out"),
+                            "--estimated-budget-usd",
+                            "1",
+                            "--dry-run",
+                            *invocation,
+                        ],
+                        stdout=stdout,
+                        stderr=stderr,
+                    )
+                self.assertEqual(code, 0, stderr.getvalue())
+                self.assertIn(f"Profile: {canonical}", stdout.getvalue())
+                self.assertNotIn("current-default", stdout.getvalue())
+
+        from asterion.dci.verification import paper_product_contract
+
+        canonical_evidence = json.dumps(
+            paper_product_contract(), sort_keys=True
+        )
+        self.assertNotIn("current-default", canonical_evidence)
+        self.assertIn("asterion-safe/pi", canonical_evidence)
+
+    def _assert_invalid_profile_mutation(self, profile_id, mutate) -> None:
+        from asterion.dci import experiment_profiles
+
+        package = resources.files("asterion.dci.resources")
+        payload = json.loads(
+            package.joinpath("experiment-profiles.json").read_text()
+        )
+        schema = json.loads(
+            package.joinpath("experiment-profile.schema.json").read_text()
+        )
+        item = next(
+            item for item in payload["profiles"] if item["profile_id"] == profile_id
+        )
+        mutate(item)
+        with patch.object(
+            experiment_profiles,
+            "_read_profile_resources",
+            return_value=(payload, schema),
+        ):
+            experiment_profiles._profiles.cache_clear()
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "^DCI experiment profile contract is invalid$",
+            ):
+                experiment_profiles.experiment_profile_ids()
+
     def test_batch_evidence_exports_transitive_implementation_identity(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory).resolve()
