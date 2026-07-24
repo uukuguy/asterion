@@ -78,7 +78,11 @@ from asterion.dci.analysis import (
     gather_query_metrics,
     write_analysis_artifacts,
 )
-from asterion.dci.metrics import compute_ir_ndcg
+from asterion.dci.metrics import (
+    DEDUPLICATED_NDCG_CONTRACT,
+    UPSTREAM_LIST_NDCG_CONTRACT,
+    compute_ir_ndcg,
+)
 from asterion.dci.trajectory_resolution import (
     TrajectoryAnalysisConfig,
     TrajectoryResolutionError,
@@ -641,6 +645,7 @@ def _prepare(
         request.judge_config, contract_id=judge_contract
     )
     judge_fingerprint = _fingerprint(judge)
+    ranking_metric_contract = _metric_contract_for_request(request)
     implementation_sha256 = dci_complete_implementation_identity()
     dataset_identity = canonical_input_identity(request.dataset)
     dataset_digest = hashlib.sha256(dataset_raw).hexdigest()
@@ -678,6 +683,7 @@ def _prepare(
         "figures": request.figures,
         "judge": judge,
         "judge_configuration_fingerprint": judge_fingerprint,
+        "ranking_metric_contract": ranking_metric_contract,
         "implementation_sha256": implementation_sha256,
         "benchmark_prompt_contract": prompt_contract.contract_id,
         "benchmark_prompt_contract_sha256": prompt_contract_sha256_value,
@@ -747,6 +753,7 @@ def _prepare(
             "max_turns": request.max_turns,
             "benchmark_prompt_contract": prompt_contract.contract_id,
             "benchmark_prompt_contract_sha256": prompt_contract_sha256_value,
+            "ranking_metric_contract": ranking_metric_contract,
             "prompt_resources": config["prompt_resources"],
             "implementation_sha256": implementation_sha256,
         }
@@ -858,6 +865,7 @@ async def _run_row(
                 item["row_fingerprint"],
                 "failed",
                 implementation_sha256=item["implementation_sha256"],
+                ranking_metric_contract=item["identity"]["ranking_metric_contract"],
                 native_generation=authority.generation,
                 native_evidence_available=False,
             )
@@ -889,6 +897,7 @@ async def _run_row(
                     item["row_fingerprint"],
                     "failed",
                     implementation_sha256=item["implementation_sha256"],
+                    ranking_metric_contract=item["identity"]["ranking_metric_contract"],
                     native_generation=generation,
                     native_evidence_available=False,
                 )
@@ -939,6 +948,7 @@ async def _run_row(
                 "query_id": row.query_id,
                 "row_fingerprint": item["row_fingerprint"],
                 "implementation_sha256": item["implementation_sha256"],
+                "ranking_metric_contract": item["identity"]["ranking_metric_contract"],
                 "status": "completed",
                 "mode": request.mode,
                 "native_generation": generation,
@@ -982,6 +992,7 @@ async def _run_row(
             item["row_fingerprint"],
             "cancelled",
             implementation_sha256=item["implementation_sha256"],
+            ranking_metric_contract=item["identity"]["ranking_metric_contract"],
             native_generation=generation,
             native_evidence_available=available,
             native_evidence_fingerprint=evidence_fingerprint,
@@ -999,6 +1010,7 @@ async def _run_row(
             item["row_fingerprint"],
             "failed",
             implementation_sha256=item["implementation_sha256"],
+            ranking_metric_contract=item["identity"]["ranking_metric_contract"],
             native_generation=generation,
             native_evidence_available=available,
             native_evidence_fingerprint=evidence_fingerprint,
@@ -1157,6 +1169,7 @@ def _validate_config_document(
         "schema", "dataset", "mode", "profile", "corpus_identity", "corpus_hint",
         "cwd", "runtime", "conversation_features", "max_concurrency", "max_turns",
         "analysis", "figures", "judge", "judge_configuration_fingerprint",
+        "ranking_metric_contract",
         "implementation_sha256",
         "benchmark_prompt_contract", "benchmark_prompt_contract_sha256",
         "prompt_resources", "run_fingerprint", "batch_fingerprint",
@@ -1167,6 +1180,7 @@ def _validate_config_document(
         or not set(value).issubset(expected | optional)
         or value.get("schema") != "asterion.dci.batch/v1"
         or not _has_selected_prompt_contract(value)
+        or not _has_selected_metric_contract(value)
         or re.fullmatch(
             r"[0-9a-f]{64}", str(value.get("implementation_sha256"))
         )
@@ -1314,6 +1328,7 @@ def _validate_item_document(value: dict[str, Any]) -> None:
         raise DciBenchmarkError("DCI benchmark item evidence is invalid")
     if (
         not _has_selected_prompt_contract(identity)
+        or not _has_selected_metric_contract(identity)
         or re.fullmatch(
             r"[0-9a-f]{64}", str(value.get("implementation_sha256"))
         )
@@ -1420,6 +1435,31 @@ def _judge_contract_for_request(request: BenchmarkRequest) -> str:
         raise DciBenchmarkError("DCI benchmark Judge contract is invalid") from error
 
 
+def _metric_contract_for_request(request: BenchmarkRequest) -> str | None:
+    """Resolve the profile's one executable IR metric without model heuristics."""
+
+    if request.mode != "ir":
+        return None
+    if request.profile is None:
+        return DEDUPLICATED_NDCG_CONTRACT
+    try:
+        profile = _resolve_prompt_profile(
+            request.profile,
+            provider=request.runtime_options.provider,
+            model=request.runtime_options.model,
+        )
+    except ValueError as error:
+        raise DciBenchmarkError("DCI benchmark metric contract is invalid") from error
+    contracts = tuple(
+        contract
+        for contract in profile.metric_contracts
+        if contract in {DEDUPLICATED_NDCG_CONTRACT, UPSTREAM_LIST_NDCG_CONTRACT}
+    )
+    if len(contracts) != 1:
+        raise DciBenchmarkError("DCI benchmark metric contract is unreported")
+    return contracts[0]
+
+
 def _has_selected_prompt_contract(value: Mapping[str, Any]) -> bool:
     try:
         profile_id = value.get("profile")
@@ -1446,6 +1486,31 @@ def _has_selected_prompt_contract(value: Mapping[str, Any]) -> bool:
             == prompt_contract_sha256(contract, mode)
         )
     except (PromptContractError, ValueError):
+        return False
+
+
+def _has_selected_metric_contract(value: Mapping[str, Any]) -> bool:
+    try:
+        mode = value.get("mode")
+        if mode not in {"qa", "ir"}:
+            return False
+        profile_id = value.get("profile")
+        runtime = value.get("runtime")
+        provider = runtime.get("provider") if isinstance(runtime, dict) else None
+        model = runtime.get("model") if isinstance(runtime, dict) else None
+        request = BenchmarkRequest(
+            dataset=Path("/metric-contract-input"),
+            output_root=Path("/metric-contract-output"),
+            cwd=Path("/metric-contract-cwd"),
+            judge_config=JudgeConfig(),
+            runtime_options=DciRuntimeOptions(provider=provider, model=model),
+            mode=mode,
+            profile=profile_id if isinstance(profile_id, str) else None,
+        )
+        return value.get("ranking_metric_contract") == _metric_contract_for_request(
+            request
+        )
+    except (DciBenchmarkError, ValueError):
         return False
 
 
@@ -1586,7 +1651,7 @@ def _validate_result_shape(
     common = {
         "schema", "query_id", "row_fingerprint", "status", "mode",
         "native_generation", "native_evidence_fingerprint",
-        "implementation_sha256",
+        "implementation_sha256", "ranking_metric_contract",
     }
     expected = common | (
         {
@@ -1603,6 +1668,8 @@ def _validate_result_shape(
         or value.get("row_fingerprint") != item.get("row_fingerprint")
         or value.get("implementation_sha256")
         != item.get("implementation_sha256")
+        or value.get("ranking_metric_contract")
+        != item.get("identity", {}).get("ranking_metric_contract")
         or value.get("status") != "completed"
         or value.get("mode") != mode
         or not isinstance(value.get("native_generation"), str)
@@ -1624,12 +1691,15 @@ def _validate_terminal_result(
             "schema", "query_id", "row_fingerprint", "status",
             "native_generation", "native_evidence_available",
             "native_evidence_fingerprint", "implementation_sha256",
+            "ranking_metric_contract",
         }
         or value.get("schema") != "asterion.dci.batch-result/v1"
         or value.get("query_id") != item.get("query_id")
         or value.get("row_fingerprint") != item.get("row_fingerprint")
         or value.get("implementation_sha256")
         != item.get("implementation_sha256")
+        or value.get("ranking_metric_contract")
+        != item.get("identity", {}).get("ranking_metric_contract")
         or value.get("status") not in {"failed", "cancelled", "not_started"}
         or value.get("native_generation") is not None
         and (
@@ -1793,7 +1863,15 @@ def _resumable_run(path: Path) -> bool:
 
 
 def _reusable_result(value: object, item: dict[str, object], mode: str) -> bool:
-    if not isinstance(value, dict) or value.get("status") != "completed" or value.get("row_fingerprint") != item["row_fingerprint"]:
+    identity = item.get("identity")
+    if (
+        not isinstance(value, dict)
+        or not isinstance(identity, dict)
+        or value.get("status") != "completed"
+        or value.get("row_fingerprint") != item["row_fingerprint"]
+        or value.get("ranking_metric_contract")
+        != identity.get("ranking_metric_contract")
+    ):
         return False
     if mode == "ir":
         return "is_correct" not in value
@@ -1854,6 +1932,7 @@ def _failed_result(
     status: str,
     *,
     implementation_sha256: object,
+    ranking_metric_contract: object,
     native_generation: str | None = None,
     native_evidence_available: bool = False,
     native_evidence_fingerprint: str | None = None,
@@ -1863,6 +1942,7 @@ def _failed_result(
         "query_id": query_id,
         "row_fingerprint": row_fingerprint,
         "implementation_sha256": implementation_sha256,
+        "ranking_metric_contract": ranking_metric_contract,
         "status": status,
         "native_generation": native_generation,
         "native_evidence_available": native_evidence_available,
@@ -1911,6 +1991,7 @@ def _publish_aggregates(
     summary = aggregate_results(metrics)
     summary["provenance"] = {
         "implementation_sha256": implementation_sha256,
+        "ranking_metric_contract": _metric_contract_for_request(request),
     }
     lock.write_json("summary.json", summary)
     if include_analysis and request.analysis:
@@ -2044,7 +2125,13 @@ def _analysis_results(
         if judge_result is None and type(result.get("is_correct")) is bool:
             judge_result = {"is_correct": result["is_correct"]}
         ndcg = (
-            compute_ir_ndcg(final_text, row, request.corpus, 10)
+            compute_ir_ndcg(
+                final_text,
+                row,
+                request.corpus,
+                10,
+                metric_contract=str(_metric_contract_for_request(request)),
+            )
             if request.mode == "ir" and result.get("status") == "completed"
             else None
         )
@@ -2222,6 +2309,7 @@ def _terminal_results(
                 items[index]["row_fingerprint"],
                 missing_status,
                 implementation_sha256=items[index]["implementation_sha256"],
+                ranking_metric_contract=items[index]["identity"]["ranking_metric_contract"],
             )
             query.write_json("result.json", result)
         results[index] = result

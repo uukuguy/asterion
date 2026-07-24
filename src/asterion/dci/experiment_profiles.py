@@ -478,7 +478,19 @@ def _profiles() -> Mapping[str, ExperimentProfile]:
             dict(profile.judge) != expected_judge
             or profile.corpus_identity != "dci.paper-corpora/af-320-v1"
             or profile.metric_identities
-            != ("llm-answer-correctness", "ndcg@10-binary-deduplicated")
+            != (
+                "llm-answer-correctness",
+                (
+                    "dci.paper-ndcg@10/arxiv:2605.05242v1/"
+                    "duplicate-handling-unreported/v1"
+                    if name.startswith("paper-reference/")
+                    else (
+                        "ndcg@10-binary-upstream-list/v1"
+                        if name.startswith("upstream-github/")
+                        else "ndcg@10-binary-deduplicated/v1"
+                    )
+                ),
+            )
             or profile.aggregation_identity
             != "dci.paper-aggregation/query-preserving/v1"
             or dict(profile.comparison) != expected_comparison
