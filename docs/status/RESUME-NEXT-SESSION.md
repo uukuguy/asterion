@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-24 19:00. **Session remains active — not a final handoff.**
+> Updated: 2026-07-24 19:19. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -32,6 +32,11 @@
   controlled-code graphs.
 - Application Task 5 now uses a domain-neutral exact
   `asterion.host_services` factory registry with opaque generic CLI options.
+- Protocol Tasks 1–2 are implemented and independently reviewed clean:
+  runtime IDs/arrays are canonical across Python, TypeScript, and schemas;
+  every runtime tool call must have a matching result before termination.
+- Built-in Claude and Pi capability mappers now emit sorted, deduplicated
+  capabilities, closing the regression found during Task 1 review.
 
 ## Next steps
 
@@ -41,8 +46,8 @@ Execute, in order:
 2. `docs/superpowers/plans/2026-07-24-asterion-application-authority.md`
 3. `docs/superpowers/plans/2026-07-24-dci-provenance-reproduction.md`
 
-Start with Task 1 of the protocol plan using TDD. Keep commits atomic as
-specified by each task.
+Resume with Task 3 of the protocol plan using TDD. Tasks 1–2 are recorded in
+`.superpowers/sdd/progress.md`; keep commits atomic as specified by each task.
 
 ## Don't go down these paths again
 

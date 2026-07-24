@@ -21,3 +21,4 @@
 - 19:00 Resolved plan gates, fake host edges, and exact host-service registry before implementation [775710b]
 - 19:04 Enforced canonical runtime IDs and sorted capability arrays across validators and schemas [9094aaa]
 - 19:14 Canonicalized built-in adapter capabilities to prevent validator regressions [99a8e68]
+- 19:16 Require matched runtime tool lifecycle before terminal completion [3571121]
