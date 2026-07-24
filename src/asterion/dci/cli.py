@@ -141,6 +141,7 @@ def _parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--corpus-hint")
     benchmark.add_argument("--resolution-registry", type=Path)
     benchmark.add_argument("--resolution-segment-characters", type=int)
+    benchmark.add_argument("--resolution-read-minimum-evidence-overlap", type=float)
     benchmark.add_argument("--max-concurrency", type=int)
     benchmark.add_argument("--max-turns", type=int)
     benchmark.add_argument(
@@ -322,6 +323,7 @@ def main(
                 "tools",
                 "resolution_registry",
                 "resolution_segment_characters",
+                "resolution_read_minimum_evidence_overlap",
                 "system_prompt_file",
                 "append_system_prompt_file",
                 "corpus_hint",
@@ -604,6 +606,9 @@ def main(
                 args.resolution_segment_characters = (
                     selected_ablation.segment_characters
                 )
+                args.resolution_read_minimum_evidence_overlap = (
+                    selected_ablation.read_minimum_evidence_overlap
+                )
             _apply_benchmark_profile(
                 args, repo_root=root, invocation_cwd=invocation_cwd
             )
@@ -662,6 +667,9 @@ def main(
                 figures=not args.no_figures,
                 resolution_registry=benchmark_resolution_registry,
                 resolution_segment_characters=args.resolution_segment_characters,
+                resolution_read_minimum_evidence_overlap=(
+                    args.resolution_read_minimum_evidence_overlap
+                ),
                 ablation_row=(
                     selected_ablation.row_id
                     if selected_ablation is not None

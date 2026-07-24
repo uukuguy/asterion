@@ -126,6 +126,14 @@ _PAPER_IR_ASSUMPTION_LABELS = {
         "deduplicated/v1"
     ),
 }
+_PAPER_RESOLUTION_ASSUMPTION_LABELS = {
+    "segment_characters": (
+        "asterion.operator-assumption/paper-resolution-segment-characters/v1"
+    ),
+    "read_minimum_evidence_overlap": (
+        "asterion.operator-assumption/paper-resolution-read-overlap/v1"
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -150,6 +158,7 @@ class BenchmarkRequest:
     figures: bool = True
     resolution_registry: Path | None = None
     resolution_segment_characters: int | None = None
+    resolution_read_minimum_evidence_overlap: float | None = None
     ablation_row: str | None = None
     full_execution_authorization: FullExecutionAuthorization | None = None
     paper_ir_duplicate_handling: str | None = None
@@ -390,19 +399,62 @@ def _corpus_content_identity(corpus: Path) -> dict[str, object]:
     return {"sha256": _fingerprint(first), "file_count": len(first)}
 
 
+def _resolution_parameters(
+    request: BenchmarkRequest,
+) -> tuple[Path, int, float] | None:
+    """Return the complete explicit resolution triple or reject partial input."""
+
+    values = (
+        request.resolution_registry,
+        request.resolution_segment_characters,
+        request.resolution_read_minimum_evidence_overlap,
+    )
+    if values == (None, None, None):
+        return None
+    registry_path, segment_characters, overlap = values
+    if (
+        not isinstance(registry_path, Path)
+        or type(segment_characters) is not int
+        or segment_characters <= 0
+        or type(overlap) not in {int, float}
+        or not math.isfinite(float(overlap))
+        or not 0.0 < float(overlap) <= 1.0
+    ):
+        raise DciBenchmarkError("DCI benchmark resolution configuration is invalid")
+    return registry_path, segment_characters, float(overlap)
+
+
+def _resolution_operator_assumptions(
+    request: BenchmarkRequest,
+) -> dict[str, str] | None:
+    """Record explicit paper-unreported resolution choices as operator assumptions."""
+
+    if _resolution_parameters(request) is None or request.profile is None:
+        return None
+    try:
+        profile = _resolve_prompt_profile(
+            request.profile,
+            provider=request.runtime_options.provider,
+            model=request.runtime_options.model,
+        )
+    except ValueError as error:
+        raise DciBenchmarkError("DCI benchmark resolution configuration is invalid") from error
+    if profile.source_family != "paper-reference":
+        return None
+    return dict(_PAPER_RESOLUTION_ASSUMPTION_LABELS)
+
+
 def _resolution_manifest_paths(
     request: BenchmarkRequest, rows: tuple[BenchmarkRow, ...]
 ) -> tuple[dict[str, Path], dict[str, object], dict[str, bytes]]:
-    registry_path = request.resolution_registry
-    segment_characters = request.resolution_segment_characters
-    if registry_path is None and segment_characters is None:
+    parameters = _resolution_parameters(request)
+    if parameters is None:
         return {}, {}, {}
+    registry_path, segment_characters, overlap = parameters
+    operator_assumptions = _resolution_operator_assumptions(request)
     features = request.conversation_features or DciConversationFeatures()
     if (
-        registry_path is None
-        or type(segment_characters) is not int
-        or segment_characters <= 0
-        or request.corpus is None
+        request.corpus is None
         or not features.externalize_tool_results
     ):
         raise DciBenchmarkError("DCI benchmark resolution configuration is invalid")
@@ -476,14 +528,20 @@ def _resolution_manifest_paths(
             "schema": "dci.trajectory-analysis-config/v1",
             "dataset_id": registry["dataset_id"],
             "corpus": _corpus_content_identity(request.corpus),
+            "parameter_source": "asterion-defined",
             "segment_characters": segment_characters,
             "alignment_version": "dci.paper-alignment/v1",
-            "read_minimum_evidence_overlap": 0.5,
+            "read_minimum_evidence_overlap": overlap,
             "registry": {
                 "identity": str(canonical_input_identity(registry_path)),
                 "sha256": hashlib.sha256(registry_raw).hexdigest(),
             },
             "manifests": identities,
+            **(
+                {"operator_assumptions": operator_assumptions}
+                if operator_assumptions is not None
+                else {}
+            ),
         },
         snapshots,
     )
@@ -498,6 +556,7 @@ def _prepare(
     tuple[dict[str, object], ...],
     dict[str, bytes],
 ]:
+    _resolution_parameters(request)
     if request.mode not in {"qa", "ir"}:
         raise DciBenchmarkError("DCI benchmark mode is invalid")
     for value, label in (
@@ -522,6 +581,7 @@ def _prepare(
     paper_ir_duplicate_handling_assumption = (
         _paper_ir_assumption_label_for_request(request)
     )
+    paper_resolution_assumptions = _resolution_operator_assumptions(request)
     prompt_contract, prompt_contract_sha256_value = _prompt_contract_for_request(
         request
     )
@@ -563,6 +623,8 @@ def _prepare(
             or canonical_input_identity(request.resolution_registry)
             != canonical_input_identity(expected_registry)
             or request.resolution_segment_characters != ablation.segment_characters
+            or request.resolution_read_minimum_evidence_overlap
+            != ablation.read_minimum_evidence_overlap
         ):
             raise DciBenchmarkError("DCI benchmark ablation row is invalid")
         ablation_identity = {
@@ -729,7 +791,8 @@ def _prepare(
             "selected_rows": len(rows),
             "full_dataset": True,
             "comparable": _paper_selection_is_comparable(
-                paper_ir_duplicate_handling_assumption
+                paper_ir_duplicate_handling_assumption,
+                paper_resolution_assumptions,
             ),
             "authorization_profile": (
                 authorization.profile_id if authorization is not None else None
@@ -1194,6 +1257,85 @@ def _legacy_nonpaper_run_fingerprint(config: dict[str, object]) -> str:
     )
 
 
+def _valid_resolution_configuration(
+    value: object, *, profile_id: object, runtime: object
+) -> bool:
+    """Validate the closed, body-free resolution configuration evidence."""
+
+    if not isinstance(value, dict):
+        return False
+    expected = {
+        "schema",
+        "dataset_id",
+        "corpus",
+        "parameter_source",
+        "segment_characters",
+        "alignment_version",
+        "read_minimum_evidence_overlap",
+        "registry",
+        "manifests",
+    }
+    assumptions = value.get("operator_assumptions")
+    if assumptions is not None:
+        expected.add("operator_assumptions")
+    corpus = value.get("corpus")
+    registry = value.get("registry")
+    manifests = value.get("manifests")
+    overlap = value.get("read_minimum_evidence_overlap")
+    if (
+        set(value) != expected
+        or value.get("schema") != "dci.trajectory-analysis-config/v1"
+        or type(value.get("dataset_id")) is not str
+        or not value["dataset_id"]
+        or value.get("parameter_source") != "asterion-defined"
+        or type(value.get("segment_characters")) is not int
+        or value["segment_characters"] <= 0
+        or value.get("alignment_version") != "dci.paper-alignment/v1"
+        or type(overlap) not in {int, float}
+        or not math.isfinite(float(overlap))
+        or not 0.0 < float(overlap) <= 1.0
+        or type(corpus) is not dict
+        or set(corpus) != {"sha256", "file_count"}
+        or re.fullmatch(r"[0-9a-f]{64}", str(corpus.get("sha256"))) is None
+        or type(corpus.get("file_count")) is not int
+        or corpus["file_count"] < 1
+        or type(registry) is not dict
+        or set(registry) != {"identity", "sha256"}
+        or type(registry.get("identity")) is not str
+        or not registry["identity"]
+        or re.fullmatch(r"[0-9a-f]{64}", str(registry.get("sha256"))) is None
+        or type(manifests) is not dict
+        or not manifests
+    ):
+        return False
+    for query_id, manifest in manifests.items():
+        if (
+            type(query_id) is not str
+            or not query_id
+            or type(manifest) is not dict
+            or set(manifest) != {"identity", "sha256", "snapshot_key"}
+            or type(manifest.get("identity")) is not str
+            or not manifest["identity"]
+            or re.fullmatch(r"[0-9a-f]{64}", str(manifest.get("sha256"))) is None
+            or type(manifest.get("snapshot_key")) is not str
+            or not manifest["snapshot_key"]
+        ):
+            return False
+    try:
+        provider = runtime.get("provider") if isinstance(runtime, dict) else None
+        model = runtime.get("model") if isinstance(runtime, dict) else None
+        source_family = (
+            None
+            if profile_id is None
+            else _resolve_prompt_profile(profile_id, provider=provider, model=model).source_family
+        )
+    except ValueError:
+        return False
+    if source_family == "paper-reference":
+        return assumptions == _PAPER_RESOLUTION_ASSUMPTION_LABELS
+    return assumptions is None
+
+
 def _validate_config_document(
     value: dict[str, Any], *, expected_execution_class: str,
     allow_legacy_nonpaper: bool = False,
@@ -1222,6 +1364,14 @@ def _validate_config_document(
         or not _has_selected_prompt_contract(value)
         or not _has_selected_metric_contract(value)
         or not _has_selected_paper_ir_assumption(value)
+        or (
+            "resolution" in value
+            and not _valid_resolution_configuration(
+                value["resolution"],
+                profile_id=value.get("profile"),
+                runtime=value.get("runtime"),
+            )
+        )
         or re.fullmatch(
             r"[0-9a-f]{64}", str(value.get("implementation_sha256"))
         )
@@ -1264,6 +1414,12 @@ def _validate_config_document(
     ):
         raise DciBenchmarkError("DCI benchmark configuration evidence is invalid")
     selection = value.get("selection")
+    resolution = value.get("resolution")
+    resolution_assumptions = (
+        resolution.get("operator_assumptions")
+        if isinstance(resolution, dict)
+        else None
+    )
     try:
         selection_profile_scope = paper_scope_for_profile(value.get("profile"))
     except ValueError:
@@ -1326,7 +1482,8 @@ def _validate_config_document(
                 and selection.get("selected_rows") == expected_rows
                 and selection.get("full_dataset") is True
                 and selection.get("comparable") is _paper_selection_is_comparable(
-                    value.get("paper_ir_duplicate_handling_assumption")
+                    value.get("paper_ir_duplicate_handling_assumption"),
+                    resolution_assumptions,
                 )
                 and type(authorization_profile) is str
             )
@@ -1519,6 +1676,8 @@ def _metric_contract_for_request(request: BenchmarkRequest) -> str | None:
 def validate_benchmark_metric_selection(request: BenchmarkRequest) -> None:
     """Reject missing or injected paper scoring assumptions before execution."""
 
+    _resolution_parameters(request)
+    _resolution_operator_assumptions(request)
     _metric_contract_for_request(request)
     _paper_ir_assumption_label_for_request(request)
 
@@ -1547,10 +1706,13 @@ def _paper_ir_assumption_label_for_request(
     return label
 
 
-def _paper_selection_is_comparable(assumption_label: object) -> bool:
+def _paper_selection_is_comparable(
+    assumption_label: object,
+    resolution_assumptions: object = None,
+) -> bool:
     """Paper-assumption IR results never claim paper-reported comparability."""
 
-    return assumption_label is None
+    return assumption_label is None and resolution_assumptions is None
 
 
 def _has_selected_prompt_contract(value: Mapping[str, Any]) -> bool:
@@ -2278,6 +2440,7 @@ def _analysis_results(
             and isinstance(generation, str)
             and request.corpus is not None
             and request.resolution_segment_characters is not None
+            and request.resolution_read_minimum_evidence_overlap is not None
         ):
             attempts = state.get("attempts")
             if not isinstance(attempts, list) or not attempts:
@@ -2304,7 +2467,10 @@ def _analysis_results(
                     attempt=len(attempts),
                     corpus_dir=request.corpus,
                     config=TrajectoryAnalysisConfig(
-                        segment_characters=request.resolution_segment_characters
+                        segment_characters=request.resolution_segment_characters,
+                        read_minimum_evidence_overlap=(
+                            request.resolution_read_minimum_evidence_overlap
+                        ),
                     ),
                     gold_manifest_bytes=manifest_bytes,
                 )

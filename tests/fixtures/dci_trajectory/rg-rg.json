@@ -1,0 +1,44 @@
+{
+  "schema": "dci.trajectory-fixture/v1",
+  "fixture_id": "rg-rg",
+  "dataset_id": "trajectory-fixture-dataset",
+  "query_id": "trajectory-fixture-query",
+  "configuration": {
+    "parameter_source": "asterion-defined",
+    "segment_characters": 4096,
+    "read_minimum_evidence_overlap": 0.5
+  },
+  "tool_call": {
+    "call_id": "call-rg-rg",
+    "name": "bash",
+    "arguments": {
+      "command": "rg -n gold doc-b.txt doc-a.txt | rg 'gold text'"
+    },
+    "output": "doc-a.txt:3:gold text\n"
+  },
+  "corpus": [
+    {
+      "document_id": "doc-a.txt",
+      "relative_path": "doc-a.txt",
+      "body": "line one\nline two\ngold text\nline four\n",
+      "sha256": "32bef3bbe2d07670c3828450be5887cfe379587a2c38bdc933b569d4df0f4589",
+      "evidence_spans": [{"start": 18, "end": 27}]
+    },
+    {
+      "document_id": "doc-b.txt",
+      "relative_path": "doc-b.txt",
+      "body": "alt one\nalt two\nother gold\n",
+      "sha256": "a60b1479515696d15f1c3af95c6571cba091d8b92298af1ecfca1b6424453e40",
+      "evidence_spans": [{"start": 16, "end": 26}]
+    }
+  ],
+  "expected": {
+    "surfaced_gold_ids": ["doc-a.txt"],
+    "coverage": {"any": 1.0, "mean": 0.5, "all": 0.0},
+    "localization": {
+      "per_document": [{"document_id": "doc-a.txt", "value": 1.0}],
+      "query": {"value": 1.0, "matched_gold_count": 1, "unavailable_reason": null},
+      "dataset": {"value": 1.0, "matched_gold_count": 1}
+    }
+  }
+}

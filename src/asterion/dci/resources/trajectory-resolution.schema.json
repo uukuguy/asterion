@@ -145,8 +145,9 @@
     "configuration": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["alignment_version", "read_minimum_evidence_overlap", "segment_characters"],
+      "required": ["parameter_source", "alignment_version", "read_minimum_evidence_overlap", "segment_characters"],
       "properties": {
+        "parameter_source": {"const": "asterion-defined"},
         "alignment_version": {"const": "dci.paper-alignment/v1"},
         "read_minimum_evidence_overlap": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
         "segment_characters": {"type": "integer", "minimum": 1}

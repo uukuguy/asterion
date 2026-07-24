@@ -47,22 +47,27 @@ class TrajectoryAnalysisConfig:
     segment_characters: int
     read_minimum_evidence_overlap: float = 0.5
     alignment_version: str = "dci.paper-alignment/v1"
+    parameter_source: str = "asterion-defined"
 
     def __post_init__(self) -> None:
+        overlap = self.read_minimum_evidence_overlap
         if (
             type(self.segment_characters) is not int
             or self.segment_characters <= 0
-            or type(self.read_minimum_evidence_overlap) is not float
-            or not math.isfinite(self.read_minimum_evidence_overlap)
-            or not 0.0 < self.read_minimum_evidence_overlap <= 1.0
+            or type(overlap) not in {int, float}
+            or not math.isfinite(float(overlap))
+            or not 0.0 < float(overlap) <= 1.0
             or self.alignment_version != "dci.paper-alignment/v1"
+            or self.parameter_source != "asterion-defined"
         ):
             raise TrajectoryResolutionError(
                 "DCI trajectory analysis configuration is invalid"
             )
+        object.__setattr__(self, "read_minimum_evidence_overlap", float(overlap))
 
     def to_mapping(self) -> dict[str, object]:
         return {
+            "parameter_source": self.parameter_source,
             "alignment_version": self.alignment_version,
             "read_minimum_evidence_overlap": self.read_minimum_evidence_overlap,
             "segment_characters": self.segment_characters,
@@ -107,6 +112,7 @@ class _ToolObservation:
 
 
 _GREP_LINE = re.compile(r"^(?P<path>[^:\r\n]+):(?P<line>[1-9][0-9]*):(?P<text>.*)$")
+_GREP_PATH_LINE = re.compile(r"^(?P<path>[^:\r\n]+):(?P<line>[1-9][0-9]*)$")
 _PUBLIC_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SAFE_TOOLS = frozenset({"read", "grep", "rg", "bash"})
@@ -710,44 +716,86 @@ def _read_alignments(
     return [_fallback_alignment(observation, document)]
 
 
-def _grep_alignments(
+def _matched_line_alignment(
+    observation: _ToolObservation,
+    document: _GoldDocument,
+    line_number: int,
+    output_line: str,
+    expected_text: str | None,
+) -> dict[str, object] | None:
+    span = _line_span(document.body, line_number)
+    if span is None or (expected_text is not None and span[2] != expected_text):
+        return None
+    start, end, text = span
+    return {
+        "call_id": observation.call_id,
+        "tool": observation.name,
+        "document_id": document.document_id,
+        "rule": "grep-matched-line",
+        "snippet_characters": max(1, len(text)),
+        "start": start,
+        "end": end,
+        "observation": output_line,
+    }
+
+
+def _output_alignments(
     observation: _ToolObservation,
     documents: tuple[_GoldDocument, ...],
 ) -> list[dict[str, object]]:
+    """Return corpus-verified output evidence without consulting arguments."""
+
+    if observation.name not in {"grep", "rg", "bash"}:
+        return []
     alignments: list[dict[str, object]] = []
     for output_line in observation.output.splitlines():
-        match = _GREP_LINE.fullmatch(output_line)
-        if match is None:
+        line_match = _GREP_LINE.fullmatch(output_line)
+        if line_match is not None:
+            document = _argument_path(line_match.group("path"), documents)
+            if document is None:
+                continue
+            alignment = _matched_line_alignment(
+                observation,
+                document,
+                int(line_match.group("line")),
+                output_line,
+                line_match.group("text"),
+            )
+            if alignment is not None:
+                alignments.append(alignment)
             continue
-        document = _argument_path(match.group("path"), documents)
-        if document is None:
+        path_line_match = _GREP_PATH_LINE.fullmatch(output_line)
+        if path_line_match is not None:
+            document = _argument_path(path_line_match.group("path"), documents)
+            if document is None:
+                continue
+            alignment = _matched_line_alignment(
+                observation,
+                document,
+                int(path_line_match.group("line")),
+                output_line,
+                None,
+            )
+            if alignment is not None:
+                alignments.append(alignment)
             continue
-        span = _line_span(document.body, int(match.group("line")))
-        if span is None or span[2] != match.group("text"):
-            continue
-        start, end, text = span
-        alignments.append(
-            {
-                "call_id": observation.call_id,
-                "tool": observation.name,
-                "document_id": document.document_id,
-                "rule": "grep-matched-line",
-                "snippet_characters": max(1, len(text)),
-                "start": start,
-                "end": end,
-                "observation": output_line,
-            }
-        )
-    if alignments:
-        return alignments
-    document = _argument_path(observation.arguments.get("path"), documents)
-    return [_fallback_alignment(observation, document)] if document else []
+        document = _argument_path(output_line, documents)
+        if document is not None:
+            alignments.append(_fallback_alignment(observation, document))
+    return alignments
 
 
-def _bash_alignments(
+def _argument_fallbacks(
     observation: _ToolObservation,
     documents: tuple[_GoldDocument, ...],
 ) -> list[dict[str, object]]:
+    """Return full-document fallbacks derived only from exact tool arguments."""
+
+    if observation.name in {"grep", "rg"}:
+        document = _argument_path(observation.arguments.get("path"), documents)
+        return [_fallback_alignment(observation, document)] if document else []
+    if observation.name != "bash":
+        return []
     command = observation.arguments.get("command")
     if type(command) is not str or not command:
         raise TrajectoryResolutionError("DCI bash observation is invalid")
@@ -755,17 +803,11 @@ def _bash_alignments(
         tokens = shlex.split(command)
     except ValueError as error:
         raise TrajectoryResolutionError("DCI bash observation is malformed") from error
-    referenced = []
+    referenced: list[_GoldDocument] = []
     for token in tokens:
         document = _argument_path(token, documents)
         if document is not None and document not in referenced:
             referenced.append(document)
-    if any(token in {"|", "||", "&&", ";", ">", ">>", "<"} for token in tokens):
-        return [_fallback_alignment(observation, document) for document in referenced]
-    if tokens and PurePosixPath(tokens[0]).name in {"grep", "rg"}:
-        return _grep_alignments(observation, documents) or [
-            _fallback_alignment(observation, document) for document in referenced
-        ]
     return [_fallback_alignment(observation, document) for document in referenced]
 
 
@@ -778,10 +820,10 @@ def _align(
     for observation in observations:
         if observation.name == "read":
             current = _read_alignments(observation, documents, config)
-        elif observation.name in {"grep", "rg"}:
-            current = _grep_alignments(observation, documents)
-        elif observation.name == "bash":
-            current = _bash_alignments(observation, documents)
+        elif observation.name in {"grep", "rg", "bash"}:
+            current = _output_alignments(observation, documents)
+            if not current:
+                current = _argument_fallbacks(observation, documents)
         else:  # pragma: no cover - closed at protocol validation
             raise TrajectoryResolutionError("DCI observation tool is unsupported")
         alignments.extend(current)
@@ -1189,6 +1231,27 @@ def _non_negative_int(value: object) -> int:
     return value
 
 
+def _valid_analysis_configuration(value: object) -> bool:
+    overlap = value.get("read_minimum_evidence_overlap") if type(value) is dict else None
+    return (
+        type(value) is dict
+        and set(value)
+        == {
+            "parameter_source",
+            "alignment_version",
+            "read_minimum_evidence_overlap",
+            "segment_characters",
+        }
+        and value.get("parameter_source") == "asterion-defined"
+        and value.get("alignment_version") == "dci.paper-alignment/v1"
+        and type(overlap) in {int, float}
+        and math.isfinite(float(overlap))
+        and 0.0 < float(overlap) <= 1.0
+        and type(value.get("segment_characters")) is int
+        and value["segment_characters"] > 0
+    )
+
+
 def _validated_public_fields(
     evidence: object,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
@@ -1226,7 +1289,7 @@ def _validated_public_fields(
         or set(run) != {"run_id", "attempt"}
         or type(dataset) is not dict
         or set(dataset) != {"dataset_id", "query_id"}
-        or type(configuration) is not dict
+        or not _valid_analysis_configuration(configuration)
         or type(metrics) is not dict
         or set(metrics) != {"coverage", "localization", "retained_coverage"}
         or type(counts) is not dict

@@ -399,9 +399,10 @@ def paper_product_contract() -> dict[str, object]:
             "retained_coverage",
         ],
         "analysis_configuration": {
+            "parameter_source": "asterion-defined",
             "alignment_version": "dci.paper-alignment/v1",
             "segment_characters": "required-positive-integer",
-            "read_minimum_evidence_overlap": 0.5,
+            "read_minimum_evidence_overlap": "required-unit-interval",
         },
         "safe_artifact_schemas": [
             "asterion.dci.batch-analysis/v1",

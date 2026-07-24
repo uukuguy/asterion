@@ -14,9 +14,13 @@ from asterion.dci.benchmark import (
     BenchmarkResult,
     BenchmarkRequest,
     DciBenchmarkError,
+    _fingerprint,
     _prepare,
+    _validate_config_document,
     run_benchmark,
+    validate_benchmark_metric_selection,
 )
+from asterion.dci.artifacts import DciConversationFeatures
 from asterion.dci.cli import main as dci_main
 from asterion.dci.config import DciRuntimeOptions, resolve_dci_paths
 from asterion.dci.experiment_profiles import (
@@ -82,6 +86,229 @@ def _recorded_run(_paths: object, request: object, **kwargs: object) -> DciRunRe
 
 
 class AsterionDciBenchmarkTests(unittest.TestCase):
+    def test_resolution_requires_complete_configuration_before_agent_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            corpus = root / "corpus"
+            corpus.mkdir()
+            request = replace(
+                _request(root),
+                profile="asterion-safe/pi",
+                corpus=corpus,
+                resolution_registry=root / "registry.json",
+                resolution_segment_characters=4096,
+                conversation_features=DciConversationFeatures(
+                    externalize_tool_results=True
+                ),
+            )
+            with patch("asterion.dci.benchmark.run_pi_research") as run:
+                with self.assertRaisesRegex(DciBenchmarkError, "resolution configuration"):
+                    run_benchmark(request, paths=Mock())
+
+        run.assert_not_called()
+
+    def test_resolution_configuration_binds_parameter_source_overlap_and_fingerprint(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            first = _resolution_request(root, overlap=0.5)
+            _rows, _output, first_config, _items, _snapshots = _prepare(first)
+            second = _resolution_request(root, overlap=0.75)
+            _rows, _output, second_config, _items, _snapshots = _prepare(second)
+
+        self.assertEqual(
+            first_config["resolution"]["parameter_source"],
+            "asterion-defined",
+        )
+        self.assertEqual(first_config["resolution"]["read_minimum_evidence_overlap"], 0.5)
+        self.assertNotEqual(
+            first_config["run_fingerprint"], second_config["run_fingerprint"]
+        )
+
+    def test_resolution_normalizes_integer_overlap_and_accepts_persisted_json_number(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            _rows, _output, config, _items, _snapshots = _prepare(
+                _resolution_request(root, overlap=1)
+            )
+
+        self.assertEqual(config["resolution"]["read_minimum_evidence_overlap"], 1.0)
+        persisted = json.loads(json.dumps(config))
+        persisted["resolution"]["read_minimum_evidence_overlap"] = 1
+        persisted["run_fingerprint"] = _fingerprint(
+            {
+                key: value
+                for key, value in persisted.items()
+                if key not in {"judge", "judge_configuration_fingerprint", "run_fingerprint", "batch_fingerprint"}
+            }
+        )
+        batch_payload = dict(persisted)
+        batch_payload.pop("batch_fingerprint")
+        persisted["batch_fingerprint"] = _fingerprint(batch_payload)
+
+        _validate_config_document(persisted, expected_execution_class="non-paper")
+
+    def test_resolution_request_rejects_invalid_overlap_and_registry_types_before_agent_execution(self) -> None:
+        base = BenchmarkRequest(
+            dataset=Path("/tmp/dataset.jsonl"),
+            output_root=Path("/tmp/output"),
+            cwd=Path("/tmp"),
+            judge_config=JudgeConfig(),
+            runtime_options=DciRuntimeOptions(),
+            resolution_registry=Path("/tmp/registry.json"),
+            resolution_segment_characters=4096,
+            resolution_read_minimum_evidence_overlap=0.5,
+        )
+        for changes in (
+            {"resolution_read_minimum_evidence_overlap": True},
+            {"resolution_read_minimum_evidence_overlap": 0},
+            {"resolution_read_minimum_evidence_overlap": float("inf")},
+            {"resolution_registry": "/tmp/registry.json"},
+        ):
+            with self.subTest(changes=changes):
+                with self.assertRaisesRegex(DciBenchmarkError, "resolution configuration"):
+                    validate_benchmark_metric_selection(replace(base, **changes))
+
+    def test_paper_resolution_records_operator_assumptions_and_is_not_comparable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            request = replace(
+                _resolution_request(root, overlap=0.5),
+                profile="paper-reference/pi",
+                runtime_options=DciRuntimeOptions(
+                    provider="openai", model="gpt-5.4-nano"
+                ),
+                limit=1,
+            )
+            with patch(
+                "asterion.dci.benchmark.paper_scope_for_profile",
+                return_value="fixture-scope",
+            ), patch(
+                "asterion.dci.benchmark._paper_scope_for_rows",
+                return_value="fixture-scope",
+            ), patch(
+                "asterion.dci.benchmark.resolve_paper_experiment_scope",
+                return_value=Mock(dataset_id="fixture-dataset"),
+            ), patch(
+                "asterion.dci.benchmark.resolve_paper_benchmark",
+                return_value=Mock(dataset_id="fixture-dataset"),
+            ):
+                _rows, _output, config, _items, _snapshots = _prepare(request)
+
+        self.assertEqual(
+            config["resolution"]["operator_assumptions"],
+            {
+                "segment_characters": "asterion.operator-assumption/paper-resolution-segment-characters/v1",
+                "read_minimum_evidence_overlap": "asterion.operator-assumption/paper-resolution-read-overlap/v1",
+            },
+        )
+        self.assertFalse(config["selection"]["comparable"])
+
+    def test_rehashed_resolution_configuration_mutation_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            _rows, _output, config, _items, _snapshots = _prepare(_request(root))
+
+        forged = json.loads(json.dumps(config))
+        forged["resolution"] = {"parameter_source": "forged"}
+        forged["run_fingerprint"] = _fingerprint(
+            {
+                key: value
+                for key, value in forged.items()
+                if key not in {"judge", "judge_configuration_fingerprint", "run_fingerprint", "batch_fingerprint"}
+            }
+        )
+        batch_payload = dict(forged)
+        batch_payload.pop("batch_fingerprint")
+        forged["batch_fingerprint"] = _fingerprint(batch_payload)
+
+        with self.assertRaisesRegex(DciBenchmarkError, "configuration evidence"):
+            _validate_config_document(forged, expected_execution_class="non-paper")
+
+    def test_paper_resolution_requires_explicit_overlap_before_execution(self) -> None:
+        request = BenchmarkRequest(
+            dataset=Path("/tmp/dataset.jsonl"),
+            output_root=Path("/tmp/output"),
+            cwd=Path("/tmp"),
+            judge_config=JudgeConfig(),
+            runtime_options=DciRuntimeOptions(provider="openai", model="gpt-5.4-nano"),
+            profile="paper-reference/pi",
+            resolution_registry=Path("/tmp/registry.json"),
+            resolution_segment_characters=4096,
+        )
+
+        with self.assertRaisesRegex(DciBenchmarkError, "resolution configuration"):
+            validate_benchmark_metric_selection(request)
+
+    def test_benchmark_cli_propagates_explicit_resolution_overlap(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            dataset = root / "dataset.jsonl"
+            corpus = root / "corpus"
+            corpus.mkdir()
+            registry = root / "registry.json"
+            registry.write_text("{}\n", encoding="utf-8")
+            dataset.write_text(
+                json.dumps({"query_id": "q-1", "query": "question", "answer": "answer"}) + "\n",
+                encoding="utf-8",
+            )
+            captured: list[BenchmarkRequest] = []
+
+            def capture(request: BenchmarkRequest, *, paths: object) -> BenchmarkResult:
+                del paths
+                captured.append(request)
+                return BenchmarkResult(request.output_root, {"total": 1})
+
+            with patch("asterion.dci.cli.run_benchmark", side_effect=capture), patch(
+                "asterion.dci.cli.validate_dci_run_request"
+            ):
+                stdout = __import__("io").StringIO()
+                stderr = __import__("io").StringIO()
+                code = dci_main(
+                    [
+                        "benchmark",
+                        "--dataset", str(dataset),
+                        "--output-root", str(root / "out"),
+                        "--cwd", str(root),
+                        "--corpus", str(corpus),
+                        "--resolution-registry", str(registry),
+                        "--resolution-segment-characters", "4096",
+                        "--resolution-read-minimum-evidence-overlap", "0.75",
+                    ],
+                    repo_root=root,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+
+        self.assertEqual(code, 0, stderr.getvalue())
+        self.assertEqual(captured[0].resolution_read_minimum_evidence_overlap, 0.75)
+
+    def test_ablation_propagates_its_exact_resolution_overlap(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            captured: list[BenchmarkRequest] = []
+
+            def capture(request: BenchmarkRequest, *, paths: object) -> BenchmarkResult:
+                del paths
+                captured.append(request)
+                return BenchmarkResult(request.output_root, {"total": 1})
+
+            with patch("asterion.dci.cli.run_benchmark", side_effect=capture), patch(
+                "asterion.dci.cli.validate_dci_run_request"
+            ):
+                code = dci_main(
+                    [
+                        "benchmark",
+                        "--ablation-row", "bounded.context.level0",
+                        "--output-root", str(root / "out"),
+                    ],
+                    repo_root=root,
+                    stdout=__import__("io").StringIO(),
+                    stderr=__import__("io").StringIO(),
+                )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(captured[0].resolution_read_minimum_evidence_overlap, 0.5)
+
     def setUp(self) -> None:
         from asterion.dci import experiment_profiles
 
@@ -635,6 +862,17 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         self.assertNotIn("current-default", canonical_evidence)
         self.assertIn("asterion-safe/pi", canonical_evidence)
 
+    def test_paper_product_contract_marks_resolution_parameters_as_asterion_defined(self) -> None:
+        from asterion.dci.verification import paper_product_contract
+
+        configuration = paper_product_contract()["analysis_configuration"]
+
+        self.assertEqual(configuration["parameter_source"], "asterion-defined")
+        self.assertEqual(
+            configuration["read_minimum_evidence_overlap"],
+            "required-unit-interval",
+        )
+
     def _assert_invalid_profile_mutation(self, profile_id, mutate) -> None:
         from asterion.dci import experiment_profiles
 
@@ -968,6 +1206,58 @@ def _request(root: Path, *, query_id: str = "q-1") -> BenchmarkRequest:
         cwd=root,
         judge_config=JudgeConfig(base_url="https://judge.example.test/v1"),
         runtime_options=DciRuntimeOptions(provider=None, model=None),
+    )
+
+
+def _resolution_request(root: Path, *, overlap: float) -> BenchmarkRequest:
+    corpus = root / "corpus"
+    corpus.mkdir(exist_ok=True)
+    document = corpus / "doc.txt"
+    body = "gold text\n"
+    document.write_text(body, encoding="utf-8")
+    manifest = {
+        "schema": "dci.gold-document-manifest/v1",
+        "dataset_id": "fixture-dataset",
+        "query_id": "q-1",
+        "documents": [
+            {
+                "id": "doc.txt",
+                "path": "doc.txt",
+                "sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+                "evidence_spans": [{"start": 0, "end": 9}],
+            }
+        ],
+    }
+    manifest_path = root / "gold-q-1.json"
+    manifest_bytes = (json.dumps(manifest, sort_keys=True) + "\n").encode("utf-8")
+    manifest_path.write_bytes(manifest_bytes)
+    registry_path = root / "registry.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema": "dci.gold-document-registry/v1",
+                "dataset_id": "fixture-dataset",
+                "manifests": [
+                    {
+                        "query_id": "q-1",
+                        "path": manifest_path.name,
+                        "sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+                    }
+                ],
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return replace(
+        _request(root),
+        profile="asterion-safe/pi",
+        corpus=corpus,
+        resolution_registry=registry_path,
+        resolution_segment_characters=4096,
+        resolution_read_minimum_evidence_overlap=overlap,
+        conversation_features=DciConversationFeatures(externalize_tool_results=True),
     )
 
 
