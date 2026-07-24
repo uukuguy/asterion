@@ -313,6 +313,7 @@ past tense so they cannot be mistaken for current behavior:
 | A2 | High | Closed | Acceptance collapsed packaged inventory into executable reachability | Named `packaged-assemblies`, `bound-assemblies`, `composed-assemblies`, and `executable-assemblies` checks |
 | A3 | High | Closed | Pi bypassed the selected runtime and execution rediscovered authority | Pi/Claude runtime-factory and complete-application tests |
 | A4 | High | Closed | Corpus and Judge authority were implicit environment state | Host-service preflight, descriptor-identity, Judge-redaction, and cancellation tests |
+| D1 | Medium | Closed | Application-authority documentation had not passed independent final claim review | `application-task-8-review-result.md`; `make docs-check`; `make check`; `make promotion-check` |
 
 The remaining current gaps are:
 
@@ -323,7 +324,6 @@ The remaining current gaps are:
 | E3 | High | Pipeline/path-only evidence is missed | Hand-calculated trajectory fixtures match expected coverage/localization |
 | E4 | High | Full authorization and budget are not executable authority | One authorized bounded scope consumes authority once and enforces a positive cap |
 | E5 | High | Benchmark evidence cannot compile into comparison input | Validated RunManifest is emitted and accepted by compare without manual conversion |
-| D1 | Medium | Application-authority documentation has not yet passed independent final claim review | `make docs-check`, repository-wide gates, and an independent Task 8 review pass |
 
 ## Delivery sequence
 
