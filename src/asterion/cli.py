@@ -387,6 +387,7 @@ def _verification_payload(result: VerificationResult) -> dict[str, object]:
                 "status": check.status,
                 "artifact_refs": list(check.artifact_refs),
                 "counts": dict(check.counts),
+                "unbound_resources": list(check.unbound_resources),
             }
             for check in result.checks
         ],
@@ -429,6 +430,12 @@ def _render_verification(result: VerificationResult, stdout: TextIO) -> None:
             )
         if check.artifact_refs:
             stdout.write("  artifacts: " + ", ".join(check.artifact_refs) + "\n")
+        if check.unbound_resources:
+            stdout.write(
+                "  unbound resources: "
+                + ", ".join(check.unbound_resources)
+                + "\n"
+            )
     stdout.write(f"Overall: {result.status}\n")
     stdout.write(
         f"Provider-backed operations: {result.provider_backed_operation_count}\n"

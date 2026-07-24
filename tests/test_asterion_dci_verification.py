@@ -26,10 +26,13 @@ from asterion.dci.config import resolve_dci_paths
 PROJECT = Path(__file__).resolve().parents[1]
 SOURCE = PROJECT / "src/asterion"
 EXPECTED_CHECKS = (
-    "application-assemblies",
     "application-providers",
+    "bound-assemblies",
     "capability-manifests",
+    "composed-assemblies",
     "context-profiles",
+    "executable-assemblies",
+    "packaged-assemblies",
     "paper-benchmarks",
     "paper-scopes",
     "provider-requests",
@@ -125,15 +128,52 @@ class InstalledAcceptanceTests(unittest.TestCase):
         self.assertEqual(
             {check.check_id: dict(check.counts) for check in result.checks},
             {
-                "application-assemblies": {"actual": 6, "expected": 6},
                 "application-providers": {"actual": 2, "expected": 2},
+                "bound-assemblies": {"actual": 5, "expected": 5},
                 "capability-manifests": {"actual": 11, "expected": 11},
+                "composed-assemblies": {"actual": 5, "expected": 5},
                 "context-profiles": {"actual": 5, "expected": 5},
+                "executable-assemblies": {"actual": 5, "expected": 5},
+                "packaged-assemblies": {"actual": 6, "expected": 6},
                 "paper-benchmarks": {"actual": 13, "expected": 13},
                 "paper-scopes": {"actual": 16, "expected": 16},
                 "provider-requests": {"actual": 0, "expected": 0},
             },
         )
+        checks = {check.check_id: check for check in result.checks}
+        self.assertEqual(
+            checks["packaged-assemblies"].unbound_resources,
+            (
+                "applications/dci_agent_lite/assemblies/"
+                "dci-local-research.json",
+            ),
+        )
+        self.assertTrue(
+            all(
+                not Path(reference).is_absolute()
+                for reference in checks["packaged-assemblies"].unbound_resources
+            )
+        )
+        self.assertEqual(checks["executable-assemblies"].unbound_resources, ())
+
+    def test_acceptance_resolves_manifests_without_constructing_runtime_clients(
+        self,
+    ) -> None:
+        verifier = DciProductVerifier(repo_root=PROJECT, backend=ExplodingBackend())
+        with (
+            patch(
+                "asterion.runtime.defaults._create_pi_runtime",
+                side_effect=AssertionError("acceptance constructed Pi"),
+            ),
+            patch(
+                "asterion.runtime.defaults._create_claude_code_runtime",
+                side_effect=AssertionError("acceptance constructed Claude"),
+            ),
+        ):
+            result = verifier(acceptance_request())
+
+        self.assertEqual(result.status, "PASS")
+        self.assertEqual(result.provider_backed_operation_count, 0)
 
 
 class FirstRunPreflightTests(unittest.TestCase):

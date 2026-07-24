@@ -117,6 +117,7 @@ class CapabilityProductTests(unittest.TestCase):
                     status="PASS",
                     artifact_refs=("reports/summary.json",),
                     counts=(("present", 3),),
+                    unbound_resources=("applications/example/inventory.json",),
                 ),
             ),
             provider_backed_operation_count=0,
@@ -142,6 +143,34 @@ class CapabilityProductTests(unittest.TestCase):
         )
         with self.assertRaises(CapabilityProductError):
             validate_verification_result(invalid, description())
+
+        for resources in (
+            ("/private/inventory.json",),
+            ("../inventory.json",),
+            ("applications\\inventory.json",),
+            (".",),
+            ("b.json", "a.json"),
+            ("inventory.json", "inventory.json"),
+            ["inventory.json"],
+        ):
+            with self.subTest(resources=resources):
+                invalid_resources = VerificationResult(
+                    product_id=result.product_id,
+                    level=result.level,
+                    status=result.status,
+                    checks=(
+                        VerificationCheckResult(
+                            check_id="configuration",
+                            summary="Configuration is present",
+                            status="PASS",
+                            unbound_resources=resources,
+                        ),
+                    ),
+                    provider_backed_operation_count=0,
+                    full_dataset_ran=False,
+                )
+                with self.assertRaises(CapabilityProductError):
+                    validate_verification_result(invalid_resources, description())
 
     def test_verification_request_carries_only_explicit_paths(self) -> None:
         request = VerificationRequest(

@@ -73,6 +73,7 @@ class VerificationCheckResult:
     status: str
     artifact_refs: tuple[str, ...] = ()
     counts: tuple[tuple[str, int], ...] = ()
+    unbound_resources: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -191,6 +192,13 @@ def validate_verification_result(
                 or count[1] < 0
                 for count in check.counts
             )
+            or not isinstance(check.unbound_resources, tuple)
+            or tuple(sorted(set(check.unbound_resources)))
+            != check.unbound_resources
+            or any(
+                not _safe_resource(reference)
+                for reference in check.unbound_resources
+            )
         ):
             raise CapabilityProductError("verification check is invalid")
     return value
@@ -223,3 +231,7 @@ def _safe_artifact(value: object) -> bool:
         return False
     path = PurePosixPath(value)
     return not path.is_absolute() and ".." not in path.parts and path.as_posix() == value
+
+
+def _safe_resource(value: object) -> bool:
+    return _safe_artifact(value) and bool(PurePosixPath(value).parts)

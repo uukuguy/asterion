@@ -27,9 +27,15 @@ uv run asterion describe --provider dci-agent-lite
 uv run asterion verify --provider dci-agent-lite --level acceptance
 ```
 
-`acceptance` verifies package-owned closure: providers, applications,
-assemblies, capability manifests, context profiles, benchmark identities, and
-paper scopes. It does not contact an Agent or Judge and does not run a dataset.
+`acceptance` reports installed inventory and executable reachability
+separately. The wheel packages six assembly resources; providers bind five,
+all five compose against exact runtime manifests, and all five have complete
+implementation bindings. The unbound
+`applications/dci_agent_lite/assemblies/dci-local-research.json` resource is
+reported as package-relative inventory, not as a product entry point. The
+check also covers providers, capability manifests, context profiles, benchmark
+identities, and paper scopes. It does not construct runtime clients, contact an
+Agent or Judge, or run a dataset.
 
 ## External Pi and resources
 

@@ -1053,6 +1053,7 @@ def _acceptance_check(
     *,
     actual: int,
     expected: int,
+    unbound_resources: tuple[str, ...] = (),
 ) -> VerificationCheckResult:
     passed = actual == expected
     return VerificationCheckResult(
@@ -1060,6 +1061,7 @@ def _acceptance_check(
         summary=summary if passed else f"{summary} is incomplete",
         status="PASS" if passed else "FAIL",
         counts=(("actual", actual), ("expected", expected)),
+        unbound_resources=unbound_resources,
     )
 
 
@@ -1072,8 +1074,13 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
     from asterion.applications.dci_agent_lite import (
         create_provider as create_dci_provider,
     )
-    from asterion.applications.provider import validate_installed_provider
+    from asterion.applications.provider import (
+        resolve_installed_provider,
+        validate_installed_provider,
+    )
     from asterion.packages.catalog import discover_packages
+    from asterion.packages.execution import validate_implementation_bindings
+    from asterion.runtime.defaults import default_runtime_factory_registry
 
     providers = (
         validate_installed_provider(
@@ -1088,11 +1095,99 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
         for provider in providers
         for application in provider.applications
     )
+    package_root = Path(str(resources.files("asterion"))).resolve()
+
+    def package_identity(path: Path) -> str:
+        if path.is_symlink():
+            raise RuntimeError("installed assembly resource is invalid")
+        try:
+            relative = path.resolve(strict=True).relative_to(package_root)
+        except (OSError, ValueError):
+            raise RuntimeError("installed assembly resource is invalid") from None
+        identity = relative.as_posix()
+        if (
+            relative.is_absolute()
+            or ".." in relative.parts
+            or not identity.startswith("applications/")
+        ):
+            raise RuntimeError("installed assembly resource is invalid")
+        return identity
+
     bound_assemblies = tuple(
-        path
-        for application in applications
-        for path in application.assembly_paths
+        sorted(
+            package_identity(path)
+            for application in applications
+            for path in application.assembly_paths
+        )
     )
+    if len(set(bound_assemblies)) != len(bound_assemblies):
+        raise RuntimeError("installed application closure is invalid")
+
+    runtime_factories = default_runtime_factory_registry()
+    resolved_providers = tuple(
+        resolve_installed_provider(provider, runtime_factories=runtime_factories)
+        for provider in providers
+    )
+    composed_assemblies = tuple(
+        sorted(
+            package_identity(assembly.path)
+            for provider in resolved_providers
+            for application in provider.applications
+            for assembly in application.assemblies
+        )
+    )
+
+    def executable_identity(application, assembly) -> str:
+        validate_implementation_bindings(
+            assembly.plan, application.implementations
+        )
+        return package_identity(assembly.path)
+
+    executable_assemblies = tuple(
+        sorted(
+            executable_identity(application, assembly)
+            for provider in resolved_providers
+            for application in provider.applications
+            for assembly in application.assemblies
+        )
+    )
+    if (
+        composed_assemblies != bound_assemblies
+        or executable_assemblies != composed_assemblies
+    ):
+        raise RuntimeError("installed application executable closure is invalid")
+
+    catalog_roots = tuple(
+        sorted(
+            {
+                root
+                for application in applications
+                for root in application.catalog_roots
+            }
+        )
+    )
+    manifests = discover_packages(catalog_roots).entries
+    packaged_assemblies = tuple(
+        sorted(
+            package_identity(path)
+            for path in (package_root / "applications").glob(
+                "*/assemblies/*.json"
+            )
+        )
+    )
+    unbound_resources = tuple(
+        sorted(set(packaged_assemblies) - set(bound_assemblies))
+    )
+    if (
+        not set(bound_assemblies).issubset(packaged_assemblies)
+        or unbound_resources
+        != (
+            "applications/dci_agent_lite/assemblies/"
+            "dci-local-research.json",
+        )
+    ):
+        raise RuntimeError("packaged application inventory is invalid")
+
     if (
         tuple(provider.provider_id for provider in providers)
         != ("controlled-code", "dci-agent-lite")
@@ -1105,21 +1200,6 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
         or len(bound_assemblies) != 5
     ):
         raise RuntimeError("installed application closure is invalid")
-
-    catalog_roots = tuple(
-        sorted(
-            {
-                root
-                for application in applications
-                for root in application.catalog_roots
-            }
-        )
-    )
-    manifests = discover_packages(catalog_roots).entries
-    package_root = Path(str(resources.files("asterion"))).resolve()
-    packaged_assemblies = tuple(
-        sorted((package_root / "applications").glob("*/assemblies/*.json"))
-    )
 
     profiles = context_profile_names()
     if profiles != ("level0", "level1", "level2", "level3", "level4"):
@@ -1141,16 +1221,16 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
         sorted(
             (
                 _acceptance_check(
-                    "application-assemblies",
-                    "Application assembly closure is valid",
-                    actual=len(packaged_assemblies),
-                    expected=6,
-                ),
-                _acceptance_check(
                     "application-providers",
                     "Installed provider closure is valid",
                     actual=len(providers),
                     expected=2,
+                ),
+                _acceptance_check(
+                    "bound-assemblies",
+                    "Provider-bound assembly closure is valid",
+                    actual=len(bound_assemblies),
+                    expected=5,
                 ),
                 _acceptance_check(
                     "capability-manifests",
@@ -1159,10 +1239,29 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
                     expected=11,
                 ),
                 _acceptance_check(
+                    "composed-assemblies",
+                    "Resolved assembly composition closure is valid",
+                    actual=len(composed_assemblies),
+                    expected=5,
+                ),
+                _acceptance_check(
                     "context-profiles",
                     "Context profile closure is valid",
                     actual=len(profiles),
                     expected=5,
+                ),
+                _acceptance_check(
+                    "executable-assemblies",
+                    "Executable binding closure is valid",
+                    actual=len(executable_assemblies),
+                    expected=5,
+                ),
+                _acceptance_check(
+                    "packaged-assemblies",
+                    "Packaged assembly inventory is valid",
+                    actual=len(packaged_assemblies),
+                    expected=6,
+                    unbound_resources=unbound_resources,
                 ),
                 _acceptance_check(
                     "paper-benchmarks",

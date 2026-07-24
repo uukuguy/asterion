@@ -589,13 +589,28 @@ class AsterionCliTests(unittest.TestCase):
         self.assertEqual(
             [item["check_id"] for item in payload["checks"]],
             [
-                "application-assemblies",
                 "application-providers",
+                "bound-assemblies",
                 "capability-manifests",
+                "composed-assemblies",
                 "context-profiles",
+                "executable-assemblies",
+                "packaged-assemblies",
                 "paper-benchmarks",
                 "paper-scopes",
                 "provider-requests",
+            ],
+        )
+        packaged = next(
+            item
+            for item in payload["checks"]
+            if item["check_id"] == "packaged-assemblies"
+        )
+        self.assertEqual(
+            packaged["unbound_resources"],
+            [
+                "applications/dci_agent_lite/assemblies/"
+                "dci-local-research.json"
             ],
         )
 
