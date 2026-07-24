@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -342,26 +344,20 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                     )
         self.assertNotIn("SECRET", str(caught.exception))
 
-    def test_pi_reference_factory_uses_explicit_environment_paths(self) -> None:
+    def test_pi_reference_factory_uses_only_explicit_context_options(self) -> None:
         from asterion.runtime.defaults import default_runtime_factory_registry
 
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            package = root / "pi/packages/coding-agent"
-            agent = root / "agent"
             corpus = root / "corpus"
-            (package / "dist").mkdir(parents=True)
-            (package / "dist/cli.js").write_text("")
-            agent.mkdir()
             corpus.mkdir()
-            environment = {
-                "DCI_PI_PACKAGE_DIR": str(package),
-                "DCI_PI_AGENT_DIR": str(agent),
-                "ASTERION_RUNTIME_CWD": str(corpus),
-                "DCI_PROVIDER": "fixture-provider",
-                "DCI_MODEL": "fixture-model",
-            }
-            with patch.dict(os.environ, environment, clear=False):
+            with (
+                patch("asterion.runtime.defaults.Path.cwd", side_effect=AssertionError),
+                patch(
+                    "asterion.runtime.defaults.shutil.which",
+                    side_effect=AssertionError,
+                ),
+            ):
                 binding = default_runtime_factory_registry().select("pi.reference")
                 runtime = binding.factory(
                     RuntimeFactoryContext(
@@ -371,18 +367,34 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                         runtime_id="pi.reference",
                         assembly_path=root / "assembly.json",
                         options={
+                            "command": json.dumps([sys.executable, "-u", "-c", "pass"]),
+                            "cwd": str(corpus),
+                            "environment": json.dumps(
+                                {"SENTINEL_RUNTIME_VALUE": "private"}
+                            ),
+                            "evidence_root": str(root / "evidence"),
                             "provider": "fixture-provider",
                             "model": "fixture-model",
-                            "tools": "read,bash",
-                            "timeout_seconds": 3600.0,
-                            "authentication_mode": "saved-auth",
+                            "tools": "read,grep",
+                            "max_turns": "100",
+                            "context_profile": "level3",
                         },
                     )
                 )
 
-        self.assertEqual(binding.capabilities, ("filesystem.read", "shell"))
+        self.assertEqual(
+            binding.capabilities, ("filesystem.read", "pi.tool.grep")
+        )
         self.assertEqual(runtime.manifest.runtime_id, "pi.reference")
         self.assertEqual(runtime.manifest.capabilities, binding.capabilities)
+        self.assertEqual(runtime._cwd, corpus.resolve())
+        self.assertEqual(runtime._env, {"SENTINEL_RUNTIME_VALUE": "private"})
+        self.assertEqual(runtime._max_turns, 100)
+        self.assertEqual(runtime._provider, "fixture-provider")
+        self.assertEqual(runtime._model, "fixture-model")
+        self.assertEqual(runtime._tools, ("read", "grep"))
+        self.assertEqual(runtime._context_profile, "level3")
+        self.assertEqual(runtime._evidence_root, (root / "evidence").resolve())
 
     def test_missing_pi_cli_fails_without_exposing_the_path(self) -> None:
         from asterion.runtime.defaults import default_runtime_factory_registry
@@ -390,28 +402,28 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            with patch.dict(
-                os.environ,
-                {
-                    "DCI_PI_PACKAGE_DIR": str(root / "SECRET-PACKAGE"),
-                    "DCI_PI_AGENT_DIR": str(root),
-                    "ASTERION_RUNTIME_CWD": str(root),
-                },
-                clear=False,
-            ):
-                binding = default_runtime_factory_registry().select("pi.reference")
-                with self.assertRaises(RuntimeFactoryError) as caught:
-                    binding.factory(
-                        RuntimeFactoryContext(
-                            provider_id="dci-agent-lite",
-                            application_id="dci.research-capability",
-                            application_version="1.0.0",
-                            runtime_id="pi.reference",
-                            assembly_path=root / "assembly.json",
-                            options={},
-                        )
+            binding = default_runtime_factory_registry().select("pi.reference")
+            with self.assertRaises(RuntimeFactoryError) as caught:
+                binding.factory(
+                    RuntimeFactoryContext(
+                        provider_id="dci-agent-lite",
+                        application_id="dci.research-capability",
+                        application_version="1.0.0",
+                        runtime_id="pi.reference",
+                        assembly_path=root / "assembly.json",
+                        options={
+                            "command": json.dumps(
+                                [str(root / "SECRET-PACKAGE"), "--mode", "rpc"]
+                            ),
+                            "cwd": str(root),
+                            "environment": "{}",
+                            "evidence_root": str(root / "evidence"),
+                            "tools": "read,grep",
+                            "max_turns": "4",
+                        },
                     )
-        self.assertNotIn("SECRET-PACKAGE", str(caught.exception))
+                )
+            self.assertNotIn("SECRET-PACKAGE", str(caught.exception))
 
     @staticmethod
     def _context(root: Path, **options: object) -> RuntimeFactoryContext:

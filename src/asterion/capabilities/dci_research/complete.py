@@ -7,7 +7,6 @@ import hashlib
 import json
 import os
 import stat
-import threading
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -15,10 +14,8 @@ from collections.abc import Mapping
 from typing import Awaitable, Callable
 
 from asterion.dci.analysis import aggregate_results
-from asterion.dci.bridge import DciRunExecutor, project_dci_run
 from asterion.dci.evaluation import evaluate_run_directory_async
 from asterion.dci.judge import JudgeConfig, judge_answer_async
-from asterion.dci.run import DciRunRequest, DciRunResult
 from asterion.packages.execution import (
     PackageExecutionError,
     PackageExecutionResult,
@@ -164,70 +161,22 @@ def _plain(value: object) -> object:
     return value
 
 
-def _bind_research_projection(projected: PackageExecutionResult) -> PackageExecutionResult:
-    if len(projected.artifacts) != 1:
-        raise PackageExecutionError("complete research evidence is invalid")
-    artifact = projected.artifacts[0]
-    value = artifact.get("value")
-    if not isinstance(value, Mapping):
-        raise PackageExecutionError("complete research evidence is invalid")
-    return PackageExecutionResult(
-        events=projected.events,
-        artifacts=({
-            "artifact_id": artifact["artifact_id"],
-            "media_type": artifact["media_type"],
-            "value": {
-                "schema": IMPLEMENTATION_PROTOCOL,
-                "implementation_sha256": complete_application_identity(),
-                **dict(value),
-            },
-        },),
-    )
-
-
 class DciCompleteResearchImplementation:
-    def __init__(self, *, store: DciCompleteAttemptStore, native_executor: DciRunExecutor) -> None:
+    def __init__(self, *, store: DciCompleteAttemptStore) -> None:
         self._store = store
-        self._native_executor = native_executor
 
     async def execute(self, invocation: PackageInvocation) -> PackageExecutionResult:
         question, gold = _envelope(invocation.input_text)
-        if invocation.runtime.manifest.runtime_id == "pi.reference":
-            try:
-                raw_max_turns = os.environ.get("DCI_MAX_TURNS", "4").strip()
-                max_turns = int(raw_max_turns)
-                if max_turns <= 0 or str(max_turns) != raw_max_turns:
-                    raise ValueError
-                native = await _run_native_cancellable(
-                    self._native_executor,
-                    DciRunRequest(
-                        run_id=invocation.run_id,
-                        question=question,
-                        cwd=Path.cwd(),
-                        tools="read,grep",
-                        max_turns=max_turns,
-                    ),
-                    invocation.signal,
-                )
-                projected = project_dci_run(native)
-                self._store.start(
-                    invocation.run_id,
-                    question=question,
-                    gold_answer=gold,
-                    output_dir=native.output_dir,
-                )
-                return _bind_research_projection(projected)
-            except (OSError, RuntimeError, TypeError, ValueError):
-                raise PackageExecutionError("complete research execution failed") from None
         try:
+            required = invocation.manifest["requires_capabilities"]
+            if not isinstance(required, tuple) or not all(
+                isinstance(capability, str) for capability in required
+            ):
+                raise TypeError
             request = RunRequest(
                 run_id=invocation.run_id,
                 input_text=question,
-                requested_capabilities=(
-                    "claude.tool.glob",
-                    "claude.tool.grep",
-                    "filesystem.read",
-                ),
+                requested_capabilities=required,
             )
             events = [
                 event.to_mapping()
@@ -283,42 +232,6 @@ class DciCompleteResearchImplementation:
             media_type="application/vnd.dci.research+json",
             value={"answer_artifact_uri": answer},
         )
-
-
-async def _run_native_cancellable(
-    executor: DciRunExecutor,
-    request: DciRunRequest,
-    signal: CancellationSignal | None,
-) -> DciRunResult:
-    cancel_event = threading.Event()
-    work = asyncio.create_task(
-        asyncio.to_thread(executor.run, request, cancel_event=cancel_event)
-    )
-    try:
-        while not work.done():
-            if signal is not None and signal.cancelled:
-                cancel_event.set()
-            await asyncio.wait({work}, timeout=0.05)
-        return work.result()
-    except asyncio.CancelledError:
-        cancel_event.set()
-        await _drain_native_work(work)
-        raise
-
-
-async def _drain_native_work(work: asyncio.Task[object]) -> None:
-    while not work.done():
-        current = asyncio.current_task()
-        if current is not None:
-            current.uncancel()
-        try:
-            await asyncio.wait({work})
-        except asyncio.CancelledError:
-            continue
-    try:
-        work.result()
-    except Exception:
-        pass
 
 
 Evaluator = Callable[..., Awaitable[dict[str, object]]]
@@ -464,14 +377,12 @@ class DciCompleteExportImplementation:
         )
 
 
-def complete_dci_bindings(
-    *, native_executor: DciRunExecutor
-) -> tuple[tuple[object, object], ...]:
+def complete_dci_bindings() -> tuple[tuple[object, object], ...]:
     from asterion.packages.catalog import PackageRef
 
     store = DciCompleteAttemptStore()
     return (
-        (PackageRef("dci.research", "1.0.0"), DciCompleteResearchImplementation(store=store, native_executor=native_executor)),
+        (PackageRef("dci.research", "1.0.0"), DciCompleteResearchImplementation(store=store)),
         (PackageRef("dci.evaluation", "1.0.0"), DciCompleteEvaluationImplementation(store=store)),
         (PackageRef("dci.benchmark", "1.0.0"), DciCompleteBenchmarkImplementation()),
         (PackageRef("dci.analysis", "1.0.0"), DciCompleteAnalysisImplementation()),

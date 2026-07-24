@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 import tempfile
 import unittest
@@ -80,10 +81,12 @@ class PiRuntimeClientTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_translates_one_pi_rpc_run_to_normalized_events(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
             client = PiRuntimeClient(
                 command=(sys.executable, "-u", "-c", SUCCESS_SCRIPT),
-                cwd=Path(temp_dir),
+                cwd=root,
                 capabilities=("filesystem.read", "shell"),
+                evidence_root=root / "evidence",
             )
 
             events = [
@@ -96,6 +99,19 @@ class PiRuntimeClientTests(unittest.IsolatedAsyncioTestCase):
                     )
                 )
             ]
+
+            completed = client.completed_run_dir("pi-run-1")
+            self.assertIsNotNone(completed)
+            assert completed is not None
+            self.assertEqual((completed / "final.txt").read_text(), "Pudding Lane")
+            self.assertEqual(
+                os.stat(completed).st_mode & 0o777,
+                0o700,
+            )
+            self.assertEqual(
+                os.stat(completed / "final.txt").st_mode & 0o777,
+                0o600,
+            )
 
         self.assertEqual(client.manifest.runtime_id, "pi.reference")
         self.assertEqual(
@@ -127,10 +143,12 @@ class PiRuntimeClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_json_and_early_eof_are_redacted(self) -> None:
         for script in (INVALID_JSON_SCRIPT, EARLY_EOF_SCRIPT):
             with self.subTest(script=script), tempfile.TemporaryDirectory() as temp_dir:
+                evidence_root = Path(temp_dir) / "evidence"
                 client = PiRuntimeClient(
                     command=(sys.executable, "-u", "-c", script),
                     cwd=Path(temp_dir),
                     capabilities=("filesystem.read",),
+                    evidence_root=evidence_root,
                 )
                 with self.assertRaises(ProtocolError) as raised:
                     _ = [
@@ -144,6 +162,8 @@ class PiRuntimeClientTests(unittest.IsolatedAsyncioTestCase):
                         )
                     ]
                 self.assertNotIn("SECRET", str(raised.exception))
+                self.assertIsNone(client.completed_run_dir("invalid-stream"))
+                self.assertFalse(evidence_root.exists())
 
     async def test_cancellation_aborts_and_reaps_a_slow_process(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -151,6 +171,7 @@ class PiRuntimeClientTests(unittest.IsolatedAsyncioTestCase):
                 command=(sys.executable, "-u", "-c", SLOW_SCRIPT),
                 cwd=Path(temp_dir),
                 capabilities=("filesystem.read",),
+                evidence_root=Path(temp_dir) / "evidence",
             )
             signal = MutableSignal()
 
@@ -173,6 +194,7 @@ class PiRuntimeClientTests(unittest.IsolatedAsyncioTestCase):
                     timeout=1,
                 )
             await cancel_task
+            self.assertIsNone(client.completed_run_dir("cancelled-run"))
 
     async def test_rejects_a_second_active_run(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

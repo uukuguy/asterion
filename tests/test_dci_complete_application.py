@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import threading
-import time
 import tempfile
 import unittest
 from collections.abc import AsyncIterator
@@ -23,7 +21,6 @@ from asterion.capabilities.dci_research.complete import (
     INPUT_PROTOCOL,
     complete_application_identity,
 )
-from asterion.dci.run import DciRunResult
 from asterion.dci.dual_runtime_verification import (
     DciDualRuntimeVerificationError,
     audit_restricted_claude_application,
@@ -155,6 +152,28 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
 
 
 class DciCompleteApplicationBindingTests(unittest.TestCase):
+    def test_provider_creation_is_metadata_only(self) -> None:
+        provider_source = (
+            SOURCE / "applications/dci_agent_lite/provider.py"
+        ).read_text()
+        with (
+            patch(
+                "asterion.dci.application_executor.EnvironmentDciRunExecutor.__init__",
+                side_effect=AssertionError("executor construction"),
+            ),
+            patch.object(Path, "cwd", side_effect=AssertionError("cwd access")),
+        ):
+            provider = create_provider()
+
+        self.assertEqual(provider.provider_id, "dci-agent-lite")
+        for forbidden in (
+            "EnvironmentDciRunExecutor",
+            "native_executor",
+            "os.environ",
+            "Path.cwd",
+        ):
+            self.assertNotIn(forbidden, provider_source)
+
     def test_installed_provider_binds_every_executable_stage_exactly_once(self) -> None:
         application = next(
             application
@@ -187,56 +206,25 @@ class _UnusedPiRuntime:
         self, request: RunRequest, *, signal: object | None = None
     ) -> AsyncIterator[RunEvent]:
         del request, signal
-        raise AssertionError("native Pi binding must not call the generic runtime")
+        raise AssertionError("unused runtime was called")
         yield
 
 
-class _NativeExecutor:
-    def __init__(self, output_dir: Path) -> None:
-        self.output_dir = output_dir
-        self.questions: list[str] = []
-        self.requests = []
-
-    def run(self, request, *, cancel_event=None) -> DciRunResult:
-        del cancel_event
-        self.requests.append(request)
-        self.questions.append(request.question)
-        return DciRunResult(
-            output_dir=self.output_dir,
-            final_text="PRIVATE ANSWER",
-            events=(
-                RunEvent(request.run_id, 1, "run.started", {"capabilities": []}),
-                RunEvent(
-                    request.run_id,
-                    2,
-                    "artifact.created",
-                    {
-                        "artifact": {
-                            "artifact_id": "answer",
-                            "kind": "answer",
-                            "media_type": "text/plain",
-                            "uri": "final.txt",
-                        }
-                    },
-                ),
-                RunEvent(request.run_id, 3, "run.completed", {"status": "completed"}),
-            ),
-            status="completed",
+class _CompletedRuntime:
+    def __init__(self, runtime_id: str, output_dir: Path) -> None:
+        capabilities = (
+            ("claude.tool.glob", "claude.tool.grep", "filesystem.read")
+            if runtime_id == "claude-code.reference"
+            else ("filesystem.read", "shell")
         )
-
-
-class _ClaudeRuntime:
-    manifest = RuntimeManifest(
-        "claude-code.reference",
-        ("claude.tool.glob", "claude.tool.grep", "filesystem.read"),
-    )
-
-    def __init__(self, output_dir: Path) -> None:
+        self.manifest = RuntimeManifest(runtime_id, capabilities)
         self.output_dir = output_dir
         self.requests = []
+        self.calls = 0
 
     async def run(self, request: RunRequest, *, signal=None):
         del signal
+        self.calls += 1
         self.requests.append(request)
         self.output_dir.mkdir(mode=0o700)
         final_path = self.output_dir / "final.txt"
@@ -252,71 +240,6 @@ class _ClaudeRuntime:
 
 
 class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
-    async def test_native_pi_profile_max_turns_reaches_dci_request(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            native = _NativeExecutor(Path(directory))
-            implementation = DciCompleteResearchImplementation(
-                store=DciCompleteAttemptStore(), native_executor=native
-            )
-            invocation = PackageInvocation(
-                package_ref=PackageRef("dci.research", "1.0.0"),
-                manifest={},
-                run_id="profile-native",
-                input_text=json.dumps(
-                    {"protocol": INPUT_PROTOCOL, "question": "q", "gold_answer": "g"}
-                ),
-                upstream_artifacts=(),
-                runtime=_UnusedPiRuntime(),
-                host_services={},
-            )
-            with patch.dict("os.environ", {"DCI_MAX_TURNS": "100"}):
-                await implementation.execute(invocation)
-            self.assertEqual(native.requests[0].max_turns, 100)
-
-    async def test_native_research_forwards_inflight_cancellation(self) -> None:
-        class Signal:
-            cancelled = False
-
-        class BlockingExecutor:
-            def __init__(self) -> None:
-                self.started = threading.Event()
-                self.stopped = threading.Event()
-
-            def run(self, request, *, cancel_event=None):
-                del request
-                if cancel_event is None:
-                    raise RuntimeError("missing cancellation event")
-                self.started.set()
-                while not cancel_event.is_set():
-                    time.sleep(0.01)
-                self.stopped.set()
-                raise RuntimeError("cancelled")
-
-        executor = BlockingExecutor()
-        signal = Signal()
-        implementation = DciCompleteResearchImplementation(
-            store=DciCompleteAttemptStore(), native_executor=executor
-        )
-        invocation = PackageInvocation(
-            package_ref=PackageRef("dci.research", "1.0.0"),
-            manifest={},
-            run_id="cancel-native",
-            input_text=json.dumps(
-                {"protocol": INPUT_PROTOCOL, "question": "question", "gold_answer": "gold"}
-            ),
-            upstream_artifacts=(),
-            runtime=_UnusedPiRuntime(),
-            host_services={},
-            signal=signal,
-        )
-        task = asyncio.create_task(implementation.execute(invocation))
-        self.assertTrue(await asyncio.to_thread(executor.started.wait, 1))
-        signal.cancelled = True
-
-        with self.assertRaises(PackageExecutionError):
-            await asyncio.wait_for(task, timeout=3)
-        self.assertTrue(executor.stopped.is_set())
-
     async def test_stage_rejects_wrong_upstream_schema_or_implementation(self) -> None:
         implementation = DciCompleteBenchmarkImplementation()
         for value in (
@@ -402,7 +325,9 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
     async def test_claude_run_is_judged_and_exports_without_private_bodies(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = DciCompleteAttemptStore()
-            runtime = _ClaudeRuntime(Path(directory) / "claude-run")
+            runtime = _CompletedRuntime(
+                "claude-code.reference", Path(directory) / "claude-run"
+            )
             judge_calls = []
 
             async def answer_evaluator(**kwargs):
@@ -410,7 +335,7 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
                 return {"is_correct": True, "judge_request_fingerprint": "b" * 64}
 
             bindings = (
-                (PackageRef("dci.research", "1.0.0"), DciCompleteResearchImplementation(store=store, native_executor=_NativeExecutor(Path(directory) / "unused"))),
+                (PackageRef("dci.research", "1.0.0"), DciCompleteResearchImplementation(store=store)),
                 (PackageRef("dci.evaluation", "1.0.0"), DciCompleteEvaluationImplementation(store=store, answer_evaluator=answer_evaluator, judge_config=lambda: object())),
                 (PackageRef("dci.benchmark", "1.0.0"), DciCompleteBenchmarkImplementation()),
                 (PackageRef("dci.analysis", "1.0.0"), DciCompleteAnalysisImplementation()),
@@ -425,50 +350,58 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
                 host_services={},
             )
 
-        self.assertEqual(runtime.requests[0].requested_capabilities, ("claude.tool.glob", "claude.tool.grep", "filesystem.read"))
+        self.assertEqual(
+            runtime.requests[0].requested_capabilities, ("filesystem.read",)
+        )
         self.assertEqual(judge_calls[0]["predicted_answer"], "PRIVATE ANSWER")
         self.assertEqual(tuple(event["type"] for event in result.events), EVENTS)
         self.assertNotIn("PRIVATE", repr(result))
 
-    async def test_native_run_evaluates_aggregates_and_exports_without_bodies(self) -> None:
+    async def test_pi_run_uses_selected_runtime_and_exports_without_bodies(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = DciCompleteAttemptStore()
-            native = _NativeExecutor(Path(directory))
-            evaluator_calls = []
+            runtime = _CompletedRuntime("pi.reference", Path(directory) / "pi-run")
+            judge_calls = []
 
-            async def evaluator(output_dir, **kwargs):
-                evaluator_calls.append((output_dir, kwargs["gold_answer"]))
+            async def answer_evaluator(**kwargs):
+                judge_calls.append(kwargs)
                 return {
                     "is_correct": True,
                     "judge_request_fingerprint": "a" * 64,
                 }
 
             bindings = (
-                (PackageRef("dci.research", "1.0.0"), DciCompleteResearchImplementation(store=store, native_executor=native)),
-                (PackageRef("dci.evaluation", "1.0.0"), DciCompleteEvaluationImplementation(store=store, evaluator=evaluator, judge_config=lambda: object())),
+                (PackageRef("dci.research", "1.0.0"), DciCompleteResearchImplementation(store=store)),
+                (PackageRef("dci.evaluation", "1.0.0"), DciCompleteEvaluationImplementation(store=store, answer_evaluator=answer_evaluator, judge_config=lambda: object())),
                 (PackageRef("dci.benchmark", "1.0.0"), DciCompleteBenchmarkImplementation()),
                 (PackageRef("dci.analysis", "1.0.0"), DciCompleteAnalysisImplementation()),
                 (PackageRef("dci.export", "1.0.0"), DciCompleteExportImplementation(store=store)),
             )
-            result = await run_composed_application(
-                plan("pi.reference"),
-                implementations=bindings,
-                runtime=_UnusedPiRuntime(),
-                run_id="complete-run",
-                input_text=json.dumps(
-                    {
-                        "protocol": INPUT_PROTOCOL,
-                        "question": "PRIVATE QUESTION",
-                        "gold_answer": "PRIVATE GOLD",
-                    }
-                ),
-                host_services={},
-            )
+            with patch(
+                "asterion.dci.application_executor.EnvironmentDciRunExecutor.run",
+                side_effect=AssertionError("native bypass"),
+            ):
+                result = await run_composed_application(
+                    plan("pi.reference"),
+                    implementations=bindings,
+                    runtime=runtime,
+                    run_id="complete-run",
+                    input_text=json.dumps(
+                        {
+                            "protocol": INPUT_PROTOCOL,
+                            "question": "PRIVATE QUESTION",
+                            "gold_answer": "PRIVATE GOLD",
+                        }
+                    ),
+                    host_services={},
+                )
 
-        self.assertEqual(native.questions, ["PRIVATE QUESTION"])
-        self.assertEqual(native.requests[0].tools, "read,grep")
-        self.assertEqual(native.requests[0].max_turns, 4)
-        self.assertEqual(evaluator_calls, [(Path(directory), "PRIVATE GOLD")])
+        self.assertEqual(runtime.calls, 1)
+        self.assertEqual(runtime.requests[0].input_text, "PRIVATE QUESTION")
+        self.assertEqual(
+            runtime.requests[0].requested_capabilities, ("filesystem.read",)
+        )
+        self.assertEqual(judge_calls[0]["predicted_answer"], "PRIVATE ANSWER")
         self.assertEqual(tuple(event["type"] for event in result.events), EVENTS)
         self.assertEqual(tuple(item["media_type"] for item in result.artifacts), ARTIFACTS)
         self.assertEqual(
