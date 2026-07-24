@@ -1,17 +1,16 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-24 23:21. **Session remains active — not a final handoff.**
+> Updated: 2026-07-24 23:39. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- Protocol/composition Tasks 1–8 and all four final-review corrective waves are
-  implemented. The third re-review found lossy re-export binding names;
-  `3402675` preserves provenance and validates it recursively, and the complete
-  provider-free gates pass.
-- A new final whole-branch re-review is still required. Do not call the review
-  clean until that independent verdict is recorded.
+- Protocol/composition Tasks 1–8 and all final-review corrective waves are
+  implemented. A fresh independent whole-branch review returned CLEAN after
+  `3402675` closed the last re-export provenance finding.
+- Controller reruns confirm the complete provider-free gates pass, including
+  `make check`, `make promotion-check`, and whitespace validation.
 - Application Authority Task 1 is implemented. Approved Application Authority
-  Tasks 2–8 remain future work; Task 2 starts only after a clean final review.
+  Tasks 2–8 remain future work; Task 2 is now the active next item.
 - No provider-backed benchmark, Agent/Judge operation, full-dataset run, or
   published-score reproduction has been performed.
 
@@ -65,6 +64,8 @@
   validate their semantics without import execution.
 - `901c786` and `ca5c6b8` record the earlier corrective waves and provider-free
   evidence. The full report is cumulative and must be read through its end.
+- `.superpowers/sdd/protocol-final-review-fresh.md` records the independent
+  whole-branch CLEAN verdict with no remaining findings.
 
 ## Verification boundary
 
@@ -84,11 +85,9 @@
 
 ## Immediate next actions
 
-1. Request a new final whole-branch re-review covering `3402675` and this
-   cumulative checkpoint/report update.
-2. Only after a clean final verdict, resume Application Authority Task 2:
-   prove runtime-to-assembly bijection and executable closure.
-3. Continue approved Application Authority Tasks 3–8 in order, then begin the
+1. Resume Application Authority Task 2: prove runtime-to-assembly bijection and
+   executable closure.
+2. Continue approved Application Authority Tasks 3–8 in order, then begin the
    separate DCI provenance/reproduction plan only with its stated authority and
    finite budget.
 
@@ -115,6 +114,6 @@
 ```bash
 git status --short
 git log --oneline -10
-cat .superpowers/sdd/protocol-final-fix-report.md
+cat .superpowers/sdd/protocol-final-review-fresh.md
 sed -n '150,260p' docs/superpowers/plans/2026-07-24-asterion-application-authority.md
 ```
