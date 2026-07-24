@@ -7,6 +7,16 @@ import json
 import signal
 import stat
 import sys
+from pathlib import Path
+
+
+def trusted_script_path() -> Path:
+    """Return this installed helper as one absolute package-owned script."""
+
+    path = Path(__file__).resolve(strict=True)
+    if not path.is_file():
+        raise OSError("trusted cwd helper is unavailable")
+    return path
 
 
 def main() -> int:

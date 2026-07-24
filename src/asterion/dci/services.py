@@ -20,6 +20,7 @@ from asterion.runtime.working_directory import (
     ProcessDirectoryAuthority,
     ProcessWorkingDirectory,
 )
+from asterion.runtime.cwd_exec import trusted_script_path
 
 
 class LocalCorpusServiceError(ValueError):
@@ -91,8 +92,9 @@ class _PinnedLocalCorpusService:
                 cwd = "/"
                 command_prefix = (
                     sys.executable,
-                    "-m",
-                    "asterion.runtime.cwd_exec",
+                    "-I",
+                    "-S",
+                    str(trusted_script_path()),
                     "--fd",
                     str(descriptor),
                 )
@@ -259,10 +261,11 @@ def _secure_local_corpus_available() -> bool:
                     and callable(os.fchdir)
                     and callable(os.execvpe)
                     and bool(sys.executable)
+                    and trusted_script_path().is_file()
                 )
             )
         )
-    except (AttributeError, TypeError):
+    except (AttributeError, OSError, TypeError):
         return False
 
 

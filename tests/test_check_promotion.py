@@ -229,6 +229,16 @@ class PromotionCheckTests(unittest.TestCase):
         self.assertTrue(
             any(command[:3] == ("uv", "pip", "install") for command in commands)
         )
+        wheel_smoke = next(
+            command
+            for command in commands
+            if len(command) == 3
+            and command[1] == "-c"
+            and "cwd_exec.py" in command[2]
+        )
+        self.assertIn("PYTHONHOME", wheel_smoke[2])
+        self.assertIn("PYTHONPATH", wheel_smoke[2])
+        self.assertIn("'-I', '-S'", wheel_smoke[2])
         for suffix in (
             ("list",),
             ("describe", "--provider", "dci-agent-lite", "--json"),

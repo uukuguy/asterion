@@ -199,6 +199,111 @@ class RecordingDirectoryAuthority:
 
 
 class PiRuntimeClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_authority_launch_ignores_python_startup_controls(
+        self,
+    ) -> None:
+        script = r'''
+IFS= read -r request
+[ "$PYTHONPATH" = "$0" ] || exit 91
+[ "$PYTHONHOME" = "$1" ] || exit 92
+request_id=$(printf '%s' "$request" | /usr/bin/sed -E 's/.*"id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+printf '{"type":"response","id":"%s","success":true}\n' "$request_id"
+printf '%s\n' \
+  '{"type":"agent_start"}' \
+  '{"type":"turn_start"}' \
+  '{"type":"message_end","message":{"role":"assistant","stopReason":"stop","usage":{"input":1,"output":1},"content":[{"type":"text","text":"hostile-env-ok"}]}}' \
+  '{"type":"agent_end"}'
+'''
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            corpus = root / "corpus"
+            corpus.mkdir()
+            shadow = root / "shadow"
+            shadow_module = shadow / "asterion/runtime"
+            shadow_module.mkdir(parents=True)
+            benign_python_path = root / "benign-python-path"
+            benign_python_path.mkdir()
+            (shadow / "asterion/__init__.py").write_text("")
+            (shadow_module / "__init__.py").write_text("")
+            marker = root / "shadow-executed"
+            (shadow_module / "cwd_exec.py").write_text(
+                "import os\n"
+                "from pathlib import Path\n"
+                "Path(os.environ['MALICIOUS_MARKER']).write_text('executed')\n"
+            )
+            environments = (
+                {
+                    "PYTHONPATH": str(shadow),
+                    "PYTHONHOME": sys.prefix,
+                    "PYTHONUSERBASE": str(root / "user-base"),
+                    "PYTHONSTARTUP": str(root / "startup.py"),
+                    "PYTHONWARNINGS": "ignore",
+                    "PYTHONDONTWRITEBYTECODE": "1",
+                    "PYTHONHASHSEED": "7",
+                    "MALICIOUS_MARKER": str(marker),
+                },
+                {
+                    "PYTHONPATH": str(benign_python_path),
+                    "PYTHONHOME": "/definitely/not/a/python/home",
+                },
+            )
+            context = HostServiceFactoryContext(
+                provider_id="dci-agent-lite",
+                application_id="dci.research-capability",
+                application_version="1.0.0",
+                capability_id="corpus.local-root",
+                options={"root": str(corpus)},
+            )
+            async with create_local_corpus_service_factory().factory(
+                context
+            ) as authority:
+                for index, environment in enumerate(environments):
+                    with self.subTest(environment=index):
+                        clients = (
+                            PiRuntimeClient(
+                                command=(
+                                    "/bin/sh",
+                                    "-c",
+                                    script,
+                                    environment["PYTHONPATH"],
+                                    environment["PYTHONHOME"],
+                                ),
+                                cwd=corpus,
+                                capabilities=("filesystem.read",),
+                                env=environment,
+                            ),
+                            PiRuntimeClient(
+                                command=(
+                                    "/bin/sh",
+                                    "-c",
+                                    script,
+                                    environment["PYTHONPATH"],
+                                    environment["PYTHONHOME"],
+                                ),
+                                cwd=None,
+                                cwd_authority=authority,
+                                capabilities=("filesystem.read",),
+                                env=environment,
+                            ),
+                        )
+                        streams = []
+                        for client_index, client in enumerate(clients):
+                            with self.subTest(authority=client_index == 1):
+                                streams.append([
+                                    event.to_mapping()
+                                    async for event in client.run(
+                                        RunRequest(
+                                            "hostile-python",
+                                            "question",
+                                            requested_capabilities=(
+                                                "filesystem.read",
+                                            ),
+                                        )
+                                    )
+                                ])
+                        self.assertEqual(streams[1], streams[0])
+                        self.assertFalse(marker.exists())
+
     async def test_authority_launch_preserves_argv_and_session_identity(
         self,
     ) -> None:

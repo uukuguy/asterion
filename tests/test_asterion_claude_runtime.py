@@ -90,6 +90,17 @@ class ClaudeCodeRuntimeClientTests(unittest.IsolatedAsyncioTestCase):
             executable = root / "print-environment"
             executable.write_text("#!/bin/sh\nexec /usr/bin/env -0\n")
             executable.chmod(0o700)
+            shadow = root / "shadow"
+            shadow_module = shadow / "asterion/runtime"
+            shadow_module.mkdir(parents=True)
+            (shadow / "asterion/__init__.py").write_text("")
+            (shadow_module / "__init__.py").write_text("")
+            marker = root / "shadow-executed"
+            (shadow_module / "cwd_exec.py").write_text(
+                "import os\n"
+                "from pathlib import Path\n"
+                "Path(os.environ['MALICIOUS_MARKER']).write_text('executed')\n"
+            )
             context = HostServiceFactoryContext(
                 provider_id="dci-agent-lite",
                 application_id="dci.research-capability",
@@ -100,37 +111,56 @@ class ClaudeCodeRuntimeClientTests(unittest.IsolatedAsyncioTestCase):
             async with create_local_corpus_service_factory().factory(
                 context
             ) as authority:
-                for index, environment in enumerate(
-                    ({}, {"EXACT_SENTINEL": "exact-value"})
-                ):
-                    direct_output = root / f"direct-{index}"
-                    authority_output = root / f"authority-{index}"
-                    await asyncio.to_thread(
-                        run_claude_code,
-                        prompt="question",
-                        output_dir=direct_output,
-                        cwd=corpus,
-                        tools=["Read"],
-                        timeout_seconds=10,
-                        executable=str(executable),
-                        environment=environment,
-                    )
-                    await asyncio.to_thread(
-                        run_claude_code,
-                        prompt="question",
-                        output_dir=authority_output,
-                        cwd=None,
-                        cwd_authority=authority,
-                        tools=["Read"],
-                        timeout_seconds=10,
-                        executable=str(executable),
-                        environment=environment,
-                    )
+                environments = (
+                    {},
+                    {"EXACT_SENTINEL": "exact-value"},
+                    {
+                        "PYTHONPATH": str(shadow),
+                        "PYTHONUSERBASE": str(root / "user-base"),
+                        "PYTHONSTARTUP": str(root / "startup.py"),
+                        "PYTHONWARNINGS": "ignore",
+                        "PYTHONDONTWRITEBYTECODE": "1",
+                        "PYTHONHASHSEED": "7",
+                        "MALICIOUS_MARKER": str(marker),
+                    },
+                    {
+                        "PYTHONHOME": "/definitely/not/a/python/home",
+                        "EXACT_SENTINEL": "python-home",
+                    },
+                )
+                for index, environment in enumerate(environments):
+                    with self.subTest(environment=index):
+                        direct_output = root / f"direct-{index}"
+                        authority_output = root / f"authority-{index}"
+                        await asyncio.to_thread(
+                            run_claude_code,
+                            prompt="question",
+                            output_dir=direct_output,
+                            cwd=corpus,
+                            tools=["Read"],
+                            timeout_seconds=10,
+                            executable=str(executable),
+                            environment=environment,
+                        )
+                        await asyncio.to_thread(
+                            run_claude_code,
+                            prompt="question",
+                            output_dir=authority_output,
+                            cwd=None,
+                            cwd_authority=authority,
+                            tools=["Read"],
+                            timeout_seconds=10,
+                            executable=str(executable),
+                            environment=environment,
+                        )
 
-                    self.assertEqual(
-                        (authority_output / "raw-events.jsonl").read_bytes(),
-                        (direct_output / "raw-events.jsonl").read_bytes(),
-                    )
+                        self.assertEqual(
+                            (
+                                authority_output / "raw-events.jsonl"
+                            ).read_bytes(),
+                            (direct_output / "raw-events.jsonl").read_bytes(),
+                        )
+                        self.assertFalse(marker.exists())
 
     async def test_default_tools_produce_canonical_request_and_started_capabilities(
         self,

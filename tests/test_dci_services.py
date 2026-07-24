@@ -162,10 +162,15 @@ class LocalCorpusServiceTests(unittest.IsolatedAsyncioTestCase):
             async with binding.factory(_context(root)) as service:
                 with service.open_process_working_directory() as working:
                     self.assertEqual(working.cwd, "/")
-                    self.assertIn(
-                        "asterion.runtime.cwd_exec",
-                        working.command_prefix,
+                    self.assertEqual(
+                        working.command_prefix[:3],
+                        (sys.executable, "-I", "-S"),
                     )
+                    helper = Path(working.command_prefix[3])
+                    self.assertTrue(helper.is_absolute())
+                    self.assertEqual(helper.name, "cwd_exec.py")
+                    self.assertTrue(helper.is_file())
+                    self.assertNotIn("-m", working.command_prefix)
                     environment = {"EXACT": "value"}
                     with prepare_process_launch(
                         working,

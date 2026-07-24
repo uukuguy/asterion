@@ -14,6 +14,86 @@ from pathlib import Path
 
 Runner = Callable[[tuple[str, ...], Path], subprocess.CompletedProcess[str]]
 
+WHEEL_CWD_SHIM_SMOKE = r"""
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+from asterion.runtime.cwd_exec import trusted_script_path
+
+helper = trusted_script_path()
+assert helper.is_absolute()
+assert helper.name == 'cwd_exec.py'
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary)
+    shadow = root / 'shadow'
+    fake_runtime = shadow / 'asterion/runtime'
+    fake_runtime.mkdir(parents=True)
+    (shadow / 'asterion/__init__.py').write_text('')
+    (fake_runtime / '__init__.py').write_text('')
+    marker = root / 'shadow-executed'
+    attack = (
+        "import os\n"
+        "from pathlib import Path\n"
+        "Path(os.environ['MALICIOUS_MARKER']).write_text('executed')\n"
+    )
+    (fake_runtime / 'cwd_exec.py').write_text(attack)
+    (shadow / 'sitecustomize.py').write_text(attack)
+    cases = (
+        (
+            ('PYTHONHOME', '/definitely/not/a/python/home'),
+            ('EXACT', 'python-home'),
+        ),
+        (
+            ('PYTHONPATH', str(shadow)),
+            ('PYTHONUSERBASE', str(root / 'user-base')),
+            ('PYTHONSTARTUP', str(root / 'startup.py')),
+            ('PYTHONWARNINGS', 'ignore'),
+            ('PYTHONDONTWRITEBYTECODE', '1'),
+            ('PYTHONHASHSEED', '7'),
+            ('MALICIOUS_MARKER', str(marker)),
+        ),
+    )
+    cwd_descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for pairs in cases:
+            payload = json.dumps(
+                list(pairs), ensure_ascii=True, separators=(',', ':')
+            ).encode('ascii')
+            with tempfile.TemporaryFile() as transport:
+                transport.write(payload)
+                transport.seek(0)
+                environment_descriptor = transport.fileno()
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        '-I', '-S',
+                        str(helper),
+                        '--fd', str(cwd_descriptor),
+                        '--env-fd', str(environment_descriptor),
+                        '--',
+                        '/usr/bin/env', '-0',
+                    ],
+                    cwd='/',
+                    env=dict(pairs),
+                    pass_fds=(cwd_descriptor, environment_descriptor),
+                    capture_output=True,
+                    check=False,
+                )
+            expected = b''.join(
+                key.encode() + b'=' + value.encode() + b'\0'
+                for key, value in pairs
+            )
+            assert completed.returncode == 0
+            assert completed.stdout == expected
+    finally:
+        os.close(cwd_descriptor)
+    assert not marker.exists()
+"""
+
 ROOT_EXCLUDED_NAMES = frozenset(
     {
         "build",
@@ -307,6 +387,7 @@ def _run_full(copy_root: Path, venv_root: Path, runner: Runner) -> int:
     installed_commands = (
         ("uv", "venv", str(venv_root)),
         ("uv", "pip", "install", "--python", str(python), str(wheels[0])),
+        (str(python), "-c", WHEEL_CWD_SHIM_SMOKE),
         (str(asterion), "list"),
         (str(asterion), "describe", "--provider", "dci-agent-lite", "--json"),
     )
