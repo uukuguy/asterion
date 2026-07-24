@@ -10,7 +10,7 @@ from importlib import metadata
 from asterion.applications.provider import (
     ApplicationProviderError,
     InstalledApplicationProvider,
-    validate_installed_provider,
+    validate_installed_provider_metadata,
 )
 
 
@@ -49,12 +49,16 @@ def load_application_provider(
     """Load and validate only one explicitly selected provider."""
 
     if not _valid_provider_id(provider_id):
-        raise ApplicationProviderError("installed application provider identity is invalid")
+        raise ApplicationProviderError(
+            "installed application provider identity is invalid"
+        )
     matches = [
         entry for entry in _entry_points(entry_points) if entry.name == provider_id
     ]
     if len(matches) != 1:
-        raise ApplicationProviderError("installed application provider selection is invalid")
+        raise ApplicationProviderError(
+            "installed application provider selection is invalid"
+        )
     try:
         factory = matches[0].load()
         if not callable(factory):
@@ -64,7 +68,7 @@ def load_application_provider(
         raise ApplicationProviderError(
             "installed application provider failed to load"
         ) from None
-    return validate_installed_provider(value, selected_id=provider_id)
+    return validate_installed_provider_metadata(value, selected_id=provider_id)
 
 
 def _entry_points(values: Iterable[object] | None) -> tuple[object, ...]:

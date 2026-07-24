@@ -4,8 +4,11 @@ from asterion.applications.provider import (
     APPLICATION_PROVIDER_PROTOCOL,
     ApplicationProviderError,
     InstalledApplication,
+    InstalledAssembly,
     InstalledApplicationProvider,
+    resolve_installed_provider,
     validate_installed_provider,
+    validate_installed_provider_metadata,
 )
 from asterion.applications.discovery import (
     APPLICATION_ENTRY_POINT_GROUP,
@@ -19,9 +22,12 @@ __all__ = (
     "APPLICATION_ENTRY_POINT_GROUP",
     "ApplicationProviderError",
     "InstalledApplication",
+    "InstalledAssembly",
     "InstalledApplicationProvider",
     "InstalledProviderMetadata",
     "list_application_providers",
     "load_application_provider",
+    "resolve_installed_provider",
     "validate_installed_provider",
+    "validate_installed_provider_metadata",
 )

@@ -7,13 +7,27 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from asterion.assembly.protocol import validate_assembly_manifest
-from asterion.packages.catalog import PackageRef
-from asterion.packages.execution import PackageImplementation
+from asterion.assembly.protocol import (
+    AssemblyError,
+    AssemblyPlan,
+    resolve_assembly,
+    validate_assembly_manifest,
+)
+from asterion.packages.catalog import (
+    PackageCatalogError,
+    PackageRef,
+    discover_packages,
+)
+from asterion.packages.execution import (
+    PackageExecutionError,
+    PackageImplementation,
+    validate_implementation_bindings,
+)
 from asterion.applications.product import (
     InstalledCapabilityProduct,
     validate_capability_product,
 )
+from asterion.runtime.factory import RuntimeFactoryError, RuntimeFactoryRegistry
 
 
 APPLICATION_PROVIDER_PROTOCOL = "asterion.application-provider/v1"
@@ -28,6 +42,13 @@ class ApplicationProviderError(ValueError):
 
 
 @dataclass(frozen=True)
+class InstalledAssembly:
+    runtime_id: str
+    path: Path
+    plan: AssemblyPlan
+
+
+@dataclass(frozen=True)
 class InstalledApplication:
     application_id: str
     version: str
@@ -35,6 +56,7 @@ class InstalledApplication:
     catalog_roots: tuple[Path, ...]
     implementations: tuple[tuple[PackageRef, PackageImplementation], ...]
     runtime_ids: tuple[str, ...]
+    assemblies: tuple[InstalledAssembly, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -49,14 +71,26 @@ class InstalledApplicationProvider:
 def validate_installed_provider(
     value: InstalledApplicationProvider, *, selected_id: str
 ) -> InstalledApplicationProvider:
-    """Validate and canonicalize one explicitly selected installed provider."""
+    """Backward-compatible name for metadata-only provider validation."""
+
+    return validate_installed_provider_metadata(value, selected_id=selected_id)
+
+
+def validate_installed_provider_metadata(
+    value: InstalledApplicationProvider, *, selected_id: str
+) -> InstalledApplicationProvider:
+    """Validate selected provider metadata without selecting runtime factories."""
 
     if not isinstance(value, InstalledApplicationProvider):
         raise ApplicationProviderError("installed application provider is invalid")
     if value.protocol != APPLICATION_PROVIDER_PROTOCOL:
-        raise ApplicationProviderError("installed application provider protocol is invalid")
+        raise ApplicationProviderError(
+            "installed application provider protocol is invalid"
+        )
     if not _identifier(selected_id) or value.provider_id != selected_id:
-        raise ApplicationProviderError("installed application provider identity is invalid")
+        raise ApplicationProviderError(
+            "installed application provider identity is invalid"
+        )
     root = _canonical_resource(value.resource_root, kind="directory")
     if not value.applications or not isinstance(value.applications, tuple):
         raise ApplicationProviderError("installed application set is invalid")
@@ -74,13 +108,15 @@ def validate_installed_provider(
         ):
             raise ApplicationProviderError("installed application identity is invalid")
         identities.add(identity)
-        applications.append(_validate_application(application, root=root))
+        applications.append(_validate_application_metadata(application, root=root))
     product = None
     if value.product is not None:
         try:
             product = validate_capability_product(value.product)
         except ValueError:
-            raise ApplicationProviderError("installed capability product is invalid") from None
+            raise ApplicationProviderError(
+                "installed capability product is invalid"
+            ) from None
     return InstalledApplicationProvider(
         protocol=APPLICATION_PROVIDER_PROTOCOL,
         provider_id=selected_id,
@@ -90,15 +126,50 @@ def validate_installed_provider(
     )
 
 
-def _validate_application(
+def resolve_installed_provider(
+    provider: InstalledApplicationProvider,
+    *,
+    runtime_factories: RuntimeFactoryRegistry,
+) -> InstalledApplicationProvider:
+    """Resolve every installed application into an exact executable closure."""
+
+    if not isinstance(provider, InstalledApplicationProvider) or not isinstance(
+        runtime_factories, RuntimeFactoryRegistry
+    ):
+        raise ApplicationProviderError("installed application provider is invalid")
+    metadata = validate_installed_provider_metadata(
+        provider, selected_id=provider.provider_id
+    )
+    applications = tuple(
+        _resolve_application(application, runtime_factories=runtime_factories)
+        for application in metadata.applications
+    )
+    return InstalledApplicationProvider(
+        protocol=metadata.protocol,
+        provider_id=metadata.provider_id,
+        resource_root=metadata.resource_root,
+        applications=applications,
+        product=metadata.product,
+    )
+
+
+def _validate_application_metadata(
     application: InstalledApplication, *, root: Path
 ) -> InstalledApplication:
-    if not isinstance(application.assembly_paths, tuple) or not application.assembly_paths:
+    if (
+        not isinstance(application.assembly_paths, tuple)
+        or not application.assembly_paths
+    ):
         raise ApplicationProviderError("installed application assemblies are invalid")
-    if not isinstance(application.catalog_roots, tuple) or not application.catalog_roots:
+    if (
+        not isinstance(application.catalog_roots, tuple)
+        or not application.catalog_roots
+    ):
         raise ApplicationProviderError("installed application catalogs are invalid")
     if not isinstance(application.implementations, tuple):
-        raise ApplicationProviderError("installed application implementations are invalid")
+        raise ApplicationProviderError(
+            "installed application implementations are invalid"
+        )
     if (
         not isinstance(application.runtime_ids, tuple)
         or not application.runtime_ids
@@ -128,24 +199,37 @@ def _validate_application(
         refs.add(binding[0])
         implementations.append(binding)
 
+    assembly_runtime_ids: list[str] = []
     for assembly_path in assemblies:
         try:
             assembly = json.loads(assembly_path.read_text())
             validate_assembly_manifest(assembly)
-        except Exception:
-            raise ApplicationProviderError("installed application assembly is invalid") from None
+        except (OSError, UnicodeError, json.JSONDecodeError, AssemblyError):
+            raise ApplicationProviderError(
+                "installed application assembly is invalid"
+            ) from None
         if (
             assembly["application_id"] != application.application_id
             or assembly["version"] != application.version
-            or assembly["runtime_id"] not in application.runtime_ids
         ):
-            raise ApplicationProviderError("installed application assembly identity is invalid")
+            raise ApplicationProviderError(
+                "installed application assembly identity is invalid"
+            )
+        runtime_id = assembly["runtime_id"]
+        assert isinstance(runtime_id, str)
+        assembly_runtime_ids.append(runtime_id)
         package_refs = {
             PackageRef(item["package_id"], item["version"])
             for item in assembly["packages"]
         }
         if not refs.issubset(package_refs):
-            raise ApplicationProviderError("installed application binding is unavailable")
+            raise ApplicationProviderError(
+                "installed application binding is unavailable"
+            )
+    if tuple(sorted(assembly_runtime_ids)) != application.runtime_ids:
+        raise ApplicationProviderError(
+            "installed application runtime assemblies are invalid"
+        )
 
     return InstalledApplication(
         application_id=application.application_id,
@@ -154,6 +238,66 @@ def _validate_application(
         catalog_roots=catalogs,
         implementations=tuple(implementations),
         runtime_ids=application.runtime_ids,
+        assemblies=(),
+    )
+
+
+def _resolve_application(
+    application: InstalledApplication,
+    *,
+    runtime_factories: RuntimeFactoryRegistry,
+) -> InstalledApplication:
+    try:
+        catalog = discover_packages(application.catalog_roots)
+        assemblies: list[InstalledAssembly] = []
+        for assembly_path in application.assembly_paths:
+            assembly = json.loads(assembly_path.read_text())
+            if not isinstance(assembly, dict):
+                raise TypeError
+            runtime_id = assembly["runtime_id"]
+            if not isinstance(runtime_id, str):
+                raise TypeError
+            runtime_binding = runtime_factories.select(runtime_id)
+            plan = resolve_assembly(
+                assembly,
+                catalog=catalog,
+                runtime_manifest=runtime_binding.manifest.to_mapping(),
+            )
+            validate_implementation_bindings(plan, application.implementations)
+            assemblies.append(
+                InstalledAssembly(
+                    runtime_id=runtime_id,
+                    path=assembly_path,
+                    plan=plan,
+                )
+            )
+    except (
+        OSError,
+        UnicodeError,
+        json.JSONDecodeError,
+        KeyError,
+        TypeError,
+        PackageCatalogError,
+        AssemblyError,
+        PackageExecutionError,
+        RuntimeFactoryError,
+    ):
+        raise ApplicationProviderError(
+            "installed application executable closure is invalid"
+        ) from None
+    values = tuple(sorted(assemblies, key=lambda value: value.runtime_id))
+    if tuple(value.runtime_id for value in values) != application.runtime_ids:
+        raise ApplicationProviderError(
+            "installed application runtime assemblies are invalid"
+        )
+    return InstalledApplication(
+        application_id=application.application_id,
+        version=application.version,
+        assembly_paths=application.assembly_paths,
+        catalog_roots=application.catalog_roots,
+        implementations=application.implementations,
+        runtime_ids=application.runtime_ids,
+        assemblies=values,
     )
 
 
@@ -164,7 +308,9 @@ def _canonical_resource(value: Path, *, kind: str) -> Path:
     try:
         resolved = path.resolve(strict=True)
     except OSError:
-        raise ApplicationProviderError("installed application resource is unavailable") from None
+        raise ApplicationProviderError(
+            "installed application resource is unavailable"
+        ) from None
     if kind == "file" and not resolved.is_file():
         raise ApplicationProviderError("installed application resource is invalid")
     if kind == "directory" and not resolved.is_dir():
@@ -178,7 +324,9 @@ def _resource_beneath(value: Path, *, root: Path, kind: str) -> Path:
         raise ApplicationProviderError("installed application resource is unsafe")
     resolved = _canonical_resource(path, kind=kind)
     if not resolved.is_relative_to(root):
-        raise ApplicationProviderError("installed application resource escapes its root")
+        raise ApplicationProviderError(
+            "installed application resource escapes its root"
+        )
     return resolved
 
 

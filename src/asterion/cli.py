@@ -16,7 +16,12 @@ from asterion.applications.discovery import (
     list_application_providers,
     load_application_provider,
 )
-from asterion.applications.provider import ApplicationProviderError, InstalledApplication
+from asterion.applications.provider import (
+    ApplicationProviderError,
+    InstalledApplication,
+    InstalledAssembly,
+    resolve_installed_provider,
+)
 from asterion.applications.product import (
     CapabilityProductDescription,
     VerificationRequest,
@@ -27,12 +32,8 @@ from asterion.applications.selection import (
     parse_application_selector,
     select_installed_application,
 )
-from asterion.assembly.protocol import AssemblyError, resolve_assembly
-from asterion.packages.catalog import discover_packages
-from asterion.packages.execution import (
-    PackageExecutionError,
-    validate_implementation_bindings,
-)
+from asterion.assembly.protocol import AssemblyError
+from asterion.packages.execution import PackageExecutionError
 from asterion.runner.application import ApplicationRunError
 from asterion.runner.composed import run_composed_application
 from asterion.runtime.factory import (
@@ -147,14 +148,19 @@ def main(
                 provider.product.verifier(request), description
             )
             if args.json:
-                stdout.write(json.dumps(_verification_payload(result), sort_keys=True) + "\n")
+                stdout.write(
+                    json.dumps(_verification_payload(result), sort_keys=True) + "\n"
+                )
             else:
                 _render_verification(result, stdout)
             return 0 if result.status == "PASS" else 1
-        if sum(
-            value is not None
-            for value in (args.application, args.assembly, args.legacy_assembly)
-        ) != 1:
+        if (
+            sum(
+                value is not None
+                for value in (args.application, args.assembly, args.legacy_assembly)
+            )
+            != 1
+        ):
             raise ApplicationProviderError("application selection mode is invalid")
         return asyncio.run(
             _run(
@@ -189,8 +195,9 @@ async def _run(
     stdin: TextIO,
     stdout: TextIO,
 ) -> int:
-    provider = load_application_provider(
-        args.provider, entry_points=entry_points
+    provider = resolve_installed_provider(
+        load_application_provider(args.provider, entry_points=entry_points),
+        runtime_factories=registry,
     )
     if args.application is not None:
         application = select_installed_application(
@@ -216,17 +223,13 @@ async def _run(
         runtime_id = application.runtime_ids[0]
     if runtime_id not in application.runtime_ids:
         raise ApplicationProviderError("application runtime selection is invalid")
-    if args.application is not None:
-        assembly_path = _select_application_assembly(application, runtime_id)
+    assembly = _select_application_assembly(application, runtime_id)
+    if args.application is None and assembly.path != assembly_path:
+        raise ApplicationProviderError("application assembly selection is invalid")
+    assembly_path = assembly.path
     runtime_options = _runtime_options(args.runtime_option)
     runtime_binding = registry.select(runtime_id)
-    assembly = json.loads(assembly_path.read_text())
-    plan = resolve_assembly(
-        assembly,
-        catalog=discover_packages(application.catalog_roots),
-        runtime_manifest=runtime_binding.manifest.to_mapping(),
-    )
-    validate_implementation_bindings(plan, application.implementations)
+    plan = assembly.plan
     operator_config = _operator_executor_config(args, plan.host_capabilities)
     context = RuntimeFactoryContext(
         provider_id=provider.provider_id,
@@ -273,17 +276,14 @@ def _runtime_options(values: list[str]) -> Mapping[str, str]:
 
 def _select_application_assembly(
     application: InstalledApplication, runtime_id: str
-) -> Path:
+) -> InstalledAssembly:
     """Return the application's unique canonical assembly for one runtime."""
 
-    matches = []
-    for path in application.assembly_paths:
-        try:
-            assembly = json.loads(path.read_text())
-        except (OSError, TypeError, ValueError):
-            raise ApplicationProviderError("application assembly selection is invalid") from None
-        if isinstance(assembly, dict) and assembly.get("runtime_id") == runtime_id:
-            matches.append(path)
+    matches = [
+        assembly
+        for assembly in application.assemblies
+        if assembly.runtime_id == runtime_id
+    ]
     if len(matches) != 1:
         raise ApplicationProviderError("application assembly selection is invalid")
     return matches[0]
@@ -322,8 +322,12 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--input")
     run.add_argument("--application")
     run.add_argument("--assembly")
-    run.add_argument("--executor-binary", default=os.environ.get("ASTERION_EXECUTOR_BINARY"))
-    run.add_argument("--executor-policy", default=os.environ.get("ASTERION_EXECUTOR_POLICY"))
+    run.add_argument(
+        "--executor-binary", default=os.environ.get("ASTERION_EXECUTOR_BINARY")
+    )
+    run.add_argument(
+        "--executor-policy", default=os.environ.get("ASTERION_EXECUTOR_POLICY")
+    )
     run.add_argument(
         "--executor-validation-config",
         default=os.environ.get("ASTERION_EXECUTOR_VALIDATION_CONFIG"),
@@ -332,7 +336,9 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _description_payload(description: CapabilityProductDescription) -> dict[str, object]:
+def _description_payload(
+    description: CapabilityProductDescription,
+) -> dict[str, object]:
     return {
         "product_id": description.product_id,
         "version": description.version,
@@ -453,7 +459,9 @@ def _operator_executor_config(
     requires_executor = "executor.controlled" in host_capabilities
     if requires_executor:
         if not all(values):
-            raise ApplicationProviderError("controlled executor configuration is required")
+            raise ApplicationProviderError(
+                "controlled executor configuration is required"
+            )
         return load_operator_executor_config(*values)
     if any(values):
         raise ApplicationProviderError("controlled executor configuration is invalid")

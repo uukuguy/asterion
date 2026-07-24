@@ -4,41 +4,46 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from asterion.applications.provider import (
     APPLICATION_PROVIDER_PROTOCOL,
     ApplicationProviderError,
     InstalledApplication,
     InstalledApplicationProvider,
+    resolve_installed_provider,
     validate_installed_provider,
 )
 from asterion.applications.product import InstalledCapabilityProduct
-from asterion.packages.catalog import PackageRef
+from asterion.packages.catalog import PackageRef, discover_packages
 from asterion.packages.execution import PackageExecutionResult, PackageInvocation
+from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
 
 
 class FixtureImplementation:
-    async def execute(
-        self, invocation: PackageInvocation
-    ) -> PackageExecutionResult:
+    async def execute(self, invocation: PackageInvocation) -> PackageExecutionResult:
         del invocation
         return PackageExecutionResult(events=(), artifacts=())
 
 
-def write_assembly(root: Path, *, application_id: str = "example.research") -> Path:
+def write_assembly(
+    root: Path,
+    *,
+    application_id: str = "example.research",
+    filename: str = "research.json",
+    runtime_id: str = "pi.reference",
+) -> Path:
     assembly_dir = root / "assemblies"
     assembly_dir.mkdir(exist_ok=True)
-    path = assembly_dir / "research.json"
+    path = assembly_dir / filename
     path.write_text(
         json.dumps(
             {
                 "protocol": "dci.assembly/v1",
                 "application_id": application_id,
                 "version": "1.0.0",
-                "runtime_id": "pi.reference",
-                "packages": [
-                    {"package_id": "example.research", "version": "1.0.0"}
-                ],
+                "runtime_id": runtime_id,
+                "packages": [{"package_id": "example.research", "version": "1.0.0"}],
                 "host_capabilities": [],
                 "host_policies": [],
                 "host_events": ["run.started"],
@@ -47,6 +52,21 @@ def write_assembly(root: Path, *, application_id: str = "example.research") -> P
         )
     )
     return path
+
+
+def runtime_factories(*runtime_ids: str) -> RuntimeFactoryRegistry:
+    def fail_if_called(context):
+        del context
+        raise AssertionError("provider validation called a runtime factory")
+
+    return RuntimeFactoryRegistry(
+        RuntimeFactoryBinding(
+            runtime_id=runtime_id,
+            capabilities=(),
+            factory=fail_if_called,
+        )
+        for runtime_id in runtime_ids
+    )
 
 
 def provider(root: Path) -> InstalledApplicationProvider:
@@ -92,6 +112,129 @@ def provider(root: Path) -> InstalledApplicationProvider:
 
 
 class InstalledApplicationProviderTests(unittest.TestCase):
+    def test_malformed_executable_closures_fail_before_runtime_creation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            valid = provider(root)
+            application = valid.applications[0]
+            duplicate_path = write_assembly(root, filename="research-copy.json")
+            unlisted_path = write_assembly(
+                root,
+                filename="other-runtime.json",
+                runtime_id="other.runtime",
+            )
+            catalog = application.catalog_roots[0]
+            uncomposable_catalog = root / "uncomposable-manifests"
+            uncomposable_catalog.mkdir()
+            (uncomposable_catalog / "research.json").write_text(
+                json.dumps(
+                    {
+                        "protocol": "dci.package/v1",
+                        "package_id": "example.research",
+                        "version": "1.0.0",
+                        "kind": "capability",
+                        "provides_capabilities": [],
+                        "requires_capabilities": ["missing.capability"],
+                        "requires_policies": [],
+                        "emits_events": [],
+                        "consumes_events": [],
+                        "produces_artifacts": [],
+                        "consumes_artifacts": [],
+                    }
+                )
+            )
+
+            def with_application(
+                value: InstalledApplication,
+            ) -> InstalledApplicationProvider:
+                return InstalledApplicationProvider(
+                    protocol=valid.protocol,
+                    provider_id=valid.provider_id,
+                    resource_root=valid.resource_root,
+                    applications=(value,),
+                )
+
+            cases = {
+                "runtime-without-assembly": with_application(
+                    InstalledApplication(
+                        application_id=application.application_id,
+                        version=application.version,
+                        assembly_paths=application.assembly_paths,
+                        catalog_roots=(catalog,),
+                        implementations=application.implementations,
+                        runtime_ids=("other.runtime", "pi.reference"),
+                    )
+                ),
+                "two-assemblies-for-one-runtime": with_application(
+                    InstalledApplication(
+                        application_id=application.application_id,
+                        version=application.version,
+                        assembly_paths=(*application.assembly_paths, duplicate_path),
+                        catalog_roots=(catalog,),
+                        implementations=application.implementations,
+                        runtime_ids=("pi.reference",),
+                    )
+                ),
+                "assembly-runtime-not-listed": with_application(
+                    InstalledApplication(
+                        application_id=application.application_id,
+                        version=application.version,
+                        assembly_paths=(unlisted_path,),
+                        catalog_roots=(catalog,),
+                        implementations=application.implementations,
+                        runtime_ids=("pi.reference",),
+                    )
+                ),
+                "missing-package-implementation": with_application(
+                    InstalledApplication(
+                        application_id=application.application_id,
+                        version=application.version,
+                        assembly_paths=application.assembly_paths,
+                        catalog_roots=(catalog,),
+                        implementations=(),
+                        runtime_ids=application.runtime_ids,
+                    )
+                ),
+                "unknown-package-implementation": with_application(
+                    InstalledApplication(
+                        application_id=application.application_id,
+                        version=application.version,
+                        assembly_paths=application.assembly_paths,
+                        catalog_roots=(catalog,),
+                        implementations=(
+                            *application.implementations,
+                            (
+                                PackageRef("example.unknown", "1.0.0"),
+                                FixtureImplementation(),
+                            ),
+                        ),
+                        runtime_ids=application.runtime_ids,
+                    )
+                ),
+                "uncomposable-bound-assembly": with_application(
+                    InstalledApplication(
+                        application_id=application.application_id,
+                        version=application.version,
+                        assembly_paths=application.assembly_paths,
+                        catalog_roots=(uncomposable_catalog,),
+                        implementations=application.implementations,
+                        runtime_ids=application.runtime_ids,
+                    )
+                ),
+            }
+            registry = runtime_factories("other.runtime", "pi.reference")
+            for case, value in cases.items():
+                with (
+                    self.subTest(case=case),
+                    self.assertRaises(ApplicationProviderError),
+                ):
+                    resolve_installed_provider(
+                        validate_installed_provider(
+                            value, selected_id=value.provider_id
+                        ),
+                        runtime_factories=registry,
+                    )
+
     def test_optional_capability_product_survives_provider_validation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             valid = provider(Path(temp_dir))
@@ -112,14 +255,34 @@ class InstalledApplicationProviderTests(unittest.TestCase):
 
     def test_valid_provider_is_deeply_immutable_and_exact(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            value = validate_installed_provider(
+            metadata = validate_installed_provider(
                 provider(Path(temp_dir)), selected_id="example-app"
             )
+            with patch(
+                "asterion.applications.provider.discover_packages",
+                wraps=discover_packages,
+            ) as discovery:
+                value = resolve_installed_provider(
+                    metadata,
+                    runtime_factories=runtime_factories("pi.reference"),
+                )
 
+        self.assertEqual(metadata.applications[0].assemblies, ())
+        self.assertEqual(discovery.call_count, 1)
         self.assertEqual(value.protocol, "asterion.application-provider/v1")
         self.assertEqual(value.applications[0].application_id, "example.research")
+        self.assertEqual(
+            tuple(assembly.runtime_id for assembly in value.applications[0].assemblies),
+            ("pi.reference",),
+        )
+        self.assertEqual(
+            value.applications[0].assemblies[0].plan.application_id,
+            "example.research",
+        )
         with self.assertRaises((AttributeError, TypeError)):
             value.applications[0].runtime_ids += ("other.runtime",)
+        with self.assertRaises((AttributeError, TypeError)):
+            value.applications[0].assemblies += ()
 
     def test_provider_identity_and_duplicate_applications_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -137,8 +300,9 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                 ),
             )
             for value, selected in cases:
-                with self.subTest(selected=selected), self.assertRaises(
-                    ApplicationProviderError
+                with (
+                    self.subTest(selected=selected),
+                    self.assertRaises(ApplicationProviderError),
                 ):
                     validate_installed_provider(value, selected_id=selected)
 
@@ -175,7 +339,9 @@ class InstalledApplicationProviderTests(unittest.TestCase):
 
         self.assertNotIn(sentinel, str(raised.exception))
 
-    def test_protocol_runtime_and_duplicate_binding_invariants_fail_closed(self) -> None:
+    def test_protocol_runtime_and_duplicate_binding_invariants_fail_closed(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             valid = provider(Path(temp_dir))
             application = valid.applications[0]
@@ -219,8 +385,9 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                 ),
             )
             for value in cases:
-                with self.subTest(value=value), self.assertRaises(
-                    ApplicationProviderError
+                with (
+                    self.subTest(value=value),
+                    self.assertRaises(ApplicationProviderError),
                 ):
                     validate_installed_provider(value, selected_id="example-app")
 

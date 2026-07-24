@@ -11,8 +11,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from asterion.cli import _parser, main
-from asterion.applications.dci_agent_lite.provider import create_provider as create_dci_provider
-from asterion.applications.provider import InstalledApplication, InstalledApplicationProvider
+from asterion.applications.dci_agent_lite.provider import (
+    create_provider as create_dci_provider,
+)
+from asterion.applications.provider import (
+    InstalledApplication,
+    InstalledApplicationProvider,
+)
 from asterion.applications.product import (
     CapabilityFunction,
     CapabilityProductDescription,
@@ -30,7 +35,9 @@ from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegist
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 from asterion.services.controlled_executor import ControlledExecutionResult
 from tests.test_application_discovery import FakeEntryPoint
-from tests.test_installed_application_provider import provider as installed_provider_fixture
+from tests.test_installed_application_provider import (
+    provider as installed_provider_fixture,
+)
 
 
 class FixtureRuntime:
@@ -180,6 +187,11 @@ def configure_manager(manager, config):
     return manager
 
 
+def fail_if_unselected_runtime_is_created(context):
+    del context
+    raise AssertionError("unselected runtime factory was called")
+
+
 def provider(root: Path) -> InstalledApplicationProvider:
     value = installed_provider_fixture(root)
     for application in value.applications:
@@ -235,7 +247,8 @@ class AsterionCliTests(unittest.TestCase):
 
         self.assertEqual(code, 0, stderr.getvalue())
         configuration = {
-            item["name"]: item for item in json.loads(stdout.getvalue())["configuration"]
+            item["name"]: item
+            for item in json.loads(stdout.getvalue())["configuration"]
         }
         self.assertEqual(configuration["DCI_PROVIDER"]["default"], "openai-codex")
         self.assertEqual(configuration["DCI_MODEL"]["default"], "gpt-5.6-luna")
@@ -323,17 +336,16 @@ class AsterionCliTests(unittest.TestCase):
             with self.subTest(value=value), tempfile.TemporaryDirectory() as temp_dir:
                 root = Path(temp_dir)
                 installed = provider(root)
-                entry = FakeEntryPoint(
-                    name="example-app", factory=lambda: installed
-                )
+                entry = FakeEntryPoint(name="example-app", factory=lambda: installed)
                 contexts = []
                 registry = RuntimeFactoryRegistry(
                     (
                         RuntimeFactoryBinding(
                             runtime_id="pi.reference",
                             capabilities=(),
-                            factory=lambda context: contexts.append(context)
-                            or FixtureRuntime(),
+                            factory=lambda context: (
+                                contexts.append(context) or FixtureRuntime()
+                            ),
                         ),
                     )
                 )
@@ -367,7 +379,9 @@ class AsterionCliTests(unittest.TestCase):
                 self.assertEqual(code, 2)
                 self.assertEqual(contexts, [])
 
-    def _product_provider(self, root: Path, calls: list[object]) -> InstalledApplicationProvider:
+    def _product_provider(
+        self, root: Path, calls: list[object]
+    ) -> InstalledApplicationProvider:
         valid = provider(root)
         description = CapabilityProductDescription(
             product_id="example-product",
@@ -431,7 +445,9 @@ class AsterionCliTests(unittest.TestCase):
             provider_id=valid.provider_id,
             resource_root=valid.resource_root,
             applications=valid.applications,
-            product=InstalledCapabilityProduct(description=description, verifier=verify),
+            product=InstalledCapabilityProduct(
+                description=description, verifier=verify
+            ),
         )
 
     def test_describe_loads_only_selected_product_and_renders_stable_json(self) -> None:
@@ -462,7 +478,9 @@ class AsterionCliTests(unittest.TestCase):
         self.assertNotIn("value", payload["configuration"][0])
         self.assertEqual(calls, [])
 
-    def test_describe_human_output_is_plain_and_provider_without_product_fails(self) -> None:
+    def test_describe_human_output_is_plain_and_provider_without_product_fails(
+        self,
+    ) -> None:
         calls: list[object] = []
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -622,7 +640,9 @@ class AsterionCliTests(unittest.TestCase):
                 os.chdir(previous)
 
         self.assertEqual(code, 0)
-        self.assertEqual(json.loads(isolated.getvalue()), json.loads(baseline.getvalue()))
+        self.assertEqual(
+            json.loads(isolated.getvalue()), json.loads(baseline.getvalue())
+        )
 
     def test_list_reports_metadata_without_loading_provider(self) -> None:
         entry = FakeEntryPoint(name="example-app", factory=lambda: None)
@@ -671,7 +691,9 @@ class AsterionCliTests(unittest.TestCase):
             },
         )
 
-    def test_run_preflights_then_constructs_runtime_and_outputs_one_result(self) -> None:
+    def test_run_preflights_then_constructs_runtime_and_outputs_one_result(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             value = provider(Path(temp_dir))
             entry = FakeEntryPoint(name="example-app", factory=lambda: value)
@@ -752,7 +774,9 @@ class AsterionCliTests(unittest.TestCase):
             )
 
         self.assertEqual(code, 0)
-        self.assertEqual(json.loads(stdout.getvalue())["application_id"], "example.research")
+        self.assertEqual(
+            json.loads(stdout.getvalue())["application_id"], "example.research"
+        )
 
     def test_run_does_not_normalize_runtime_aliases(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -764,8 +788,9 @@ class AsterionCliTests(unittest.TestCase):
                     RuntimeFactoryBinding(
                         runtime_id="pi.reference",
                         capabilities=(),
-                        factory=lambda context: contexts.append(context)
-                        or FixtureRuntime(),
+                        factory=lambda context: (
+                            contexts.append(context) or FixtureRuntime()
+                        ),
                     ),
                 )
             )
@@ -822,8 +847,14 @@ class AsterionCliTests(unittest.TestCase):
                     RuntimeFactoryBinding(
                         runtime_id="claude-code.reference",
                         capabilities=(),
-                        factory=lambda context: contexts.append(context)
-                        or ClaudeFixtureRuntime(),
+                        factory=lambda context: (
+                            contexts.append(context) or ClaudeFixtureRuntime()
+                        ),
+                    ),
+                    RuntimeFactoryBinding(
+                        runtime_id="pi.reference",
+                        capabilities=(),
+                        factory=fail_if_unselected_runtime_is_created,
                     ),
                 )
             )
@@ -882,14 +913,16 @@ class AsterionCliTests(unittest.TestCase):
                     RuntimeFactoryBinding(
                         runtime_id="claude-code.reference",
                         capabilities=(),
-                        factory=lambda context: contexts.append(context)
-                        or ClaudeFixtureRuntime(),
+                        factory=lambda context: (
+                            contexts.append(context) or ClaudeFixtureRuntime()
+                        ),
                     ),
                     RuntimeFactoryBinding(
                         runtime_id="pi.reference",
                         capabilities=(),
-                        factory=lambda context: contexts.append(context)
-                        or FixtureRuntime(),
+                        factory=lambda context: (
+                            contexts.append(context) or FixtureRuntime()
+                        ),
                     ),
                 )
             )
@@ -958,8 +991,9 @@ class AsterionCliTests(unittest.TestCase):
                     RuntimeFactoryBinding(
                         runtime_id="claude-code.reference",
                         capabilities=(),
-                        factory=lambda context: contexts.append(context)
-                        or ClaudeFixtureRuntime(),
+                        factory=lambda context: (
+                            contexts.append(context) or ClaudeFixtureRuntime()
+                        ),
                     ),
                 )
             )
@@ -992,8 +1026,14 @@ class AsterionCliTests(unittest.TestCase):
                 RuntimeFactoryBinding(
                     runtime_id="claude-code.reference",
                     capabilities=("filesystem.read", "shell"),
-                    factory=lambda context: contexts.append(context)
-                    or DciClaudeFixtureRuntime(),
+                    factory=lambda context: (
+                        contexts.append(context) or DciClaudeFixtureRuntime()
+                    ),
+                ),
+                RuntimeFactoryBinding(
+                    runtime_id="pi.reference",
+                    capabilities=("filesystem.read", "shell"),
+                    factory=fail_if_unselected_runtime_is_created,
                 ),
             )
         )
@@ -1037,6 +1077,11 @@ class AsterionCliTests(unittest.TestCase):
         native_executor = DciNativeExecutor()
         registry = RuntimeFactoryRegistry(
             (
+                RuntimeFactoryBinding(
+                    runtime_id="claude-code.reference",
+                    capabilities=("filesystem.read", "shell"),
+                    factory=fail_if_unselected_runtime_is_created,
+                ),
                 RuntimeFactoryBinding(
                     runtime_id="pi.reference",
                     capabilities=("filesystem.read", "shell"),
@@ -1090,6 +1135,11 @@ class AsterionCliTests(unittest.TestCase):
         runtime = DciPiFixtureRuntime()
         registry = RuntimeFactoryRegistry(
             (
+                RuntimeFactoryBinding(
+                    runtime_id="claude-code.reference",
+                    capabilities=("filesystem.read", "shell"),
+                    factory=fail_if_unselected_runtime_is_created,
+                ),
                 RuntimeFactoryBinding(
                     runtime_id="pi.reference",
                     capabilities=("filesystem.read", "shell"),
@@ -1160,7 +1210,9 @@ class AsterionCliTests(unittest.TestCase):
                         FakeEntryPoint(
                             name="dci-agent-lite",
                             factory=lambda: create_dci_provider(
-                                native_executor=EnvironmentDciRunExecutor(repo_root=root)
+                                native_executor=EnvironmentDciRunExecutor(
+                                    repo_root=root
+                                )
                             ),
                         ),
                     ),
@@ -1173,7 +1225,10 @@ class AsterionCliTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         self.assertIsInstance(payload, dict)
         self.assertEqual(payload["application_id"], "dci.research-capability")
-        self.assertEqual(payload["events"], [{"payload": {"status": "completed"}, "type": "research.completed"}])
+        self.assertEqual(
+            payload["events"],
+            [{"payload": {"status": "completed"}, "type": "research.completed"}],
+        )
         self.assertNotIn("SECRET-NATIVE-DELTA", stdout.getvalue())
         self.assertNotIn("SECRET-INPUT", stdout.getvalue())
 
@@ -1182,6 +1237,11 @@ class AsterionCliTests(unittest.TestCase):
         native_executor = FailingDciNativeExecutor()
         registry = RuntimeFactoryRegistry(
             (
+                RuntimeFactoryBinding(
+                    runtime_id="claude-code.reference",
+                    capabilities=("filesystem.read", "shell"),
+                    factory=fail_if_unselected_runtime_is_created,
+                ),
                 RuntimeFactoryBinding(
                     runtime_id="pi.reference",
                     capabilities=("filesystem.read", "shell"),
@@ -1248,7 +1308,9 @@ class AsterionCliTests(unittest.TestCase):
                 self.assertEqual(code, 2)
         self.assertEqual(entry.loads, 0)
 
-    def test_controlled_code_requires_complete_operator_config_before_runtime(self) -> None:
+    def test_controlled_code_requires_complete_operator_config_before_runtime(
+        self,
+    ) -> None:
         calls = []
         registry = RuntimeFactoryRegistry(
             (
@@ -1310,7 +1372,9 @@ class AsterionCliTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual(calls, [])
 
-    def test_executor_environment_configuration_is_used_when_flags_are_absent(self) -> None:
+    def test_executor_environment_configuration_is_used_when_flags_are_absent(
+        self,
+    ) -> None:
         with patch.dict(
             os.environ,
             {
@@ -1385,16 +1449,22 @@ class AsterionCliTests(unittest.TestCase):
                     "src/example.py",
                 ],
                 runtime_factories=registry,
-                managed_executor_factory=lambda config: configure_manager(manager, config),
+                managed_executor_factory=lambda config: configure_manager(
+                    manager, config
+                ),
                 stdout=stdout,
                 stderr=stderr,
             )
         self.assertEqual(code, 0, stderr.getvalue())
         self.assertTrue(manager.entered)
         self.assertIsNotNone(manager.config)
-        self.assertEqual(json.loads(stdout.getvalue())["application_id"], "code.quality")
+        self.assertEqual(
+            json.loads(stdout.getvalue())["application_id"], "code.quality"
+        )
 
-    def test_invalid_provider_fails_before_runtime_factory_and_redacts_input(self) -> None:
+    def test_invalid_provider_fails_before_runtime_factory_and_redacts_input(
+        self,
+    ) -> None:
         calls = []
         registry = RuntimeFactoryRegistry(
             (
