@@ -40,22 +40,37 @@ def compose_packages(
         packages[package_id] = manifest
 
     capability_providers: dict[str, str] = {}
-    event_providers: dict[str, set[str]] = {}
-    artifact_providers: dict[str, set[str]] = {}
-    policy_providers = {
-        package_id
-        for package_id, manifest in packages.items()
-        if manifest["kind"] == "policy"
-    }
+    policy_providers: dict[str, str] = {}
+    event_providers: dict[str, str] = {}
+    artifact_providers: dict[str, str] = {}
     for package_id, manifest in packages.items():
+        if manifest["kind"] == "policy":
+            _bind_provider(
+                policy_providers,
+                package_id,
+                package_id,
+                label="policy",
+            )
         for capability in _edges(manifest, "provides_capabilities"):
-            if capability in capability_providers:
-                raise PackageCompositionError("capability provider is ambiguous")
-            capability_providers[capability] = package_id
+            _bind_provider(
+                capability_providers,
+                capability,
+                package_id,
+                label="capability",
+            )
         for event in _edges(manifest, "emits_events"):
-            event_providers.setdefault(event, set()).add(package_id)
+            _bind_provider(event_providers, event, package_id, label="event")
         for artifact in _edges(manifest, "produces_artifacts"):
-            artifact_providers.setdefault(artifact, set()).add(package_id)
+            _bind_provider(artifact_providers, artifact, package_id, label="artifact")
+
+    for providers, host_edges, label in (
+        (capability_providers, host_capabilities, "capability"),
+        (policy_providers, host_policies, "policy"),
+        (event_providers, host_events, "event"),
+        (artifact_providers, host_artifacts, "artifact"),
+    ):
+        if providers.keys() & host_edges:
+            raise PackageCompositionError(f"{label} provider is ambiguous")
 
     dependencies: dict[str, set[str]] = {package_id: set() for package_id in packages}
     for package_id, manifest in packages.items():
@@ -69,17 +84,18 @@ def compose_packages(
         for policy in _edges(manifest, "requires_policies"):
             if policy in host_policies:
                 continue
-            if policy not in policy_providers:
+            provider = policy_providers.get(policy)
+            if provider is None:
                 raise PackageCompositionError("required policy is unavailable")
-            dependencies[package_id].add(policy)
-        _add_multi_dependencies(
+            dependencies[package_id].add(provider)
+        _add_provider_dependencies(
             dependencies[package_id],
             _edges(manifest, "consumes_events"),
             host_events,
             event_providers,
             "required event is unavailable",
         )
-        _add_multi_dependencies(
+        _add_provider_dependencies(
             dependencies[package_id],
             _edges(manifest, "consumes_artifacts"),
             host_artifacts,
@@ -116,17 +132,29 @@ def _edges(manifest: Mapping[str, object], field: str) -> list[str]:
     return values
 
 
-def _add_multi_dependencies(
+def _bind_provider(
+    providers: dict[str, str],
+    edge: str,
+    package_id: str,
+    *,
+    label: str,
+) -> None:
+    if edge in providers:
+        raise PackageCompositionError(f"{label} provider is ambiguous")
+    providers[edge] = package_id
+
+
+def _add_provider_dependencies(
     dependencies: set[str],
     required_edges: Iterable[str],
     host_edges: Set[str],
-    providers: Mapping[str, set[str]],
+    providers: Mapping[str, str],
     error: str,
 ) -> None:
     for edge in required_edges:
         if edge in host_edges:
             continue
-        edge_providers = providers.get(edge)
-        if not edge_providers:
+        provider = providers.get(edge)
+        if provider is None:
             raise PackageCompositionError(error)
-        dependencies.update(edge_providers)
+        dependencies.add(provider)
