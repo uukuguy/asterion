@@ -39,3 +39,5 @@
 - 22:07 Pinned catalog roots/documents to descriptor objects, closing symlink replacement TOCTOU [798591b]
 - 22:09 Redacted provider-controlled keys and call IDs while retaining structural protocol rejection [71dff6a]
 - 22:17 Aligned architecture imports/graph and recovery truth so documentation matches shipped protocol state [6168056]
+- 22:20 Recorded final finding-to-fix and gate evidence for whole-branch re-review [b2a4ce1]
+- 22:38 Rejected intermediate catalog symlinks and closed every descriptor on interrupts to preserve pinned discovery [0a0639c]

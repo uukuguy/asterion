@@ -569,11 +569,14 @@ class StandaloneRepositoryTests(unittest.TestCase):
             package.mkdir(parents=True)
             (package / "__init__.py").write_text("", encoding="utf-8")
             (package / "fixture.py").write_text(
+                "from pathlib import Path\n"
+                'Path("IMPORT_SIDE_EFFECT").write_text("executed", encoding="utf-8")\n'
                 "DOCUMENTED_API = object()\n",
                 encoding="utf-8",
             )
             environment = os.environ.copy()
             environment["PYTHONPATH"] = str(root / "src")
+            marker = root / "IMPORT_SIDE_EFFECT"
 
             def run() -> subprocess.CompletedProcess[str]:
                 return subprocess.run(
@@ -585,26 +588,60 @@ class StandaloneRepositoryTests(unittest.TestCase):
                     text=True,
                 )
 
-            (root / "README.md").write_text(
-                "# Root\n\n"
-                "```python\n"
-                "from asterion.fixture import MISSING_API\n"
-                "```\n",
-                encoding="utf-8",
+            cases = (
+                (
+                    "missing direct module",
+                    "import asterion.definitely_missing\n",
+                    False,
+                    "documented import is unavailable",
+                ),
+                (
+                    "missing explicit symbol",
+                    "from asterion.fixture import MISSING_API\n",
+                    False,
+                    "documented import is unavailable",
+                ),
+                (
+                    "existing direct module",
+                    "import asterion.fixture\n",
+                    True,
+                    "",
+                ),
+                (
+                    "existing explicit symbol",
+                    "from asterion.fixture import DOCUMENTED_API\n",
+                    True,
+                    "",
+                ),
+                (
+                    "malformed multiline import",
+                    "from asterion.fixture import (\n    DOCUMENTED_API\n",
+                    False,
+                    "documented import is invalid",
+                ),
             )
-            invalid = run()
-            self.assertNotEqual(invalid.returncode, 0)
-            self.assertIn("documented import is unavailable", invalid.stderr)
-
-            (root / "README.md").write_text(
-                "# Root\n\n"
-                "```python\n"
-                "from asterion.fixture import DOCUMENTED_API\n"
-                "```\n",
-                encoding="utf-8",
-            )
-            valid = run()
-            self.assertEqual(valid.returncode, 0, valid.stderr)
+            for label, snippet, should_pass, expected_error in cases:
+                with self.subTest(case=label):
+                    marker.unlink(missing_ok=True)
+                    (root / "README.md").write_text(
+                        f"# Root\n\n```python\n{snippet}```\n",
+                        encoding="utf-8",
+                    )
+                    completed = run()
+                    if should_pass:
+                        self.assertEqual(
+                            completed.returncode,
+                            0,
+                            completed.stderr,
+                        )
+                    else:
+                        self.assertNotEqual(completed.returncode, 0)
+                        self.assertIn(expected_error, completed.stderr)
+                    self.assertNotIn("Traceback", completed.stderr)
+                    self.assertFalse(
+                        marker.exists(),
+                        "documentation checking executed imported module code",
+                    )
 
 
 if __name__ == "__main__":

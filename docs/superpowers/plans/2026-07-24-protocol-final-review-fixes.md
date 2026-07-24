@@ -239,3 +239,149 @@ git status --short
 ```
 
 Expected: the report is committed, the branch diff is whitespace-clean, and the worktree is clean.
+
+---
+
+## Final Re-review Follow-up
+
+### Task 5: Reject intermediate catalog symlinks and close every descriptor
+
+**Files:**
+- Modify: `tests/test_package_catalog.py`
+- Modify: `src/asterion/packages/catalog.py`
+- Modify: `docs/architecture/local-package-catalog.md`
+
+**Interfaces:**
+- Consumes: explicit absolute or relative physical root paths.
+- Produces: the existing `discover_packages()` API with component-by-component
+  no-follow root pinning and unconditional descriptor cleanup.
+
+- [x] **Step 1: Add failing path and ownership tests**
+
+Create an external manifest under a physical directory, point an intermediate
+`alias` symlink at its parent, and assert `discover_packages(alias / "packages")`
+rejects without exposing or accepting the sentinel identity. Pass a root
+containing `..` and assert structural rejection. Patch root provenance to raise
+`KeyboardInterrupt`, record every descriptor returned by `os.open`, and assert
+all recorded descriptors are closed after unwinding.
+
+- [x] **Step 2: Run RED**
+
+```bash
+uv run python -m unittest -v tests.test_package_catalog
+```
+
+Expected: intermediate alias traversal is accepted, `..` is accepted, and the
+provenance descriptor remains open after `KeyboardInterrupt`.
+
+- [x] **Step 3: Implement anchored component walking**
+
+Use one `ExitStack` for all root descriptors. Open `/` for absolute paths or `.`
+for relative paths, register each descriptor immediately, reject every `..`
+component, ignore normalized `.`/empty components, and open each remaining
+component relative to the previous descriptor with
+`O_DIRECTORY | O_NOFOLLOW`. Obtain provenance only from the final pinned
+descriptor. Update temporary tests to use `Path(...).resolve()` because callers
+must provide a physical path and discovery must not resolve attacker-controlled
+aliases.
+
+- [x] **Step 4: Run GREEN and commit**
+
+```bash
+uv run python -m unittest -v tests.test_package_catalog
+uv run ruff check src/asterion/packages/catalog.py tests/test_package_catalog.py
+git add src/asterion/packages/catalog.py tests/test_package_catalog.py \
+  docs/architecture/local-package-catalog.md
+git commit -m "fix: reject intermediate catalog symlinks"
+```
+
+### Task 6: Make documentation import validation static and total
+
+**Files:**
+- Modify: `tests/test_standalone_repository.py`
+- Modify: `tools/check_docs.py`
+
+**Interfaces:**
+- Consumes: Python fenced snippets containing explicit `asterion.*` imports.
+- Produces: static module/symbol existence checks that never execute imported
+  code and always convert malformed import syntax into a docs error.
+
+- [x] **Step 1: Add failing static-import tests**
+
+Create a temporary `asterion.fixture` module with a file-writing import side
+effect and a statically declared `DOCUMENTED_API`. Assert direct
+`import asterion.fixture` and `from asterion.fixture import DOCUMENTED_API`
+pass without creating the marker. Assert
+`import asterion.definitely_missing` fails. Assert an incomplete multiline
+`from asterion.fixture import (` returns a structural docs error without a
+traceback.
+
+- [x] **Step 2: Run RED**
+
+```bash
+uv run python -m unittest -v \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_validates_asterion_import_snippets
+```
+
+Expected: direct missing imports pass, side-effectful modules execute, or the
+malformed fallback raises `SyntaxError`.
+
+- [x] **Step 3: Implement static validation**
+
+Resolve module specs component-by-component with `PathFinder.find_spec()` and
+their `submodule_search_locations`, without importing packages. For explicit
+symbols, parse the resolved source file and collect top-level bound names; accept a child
+module as an importable symbol when present. Handle both `ast.Import` and
+`ast.ImportFrom`. If a full fenced block is incomplete, parse only candidate
+Asterion import statements; catch every `SyntaxError` and append a structural
+documentation error.
+
+- [x] **Step 4: Run GREEN and commit**
+
+```bash
+uv run python -m unittest -v \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_validates_asterion_import_snippets \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_handles_links_and_rejects_unsafe_targets
+make docs-check
+uv run ruff check tools/check_docs.py tests/test_standalone_repository.py
+git add tools/check_docs.py tests/test_standalone_repository.py \
+  docs/superpowers/plans/2026-07-24-protocol-final-review-fixes.md
+git commit -m "fix: make documentation import checks total"
+```
+
+### Task 7: Append evidence and rerun final provider-free gates
+
+**Files:**
+- Modify: `.superpowers/sdd/protocol-final-fix-report.md`
+
+- [ ] **Step 1: Append follow-up evidence**
+
+Record the three re-review findings, RED/green evidence, physical-root contract,
+descriptor lifecycle audit, static docs-import design, follow-up commits, and
+final command counts.
+
+- [ ] **Step 2: Run all gates**
+
+```bash
+uv run python -m unittest -v \
+  tests.test_protocol_canonical_ordering \
+  tests.test_runtime_protocol \
+  tests.test_package_composition \
+  tests.test_package_catalog \
+  tests.test_package_execution \
+  tests.test_dci_complete_application \
+  tests.test_dci_research_capability \
+  tests.test_controlled_code_application
+uv run python -m unittest -v tests.test_runtime_adapter_redaction
+npm --prefix packages/typescript/asterion-runtime test
+make test
+make check
+make lint
+make docs-check
+make promotion-check
+git diff --check
+```
+
+Expected: the expanded protocol gate, two adapter tests, TypeScript 13 tests,
+all repository tests/builds, 18-command provider-free promotion, and whitespace
+validation pass.

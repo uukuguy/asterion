@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import ast
-import importlib
 import re
 import sys
 import textwrap
+from importlib.machinery import ModuleSpec, PathFinder
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -103,37 +103,142 @@ def _check_asterion_imports(document: Path, text: str) -> tuple[str, ...]:
         try:
             trees = (ast.parse(snippet),)
         except SyntaxError:
-            trees = tuple(
-                ast.parse(line.strip())
-                for line in snippet.splitlines()
-                if line.strip().startswith("from asterion")
-            )
+            trees, invalid = _parse_asterion_import_candidates(snippet)
+            if invalid:
+                errors.append(f"{document}: documented import is invalid")
         for tree in trees:
             for node in ast.walk(tree):
-                if (
-                    not isinstance(node, ast.ImportFrom)
-                    or node.level != 0
-                    or node.module is None
-                    or not (
-                        node.module == "asterion"
-                        or node.module.startswith("asterion.")
-                    )
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if _is_asterion_module(alias.name) and not _module_spec(
+                            alias.name
+                        ):
+                            errors.append(
+                                f"{document}: documented import is unavailable: "
+                                f"{alias.name}"
+                            )
+                elif (
+                    isinstance(node, ast.ImportFrom)
+                    and node.level == 0
+                    and node.module is not None
+                    and _is_asterion_module(node.module)
                 ):
-                    continue
-                try:
-                    module = importlib.import_module(node.module)
-                except (ImportError, AttributeError):
-                    errors.append(
-                        f"{document}: documented import is unavailable: {node.module}"
-                    )
-                    continue
-                for name in node.names:
-                    if name.name != "*" and not hasattr(module, name.name):
+                    spec = _module_spec(node.module)
+                    if spec is None:
                         errors.append(
                             f"{document}: documented import is unavailable: "
-                            f"{node.module}.{name.name}"
+                            f"{node.module}"
+                        )
+                        continue
+                    bindings = _source_bindings(spec)
+                    for alias in node.names:
+                        if alias.name == "*":
+                            continue
+                        if alias.name in bindings:
+                            continue
+                        if _module_spec(f"{node.module}.{alias.name}") is not None:
+                            continue
+                        errors.append(
+                            f"{document}: documented import is unavailable: "
+                            f"{node.module}.{alias.name}"
                         )
     return tuple(errors)
+
+
+def _parse_asterion_import_candidates(
+    snippet: str,
+) -> tuple[tuple[ast.Module, ...], bool]:
+    trees: list[ast.Module] = []
+    invalid = False
+    lines = snippet.splitlines()
+    index = 0
+    while index < len(lines):
+        stripped = lines[index].strip()
+        if not (
+            stripped.startswith("import asterion")
+            or stripped.startswith("from asterion")
+        ):
+            index += 1
+            continue
+
+        candidate = [stripped]
+        depth = stripped.count("(") - stripped.count(")")
+        continued = stripped.endswith("\\")
+        index += 1
+        while index < len(lines) and (depth > 0 or continued):
+            line = lines[index]
+            candidate.append(line)
+            depth += line.count("(") - line.count(")")
+            continued = line.rstrip().endswith("\\")
+            index += 1
+        try:
+            trees.append(ast.parse("\n".join(candidate)))
+        except SyntaxError:
+            invalid = True
+    return tuple(trees), invalid
+
+
+def _is_asterion_module(name: str) -> bool:
+    return name == "asterion" or name.startswith("asterion.")
+
+
+def _module_spec(module_name: str) -> ModuleSpec | None:
+    search_path = None
+    parts = module_name.split(".")
+    for count in range(1, len(parts) + 1):
+        qualified_name = ".".join(parts[:count])
+        try:
+            spec = PathFinder.find_spec(qualified_name, search_path)
+        except (AttributeError, ImportError, OSError, ValueError):
+            return None
+        if spec is None:
+            return None
+        if count != len(parts):
+            locations = spec.submodule_search_locations
+            if locations is None:
+                return None
+            search_path = locations
+    return spec
+
+
+def _source_bindings(spec: ModuleSpec) -> frozenset[str]:
+    origin = spec.origin
+    if origin is None or not origin.endswith(".py"):
+        return frozenset()
+    try:
+        source = Path(origin).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+    except (OSError, SyntaxError, UnicodeError):
+        return frozenset()
+
+    bindings: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bindings.add(node.name)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else (node.target,)
+            for target in targets:
+                bindings.update(_assigned_names(target))
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                bindings.add(alias.asname or alias.name.split(".", 1)[0])
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name != "*":
+                    bindings.add(alias.asname or alias.name)
+    return frozenset(bindings)
+
+
+def _assigned_names(target: ast.expr) -> frozenset[str]:
+    if isinstance(target, ast.Name):
+        return frozenset((target.id,))
+    if isinstance(target, (ast.List, ast.Tuple)):
+        return frozenset(
+            name
+            for element in target.elts
+            for name in _assigned_names(element)
+        )
+    return frozenset()
 
 
 def main() -> int:
