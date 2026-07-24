@@ -5,7 +5,8 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
-from contextlib import asynccontextmanager
+import sys
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -15,6 +16,10 @@ from asterion.services.registry import (
     HostServiceFactoryContext,
     HostServiceRegistryError,
 )
+from asterion.runtime.working_directory import (
+    ProcessDirectoryAuthority,
+    ProcessWorkingDirectory,
+)
 
 
 class LocalCorpusServiceError(ValueError):
@@ -22,7 +27,7 @@ class LocalCorpusServiceError(ValueError):
 
 
 @runtime_checkable
-class LocalCorpusService(Protocol):
+class LocalCorpusService(ProcessDirectoryAuthority, Protocol):
     @property
     def root(self) -> Path:
         raise NotImplementedError
@@ -48,6 +53,10 @@ class _PinnedLocalCorpusService:
         return self._root
 
     @property
+    def directory_path(self) -> Path:
+        return self.root
+
+    @property
     def identity_sha256(self) -> str:
         self._require_live_identity()
         return self._identity_sha256
@@ -62,6 +71,51 @@ class _PinnedLocalCorpusService:
         except OSError:
             pass
 
+    @contextmanager
+    def open_process_working_directory(self):
+        self._require_live_identity()
+        descriptor = -1
+        try:
+            descriptor = os.dup(self._descriptor)
+            details = os.fstat(descriptor)
+            if (details.st_dev, details.st_ino) != self._identity:
+                raise LocalCorpusServiceError(
+                    "local corpus identity changed"
+                )
+            if sys.platform == "linux":
+                cwd = f"/proc/self/fd/{descriptor}"
+                command_prefix: tuple[str, ...] = ()
+            else:
+                cwd = "/"
+                command_prefix = (
+                    sys.executable,
+                    "-m",
+                    "asterion.runtime.cwd_exec",
+                    "--fd",
+                    str(descriptor),
+                    "--",
+                )
+            working = ProcessWorkingDirectory(
+                identity_path=self._root,
+                cwd=cwd,
+                pass_fds=(descriptor,),
+                command_prefix=command_prefix,
+            )
+        except LocalCorpusServiceError:
+            raise
+        except (AttributeError, NotImplementedError, OSError, TypeError):
+            raise LocalCorpusServiceError(
+                "local corpus process binding is unavailable"
+            ) from None
+        try:
+            yield working
+        finally:
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+
     def _require_live_identity(self) -> None:
         if self._descriptor < 0:
             raise LocalCorpusServiceError("local corpus service is unavailable")
@@ -69,7 +123,13 @@ class _PinnedLocalCorpusService:
             pinned = os.fstat(self._descriptor)
             current = _probe_directory(self._root)
             current_details = os.fstat(current)
-        except (OSError, LocalCorpusServiceError):
+        except (
+            AttributeError,
+            LocalCorpusServiceError,
+            NotImplementedError,
+            OSError,
+            TypeError,
+        ):
             raise LocalCorpusServiceError(
                 "local corpus identity changed"
             ) from None
@@ -107,6 +167,10 @@ def create_answer_judge_service_factory() -> HostServiceFactoryBinding:
 
 @asynccontextmanager
 async def _open_local_corpus_service(context: HostServiceFactoryContext):
+    if not _secure_local_corpus_available():
+        raise LocalCorpusServiceError(
+            "secure local corpus service is unavailable"
+        )
     if (
         context.capability_id != "corpus.local-root"
         or set(context.options) != {"root"}
@@ -123,7 +187,6 @@ async def _open_local_corpus_service(context: HostServiceFactoryContext):
     ):
         raise LocalCorpusServiceError("local corpus configuration is invalid")
     descriptor = _open_directory(root)
-    service: _PinnedLocalCorpusService | None = None
     try:
         details = os.fstat(descriptor)
         if not stat.S_ISDIR(details.st_mode):
@@ -141,17 +204,16 @@ async def _open_local_corpus_service(context: HostServiceFactoryContext):
             _identity=identity,
             _identity_sha256=digest.hexdigest(),
         )
-        descriptor = -1
-        yield service
     except LocalCorpusServiceError:
+        os.close(descriptor)
         raise
-    except OSError:
+    except (AttributeError, NotImplementedError, OSError, TypeError):
+        os.close(descriptor)
         raise LocalCorpusServiceError("local corpus root is unavailable") from None
+    try:
+        yield service
     finally:
-        if service is not None:
-            service.close()
-        if descriptor >= 0:
-            os.close(descriptor)
+        service.close()
 
 
 @asynccontextmanager
@@ -168,8 +230,36 @@ async def _unavailable_answer_judge_service(
 def _open_directory(path: Path) -> int:
     try:
         return _probe_directory(path)
-    except OSError:
+    except (AttributeError, NotImplementedError, OSError, TypeError):
         raise LocalCorpusServiceError("local corpus root is unavailable") from None
+
+
+def _secure_local_corpus_available() -> bool:
+    try:
+        return (
+            sys.platform in {"darwin", "linux"}
+            and isinstance(os.O_DIRECTORY, int)
+            and isinstance(os.O_NOFOLLOW, int)
+            and callable(os.dup)
+            and callable(os.fstat)
+            and os.open in os.supports_dir_fd
+            and os.stat in os.supports_dir_fd
+            and os.stat in os.supports_follow_symlinks
+            and (
+                (
+                    sys.platform == "linux"
+                    and Path("/proc/self/fd").is_dir()
+                )
+                or (
+                    sys.platform == "darwin"
+                    and callable(os.fchdir)
+                    and callable(os.execvpe)
+                    and bool(sys.executable)
+                )
+            )
+        )
+    except (AttributeError, TypeError):
+        return False
 
 
 def _probe_directory(path: Path) -> int:

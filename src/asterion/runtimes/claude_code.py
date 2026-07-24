@@ -33,6 +33,10 @@ from asterion.runtime.host import (
     RunRequest,
     RuntimeManifest,
 )
+from asterion.runtime.working_directory import (
+    ProcessDirectoryAuthority,
+    bind_process_working_directory,
+)
 
 
 class ClaudeCodeRuntimeClient:
@@ -42,7 +46,8 @@ class ClaudeCodeRuntimeClient:
         self,
         *,
         executable: str,
-        cwd: Path,
+        cwd: Path | None,
+        cwd_authority: ProcessDirectoryAuthority | None = None,
         environment: Mapping[str, str],
         default_timeout_seconds: float | None = 30,
         max_turns: int = 4,
@@ -55,7 +60,10 @@ class ClaudeCodeRuntimeClient:
         run_process: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     ) -> None:
         self._executable = executable
-        self._cwd = Path(cwd)
+        if (cwd is None) == (cwd_authority is None):
+            raise ValueError("Claude Code working directory is invalid")
+        self._cwd = Path(cwd) if cwd is not None else None
+        self._cwd_authority = cwd_authority
         self._environment = dict(environment)
         if isinstance(max_turns, bool) or not isinstance(max_turns, int) or max_turns <= 0:
             raise ValueError("Claude Code max turns is invalid")
@@ -121,6 +129,7 @@ class ClaudeCodeRuntimeClient:
                         prompt=request.input_text,
                         output_dir=output_dir,
                         cwd=self._cwd,
+                        cwd_authority=self._cwd_authority,
                         tools=list(self._tools),
                         timeout_seconds=timeout_seconds,
                         max_turns=self._max_turns,
@@ -269,7 +278,8 @@ def run_claude_code(
     *,
     prompt: str,
     output_dir: Path,
-    cwd: Path,
+    cwd: Path | None,
+    cwd_authority: ProcessDirectoryAuthority | None = None,
     tools: list[str],
     timeout_seconds: float | None,
     max_turns: int = 4,
@@ -306,7 +316,13 @@ def run_claude_code(
         output_dir / "runtime-policy.json",
         {
             "schema": "asterion.claude-code.restricted-policy/v1",
-            "runtime_cwd": str(cwd.resolve()),
+            "runtime_cwd": str(
+                (
+                    cwd
+                    if cwd is not None
+                    else cwd_authority.directory_path
+                ).resolve()
+            ),
             "agent_provider": agent_provider,
             "agent_model": agent_model,
             "reasoning": reasoning,
@@ -336,22 +352,33 @@ def run_claude_code(
         completed = _run_owned_process(
             command,
             cwd=cwd,
+            cwd_authority=cwd_authority,
             environment=process_environment,
             input_text=prompt,
             timeout_seconds=timeout_seconds,
             cancelled=cancelled,
         )
     else:
-        completed = run_process(
-            command,
+        with bind_process_working_directory(
             cwd=cwd,
-            env=process_environment,
-            input=prompt,
-            text=True,
-            capture_output=True,
-            timeout=timeout_seconds,
-            check=False,
-        )
+            authority=cwd_authority,
+        ) as working:
+            descriptor_options = (
+                {"pass_fds": working.pass_fds}
+                if working.pass_fds
+                else {}
+            )
+            completed = run_process(
+                [*working.command_prefix, *command],
+                cwd=working.cwd,
+                env=process_environment,
+                input=prompt,
+                text=True,
+                capture_output=True,
+                timeout=timeout_seconds,
+                check=False,
+                **descriptor_options,
+            )
     _write_private(output_dir / "raw-events.jsonl", completed.stdout)
     _write_private(output_dir / "stderr.txt", completed.stderr)
     if completed.returncode != 0:
@@ -411,7 +438,8 @@ def run_claude_code(
 def _run_owned_process(
     command: list[str],
     *,
-    cwd: Path,
+    cwd: Path | None,
+    cwd_authority: ProcessDirectoryAuthority | None,
     environment: Mapping[str, str],
     input_text: str,
     timeout_seconds: float | None,
@@ -421,16 +449,27 @@ def _run_owned_process(
 
     if cancelled is not None and cancelled():
         raise CancelledError
-    process = subprocess.Popen(
-        command,
+    with bind_process_working_directory(
         cwd=cwd,
-        env=dict(environment),
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        start_new_session=os.name != "nt",
-    )
+        authority=cwd_authority,
+    ) as working:
+        launched_command = [*working.command_prefix, *command]
+        descriptor_options = (
+            {"pass_fds": working.pass_fds}
+            if working.pass_fds
+            else {}
+        )
+        process = subprocess.Popen(
+            launched_command,
+            cwd=working.cwd,
+            env=dict(environment),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=os.name != "nt",
+            **descriptor_options,
+        )
     deadline = (
         time.monotonic() + timeout_seconds
         if timeout_seconds is not None
@@ -443,7 +482,9 @@ def _run_owned_process(
                 raise CancelledError
             remaining = None if deadline is None else deadline - time.monotonic()
             if remaining is not None and remaining <= 0:
-                raise subprocess.TimeoutExpired(command, timeout_seconds)
+                raise subprocess.TimeoutExpired(
+                    launched_command, timeout_seconds
+                )
             poll_seconds = 0.05 if remaining is None else min(0.05, remaining)
             try:
                 stdout, stderr = process.communicate(
@@ -451,7 +492,7 @@ def _run_owned_process(
                     timeout=poll_seconds,
                 )
                 return subprocess.CompletedProcess(
-                    command, process.returncode, stdout, stderr
+                    launched_command, process.returncode, stdout, stderr
                 )
             except subprocess.TimeoutExpired:
                 pending_input = None

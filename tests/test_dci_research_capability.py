@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import unittest
 from collections.abc import AsyncIterator
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
 from asterion.packages.catalog import PackageRef
 from asterion.packages.execution import PackageExecutionError, PackageInvocation
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
+from asterion.runtime.working_directory import ProcessWorkingDirectory
 from asterion.capabilities.dci_research import DciLocalResearchImplementation
 
 
@@ -68,7 +70,16 @@ class FailingRuntime(FixtureRuntime):
 
 class FixtureCorpusService:
     root = PROJECT
+    directory_path = PROJECT
     identity_sha256 = "a" * 64
+
+    @contextmanager
+    def open_process_working_directory(self):
+        yield ProcessWorkingDirectory(
+            identity_path=PROJECT,
+            cwd=str(PROJECT),
+            pass_fds=(),
+        )
 
 
 def invocation(

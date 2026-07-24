@@ -25,6 +25,10 @@ from asterion.runtime.host import (
     RuntimeManifest,
 )
 from asterion.runtime.protocol import ProtocolError, validate_event_stream
+from asterion.runtime.working_directory import (
+    ProcessDirectoryAuthority,
+    bind_process_working_directory,
+)
 
 
 _MAX_STDOUT_LINE_BYTES = 64 * 1024
@@ -69,7 +73,8 @@ class PiRuntimeClient:
         self,
         *,
         command: Sequence[str],
-        cwd: Path,
+        cwd: Path | None,
+        cwd_authority: ProcessDirectoryAuthority | None = None,
         capabilities: tuple[str, ...],
         env: Mapping[str, str] | None = None,
         max_turns: int = 4,
@@ -82,7 +87,10 @@ class PiRuntimeClient:
         if not command:
             raise ValueError("Pi runtime command must not be empty")
         self._command = tuple(command)
-        self._cwd = Path(cwd)
+        if (cwd is None) == (cwd_authority is None):
+            raise ValueError("Pi runtime working directory is invalid")
+        self._cwd = Path(cwd) if cwd is not None else None
+        self._cwd_authority = cwd_authority
         self._capabilities = tuple(capabilities)
         self._env = dict(os.environ if env is None else env)
         if (
@@ -164,6 +172,7 @@ class PiRuntimeClient:
                     snapshot = await _collect_runtime_snapshot(
                         command=self._command,
                         cwd=self._cwd,
+                        cwd_authority=self._cwd_authority,
                         environment=self._env,
                         capabilities=self._capabilities,
                         max_turns=self._max_turns,
@@ -228,7 +237,8 @@ class PiRuntimeClient:
 async def _collect_runtime_snapshot(
     *,
     command: Sequence[str],
-    cwd: Path,
+    cwd: Path | None,
+    cwd_authority: ProcessDirectoryAuthority | None,
     environment: Mapping[str, str],
     capabilities: tuple[str, ...],
     max_turns: int,
@@ -243,16 +253,27 @@ async def _collect_runtime_snapshot(
     )
     adapter.start()
     try:
-        process = await asyncio.create_subprocess_exec(
-            *command,
+        with bind_process_working_directory(
             cwd=cwd,
-            env=environment,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            start_new_session=os.name != "nt",
-        )
-    except (OSError, ValueError):
+            authority=cwd_authority,
+        ) as working:
+            descriptor_options = (
+                {"pass_fds": working.pass_fds}
+                if working.pass_fds
+                else {}
+            )
+            process = await asyncio.create_subprocess_exec(
+                *working.command_prefix,
+                *command,
+                cwd=working.cwd,
+                env=environment,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                start_new_session=os.name != "nt",
+                **descriptor_options,
+            )
+    except (OSError, TypeError, ValueError):
         raise ProtocolError("Pi runtime process failed to start") from None
 
     assert process.stdin is not None

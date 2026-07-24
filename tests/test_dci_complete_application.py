@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 from collections.abc import AsyncIterator
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -34,6 +35,7 @@ from asterion.packages.catalog import discover_packages
 from asterion.packages.execution import PackageExecutionError, PackageInvocation
 from asterion.runner.composed import run_composed_application
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
+from asterion.runtime.working_directory import ProcessWorkingDirectory
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -70,7 +72,16 @@ ARTIFACTS = (
 
 class _CorpusService:
     root = PROJECT
+    directory_path = PROJECT
     identity_sha256 = "a" * 64
+
+    @contextmanager
+    def open_process_working_directory(self):
+        yield ProcessWorkingDirectory(
+            identity_path=PROJECT,
+            cwd=str(PROJECT),
+            pass_fds=(),
+        )
 
 
 def _host_services() -> dict[str, object]:

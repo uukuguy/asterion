@@ -130,6 +130,34 @@ class HostServiceFactoryRegistryTests(unittest.IsolatedAsyncioTestCase):
             events, ["enter:corpus.local-root", "exit:corpus.local-root"]
         )
 
+    async def test_selected_service_mapping_repr_is_redacted(self) -> None:
+        class SecretService:
+            def __repr__(self) -> str:
+                return "<SECRET-SERVICE-VALUE>"
+
+        @asynccontextmanager
+        async def service(context):
+            del context
+            yield SecretService()
+
+        entry = _EntryPoint(
+            "service.selected",
+            lambda: HostServiceFactoryBinding(
+                capability_id="service.selected",
+                option_names=(),
+                factory=service,
+            ),
+        )
+
+        async with HostServiceFactoryRegistry((entry,)).open(
+            provider_id="provider",
+            application_id="application",
+            application_version="1.0.0",
+            capability_ids=("service.selected",),
+            options={},
+        ) as services:
+            self.assertNotIn("SECRET-SERVICE-VALUE", repr(services))
+
     async def test_missing_duplicate_unknown_and_mismatched_factories_fail_closed(
         self,
     ) -> None:
@@ -299,6 +327,181 @@ class HostServiceFactoryRegistryTests(unittest.IsolatedAsyncioTestCase):
                 pass
 
         self.assertNotIn("SECRET-SERVICE-EXIT", str(raised.exception))
+
+    async def test_truthy_service_exit_cannot_suppress_body_failure(self) -> None:
+        class SuppressingManager:
+            async def __aenter__(self):
+                return object()
+
+            async def __aexit__(self, exc_type, exc, traceback):
+                del exc_type, exc, traceback
+                return True
+
+        entry = _EntryPoint(
+            "service.selected",
+            lambda: HostServiceFactoryBinding(
+                capability_id="service.selected",
+                option_names=(),
+                factory=lambda context: SuppressingManager(),
+            ),
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "body failure"):
+            async with HostServiceFactoryRegistry((entry,)).open(
+                provider_id="provider",
+                application_id="application",
+                application_version="1.0.0",
+                capability_ids=("service.selected",),
+                options={},
+            ):
+                raise RuntimeError("body failure")
+
+    async def test_partial_enter_failure_exits_prior_services(self) -> None:
+        events: list[str] = []
+
+        @asynccontextmanager
+        async def first(context):
+            del context
+            events.append("enter:first")
+            try:
+                yield object()
+            finally:
+                events.append("exit:first")
+
+        @asynccontextmanager
+        async def second(context):
+            del context
+            events.append("enter:second")
+            raise RuntimeError("SECRET-ENTER")
+            yield object()
+
+        entries = (
+            _EntryPoint(
+                "service.first",
+                lambda: HostServiceFactoryBinding(
+                    "service.first", (), first
+                ),
+            ),
+            _EntryPoint(
+                "service.second",
+                lambda: HostServiceFactoryBinding(
+                    "service.second", (), second
+                ),
+            ),
+        )
+
+        with self.assertRaises(HostServiceRegistryError) as raised:
+            async with HostServiceFactoryRegistry(entries).open(
+                provider_id="provider",
+                application_id="application",
+                application_version="1.0.0",
+                capability_ids=("service.first", "service.second"),
+                options={},
+            ):
+                self.fail("unreachable")
+
+        self.assertEqual(
+            events, ["enter:first", "enter:second", "exit:first"]
+        )
+        self.assertNotIn("SECRET-ENTER", str(raised.exception))
+
+    async def test_multiple_exit_failures_attempt_every_cleanup(self) -> None:
+        events: list[str] = []
+
+        def binding(capability_id: str) -> HostServiceFactoryBinding:
+            @asynccontextmanager
+            async def service(context):
+                del context
+                events.append(f"enter:{capability_id}")
+                try:
+                    yield object()
+                finally:
+                    events.append(f"exit:{capability_id}")
+                    raise RuntimeError(f"SECRET-EXIT-{capability_id}")
+
+            return HostServiceFactoryBinding(capability_id, (), service)
+
+        entries = (
+            _EntryPoint("service.first", lambda: binding("service.first")),
+            _EntryPoint("service.second", lambda: binding("service.second")),
+        )
+        with self.assertRaises(HostServiceRegistryError) as raised:
+            async with HostServiceFactoryRegistry(entries).open(
+                provider_id="provider",
+                application_id="application",
+                application_version="1.0.0",
+                capability_ids=("service.first", "service.second"),
+                options={},
+            ):
+                pass
+
+        self.assertEqual(
+            events,
+            [
+                "enter:service.first",
+                "enter:service.second",
+                "exit:service.second",
+                "exit:service.first",
+            ],
+        )
+        self.assertNotIn("SECRET-EXIT", str(raised.exception))
+
+    async def test_truthy_managed_and_factory_exits_preserve_cancellation(
+        self,
+    ) -> None:
+        events: list[str] = []
+
+        class TruthyManager:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            async def __aenter__(self):
+                events.append(f"enter:{self.name}")
+                return object()
+
+            async def __aexit__(self, exc_type, exc, traceback):
+                del exc_type, exc, traceback
+                events.append(f"exit:{self.name}")
+                return True
+
+        entry = _EntryPoint(
+            "service.selected",
+            lambda: HostServiceFactoryBinding(
+                "service.selected",
+                (),
+                lambda context: TruthyManager("service.selected"),
+            ),
+        )
+
+        async def run() -> None:
+            async with HostServiceFactoryRegistry((entry,)).open(
+                provider_id="provider",
+                application_id="application",
+                application_version="1.0.0",
+                capability_ids=("executor.controlled", "service.selected"),
+                options={},
+                managed={
+                    "executor.controlled": TruthyManager(
+                        "executor.controlled"
+                    )
+                },
+            ):
+                await asyncio.sleep(30)
+
+        task = asyncio.create_task(run())
+        await asyncio.sleep(0)
+        task.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.assertEqual(
+            events,
+            [
+                "enter:executor.controlled",
+                "enter:service.selected",
+                "exit:service.selected",
+                "exit:executor.controlled",
+            ],
+        )
 
 
 if __name__ == "__main__":

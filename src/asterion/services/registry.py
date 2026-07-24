@@ -8,8 +8,8 @@ from collections.abc import Callable, Iterable, Mapping
 from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from importlib import metadata
-from types import MappingProxyType
-from typing import TypeVar
+
+from asterion.immutable import RedactedImmutableMapping
 
 
 HOST_SERVICE_ENTRY_POINT_GROUP = "asterion.host_services"
@@ -22,29 +22,6 @@ _SEMANTIC_VERSION = re.compile(
 
 class HostServiceRegistryError(ValueError):
     """Raised when exact host-service selection is unavailable or unsafe."""
-
-
-_Value = TypeVar("_Value")
-
-
-class _FrozenMapping(Mapping[str, _Value]):
-    def __init__(self, values: Mapping[str, _Value]) -> None:
-        self._values = MappingProxyType(dict(values))
-
-    def __getitem__(self, key: str) -> _Value:
-        return self._values[key]
-
-    def __iter__(self):
-        return iter(self._values)
-
-    def __len__(self) -> int:
-        return len(self._values)
-
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, Mapping) and dict(self.items()) == dict(other.items())
-
-    def __repr__(self) -> str:
-        return "<immutable host-service values>"
 
 
 @dataclass(frozen=True, repr=False)
@@ -63,7 +40,9 @@ class HostServiceFactoryContext:
             or _IDENTIFIER.fullmatch(self.capability_id) is None
         ):
             raise HostServiceRegistryError("host service context is invalid")
-        object.__setattr__(self, "options", _FrozenMapping(self.options))
+        object.__setattr__(
+            self, "options", RedactedImmutableMapping(self.options)
+        )
 
     def __repr__(self) -> str:
         return (
@@ -106,9 +85,10 @@ class _RedactedAsyncContextManager:
 
     async def __aexit__(self, exc_type, exc, traceback):
         try:
-            return await self._manager.__aexit__(exc_type, exc, traceback)
+            await self._manager.__aexit__(exc_type, exc, traceback)
         except Exception:
             raise HostServiceRegistryError(self._message) from None
+        return False
 
 
 def parse_host_service_options(
@@ -132,9 +112,9 @@ def parse_host_service_options(
         ):
             raise HostServiceRegistryError("host service option is invalid")
         parsed.setdefault(capability_id, {})[key] = value
-    return _FrozenMapping(
+    return RedactedImmutableMapping(
         {
-            capability_id: _FrozenMapping(options)
+            capability_id: RedactedImmutableMapping(options)
             for capability_id, options in parsed.items()
         }
     )
@@ -218,7 +198,7 @@ class HostServiceFactoryRegistry:
                     raise HostServiceRegistryError(
                         "host service is unavailable"
                     ) from None
-            yield MappingProxyType(selected)
+            yield RedactedImmutableMapping(selected)
 
     def _load_binding(self, capability_id: str) -> HostServiceFactoryBinding:
         entries = (

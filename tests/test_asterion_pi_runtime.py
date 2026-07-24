@@ -7,12 +7,14 @@ import sys
 import tempfile
 import time
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
 from asterion.adapters.pi import map_pi_capabilities
 from asterion.runtime.host import RunRequest
 from asterion.runtime.protocol import ProtocolError, validate_event_stream
+from asterion.runtime.working_directory import ProcessWorkingDirectory
 from asterion.runtimes.pi import PiRuntimeClient
 
 
@@ -170,6 +172,29 @@ class MutableSignal:
         self.cancelled = False
 
 
+class RecordingDirectoryAuthority:
+    def __init__(self, root: Path) -> None:
+        self.directory_path = root
+        self._root_fd = os.open(root, os.O_RDONLY)
+        self.process_fd: int | None = None
+
+    @contextmanager
+    def open_process_working_directory(self):
+        descriptor = os.dup(self._root_fd)
+        self.process_fd = descriptor
+        try:
+            yield ProcessWorkingDirectory(
+                identity_path=self.directory_path,
+                cwd=str(self.directory_path),
+                pass_fds=(descriptor,),
+            )
+        finally:
+            os.close(descriptor)
+
+    def close(self) -> None:
+        os.close(self._root_fd)
+
+
 class PiRuntimeClientTests(unittest.IsolatedAsyncioTestCase):
     def _client(
         self,
@@ -210,6 +235,78 @@ class PiRuntimeClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(capabilities, ["filesystem.read", "shell"])
         self.assertEqual(events[0].payload["capabilities"], capabilities)
         validate_event_stream([event.to_mapping() for event in events])
+
+    async def test_process_binding_fd_closes_on_start_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            authority = RecordingDirectoryAuthority(Path(temp_dir))
+            client = PiRuntimeClient(
+                command=(sys.executable, "-u", "-c", SUCCESS_SCRIPT),
+                cwd=None,
+                cwd_authority=authority,
+                capabilities=("filesystem.read",),
+            )
+            try:
+                with (
+                    patch(
+                        "asterion.runtimes.pi.asyncio.create_subprocess_exec",
+                        side_effect=OSError("SECRET-START"),
+                    ),
+                    self.assertRaises(ProtocolError) as caught,
+                ):
+                    await anext(
+                        client.run(
+                            RunRequest(
+                                "start-failure",
+                                "question",
+                                requested_capabilities=("filesystem.read",),
+                            )
+                        )
+                    )
+                assert authority.process_fd is not None
+                with self.assertRaises(OSError):
+                    os.fstat(authority.process_fd)
+                self.assertNotIn("SECRET", str(caught.exception))
+            finally:
+                authority.close()
+
+    async def test_process_binding_fd_is_closed_before_cancellation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            authority = RecordingDirectoryAuthority(Path(temp_dir))
+            signal = MutableSignal()
+            client = PiRuntimeClient(
+                command=(sys.executable, "-u", "-c", SLOW_SCRIPT),
+                cwd=None,
+                cwd_authority=authority,
+                capabilities=("filesystem.read",),
+            )
+            task = asyncio.create_task(
+                anext(
+                    client.run(
+                        RunRequest(
+                            "authority-cancel",
+                            "question",
+                            requested_capabilities=("filesystem.read",),
+                        ),
+                        signal=signal,
+                    )
+                )
+            )
+            try:
+                for _ in range(100):
+                    if authority.process_fd is not None:
+                        try:
+                            os.fstat(authority.process_fd)
+                        except OSError:
+                            break
+                    await asyncio.sleep(0.01)
+                assert authority.process_fd is not None
+                with self.assertRaises(OSError):
+                    os.fstat(authority.process_fd)
+                signal.cancelled = True
+                with self.assertRaises(ProtocolError):
+                    await asyncio.wait_for(task, timeout=3)
+            finally:
+                authority.close()
 
     async def test_translates_one_pi_rpc_run_to_normalized_events(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 
+from asterion.immutable import RedactedImmutableMapping
 from asterion.runtime.host import AgentRuntimeClient, RuntimeManifest
 
 
@@ -14,7 +15,7 @@ class RuntimeFactoryError(ValueError):
     """Raised when runtime construction is unavailable or ambiguous."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class RuntimeFactoryContext:
     provider_id: str
     application_id: str
@@ -25,9 +26,24 @@ class RuntimeFactoryContext:
     host_services: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "options", MappingProxyType(dict(self.options)))
         object.__setattr__(
-            self, "host_services", MappingProxyType(dict(self.host_services))
+            self, "options", RedactedImmutableMapping(self.options)
+        )
+        object.__setattr__(
+            self,
+            "host_services",
+            RedactedImmutableMapping(self.host_services),
+        )
+
+    def __repr__(self) -> str:
+        return (
+            "RuntimeFactoryContext("
+            f"provider_id={self.provider_id!r}, "
+            f"application_id={self.application_id!r}, "
+            f"application_version={self.application_version!r}, "
+            f"runtime_id={self.runtime_id!r}, "
+            "assembly_path=<redacted>, options=<redacted>, "
+            "host_services=<redacted>)"
         )
 
 

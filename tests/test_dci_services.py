@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+import asterion.dci.services as dci_services
 from asterion.dci.services import (
     LocalCorpusService,
     LocalCorpusServiceError,
@@ -15,6 +19,7 @@ from asterion.services.registry import (
     HostServiceFactoryContext,
     HostServiceRegistryError,
 )
+from asterion.runtime.working_directory import ProcessWorkingDirectory
 
 
 def _context(root: Path) -> HostServiceFactoryContext:
@@ -96,6 +101,43 @@ class LocalCorpusServiceTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("SECRET-CORPUS", rendered)
             self.assertNotIn("SECRET-CONTENT-BODY", rendered)
 
+    async def test_process_directory_binding_keeps_pinned_identity_at_start(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir).resolve()
+            root = base / "corpus"
+            root.mkdir()
+            (root / "marker").write_text("ORIGINAL")
+            binding = create_local_corpus_service_factory()
+
+            async with binding.factory(_context(root)) as service:
+                with service.open_process_working_directory() as working:
+                    self.assertIsInstance(working, ProcessWorkingDirectory)
+                    duplicate = working.pass_fds[0]
+                    moved = base / "moved"
+                    os.rename(root, moved)
+                    root.mkdir()
+                    (root / "marker").write_text("REPLACEMENT")
+                    completed = subprocess.run(
+                        [
+                            *working.command_prefix,
+                            sys.executable,
+                            "-c",
+                            "from pathlib import Path; "
+                            "print(Path('marker').read_text())",
+                        ],
+                        cwd=working.cwd,
+                        pass_fds=working.pass_fds,
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
+
+                self.assertEqual(completed.stdout.strip(), "ORIGINAL")
+                with self.assertRaises(OSError):
+                    os.fstat(duplicate)
+
     async def test_factory_rejects_unknown_context_and_judge_is_fail_closed(
         self,
     ) -> None:
@@ -127,6 +169,35 @@ class LocalCorpusServiceTests(unittest.IsolatedAsyncioTestCase):
                 )
             ):
                 self.fail("unreachable")
+
+    async def test_secure_primitive_absence_fails_closed_and_redacted(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            binding = create_local_corpus_service_factory()
+            cases = (
+                patch.object(os, "supports_dir_fd", set()),
+                patch.object(
+                    dci_services.os,
+                    "open",
+                    side_effect=NotImplementedError("SECRET-NOT-SUPPORTED"),
+                ),
+                patch.object(
+                    dci_services.os,
+                    "open",
+                    side_effect=TypeError("SECRET-BAD-DIR-FD"),
+                ),
+            )
+            for unavailable in cases:
+                with (
+                    self.subTest(unavailable=type(unavailable).__name__),
+                    unavailable,
+                    self.assertRaises(LocalCorpusServiceError) as raised,
+                ):
+                    async with binding.factory(_context(root)):
+                        self.fail("unreachable")
+                self.assertNotIn("SECRET", str(raised.exception))
 
 
 if __name__ == "__main__":

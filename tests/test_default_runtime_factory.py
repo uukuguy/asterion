@@ -5,15 +5,55 @@ import os
 import sys
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
 from asterion.runtime.factory import RuntimeFactoryContext
 from asterion.runtime.factory import RuntimeFactoryError
 from asterion.runtime.defaults import _claude_provider_environment
+from asterion.runtime.host import RunRequest
+from asterion.runtime.working_directory import ProcessWorkingDirectory
+from asterion.dci.services import create_local_corpus_service_factory
+from asterion.services.registry import HostServiceFactoryContext
+
+
+class DirectoryAuthority:
+    def __init__(self, root: Path) -> None:
+        self.directory_path = root
+
+    @contextmanager
+    def open_process_working_directory(self):
+        yield ProcessWorkingDirectory(
+            identity_path=self.directory_path,
+            cwd=str(self.directory_path),
+            pass_fds=(),
+        )
 
 
 class DefaultRuntimeFactoryTests(unittest.TestCase):
+    def test_runtime_factory_context_repr_redacts_all_operator_values(self) -> None:
+        class SecretService:
+            def __repr__(self) -> str:
+                return "<SECRET-SERVICE-VALUE>"
+
+        context = RuntimeFactoryContext(
+            provider_id="provider",
+            application_id="application",
+            application_version="1.0.0",
+            runtime_id="pi.reference",
+            assembly_path=Path("/SECRET-ASSEMBLY/assembly.json"),
+            options={"token": "SECRET-OPTION-VALUE"},
+            host_services={"service.secret": SecretService()},
+        )
+
+        for rendered in (
+            repr(context),
+            repr(context.options),
+            repr(context.host_services),
+        ):
+            self.assertNotIn("SECRET-", rendered)
+
     def test_claude_subscription_injects_no_provider_credentials(self) -> None:
         child, mode = _claude_provider_environment(
             {}, provider=None, model="claude-sonnet-4-6"
@@ -410,10 +450,6 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
     ) -> None:
         from asterion.runtime.defaults import default_runtime_factory_registry
 
-        class CorpusService:
-            def __init__(self, root: Path) -> None:
-                self.root = root
-
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir).resolve()
             corpus = root / "corpus"
@@ -436,14 +472,19 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                     "max_turns": "4",
                     "tools": "read,grep",
                 },
-                host_services={"corpus.local-root": CorpusService(corpus)},
+                host_services={
+                    "corpus.local-root": DirectoryAuthority(corpus)
+                },
             )
             runtime = default_runtime_factory_registry().select(
                 "pi.reference"
             ).factory(context)
 
-        self.assertEqual(runtime._cwd, corpus)
-        self.assertEqual(context.host_services["corpus.local-root"].root, corpus)
+        self.assertIsNone(runtime._cwd)
+        self.assertIs(
+            runtime._cwd_authority,
+            context.host_services["corpus.local-root"],
+        )
         with self.assertRaises(TypeError):
             context.host_services["service.other"] = object()
 
@@ -452,10 +493,6 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
     ) -> None:
         from asterion.runtime.defaults import default_runtime_factory_registry
         from asterion.runtime.factory import RuntimeFactoryError
-
-        class Service:
-            def __init__(self, root: object) -> None:
-                self.root = root
 
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir).resolve()
@@ -477,10 +514,17 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                 ({}, {}),
                 (
                     {**base, "cwd": str(corpus)},
-                    {"corpus.local-root": Service(corpus)},
+                    {"corpus.local-root": DirectoryAuthority(corpus)},
                 ),
-                (base, {"corpus.local-root": Service("SECRET-NOT-A-PATH")}),
-                (base, {"service.other": Service(corpus)}),
+                (base, {"corpus.local-root": object()}),
+                (base, {"service.other": DirectoryAuthority(corpus)}),
+                (
+                    {**base, "cwd_host_capability": "corpus.local-root"},
+                    {
+                        "corpus.local-root": DirectoryAuthority(corpus),
+                        "service.other": object(),
+                    },
+                ),
             )
             binding = default_runtime_factory_registry().select("pi.reference")
             for options, services in cases:
@@ -500,6 +544,97 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                         )
                     )
                 self.assertNotIn("SECRET", str(raised.exception))
+
+    def test_claude_host_directory_is_exact_and_rejects_competing_cwd(
+        self,
+    ) -> None:
+        from asterion.runtime.defaults import default_runtime_factory_registry
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            corpus = root / "corpus"
+            corpus.mkdir()
+            authority = DirectoryAuthority(corpus)
+            evidence = root / "evidence"
+            base_options = {
+                "authentication_mode": "subscription",
+                "cwd_host_capability": "corpus.local-root",
+                "evidence_root": str(evidence),
+                "model": None,
+                "provider": None,
+                "timeout_seconds": "3600",
+                "tools": "read,grep,glob",
+            }
+            registry = default_runtime_factory_registry()
+            with (
+                patch.dict(
+                    os.environ,
+                    {"ASTERION_CLAUDE_EXECUTABLE": "claude"},
+                    clear=True,
+                ),
+                patch(
+                    "asterion.runtime.defaults.shutil.which",
+                    return_value="/tool/claude",
+                ),
+                patch.object(Path, "cwd", side_effect=AssertionError("cwd")),
+            ):
+                runtime = registry.select("claude-code.reference").factory(
+                    RuntimeFactoryContext(
+                        provider_id="dci-agent-lite",
+                        application_id="dci.research-capability",
+                        application_version="1.0.0",
+                        runtime_id="claude-code.reference",
+                        assembly_path=root / "assembly.json",
+                        options=base_options,
+                        host_services={"corpus.local-root": authority},
+                    )
+                )
+
+        self.assertIsNone(runtime._cwd)
+        self.assertIs(runtime._cwd_authority, authority)
+
+        cases = (
+            (
+                {**base_options, "cwd": str(corpus)},
+                {"ASTERION_CLAUDE_EXECUTABLE": "claude"},
+            ),
+            (
+                base_options,
+                {
+                    "ASTERION_CLAUDE_EXECUTABLE": "claude",
+                    "ASTERION_RUNTIME_CWD": str(root / "other"),
+                },
+            ),
+            (
+                {
+                    key: value
+                    for key, value in base_options.items()
+                    if key != "cwd_host_capability"
+                },
+                {"ASTERION_CLAUDE_EXECUTABLE": "claude"},
+            ),
+        )
+        for options, environment in cases:
+            with (
+                self.subTest(options=tuple(options)),
+                patch.dict(os.environ, environment, clear=True),
+                patch(
+                    "asterion.runtime.defaults.shutil.which",
+                    return_value="/tool/claude",
+                ),
+                self.assertRaises(RuntimeFactoryError),
+            ):
+                registry.select("claude-code.reference").factory(
+                    RuntimeFactoryContext(
+                        provider_id="dci-agent-lite",
+                        application_id="dci.research-capability",
+                        application_version="1.0.0",
+                        runtime_id="claude-code.reference",
+                        assembly_path=root / "assembly.json",
+                        options=options,
+                        host_services={"corpus.local-root": authority},
+                    )
+                )
 
     def test_pi_factory_rejects_every_noncanonical_authority_value(self) -> None:
         from asterion.runtime.defaults import default_runtime_factory_registry
@@ -626,6 +761,198 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                 **options,
             },
         )
+
+
+class DefaultRuntimeFactoryProcessAuthorityTests(
+    unittest.IsolatedAsyncioTestCase
+):
+    async def test_pi_factory_starts_child_in_pinned_corpus_after_swap(
+        self,
+    ) -> None:
+        from asterion.runtime.defaults import default_runtime_factory_registry
+        import asterion.runtimes.pi as pi_runtime
+
+        script = (
+            "import json,pathlib,sys;"
+            "request=json.loads(sys.stdin.readline());"
+            "answer=pathlib.Path('marker.txt').read_text();"
+            "print(json.dumps({'type':'response','id':request['id'],"
+            "'success':True}),flush=True);"
+            "print(json.dumps({'type':'agent_start'}),flush=True);"
+            "print(json.dumps({'type':'turn_start'}),flush=True);"
+            "print(json.dumps({'type':'message_end','message':{'role':"
+            "'assistant','stopReason':'stop','usage':{'input':1,'output':1},"
+            "'content':[{'type':'text','text':answer}]}}),flush=True);"
+            "print(json.dumps({'type':'agent_end'}),flush=True)"
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            corpus = root / "corpus"
+            corpus.mkdir()
+            (corpus / "marker.txt").write_text("ORIGINAL")
+            context = HostServiceFactoryContext(
+                provider_id="dci-agent-lite",
+                application_id="dci.research-capability",
+                application_version="1.0.0",
+                capability_id="corpus.local-root",
+                options={"root": str(corpus)},
+            )
+            async with create_local_corpus_service_factory().factory(
+                context
+            ) as service:
+                runtime = default_runtime_factory_registry().select(
+                    "pi.reference"
+                ).factory(
+                    RuntimeFactoryContext(
+                        provider_id="dci-agent-lite",
+                        application_id="dci.research-capability",
+                        application_version="1.0.0",
+                        runtime_id="pi.reference",
+                        assembly_path=root / "assembly.json",
+                        options={
+                            "command": json.dumps(
+                                [
+                                    str(Path(sys.executable).resolve()),
+                                    "-u",
+                                    "-c",
+                                    script,
+                                ],
+                                separators=(",", ":"),
+                            ),
+                            "cwd_host_capability": "corpus.local-root",
+                            "environment": "{}",
+                            "evidence_root": str(root / "pi-evidence"),
+                            "max_turns": "4",
+                            "tools": "read,grep",
+                        },
+                        host_services={"corpus.local-root": service},
+                    )
+                )
+                original_start = pi_runtime.asyncio.create_subprocess_exec
+                swapped = False
+
+                async def swap_then_start(*args, **kwargs):
+                    nonlocal swapped
+                    if not swapped:
+                        swapped = True
+                        corpus.rename(root / "original-corpus")
+                        corpus.mkdir()
+                        (corpus / "marker.txt").write_text("REPLACEMENT")
+                    return await original_start(*args, **kwargs)
+
+                with patch.object(
+                    pi_runtime.asyncio,
+                    "create_subprocess_exec",
+                    side_effect=swap_then_start,
+                ):
+                    events = [
+                        event
+                        async for event in runtime.run(
+                            RunRequest(
+                                "pinned-pi",
+                                "question",
+                                requested_capabilities=("filesystem.read",),
+                            )
+                        )
+                    ]
+
+            run_dir = runtime.completed_run_dir("pinned-pi")
+            self.assertTrue(swapped)
+            self.assertEqual(events[-1].type, "run.completed")
+            assert run_dir is not None
+            self.assertEqual((run_dir / "final.txt").read_text(), "ORIGINAL")
+
+    async def test_claude_factory_starts_child_in_pinned_corpus_after_swap(
+        self,
+    ) -> None:
+        from asterion.runtime.defaults import default_runtime_factory_registry
+        import asterion.runtimes.claude_code as claude_runtime
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            corpus = root / "corpus"
+            corpus.mkdir()
+            (corpus / "marker.txt").write_text("ORIGINAL")
+            executable = root / "fixture-claude"
+            executable.write_text(
+                f"#!{sys.executable}\n"
+                "import json, pathlib\n"
+                "answer = pathlib.Path('marker.txt').read_text()\n"
+                "print(json.dumps({'type':'system','subtype':'init',"
+                "'tools':['Read','Grep','Glob']}))\n"
+                "print(json.dumps({'type':'assistant','message':{'role':"
+                "'assistant','content':[{'type':'text','text':answer}],"
+                "'usage':{'input_tokens':1,'output_tokens':1}}}))\n"
+                "print(json.dumps({'type':'result','subtype':'success',"
+                "'is_error':False,'result':answer,'usage':"
+                "{'input_tokens':1,'output_tokens':1}}))\n"
+            )
+            executable.chmod(0o700)
+            service_context = HostServiceFactoryContext(
+                provider_id="dci-agent-lite",
+                application_id="dci.research-capability",
+                application_version="1.0.0",
+                capability_id="corpus.local-root",
+                options={"root": str(corpus)},
+            )
+            async with create_local_corpus_service_factory().factory(
+                service_context
+            ) as service:
+                with patch.dict(
+                    os.environ,
+                    {"ASTERION_CLAUDE_EXECUTABLE": str(executable)},
+                    clear=True,
+                ):
+                    runtime = default_runtime_factory_registry().select(
+                        "claude-code.reference"
+                    ).factory(
+                        RuntimeFactoryContext(
+                            provider_id="dci-agent-lite",
+                            application_id="dci.research-capability",
+                            application_version="1.0.0",
+                            runtime_id="claude-code.reference",
+                            assembly_path=root / "assembly.json",
+                            options={
+                                "authentication_mode": "subscription",
+                                "cwd_host_capability": "corpus.local-root",
+                                "evidence_root": str(root / "claude-evidence"),
+                                "model": None,
+                                "provider": None,
+                                "timeout_seconds": "10",
+                                "tools": "read,grep,glob",
+                            },
+                            host_services={"corpus.local-root": service},
+                        )
+                    )
+                original_popen = claude_runtime.subprocess.Popen
+                swapped = False
+
+                def swap_then_start(*args, **kwargs):
+                    nonlocal swapped
+                    if not swapped:
+                        swapped = True
+                        corpus.rename(root / "original-corpus")
+                        corpus.mkdir()
+                        (corpus / "marker.txt").write_text("REPLACEMENT")
+                    return original_popen(*args, **kwargs)
+
+                with patch.object(
+                    claude_runtime.subprocess,
+                    "Popen",
+                    side_effect=swap_then_start,
+                ):
+                    events = [
+                        event
+                        async for event in runtime.run(
+                            RunRequest("pinned-claude", "question")
+                        )
+                    ]
+
+            run_dir = runtime.completed_run_dir("pinned-claude")
+            self.assertTrue(swapped)
+            self.assertEqual(events[-1].type, "run.completed")
+            assert run_dir is not None
+            self.assertEqual((run_dir / "final.txt").read_text(), "ORIGINAL\n")
 
 
 if __name__ == "__main__":

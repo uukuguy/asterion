@@ -17,6 +17,7 @@ from asterion.runtime.factory import (
     RuntimeFactoryError,
     RuntimeFactoryRegistry,
 )
+from asterion.runtime.working_directory import ProcessDirectoryAuthority
 from asterion.runtimes.claude_code import ClaudeCodeRuntimeClient
 from asterion.runtimes.pi import PiRuntimeClient, prepare_pi_evidence_root
 
@@ -108,12 +109,17 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
     ):
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
     command = list(_pi_command(context.options["command"]))
-    if has_host_cwd:
-        runtime_cwd = _pi_host_service_path(context)
-    else:
-        runtime_cwd = _pi_exact_path(
+    cwd_authority = (
+        _host_directory_authority(context)
+        if has_host_cwd
+        else None
+    )
+    if cwd_authority is None:
+        runtime_cwd: Path | None = _pi_exact_path(
             context.options["cwd"], require_directory=True
         )
+    else:
+        runtime_cwd = None
     evidence_root_path = _pi_exact_path(
         context.options["evidence_root"], require_directory=False
     )
@@ -155,6 +161,7 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
     return PiRuntimeClient(
         command=command,
         cwd=runtime_cwd,
+        cwd_authority=cwd_authority,
         capabilities=PI_CAPABILITIES,
         env=environment,
         max_turns=max_turns,
@@ -166,7 +173,9 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
     )
 
 
-def _pi_host_service_path(context: RuntimeFactoryContext) -> Path:
+def _host_directory_authority(
+    context: RuntimeFactoryContext,
+) -> ProcessDirectoryAuthority:
     capability_id = context.options["cwd_host_capability"]
     if (
         type(capability_id) is not str
@@ -175,15 +184,25 @@ def _pi_host_service_path(context: RuntimeFactoryContext) -> Path:
     ):
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
     try:
+        if set(context.host_services) != {capability_id}:
+            raise KeyError
         service = context.host_services[capability_id]
-        root = service.root
     except Exception:
         raise RuntimeFactoryError(
-            "Pi reference runtime host service is unavailable"
+            "runtime host directory service is unavailable"
         ) from None
-    if not isinstance(root, Path):
-        raise RuntimeFactoryError("Pi reference runtime host service is invalid")
-    return _pi_exact_path(str(root), require_directory=True)
+    if not isinstance(service, ProcessDirectoryAuthority):
+        raise RuntimeFactoryError("runtime host directory service is invalid")
+    try:
+        path = service.directory_path
+    except Exception:
+        raise RuntimeFactoryError(
+            "runtime host directory service is unavailable"
+        ) from None
+    if not isinstance(path, Path):
+        raise RuntimeFactoryError("runtime host directory service is invalid")
+    _pi_exact_path(str(path), require_directory=True)
+    return service
 
 
 def _pi_command(value: str) -> tuple[str, ...]:
@@ -296,14 +315,63 @@ def _create_claude_code_runtime(
 ) -> ClaudeCodeRuntimeClient:
     if context.runtime_id != "claude-code.reference":
         raise RuntimeFactoryError("runtime factory context is invalid")
+    allowed = {
+        "authentication_mode",
+        "context_profile",
+        "cwd",
+        "cwd_host_capability",
+        "evidence_root",
+        "model",
+        "provider",
+        "thinking_level",
+        "timeout_seconds",
+        "tools",
+    }
+    if set(context.options) - allowed:
+        raise RuntimeFactoryError("Claude Code runtime configuration is invalid")
     executable = _configured_executable("ASTERION_CLAUDE_EXECUTABLE", "claude")
-    runtime_cwd = _configured_path("ASTERION_RUNTIME_CWD", Path.cwd(), root=Path.cwd())
-    evidence_root = _configured_path(
-        "ASTERION_CLAUDE_OUTPUT_ROOT",
-        Path.cwd() / "outputs/asterion-claude-runs",
-        root=Path.cwd(),
-    )
-    if executable is None or not runtime_cwd.is_dir():
+    has_host_cwd = bool(context.host_services)
+    if has_host_cwd:
+        if (
+            "cwd_host_capability" not in context.options
+            or "cwd" in context.options
+            or os.environ.get("ASTERION_RUNTIME_CWD", "").strip()
+            or "evidence_root" not in context.options
+        ):
+            raise RuntimeFactoryError("Claude Code runtime configuration is invalid")
+        cwd_authority: ProcessDirectoryAuthority | None = (
+            _host_directory_authority(context)
+        )
+        runtime_cwd: Path | None = None
+        evidence_root = _pi_exact_path(
+            context.options["evidence_root"], require_directory=False
+        )
+    else:
+        if "cwd_host_capability" in context.options:
+            raise RuntimeFactoryError("Claude Code runtime configuration is invalid")
+        current = Path.cwd()
+        if "cwd" in context.options:
+            runtime_cwd = _pi_exact_path(
+                context.options["cwd"], require_directory=True
+            )
+        else:
+            runtime_cwd = _configured_path(
+                "ASTERION_RUNTIME_CWD", current, root=current
+            )
+        cwd_authority = None
+        if "evidence_root" in context.options:
+            evidence_root = _pi_exact_path(
+                context.options["evidence_root"], require_directory=False
+            )
+        else:
+            evidence_root = _configured_path(
+                "ASTERION_CLAUDE_OUTPUT_ROOT",
+                current / "outputs/asterion-claude-runs",
+                root=current,
+            )
+    if executable is None or (
+        runtime_cwd is not None and not runtime_cwd.is_dir()
+    ):
         raise RuntimeFactoryError("Claude Code runtime is unavailable")
     provider = _option_text(context, "provider")
     model = _option_text(context, "model")
@@ -333,6 +401,7 @@ def _create_claude_code_runtime(
     return ClaudeCodeRuntimeClient(
         executable=executable,
         cwd=runtime_cwd,
+        cwd_authority=cwd_authority,
         environment=environment,
         default_timeout_seconds=default_timeout_seconds,
         max_turns=max_turns,
