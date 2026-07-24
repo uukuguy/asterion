@@ -10,7 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from asterion.cli import _parser, main, resolve_public_runtime_id
+from asterion.cli import _parser, main
 from asterion.applications.dci_agent_lite.provider import create_provider as create_dci_provider
 from asterion.applications.provider import InstalledApplication, InstalledApplicationProvider
 from asterion.applications.product import (
@@ -23,7 +23,6 @@ from asterion.applications.product import (
     VerificationResult,
 )
 from asterion.dci.application_executor import EnvironmentDciRunExecutor
-from asterion.dci.config import ConfigLayers
 from asterion.dci.verification import create_dci_product
 from asterion.dci.pi_rpc import PiRpcClient
 from asterion.dci.run import DciRunRequest, DciRunResult
@@ -31,7 +30,7 @@ from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegist
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 from asterion.services.controlled_executor import ControlledExecutionResult
 from tests.test_application_discovery import FakeEntryPoint
-from tests.test_installed_application_provider import provider
+from tests.test_installed_application_provider import provider as installed_provider_fixture
 
 
 class FixtureRuntime:
@@ -181,19 +180,46 @@ def configure_manager(manager, config):
     return manager
 
 
+def provider(root: Path) -> InstalledApplicationProvider:
+    value = installed_provider_fixture(root)
+    for application in value.applications:
+        for assembly_path in application.assembly_paths:
+            assembly = json.loads(assembly_path.read_text(encoding="utf-8"))
+            assembly["host_events"] = []
+            assembly["host_artifacts"] = []
+            assembly_path.write_text(json.dumps(assembly), encoding="utf-8")
+    return value
+
+
 class AsterionCliTests(unittest.TestCase):
-    def test_public_runtime_names_map_to_exact_installed_ids(self) -> None:
-        self.assertEqual(resolve_public_runtime_id("pi"), "pi.reference")
-        self.assertEqual(
-            resolve_public_runtime_id("claude-code"), "claude-code.reference"
+    def test_generic_cli_has_no_dci_configuration_imports(self) -> None:
+        source = (
+            Path(__file__).resolve().parents[1] / "src/asterion/cli.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("asterion.dci", source)
+        self.assertNotIn("ConfigLayers", source)
+        self.assertNotIn("resolve_dci_runtime", source)
+
+    def test_run_parser_accepts_repeatable_opaque_runtime_options(self) -> None:
+        args, unknown = _parser().parse_known_args(
+            [
+                "run",
+                "--provider",
+                "fixture",
+                "--runtime-option",
+                "model=fixture-model",
+                "--runtime-option",
+                "empty=",
+                "--application",
+                "fixture.app@1.0.0",
+            ]
         )
-        self.assertEqual(resolve_public_runtime_id("pi.reference"), "pi.reference")
+
+        self.assertEqual(unknown, [])
         self.assertEqual(
-            resolve_public_runtime_id("claude-code.reference"),
-            "claude-code.reference",
+            getattr(args, "runtime_option", None),
+            ["model=fixture-model", "empty="],
         )
-        with self.assertRaises(ValueError):
-            resolve_public_runtime_id("unsupported")
 
     def test_dci_describe_json_reports_effective_first_run_defaults(self) -> None:
         entry = FakeEntryPoint(name="dci-agent-lite", factory=create_dci_provider)
@@ -216,9 +242,7 @@ class AsterionCliTests(unittest.TestCase):
         self.assertEqual(configuration["DCI_PI_DIR"]["default"], "./pi")
         self.assertEqual(configuration["DCI_PI_AGENT_DIR"]["default"], "~/.pi/agent")
 
-    def test_run_materializes_dotenv_once_without_overriding_exported_values(
-        self,
-    ) -> None:
+    def test_run_ignores_repository_dotenv_and_preserves_environment(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             value = provider(root)
@@ -226,33 +250,17 @@ class AsterionCliTests(unittest.TestCase):
             (root / ".env").write_text(
                 "\n".join(
                     (
-                        "DCI_PROVIDER=dotenv-provider",
-                        "MINIMAX_API_KEY=dotenv-minimax-secret",
-                        "MINIMAX_CN_API_KEY=dotenv-minimax-cn-secret",
-                        "DCI_PI_PACKAGE_DIR=dotenv-pi-package",
-                        "DCI_PI_AGENT_DIR=dotenv-pi-agent",
-                        "ASTERION_RUNTIME_CWD=dotenv-runtime-cwd",
-                        "ASTERION_CLAUDE_EXECUTABLE=dotenv-claude",
+                        "DCI_RUNTIME=SENTINEL_SECRET",
+                        "DCI_RPC_TIMEOUT_SECONDS=SENTINEL_SECRET",
                     )
                 )
                 + "\n",
                 encoding="utf-8",
             )
             contexts = []
-            factory_environment = {}
 
             def create_runtime(context):
                 contexts.append(context)
-                for name in (
-                    "DCI_PROVIDER",
-                    "MINIMAX_API_KEY",
-                    "MINIMAX_CN_API_KEY",
-                    "DCI_PI_PACKAGE_DIR",
-                    "DCI_PI_AGENT_DIR",
-                    "ASTERION_RUNTIME_CWD",
-                    "ASTERION_CLAUDE_EXECUTABLE",
-                ):
-                    factory_environment[name] = os.environ.get(name)
                 return FixtureRuntime()
 
             registry = RuntimeFactoryRegistry(
@@ -264,34 +272,87 @@ class AsterionCliTests(unittest.TestCase):
                     ),
                 )
             )
-            original_materialize = ConfigLayers.materialize
             stdout = io.StringIO()
-            with (
-                patch.dict(
-                    os.environ,
-                    {
-                        "DCI_PROVIDER": "exported-provider",
-                        "ASTERION_RUNTIME_CWD": "exported-runtime-cwd",
-                    },
-                    clear=True,
-                ),
-                patch("asterion.cli.Path.cwd", return_value=root),
-                patch.object(
-                    ConfigLayers,
-                    "materialize",
-                    autospec=True,
-                    side_effect=lambda layers, target: original_materialize(
-                        layers, target
-                    ),
-                ) as materialize,
+            stderr = io.StringIO()
+            with patch.dict(
+                os.environ,
+                {"FIXTURE_EXPORTED": "preserved"},
+                clear=True,
             ):
+                original_environment = dict(os.environ)
+                previous = Path.cwd()
+                try:
+                    os.chdir(root)
+                    code = main(
+                        [
+                            "run",
+                            "--provider",
+                            "example-app",
+                            "--runtime",
+                            "pi.reference",
+                            "--runtime-option",
+                            "model=fixture-model",
+                            "--runtime-option",
+                            "empty=",
+                            "--application",
+                            "example.research@1.0.0",
+                            "--input",
+                            "research",
+                        ],
+                        entry_points=(entry,),
+                        runtime_factories=registry,
+                        stdout=stdout,
+                        stderr=stderr,
+                    )
+                finally:
+                    os.chdir(previous)
+                self.assertEqual(dict(os.environ), original_environment)
+
+        self.assertEqual(code, 0, stderr.getvalue())
+        self.assertEqual(len(contexts), 1)
+        self.assertEqual(
+            contexts[0].options,
+            {"empty": "", "model": "fixture-model"},
+        )
+        self.assertNotIn("SENTINEL_SECRET", stdout.getvalue())
+        self.assertEqual(stderr.getvalue(), "")
+
+    def test_run_rejects_invalid_runtime_options_before_factory(self) -> None:
+        cases = ("missing-separator", "=missing-key", "duplicate=value")
+        for value in cases:
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                installed = provider(root)
+                entry = FakeEntryPoint(
+                    name="example-app", factory=lambda: installed
+                )
+                contexts = []
+                registry = RuntimeFactoryRegistry(
+                    (
+                        RuntimeFactoryBinding(
+                            runtime_id="pi.reference",
+                            capabilities=(),
+                            factory=lambda context: contexts.append(context)
+                            or FixtureRuntime(),
+                        ),
+                    )
+                )
+                options = ["--runtime-option", value]
+                if value == "duplicate=value":
+                    options = [
+                        "--runtime-option",
+                        "duplicate=first",
+                        "--runtime-option",
+                        value,
+                    ]
                 code = main(
                     [
                         "run",
                         "--provider",
                         "example-app",
                         "--runtime",
-                        "pi",
+                        "pi.reference",
+                        *options,
                         "--application",
                         "example.research@1.0.0",
                         "--input",
@@ -299,33 +360,12 @@ class AsterionCliTests(unittest.TestCase):
                     ],
                     entry_points=(entry,),
                     runtime_factories=registry,
-                    stdout=stdout,
+                    stdout=io.StringIO(),
                     stderr=io.StringIO(),
                 )
 
-        self.assertEqual(code, 0)
-        materialize.assert_called_once()
-        self.assertEqual(factory_environment["DCI_PROVIDER"], "exported-provider")
-        self.assertEqual(
-            factory_environment["ASTERION_RUNTIME_CWD"], "exported-runtime-cwd"
-        )
-        self.assertEqual(
-            factory_environment["MINIMAX_API_KEY"], "dotenv-minimax-secret"
-        )
-        self.assertEqual(
-            factory_environment["MINIMAX_CN_API_KEY"],
-            "dotenv-minimax-cn-secret",
-        )
-        self.assertEqual(
-            factory_environment["DCI_PI_PACKAGE_DIR"], "dotenv-pi-package"
-        )
-        self.assertEqual(factory_environment["DCI_PI_AGENT_DIR"], "dotenv-pi-agent")
-        self.assertEqual(
-            factory_environment["ASTERION_CLAUDE_EXECUTABLE"], "dotenv-claude"
-        )
-        self.assertEqual(contexts[0].options["provider"], "exported-provider")
-        self.assertNotIn("API_KEY", repr(contexts[0].options))
-        self.assertNotIn("dotenv-minimax-secret", stdout.getvalue())
+                self.assertEqual(code, 2)
+                self.assertEqual(contexts, [])
 
     def _product_provider(self, root: Path, calls: list[object]) -> InstalledApplicationProvider:
         valid = provider(root)
@@ -679,7 +719,9 @@ class AsterionCliTests(unittest.TestCase):
         self.assertEqual(payload["run_id"], "cli-run")
         self.assertNotIn("SECRET-INPUT", stdout.getvalue())
 
-    def test_run_selects_application_without_an_assembly_path(self) -> None:
+    def test_run_defaults_the_only_application_runtime_without_an_assembly_path(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             value = provider(Path(temp_dir))
             entry = FakeEntryPoint(name="example-app", factory=lambda: value)
@@ -698,8 +740,6 @@ class AsterionCliTests(unittest.TestCase):
                     "run",
                     "--provider",
                     "example-app",
-                    "--runtime",
-                    "pi.reference",
                     "--application",
                     "example.research@1.0.0",
                     "--input",
@@ -713,6 +753,42 @@ class AsterionCliTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(stdout.getvalue())["application_id"], "example.research")
+
+    def test_run_does_not_normalize_runtime_aliases(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            installed = provider(Path(temp_dir))
+            entry = FakeEntryPoint(name="example-app", factory=lambda: installed)
+            contexts = []
+            registry = RuntimeFactoryRegistry(
+                (
+                    RuntimeFactoryBinding(
+                        runtime_id="pi.reference",
+                        capabilities=(),
+                        factory=lambda context: contexts.append(context)
+                        or FixtureRuntime(),
+                    ),
+                )
+            )
+            code = main(
+                [
+                    "run",
+                    "--provider",
+                    "example-app",
+                    "--runtime",
+                    "pi",
+                    "--application",
+                    "example.research@1.0.0",
+                    "--input",
+                    "research",
+                ],
+                entry_points=(entry,),
+                runtime_factories=registry,
+                stdout=io.StringIO(),
+                stderr=io.StringIO(),
+            )
+
+        self.assertEqual(code, 2)
+        self.assertEqual(contexts, [])
 
     def test_run_selects_matching_runtime_assembly(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -774,7 +850,7 @@ class AsterionCliTests(unittest.TestCase):
         self.assertEqual(len(contexts), 1)
         self.assertEqual(contexts[0].assembly_path.name, "claude.json")
 
-    def test_run_defaults_runtime_selection_from_environment_alias(self) -> None:
+    def test_run_requires_explicit_runtime_for_multi_runtime_application(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             value = provider(root)
@@ -809,17 +885,25 @@ class AsterionCliTests(unittest.TestCase):
                         factory=lambda context: contexts.append(context)
                         or ClaudeFixtureRuntime(),
                     ),
+                    RuntimeFactoryBinding(
+                        runtime_id="pi.reference",
+                        capabilities=(),
+                        factory=lambda context: contexts.append(context)
+                        or FixtureRuntime(),
+                    ),
                 )
             )
-
-            with patch.dict(
-                os.environ,
-                {
-                    "DCI_RUNTIME": "claude-code.reference",
-                    "DCI_PROVIDER": "minimax",
-                    "DCI_MODEL": "MiniMax-M2.7",
-                },
-                clear=True,
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "DCI_RUNTIME": "claude-code",
+                        "DCI_PROVIDER": "minimax",
+                        "DCI_MODEL": "MiniMax-M2.7",
+                    },
+                    clear=True,
+                ),
+                patch("asterion.cli.Path.cwd", return_value=root),
             ):
                 code = main(
                     [
@@ -837,10 +921,8 @@ class AsterionCliTests(unittest.TestCase):
                     stderr=io.StringIO(),
                 )
 
-        self.assertEqual(code, 0)
-        self.assertEqual(len(contexts), 1)
-        self.assertEqual(contexts[0].runtime_id, "claude-code.reference")
-        self.assertEqual(contexts[0].assembly_path.name, "claude.json")
+        self.assertEqual(code, 2)
+        self.assertEqual(contexts, [])
 
     def test_run_rejects_ambiguous_runtime_assemblies_before_factory(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

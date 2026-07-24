@@ -21,7 +21,7 @@ class RuntimeFactoryContext:
     application_version: str
     runtime_id: str
     assembly_path: Path
-    options: Mapping[str, object]
+    options: Mapping[str, str]
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "options", MappingProxyType(dict(self.options)))

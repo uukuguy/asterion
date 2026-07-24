@@ -258,7 +258,7 @@ def _claude_tools(value: str | None) -> tuple[str, ...]:
     return tuple(mapping[part] for part in normalized)
 
 
-def _configured_timeout_option(value: object) -> float | None:
+def _configured_timeout_option(value: str | None) -> float | None:
     if value is None:
         return None
     return _configured_timeout_seconds({"DCI_RPC_TIMEOUT_SECONDS": str(value)})

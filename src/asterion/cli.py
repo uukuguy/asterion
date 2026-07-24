@@ -9,6 +9,7 @@ import os
 import sys
 from collections.abc import Iterable, Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import Callable, TextIO
 
 from asterion.applications.discovery import (
@@ -27,7 +28,6 @@ from asterion.applications.selection import (
     select_installed_application,
 )
 from asterion.assembly.protocol import AssemblyError, resolve_assembly
-from asterion.dci.config import resolve_dci_runtime_options
 from asterion.packages.catalog import discover_packages
 from asterion.packages.execution import (
     PackageExecutionError,
@@ -35,7 +35,6 @@ from asterion.packages.execution import (
 )
 from asterion.runner.application import ApplicationRunError
 from asterion.runner.composed import run_composed_application
-from asterion.dci.config import ConfigLayers, resolve_asterion_runtime
 from asterion.runtime.factory import (
     RuntimeFactoryContext,
     RuntimeFactoryError,
@@ -193,10 +192,6 @@ async def _run(
     provider = load_application_provider(
         args.provider, entry_points=entry_points
     )
-    runtime = resolve_dci_runtime_options(
-        {"runtime": _public_runtime_from_cli(args.runtime)}
-    )
-    runtime_id = _runtime_id_from_runtime(runtime.runtime)
     if args.application is not None:
         application = select_installed_application(
             provider, parse_application_selector(args.application)
@@ -214,17 +209,16 @@ async def _run(
         if len(matches) != 1:
             raise ApplicationProviderError("application assembly selection is invalid")
         application = matches[0]
-    layers = ConfigLayers.from_repo(Path.cwd())
-    resolved_runtime = resolve_asterion_runtime(
-        {"runtime": args.runtime} if args.runtime is not None else {},
-        layers,
-    )
-    layers.materialize(os.environ)
-    runtime_id = resolve_public_runtime_id(resolved_runtime.runtime)
+    runtime_id = args.runtime
+    if runtime_id is None:
+        if len(application.runtime_ids) != 1:
+            raise ApplicationProviderError("application runtime selection is required")
+        runtime_id = application.runtime_ids[0]
     if runtime_id not in application.runtime_ids:
         raise ApplicationProviderError("application runtime selection is invalid")
     if args.application is not None:
         assembly_path = _select_application_assembly(application, runtime_id)
+    runtime_options = _runtime_options(args.runtime_option)
     runtime_binding = registry.select(runtime_id)
     assembly = json.loads(assembly_path.read_text())
     plan = resolve_assembly(
@@ -240,15 +234,7 @@ async def _run(
         application_version=application.version,
         runtime_id=runtime_id,
         assembly_path=assembly_path,
-        options={
-            "provider": resolved_runtime.provider,
-            "model": resolved_runtime.model,
-            "tools": resolved_runtime.tools,
-            "thinking_level": resolved_runtime.thinking_level,
-            "context_profile": resolved_runtime.context_profile,
-            "timeout_seconds": resolved_runtime.timeout_seconds,
-            "authentication_mode": resolved_runtime.authentication_mode,
-        },
+        options=runtime_options,
     )
     runtime = runtime_binding.factory(context)
     input_text = args.input if args.input is not None else stdin.read()
@@ -275,37 +261,14 @@ async def _run(
     return 0
 
 
-def _public_runtime_from_cli(selection: str | None) -> str:
-    """Normalize CLI runtime selection into config-runtime keys."""
-
-    if selection is None:
-        return resolve_dci_runtime_options().runtime
-    normalized = _normalize_runtime_name(selection)
-    if normalized is None:
-        raise ValueError("application runtime selection is invalid")
-    return normalized
-
-
-def _runtime_id_from_runtime(runtime: str) -> str:
-    if runtime == "pi":
-        return "pi.reference"
-    if runtime == "claude-code":
-        return "claude-code.reference"
-    raise ValueError("application runtime selection is invalid")
-
-
-def _normalize_runtime_name(value: str) -> str | None:
-    normalized = value.strip().lower()
-    if normalized in {"", "pi", "pi.reference", "pi-ref", "pi_reference"}:
-        return "pi"
-    if normalized in {
-        "claude-code",
-        "claude-code.reference",
-        "claude_code",
-        "claudecode",
-    }:
-        return "claude-code"
-    return None
+def _runtime_options(values: list[str]) -> Mapping[str, str]:
+    parsed: dict[str, str] = {}
+    for value in values:
+        key, separator, item = value.partition("=")
+        if not separator or not key or key in parsed:
+            raise RuntimeFactoryError("runtime option is invalid")
+        parsed[key] = item
+    return MappingProxyType(parsed)
 
 
 def _select_application_assembly(
@@ -349,6 +312,12 @@ def _parser() -> argparse.ArgumentParser:
     run = subparsers.add_parser("run")
     run.add_argument("--provider", required=True)
     run.add_argument("--runtime")
+    run.add_argument(
+        "--runtime-option",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+    )
     run.add_argument("--run-id", default="asterion-run")
     run.add_argument("--input")
     run.add_argument("--application")
@@ -361,20 +330,6 @@ def _parser() -> argparse.ArgumentParser:
     )
     run.add_argument("legacy_assembly", nargs="?")
     return parser
-
-
-def resolve_public_runtime_id(value: str) -> str:
-    """Map a public runtime name to an exact installed runtime identity."""
-
-    try:
-        return {
-            "pi": "pi.reference",
-            "claude-code": "claude-code.reference",
-            "pi.reference": "pi.reference",
-            "claude-code.reference": "claude-code.reference",
-        }[value]
-    except KeyError:
-        raise ValueError("application runtime selection is invalid") from None
 
 
 def _description_payload(description: CapabilityProductDescription) -> dict[str, object]:
