@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-import math
 import json
+import math
 import os
+import re
 import shutil
+import stat
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -16,7 +18,7 @@ from asterion.runtime.factory import (
     RuntimeFactoryRegistry,
 )
 from asterion.runtimes.claude_code import ClaudeCodeRuntimeClient
-from asterion.runtimes.pi import PiRuntimeClient
+from asterion.runtimes.pi import PiRuntimeClient, prepare_pi_evidence_root
 
 
 PI_CAPABILITIES = ("filesystem.read", "pi.tool.grep")
@@ -100,38 +102,39 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
     if set(context.options) - allowed or not required.issubset(context.options):
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
     command = list(_pi_command(context.options["command"]))
-    runtime_cwd = _pi_absolute_path(
+    runtime_cwd = _pi_exact_path(
         context.options["cwd"], require_directory=True
     )
-    evidence_root = _pi_absolute_path(
+    evidence_root_path = _pi_exact_path(
         context.options["evidence_root"], require_directory=False
     )
     environment = _pi_environment(context.options["environment"])
-    tools = _option_text(context, "tools")
-    if tools is None:
+    tools = context.options["tools"]
+    if type(tools) is not str or tools != "read,grep":
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
-    normalized_tools = tuple(part.strip() for part in tools.split(","))
-    if (
-        not normalized_tools
-        or any(not part for part in normalized_tools)
-        or len(set(normalized_tools)) != len(normalized_tools)
-        or normalized_tools != ("read", "grep")
-    ):
-        raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
-    provider = _option_text(context, "provider")
-    model = _option_text(context, "model")
+    normalized_tools = ("read", "grep")
+    provider = _pi_identity_option(context.options.get("provider"))
+    model = _pi_identity_option(context.options.get("model"))
     if (provider is None) != (model is None):
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
-    context_profile = _option_text(context, "context_profile")
+    context_profile = context.options.get("context_profile")
     if context_profile not in {None, "level3"}:
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
     raw_max_turns = context.options["max_turns"]
+    if type(raw_max_turns) is not str:
+        raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
     try:
         max_turns = int(raw_max_turns)
     except ValueError:
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid") from None
     if max_turns <= 0 or str(max_turns) != raw_max_turns:
-        raise RuntimeFactoryError("Pi reference runtime is unavailable")
+        raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
+    try:
+        evidence_root = prepare_pi_evidence_root(evidence_root_path)
+    except ValueError:
+        raise RuntimeFactoryError(
+            "Pi reference runtime configuration is invalid"
+        ) from None
 
     for option, value in (
         ("--provider", provider),
@@ -155,45 +158,108 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
 
 
 def _pi_command(value: str) -> tuple[str, ...]:
-    try:
-        parsed = json.loads(value)
-    except (TypeError, ValueError):
-        raise RuntimeFactoryError("Pi reference runtime configuration is invalid") from None
+    parsed = _pi_exact_json(value, sort_keys=False)
     if (
         not isinstance(parsed, list)
         or not parsed
-        or any(not isinstance(item, str) or not item for item in parsed)
+        or any(type(item) is not str or not item for item in parsed)
     ):
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
-    executable = Path(parsed[0])
-    if not executable.is_absolute() or not executable.is_file():
+    executable = _pi_exact_path(parsed[0], require_directory=False)
+    try:
+        details = executable.stat(follow_symlinks=False)
+    except OSError:
+        raise RuntimeFactoryError("Pi reference runtime is unavailable") from None
+    if (
+        not stat.S_ISREG(details.st_mode)
+        or stat.S_IMODE(details.st_mode) & 0o111 == 0
+        or not os.access(executable, os.X_OK)
+    ):
         raise RuntimeFactoryError("Pi reference runtime is unavailable")
     return tuple(parsed)
 
 
-def _pi_absolute_path(value: str, *, require_directory: bool) -> Path:
-    path = Path(value)
-    if not path.is_absolute():
+def _pi_exact_path(value: str, *, require_directory: bool) -> Path:
+    if type(value) is not str:
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
-    resolved = path.resolve()
-    if require_directory and not resolved.is_dir():
+    path = Path(value)
+    if (
+        not path.is_absolute()
+        or str(path) != value
+        or any(part in {"", ".", ".."} for part in path.parts[1:])
+        or str(path.resolve(strict=False)) != value
+    ):
+        raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
+    current = Path(path.anchor)
+    try:
+        details = current.stat(follow_symlinks=False)
+    except OSError:
+        raise RuntimeFactoryError("Pi reference runtime is unavailable") from None
+    for component in path.parts[1:]:
+        current /= component
+        try:
+            details = current.stat(follow_symlinks=False)
+        except FileNotFoundError:
+            if current == path and not require_directory:
+                return path
+            raise RuntimeFactoryError("Pi reference runtime is unavailable") from None
+        except OSError:
+            raise RuntimeFactoryError("Pi reference runtime is unavailable") from None
+        if stat.S_ISLNK(details.st_mode):
+            raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
+    if require_directory and not stat.S_ISDIR(details.st_mode):
         raise RuntimeFactoryError("Pi reference runtime is unavailable")
-    return resolved
+    return path
 
 
 def _pi_environment(value: str) -> dict[str, str]:
-    try:
-        parsed = json.loads(value)
-    except (TypeError, ValueError):
-        raise RuntimeFactoryError("Pi reference runtime configuration is invalid") from None
+    parsed = _pi_exact_json(value, sort_keys=True)
     if not isinstance(parsed, dict) or any(
-        not isinstance(key, str)
+        type(key) is not str
         or not key
-        or not isinstance(item, str)
+        or type(item) is not str
         for key, item in parsed.items()
     ):
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
     return dict(parsed)
+
+
+def _pi_exact_json(value: str, *, sort_keys: bool) -> object:
+    if type(value) is not str:
+        raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
+
+    def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, item in pairs:
+            if key in result:
+                raise ValueError
+            result[key] = item
+        return result
+
+    try:
+        parsed = json.loads(value, object_pairs_hook=unique_object)
+    except (TypeError, ValueError):
+        raise RuntimeFactoryError("Pi reference runtime configuration is invalid") from None
+    canonical = json.dumps(
+        parsed,
+        ensure_ascii=False,
+        sort_keys=sort_keys,
+        separators=(",", ":"),
+    )
+    if canonical != value:
+        raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
+    return parsed
+
+
+def _pi_identity_option(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if (
+        type(value) is not str
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/+-]*", value) is None
+    ):
+        raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
+    return value
 
 
 def _create_claude_code_runtime(

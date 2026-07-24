@@ -348,7 +348,7 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
         from asterion.runtime.defaults import default_runtime_factory_registry
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
+            root = Path(temp_dir).resolve()
             corpus = root / "corpus"
             corpus.mkdir()
             with (
@@ -367,10 +367,19 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                         runtime_id="pi.reference",
                         assembly_path=root / "assembly.json",
                         options={
-                            "command": json.dumps([sys.executable, "-u", "-c", "pass"]),
+                            "command": json.dumps(
+                                [
+                                    str(Path(sys.executable).resolve()),
+                                    "-u",
+                                    "-c",
+                                    "pass",
+                                ],
+                                separators=(",", ":"),
+                            ),
                             "cwd": str(corpus),
                             "environment": json.dumps(
-                                {"SENTINEL_RUNTIME_VALUE": "private"}
+                                {"SENTINEL_RUNTIME_VALUE": "private"},
+                                separators=(",", ":"),
                             ),
                             "evidence_root": str(root / "evidence"),
                             "provider": "fixture-provider",
@@ -396,12 +405,84 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
         self.assertEqual(runtime._context_profile, "level3")
         self.assertEqual(runtime._evidence_root, (root / "evidence").resolve())
 
+    def test_pi_factory_rejects_every_noncanonical_authority_value(self) -> None:
+        from asterion.runtime.defaults import default_runtime_factory_registry
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            cwd = root / "cwd"
+            cwd.mkdir()
+            executable = Path(sys.executable).resolve()
+            base = {
+                "command": json.dumps(
+                    [str(executable), "-u", "-c", "pass"],
+                    separators=(",", ":"),
+                ),
+                "cwd": str(cwd),
+                "environment": '{"A":"1","B":"2"}',
+                "evidence_root": str(root / "evidence"),
+                "provider": "fixture-provider",
+                "model": "fixture-model",
+                "tools": "read,grep",
+                "max_turns": "4",
+                "context_profile": "level3",
+            }
+            non_executable = root / "SECRET-NON-EXECUTABLE"
+            non_executable.write_text("#!/bin/sh\n")
+            non_executable.chmod(0o600)
+            symlink_target = root / "target"
+            symlink_target.mkdir(mode=0o700)
+            symlink_root = root / "SECRET-SYMLINK"
+            symlink_root.symlink_to(symlink_target, target_is_directory=True)
+            public_root = root / "SECRET-PUBLIC"
+            public_root.mkdir(mode=0o755)
+            cases = (
+                {"tools": " read,grep"},
+                {"provider": " fixture-provider"},
+                {"model": "fixture-model "},
+                {"context_profile": "level3 "},
+                {"max_turns": "04"},
+                {"cwd": str(cwd / ".." / "cwd")},
+                {"evidence_root": str(symlink_root)},
+                {"evidence_root": str(public_root)},
+                {
+                    "command": json.dumps(
+                        [str(non_executable)],
+                        separators=(",", ":"),
+                    )
+                },
+                {
+                    "command": json.dumps(
+                        [str(executable), "-c", "pass"]
+                    )
+                },
+                {"environment": '{"A":"1","A":"2"}'},
+                {"environment": '{"B":"2", "A":"1"}'},
+            )
+            binding = default_runtime_factory_registry().select("pi.reference")
+            for override in cases:
+                with (
+                    self.subTest(override=next(iter(override))),
+                    self.assertRaises(RuntimeFactoryError) as raised,
+                ):
+                    binding.factory(
+                        RuntimeFactoryContext(
+                            provider_id="dci-agent-lite",
+                            application_id="dci.research-capability",
+                            application_version="1.0.0",
+                            runtime_id="pi.reference",
+                            assembly_path=root / "assembly.json",
+                            options={**base, **override},
+                        )
+                    )
+                self.assertNotIn("SECRET", str(raised.exception))
+
     def test_missing_pi_cli_fails_without_exposing_the_path(self) -> None:
         from asterion.runtime.defaults import default_runtime_factory_registry
         from asterion.runtime.factory import RuntimeFactoryError
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
+            root = Path(temp_dir).resolve()
             binding = default_runtime_factory_registry().select("pi.reference")
             with self.assertRaises(RuntimeFactoryError) as caught:
                 binding.factory(
@@ -413,7 +494,8 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                         assembly_path=root / "assembly.json",
                         options={
                             "command": json.dumps(
-                                [str(root / "SECRET-PACKAGE"), "--mode", "rpc"]
+                                [str(root / "SECRET-PACKAGE"), "--mode", "rpc"],
+                                separators=(",", ":"),
                             ),
                             "cwd": str(root),
                             "environment": "{}",

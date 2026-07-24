@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from asterion.adapters.pi import map_pi_capabilities
 from asterion.runtime.host import RunRequest
@@ -20,9 +23,19 @@ import sys
 request = json.loads(sys.stdin.readline())
 print(json.dumps({"type": "response", "id": request["id"], "success": True}), flush=True)
 print(json.dumps({"type": "agent_start"}), flush=True)
+print(json.dumps({"type": "turn_start"}), flush=True)
 print(json.dumps({
     "type": "message_update",
     "assistantMessageEvent": {"type": "text_delta", "delta": "Pudding Lane"}
+}), flush=True)
+print(json.dumps({
+    "type": "message_end",
+    "message": {
+        "role": "assistant",
+        "stopReason": "stop",
+        "usage": {"input": 1, "output": 2},
+        "content": [{"type": "text", "text": "Pudding Lane"}]
+    }
 }), flush=True)
 print(json.dumps({"type": "agent_end"}), flush=True)
 '''
@@ -47,6 +60,110 @@ sys.stdin.readline()
 time.sleep(5)
 '''
 
+ERROR_SCRIPT = r'''
+import json, sys
+request = json.loads(sys.stdin.readline())
+print(json.dumps({"type": "response", "id": request["id"], "success": True}), flush=True)
+print(json.dumps({"type": "agent_start"}), flush=True)
+print(json.dumps({"type": "turn_start"}), flush=True)
+print(json.dumps({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "SECRET-PROVIDER-FAILURE"}}), flush=True)
+print(json.dumps({"type": "message_end", "message": {"role": "assistant", "stopReason": "error", "usage": {"input": 1, "output": 1}}}), flush=True)
+print(json.dumps({"type": "agent_end"}), flush=True)
+'''
+
+RETRY_SCRIPT = r'''
+import json, sys
+request = json.loads(sys.stdin.readline())
+print(json.dumps({"type": "response", "id": request["id"], "success": True}), flush=True)
+print(json.dumps({"type": "agent_start"}), flush=True)
+print(json.dumps({"type": "turn_start"}), flush=True)
+print(json.dumps({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "discarded"}}), flush=True)
+print(json.dumps({"type": "agent_end", "willRetry": True}), flush=True)
+print(json.dumps({"type": "agent_start"}), flush=True)
+print(json.dumps({"type": "turn_start"}), flush=True)
+print(json.dumps({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "recovered answer"}}), flush=True)
+print(json.dumps({"type": "message_end", "message": {"role": "assistant", "stopReason": "stop", "usage": {"input": 1, "output": 1}}}), flush=True)
+print(json.dumps({"type": "agent_end"}), flush=True)
+'''
+
+OVER_TURN_SCRIPT = r'''
+import json, sys, time
+request = json.loads(sys.stdin.readline())
+print(json.dumps({"type": "response", "id": request["id"], "success": True}), flush=True)
+print(json.dumps({"type": "agent_start"}), flush=True)
+print(json.dumps({"type": "turn_start"}), flush=True)
+print(json.dumps({"type": "turn_start"}), flush=True)
+time.sleep(5)
+'''
+
+RECOVERED_FINAL_SCRIPT = r'''
+import json, sys
+request = json.loads(sys.stdin.readline())
+print(json.dumps({"type": "response", "id": request["id"], "success": True}), flush=True)
+print(json.dumps({"type": "agent_start"}), flush=True)
+print(json.dumps({"type": "turn_start"}), flush=True)
+print(json.dumps({"type": "message_end", "message": {"role": "assistant", "stopReason": "stop", "usage": {"input": 1, "output": 1}, "content": [{"type": "text", "text": "recovered final"}]}}), flush=True)
+print(json.dumps({"type": "agent_end"}), flush=True)
+'''
+
+EMPTY_FINAL_SCRIPT = r'''
+import json, sys
+request = json.loads(sys.stdin.readline())
+print(json.dumps({"type": "response", "id": request["id"], "success": True}), flush=True)
+print(json.dumps({"type": "agent_start"}), flush=True)
+print(json.dumps({"type": "turn_start"}), flush=True)
+print(json.dumps({"type": "message_end", "message": {"role": "assistant", "stopReason": "stop", "usage": {"input": 1, "output": 0}, "content": []}}), flush=True)
+print(json.dumps({"type": "agent_end"}), flush=True)
+'''
+
+DESCENDANT_STDERR_SCRIPT = r'''
+import json, subprocess, sys
+request = json.loads(sys.stdin.readline())
+subprocess.Popen([sys.executable, "-c", "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(5)"])
+print(json.dumps({"type": "response", "id": request["id"], "success": True}), flush=True)
+print(json.dumps({"type": "agent_start"}), flush=True)
+print(json.dumps({"type": "turn_start"}), flush=True)
+print(json.dumps({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "owned tree"}}), flush=True)
+print(json.dumps({"type": "agent_end"}), flush=True)
+'''
+
+LARGE_STDERR_SCRIPT = r'''
+import json, sys
+request = json.loads(sys.stdin.readline())
+sys.stderr.write("x" * (1024 * 1024))
+sys.stderr.flush()
+print(json.dumps({"type": "response", "id": request["id"], "success": True}), flush=True)
+print(json.dumps({"type": "agent_start"}), flush=True)
+print(json.dumps({"type": "turn_start"}), flush=True)
+print(json.dumps({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "bounded stderr"}}), flush=True)
+print(json.dumps({"type": "agent_end"}), flush=True)
+'''
+
+OVERSIZED_LINE_SCRIPT = r'''
+import json, sys
+request = json.loads(sys.stdin.readline())
+print(json.dumps({"type": "response", "id": request["id"], "success": True}), flush=True)
+print(json.dumps({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "x" * (128 * 1024)}}), flush=True)
+'''
+
+EVENT_FLOOD_SCRIPT = r'''
+import json, sys
+request = json.loads(sys.stdin.readline())
+print(json.dumps({"type": "response", "id": request["id"], "success": True}), flush=True)
+for _ in range(2100):
+    print(json.dumps({"type": "agent_start"}), flush=True)
+'''
+
+FINAL_TEXT_CAP_SCRIPT = r'''
+import json, sys
+request = json.loads(sys.stdin.readline())
+print(json.dumps({"type": "response", "id": request["id"], "success": True}), flush=True)
+print(json.dumps({"type": "agent_start"}), flush=True)
+print(json.dumps({"type": "turn_start"}), flush=True)
+for _ in range(1100):
+    print(json.dumps({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "x" * 1024}}), flush=True)
+'''
+
 
 class MutableSignal:
     def __init__(self) -> None:
@@ -54,6 +171,21 @@ class MutableSignal:
 
 
 class PiRuntimeClientTests(unittest.IsolatedAsyncioTestCase):
+    def _client(
+        self,
+        root: Path,
+        script: str,
+        *,
+        max_turns: int = 4,
+    ) -> PiRuntimeClient:
+        return PiRuntimeClient(
+            command=(sys.executable, "-u", "-c", script),
+            cwd=root,
+            capabilities=("filesystem.read", "shell"),
+            max_turns=max_turns,
+            evidence_root=root / "evidence",
+        )
+
     async def test_reordered_tools_produce_canonical_request_and_started_capabilities(
         self,
     ) -> None:
@@ -81,7 +213,7 @@ class PiRuntimeClientTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_translates_one_pi_rpc_run_to_normalized_events(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
+            root = Path(temp_dir).resolve()
             client = PiRuntimeClient(
                 command=(sys.executable, "-u", "-c", SUCCESS_SCRIPT),
                 cwd=root,
@@ -116,9 +248,332 @@ class PiRuntimeClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.manifest.runtime_id, "pi.reference")
         self.assertEqual(
             tuple(event.type for event in events),
-            ("run.started", "text.delta", "artifact.created", "run.completed"),
+            (
+                "run.started",
+                "text.delta",
+                "usage.reported",
+                "artifact.created",
+                "run.completed",
+            ),
         )
         self.assertEqual(events[-1].payload["status"], "completed")
+
+    async def test_completion_is_published_only_after_normal_stream_exhaustion(
+        self,
+    ) -> None:
+        for prefix in range(1, 6):
+            with self.subTest(prefix=prefix), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp).resolve()
+                client = self._client(root, SUCCESS_SCRIPT)
+                stream = client.run(
+                    RunRequest(
+                        run_id=f"prefix-{prefix}",
+                        input_text="question",
+                        requested_capabilities=("filesystem.read",),
+                    )
+                )
+                for _ in range(prefix):
+                    await anext(stream)
+                await stream.aclose()
+                self.assertIsNone(client.completed_run_dir(f"prefix-{prefix}"))
+                self.assertEqual(list((root / "evidence").iterdir()), [])
+
+        for prefix in range(1, 5):
+            with self.subTest(failure_prefix=prefix), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp).resolve()
+                client = self._client(root, SUCCESS_SCRIPT)
+                stream = client.run(
+                    RunRequest(
+                        run_id=f"consumer-failure-{prefix}",
+                        input_text="question",
+                        requested_capabilities=("filesystem.read",),
+                    )
+                )
+                for _ in range(prefix):
+                    await anext(stream)
+                with self.assertRaisesRegex(RuntimeError, "consumer stopped"):
+                    await stream.athrow(RuntimeError("consumer stopped"))
+                self.assertIsNone(
+                    client.completed_run_dir(f"consumer-failure-{prefix}")
+                )
+                self.assertEqual(list((root / "evidence").iterdir()), [])
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            client = self._client(root, SUCCESS_SCRIPT)
+            events = [
+                event
+                async for event in client.run(
+                    RunRequest(
+                        run_id="fully-consumed",
+                        input_text="question",
+                        requested_capabilities=("filesystem.read",),
+                    )
+                )
+            ]
+            self.assertEqual(events[-1].type, "run.completed")
+            self.assertIsNotNone(client.completed_run_dir("fully-consumed"))
+
+    async def test_error_retry_turn_limit_and_final_recovery_lifecycle(self) -> None:
+        cases = (
+            ("assistant-error", ERROR_SCRIPT, 4, False, None),
+            ("over-turn-limit", OVER_TURN_SCRIPT, 1, False, None),
+            ("empty-final", EMPTY_FINAL_SCRIPT, 4, False, None),
+            ("retry-final", RETRY_SCRIPT, 4, True, "recovered answer"),
+            (
+                "message-recovery",
+                RECOVERED_FINAL_SCRIPT,
+                4,
+                True,
+                "recovered final",
+            ),
+        )
+        for run_id, script, turns, succeeds, expected in cases:
+            with self.subTest(run_id=run_id), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp).resolve()
+                client = self._client(root, script, max_turns=turns)
+                request = RunRequest(
+                    run_id=run_id,
+                    input_text="question",
+                    requested_capabilities=("filesystem.read",),
+                )
+                if succeeds:
+                    events = await _collect(client, request, MutableSignal())
+                    completed = client.completed_run_dir(run_id)
+                    self.assertIsNotNone(completed)
+                    assert completed is not None
+                    self.assertEqual((completed / "final.txt").read_text(), expected)
+                    if run_id == "retry-final":
+                        deltas = [
+                            event.payload["text"]
+                            for event in events
+                            if event.type == "text.delta"
+                        ]
+                        self.assertEqual(deltas, ["recovered answer"])
+                else:
+                    with self.assertRaises(ProtocolError) as raised:
+                        await _collect(client, request, MutableSignal())
+                    self.assertNotIn("SECRET", str(raised.exception))
+                    self.assertIsNone(client.completed_run_dir(run_id))
+
+    async def test_owned_tree_caps_and_reuse_after_failure(self) -> None:
+        for script in (DESCENDANT_STDERR_SCRIPT, LARGE_STDERR_SCRIPT):
+            with self.subTest(script=script[:20]), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp).resolve()
+                client = self._client(root, script)
+                started = time.monotonic()
+                await asyncio.wait_for(
+                    _collect(
+                        client,
+                        RunRequest(
+                            run_id="bounded-success",
+                            input_text="question",
+                            requested_capabilities=("filesystem.read",),
+                        ),
+                        MutableSignal(),
+                    ),
+                    timeout=2,
+                )
+                self.assertLess(time.monotonic() - started, 2)
+                self.assertFalse(client._running)
+
+        for index, script in enumerate(
+            (OVERSIZED_LINE_SCRIPT, EVENT_FLOOD_SCRIPT, FINAL_TEXT_CAP_SCRIPT)
+        ):
+            with self.subTest(cap=index), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp).resolve()
+                client = self._client(root, script)
+                with self.assertRaises(ProtocolError):
+                    await _collect(
+                        client,
+                        RunRequest(
+                            run_id=f"oversized-{index}",
+                            input_text="question",
+                            requested_capabilities=("filesystem.read",),
+                        ),
+                        MutableSignal(),
+                    )
+                self.assertFalse(client._running)
+                client._command = (sys.executable, "-u", "-c", SUCCESS_SCRIPT)
+                await _collect(
+                    client,
+                    RunRequest(
+                        run_id=f"reused-{index}",
+                        input_text="question",
+                        requested_capabilities=("filesystem.read",),
+                    ),
+                    MutableSignal(),
+                )
+                self.assertIsNotNone(
+                    client.completed_run_dir(f"reused-{index}")
+                )
+
+    async def test_cancellation_during_finalization_reaps_tree_and_reuses_client(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            client = self._client(root, DESCENDANT_STDERR_SCRIPT)
+            work = asyncio.create_task(
+                _collect(
+                    client,
+                    RunRequest(
+                        run_id="cancel-finalization",
+                        input_text="question",
+                        requested_capabilities=("filesystem.read",),
+                    ),
+                    MutableSignal(),
+                )
+            )
+            await asyncio.sleep(0.1)
+            work.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await asyncio.wait_for(work, timeout=2)
+            self.assertFalse(client._running)
+            self.assertIsNone(client.completed_run_dir("cancel-finalization"))
+
+            client._command = (sys.executable, "-u", "-c", SUCCESS_SCRIPT)
+            await _collect(
+                client,
+                RunRequest(
+                    run_id="after-finalization-cancel",
+                    input_text="question",
+                    requested_capabilities=("filesystem.read",),
+                ),
+                MutableSignal(),
+            )
+            self.assertIsNotNone(
+                client.completed_run_dir("after-finalization-cancel")
+            )
+
+    async def test_evidence_root_rejects_symlinks_modes_files_and_replacement(
+        self,
+    ) -> None:
+        for kind in ("symlink", "file", "public"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp).resolve()
+                evidence = root / f"SECRET-{kind}"
+                if kind == "symlink":
+                    target = root / "target"
+                    target.mkdir(mode=0o700)
+                    evidence.symlink_to(target, target_is_directory=True)
+                elif kind == "file":
+                    evidence.write_text("private")
+                    evidence.chmod(0o600)
+                else:
+                    evidence.mkdir(mode=0o755)
+                client = PiRuntimeClient(
+                    command=("SECRET-MISSING-COMMAND",),
+                    cwd=root,
+                    capabilities=("filesystem.read",),
+                    env={},
+                    evidence_root=evidence,
+                )
+                with self.assertRaises(ProtocolError) as raised:
+                    await _collect(
+                        client,
+                        RunRequest(
+                            run_id="SECRET-RUN-ID",
+                            input_text="SECRET-INPUT",
+                            requested_capabilities=("filesystem.read",),
+                        ),
+                        MutableSignal(),
+                    )
+                self.assertNotIn("SECRET", str(raised.exception))
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            evidence = root / "evidence"
+            client = self._client(root, SUCCESS_SCRIPT)
+            original_stage = __import__(
+                "asterion.runtimes.pi", fromlist=["_stage_evidence"]
+            )._stage_evidence
+            parked = root / "parked"
+
+            def replace_root(*args, **kwargs):
+                staged = original_stage(*args, **kwargs)
+                evidence.rename(parked)
+                evidence.mkdir(mode=0o700)
+                return staged
+
+            with (
+                patch(
+                    "asterion.runtimes.pi._stage_evidence",
+                    side_effect=replace_root,
+                ),
+                self.assertRaises(ProtocolError),
+            ):
+                await _collect(
+                    client,
+                    RunRequest(
+                        run_id="replacement-race",
+                        input_text="question",
+                        requested_capabilities=("filesystem.read",),
+                    ),
+                    MutableSignal(),
+                )
+            self.assertIsNone(client.completed_run_dir("replacement-race"))
+            self.assertEqual(list(parked.iterdir()), [])
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            evidence = root / "evidence"
+            client = self._client(root, SUCCESS_SCRIPT)
+            module = __import__(
+                "asterion.runtimes.pi", fromlist=["_publish_evidence"]
+            )
+            original_publish = module._publish_evidence
+            parked = root / "parked"
+
+            def replace_after_publish(*args, **kwargs):
+                identity = original_publish(*args, **kwargs)
+                evidence.rename(parked)
+                evidence.mkdir(mode=0o700)
+                return identity
+
+            with (
+                patch(
+                    "asterion.runtimes.pi._publish_evidence",
+                    side_effect=replace_after_publish,
+                ),
+                self.assertRaises(ProtocolError),
+            ):
+                await _collect(
+                    client,
+                    RunRequest(
+                        run_id="post-publication-race",
+                        input_text="question",
+                        requested_capabilities=("filesystem.read",),
+                    ),
+                    MutableSignal(),
+                )
+            self.assertIsNone(
+                client.completed_run_dir("post-publication-race")
+            )
+            self.assertEqual(list(parked.iterdir()), [])
+
+    async def test_failure_paths_close_every_evidence_descriptor(self) -> None:
+        descriptor_root = Path("/dev/fd")
+        if not descriptor_root.is_dir():
+            self.skipTest("descriptor inventory is unavailable")
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            client = self._client(root, INVALID_JSON_SCRIPT)
+            before = len(list(descriptor_root.iterdir()))
+            for index in range(5):
+                with self.assertRaises(ProtocolError):
+                    await _collect(
+                        client,
+                        RunRequest(
+                            run_id=f"descriptor-failure-{index}",
+                            input_text="question",
+                            requested_capabilities=("filesystem.read",),
+                        ),
+                        MutableSignal(),
+                    )
+            gc.collect()
+            after = len(list(descriptor_root.iterdir()))
+            self.assertLessEqual(after, before)
 
     async def test_capability_mismatch_fails_before_process_start(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
