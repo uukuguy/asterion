@@ -41,3 +41,4 @@
 - 22:17 Aligned architecture imports/graph and recovery truth so documentation matches shipped protocol state [6168056]
 - 22:20 Recorded final finding-to-fix and gate evidence for whole-branch re-review [b2a4ce1]
 - 22:38 Rejected intermediate catalog symlinks and closed every descriptor on interrupts to preserve pinned discovery [0a0639c]
+- 22:46 Validated documented imports statically and converted malformed syntax into errors without executing modules [2487277]

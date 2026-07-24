@@ -354,13 +354,13 @@ git commit -m "fix: make documentation import checks total"
 **Files:**
 - Modify: `.superpowers/sdd/protocol-final-fix-report.md`
 
-- [ ] **Step 1: Append follow-up evidence**
+- [x] **Step 1: Append follow-up evidence**
 
 Record the three re-review findings, RED/green evidence, physical-root contract,
 descriptor lifecycle audit, static docs-import design, follow-up commits, and
 final command counts.
 
-- [ ] **Step 2: Run all gates**
+- [x] **Step 2: Run all gates**
 
 ```bash
 uv run python -m unittest -v \

@@ -266,3 +266,146 @@ reproduction, or paper experiment was run.
 - There are no known functional blockers. The next authority boundary remains
   Application Authority Task 2; this wave does not implement any future
   application registry, service discovery, provider operation, or benchmark.
+
+## Final re-review follow-up
+
+The final re-review identified three remaining failures. The following two
+commits close them:
+
+- `0a0639ceb939bd8557df05f8d5d08c907dd520cc` —
+  `fix: reject intermediate catalog symlinks`
+- `24872772e8159c7f81dc9e6e314540da2da48a04` —
+  `fix: make documentation import checks total`
+
+### Component-pinned catalog roots
+
+The earlier portability statement that intermediate components retained normal
+path resolution is superseded. Catalog roots now have one explicit physical
+path contract:
+
+- Absolute roots start from a pinned `/` descriptor and relative roots start
+  from a pinned current-directory descriptor.
+- Every remaining component is opened relative to its parent descriptor with
+  `O_DIRECTORY | O_NOFOLLOW`; an intermediate or final symbolic link is
+  rejected.
+- `..` is rejected. Empty paths and `.` select the pinned starting directory;
+  normalized empty and `.` components are ignored.
+- Callers provide a physical path. Discovery does not resolve aliases into an
+  accepted root; canonical provenance still comes only from the final pinned
+  descriptor.
+
+The deterministic intermediate-alias regression points an alias at an external
+parent containing a sentinel manifest and proves discovery rejects the root
+without exposing or accepting that identity. The existing root-replacement
+regression now triggers at the descriptor-relative component open.
+
+One `ExitStack` owns the anchor, intermediate, and final descriptors for every
+root. Each successful `os.open` is registered for cleanup immediately, before
+provenance or any later operation. Normal completion, structural catalog
+errors, duplicate-root unwinding, and `BaseException` unwinding therefore use
+the same lifecycle. The `KeyboardInterrupt` regression records every opened
+root descriptor, interrupts descriptor provenance, and proves all recorded
+descriptors are closed.
+
+Catalog RED:
+
+```text
+uv run python -m unittest -v tests.test_package_catalog
+FAILED: 15 tests, 3 failures
+- intermediate symbolic-link root was accepted
+- a root containing `..` was accepted
+- descriptor provenance interrupted by KeyboardInterrupt leaked a descriptor
+```
+
+Catalog GREEN:
+
+```text
+uv run python -m unittest -v tests.test_package_catalog
+PASS: 16 tests
+
+uv run ruff check src/asterion/packages/catalog.py tests/test_package_catalog.py
+PASS
+```
+
+### Static and total documentation import checking
+
+The documentation checker now handles both `ast.Import` and `ast.ImportFrom`.
+It resolves every `asterion` module component with
+`PathFinder.find_spec()` and the preceding package's
+`submodule_search_locations`; it never calls `import_module`. Explicit symbols
+are checked against statically parsed top-level source bindings, with an
+existing child module accepted as an importable symbol.
+
+When a fenced block is not valid Python, the checker extracts candidate
+Asterion import statements, including continued multiline statements. Every
+candidate `SyntaxError` becomes `documented import is invalid`; no syntax
+exception or traceback escapes the checker.
+
+The copied-tree regression uses a module that writes a marker if imported. It
+proves direct and from-import success without the marker, proves
+`import asterion.definitely_missing` fails, proves a missing explicit symbol
+fails, and proves an unfinished multiline import returns a structural error
+without a traceback.
+
+Documentation checker RED:
+
+```text
+uv run python -m unittest -v \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_validates_asterion_import_snippets
+FAILED: 1 test, 4 failing subtests
+- direct missing module returned success
+- missing/valid from-import cases executed module code
+- malformed multiline import escaped with a SyntaxError traceback
+```
+
+Documentation checker GREEN:
+
+```text
+uv run python -m unittest -v \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_validates_asterion_import_snippets \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_handles_links_and_rejects_unsafe_targets
+PASS: 2 tests
+
+make docs-check
+PASS: 25 Markdown files, 39 local links
+
+uv run ruff check tools/check_docs.py tests/test_standalone_repository.py
+PASS
+```
+
+### Final provider-free verification
+
+All final gates were rerun after both follow-up fixes:
+
+```text
+expanded protocol/application gate
+PASS: 76 tests
+
+uv run python -m unittest -v tests.test_runtime_adapter_redaction
+PASS: 2 tests
+
+npm --prefix packages/typescript/asterion-runtime test
+PASS: 13 tests
+
+make test
+PASS: 256 tests
+
+make check
+PASS: 256 Python tests; compile/Ruff; 25 Markdown files and 39 links;
+      TypeScript 13 + 11 tests; Rust 19 tests plus fmt/clippy;
+      sdist and wheel build
+
+make lint
+PASS: compileall and Ruff
+
+make docs-check
+PASS: 25 Markdown files, 39 local links
+
+make promotion-check
+PASS: 18 commands, provider_operations=0, full_dataset=no
+
+git diff --check
+PASS
+```
+
+No provider-backed operation, benchmark, or full-dataset run was performed.
