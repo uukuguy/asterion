@@ -44,7 +44,8 @@ def _fd_identity(fd: int) -> tuple[int, int]:
 class PackageCatalogTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary_directory.name) / "packages"
+        physical_temporary_root = Path(self.temporary_directory.name).resolve()
+        self.root = physical_temporary_root / "packages"
         self.root.mkdir()
         self.write_manifest(self.root / "capability.json", manifest("capability.one"))
 
@@ -95,6 +96,49 @@ class PackageCatalogTests(unittest.TestCase):
             discover_packages((symlink,))
 
         self.assertIn("catalog root is a symlink", str(caught.exception))
+
+    def test_intermediate_symlink_catalog_root_is_rejected(self) -> None:
+        external_parent = self.root.parent / "external-parent"
+        external_root = external_parent / "packages"
+        external_root.mkdir(parents=True)
+        self.write_manifest(
+            external_root / "external.json",
+            manifest("sentinel.intermediate-alias"),
+        )
+        alias = self.root.parent / "alias"
+        alias.symlink_to(external_parent, target_is_directory=True)
+
+        with self.assertRaises(PackageCatalogError) as caught:
+            discover_packages((alias / "packages",))
+
+        self.assertNotIn("sentinel.intermediate-alias", str(caught.exception))
+
+    def test_parent_component_catalog_root_is_rejected(self) -> None:
+        aliased_root = self.root / ".." / self.root.name
+
+        with self.assertRaises(PackageCatalogError) as caught:
+            discover_packages((aliased_root,))
+
+        self.assertEqual(str(caught.exception), f"catalog root is invalid: {aliased_root}")
+
+    def test_dot_and_empty_roots_use_the_pinned_current_directory(self) -> None:
+        current_directory = os.open(".", os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.chdir(self.root)
+            for root in (Path("."), Path("")):
+                with self.subTest(root=str(root)):
+                    catalog = discover_packages((root,))
+                    self.assertEqual(
+                        tuple(entry.ref for entry in catalog.entries),
+                        (PackageRef("capability.one", "1.0.0"),),
+                    )
+                    self.assertEqual(
+                        catalog.entries[0].source,
+                        self.root / "capability.json",
+                    )
+        finally:
+            os.fchdir(current_directory)
+            os.close(current_directory)
 
     def test_symlink_package_document_is_rejected(self) -> None:
         document = self.root / "linked.json"
@@ -170,6 +214,7 @@ class PackageCatalogTests(unittest.TestCase):
         original_is_symlink = Path.is_symlink
         original_open = os.open
         original_fdopen = os.fdopen
+        parent_identity = _file_identity(self.root.parent)
         replaced = False
 
         def replace_root() -> None:
@@ -193,7 +238,15 @@ class PackageCatalogTests(unittest.TestCase):
             *,
             dir_fd: int | None = None,
         ) -> int:
-            if dir_fd is None and Path(os.fsdecode(path)) == self.root:
+            whole_root_open = (
+                dir_fd is None and Path(os.fsdecode(path)) == self.root
+            )
+            component_root_open = (
+                dir_fd is not None
+                and os.fsdecode(path) == self.root.name
+                and _fd_identity(dir_fd) == parent_identity
+            )
+            if whole_root_open or component_root_open:
                 replace_root()
             return original_open(path, flags, mode, dir_fd=dir_fd)
 
@@ -210,6 +263,42 @@ class PackageCatalogTests(unittest.TestCase):
             discover_packages((self.root,))
 
         self.assertNotIn("sentinel.external-root", str(caught.exception))
+
+    def test_provenance_interrupt_closes_every_open_root_descriptor(self) -> None:
+        original_open = os.open
+        opened_descriptors: list[int] = []
+
+        def recording_open(
+            path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+            flags: int,
+            mode: int = 0o777,
+            *,
+            dir_fd: int | None = None,
+        ) -> int:
+            descriptor = original_open(path, flags, mode, dir_fd=dir_fd)
+            opened_descriptors.append(descriptor)
+            return descriptor
+
+        with (
+            patch.object(os, "open", recording_open),
+            patch.object(
+                package_catalog,
+                "_path_from_descriptor",
+                side_effect=KeyboardInterrupt,
+            ),
+            self.assertRaises(KeyboardInterrupt),
+        ):
+            discover_packages((self.root,))
+
+        leaked: list[int] = []
+        for descriptor in opened_descriptors:
+            try:
+                os.fstat(descriptor)
+            except OSError:
+                continue
+            leaked.append(descriptor)
+            os.close(descriptor)
+        self.assertEqual(leaked, [])
 
     def test_discovery_fails_closed_without_pinned_filesystem_primitives(self) -> None:
         with (

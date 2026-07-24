@@ -8,7 +8,7 @@ import os
 import stat
 import sys
 from collections.abc import Iterable, Mapping
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -125,55 +125,87 @@ def discover_packages(roots: Iterable[Path]) -> PackageCatalog:
 
 @contextmanager
 def _pin_roots(roots: Iterable[Path]):
-    pinned: list[_PinnedRoot] = []
-    paths: set[Path] = set()
-    identities: set[tuple[int, int]] = set()
-    try:
+    with ExitStack() as descriptors:
+        pinned: list[_PinnedRoot] = []
+        paths: set[Path] = set()
+        identities: set[tuple[int, int]] = set()
         for value in roots:
             root = Path(value)
-            descriptor = _open_root(root)
-            try:
-                details = os.fstat(descriptor)
-                if not stat.S_ISDIR(details.st_mode):
-                    raise PackageCatalogError(f"catalog root is invalid: {root}")
-                canonical = _path_from_descriptor(descriptor)
-                identity = (details.st_dev, details.st_ino)
-                if canonical in paths or identity in identities:
-                    raise PackageCatalogError(
-                        f"duplicate catalog root: {canonical}"
-                    )
-                paths.add(canonical)
-                identities.add(identity)
-                pinned.append(_PinnedRoot(canonical, descriptor, identity))
-            except Exception:
-                os.close(descriptor)
-                raise
+            descriptor = _open_root(root, descriptors)
+            details = os.fstat(descriptor)
+            if not stat.S_ISDIR(details.st_mode):
+                raise PackageCatalogError(f"catalog root is invalid: {root}")
+            canonical = _path_from_descriptor(descriptor)
+            identity = (details.st_dev, details.st_ino)
+            if canonical in paths or identity in identities:
+                raise PackageCatalogError(f"duplicate catalog root: {canonical}")
+            paths.add(canonical)
+            identities.add(identity)
+            pinned.append(_PinnedRoot(canonical, descriptor, identity))
         yield tuple(sorted(pinned, key=lambda item: str(item.path)))
-    finally:
-        for root in pinned:
-            os.close(root.fd)
 
 
-def _open_root(root: Path) -> int:
+def _open_root(root: Path, descriptors: ExitStack) -> int:
+    components = root.parts[1:] if root.is_absolute() else root.parts
+    if ".." in components:
+        raise PackageCatalogError(f"catalog root is invalid: {root}")
+
     flags = (
         os.O_RDONLY
         | os.O_DIRECTORY
         | os.O_NOFOLLOW
         | getattr(os, "O_CLOEXEC", 0)
     )
+    anchor = "/" if root.is_absolute() else "."
+    current = _open_directory(
+        anchor,
+        flags=flags,
+        parent_fd=None,
+        root=root,
+        descriptors=descriptors,
+    )
+    for component in components:
+        if component in {"", "."}:
+            continue
+        current = _open_directory(
+            component,
+            flags=flags,
+            parent_fd=current,
+            root=root,
+            descriptors=descriptors,
+        )
+    return current
+
+
+def _open_directory(
+    name: str,
+    *,
+    flags: int,
+    parent_fd: int | None,
+    root: Path,
+    descriptors: ExitStack,
+) -> int:
     try:
-        return os.open(root, flags)
+        if parent_fd is None:
+            descriptor = os.open(name, flags)
+        else:
+            descriptor = os.open(name, flags, dir_fd=parent_fd)
     except OSError as error:
         if error.errno == errno.ELOOP or (
-            error.errno == errno.ENOTDIR and _is_symlink(root)
+            error.errno == errno.ENOTDIR
+            and parent_fd is not None
+            and _is_symlink_at(parent_fd, name)
         ):
             raise PackageCatalogError(f"catalog root is a symlink: {root}") from error
         raise PackageCatalogError(f"catalog root is invalid: {root}") from error
+    descriptors.callback(os.close, descriptor)
+    return descriptor
 
 
-def _is_symlink(path: Path) -> bool:
+def _is_symlink_at(parent_fd: int, name: str) -> bool:
     try:
-        return stat.S_ISLNK(os.stat(path, follow_symlinks=False).st_mode)
+        details = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        return stat.S_ISLNK(details.st_mode)
     except OSError:
         return False
 

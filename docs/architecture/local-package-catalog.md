@@ -63,13 +63,22 @@ artifact, and cycle relationships.
 
 ## Filesystem and execution boundary
 
-Roots are opened and pinned without following a final symlink. Direct child
-names are enumerated relative to that directory descriptor, each JSON child is
-opened relative to the same descriptor with no-follow semantics, its regular
-file identity is validated with `fstat`, and its body is read only from the
-pinned descriptor. Source provenance is constructed from the pinned root path
-and enumerated child name; discovery never re-resolves the child pathname after
-opening it.
+Callers provide physical root paths: no component may be a symbolic link, and
+discovery does not call `resolve()` to turn an alias into an accepted root.
+Absolute roots are walked from a pinned `/` descriptor; relative roots are
+walked from a pinned current-directory descriptor. Every component is opened
+relative to the preceding descriptor with `O_DIRECTORY | O_NOFOLLOW`. A `..`
+component is rejected. Empty paths and `.` select the pinned starting
+directory, while normalized empty and `.` components are ignored.
+
+All descriptors are registered for cleanup immediately after each successful
+open and remain pinned until discovery finishes or unwinds for any exception,
+including interrupts. Direct child names are enumerated relative to the final
+root descriptor, each JSON child is opened relative to the same descriptor
+with no-follow semantics, its regular file identity is validated with `fstat`,
+and its body is read only from the pinned descriptor. Source provenance is
+constructed from the final pinned root path and enumerated child name;
+discovery never re-resolves the child pathname after opening it.
 
 Platforms without descriptor-relative open/list/stat, no-follow directory and
 file opens, or pinned-descriptor path provenance fail closed rather than using
