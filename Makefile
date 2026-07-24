@@ -15,6 +15,7 @@ DCI_ARGS ?=
 .PHONY: asterion-run
 .PHONY: dci-system-prompt dci-run dci-terminal dci-resume dci-evaluate
 .PHONY: dci-benchmark dci-export dci-ablation dci-paper
+.PHONY: dci-basic-example dci-runtime-context-example
 .PHONY: test-typescript test-rust check-rust
 
 help:
@@ -24,6 +25,7 @@ help:
 	@echo "provider-free framework: asterion-list asterion-describe asterion-verify-preflight asterion-verify-acceptance"
 	@echo "bounded provider-backed: asterion-verify-basic asterion-verify-complete asterion-run"
 	@echo "DCI passthrough: dci-system-prompt dci-run dci-terminal dci-resume dci-evaluate dci-benchmark dci-export dci-ablation dci-paper"
+	@echo "DCI bounded examples: dci-basic-example dci-runtime-context-example"
 	@echo "Cross-language provider-free: test-typescript test-rust check-rust"
 	@echo "Cost boundary: full execution requires separate authorization"
 	@echo "Arguments: ASTERION_ARGS='...' or DCI_ARGS='...'"
@@ -134,3 +136,9 @@ test-rust:
 check-rust: test-rust
 	cargo fmt --manifest-path packages/rust/controlled-executor/Cargo.toml -- --check
 	cargo clippy --manifest-path packages/rust/controlled-executor/Cargo.toml -- -D warnings
+
+dci-basic-example:
+	bash examples/asterion_dci_basic_example.sh
+
+dci-runtime-context-example:
+	bash examples/asterion_dci_runtime_context_example.sh
