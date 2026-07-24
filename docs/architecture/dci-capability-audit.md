@@ -158,11 +158,11 @@ motivated the protocol/composition plan. They are not the current behavior:
 | Runtime ID `../runtime` | Accepted | IDs use the canonical identifier grammar |
 | Unsorted runtime/request/start capability arrays | Accepted | All contract arrays are sorted and unique |
 | Host and package both provide one capability | Accepted; host precedence can remove the package dependency | Provider overlap fails closed |
-| Multiple packages emit the same event | Accepted | Multi-provider semantics must be explicit; v1 should reject ambiguity |
-| Multiple packages produce the same artifact media type | Accepted | Multi-provider semantics must be explicit; v1 should reject ambiguity |
+| Multiple packages emit the same event | Accepted | v1 rejects provider ambiguity |
+| Multiple packages produce the same artifact media type | Accepted | v1 rejects provider ambiguity |
 | Mutation of `PackageCatalog.entries[*].manifest` | Changes later `select()` output | Catalog snapshots are deeply immutable |
-| Package declares output but returns none | Accepted | v1 must define whether declarations are allowed or guaranteed output |
-| Duplicate event instances or multiple artifacts of one media type | Accepted | Cardinality must be explicit |
+| Package declares output but returns none | Accepted | Declarations are allowlists; an empty result is valid |
+| Duplicate event instances or multiple artifacts of one media type | Accepted | v1 imposes no per-type cardinality |
 
 The Python and TypeScript runtime validators now reject the shared invalid
 fixtures, including an unmatched call at terminal. Direct composition and
@@ -175,11 +175,15 @@ The implemented v1 semantics are:
 
 - Runtime IDs/capabilities and assembly/package IDs use their contracts'
   canonical identifier grammars. Package and assembly edge values, including
-  event and media-type names, are non-empty strings in canonical arrays; v1 does
-  not impose the runtime identifier grammar on those values.
+  event and media-type names, are non-empty Unicode scalar strings in canonical
+  arrays; v1 does not impose the runtime identifier grammar on those values.
 - Runtime capabilities, requested capabilities, `run.started` capabilities,
   package edge arrays, and assembly arrays/references are sorted and unique;
   validators reject noncanonical input rather than silently reordering it.
+  String arrays use lexicographic Unicode scalar-value order, with a shorter
+  prefix first; surrogate code points are invalid. Assembly package references
+  compare `package_id` first and `version` second with that ordering, never an
+  interpolated `package_id@version`.
 - A runtime stream has one run ID, contiguous sequences, one terminal event,
   and every tool call has exactly one later matching result before terminal.
 - Provider overlap across host, runtime (as host capability), and packages is
@@ -295,12 +299,20 @@ and corpus ablations do not form a complete executable target matrix.
 
 ## Prioritized gap register
 
-| ID | Priority | Gap | Completion evidence |
+The following findings are historical and closed. Their gap descriptions use
+past tense so they cannot be mistaken for current behavior:
+
+| ID | Priority | Status | Historical gap | Named closure evidence |
+| --- | --- | --- | --- | --- |
+| P1 | Blocker | Closed | Runtime v1 accepted noncanonical arrays/IDs and unresolved tool calls | `TestRuntimeProtocol`; `ProtocolCanonicalOrderingTests`; TypeScript shared-fixture tests |
+| P2 | Blocker | Closed | The composer accepted hidden host precedence and multi-provider ambiguity | `PackageCompositionTests.test_rejects_every_provider_ambiguity` |
+| P3 | High | Closed | Catalog and TypeScript validation returned mutable contract state | `PackageCatalogTests.test_entry_manifest_is_deeply_immutable`, `test_selected_manifest_is_fresh`; TypeScript `returns a deep immutable validation snapshot` |
+| A1 | Blocker | Closed | The generic CLI imported DCI configuration and repository `.env` values contaminated provider-free tests | `AsterionCliTests.test_generic_cli_has_no_dci_configuration_imports`, `test_run_ignores_repository_dotenv_and_preserves_environment` |
+
+The remaining current gaps are:
+
+| ID | Priority | Open gap | Completion evidence |
 | --- | --- | --- | --- |
-| P1 | Blocker | Runtime v1 accepts noncanonical arrays/IDs and unresolved tool calls | Shared Python/TS valid and invalid fixture suite passes |
-| P2 | Blocker | Composer accepts hidden host precedence and multi-provider ambiguity | Direct composition matrix rejects every overlap |
-| P3 | High | Catalog and TS validation return mutable contract state | Mutation tests fail before and pass after deep snapshotting |
-| A1 | Blocker | Generic CLI imports DCI configuration and `.env` contaminates provider-free tests | Generic CLI tests pass from repository cwd with sentinel `.env` |
 | A2 | High | Provider acceptance counts inventory rather than executable closure | Report separately proves packaged, bound, composed, bound-implementation counts |
 | A3 | High | Pi bypasses selected runtime and execution re-resolves authority | Both runtimes execute only through the selected runtime client |
 | A4 | High | Corpus and Judge are implicit environment services | Assembly-declared, host-injected service preflight and redaction tests pass |
@@ -309,7 +321,7 @@ and corpus ablations do not form a complete executable target matrix.
 | E3 | High | Pipeline/path-only evidence is missed | Hand-calculated trajectory fixtures match expected coverage/localization |
 | E4 | High | Full authorization and budget are not executable authority | One authorized bounded scope consumes authority once and enforces a positive cap |
 | E5 | High | Benchmark evidence cannot compile into comparison input | Validated RunManifest is emitted and accepted by compare without manual conversion |
-| D1 | Medium | Documentation overstates CLI neutrality, closure, paths, and verification | `make docs-check` and claim audit pass |
+| D1 | Medium | Documentation claim audit is not yet independently rerun after protocol hardening | `make docs-check` and an independent claim audit pass |
 
 ## Delivery sequence
 

@@ -15,11 +15,18 @@ declared policy requirements, and protocol boundaries established here.
 ## Manifest contract
 
 Every manifest is a closed JSON object. Its edge arrays contain non-empty strings
-in sorted, duplicate-free order. Package IDs use the canonical identifier grammar
-and versions are exact semantic versions; assembly package references are likewise
-sorted, unique, and exact `package_id@version` selections. Canonical ordering is
-part of the v1 contract, not a convenience that a resolver may normalize after
-acceptance. For example, a research capability can declare:
+in sorted, duplicate-free order. Package IDs use the canonical identifier
+grammar and versions are exact semantic versions; assembly package references
+are likewise sorted, unique, exact selections.
+
+Canonical string order is lexicographic Unicode scalar-value order: compare the
+first differing scalar value numerically, and place a shorter prefix before the
+longer string. A string containing a surrogate code point is invalid. Assembly
+package references are compared field-wise by `package_id` and then `version`
+using that order; validators never compare an interpolated
+`package_id@version` string. Canonical ordering is part of the v1 contract, not
+a convenience that a resolver may normalize after acceptance. For example, a
+research capability can declare:
 
 ```json
 {
@@ -39,9 +46,11 @@ acceptance. For example, a research capability can declare:
 
 The canonical definition is
 `schemas/packages/v1/package-manifest.schema.json`; shared positive and negative
-fixtures live in `tests/fixtures/packages/v1/`. The reference manifests under
-`src/asterion/capabilities/dci_research/manifests/` form the policy → research → evaluation → observability
-DCI graph.
+fixtures live in `tests/fixtures/packages/v1/` and
+`tests/fixtures/assembly/v1/`. They include prefix package IDs, BMP/non-BMP
+scalar ordering, and lone-surrogate rejection. The reference manifests under
+`src/asterion/capabilities/dci_research/manifests/` form the policy → research
+→ evaluation → observability DCI graph.
 
 Manifests are compatibility allowlists, not output guarantees or execution
 authority. `emits_events` and `produces_artifacts` permit an implementation to
