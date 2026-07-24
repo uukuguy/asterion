@@ -1,12 +1,13 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-24 18:49. **Session remains active — not a final handoff.**
+> Updated: 2026-07-24 19:00. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
 - `docs/architecture/dci-capability-audit.md` is the authoritative mapping from
   paper/GitHub claims to Asterion code, reachability, evidence, and gaps.
-- Audit and three implementation plans are committed as `bf4bbfe`.
+- Audit and three implementation plans are committed as `bf4bbfe`; approved
+  execution-plan corrections are committed as `775710b`.
 - The user approved separate `paper-reference`, exact
   `upstream-github/<commit>`, and `asterion-safe` experiment families.
 - Work is split into three independently testable plans: protocol/composition,
@@ -25,7 +26,12 @@
 - Prompt, Judge, trajectory alignment, context behavior, and full
   authorization/reproduction differences are recorded in the audit.
 - Full `make check` remains red on three `.env`-contaminated generic CLI tests
-  and one Node-version CI assertion. Do not report it as passing.
+  and one Node-version CI assertion. The application-authority plan now owns
+  both corrections; do not report the full gate as passing before that plan.
+- Protocol Task 7 now removes fictional host edges from both DCI and
+  controlled-code graphs.
+- Application Task 5 now uses a domain-neutral exact
+  `asterion.host_services` factory registry with opaque generic CLI options.
 
 ## Next steps
 
