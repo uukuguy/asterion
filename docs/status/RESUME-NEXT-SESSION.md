@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-24 20:41. **Session remains active — not a final handoff.**
+> Updated: 2026-07-24 21:13. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -43,6 +43,13 @@
   transport one immutable host/upstream evidence snapshot.
 - Task 6 intentionally exposes three product tests whose assemblies declare
   fictional runtime-internal host edges. Approved Task 7 owns that cleanup.
+- Protocol Task 7 removed those fictional DCI/controlled-code edges and its
+  43 focused tests pass.
+- Application-authority Task 1 was pulled forward to remove generic CLI DCI
+  configuration authority. CLI/standalone/runtime-default suites pass, and
+  `make promotion-check` now passes 18 commands with zero provider operations.
+- The tracked root instruction symlink was replaced by portable
+  `CLAUDE.md` content `@AGENTS.md`; CI now uses exact Node `22.19.0`.
 
 ## Next steps
 
@@ -52,7 +59,8 @@ Execute, in order:
 2. `docs/superpowers/plans/2026-07-24-asterion-application-authority.md`
 3. `docs/superpowers/plans/2026-07-24-dci-provenance-reproduction.md`
 
-Resume with Task 7 of the protocol plan using TDD. Tasks 1–6 are recorded in
+Resume with Task 8 of the protocol plan. Protocol Tasks 1–7 and pulled-forward
+Application Task 1 are recorded in
 `.superpowers/sdd/progress.md`; keep commits atomic as specified by each task.
 
 ## Don't go down these paths again
