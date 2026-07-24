@@ -11,6 +11,7 @@ from asterion.applications.provider import (
     ApplicationProviderError,
     InstalledApplication,
     InstalledApplicationProvider,
+    compose_installed_provider,
     resolve_installed_provider,
     validate_installed_provider,
 )
@@ -116,6 +117,58 @@ def provider(root: Path) -> InstalledApplicationProvider:
 
 
 class InstalledApplicationProviderTests(unittest.TestCase):
+    def test_composition_is_independent_from_executable_bindings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            valid = provider(Path(temp_dir))
+            application = valid.applications[0]
+            missing_binding = InstalledApplicationProvider(
+                protocol=valid.protocol,
+                provider_id=valid.provider_id,
+                resource_root=valid.resource_root,
+                applications=(
+                    InstalledApplication(
+                        application_id=application.application_id,
+                        version=application.version,
+                        assembly_paths=application.assembly_paths,
+                        catalog_roots=application.catalog_roots,
+                        implementations=(),
+                        runtime_ids=application.runtime_ids,
+                    ),
+                ),
+            )
+            registry = runtime_factories("pi.reference")
+
+            composed = compose_installed_provider(
+                missing_binding, runtime_factories=registry
+            )
+
+            self.assertEqual(
+                tuple(
+                    assembly.runtime_id
+                    for assembly in composed.applications[0].assemblies
+                ),
+                ("pi.reference",),
+            )
+            with self.assertRaises(ApplicationProviderError):
+                resolve_installed_provider(
+                    missing_binding, runtime_factories=registry
+                )
+
+    def test_executable_resolution_composes_exactly_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            valid = provider(Path(temp_dir))
+            registry = runtime_factories("pi.reference")
+            with patch(
+                "asterion.applications.provider.compose_installed_provider",
+                wraps=compose_installed_provider,
+            ) as composition:
+                resolved = resolve_installed_provider(
+                    valid, runtime_factories=registry
+                )
+
+        self.assertEqual(composition.call_count, 1)
+        self.assertEqual(len(resolved.applications[0].assemblies), 1)
+
     def test_malformed_executable_closures_fail_before_runtime_creation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from dataclasses import replace
 from importlib import resources
 from pathlib import Path
 from unittest.mock import patch
@@ -14,7 +15,11 @@ from asterion.applications.controlled_code import (
 )
 from asterion.applications.dci_agent_lite import create_provider as create_dci_provider
 from asterion.applications.product import VerificationRequest
-from asterion.applications.provider import validate_installed_provider
+from asterion.applications.provider import (
+    ApplicationProviderError,
+    compose_installed_provider,
+    validate_installed_provider,
+)
 from asterion.dci.verification import (
     DciProductVerifier,
     LocalDciVerificationBackend,
@@ -368,6 +373,22 @@ class FirstRunPreflightTests(unittest.TestCase):
 
 
 class InstalledAcceptanceBoundaryTests(unittest.TestCase):
+    def assert_named_layers(
+        self,
+        result,
+        *,
+        packaged: str,
+        bound: str,
+        composed: str,
+        executable: str,
+    ) -> None:
+        checks = {check.check_id: check for check in result.checks}
+        self.assertNotIn("installed-closure", checks)
+        self.assertEqual(checks["packaged-assemblies"].status, packaged)
+        self.assertEqual(checks["bound-assemblies"].status, bound)
+        self.assertEqual(checks["composed-assemblies"].status, composed)
+        self.assertEqual(checks["executable-assemblies"].status, executable)
+        self.assertEqual(result.provider_backed_operation_count, 0)
 
     def test_acceptance_ignores_source_evidence_path(self) -> None:
         verifier = DciProductVerifier(repo_root=PROJECT, backend=ExplodingBackend())
@@ -389,12 +410,127 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
             verifier = DciProductVerifier(
                 repo_root=Path(temp_dir), backend=ExplodingBackend()
             )
-            with patch("importlib.resources.files", return_value=package_root):
+            resource_files = resources.files
+            with patch(
+                "importlib.resources.files",
+                side_effect=lambda anchor: (
+                    package_root
+                    if anchor == "asterion"
+                    else resource_files(anchor)
+                ),
+            ):
                 result = verifier(acceptance_request())
 
         self.assertEqual(result.status, "FAIL")
         self.assertEqual(result.provider_backed_operation_count, 0)
         self.assertFalse(result.full_dataset_ran)
+        checks = {check.check_id: check for check in result.checks}
+        self.assertNotIn("installed-closure", checks)
+        self.assertEqual(checks["packaged-assemblies"].status, "PASS")
+        self.assertEqual(checks["capability-manifests"].status, "FAIL")
+        self.assertEqual(checks["composed-assemblies"].status, "FAIL")
+        self.assertEqual(checks["executable-assemblies"].status, "FAIL")
+
+    def test_acceptance_reports_independent_damage_layers(self) -> None:
+        verifier = DciProductVerifier(repo_root=PROJECT, backend=ExplodingBackend())
+
+        with self.subTest(layer="packaged"), tempfile.TemporaryDirectory() as temp_dir:
+            package_root = Path(temp_dir) / "asterion"
+            shutil.copytree(SOURCE, package_root)
+            assembly_root = package_root / "applications/dci_agent_lite/assemblies"
+            (assembly_root / "dci-local-research.json").rename(
+                assembly_root / "same-count-substitute.json"
+            )
+            resource_files = resources.files
+            with patch(
+                "importlib.resources.files",
+                side_effect=lambda anchor: (
+                    package_root
+                    if anchor == "asterion"
+                    else resource_files(anchor)
+                ),
+            ):
+                result = verifier(acceptance_request())
+            self.assert_named_layers(
+                result,
+                packaged="FAIL",
+                bound="PASS",
+                composed="PASS",
+                executable="PASS",
+            )
+            packaged = next(
+                check
+                for check in result.checks
+                if check.check_id == "packaged-assemblies"
+            )
+            self.assertEqual(dict(packaged.counts)["actual"], 6)
+
+        with self.subTest(layer="bound"):
+            installed = create_dci_provider()
+            damaged = replace(
+                installed, applications=(installed.applications[0],)
+            )
+            with patch(
+                "asterion.applications.dci_agent_lite.create_provider",
+                return_value=damaged,
+            ):
+                result = verifier(acceptance_request())
+            self.assert_named_layers(
+                result,
+                packaged="PASS",
+                bound="FAIL",
+                composed="FAIL",
+                executable="FAIL",
+            )
+
+        def fail_dci_composition(provider, *, runtime_factories):
+            if provider.provider_id == "dci-agent-lite":
+                raise ApplicationProviderError(
+                    "installed application composition closure is invalid"
+                )
+            return compose_installed_provider(
+                provider, runtime_factories=runtime_factories
+            )
+
+        with self.subTest(layer="composed"), patch(
+            "asterion.applications.provider.compose_installed_provider",
+            side_effect=fail_dci_composition,
+        ):
+            result = verifier(acceptance_request())
+            self.assert_named_layers(
+                result,
+                packaged="PASS",
+                bound="PASS",
+                composed="FAIL",
+                executable="FAIL",
+            )
+
+        with self.subTest(layer="executable"):
+            installed = create_dci_provider()
+            application = installed.applications[0]
+            ref, _implementation = application.implementations[0]
+            damaged = replace(
+                installed,
+                applications=(
+                    replace(
+                        application,
+                        implementations=((ref, object()),),
+                    ),
+                    installed.applications[1],
+                ),
+            )
+            with patch(
+                "asterion.applications.dci_agent_lite.create_provider",
+                return_value=damaged,
+            ):
+                result = verifier(acceptance_request())
+            self.assert_named_layers(
+                result,
+                packaged="PASS",
+                bound="PASS",
+                composed="PASS",
+                executable="FAIL",
+            )
 
 
 if __name__ == "__main__":

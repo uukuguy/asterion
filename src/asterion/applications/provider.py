@@ -133,6 +133,29 @@ def resolve_installed_provider(
 ) -> InstalledApplicationProvider:
     """Resolve every installed application into an exact executable closure."""
 
+    composed = compose_installed_provider(
+        provider, runtime_factories=runtime_factories
+    )
+    try:
+        for application in composed.applications:
+            for assembly in application.assemblies:
+                validate_implementation_bindings(
+                    assembly.plan, application.implementations
+                )
+    except (PackageExecutionError, TypeError, ValueError):
+        raise ApplicationProviderError(
+            "installed application executable closure is invalid"
+        ) from None
+    return composed
+
+
+def compose_installed_provider(
+    provider: InstalledApplicationProvider,
+    *,
+    runtime_factories: RuntimeFactoryRegistry,
+) -> InstalledApplicationProvider:
+    """Compose exact installed plans without asserting executable bindings."""
+
     if not isinstance(provider, InstalledApplicationProvider) or not isinstance(
         runtime_factories, RuntimeFactoryRegistry
     ):
@@ -141,7 +164,7 @@ def resolve_installed_provider(
         provider, selected_id=provider.provider_id
     )
     applications = tuple(
-        _resolve_application(application, runtime_factories=runtime_factories)
+        _compose_application(application, runtime_factories=runtime_factories)
         for application in metadata.applications
     )
     return InstalledApplicationProvider(
@@ -229,7 +252,7 @@ def _validate_application_metadata(
     )
 
 
-def _resolve_application(
+def _compose_application(
     application: InstalledApplication,
     *,
     runtime_factories: RuntimeFactoryRegistry,
@@ -249,7 +272,6 @@ def _resolve_application(
                 catalog=catalog,
                 runtime_manifest=runtime_binding.manifest.to_mapping(),
             )
-            validate_implementation_bindings(plan, application.implementations)
             assemblies.append(
                 InstalledAssembly(
                     runtime_id=runtime_id,
@@ -265,11 +287,10 @@ def _resolve_application(
         ValueError,
         PackageCatalogError,
         AssemblyError,
-        PackageExecutionError,
         RuntimeFactoryError,
     ):
         raise ApplicationProviderError(
-            "installed application executable closure is invalid"
+            "installed application composition closure is invalid"
         ) from None
     values = tuple(sorted(assemblies, key=lambda value: value.runtime_id))
     if tuple(value.runtime_id for value in values) != application.runtime_ids:
