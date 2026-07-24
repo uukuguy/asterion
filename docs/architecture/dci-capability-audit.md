@@ -7,12 +7,13 @@
 ## Purpose and sources
 
 This audit maps the public claims of DCI to the authoritative standalone
-Asterion implementation. It distinguishes four states that must not be
+Asterion implementation. It distinguishes five states that must not be
 collapsed:
 
 - **Packaged** — a resource is included in the source tree or wheel.
 - **Bound** — an installed provider exposes the resource through an exact
   application binding.
+- **Composed** — the exact package catalog and composer prove its graph.
 - **Executable** — the bound graph resolves to one runtime and one exact
   implementation for every executable package.
 - **Verified** — a named command passed inside its stated boundary.
@@ -77,16 +78,17 @@ Two packaged resources are not provider-reachable:
 - `applications/dci_agent_lite/assemblies/dci-local-research.json`
 - `capabilities/dci_research/manifests/protocol-observability.json`
 
-Installed acceptance currently counts six packaged assemblies while the two
-providers bind five assemblies in total. Therefore its
-`application-assemblies` result proves packaged inventory, not provider
-reachability or executable closure.
+Installed acceptance reports the reachability classes separately: six
+packaged assemblies, five provider-bound assemblies, five composed assemblies,
+and five executable assemblies. It names
+`applications/dci_agent_lite/assemblies/dci-local-research.json` as the one
+unbound assembly instead of promoting packaged inventory to reachability.
 
 ## DCI README claim mapping
 
 | Upstream claim | Asterion evidence | Status | Qualification |
 | --- | --- | --- | --- |
-| Direct access to raw corpus through terminal tools | Pi and Claude Code research paths expose read/search tools | Implemented | The generic manifest names `filesystem.read`; corpus authority remains implicit in runtime cwd/configuration |
+| Direct access to raw corpus through terminal tools | Pi and Claude Code research paths expose read/search tools | Implemented | The generic manifest names `filesystem.read`; corpus authority is the explicit `corpus.local-root` host service, pinned before process start |
 | No fixed retriever or hosted retrieval API | Research implementation delegates search strategy to the Agent | Implemented | Model-provider calls remain external operations |
 | Zero index, embeddings, vector database, or offline build | No index construction or retrieval database exists in the product path | Implemented | Resource setup downloads or validates corpora but does not index them |
 | Minimal Pi plus bash/read workflow | `asterion-dci` defaults to Pi and `read,bash` | Implemented with divergence | Installed complete Pi forces `read,grep`, so it is a restricted verifier rather than the faithful open-bash setup |
@@ -125,27 +127,27 @@ policy.local-corpus
           → dci.export
 ```
 
-Portable artifacts order the executable stages. However, the question, gold
-answer, predicted answer, and private output directory also pass through
-`DciCompleteAttemptStore`. The artifacts prove stage continuity but are not the
-complete data flow.
+Portable artifacts order the executable stages. The question, gold answer,
+predicted answer, and private output directory now move through
+`InProcessArtifactPayload`, so stage continuity is preserved without exposing
+bodies. The CLI only emits the payload's explicit safe public projection.
 
-The following boundary gaps remain:
+The following previously open application-authority gaps are now closed:
 
-1. Pi implementations can invoke `EnvironmentDciRunExecutor` directly instead
-   of using the selected `AgentRuntimeClient`; Claude Code uses the runtime
-   client.
-2. Runtime cwd, provider, model, tools, and Judge configuration can be resolved
-   again during execution rather than being fixed in the resolved plan.
-3. Judge access is environment-owned but is neither declared as an assembly
-   host capability nor injected as a read-only service.
-4. Local corpus authority is represented by runtime cwd and environment
-   configuration, not an explicit operator-owned host service.
-5. `complete_application_identity()` hashes `complete.py`, manifests, and
-   assemblies but not all imported implementation modules that affect
-   evaluation, analysis, bridging, and Judge behavior.
-6. The benchmark reuse identity does not include a transitive implementation
-   digest.
+1. Pi and Claude Code research implementations execute only through the
+   selected runtime client; `EnvironmentDciRunExecutor` is no longer on the
+   product path.
+2. Runtime cwd, provider, model, tools, and Judge configuration are fixed by
+   the selected runtime-factory context and injected host services before
+   execution instead of being rediscovered by package implementations.
+3. Judge access is an explicit `evaluation.answer-judge` host service and is
+   only selected by the two complete assemblies.
+4. Local corpus authority is an explicit `corpus.local-root` host service and
+   is never inferred from runtime cwd or environment configuration.
+5. `complete_application_identity()` hashes the full 65-resource transitive
+   implementation closure.
+6. Benchmark reuse identity includes the same transitive implementation digest
+   and rejects mismatched evidence before Agent or Judge work begins.
 
 ## Protocol and composition audit
 
@@ -308,20 +310,20 @@ past tense so they cannot be mistaken for current behavior:
 | P2 | Blocker | Closed | The composer accepted hidden host precedence and multi-provider ambiguity | `PackageCompositionTests.test_rejects_every_provider_ambiguity` |
 | P3 | High | Closed | Catalog and TypeScript validation returned mutable contract state | `PackageCatalogTests.test_entry_manifest_is_deeply_immutable`, `test_selected_manifest_is_fresh`; TypeScript `returns a deep immutable validation snapshot` |
 | A1 | Blocker | Closed | The generic CLI imported DCI configuration and repository `.env` values contaminated provider-free tests | `AsterionCliTests.test_generic_cli_has_no_dci_configuration_imports`, `test_run_ignores_repository_dotenv_and_preserves_environment` |
+| A2 | High | Closed | Acceptance collapsed packaged inventory into executable reachability | Named `packaged-assemblies`, `bound-assemblies`, `composed-assemblies`, and `executable-assemblies` checks |
+| A3 | High | Closed | Pi bypassed the selected runtime and execution rediscovered authority | Pi/Claude runtime-factory and complete-application tests |
+| A4 | High | Closed | Corpus and Judge authority were implicit environment state | Host-service preflight, descriptor-identity, Judge-redaction, and cancellation tests |
 
 The remaining current gaps are:
 
 | ID | Priority | Open gap | Completion evidence |
 | --- | --- | --- | --- |
-| A2 | High | Provider acceptance counts inventory rather than executable closure | Report separately proves packaged, bound, composed, bound-implementation counts |
-| A3 | High | Pi bypasses selected runtime and execution re-resolves authority | Both runtimes execute only through the selected runtime client |
-| A4 | High | Corpus and Judge are implicit environment services | Assembly-declared, host-injected service preflight and redaction tests pass |
 | E1 | Blocker | `paper-reference` mixes paper, GitHub, and Asterion semantics | Three distinct immutable provenance families and cache keys exist |
 | E2 | High | Context L3/L4 behavioral parity is unproven | Golden trajectory tests cover thresholds, retained turns, summary gating, failure limit |
 | E3 | High | Pipeline/path-only evidence is missed | Hand-calculated trajectory fixtures match expected coverage/localization |
 | E4 | High | Full authorization and budget are not executable authority | One authorized bounded scope consumes authority once and enforces a positive cap |
 | E5 | High | Benchmark evidence cannot compile into comparison input | Validated RunManifest is emitted and accepted by compare without manual conversion |
-| D1 | Medium | Documentation claim audit is not yet independently rerun after protocol hardening | `make docs-check` and an independent claim audit pass |
+| D1 | Medium | Application-authority documentation has not yet passed independent final claim review | `make docs-check`, repository-wide gates, and an independent Task 8 review pass |
 
 ## Delivery sequence
 
@@ -337,33 +339,23 @@ start until authority and cost boundaries are explicit.
 
 ## Verification snapshot
 
-Provider-free hardened-protocol evidence (2026-07-24):
+Provider-free application-authority evidence (2026-07-25):
 
 ```text
-uv run python -m unittest -v \
-  tests.test_runtime_protocol \
-  tests.test_package_composition \
-  tests.test_package_catalog \
-  tests.test_package_execution \
-  tests.test_dci_complete_application \
-  tests.test_dci_research_capability \
-  tests.test_controlled_code_application
-  PASS: focused provider-free protocol/composition/application suites
+uv run asterion list
+uv run asterion describe --provider dci-agent-lite
+uv run asterion verify --provider dci-agent-lite --level acceptance
+  PASS: two installed providers; five bound/composed/executable assemblies;
+  six packaged assemblies; zero provider requests; no full dataset
 
-npm --prefix packages/typescript/asterion-runtime test
-  PASS: TypeScript runtime and shared-contract validation
-
+make test
 make lint
 make docs-check
+make check
 make promotion-check
-  PASS: provider-free lint, documentation, and packaged-promotion gates
+  PASS: provider-free Python, TypeScript, Rust, documentation, build, and
+  packaged-promotion gates
 ```
-
-`make test` and `make check` are intentionally reserved for the
-application-authority plan's final repository-wide gate, because later
-application work changes that boundary. This audit does not promote either
-command as Task 8 evidence. The generic CLI `.env` isolation and Node 22.19.0
-corrections are already verified and are not current failures.
 
 No provider-backed benchmark or published paper score was rerun for this
 audit.

@@ -31,9 +31,12 @@ result = await run_composed_application(
     runtime=runtime,
     run_id="research-1",
     input_text=question,
-    host_services={},
+    host_services=host_services,
 )
 ```
+
+Here `host_services` is the exact operator-opened mapping declared by the
+assembly; the runner does not construct it.
 
 AF-110 execution is deterministic and sequential. The runner traverses the
 resolved package order, skips declarative policy packages, supplies only
@@ -65,6 +68,12 @@ seed the package-result/ApplicationRunResult global ID set. Future declarations
 for cross-boundary identity, minimum/maximum cardinality, or richer artifact
 routing require a new protocol version; they cannot be added silently to v1.
 
+Sensitive in-process stage data uses `InProcessArtifactPayload`. Its private
+value and separate public projection are deeply immutable, and its `repr` and
+`str` are fixed redactions. Generic output calls `project_public_value`, which
+emits only the explicit public projection and rejects unknown opaque objects;
+it never recursively serializes arbitrary implementation state.
+
 The runner does not discover modules, import capability implementations,
 resolve version ranges, start services, retry work, persist state, schedule
 parallel branches, or authorize tools. Manifests describe compatibility rather
@@ -76,8 +85,12 @@ The DCI local-corpus implementation and the independent `asterion-dci` product
 live in the one `asterion` wheel. `asterion.dci.run.DciRunResult` is converted
 only by `asterion.dci.bridge.project_dci_run`, which exposes native artifact
 references without answer, question, command, or stderr bodies. The generic
-Asterion CLI remains DCI-neutral; `asterion-dci` owns its product-specific
-arguments. Neither it nor Asterion imports or modifies the parent workspace's original DCI baseline under `src/dci/benchmark/`.
+Asterion CLI stays framework-neutral: it imports no DCI modules, and
+provider-free commands remain provider-free. DCI-specific behavior enters only
+after installed-provider selection; executable application runs additionally
+open all declared host services before runtime construction. The `asterion-dci`
+CLI owns its product-specific arguments. Neither it nor Asterion imports or
+modifies the parent workspace's original DCI baseline under `src/dci/benchmark/`.
 
 The package-local `asterion-dci resume --output-dir RUN_DIR` command restores
 only the immutable request recorded in native `state.json`; it rejects
@@ -92,9 +105,24 @@ name only body-free references, including `conversation.json`,
 `asterion-dci evaluate` uses an Asterion-owned OpenAI-compatible judge contract.
 It stores `eval_result.json` only after a structured verdict and reuses it only
 when the full public configuration plus shaped request fingerprint matches.
+Only the two complete assemblies declare `evaluation.answer-judge`; the
+research-only assemblies never load it. The Judge service exposes only a public
+identity digest family to package code, while endpoint, model, credential,
+timeout, token, pricing, retry, and transport details remain behind the
+service boundary.
 `asterion-dci benchmark` accepts explicit JSONL rows and reuses only Asterion
 native run directories; aggregate package results contain references and public
 counts, not question, answer, credential, or provider-response bodies.
+
+The complete application and standalone benchmark share one deterministic
+65-resource DCI product identity. It covers the transitive product modules,
+the selected manifests and assemblies, and their packaged schemas, profiles,
+fixtures, and extension resources. The digest participates in run, batch, and
+row fingerprints and is recorded in item, terminal result, summary, analysis,
+and complete-stage evidence. Missing or mismatched prior identity rejects
+reuse before Agent or Judge work. Generic framework and runtime source stay
+outside this product digest; their exact package/runtime contract identities
+remain separate execution-boundary inputs.
 
 The existing `dci-agent-lite` command remains the external baseline. Asterion
 and baseline runs may share questions and corpora for comparison, but they do
@@ -115,14 +143,12 @@ raw tool output, implementation objects, or host-service values. Cancellation
 propagates through application runner, capability implementation, and runtime;
 later packages do not start after cancellation.
 
-## Deferred application binding
+## Installed application binding
 
-AF-120 owns secure installed-application binding and the generic
-`asterion run <assembly>` entry point. That phase must define how an installed
-application supplies an exact implementation registry without making Asterion
-core import DCI, embedding executable module paths in manifests, or silently
-allowing arbitrary dynamic imports.
-
-AF-110 therefore has an explicit Python application composition root but no
-generic CLI, plug-in discovery, remote registry, package installation,
-automatic provider selection, or automatic service startup.
+The generic `asterion run` path loads one selected provider entry point,
+selects one exact application/runtime assembly, resolves one exact runtime
+factory, and uses the provider's exact implementation bindings. Manifests
+contain no module paths, provider configuration, credentials, or executable
+authority. `asterion list` remains metadata-only, and the host does not scan
+modules, solve ranges, install packages, select providers automatically, start
+services automatically, or consult a remote registry.

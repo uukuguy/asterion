@@ -2,9 +2,9 @@
 
 ## Boundary
 
-The Python runner executes one already resolved `AssemblyPlan` through an explicitly supplied `AgentRuntimeClient`. The caller supplies application input, run identity, optional `CancellationSignal`, and explicit host services. Asterion does not discover packages or services at execution time.
+The Python runner executes one already resolved `AssemblyPlan` through an explicitly supplied `AgentRuntimeClient`. The caller supplies application input, run identity, optional `CancellationSignal`, and an exact host-service mapping opened by host preflight. Asterion does not discover packages, select runtimes, or discover host services at execution time.
 
-The plan records runtime-owned and host-owned capabilities separately. The runner verifies the runtime identity and required capabilities, then checks every required host service before invoking the runtime. Supplying a service object satisfies presence only; it does not authorize commands, grant policy, or make the service a sandbox.
+The plan records runtime-owned and host-owned capabilities separately. The application host selects one exact runtime factory binding, opens the selected host services in one async scope, injects them into `RuntimeFactoryContext.host_services`, and only then constructs the runtime. The runner independently rechecks runtime identity, runtime capabilities, and required service presence before package work. The service scope closes after the invocation, including failure or cancellation. Supplying a service object satisfies presence only; it does not authorize commands, grant policy, or make the service a sandbox. Host services remain operator-owned, read-only contracts.
 
 ## Result and failure semantics
 
