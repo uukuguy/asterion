@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-24 21:13. **Session remains active — not a final handoff.**
+> Updated: 2026-07-24 21:44. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -50,6 +50,11 @@
   `make promotion-check` now passes 18 commands with zero provider operations.
 - The tracked root instruction symlink was replaced by portable
   `CLAUDE.md` content `@AGENTS.md`; CI now uses exact Node `22.19.0`.
+- Protocol Task 8 documents the hardened v1 semantics. Final task review is
+  clean after aligning Python/TypeScript Unicode scalar ordering, field-wise
+  package-ref ordering, and schema surrogate rejection with shared fixtures.
+- The protocol focused gate passes 67 Python tests and 13 TypeScript tests;
+  lint, docs-check, and promotion-check pass with zero provider operations.
 
 ## Next steps
 
@@ -59,9 +64,10 @@ Execute, in order:
 2. `docs/superpowers/plans/2026-07-24-asterion-application-authority.md`
 3. `docs/superpowers/plans/2026-07-24-dci-provenance-reproduction.md`
 
-Resume with Task 8 of the protocol plan. Protocol Tasks 1–7 and pulled-forward
-Application Task 1 are recorded in
-`.superpowers/sdd/progress.md`; keep commits atomic as specified by each task.
+Run the broad whole-branch review for the completed protocol plan. Protocol
+Tasks 1–8 and pulled-forward Application Task 1 are recorded in
+`.superpowers/sdd/progress.md`. After a clean broad review, resume Application
+Authority Task 2.
 
 ## Don't go down these paths again
 

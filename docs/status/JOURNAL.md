@@ -31,3 +31,8 @@
 - 20:44 Removed fictional product host evidence; retained real package edges, restoring strict preflight execution [26a53e1]
 - 20:54 Replaced root instruction symlink and pinned CI Node for portable promotion source [f601777]
 - 21:06 Removed generic DCI configuration authority so applications pass exact runtimes and opaque options [61cc38d]
+- 21:44 Documented hardened v1 semantics with named provider-free evidence [1ddd028]
+- 21:44 Unified Python and TypeScript Unicode scalar ordering with shared adversarial fixtures [1fe9662]
+- 21:44 Marked hardened protocol and CLI audit gaps closed while retaining history [5aaa0b4]
+- 21:44 Closed line-terminator surrogate escapes in canonical schemas [0317323]
+- 21:44 Recorded final canonical-ordering closure evidence for durable review [6ccd5fb]
