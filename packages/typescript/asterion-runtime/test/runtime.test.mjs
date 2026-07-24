@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
+import Ajv2020 from "ajv/dist/2020.js";
+
 import {
   ProtocolValidationError,
   validateAssemblyManifest,
@@ -141,6 +143,7 @@ test("rejects every shared invalid package manifest fixture", async () => {
     "invalid-forbidden-command.json",
     "invalid-unicode-scalar-order.json",
     "invalid-surrogate-edge.json",
+    "invalid-line-terminator-surrogate-edge.json",
   ]) {
     const invalid = await readPackageJson(name);
     assert.throws(() => validatePackageManifest(invalid), ProtocolValidationError);
@@ -213,9 +216,39 @@ test("validates the shared assembly fixtures", async () => {
     "invalid-interpolated-package-ref-order.json",
     "invalid-unicode-scalar-order.json",
     "invalid-surrogate-edge.json",
+    "invalid-line-terminator-surrogate-edge.json",
   ]) {
     const invalid = await readAssemblyJson(name);
     assert.throws(() => validateAssemblyManifest(invalid), ProtocolValidationError);
+  }
+});
+
+test("canonical schemas reject a surrogate after a line terminator", async () => {
+  const ajv = new Ajv2020({ allErrors: true });
+  const cases = [
+    {
+      schema: new URL(
+        "../../../../schemas/packages/v1/package-manifest.schema.json",
+        import.meta.url,
+      ),
+      fixture: await readPackageJson(
+        "invalid-line-terminator-surrogate-edge.json",
+      ),
+    },
+    {
+      schema: new URL(
+        "../../../../schemas/assembly/v1/assembly.schema.json",
+        import.meta.url,
+      ),
+      fixture: await readAssemblyJson(
+        "invalid-line-terminator-surrogate-edge.json",
+      ),
+    },
+  ];
+  for (const { schema, fixture } of cases) {
+    const validate = ajv.compile(JSON.parse(await readFile(schema, "utf8")));
+    assert.equal(validate(fixture), false);
+    assert.ok(validate.errors);
   }
 });
 

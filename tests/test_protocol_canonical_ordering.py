@@ -30,6 +30,7 @@ class ProtocolCanonicalOrderingTests(unittest.TestCase):
         for name in (
             "invalid-unicode-scalar-order.json",
             "invalid-surrogate-edge.json",
+            "invalid-line-terminator-surrogate-edge.json",
         ):
             with self.subTest(name=name), self.assertRaises(PackageProtocolError):
                 validate_package_manifest(fixture("packages", name))
@@ -42,6 +43,7 @@ class ProtocolCanonicalOrderingTests(unittest.TestCase):
             "invalid-interpolated-package-ref-order.json",
             "invalid-unicode-scalar-order.json",
             "invalid-surrogate-edge.json",
+            "invalid-line-terminator-surrogate-edge.json",
         ):
             with self.subTest(name=name), self.assertRaises(AssemblyError):
                 validate_assembly_manifest(fixture("assembly", name))

@@ -1,0 +1,13 @@
+{
+  "protocol": "dci.assembly/v1",
+  "application_id": "example.surrogate-line",
+  "version": "1.0.0",
+  "runtime_id": "example.runtime",
+  "packages": [
+    {"package_id": "a", "version": "1.0.0"}
+  ],
+  "host_capabilities": [],
+  "host_policies": [],
+  "host_events": ["line\n\uD800"],
+  "host_artifacts": []
+}

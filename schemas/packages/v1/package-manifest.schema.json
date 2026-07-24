@@ -28,7 +28,7 @@
       "items": {
         "type": "string",
         "minLength": 1,
-        "pattern": "^(?!.*[\\uD800-\\uDFFF])[\\s\\S]+$"
+        "pattern": "^(?![\\s\\S]*[\\uD800-\\uDFFF])[\\s\\S]+$"
       },
       "uniqueItems": true
     }
