@@ -58,6 +58,10 @@ class ClaudeFixtureRuntime(FixtureRuntime):
     manifest = RuntimeManifest(runtime_id="claude-code.reference", capabilities=())
 
 
+class NonCallableImplementation:
+    execute = "SECRET-NON-CALLABLE-IMPLEMENTATION"
+
+
 class DciClaudeFixtureRuntime:
     manifest = RuntimeManifest(
         runtime_id="claude-code.reference",
@@ -1546,6 +1550,66 @@ class AsterionCliTests(unittest.TestCase):
 
         self.assertEqual(code, 2)
         self.assertEqual(calls, [])
+
+    def test_non_callable_binding_fails_before_runtime_factory_and_is_redacted(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            valid = provider(Path(temp_dir))
+            application = valid.applications[0]
+            invalid = InstalledApplicationProvider(
+                protocol=valid.protocol,
+                provider_id=valid.provider_id,
+                resource_root=valid.resource_root,
+                applications=(
+                    InstalledApplication(
+                        application_id=application.application_id,
+                        version=application.version,
+                        assembly_paths=application.assembly_paths,
+                        catalog_roots=application.catalog_roots,
+                        implementations=(
+                            (
+                                application.implementations[0][0],
+                                NonCallableImplementation(),
+                            ),
+                        ),
+                        runtime_ids=application.runtime_ids,
+                    ),
+                ),
+            )
+            entry = FakeEntryPoint(name="example-app", factory=lambda: invalid)
+            calls = []
+            registry = RuntimeFactoryRegistry(
+                (
+                    RuntimeFactoryBinding(
+                        runtime_id="pi.reference",
+                        capabilities=(),
+                        factory=lambda context: calls.append(context),
+                    ),
+                )
+            )
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            code = main(
+                [
+                    "run",
+                    "--provider",
+                    "example-app",
+                    "--runtime",
+                    "pi.reference",
+                    str(application.assembly_paths[0]),
+                ],
+                entry_points=(entry,),
+                runtime_factories=registry,
+                stdin=io.StringIO("input"),
+                stdout=stdout,
+                stderr=stderr,
+            )
+
+        self.assertEqual(code, 2)
+        self.assertEqual(calls, [])
+        for output in (stdout.getvalue(), stderr.getvalue()):
+            self.assertNotIn("SECRET-NON-CALLABLE-IMPLEMENTATION", output)
 
 
 if __name__ == "__main__":

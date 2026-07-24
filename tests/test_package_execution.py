@@ -59,6 +59,10 @@ class RecordingImplementation:
         return PackageExecutionResult(events=(), artifacts=())
 
 
+class NonCallableImplementation:
+    execute = "SECRET-NON-CALLABLE-IMPLEMENTATION"
+
+
 class ResultImplementation:
     def __init__(self, result: PackageExecutionResult) -> None:
         self.result = result
@@ -205,6 +209,31 @@ class DciResearchManifestDeclarationTests(unittest.TestCase):
 
 
 class PackageImplementationBindingTests(unittest.TestCase):
+    def test_non_callable_implementation_is_rejected_without_content(self) -> None:
+        valid = RecordingImplementation()
+        for implementation in (object(), NonCallableImplementation()):
+            bindings = tuple(
+                (
+                    PackageRef(package_id, "1.0.0"),
+                    implementation if package_id == "dci.research" else valid,
+                )
+                for package_id in (
+                    "dci.evaluation",
+                    "dci.research",
+                    "protocol.observability",
+                )
+            )
+
+            with (
+                self.subTest(implementation=type(implementation).__name__),
+                self.assertRaises(PackageExecutionError) as raised,
+            ):
+                validate_implementation_bindings(resolve_plan(), bindings)
+
+            self.assertNotIn(
+                "SECRET-NON-CALLABLE-IMPLEMENTATION", str(raised.exception)
+            )
+
     def test_exact_bindings_require_every_executable_package(self) -> None:
         implementation = RecordingImplementation()
 

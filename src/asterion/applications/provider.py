@@ -201,20 +201,7 @@ def _validate_application_metadata(
 
     assembly_runtime_ids: list[str] = []
     for assembly_path in assemblies:
-        try:
-            assembly = json.loads(assembly_path.read_text())
-            validate_assembly_manifest(assembly)
-        except (OSError, UnicodeError, json.JSONDecodeError, AssemblyError):
-            raise ApplicationProviderError(
-                "installed application assembly is invalid"
-            ) from None
-        if (
-            assembly["application_id"] != application.application_id
-            or assembly["version"] != application.version
-        ):
-            raise ApplicationProviderError(
-                "installed application assembly identity is invalid"
-            )
+        assembly = _read_assembly_snapshot(assembly_path, application=application)
         runtime_id = assembly["runtime_id"]
         assert isinstance(runtime_id, str)
         assembly_runtime_ids.append(runtime_id)
@@ -251,12 +238,11 @@ def _resolve_application(
         catalog = discover_packages(application.catalog_roots)
         assemblies: list[InstalledAssembly] = []
         for assembly_path in application.assembly_paths:
-            assembly = json.loads(assembly_path.read_text())
-            if not isinstance(assembly, dict):
-                raise TypeError
+            assembly = _read_assembly_snapshot(
+                assembly_path, application=application
+            )
             runtime_id = assembly["runtime_id"]
-            if not isinstance(runtime_id, str):
-                raise TypeError
+            assert isinstance(runtime_id, str)
             runtime_binding = runtime_factories.select(runtime_id)
             plan = resolve_assembly(
                 assembly,
@@ -274,9 +260,9 @@ def _resolve_application(
     except (
         OSError,
         UnicodeError,
-        json.JSONDecodeError,
         KeyError,
         TypeError,
+        ValueError,
         PackageCatalogError,
         AssemblyError,
         PackageExecutionError,
@@ -299,6 +285,30 @@ def _resolve_application(
         runtime_ids=application.runtime_ids,
         assemblies=values,
     )
+
+
+def _read_assembly_snapshot(
+    assembly_path: Path,
+    *,
+    application: InstalledApplication,
+) -> dict[str, object]:
+    try:
+        assembly = json.loads(assembly_path.read_text())
+        validate_assembly_manifest(assembly)
+    except (OSError, UnicodeError, TypeError, ValueError):
+        raise ApplicationProviderError(
+            "installed application assembly is invalid"
+        ) from None
+    assert isinstance(assembly, dict)
+    if (
+        assembly["application_id"] != application.application_id
+        or assembly["version"] != application.version
+        or assembly["runtime_id"] not in application.runtime_ids
+    ):
+        raise ApplicationProviderError(
+            "installed application assembly identity is invalid"
+        )
+    return assembly
 
 
 def _canonical_resource(value: Path, *, kind: str) -> Path:

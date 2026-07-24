@@ -26,6 +26,10 @@ class FixtureImplementation:
         return PackageExecutionResult(events=(), artifacts=())
 
 
+class NonCallableImplementation:
+    execute = "SECRET-NON-CALLABLE-IMPLEMENTATION"
+
+
 def write_assembly(
     root: Path,
     *,
@@ -211,6 +215,21 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                         runtime_ids=application.runtime_ids,
                     )
                 ),
+                "non-callable-package-implementation": with_application(
+                    InstalledApplication(
+                        application_id=application.application_id,
+                        version=application.version,
+                        assembly_paths=application.assembly_paths,
+                        catalog_roots=(catalog,),
+                        implementations=(
+                            (
+                                PackageRef("example.research", "1.0.0"),
+                                NonCallableImplementation(),
+                            ),
+                        ),
+                        runtime_ids=application.runtime_ids,
+                    )
+                ),
                 "uncomposable-bound-assembly": with_application(
                     InstalledApplication(
                         application_id=application.application_id,
@@ -234,6 +253,69 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                         ),
                         runtime_factories=registry,
                     )
+
+    def test_resolution_revalidates_the_exact_assembly_snapshot(self) -> None:
+        sentinel = "other.secret"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            metadata = validate_installed_provider(
+                provider(root), selected_id="example-app"
+            )
+            assembly_path = metadata.applications[0].assembly_paths[0]
+
+            def mutate_during_discovery(roots):
+                catalog = discover_packages(roots)
+                assembly = json.loads(assembly_path.read_text())
+                assembly["application_id"] = sentinel
+                assembly_path.write_text(json.dumps(assembly))
+                return catalog
+
+            with (
+                patch(
+                    "asterion.applications.provider.discover_packages",
+                    side_effect=mutate_during_discovery,
+                ),
+                self.assertRaises(ApplicationProviderError) as raised,
+            ):
+                resolve_installed_provider(
+                    metadata,
+                    runtime_factories=runtime_factories("pi.reference"),
+                )
+
+        self.assertIs(type(raised.exception), ApplicationProviderError)
+        self.assertNotIn(sentinel, str(raised.exception))
+
+    def test_hostile_numeric_json_is_normalized_and_redacted(self) -> None:
+        sentinel = "SECRET-HOSTILE-NUMERIC"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            valid = provider(root)
+            application = valid.applications[0]
+            hostile_path = application.assembly_paths[0].with_name(
+                f"{sentinel}.json"
+            )
+            hostile_path.write_text('{"value":' + ("9" * 10000) + "}")
+            invalid = InstalledApplicationProvider(
+                protocol=valid.protocol,
+                provider_id=valid.provider_id,
+                resource_root=valid.resource_root,
+                applications=(
+                    InstalledApplication(
+                        application_id=application.application_id,
+                        version=application.version,
+                        assembly_paths=(hostile_path,),
+                        catalog_roots=application.catalog_roots,
+                        implementations=application.implementations,
+                        runtime_ids=application.runtime_ids,
+                    ),
+                ),
+            )
+
+            with self.assertRaises(ApplicationProviderError) as raised:
+                validate_installed_provider(invalid, selected_id="example-app")
+
+        self.assertIs(type(raised.exception), ApplicationProviderError)
+        self.assertNotIn(sentinel, str(raised.exception))
 
     def test_optional_capability_product_survives_provider_validation(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

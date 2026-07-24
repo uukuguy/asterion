@@ -94,6 +94,16 @@ def validate_implementation_bindings(
 
     resolved: dict[PackageRef, PackageImplementation] = {}
     for ref, implementation in bindings:
+        try:
+            execute = getattr(implementation, "execute")
+        except Exception:
+            raise PackageExecutionError(
+                "package implementation binding is invalid"
+            ) from None
+        if not callable(execute):
+            raise PackageExecutionError(
+                "package implementation binding is invalid"
+            )
         if ref in resolved:
             raise PackageExecutionError("package implementation binding is duplicated")
         resolved[ref] = implementation
