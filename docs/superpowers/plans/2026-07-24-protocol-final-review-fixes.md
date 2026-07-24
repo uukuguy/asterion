@@ -456,7 +456,7 @@ git commit -m "fix: resolve namespace imports without execution"
 - Produces: a cumulative live checkpoint whose next action remains final
   re-review and a complete append-only evidence report.
 
-- [ ] **Step 1: Run all final gates**
+- [x] **Step 1: Run all final gates**
 
 ```bash
 uv run python -m unittest -v \
@@ -481,7 +481,7 @@ git diff --check
 Expected: all commands pass without provider operations. Record the increased
 focused and repository test totals exactly from command output.
 
-- [ ] **Step 2: Refresh recovery and evidence**
+- [x] **Step 2: Refresh recovery and evidence**
 
 Rewrite the live checkpoint with the current timestamp, commits, component root
 walk, descriptor ownership, static namespace resolver, and current verification
@@ -490,7 +490,7 @@ Task 2 conditional on a clean verdict. Make the recovery command read the full
 fix report with `cat .superpowers/sdd/protocol-final-fix-report.md`. Append the
 namespace RED/GREEN and final gate evidence to the fix report.
 
-- [ ] **Step 3: Verify and commit checkpoint**
+- [x] **Step 3: Verify and commit checkpoint**
 
 ```bash
 make docs-check

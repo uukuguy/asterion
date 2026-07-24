@@ -1,78 +1,91 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-24 22:16. **Session remains active — not a final handoff.**
+> Updated: 2026-07-24 23:03. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- Protocol/composition Tasks 1–8 are implemented. The final whole-branch review
-  found one catalog race, direct-error redaction gaps, and documentation/recovery
-  drift; the corrective wave is implemented and its full provider-free gates
-  pass.
-- Application Authority Task 1 was pulled forward and implemented to remove DCI
-  configuration authority from the generic CLI. Approved Application Authority
-  Tasks 2–8 remain future work.
-- No `asterion.host_services` registry exists in the current tree. It remains an
-  approved future design in Application Authority Task 5, not implemented
-  evidence.
-- No provider-backed benchmark, Agent/Judge operation, or published-score
-  reproduction has been run.
+- Protocol/composition Tasks 1–8 and all three final-review corrective waves
+  are implemented. The second re-review found a PEP 420 namespace resolver gap;
+  `f9d7861` replaces lazy importlib namespace state with static concrete-root
+  traversal, and the complete provider-free gates pass.
+- A new final whole-branch re-review is still required. Do not call the review
+  clean until that independent verdict is recorded.
+- Application Authority Task 1 is implemented. Approved Application Authority
+  Tasks 2–8 remain future work; Task 2 starts only after a clean final review.
+- No provider-backed benchmark, Agent/Judge operation, full-dataset run, or
+  published-score reproduction has been performed.
 
 ## Cumulative state as of this checkpoint
 
 - `docs/architecture/dci-capability-audit.md` remains the authoritative mapping
   from paper/GitHub claims to Asterion code, reachability, evidence, and gaps.
-- The approved work sequence remains protocol/composition, application
-  authority, then DCI provenance/reproduction. The protocol implementation and
-  its pulled-forward generic-CLI correction are complete; later application and
-  provenance tasks have not been promoted to implemented.
 - Runtime identifiers and capability arrays are canonical across Python,
   TypeScript, schemas, and shared fixtures. Runtime streams require one run ID,
-  contiguous sequence numbers, one terminal event, and exactly one matched
-  result for every tool call.
+  contiguous sequences, matched tool calls/results, and one terminal event.
 - TypeScript validation values, catalog manifests, assembly plans, package
   invocations/results, and runner evidence are immutable snapshots.
-- Composition is deterministic, rejects every package/package and package/host
+- Composition is deterministic, rejects package/package and package/host
   provider ambiguity, fails on missing edges and cycles, and requires exact
   package references and implementation bindings.
 - DCI and controlled-code declarations use real package-produced event/artifact
-  edges. Runtime-internal events and source artifacts are not modeled as host
-  evidence.
+  edges. Runtime-internal events and source artifacts are not host evidence.
 - The generic CLI is DCI-neutral, loads one exact provider and runtime, accepts
   only explicit opaque runtime options, and does not materialize repository
   `.env` authority.
-- Packaged resources are portable: the tracked instruction symlink is gone and
-  CI uses the repository's exact Node `22.19.0` floor.
-- Final-review correction `798591b` pins catalog roots and direct JSON children
-  to descriptor-owned filesystem objects. Descriptor-relative no-follow
-  discovery fails closed when the platform cannot provide safe primitives.
-- Final-review correction `71dff6a` keeps runtime and Pi/Claude tool-lifecycle
-  errors structural without echoing provider-controlled keys or call IDs.
-- Architecture examples now use actual `asterion.*` imports and the real
-  controlled-code graph. The docs checker validates documented Asterion import
-  symbols so future API drift fails the documentation gate.
+- No `asterion.host_services` registry exists. It remains an approved future
+  Application Authority Task 5 design, not implemented evidence.
+
+## Final-review corrections
+
+- `798591b` pins roots and direct JSON children to descriptor-owned filesystem
+  objects; descriptor-relative discovery fails closed without safe primitives.
+- `71dff6a` makes runtime and Pi/Claude lifecycle errors structural without
+  echoing provider-controlled keys or call IDs.
+- `6168056` aligns architecture imports/graphs and the first recovery state with
+  shipped behavior.
+- `0a0639c` walks absolute catalog roots from pinned `/` and relative roots from
+  pinned cwd. It rejects `..`, ignores normalized empty/`.` components, and
+  opens every other component with `O_DIRECTORY | O_NOFOLLOW`.
+- The same catalog correction gives one `ExitStack` ownership of anchor,
+  intermediate, and final descriptors. Each successful open is registered
+  immediately, so success, structural failure, duplicate roots, and
+  `KeyboardInterrupt` close every descriptor exactly once.
+- `2487277` validates both documented `Import` and `ImportFrom` statements
+  statically, handles malformed multiline candidates structurally, and never
+  imports checked module code.
+- `f9d7861` resolves source modules, regular packages, and PEP 420 namespace
+  directories from concrete `sys.path` filesystem roots. Regular packages
+  carry one child root; namespaces carry all matching roots in order. Missing,
+  filesystem, and source-syntax failures become documentation errors without
+  tracebacks or module execution.
+- `901c786` records the first two corrective waves and their provider-free
+  evidence. The full report is append-only and must be read through its end.
 
 ## Verification boundary
 
-- The broad review of base `a607d6a` recorded 67 focused Python protocol tests,
-  13 TypeScript tests, 244 repository Python tests, `make check`, lint,
-  docs-check, promotion-check, and diff-check as passing.
-- The corrective wave passes the equivalent expanded protocol gate: the former
-  67-test set now has 72 tests after five new runtime/catalog regressions. The
-  two direct adapter-redaction tests also pass.
-- TypeScript passes 13 tests. `make test` passes 252 tests. `make check`, lint,
-  docs-check (25 Markdown files and 39 links), promotion-check (18 commands,
-  zero provider operations), and whitespace validation pass.
-- All commands in this wave are provider-free. External Agent/Judge, full
+- The expanded protocol/application gate passes 76 tests.
+- The direct runtime-adapter redaction gate passes 2 tests.
+- TypeScript Agent Runtime passes 13 tests.
+- `make test` passes 257 Python tests.
+- `make check` passes 257 Python tests, compile/Ruff, 25 Markdown files and
+  39 links, TypeScript 13 + 11 tests, Rust 19 tests plus fmt/clippy, and sdist
+  and wheel builds.
+- `make lint` and `make docs-check` pass.
+- `make promotion-check` passes 18 commands with
+  `provider_operations=0` and `full_dataset=no`.
+- Whole-branch whitespace validation passes.
+- All commands in this corrective wave are provider-free. External Agent/Judge,
   benchmark, and paper-reproduction boundaries remain not rerun.
 
 ## Immediate next actions
 
-1. Request the final whole-branch re-review.
-2. After a clean final re-review, resume Application Authority Task 2: prove
-   runtime-to-assembly bijection and executable closure.
+1. Request a new final whole-branch re-review covering `f9d7861` and this
+   cumulative checkpoint/report update.
+2. Only after a clean final verdict, resume Application Authority Task 2:
+   prove runtime-to-assembly bijection and executable closure.
 3. Continue approved Application Authority Tasks 3–8 in order, then begin the
-   separate DCI provenance/reproduction plan only with its stated authorization
-   and budget boundaries.
+   separate DCI provenance/reproduction plan only with its stated authority and
+   finite budget.
 
 ## Do not regress these boundaries
 
@@ -81,10 +94,12 @@
   one-question five-stage chain.
 - Do not label Asterion-safe prompt, Judge, NDCG, or localization parameters as
   paper semantics.
-- Do not make execution authority persist through `.env`, cache, prior evidence,
-  package manifests, or provider payloads.
+- Do not make execution authority persist through `.env`, cache, prior
+  evidence, package manifests, or provider payloads.
 - Do not add source scanning, package ranges, registries, hidden precedence, or
   symlink traversal to the catalog.
+- Do not make static documentation validation depend on `sys.modules`, import
+  hooks, loader execution, or package side effects.
 - Do not rerun provider-backed work without explicit operator authorization and
   a finite positive budget.
 
@@ -92,7 +107,7 @@
 
 ```bash
 git status --short
-git log --oneline -8
-sed -n '1,260p' .superpowers/sdd/protocol-final-fix-report.md
+git log --oneline -10
+cat .superpowers/sdd/protocol-final-fix-report.md
 sed -n '150,260p' docs/superpowers/plans/2026-07-24-asterion-application-authority.md
 ```

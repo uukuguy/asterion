@@ -43,3 +43,4 @@
 - 22:38 Rejected intermediate catalog symlinks and closed every descriptor on interrupts to preserve pinned discovery [0a0639c]
 - 22:46 Validated documented imports statically and converted malformed syntax into errors without executing modules [2487277]
 - 22:52 Recorded final re-review closure and provider-free gate evidence for auditable handoff [901c786]
+- 23:01 Resolved namespace imports from concrete filesystem roots without executing module code [f9d7861]

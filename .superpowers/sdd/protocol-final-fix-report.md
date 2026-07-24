@@ -409,3 +409,116 @@ PASS
 ```
 
 No provider-backed operation, benchmark, or full-dataset run was performed.
+
+## Second final re-review follow-up
+
+The second final re-review found one remaining implementation failure and one
+recovery-state drift:
+
+- Static import resolution depended on importlib `_NamespacePath` parent state
+  and raised `KeyError` for valid PEP 420 namespace children.
+- The live checkpoint still stopped at the first corrective wave and retained
+  stale 72/252 test totals.
+
+Commit `f9d7861ef1fd0679acad7346747f0bba1eb8c490`
+(`fix: resolve namespace imports without execution`) closes the implementation
+finding.
+
+### Concrete namespace resolution
+
+The checker no longer uses `PathFinder`, `ModuleSpec`,
+`spec.submodule_search_locations`, `sys.modules`, import loaders, or module
+execution. It begins with concrete filesystem entries from `sys.path` and
+resolves each dotted component using source-only import precedence:
+
+- A regular source package has a valid `__init__.py`, statically parsed
+  bindings, and its package directory as the only child root.
+- A regular source module has statically parsed bindings and no child roots.
+- A namespace component carries every matching directory from the current
+  search roots in path order, allowing a namespace to span multiple roots.
+- A module cannot have a later child component.
+- Missing paths, filesystem errors, invalid source syntax, and unresolved
+  components return an unavailable documentation result. They do not escape as
+  exceptions or tracebacks.
+
+Both copied-tree layouts are isolated from installed packages with `python -S`.
+The regular-parent fixture contains `asterion/__init__.py`,
+`asterion/ns/child.py`, an invalid-source child, and a symlink-loop child. The
+top-level namespace fixture splits `asterion/top/` children across two
+`PYTHONPATH` roots. Module and package source files write a marker if executed.
+
+The matrix proves, for both namespace shapes:
+
+- direct child imports pass;
+- `from`-imported child modules pass;
+- explicit source bindings pass;
+- a second namespace root participates in child resolution;
+- missing children and missing symbols fail structurally;
+- syntax and filesystem resolver failures fail structurally;
+- no traceback escapes and no side-effect marker is created.
+
+Namespace RED:
+
+```text
+uv run python -m unittest -v \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_resolves_namespace_packages_without_importing
+FAILED: 1 test, 13 failing subtests
+- valid nested and top-level namespace imports raised KeyError: 'asterion'
+- missing, syntax, and resolver failures escaped as tracebacks or false results
+```
+
+Namespace GREEN:
+
+```text
+uv run python -m unittest -v \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_validates_asterion_import_snippets \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_resolves_namespace_packages_without_importing \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_handles_links_and_rejects_unsafe_targets
+PASS: 3 tests
+
+make docs-check
+PASS: 25 Markdown files, 39 local links
+
+uv run ruff check tools/check_docs.py tests/test_standalone_repository.py
+PASS
+```
+
+### Refreshed final provider-free verification
+
+```text
+expanded protocol/application gate
+PASS: 76 tests
+
+uv run python -m unittest -v tests.test_runtime_adapter_redaction
+PASS: 2 tests
+
+npm --prefix packages/typescript/asterion-runtime test
+PASS: 13 tests
+
+make test
+PASS: 257 tests
+
+make check
+PASS: 257 Python tests; compile/Ruff; 25 Markdown files and 39 links;
+      TypeScript 13 + 11 tests; Rust 19 tests plus fmt/clippy;
+      sdist and wheel build
+
+make lint
+PASS: compileall and Ruff
+
+make docs-check
+PASS: 25 Markdown files, 39 local links
+
+make promotion-check
+PASS: 18 commands, provider_operations=0, full_dataset=no
+
+git diff --check
+PASS
+```
+
+`docs/status/RESUME-NEXT-SESSION.md` is now cumulative through `f9d7861`,
+records 76/257 as the current test boundary, retains final re-review as the
+immediate next action, makes Application Authority Task 2 conditional on a
+clean verdict, and reads this complete report with `cat`.
+
+No provider-backed operation, benchmark, or full-dataset run was performed.
