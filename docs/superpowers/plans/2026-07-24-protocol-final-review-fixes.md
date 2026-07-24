@@ -385,3 +385,123 @@ git diff --check
 Expected: the expanded protocol gate, two adapter tests, TypeScript 13 tests,
 all repository tests/builds, 18-command provider-free promotion, and whitespace
 validation pass.
+
+### Task 8: Resolve namespace packages without importing parent state
+
+**Files:**
+- Modify: `tests/test_standalone_repository.py`
+- Modify: `tools/check_docs.py`
+
+**Interfaces:**
+- Consumes: `sys.path` filesystem entries and an exact dotted
+  `asterion.*` module name.
+- Produces: a static resolved module containing source bindings and concrete
+  child search directories, or a structural unavailable result.
+
+- [x] **Step 1: Add copied-tree namespace regressions**
+
+Create one fixture with a regular `asterion/__init__.py`, a namespace
+`asterion/ns/` directory, and `child.py`; create another fixture whose
+top-level `asterion/` namespace is split across two `PYTHONPATH` roots. Give
+each child a file-writing import side effect and a top-level `API` binding.
+For both layouts, assert direct child imports, from-imported children, and
+explicit child symbols pass without a marker. Assert missing children and
+symbols fail with `documented import is unavailable` and every case has no
+traceback.
+
+- [x] **Step 2: Run RED**
+
+```bash
+uv run python -m unittest -v \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_resolves_namespace_packages_without_importing
+```
+
+Expected: the nested namespace case exits through an uncaught `KeyError`, and
+the top-level namespace case is unavailable.
+
+- [x] **Step 3: Implement concrete filesystem resolution**
+
+Replace `PathFinder`/`ModuleSpec` traversal with a frozen internal resolution
+value. Starting from concrete filesystem entries in `sys.path`, inspect each
+component for a source regular package, source module, or namespace directory.
+A regular package carries its one package directory; a namespace carries every
+matching directory in path order; a source module carries no child roots.
+Parse source statically to validate syntax and collect bindings. Convert
+filesystem, syntax, and resolution failures to `None`; never consult
+`sys.modules`, call an import loader, or execute source.
+
+- [x] **Step 4: Run GREEN and commit**
+
+```bash
+uv run python -m unittest -v \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_validates_asterion_import_snippets \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_resolves_namespace_packages_without_importing \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_handles_links_and_rejects_unsafe_targets
+make docs-check
+uv run ruff check tools/check_docs.py tests/test_standalone_repository.py
+git add tools/check_docs.py tests/test_standalone_repository.py \
+  docs/superpowers/plans/2026-07-24-protocol-final-review-fixes.md \
+  docs/status/JOURNAL.md
+git commit -m "fix: resolve namespace imports without execution"
+```
+
+### Task 9: Refresh cumulative recovery and final evidence
+
+**Files:**
+- Modify: `docs/status/RESUME-NEXT-SESSION.md`
+- Modify: `.superpowers/sdd/protocol-final-fix-report.md`
+
+**Interfaces:**
+- Consumes: committed namespace fix and fresh provider-free verification.
+- Produces: a cumulative live checkpoint whose next action remains final
+  re-review and a complete append-only evidence report.
+
+- [ ] **Step 1: Run all final gates**
+
+```bash
+uv run python -m unittest -v \
+  tests.test_protocol_canonical_ordering \
+  tests.test_runtime_protocol \
+  tests.test_package_composition \
+  tests.test_package_catalog \
+  tests.test_package_execution \
+  tests.test_dci_complete_application \
+  tests.test_dci_research_capability \
+  tests.test_controlled_code_application
+uv run python -m unittest -v tests.test_runtime_adapter_redaction
+npm --prefix packages/typescript/asterion-runtime test
+make test
+make check
+make lint
+make docs-check
+make promotion-check
+git diff --check
+```
+
+Expected: all commands pass without provider operations. Record the increased
+focused and repository test totals exactly from command output.
+
+- [ ] **Step 2: Refresh recovery and evidence**
+
+Rewrite the live checkpoint with the current timestamp, commits, component root
+walk, descriptor ownership, static namespace resolver, and current verification
+totals. Keep final re-review as the immediate action and Application Authority
+Task 2 conditional on a clean verdict. Make the recovery command read the full
+fix report with `cat .superpowers/sdd/protocol-final-fix-report.md`. Append the
+namespace RED/GREEN and final gate evidence to the fix report.
+
+- [ ] **Step 3: Verify and commit checkpoint**
+
+```bash
+make docs-check
+uv run ruff check src tests tools
+git diff --check
+git add docs/status/RESUME-NEXT-SESSION.md \
+  .superpowers/sdd/protocol-final-fix-report.md \
+  docs/superpowers/plans/2026-07-24-protocol-final-review-fixes.md \
+  docs/status/JOURNAL.md
+git commit -m "docs: refresh protocol final-review checkpoint"
+```
+
+Expected: documentation, Ruff, and whitespace checks pass, and the checkpoint
+contains no stale 72/252 totals or truncated report command.

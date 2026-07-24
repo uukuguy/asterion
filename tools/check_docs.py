@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import ast
 import re
+import stat
 import sys
 import textwrap
-from importlib.machinery import ModuleSpec, PathFinder
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -30,6 +31,12 @@ FORBIDDEN_LITERALS = (
     "make -C ..",
     "from dci.framework.",
 )
+
+
+@dataclass(frozen=True)
+class _ResolvedModule:
+    bindings: frozenset[str]
+    child_roots: tuple[Path, ...]
 
 
 def _documents(root: Path) -> tuple[Path, ...]:
@@ -110,7 +117,7 @@ def _check_asterion_imports(document: Path, text: str) -> tuple[str, ...]:
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     for alias in node.names:
-                        if _is_asterion_module(alias.name) and not _module_spec(
+                        if _is_asterion_module(alias.name) and not _resolve_module(
                             alias.name
                         ):
                             errors.append(
@@ -123,20 +130,22 @@ def _check_asterion_imports(document: Path, text: str) -> tuple[str, ...]:
                     and node.module is not None
                     and _is_asterion_module(node.module)
                 ):
-                    spec = _module_spec(node.module)
-                    if spec is None:
+                    resolved = _resolve_module(node.module)
+                    if resolved is None:
                         errors.append(
                             f"{document}: documented import is unavailable: "
                             f"{node.module}"
                         )
                         continue
-                    bindings = _source_bindings(spec)
                     for alias in node.names:
                         if alias.name == "*":
                             continue
-                        if alias.name in bindings:
+                        if alias.name in resolved.bindings:
                             continue
-                        if _module_spec(f"{node.module}.{alias.name}") is not None:
+                        if (
+                            _resolve_module(f"{node.module}.{alias.name}")
+                            is not None
+                        ):
                             continue
                         errors.append(
                             f"{document}: documented import is unavailable: "
@@ -182,34 +191,90 @@ def _is_asterion_module(name: str) -> bool:
     return name == "asterion" or name.startswith("asterion.")
 
 
-def _module_spec(module_name: str) -> ModuleSpec | None:
-    search_path = None
+def _resolve_module(module_name: str) -> _ResolvedModule | None:
+    search_roots = _filesystem_search_roots()
+    if search_roots is None:
+        return None
+    resolved: _ResolvedModule | None = None
     parts = module_name.split(".")
-    for count in range(1, len(parts) + 1):
-        qualified_name = ".".join(parts[:count])
-        try:
-            spec = PathFinder.find_spec(qualified_name, search_path)
-        except (AttributeError, ImportError, OSError, ValueError):
+    for index, component in enumerate(parts):
+        resolved = _resolve_component(component, search_roots)
+        if resolved is None:
             return None
-        if spec is None:
-            return None
-        if count != len(parts):
-            locations = spec.submodule_search_locations
-            if locations is None:
+        if index != len(parts) - 1:
+            if not resolved.child_roots:
                 return None
-            search_path = locations
-    return spec
+            search_roots = resolved.child_roots
+    return resolved
 
 
-def _source_bindings(spec: ModuleSpec) -> frozenset[str]:
-    origin = spec.origin
-    if origin is None or not origin.endswith(".py"):
-        return frozenset()
+def _filesystem_search_roots() -> tuple[Path, ...] | None:
     try:
-        source = Path(origin).read_text(encoding="utf-8")
+        current_directory = Path.cwd()
+    except OSError:
+        return None
+
+    roots: list[Path] = []
+    for entry in sys.path:
+        try:
+            root = Path(entry) if entry else current_directory
+            if not root.is_absolute():
+                root = current_directory / root
+        except (OSError, TypeError, ValueError):
+            return None
+        if root not in roots:
+            roots.append(root)
+    return tuple(roots)
+
+
+def _resolve_component(
+    component: str,
+    search_roots: tuple[Path, ...],
+) -> _ResolvedModule | None:
+    namespace_roots: list[Path] = []
+    for root in search_roots:
+        package_root = root / component
+        module_source = root / f"{component}.py"
+        try:
+            package_mode = _path_mode(package_root)
+            if package_mode is not None and stat.S_ISDIR(package_mode):
+                init_source = package_root / "__init__.py"
+                init_mode = _path_mode(init_source)
+                if init_mode is not None and stat.S_ISREG(init_mode):
+                    bindings = _source_bindings(init_source)
+                    if bindings is None:
+                        return None
+                    return _ResolvedModule(bindings, (package_root,))
+
+            module_mode = _path_mode(module_source)
+            if module_mode is not None and stat.S_ISREG(module_mode):
+                bindings = _source_bindings(module_source)
+                if bindings is None:
+                    return None
+                return _ResolvedModule(bindings, ())
+
+            if package_mode is not None and stat.S_ISDIR(package_mode):
+                namespace_roots.append(package_root)
+        except OSError:
+            return None
+    if namespace_roots:
+        return _ResolvedModule(frozenset(), tuple(namespace_roots))
+    return None
+
+
+def _path_mode(path: Path) -> int | None:
+    try:
+        return path.stat().st_mode
+    except FileNotFoundError:
+        return None
+
+
+def _source_bindings(source_path: Path) -> frozenset[str] | None:
+    try:
+        source = source_path.read_text(encoding="utf-8")
         tree = ast.parse(source)
     except (OSError, SyntaxError, UnicodeError):
-        return frozenset()
+        return None
 
     bindings: set[str] = set()
     for node in tree.body:

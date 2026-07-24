@@ -643,6 +643,180 @@ class StandaloneRepositoryTests(unittest.TestCase):
                         "documentation checking executed imported module code",
                     )
 
+    def test_docs_checker_resolves_namespace_packages_without_importing(
+        self,
+    ) -> None:
+        checker = PROJECT / "tools/check_docs.py"
+        self.assertTrue(checker.is_file(), "standalone docs checker is missing")
+        if not checker.is_file():
+            return
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            (root / "tools").mkdir()
+            shutil.copy2(checker, root / "tools/check_docs.py")
+            (root / "docs").mkdir()
+            marker = root / "IMPORT_SIDE_EFFECT"
+            side_effect_source = (
+                "from pathlib import Path\n"
+                'Path("IMPORT_SIDE_EFFECT").write_text("executed", encoding="utf-8")\n'
+            )
+
+            regular_root = root / "regular"
+            nested_namespace = regular_root / "asterion/ns"
+            nested_namespace.mkdir(parents=True)
+            (regular_root / "asterion/__init__.py").write_text(
+                side_effect_source,
+                encoding="utf-8",
+            )
+            (nested_namespace / "child.py").write_text(
+                f"{side_effect_source}API = object()\n",
+                encoding="utf-8",
+            )
+            (nested_namespace / "broken.py").write_text(
+                "API = (\n",
+                encoding="utf-8",
+            )
+            (nested_namespace / "loop.py").symlink_to("loop.py")
+
+            namespace_root_one = root / "namespace-one"
+            namespace_root_two = root / "namespace-two"
+            top_namespace_one = namespace_root_one / "asterion/top"
+            top_namespace_two = namespace_root_two / "asterion/top"
+            top_namespace_one.mkdir(parents=True)
+            top_namespace_two.mkdir(parents=True)
+            (top_namespace_one / "child.py").write_text(
+                f"{side_effect_source}API = object()\n",
+                encoding="utf-8",
+            )
+            (top_namespace_two / "sibling.py").write_text(
+                f"{side_effect_source}SIBLING_API = object()\n",
+                encoding="utf-8",
+            )
+
+            def run(
+                search_roots: tuple[Path, ...],
+                snippet: str,
+            ) -> subprocess.CompletedProcess[str]:
+                marker.unlink(missing_ok=True)
+                (root / "README.md").write_text(
+                    f"# Root\n\n```python\n{snippet}```\n",
+                    encoding="utf-8",
+                )
+                environment = os.environ.copy()
+                environment["PYTHONPATH"] = os.pathsep.join(
+                    str(path) for path in search_roots
+                )
+                return subprocess.run(
+                    ["python3", "-S", "tools/check_docs.py"],
+                    cwd=root,
+                    env=environment,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+
+            cases = (
+                (
+                    "nested direct child",
+                    (regular_root,),
+                    "import asterion.ns.child\n",
+                    True,
+                ),
+                (
+                    "nested from-import child",
+                    (regular_root,),
+                    "from asterion.ns import child\n",
+                    True,
+                ),
+                (
+                    "nested explicit symbol",
+                    (regular_root,),
+                    "from asterion.ns.child import API\n",
+                    True,
+                ),
+                (
+                    "nested missing child",
+                    (regular_root,),
+                    "import asterion.ns.missing\n",
+                    False,
+                ),
+                (
+                    "nested missing symbol",
+                    (regular_root,),
+                    "from asterion.ns.child import MISSING\n",
+                    False,
+                ),
+                (
+                    "nested invalid source",
+                    (regular_root,),
+                    "import asterion.ns.broken\n",
+                    False,
+                ),
+                (
+                    "nested resolver error",
+                    (regular_root,),
+                    "import asterion.ns.loop\n",
+                    False,
+                ),
+                (
+                    "top-level namespace direct child",
+                    (namespace_root_one, namespace_root_two),
+                    "import asterion.top.child\n",
+                    True,
+                ),
+                (
+                    "top-level namespace from-import child",
+                    (namespace_root_one, namespace_root_two),
+                    "from asterion.top import child\n",
+                    True,
+                ),
+                (
+                    "top-level namespace explicit symbol",
+                    (namespace_root_one, namespace_root_two),
+                    "from asterion.top.child import API\n",
+                    True,
+                ),
+                (
+                    "top-level namespace second root",
+                    (namespace_root_one, namespace_root_two),
+                    "from asterion.top import sibling\n",
+                    True,
+                ),
+                (
+                    "top-level namespace missing child",
+                    (namespace_root_one, namespace_root_two),
+                    "import asterion.top.missing\n",
+                    False,
+                ),
+                (
+                    "top-level namespace missing symbol",
+                    (namespace_root_one, namespace_root_two),
+                    "from asterion.top.child import MISSING\n",
+                    False,
+                ),
+            )
+            for label, search_roots, snippet, should_pass in cases:
+                with self.subTest(case=label):
+                    completed = run(search_roots, snippet)
+                    if should_pass:
+                        self.assertEqual(
+                            completed.returncode,
+                            0,
+                            completed.stderr,
+                        )
+                    else:
+                        self.assertNotEqual(completed.returncode, 0)
+                        self.assertIn(
+                            "documented import is unavailable",
+                            completed.stderr,
+                        )
+                    self.assertNotIn("Traceback", completed.stderr)
+                    self.assertFalse(
+                        marker.exists(),
+                        "documentation checking executed imported module code",
+                    )
+
 
 if __name__ == "__main__":
     unittest.main()
