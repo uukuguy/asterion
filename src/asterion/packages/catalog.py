@@ -34,7 +34,7 @@ class PackageCatalog:
 
     def select(
         self, refs: Iterable[PackageRef]
-    ) -> tuple[Mapping[str, object], ...]:
+    ) -> tuple[dict[str, object], ...]:
         """Return fresh manifests for exact package identities in stable order."""
 
         requested = list(refs)
@@ -96,7 +96,7 @@ def discover_packages(roots: Iterable[Path]) -> PackageCatalog:
                 CatalogEntry(
                     ref=ref,
                     source=source.resolve(strict=True),
-                    manifest=_freeze(manifest),
+                    manifest=_freeze_mapping(manifest),
                 )
             )
     return PackageCatalog(
@@ -124,9 +124,13 @@ def _canonicalize_roots(roots: Iterable[Path]) -> list[Path]:
     return sorted(canonical)
 
 
+def _freeze_mapping(value: Mapping[str, object]) -> Mapping[str, object]:
+    return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+
+
 def _freeze(value: object) -> object:
     if isinstance(value, Mapping):
-        return MappingProxyType({str(key): _freeze(item) for key, item in value.items()})
+        return _freeze_mapping(value)
     if isinstance(value, list):
         return tuple(_freeze(item) for item in value)
     return value

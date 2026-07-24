@@ -46,18 +46,29 @@ class PackageCatalogTests(unittest.TestCase):
         entry = catalog.entries[0]
 
         with self.assertRaises(TypeError):
-            entry.manifest["kind"] = "policy"
+            entry.manifest["kind"] = "policy"  # pyright: ignore[reportIndexIssue]
         with self.assertRaises(AttributeError):
-            entry.manifest["provides_capabilities"].append("changed")
+            entry.manifest["provides_capabilities"].append(  # pyright: ignore[reportAttributeAccessIssue]
+                "changed"
+            )
 
     def test_selected_manifest_is_fresh(self) -> None:
         catalog = discover_packages((self.root,))
+        ref = catalog.entries[0].ref
 
-        first = catalog.select((catalog.entries[0].ref,))[0]
+        first: dict[str, object] = catalog.select((ref,))[0]
         first["kind"] = "policy"
-        second = catalog.select((catalog.entries[0].ref,))[0]
+        first_capabilities = first["provides_capabilities"]
+        self.assertIsInstance(first_capabilities, list)
+        assert isinstance(first_capabilities, list)
+        first_capabilities.append("changed")
+
+        second: dict[str, object] = catalog.select((ref,))[0]
 
         self.assertEqual(second["kind"], "capability")
+        self.assertEqual(
+            second["provides_capabilities"], ["capability.one.provided"]
+        )
 
     def test_duplicate_catalog_roots_are_rejected(self) -> None:
         with self.assertRaises(PackageCatalogError):
