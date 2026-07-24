@@ -501,7 +501,7 @@ def compute_detailed_analysis(*, results: Sequence[Mapping[str, Any]], rows: Seq
     total_tokens = _number(totals.get("agent_total_tokens")) or 0.0
     correct_count = int(_number(counts.get("correct")) or 0)
     incorrect = [row for row in records if row.get("is_correct") is False]
-    return {
+    analysis = {
         "schema": "asterion.dci.batch-analysis/v1",
         "cost_efficiency": {"cost_per_correct_usd": total_cost / correct_count if correct_count else None, "agent_tokens_per_correct": total_tokens / correct_count if correct_count else None},
         "slices": {"all": _slice(records), "correct": _slice([row for row in records if row.get("is_correct") is True]), "incorrect": _slice(incorrect)},
@@ -510,6 +510,10 @@ def compute_detailed_analysis(*, results: Sequence[Mapping[str, Any]], rows: Seq
         "incorrect_queries": [{"query_id": row["query_id"], "wall_time_seconds": row["wall_time_seconds"], "overall_cost_total": row["overall_cost_total"], "tool_call_count": row["tool_call_count"], "turn_count": row["turn_count"], "gold_answer": row["gold_answer"], "predicted_answer": row["final_text"], "judge_reason": row["judge_reason"], "query": row["query"]} for row in incorrect],
         "per_query_metrics": records,
     }
+    provenance = summary.get("provenance")
+    if isinstance(provenance, Mapping):
+        analysis["provenance"] = dict(provenance)
+    return analysis
 
 
 def _seconds(value: object) -> str:

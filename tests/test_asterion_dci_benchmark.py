@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 from asterion.dci.benchmark import BenchmarkRequest, DciBenchmarkError, run_benchmark
 from asterion.dci.config import DciRuntimeOptions, resolve_dci_paths
 from asterion.dci.judge import JudgeConfig
+from asterion.dci.provenance import dci_complete_implementation_identity
 from asterion.dci.run import DciRunResult, run_pi_research as _real_run_pi_research
 from asterion.runtime.host import RunEvent
 
@@ -49,6 +50,127 @@ def _recorded_run(_paths: object, request: object, **kwargs: object) -> DciRunRe
 
 
 class AsterionDciBenchmarkTests(unittest.TestCase):
+    def test_batch_evidence_exports_transitive_implementation_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            request = _request(root)
+            with patch(
+                "asterion.dci.benchmark.run_pi_research", side_effect=_recorded_run
+            ), patch(
+                "asterion.dci.evaluation.judge_answer_sync",
+                return_value=_verdict(request.judge_config),
+            ):
+                run_benchmark(request, paths=Mock())
+
+            config = json.loads((request.output_root / "config.json").read_text())
+            item = json.loads(
+                (request.output_root / "q-1/item.json").read_text()
+            )
+            result = json.loads(
+                (request.output_root / "q-1/result.json").read_text()
+            )
+            summary = json.loads(
+                (request.output_root / "summary.json").read_text()
+            )
+            analysis = json.loads(
+                (request.output_root / "analysis.json").read_text()
+            )
+
+        expected = dci_complete_implementation_identity()
+        self.assertEqual(config["implementation_sha256"], expected)
+        self.assertEqual(item["implementation_sha256"], expected)
+        self.assertEqual(item["identity"]["implementation_sha256"], expected)
+        self.assertEqual(result["implementation_sha256"], expected)
+        self.assertEqual(summary["provenance"]["implementation_sha256"], expected)
+        self.assertEqual(analysis["provenance"]["implementation_sha256"], expected)
+
+    def test_changed_or_missing_implementation_identity_rejects_before_execution(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            request = _request(root)
+            first_identity = "1" * 64
+            second_identity = "2" * 64
+            with patch(
+                "asterion.dci.benchmark.dci_complete_implementation_identity",
+                return_value=first_identity,
+            ), patch(
+                "asterion.dci.benchmark.run_pi_research", side_effect=_recorded_run
+            ), patch(
+                "asterion.dci.evaluation.judge_answer_sync",
+                return_value=_verdict(request.judge_config),
+            ):
+                run_benchmark(request, paths=Mock())
+
+            with patch(
+                "asterion.dci.benchmark.dci_complete_implementation_identity",
+                return_value=second_identity,
+            ), patch("asterion.dci.benchmark.run_pi_research") as run, patch(
+                "asterion.dci.benchmark.evaluate_run_directory_async"
+            ) as evaluate:
+                with self.assertRaisesRegex(
+                    DciBenchmarkError, "configuration is incompatible"
+                ):
+                    run_benchmark(request, paths=Mock())
+            run.assert_not_called()
+            evaluate.assert_not_called()
+
+            config_path = request.output_root / "config.json"
+            config = json.loads(config_path.read_text())
+            valid_config = dict(config)
+            config.pop("implementation_sha256")
+            config_path.write_text(json.dumps(config))
+            with patch(
+                "asterion.dci.benchmark.dci_complete_implementation_identity",
+                return_value=first_identity,
+            ), patch("asterion.dci.benchmark.run_pi_research") as run, patch(
+                "asterion.dci.benchmark.evaluate_run_directory_async"
+            ) as evaluate:
+                with self.assertRaisesRegex(
+                    DciBenchmarkError, "configuration evidence is invalid"
+                ):
+                    run_benchmark(request, paths=Mock())
+            run.assert_not_called()
+            evaluate.assert_not_called()
+
+            config_path.write_text(json.dumps(valid_config))
+            item_path = request.output_root / "q-1/item.json"
+            item = json.loads(item_path.read_text())
+            valid_item = dict(item)
+            item.pop("implementation_sha256")
+            item_path.write_text(json.dumps(item))
+            with patch(
+                "asterion.dci.benchmark.dci_complete_implementation_identity",
+                return_value=first_identity,
+            ), patch("asterion.dci.benchmark.run_pi_research") as run, patch(
+                "asterion.dci.benchmark.evaluate_run_directory_async"
+            ) as evaluate:
+                with self.assertRaisesRegex(
+                    DciBenchmarkError, "item evidence is invalid"
+                ):
+                    run_benchmark(request, paths=Mock())
+            run.assert_not_called()
+            evaluate.assert_not_called()
+
+            item_path.write_text(json.dumps(valid_item))
+            result_path = request.output_root / "q-1/result.json"
+            result = json.loads(result_path.read_text())
+            result.pop("implementation_sha256")
+            result_path.write_text(json.dumps(result))
+            with patch(
+                "asterion.dci.benchmark.dci_complete_implementation_identity",
+                return_value=first_identity,
+            ), patch("asterion.dci.benchmark.run_pi_research") as run, patch(
+                "asterion.dci.benchmark.evaluate_run_directory_async"
+            ) as evaluate:
+                with self.assertRaisesRegex(
+                    DciBenchmarkError, "result evidence is invalid"
+                ):
+                    run_benchmark(request, paths=Mock())
+            run.assert_not_called()
+            evaluate.assert_not_called()
+
     def test_persisted_batch_judge_identity_is_prompt_and_request_shape_bound(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory).resolve()

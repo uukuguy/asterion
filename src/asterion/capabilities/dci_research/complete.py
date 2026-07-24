@@ -6,11 +6,11 @@ import hashlib
 import json
 import os
 import stat
-from importlib import resources
 from pathlib import Path
 from collections.abc import Mapping
 
 from asterion.dci.analysis import aggregate_results
+from asterion.dci.provenance import dci_complete_implementation_identity
 from asterion.dci.services import AnswerJudgeService, LocalCorpusService
 from asterion.packages.execution import (
     InProcessArtifactPayload,
@@ -25,31 +25,12 @@ from asterion.runtime.protocol import ProtocolError, validate_event_stream
 
 INPUT_PROTOCOL = "asterion.dci.complete-input/v1"
 IMPLEMENTATION_PROTOCOL = "asterion.dci.complete-application/v1"
-_IDENTITY_RESOURCES = (
-    "capabilities/dci_research/complete.py",
-    "capabilities/dci_research/manifests/dci-analysis.json",
-    "capabilities/dci_research/manifests/dci-benchmark.json",
-    "capabilities/dci_research/manifests/dci-evaluation.json",
-    "capabilities/dci_research/manifests/dci-export.json",
-    "capabilities/dci_research/manifests/dci-research.json",
-    "applications/dci_agent_lite/assemblies/dci-complete-application-claude.json",
-    "applications/dci_agent_lite/assemblies/dci-complete-application-pi.json",
-)
 
 
 def complete_application_identity() -> str:
     """Digest the exact shipped implementation and portable application resources."""
 
-    root = resources.files("asterion")
-    digest = hashlib.sha256()
-    for name in _IDENTITY_RESOURCES:
-        raw = root.joinpath(name).read_bytes()
-        encoded = name.encode()
-        digest.update(len(encoded).to_bytes(4, "big"))
-        digest.update(encoded)
-        digest.update(len(raw).to_bytes(8, "big"))
-        digest.update(raw)
-    return digest.hexdigest()
+    return dci_complete_implementation_identity()
 
 
 def _envelope(value: str) -> tuple[str, str]:

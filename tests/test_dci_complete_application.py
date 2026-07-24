@@ -29,6 +29,10 @@ from asterion.dci.services import (
     create_answer_judge_service_factory,
     create_local_corpus_service_factory,
 )
+from asterion.dci.provenance import (
+    DCI_COMPLETE_IMPLEMENTATION_RESOURCES,
+    dci_complete_implementation_identity,
+)
 from tests.test_application_discovery import FakeEntryPoint
 from asterion.dci.dual_runtime_verification import (
     DciDualRuntimeVerificationError,
@@ -162,6 +166,148 @@ def plan(runtime_id: str):
 
 
 class DciCompleteApplicationContractTests(unittest.TestCase):
+    def test_transitive_identity_closure_matches_complete_assembly_packages(
+        self,
+    ) -> None:
+        self.assertEqual(
+            {
+                name
+                for name in DCI_COMPLETE_IMPLEMENTATION_RESOURCES
+                if "/manifests/" not in name
+            },
+            {
+                "applications/dci_agent_lite/assemblies/dci-complete-application-claude.json",
+                "applications/dci_agent_lite/assemblies/dci-complete-application-pi.json",
+                "capabilities/dci_research/complete.py",
+                "capabilities/dci_research/implementation.py",
+                "dci/analysis.py",
+                "dci/benchmark.py",
+                "dci/bridge.py",
+                "dci/evaluation.py",
+                "dci/judge.py",
+                "dci/provenance.py",
+                "dci/run.py",
+                "dci/services.py",
+            },
+        )
+        assembly_package_ids: set[str] | None = None
+        for assembly_path in sorted(
+            ASSEMBLIES.glob("dci-complete-application-*.json")
+        ):
+            assembly = json.loads(assembly_path.read_text())
+            current = {
+                f"{item['package_id']}@{item['version']}"
+                for item in assembly["packages"]
+            }
+            if assembly_package_ids is None:
+                assembly_package_ids = current
+            else:
+                self.assertEqual(current, assembly_package_ids)
+        assert assembly_package_ids is not None
+
+        manifest_refs = set()
+        manifest_resources = {
+            name
+            for name in DCI_COMPLETE_IMPLEMENTATION_RESOURCES
+            if name.startswith("capabilities/dci_research/manifests/")
+        }
+        for resource_name in manifest_resources:
+            manifest = json.loads(SOURCE.joinpath(resource_name).read_text())
+            manifest_refs.add(f"{manifest['package_id']}@{manifest['version']}")
+
+        self.assertEqual(manifest_refs, assembly_package_ids)
+        self.assertEqual(
+            tuple(sorted(DCI_COMPLETE_IMPLEMENTATION_RESOURCES)),
+            DCI_COMPLETE_IMPLEMENTATION_RESOURCES,
+        )
+        self.assertEqual(
+            len(set(DCI_COMPLETE_IMPLEMENTATION_RESOURCES)),
+            len(DCI_COMPLETE_IMPLEMENTATION_RESOURCES),
+        )
+
+    def test_transitive_identity_changes_for_every_resource_and_ignores_order(
+        self,
+    ) -> None:
+        resources = {
+            name: f"fixture:{name}".encode()
+            for name in DCI_COMPLETE_IMPLEMENTATION_RESOURCES
+        }
+
+        def read(name: str) -> bytes:
+            return resources[name]
+
+        baseline = dci_complete_implementation_identity(
+            resource_reader=read,
+            resource_names=DCI_COMPLETE_IMPLEMENTATION_RESOURCES,
+        )
+        reversed_identity = dci_complete_implementation_identity(
+            resource_reader=read,
+            resource_names=tuple(reversed(DCI_COMPLETE_IMPLEMENTATION_RESOURCES)),
+        )
+        self.assertEqual(baseline, reversed_identity)
+
+        for name in DCI_COMPLETE_IMPLEMENTATION_RESOURCES:
+            with self.subTest(resource=name):
+                mutated = dict(resources)
+                mutated[name] += b"\x00"
+                self.assertNotEqual(
+                    baseline,
+                    dci_complete_implementation_identity(
+                        resource_reader=mutated.__getitem__,
+                        resource_names=DCI_COMPLETE_IMPLEMENTATION_RESOURCES,
+                    ),
+                )
+
+    def test_transitive_identity_rejects_incomplete_ambiguous_or_unsafe_closure(
+        self,
+    ) -> None:
+        resources = {
+            name: name.encode() for name in DCI_COMPLETE_IMPLEMENTATION_RESOURCES
+        }
+        invalid_names = (
+            DCI_COMPLETE_IMPLEMENTATION_RESOURCES[:-1],
+            DCI_COMPLETE_IMPLEMENTATION_RESOURCES
+            + (DCI_COMPLETE_IMPLEMENTATION_RESOURCES[-1],),
+            DCI_COMPLETE_IMPLEMENTATION_RESOURCES + ("dci/../judge.py",),
+            (*DCI_COMPLETE_IMPLEMENTATION_RESOURCES[:-1], ["dci/judge.py"]),
+        )
+        for names in invalid_names:
+            with self.subTest(names=names), self.assertRaisesRegex(
+                ValueError, "^DCI implementation resource closure is invalid$"
+            ):
+                dci_complete_implementation_identity(
+                    resource_reader=resources.__getitem__,
+                    resource_names=names,
+                )
+
+        def missing(_name: str) -> bytes:
+            raise FileNotFoundError("/SENTINEL_PRIVATE/source.py")
+
+        with self.assertRaises(ValueError) as raised:
+            dci_complete_implementation_identity(
+                resource_reader=missing,
+                resource_names=DCI_COMPLETE_IMPLEMENTATION_RESOURCES,
+            )
+        self.assertEqual(
+            str(raised.exception),
+            "DCI implementation resource closure is unavailable",
+        )
+        self.assertNotIn("SENTINEL", str(raised.exception))
+
+        with self.assertRaisesRegex(
+            ValueError, "^DCI implementation resource closure is unavailable$"
+        ):
+            dci_complete_implementation_identity(
+                resource_reader=lambda _name: bytearray(b"not exact bytes"),
+                resource_names=DCI_COMPLETE_IMPLEMENTATION_RESOURCES,
+            )
+
+    def test_complete_identity_uses_the_centralized_transitive_closure(self) -> None:
+        self.assertEqual(
+            complete_application_identity(),
+            dci_complete_implementation_identity(),
+        )
+
     def test_dci_assemblies_do_not_declare_runtime_internal_host_evidence(self) -> None:
         for assembly_path in sorted(ASSEMBLIES.glob("dci-*.json")):
             with self.subTest(assembly=assembly_path.name):

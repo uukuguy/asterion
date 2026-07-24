@@ -69,6 +69,7 @@ from asterion.dci.paper_benchmarks import (
     resolve_paper_benchmark,
     resolve_paper_experiment_scope,
 )
+from asterion.dci.provenance import dci_complete_implementation_identity
 from asterion.dci.analysis import (
     aggregate_results,
     gather_query_metrics,
@@ -241,6 +242,7 @@ async def run_benchmark_async(
                 authorities=row_authorities,
                 input_snapshots=snapshots,
                 resolution_config=config.get("resolution"),
+                implementation_sha256=str(config["implementation_sha256"]),
             )
         counts = _counts(results)
         _publish_aggregates(
@@ -249,6 +251,7 @@ async def run_benchmark_async(
             include_analysis=True,
             input_snapshots=snapshots,
             resolution_config=config.get("resolution"),
+            implementation_sha256=str(config["implementation_sha256"]),
         )
         _publish_batch_state(lock, "completed", results)
         return BenchmarkResult(output_root=output_root, counts=counts)
@@ -273,6 +276,7 @@ async def run_benchmark_async(
             include_analysis=True,
             input_snapshots=snapshots,
             resolution_config=config.get("resolution"),
+            implementation_sha256=str(config["implementation_sha256"]),
         )
         _publish_batch_state(lock, "cancelled", results)
         raise
@@ -297,6 +301,7 @@ async def run_benchmark_async(
             include_analysis=True,
             input_snapshots=snapshots,
             resolution_config=config.get("resolution"),
+            implementation_sha256=str(config["implementation_sha256"]),
         )
         _publish_batch_state(lock, "failed", results)
         raise
@@ -627,6 +632,7 @@ def _prepare(
     runtime = _runtime_document(request.runtime_options)
     judge = judge_public_identity(request.judge_config)
     judge_fingerprint = _fingerprint(judge)
+    implementation_sha256 = dci_complete_implementation_identity()
     dataset_identity = canonical_input_identity(request.dataset)
     dataset_digest = hashlib.sha256(dataset_raw).hexdigest()
     snapshots: dict[str, bytes] = {}
@@ -663,6 +669,7 @@ def _prepare(
         "figures": request.figures,
         "judge": judge,
         "judge_configuration_fingerprint": judge_fingerprint,
+        "implementation_sha256": implementation_sha256,
         "benchmark_prompt_contract": BENCHMARK_PROMPT_CONTRACT,
         "benchmark_prompt_contract_sha256": BENCHMARK_PROMPT_CONTRACT_SHA256,
         "prompt_resources": prompt_resources,
@@ -732,6 +739,7 @@ def _prepare(
             "benchmark_prompt_contract": BENCHMARK_PROMPT_CONTRACT,
             "benchmark_prompt_contract_sha256": BENCHMARK_PROMPT_CONTRACT_SHA256,
             "prompt_resources": config["prompt_resources"],
+            "implementation_sha256": implementation_sha256,
         }
         if resolution_config:
             identity["resolution"] = resolution_config.get("manifests", {}).get(
@@ -750,6 +758,7 @@ def _prepare(
                 "identity": identity,
                 "row_fingerprint": _fingerprint(identity),
                 "judge_configuration_fingerprint": judge_fingerprint,
+                "implementation_sha256": implementation_sha256,
             }
         )
     if authorized_scope is not None and not bounded_paper_selection:
@@ -836,6 +845,7 @@ async def _run_row(
                 row.query_id,
                 item["row_fingerprint"],
                 "failed",
+                implementation_sha256=item["implementation_sha256"],
                 native_generation=authority.generation,
                 native_evidence_available=False,
             )
@@ -866,6 +876,7 @@ async def _run_row(
                     row.query_id,
                     item["row_fingerprint"],
                     "failed",
+                    implementation_sha256=item["implementation_sha256"],
                     native_generation=generation,
                     native_evidence_available=False,
                 )
@@ -911,6 +922,7 @@ async def _run_row(
                 "schema": "asterion.dci.batch-result/v1",
                 "query_id": row.query_id,
                 "row_fingerprint": item["row_fingerprint"],
+                "implementation_sha256": item["implementation_sha256"],
                 "status": "completed",
                 "mode": request.mode,
                 "native_generation": generation,
@@ -952,6 +964,7 @@ async def _run_row(
             row.query_id,
             item["row_fingerprint"],
             "cancelled",
+            implementation_sha256=item["implementation_sha256"],
             native_generation=generation,
             native_evidence_available=available,
             native_evidence_fingerprint=evidence_fingerprint,
@@ -968,6 +981,7 @@ async def _run_row(
             row.query_id,
             item["row_fingerprint"],
             "failed",
+            implementation_sha256=item["implementation_sha256"],
             native_generation=generation,
             native_evidence_available=available,
             native_evidence_fingerprint=evidence_fingerprint,
@@ -1126,6 +1140,7 @@ def _validate_config_document(
         "schema", "dataset", "mode", "profile", "corpus_identity", "corpus_hint",
         "cwd", "runtime", "conversation_features", "max_concurrency", "max_turns",
         "analysis", "figures", "judge", "judge_configuration_fingerprint",
+        "implementation_sha256",
         "benchmark_prompt_contract", "benchmark_prompt_contract_sha256",
         "prompt_resources", "run_fingerprint", "batch_fingerprint",
     }
@@ -1137,6 +1152,10 @@ def _validate_config_document(
         or value.get("benchmark_prompt_contract") != BENCHMARK_PROMPT_CONTRACT
         or value.get("benchmark_prompt_contract_sha256")
         != BENCHMARK_PROMPT_CONTRACT_SHA256
+        or re.fullmatch(
+            r"[0-9a-f]{64}", str(value.get("implementation_sha256"))
+        )
+        is None
     ):
         raise DciBenchmarkError("DCI benchmark configuration evidence is invalid")
     paper_authorization = value.get("paper_full_authorization")
@@ -1271,7 +1290,7 @@ def _validate_config_document(
 def _validate_item_document(value: dict[str, Any]) -> None:
     expected = {
         "schema", "query_id", "input", "prompt", "identity", "row_fingerprint",
-        "judge_configuration_fingerprint",
+        "judge_configuration_fingerprint", "implementation_sha256",
     }
     if set(value) != expected or value.get("schema") != "asterion.dci.batch-item/v1":
         raise DciBenchmarkError("DCI benchmark item evidence is invalid")
@@ -1282,6 +1301,12 @@ def _validate_item_document(value: dict[str, Any]) -> None:
         identity.get("benchmark_prompt_contract") != BENCHMARK_PROMPT_CONTRACT
         or identity.get("benchmark_prompt_contract_sha256")
         != BENCHMARK_PROMPT_CONTRACT_SHA256
+        or re.fullmatch(
+            r"[0-9a-f]{64}", str(value.get("implementation_sha256"))
+        )
+        is None
+        or identity.get("implementation_sha256")
+        != value.get("implementation_sha256")
     ):
         raise DciBenchmarkError("DCI benchmark item evidence is invalid")
     if value.get("row_fingerprint") != _fingerprint(identity):
@@ -1462,6 +1487,7 @@ def _validate_result_shape(
     common = {
         "schema", "query_id", "row_fingerprint", "status", "mode",
         "native_generation", "native_evidence_fingerprint",
+        "implementation_sha256",
     }
     expected = common | (
         {
@@ -1476,6 +1502,8 @@ def _validate_result_shape(
         or value.get("schema") != "asterion.dci.batch-result/v1"
         or value.get("query_id") != item.get("query_id")
         or value.get("row_fingerprint") != item.get("row_fingerprint")
+        or value.get("implementation_sha256")
+        != item.get("implementation_sha256")
         or value.get("status") != "completed"
         or value.get("mode") != mode
         or not isinstance(value.get("native_generation"), str)
@@ -1496,11 +1524,13 @@ def _validate_terminal_result(
         != {
             "schema", "query_id", "row_fingerprint", "status",
             "native_generation", "native_evidence_available",
-            "native_evidence_fingerprint",
+            "native_evidence_fingerprint", "implementation_sha256",
         }
         or value.get("schema") != "asterion.dci.batch-result/v1"
         or value.get("query_id") != item.get("query_id")
         or value.get("row_fingerprint") != item.get("row_fingerprint")
+        or value.get("implementation_sha256")
+        != item.get("implementation_sha256")
         or value.get("status") not in {"failed", "cancelled", "not_started"}
         or value.get("native_generation") is not None
         and (
@@ -1717,6 +1747,7 @@ def _failed_result(
     row_fingerprint: object,
     status: str,
     *,
+    implementation_sha256: object,
     native_generation: str | None = None,
     native_evidence_available: bool = False,
     native_evidence_fingerprint: str | None = None,
@@ -1725,6 +1756,7 @@ def _failed_result(
         "schema": "asterion.dci.batch-result/v1",
         "query_id": query_id,
         "row_fingerprint": row_fingerprint,
+        "implementation_sha256": implementation_sha256,
         "status": status,
         "native_generation": native_generation,
         "native_evidence_available": native_evidence_available,
@@ -1755,6 +1787,7 @@ def _publish_aggregates(
     authorities: dict[int, _RowAuthority],
     input_snapshots: Mapping[str, bytes],
     resolution_config: object,
+    implementation_sha256: str,
     include_analysis: bool = False,
 ) -> None:
     ordered = [results[index] for index in sorted(results)]
@@ -1770,6 +1803,9 @@ def _publish_aggregates(
         resolution_config=resolution_config if include_analysis else None,
     )
     summary = aggregate_results(metrics)
+    summary["provenance"] = {
+        "implementation_sha256": implementation_sha256,
+    }
     lock.write_json("summary.json", summary)
     if include_analysis and request.analysis:
         artifacts = write_analysis_artifacts(
@@ -2076,7 +2112,10 @@ def _terminal_results(
             result = candidate
         if result is None:
             result = _failed_result(
-                row.query_id, items[index]["row_fingerprint"], missing_status
+                row.query_id,
+                items[index]["row_fingerprint"],
+                missing_status,
+                implementation_sha256=items[index]["implementation_sha256"],
             )
             query.write_json("result.json", result)
         results[index] = result

@@ -2,11 +2,90 @@
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import re
 import subprocess
+from collections.abc import Callable, Iterable
+from importlib import resources
 from pathlib import Path
+from pathlib import PurePosixPath
 from urllib.parse import urlsplit
+
+
+DCI_COMPLETE_IMPLEMENTATION_RESOURCES: tuple[str, ...] = (
+    "applications/dci_agent_lite/assemblies/dci-complete-application-claude.json",
+    "applications/dci_agent_lite/assemblies/dci-complete-application-pi.json",
+    "capabilities/dci_research/complete.py",
+    "capabilities/dci_research/implementation.py",
+    "capabilities/dci_research/manifests/dci-analysis.json",
+    "capabilities/dci_research/manifests/dci-benchmark.json",
+    "capabilities/dci_research/manifests/dci-evaluation.json",
+    "capabilities/dci_research/manifests/dci-export.json",
+    "capabilities/dci_research/manifests/dci-research.json",
+    "capabilities/dci_research/manifests/local-corpus-policy.json",
+    "dci/analysis.py",
+    "dci/benchmark.py",
+    "dci/bridge.py",
+    "dci/evaluation.py",
+    "dci/judge.py",
+    "dci/provenance.py",
+    "dci/run.py",
+    "dci/services.py",
+)
+_IMPLEMENTATION_IDENTITY_DOMAIN = b"asterion.dci.implementation/v1\x00"
+
+
+def dci_complete_implementation_identity(
+    *,
+    resource_reader: Callable[[str], bytes] | None = None,
+    resource_names: Iterable[str] = DCI_COMPLETE_IMPLEMENTATION_RESOURCES,
+) -> str:
+    """Hash the canonical exact-byte DCI product implementation closure."""
+
+    try:
+        names = tuple(resource_names)
+    except Exception:
+        raise ValueError("DCI implementation resource closure is invalid") from None
+    if (
+        len(names) != len(DCI_COMPLETE_IMPLEMENTATION_RESOURCES)
+        or any(not _canonical_resource_name(name) for name in names)
+        or len(set(names)) != len(names)
+        or set(names) != set(DCI_COMPLETE_IMPLEMENTATION_RESOURCES)
+    ):
+        raise ValueError("DCI implementation resource closure is invalid")
+    reader = resource_reader or _read_implementation_resource
+    digest = hashlib.sha256(_IMPLEMENTATION_IDENTITY_DOMAIN)
+    try:
+        for name in sorted(names):
+            raw = reader(name)
+            if type(raw) is not bytes:
+                raise TypeError
+            encoded = name.encode("utf-8")
+            digest.update(len(encoded).to_bytes(4, "big"))
+            digest.update(encoded)
+            digest.update(len(raw).to_bytes(8, "big"))
+            digest.update(raw)
+    except Exception:
+        raise ValueError(
+            "DCI implementation resource closure is unavailable"
+        ) from None
+    return digest.hexdigest()
+
+
+def _canonical_resource_name(value: object) -> bool:
+    if type(value) is not str or not value:
+        return False
+    path = PurePosixPath(value)
+    return (
+        not path.is_absolute()
+        and path.as_posix() == value
+        and all(part not in {"", ".", ".."} for part in path.parts)
+    )
+
+
+def _read_implementation_resource(name: str) -> bytes:
+    return resources.files("asterion").joinpath(name).read_bytes()
 
 
 _REVISION_PATTERN = re.compile(r"[0-9a-fA-F]{40,64}")
