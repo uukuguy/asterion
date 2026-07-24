@@ -111,3 +111,40 @@ None. Sorting remains semantic validation. The only string-domain change is
 lone-surrogate rejection needed to give Python and TypeScript the same Unicode
 scalar domain. No v1 cardinality or media-type/value grammar was added, and no
 provider operation ran.
+
+## Re-review closure: line-terminator schema escape
+
+The re-review probe added package and assembly edge strings containing
+`"line\n\uD800"`. Before the schema fix, Python semantic validation rejected
+both fixtures, TypeScript semantic validation rejected both fixtures, but the
+new direct Ajv test returned `true` for the canonical package schema. The
+TypeScript suite therefore failed one of thirteen tests for the expected
+schema-only reason.
+
+Both edge-string definitions now use the JSON-escaped pattern
+`^(?![\\s\\S]*[\\uD800-\\uDFFF])[\\s\\S]+$`, so the negative lookahead scans
+every code unit across line terminators. No other schema grammar changed.
+Existing surrogate and ordering fixtures remain in the matrices.
+
+Focused fix commit:
+
+- `031732358d6feb73f81d901f2159d7159652f321` —
+  `fix: close surrogate schema escape`
+
+Added evidence:
+
+- `tests/fixtures/packages/v1/invalid-line-terminator-surrogate-edge.json`
+- `tests/fixtures/assembly/v1/invalid-line-terminator-surrogate-edge.json`
+- Python canonical-ordering suite: PASS, 4 tests, including semantic rejection
+  of both new shared fixtures.
+- TypeScript suite: PASS, 13 tests, including semantic rejection and direct Ajv
+  rejection against both canonical schemas.
+- Focused Task 8 Python gate: PASS, 63 tests.
+- `make lint`: PASS.
+- `make docs-check`: PASS, 24 Markdown files and 39 local links.
+- `make promotion-check`: PASS, 18 commands, zero provider operations, no full
+  dataset.
+- `git diff --check`: PASS.
+
+No provider operation ran. No file under `docs/status/` or any progress ledger
+was changed.
