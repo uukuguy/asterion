@@ -29,6 +29,11 @@ from asterion.applications.product import (
 )
 from asterion.dci.verification import create_dci_product
 from asterion.dci.services import create_local_corpus_service_factory
+from asterion.packages.catalog import PackageRef
+from asterion.packages.execution import (
+    InProcessArtifactPayload,
+    PackageExecutionResult,
+)
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 from asterion.services.controlled_executor import ControlledExecutionResult
@@ -938,6 +943,97 @@ class AsterionCliTests(unittest.TestCase):
         self.assertEqual(payload["runtime_id"], "pi.reference")
         self.assertEqual(payload["run_id"], "cli-run")
         self.assertNotIn("SECRET-INPUT", stdout.getvalue())
+
+    def test_run_serializes_only_explicit_private_artifact_projection(self) -> None:
+        class PrivateImplementation:
+            async def execute(self, invocation):
+                del invocation
+                return PackageExecutionResult(
+                    events=(),
+                    artifacts=(
+                        {
+                            "artifact_id": "private-result",
+                            "media_type": "application/vnd.private+json",
+                            "value": {
+                                "schema": "fixture.private/v1",
+                                "stage_data": InProcessArtifactPayload(
+                                    private_value={
+                                        "question": "SENTINEL_QUESTION",
+                                        "nested": (
+                                            {
+                                                "gold": "SENTINEL_GOLD",
+                                                "path": "/private/SENTINEL_PATH",
+                                            },
+                                        ),
+                                    },
+                                    public_projection={
+                                        "status": "completed",
+                                        "body_sha256": "a" * 64,
+                                        "artifact_ids": ("answer",),
+                                    },
+                                ),
+                            },
+                        },
+                    ),
+                )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            value = provider(root)
+            manifest_path = root / "manifests/research.json"
+            manifest = json.loads(manifest_path.read_text())
+            manifest["produces_artifacts"] = ["application/vnd.private+json"]
+            manifest_path.write_text(json.dumps(manifest))
+            application = value.applications[0]
+            value = replace(
+                value,
+                applications=(
+                    replace(
+                        application,
+                        implementations=(
+                            (
+                                PackageRef("example.research", "1.0.0"),
+                                PrivateImplementation(),
+                            ),
+                        ),
+                    ),
+                ),
+            )
+            entry = FakeEntryPoint(name="example-app", factory=lambda: value)
+            registry = RuntimeFactoryRegistry(
+                (
+                    RuntimeFactoryBinding(
+                        runtime_id="pi.reference",
+                        capabilities=(),
+                        factory=lambda context: FixtureRuntime(),
+                    ),
+                )
+            )
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            code = main(
+                [
+                    "run",
+                    "--provider",
+                    "example-app",
+                    "--application",
+                    "example.research@1.0.0",
+                    "--input",
+                    "fixture",
+                ],
+                entry_points=(entry,),
+                runtime_factories=registry,
+                stdout=stdout,
+                stderr=stderr,
+            )
+
+        self.assertEqual(code, 0, stderr.getvalue())
+        payload = json.loads(stdout.getvalue())
+        stage_data = payload["artifacts"][0]["value"]["stage_data"]
+        self.assertEqual(stage_data["status"], "completed")
+        self.assertEqual(stage_data["artifact_ids"], ["answer"])
+        self.assertNotIn("SENTINEL", stdout.getvalue())
+        self.assertNotIn("SENTINEL", stderr.getvalue())
 
     def test_run_defaults_the_only_application_runtime_without_an_assembly_path(
         self,

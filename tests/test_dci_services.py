@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import asyncio
 import subprocess
 import sys
 import tempfile
@@ -10,6 +11,8 @@ from unittest.mock import patch
 
 import asterion.dci.services as dci_services
 from asterion.dci.services import (
+    AnswerJudgeService,
+    AnswerJudgeServiceError,
     LocalCorpusService,
     LocalCorpusServiceError,
     create_answer_judge_service_factory,
@@ -203,7 +206,7 @@ class LocalCorpusServiceTests(unittest.IsolatedAsyncioTestCase):
 
                 self.assertEqual(completed.stdout.strip(), "CLOSED")
 
-    async def test_factory_rejects_unknown_context_and_judge_is_fail_closed(
+    async def test_factory_rejects_unknown_context_and_opens_exact_judge(
         self,
     ) -> None:
         corpus = create_local_corpus_service_factory()
@@ -223,11 +226,30 @@ class LocalCorpusServiceTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(LocalCorpusServiceError):
             async with corpus.factory(wrong):
                 self.fail("unreachable")
+        judge_context = HostServiceFactoryContext(
+            provider_id="dci-agent-lite",
+            application_id="dci.complete-application",
+            application_version="1.0.0",
+            capability_id="evaluation.answer-judge",
+            options={},
+        )
+        sentinel_key = "SENTINEL_KEY"
+        with patch.dict(
+            os.environ,
+            {"DCI_EVAL_JUDGE_API_KEY": sentinel_key},
+            clear=False,
+        ):
+            async with judge.factory(judge_context) as service:
+                self.assertIsInstance(service, AnswerJudgeService)
+                self.assertNotIn(sentinel_key, repr(service))
+                self.assertNotIn(sentinel_key, repr(service.public_identity))
+                self.assertEqual(len(service.public_identity["request_shape_sha256"]), 64)
+
         with self.assertRaises(HostServiceRegistryError):
             async with judge.factory(
                 HostServiceFactoryContext(
                     provider_id="dci-agent-lite",
-                    application_id="dci.complete-application",
+                    application_id="dci.research-capability",
                     application_version="1.0.0",
                     capability_id="evaluation.answer-judge",
                     options={},
@@ -264,6 +286,86 @@ class LocalCorpusServiceTests(unittest.IsolatedAsyncioTestCase):
                     async with binding.factory(_context(root)):
                         self.fail("unreachable")
                 self.assertNotIn("SECRET", str(raised.exception))
+
+    async def test_judge_cancellation_reaches_owned_transport_and_is_redacted(
+        self,
+    ) -> None:
+        class Signal:
+            cancelled = False
+
+        signal = Signal()
+        started = asyncio.Event()
+        stopped = asyncio.Event()
+
+        async def operation(**kwargs):
+            self.assertEqual(kwargs["question"], "SENTINEL_QUESTION")
+            self.assertEqual(kwargs["gold_answer"], "SENTINEL_GOLD")
+            self.assertEqual(kwargs["predicted_answer"], "SENTINEL_PREDICTION")
+            self.assertEqual(kwargs["config"].api_key, "SENTINEL_KEY")
+            started.set()
+            try:
+                await asyncio.sleep(30)
+            finally:
+                stopped.set()
+
+        context = HostServiceFactoryContext(
+            provider_id="dci-agent-lite",
+            application_id="dci.complete-application",
+            application_version="1.0.0",
+            capability_id="evaluation.answer-judge",
+            options={},
+        )
+        with (
+            patch.dict(
+                os.environ,
+                {"DCI_EVAL_JUDGE_API_KEY": "SENTINEL_KEY"},
+                clear=False,
+            ),
+            patch.object(dci_services, "judge_answer_async", operation),
+        ):
+            async with create_answer_judge_service_factory().factory(context) as service:
+                task = asyncio.create_task(
+                    service.judge(
+                        question="SENTINEL_QUESTION",
+                        gold_answer="SENTINEL_GOLD",
+                        predicted_answer="SENTINEL_PREDICTION",
+                        signal=signal,
+                    )
+                )
+                await asyncio.wait_for(started.wait(), timeout=1)
+                signal.cancelled = True
+                with self.assertRaises(AnswerJudgeServiceError) as raised:
+                    await asyncio.wait_for(task, timeout=3)
+
+        self.assertTrue(stopped.is_set())
+        self.assertNotIn("SENTINEL", str(raised.exception))
+
+    async def test_judge_factory_requires_credentials_without_leaking_env(
+        self,
+    ) -> None:
+        context = HostServiceFactoryContext(
+            provider_id="dci-agent-lite",
+            application_id="dci.complete-application",
+            application_version="1.0.0",
+            capability_id="evaluation.answer-judge",
+            options={},
+        )
+        with patch.dict(
+            os.environ,
+            {
+                "DCI_EVAL_JUDGE_API_KEY": "",
+                "ASTERION_DCI_JUDGE_API_KEY": "",
+                "DEEPSEEK_API_KEY": "",
+            },
+            clear=False,
+        ):
+            with self.assertRaises(HostServiceRegistryError) as raised:
+                async with create_answer_judge_service_factory().factory(context):
+                    self.fail("unreachable")
+
+        self.assertEqual(
+            str(raised.exception), "answer judge service is unavailable"
+        )
 
 
 if __name__ == "__main__":

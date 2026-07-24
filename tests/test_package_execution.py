@@ -14,9 +14,11 @@ from asterion.packages.catalog import (
     discover_packages,
 )
 from asterion.packages.execution import (
+    InProcessArtifactPayload,
     PackageExecutionError,
     PackageExecutionResult,
     PackageInvocation,
+    project_public_value,
     validate_implementation_bindings,
     validate_package_result,
 )
@@ -206,6 +208,88 @@ class DciResearchManifestDeclarationTests(unittest.TestCase):
 
         self.assertEqual(manifest["consumes_events"], [])
         self.assertEqual(manifest["consumes_artifacts"], [])
+
+
+class InProcessArtifactPayloadTests(unittest.TestCase):
+    def test_private_value_is_deeply_immutable_and_repr_redacted(self) -> None:
+        private = {
+            "nested": {
+                "values": ["SENTINEL_QUESTION", {"gold": "SENTINEL_GOLD"}]
+            }
+        }
+        payload = InProcessArtifactPayload(
+            private_value=private,
+            public_projection={
+                "status": "completed",
+                "question_sha256": "a" * 64,
+            },
+        )
+        private["nested"]["values"][1]["gold"] = "changed"
+
+        self.assertEqual(
+            payload.private_value["nested"]["values"][1]["gold"],
+            "SENTINEL_GOLD",
+        )
+        with self.assertRaises(TypeError):
+            payload.private_value["nested"]["values"][0] = "changed"
+        with self.assertRaises(AttributeError):
+            payload._private_value = {}  # type: ignore[reportAttributeAccessIssue]
+        self.assertNotIn("SENTINEL", repr(payload))
+        self.assertNotIn("SENTINEL", str(payload))
+
+    def test_public_projection_recurses_through_mappings_and_sequences(self) -> None:
+        payload = InProcessArtifactPayload(
+            private_value={
+                "question": "SENTINEL_QUESTION",
+                "nested": ({"prediction": "SENTINEL_PREDICTION"},),
+            },
+            public_projection={
+                "status": "completed",
+                "hashes": ("a" * 64, "b" * 64),
+                "artifact_ids": ("answer",),
+            },
+        )
+
+        projected = project_public_value(
+            {
+                "artifacts": (
+                    {
+                        "artifact_id": "research",
+                        "value": {"stage_data": payload},
+                    },
+                )
+            }
+        )
+
+        self.assertEqual(
+            projected["artifacts"][0]["value"]["stage_data"]["status"],
+            "completed",
+        )
+        self.assertEqual(
+            projected["artifacts"][0]["value"]["stage_data"]["artifact_ids"],
+            ["answer"],
+        )
+        rendered = json.dumps(projected, sort_keys=True)
+        self.assertNotIn("SENTINEL", rendered)
+        with self.assertRaises(TypeError):
+            payload.public_projection["status"] = "changed"
+
+    def test_public_projection_rejects_opaque_values_fail_closed(self) -> None:
+        with self.assertRaises(PackageExecutionError) as raised:
+            project_public_value({"value": object()})
+
+        self.assertEqual(
+            str(raised.exception), "artifact public projection is invalid"
+        )
+
+        with self.assertRaises(PackageExecutionError) as private:
+            InProcessArtifactPayload(
+                private_value={"mutable": object()},
+                public_projection={},
+            )
+        self.assertEqual(
+            str(private.exception), "private artifact payload is invalid"
+        )
 
 
 class PackageImplementationBindingTests(unittest.TestCase):

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from pathlib import PurePath
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol
 
@@ -21,6 +23,52 @@ EXECUTABLE_PACKAGE_KINDS = frozenset(
 
 class PackageExecutionError(RuntimeError):
     """Raised when a package cannot execute through its declared boundary."""
+
+
+class InProcessArtifactPayload:
+    """Deeply immutable private stage data with one explicit safe projection."""
+
+    __slots__ = ("_private_value", "_public_projection")
+
+    def __init__(
+        self,
+        *,
+        private_value: Mapping[str, object],
+        public_projection: Mapping[str, object],
+    ) -> None:
+        if not isinstance(private_value, Mapping) or not isinstance(
+            public_projection, Mapping
+        ):
+            raise PackageExecutionError("private artifact payload is invalid")
+        try:
+            frozen_private = _freeze_private_mapping(private_value)
+            projected = project_public_value(public_projection)
+            if not isinstance(projected, dict):
+                raise TypeError
+            frozen_public = _freeze_mapping(projected)
+        except PackageExecutionError:
+            raise
+        except Exception:
+            raise PackageExecutionError("private artifact payload is invalid") from None
+        object.__setattr__(self, "_private_value", frozen_private)
+        object.__setattr__(self, "_public_projection", frozen_public)
+
+    @property
+    def private_value(self) -> Mapping[str, object]:
+        return self._private_value
+
+    @property
+    def public_projection(self) -> Mapping[str, object]:
+        return self._public_projection
+
+    def __repr__(self) -> str:
+        return "<in-process private artifact payload>"
+
+    __str__ = __repr__
+
+    def __setattr__(self, name: str, value: object) -> None:
+        del name, value
+        raise AttributeError("private artifact payload is immutable")
 
 
 @dataclass(frozen=True)
@@ -169,6 +217,8 @@ def _freeze_mapping(value: Mapping[str, object]) -> Mapping[str, object]:
 
 
 def _freeze(value: object) -> object:
+    if isinstance(value, InProcessArtifactPayload):
+        return value
     if isinstance(value, Mapping):
         return _freeze_mapping(value)
     if isinstance(value, (list, tuple)):
@@ -176,3 +226,50 @@ def _freeze(value: object) -> object:
     if isinstance(value, set):
         return frozenset(_freeze(item) for item in value)
     return value
+
+
+def _freeze_private_mapping(
+    value: Mapping[str, object],
+) -> Mapping[str, object]:
+    if not all(type(key) is str for key in value):
+        raise TypeError
+    return MappingProxyType(
+        {key: _freeze_private(item) for key, item in value.items()}
+    )
+
+
+def _freeze_private(value: object) -> object:
+    if isinstance(value, Mapping):
+        return _freeze_private_mapping(value)
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_private(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        return frozenset(_freeze_private(item) for item in value)
+    if value is None or type(value) in {str, bool, int, float, bytes}:
+        return value
+    if isinstance(value, PurePath):
+        return value
+    raise TypeError
+
+
+def project_public_value(value: object) -> object:
+    """Return an explicit JSON-safe projection without rendering private values."""
+
+    if isinstance(value, InProcessArtifactPayload):
+        return project_public_value(value.public_projection)
+    if isinstance(value, Mapping):
+        projected: dict[str, object] = {}
+        for key, item in value.items():
+            if type(key) is not str:
+                raise PackageExecutionError(
+                    "artifact public projection is invalid"
+                )
+            projected[key] = project_public_value(item)
+        return projected
+    if isinstance(value, (tuple, list)):
+        return [project_public_value(item) for item in value]
+    if value is None or type(value) in {str, bool, int}:
+        return value
+    if type(value) is float and math.isfinite(value):
+        return value
+    raise PackageExecutionError("artifact public projection is invalid")

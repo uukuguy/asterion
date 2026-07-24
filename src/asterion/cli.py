@@ -33,7 +33,10 @@ from asterion.applications.selection import (
     select_installed_application,
 )
 from asterion.assembly.protocol import AssemblyError
-from asterion.packages.execution import PackageExecutionError
+from asterion.packages.execution import (
+    PackageExecutionError,
+    project_public_value,
+)
 from asterion.runner.application import ApplicationRunError
 from asterion.runner.composed import run_composed_application
 from asterion.runtime.factory import (
@@ -276,7 +279,7 @@ async def _run(
             input_text=input_text,
             host_services=host_services,
         )
-    stdout.write(json.dumps(_thaw(result.__dict__), sort_keys=True) + "\n")
+    stdout.write(json.dumps(project_public_value(result.__dict__), sort_keys=True) + "\n")
     return 0
 
 
@@ -467,14 +470,6 @@ def _render_verification(result: VerificationResult, stdout: TextIO) -> None:
 
 def _optional_absolute_path(value: str | None) -> Path | None:
     return None if value is None else Path(value).expanduser().resolve()
-
-
-def _thaw(value: object) -> object:
-    if isinstance(value, Mapping):
-        return {key: _thaw(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list, set, frozenset)):
-        return [_thaw(item) for item in value]
-    return value
 
 
 def _operator_executor_config(

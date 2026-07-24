@@ -2,15 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import stat
 import sys
+from collections.abc import Mapping
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Protocol, runtime_checkable
 
+from asterion.dci.judge import (
+    JudgeConfig,
+    judge_answer_async,
+    judge_public_identity,
+)
+from asterion.immutable import RedactedImmutableMapping
+from asterion.runtime.host import CancellationSignal
 from asterion.services.registry import (
     HostServiceFactoryBinding,
     HostServiceFactoryContext,
@@ -25,6 +35,27 @@ from asterion.runtime.cwd_exec import trusted_script_path
 
 class LocalCorpusServiceError(ValueError):
     """Raised when the selected local corpus authority is unavailable."""
+
+
+class AnswerJudgeServiceError(RuntimeError):
+    """Raised when the selected answer Judge cannot return safe evidence."""
+
+
+@runtime_checkable
+class AnswerJudgeService(Protocol):
+    @property
+    def public_identity(self) -> Mapping[str, object]:
+        raise NotImplementedError
+
+    async def judge(
+        self,
+        *,
+        question: str,
+        gold_answer: str,
+        predicted_answer: str,
+        signal: CancellationSignal | None,
+    ) -> Mapping[str, object]:
+        raise NotImplementedError
 
 
 @runtime_checkable
@@ -151,6 +182,69 @@ class _PinnedLocalCorpusService:
             raise LocalCorpusServiceError("local corpus identity changed")
 
 
+@dataclass(frozen=True, repr=False)
+class _DciAnswerJudgeService:
+    _config: JudgeConfig
+
+    def __repr__(self) -> str:
+        return "<AnswerJudgeService configured>"
+
+    @property
+    def public_identity(self) -> Mapping[str, object]:
+        return RedactedImmutableMapping(judge_public_identity(self._config))
+
+    async def judge(
+        self,
+        *,
+        question: str,
+        gold_answer: str,
+        predicted_answer: str,
+        signal: CancellationSignal | None,
+    ) -> Mapping[str, object]:
+        if (
+            type(question) is not str
+            or not question.strip()
+            or type(gold_answer) is not str
+            or not gold_answer.strip()
+            or type(predicted_answer) is not str
+            or not predicted_answer.strip()
+        ):
+            raise AnswerJudgeServiceError("answer judge request is invalid")
+        work = asyncio.create_task(
+            judge_answer_async(
+                config=self._config,
+                question=question,
+                gold_answer=gold_answer,
+                predicted_answer=predicted_answer,
+            )
+        )
+        try:
+            while not work.done():
+                if signal is not None and signal.cancelled:
+                    work.cancel()
+                    await _drain_judge(work)
+                    raise AnswerJudgeServiceError(
+                        "answer judge request was cancelled"
+                    )
+                await asyncio.wait({work}, timeout=0.05)
+            verdict = work.result()
+        except asyncio.CancelledError:
+            work.cancel()
+            await _drain_judge(work)
+            raise
+        except AnswerJudgeServiceError:
+            raise
+        except Exception:
+            raise AnswerJudgeServiceError("answer judge request failed") from None
+        if (
+            not isinstance(verdict, Mapping)
+            or not isinstance(verdict.get("is_correct"), bool)
+            or type(verdict.get("judge_request_fingerprint")) is not str
+        ):
+            raise AnswerJudgeServiceError("answer judge evidence is invalid")
+        return RedactedImmutableMapping(_freeze_judge_mapping(verdict))
+
+
 def create_local_corpus_service_factory() -> HostServiceFactoryBinding:
     """Return the exact factory binding for ``corpus.local-root``."""
 
@@ -162,12 +256,12 @@ def create_local_corpus_service_factory() -> HostServiceFactoryBinding:
 
 
 def create_answer_judge_service_factory() -> HostServiceFactoryBinding:
-    """Return Task 6's identity as a structurally loadable fail-closed boundary."""
+    """Return the exact DCI-owned factory for ``evaluation.answer-judge``."""
 
     return HostServiceFactoryBinding(
         capability_id="evaluation.answer-judge",
         option_names=(),
-        factory=_unavailable_answer_judge_service,
+        factory=_open_answer_judge_service,
     )
 
 
@@ -223,14 +317,55 @@ async def _open_local_corpus_service(context: HostServiceFactoryContext):
 
 
 @asynccontextmanager
-async def _unavailable_answer_judge_service(
+async def _open_answer_judge_service(
     context: HostServiceFactoryContext,
 ):
-    del context
-    raise HostServiceRegistryError(
-        "answer judge service is unavailable until Task 6"
+    if (
+        context.provider_id != "dci-agent-lite"
+        or context.application_id != "dci.complete-application"
+        or context.application_version != "1.0.0"
+        or context.capability_id != "evaluation.answer-judge"
+        or context.options
+    ):
+        raise HostServiceRegistryError("answer judge service is unavailable")
+    try:
+        config = JudgeConfig.from_env()
+    except Exception:
+        raise HostServiceRegistryError("answer judge service is unavailable") from None
+    if not config.api_key:
+        raise HostServiceRegistryError("answer judge service is unavailable")
+    yield _DciAnswerJudgeService(config)
+
+
+async def _drain_judge(work: asyncio.Task[object]) -> None:
+    while not work.done():
+        current = asyncio.current_task()
+        if current is not None:
+            current.uncancel()
+        try:
+            await asyncio.wait({work})
+        except asyncio.CancelledError:
+            continue
+    try:
+        work.result()
+    except BaseException:
+        pass
+
+
+def _freeze_judge_mapping(
+    value: Mapping[str, object],
+) -> Mapping[str, object]:
+    return MappingProxyType(
+        {str(key): _freeze_judge_value(item) for key, item in value.items()}
     )
-    yield object()
+
+
+def _freeze_judge_value(value: object) -> object:
+    if isinstance(value, Mapping):
+        return _freeze_judge_mapping(value)
+    if isinstance(value, (tuple, list)):
+        return tuple(_freeze_judge_value(item) for item in value)
+    return value
 
 
 def _open_directory(path: Path) -> int:

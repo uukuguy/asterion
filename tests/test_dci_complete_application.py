@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import tempfile
 import unittest
@@ -12,9 +13,9 @@ from unittest.mock import patch
 from asterion.assembly.protocol import resolve_assembly
 from asterion.adapters.claude_code import ClaudeCodeProtocolAdapter
 from asterion.applications.dci_agent_lite.provider import create_provider
+from asterion.cli import main
 from asterion.capabilities.dci_research.complete import (
     DciCompleteAnalysisImplementation,
-    DciCompleteAttemptStore,
     DciCompleteBenchmarkImplementation,
     DciCompleteEvaluationImplementation,
     DciCompleteExportImplementation,
@@ -22,6 +23,13 @@ from asterion.capabilities.dci_research.complete import (
     INPUT_PROTOCOL,
     complete_application_identity,
 )
+from asterion.packages.execution import InProcessArtifactPayload, project_public_value
+from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
+from asterion.dci.services import (
+    create_answer_judge_service_factory,
+    create_local_corpus_service_factory,
+)
+from tests.test_application_discovery import FakeEntryPoint
 from asterion.dci.dual_runtime_verification import (
     DciDualRuntimeVerificationError,
     audit_restricted_claude_application,
@@ -34,6 +42,7 @@ from asterion.packages.catalog import PackageRef
 from asterion.packages.catalog import discover_packages
 from asterion.packages.execution import PackageExecutionError, PackageInvocation
 from asterion.runner.composed import run_composed_application
+from asterion.runner.application import ApplicationRunError
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 from asterion.runtime.working_directory import ProcessWorkingDirectory
 
@@ -84,8 +93,43 @@ class _CorpusService:
         )
 
 
-def _host_services() -> dict[str, object]:
-    return {"corpus.local-root": _CorpusService()}
+class _JudgeService:
+    public_identity = {
+        "endpoint": "https://judge.invalid/v1/chat/completions",
+        "request_shape_sha256": "d" * 64,
+        "prompt_contract_sha256": "e" * 64,
+    }
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def judge(
+        self,
+        *,
+        question: str,
+        gold_answer: str,
+        predicted_answer: str,
+        signal: object | None,
+    ):
+        self.calls.append(
+            {
+                "question": question,
+                "gold_answer": gold_answer,
+                "predicted_answer": predicted_answer,
+                "signal": signal,
+            }
+        )
+        return {
+            "is_correct": True,
+            "judge_request_fingerprint": "b" * 64,
+        }
+
+
+def _host_services(judge: object | None = None) -> dict[str, object]:
+    return {
+        "corpus.local-root": _CorpusService(),
+        "evaluation.answer-judge": _JudgeService() if judge is None else judge,
+    }
 
 
 def plan(runtime_id: str):
@@ -111,17 +155,27 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
                 self.assertEqual(assembly["host_events"], [])
                 self.assertEqual(assembly["host_artifacts"], [])
 
-    def test_only_provider_bound_dci_assemblies_declare_local_corpus(self) -> None:
-        bound = {
+    def test_only_complete_assemblies_declare_answer_judge(self) -> None:
+        corpus_bound = {
             "dci-complete-application-claude.json",
             "dci-complete-application-pi.json",
             "dci-research-capability-claude.json",
             "dci-research-capability.json",
         }
+        judge_bound = {
+            "dci-complete-application-claude.json",
+            "dci-complete-application-pi.json",
+        }
         for assembly_path in sorted(ASSEMBLIES.glob("dci-*.json")):
             with self.subTest(assembly=assembly_path.name):
                 assembly = json.loads(assembly_path.read_text())
-                expected = ["corpus.local-root"] if assembly_path.name in bound else []
+                expected = (
+                    ["corpus.local-root", "evaluation.answer-judge"]
+                    if assembly_path.name in judge_bound
+                    else ["corpus.local-root"]
+                    if assembly_path.name in corpus_bound
+                    else []
+                )
                 self.assertEqual(assembly["host_capabilities"], expected)
 
     def test_pi_and_claude_share_the_exact_five_stage_graph(self) -> None:
@@ -231,6 +285,119 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
         self.assertEqual(len(identity), 64)
         self.assertEqual(identity, complete_application_identity())
 
+    def test_generic_cli_exposes_only_complete_public_artifact_projection(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            corpus = root / "SENTINEL_PRIVATE_PATH"
+            corpus.mkdir()
+            runtime = _CompletedRuntime(
+                "pi.reference", root / "private-run-output"
+            )
+            provider_entry = FakeEntryPoint(
+                name="dci-agent-lite", factory=create_provider
+            )
+            host_entries = (
+                FakeEntryPoint(
+                    name="corpus.local-root",
+                    group="asterion.host_services",
+                    factory=create_local_corpus_service_factory,
+                ),
+                FakeEntryPoint(
+                    name="evaluation.answer-judge",
+                    group="asterion.host_services",
+                    factory=create_answer_judge_service_factory,
+                ),
+            )
+            registry = RuntimeFactoryRegistry(
+                (
+                    RuntimeFactoryBinding(
+                        runtime_id="pi.reference",
+                        capabilities=("filesystem.read",),
+                        factory=lambda context: runtime,
+                    ),
+                    RuntimeFactoryBinding(
+                        runtime_id="claude-code.reference",
+                        capabilities=("filesystem.read",),
+                        factory=lambda context: (_ for _ in ()).throw(
+                            AssertionError("unselected runtime")
+                        ),
+                    ),
+                )
+            )
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+
+            async def answer_judge(**kwargs):
+                self.assertEqual(kwargs["question"], "SENTINEL_QUESTION")
+                self.assertEqual(kwargs["gold_answer"], "SENTINEL_GOLD")
+                self.assertEqual(
+                    kwargs["predicted_answer"], "PRIVATE ANSWER"
+                )
+                self.assertEqual(kwargs["config"].api_key, "SENTINEL_KEY")
+                return {
+                    "is_correct": True,
+                    "judge_request_fingerprint": "f" * 64,
+                }
+
+            with (
+                patch.dict(
+                    "os.environ",
+                    {"DCI_EVAL_JUDGE_API_KEY": "SENTINEL_KEY"},
+                    clear=False,
+                ),
+                patch(
+                    "asterion.dci.services.judge_answer_async",
+                    answer_judge,
+                ),
+            ):
+                code = main(
+                    [
+                        "run",
+                        "--provider",
+                        "dci-agent-lite",
+                        "--runtime",
+                        "pi.reference",
+                        "--application",
+                        "dci.complete-application@1.0.0",
+                        "--host-option",
+                        f"corpus.local-root:root={corpus}",
+                        "--run-id",
+                        "complete-cli",
+                        "--input",
+                        json.dumps(
+                            {
+                                "protocol": INPUT_PROTOCOL,
+                                "question": "SENTINEL_QUESTION",
+                                "gold_answer": "SENTINEL_GOLD",
+                            }
+                        ),
+                    ],
+                    entry_points=(provider_entry,),
+                    host_service_entry_points=host_entries,
+                    runtime_factories=registry,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+
+        self.assertEqual(code, 0, stderr.getvalue())
+        payload = json.loads(stdout.getvalue())
+        research = payload["artifacts"][0]["value"]
+        self.assertEqual(research["status"], "completed")
+        self.assertEqual(
+            research["stage_data"]["artifact_ids"], ["answer"]
+        )
+        rendered = stdout.getvalue() + stderr.getvalue()
+        for sentinel in (
+            "SENTINEL_QUESTION",
+            "SENTINEL_GOLD",
+            "PRIVATE ANSWER",
+            "SENTINEL_KEY",
+            "SENTINEL_PRIVATE_PATH",
+        ):
+            self.assertNotIn(sentinel, rendered)
+
 
 class _UnusedPiRuntime:
     manifest = RuntimeManifest("pi.reference", ("filesystem.read",))
@@ -274,7 +441,6 @@ class _CompletedRuntime:
 
 class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
     async def test_research_requires_corpus_before_runtime_invocation(self) -> None:
-        store = DciCompleteAttemptStore()
         runtime = _CompletedRuntime("pi.reference", PROJECT / "unused-run")
         invocation = PackageInvocation(
             package_ref=PackageRef("dci.research", "1.0.0"),
@@ -293,7 +459,7 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(PackageExecutionError) as raised:
-            await DciCompleteResearchImplementation(store=store).execute(invocation)
+            await DciCompleteResearchImplementation().execute(invocation)
 
         self.assertEqual(runtime.calls, 0)
         self.assertNotIn("SECRET", str(raised.exception))
@@ -323,6 +489,35 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
                     )
                 )
 
+    async def test_complete_preflight_requires_judge_before_runtime_invocation(
+        self,
+    ) -> None:
+        runtime = _CompletedRuntime("pi.reference", PROJECT / "unused-run")
+        with self.assertRaises(ApplicationRunError) as raised:
+            await run_composed_application(
+                plan("pi.reference"),
+                implementations=(
+                    (PackageRef("dci.research", "1.0.0"), DciCompleteResearchImplementation()),
+                    (PackageRef("dci.evaluation", "1.0.0"), DciCompleteEvaluationImplementation()),
+                    (PackageRef("dci.benchmark", "1.0.0"), DciCompleteBenchmarkImplementation()),
+                    (PackageRef("dci.analysis", "1.0.0"), DciCompleteAnalysisImplementation()),
+                    (PackageRef("dci.export", "1.0.0"), DciCompleteExportImplementation()),
+                ),
+                runtime=runtime,
+                run_id="missing-judge",
+                input_text=json.dumps(
+                    {
+                        "protocol": INPUT_PROTOCOL,
+                        "question": "SENTINEL_QUESTION",
+                        "gold_answer": "SENTINEL_GOLD",
+                    }
+                ),
+                host_services={"corpus.local-root": _CorpusService()},
+            )
+
+        self.assertEqual(runtime.calls, 0)
+        self.assertNotIn("SENTINEL", str(raised.exception))
+
     async def test_evaluation_cancels_inflight_judge_when_signal_changes(self) -> None:
         class Signal:
             cancelled = False
@@ -331,28 +526,35 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
         started = asyncio.Event()
         stopped = asyncio.Event()
 
-        async def evaluator(**kwargs):
-            del kwargs
-            started.set()
-            try:
-                await asyncio.sleep(30)
-            finally:
-                stopped.set()
+        class Judge(_JudgeService):
+            async def judge(self, **kwargs):
+                judge_signal = kwargs["signal"]
+                started.set()
+                try:
+                    while not judge_signal.cancelled:
+                        await asyncio.sleep(0.01)
+                    raise RuntimeError("cancelled")
+                finally:
+                    stopped.set()
 
         with tempfile.TemporaryDirectory() as directory:
-            store = DciCompleteAttemptStore()
-            store.start(
-                "cancel-evaluation",
-                question="question",
-                gold_answer="gold",
-                output_dir=Path(directory),
-                predicted_answer="answer",
+            stage_data = InProcessArtifactPayload(
+                private_value={
+                    "question": "question",
+                    "gold_answer": "gold",
+                    "predicted_answer": "answer",
+                    "output_dir": Path(directory),
+                },
+                public_projection={
+                    "status": "completed",
+                    "question_sha256": "a" * 64,
+                    "gold_answer_sha256": "b" * 64,
+                    "prediction_sha256": "c" * 64,
+                    "evidence_sha256": "d" * 64,
+                    "artifact_ids": ("answer",),
+                },
             )
-            implementation = DciCompleteEvaluationImplementation(
-                store=store,
-                answer_evaluator=evaluator,
-                judge_config=lambda: object(),
-            )
+            implementation = DciCompleteEvaluationImplementation()
             invocation = PackageInvocation(
                 package_ref=PackageRef("dci.evaluation", "1.0.0"),
                 manifest={},
@@ -365,11 +567,12 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
                         "value": {
                             "schema": "asterion.dci.complete-application/v1",
                             "implementation_sha256": complete_application_identity(),
+                            "stage_data": stage_data,
                         },
                     },
                 ),
                 runtime=_UnusedPiRuntime(),
-                host_services=_host_services(),
+                host_services=_host_services(Judge()),
                 signal=signal,
             )
             task = asyncio.create_task(implementation.execute(invocation))
@@ -380,24 +583,94 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.wait_for(task, timeout=3)
             self.assertTrue(stopped.is_set())
 
+    async def test_cancelled_judge_stops_all_later_stages(self) -> None:
+        class Signal:
+            cancelled = False
+
+        class Judge(_JudgeService):
+            def __init__(self) -> None:
+                super().__init__()
+                self.started = asyncio.Event()
+                self.stopped = asyncio.Event()
+
+            async def judge(self, **kwargs):
+                self.calls.append(kwargs)
+                self.started.set()
+                try:
+                    while not kwargs["signal"].cancelled:
+                        await asyncio.sleep(0.01)
+                    raise RuntimeError("SENTINEL_JUDGE_FAILURE")
+                finally:
+                    self.stopped.set()
+
+        class LaterStage:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def execute(self, invocation):
+                del invocation
+                self.calls += 1
+                raise AssertionError("later stage ran")
+
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = _CompletedRuntime(
+                "pi.reference", Path(directory) / "cancelled-run"
+            )
+            signal = Signal()
+            judge = Judge()
+            later = [LaterStage(), LaterStage(), LaterStage()]
+            task = asyncio.create_task(
+                run_composed_application(
+                    plan("pi.reference"),
+                    implementations=(
+                        (
+                            PackageRef("dci.research", "1.0.0"),
+                            DciCompleteResearchImplementation(),
+                        ),
+                        (
+                            PackageRef("dci.evaluation", "1.0.0"),
+                            DciCompleteEvaluationImplementation(),
+                        ),
+                        (PackageRef("dci.benchmark", "1.0.0"), later[0]),
+                        (PackageRef("dci.analysis", "1.0.0"), later[1]),
+                        (PackageRef("dci.export", "1.0.0"), later[2]),
+                    ),
+                    runtime=runtime,
+                    run_id="cancelled-complete",
+                    input_text=json.dumps(
+                        {
+                            "protocol": INPUT_PROTOCOL,
+                            "question": "SENTINEL_QUESTION",
+                            "gold_answer": "SENTINEL_GOLD",
+                        }
+                    ),
+                    host_services=_host_services(judge),
+                    signal=signal,
+                )
+            )
+            await asyncio.wait_for(judge.started.wait(), timeout=1)
+            signal.cancelled = True
+            with self.assertRaises(ApplicationRunError) as raised:
+                await asyncio.wait_for(task, timeout=3)
+
+        self.assertTrue(judge.stopped.is_set())
+        self.assertIs(judge.calls[0]["signal"], signal)
+        self.assertEqual([implementation.calls for implementation in later], [0, 0, 0])
+        self.assertNotIn("SENTINEL", str(raised.exception))
+
     async def test_claude_run_is_judged_and_exports_without_private_bodies(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            store = DciCompleteAttemptStore()
             runtime = _CompletedRuntime(
                 "claude-code.reference", Path(directory) / "claude-run"
             )
-            judge_calls = []
-
-            async def answer_evaluator(**kwargs):
-                judge_calls.append(kwargs)
-                return {"is_correct": True, "judge_request_fingerprint": "b" * 64}
+            judge = _JudgeService()
 
             bindings = (
-                (PackageRef("dci.research", "1.0.0"), DciCompleteResearchImplementation(store=store)),
-                (PackageRef("dci.evaluation", "1.0.0"), DciCompleteEvaluationImplementation(store=store, answer_evaluator=answer_evaluator, judge_config=lambda: object())),
+                (PackageRef("dci.research", "1.0.0"), DciCompleteResearchImplementation()),
+                (PackageRef("dci.evaluation", "1.0.0"), DciCompleteEvaluationImplementation()),
                 (PackageRef("dci.benchmark", "1.0.0"), DciCompleteBenchmarkImplementation()),
                 (PackageRef("dci.analysis", "1.0.0"), DciCompleteAnalysisImplementation()),
-                (PackageRef("dci.export", "1.0.0"), DciCompleteExportImplementation(store=store)),
+                (PackageRef("dci.export", "1.0.0"), DciCompleteExportImplementation()),
             )
             result = await run_composed_application(
                 plan("claude-code.reference"),
@@ -405,35 +678,27 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
                 runtime=runtime,
                 run_id="claude-complete",
                 input_text=json.dumps({"protocol": INPUT_PROTOCOL, "question": "PRIVATE QUESTION", "gold_answer": "PRIVATE GOLD"}),
-                host_services=_host_services(),
+                host_services=_host_services(judge),
             )
 
         self.assertEqual(
             runtime.requests[0].requested_capabilities, ("filesystem.read",)
         )
-        self.assertEqual(judge_calls[0]["predicted_answer"], "PRIVATE ANSWER")
+        self.assertEqual(judge.calls[0]["predicted_answer"], "PRIVATE ANSWER")
         self.assertEqual(tuple(event["type"] for event in result.events), EVENTS)
         self.assertNotIn("PRIVATE", repr(result))
 
     async def test_pi_run_uses_selected_runtime_and_exports_without_bodies(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            store = DciCompleteAttemptStore()
             runtime = _CompletedRuntime("pi.reference", Path(directory) / "pi-run")
-            judge_calls = []
-
-            async def answer_evaluator(**kwargs):
-                judge_calls.append(kwargs)
-                return {
-                    "is_correct": True,
-                    "judge_request_fingerprint": "a" * 64,
-                }
+            judge = _JudgeService()
 
             bindings = (
-                (PackageRef("dci.research", "1.0.0"), DciCompleteResearchImplementation(store=store)),
-                (PackageRef("dci.evaluation", "1.0.0"), DciCompleteEvaluationImplementation(store=store, answer_evaluator=answer_evaluator, judge_config=lambda: object())),
+                (PackageRef("dci.research", "1.0.0"), DciCompleteResearchImplementation()),
+                (PackageRef("dci.evaluation", "1.0.0"), DciCompleteEvaluationImplementation()),
                 (PackageRef("dci.benchmark", "1.0.0"), DciCompleteBenchmarkImplementation()),
                 (PackageRef("dci.analysis", "1.0.0"), DciCompleteAnalysisImplementation()),
-                (PackageRef("dci.export", "1.0.0"), DciCompleteExportImplementation(store=store)),
+                (PackageRef("dci.export", "1.0.0"), DciCompleteExportImplementation()),
             )
             with patch(
                 "asterion.dci.application_executor.EnvironmentDciRunExecutor.run",
@@ -451,7 +716,7 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
                             "gold_answer": "PRIVATE GOLD",
                         }
                     ),
-                    host_services=_host_services(),
+                    host_services=_host_services(judge),
                 )
 
         self.assertEqual(runtime.calls, 1)
@@ -459,7 +724,7 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             runtime.requests[0].requested_capabilities, ("filesystem.read",)
         )
-        self.assertEqual(judge_calls[0]["predicted_answer"], "PRIVATE ANSWER")
+        self.assertEqual(judge.calls[0]["predicted_answer"], "PRIVATE ANSWER")
         self.assertEqual(tuple(event["type"] for event in result.events), EVENTS)
         self.assertEqual(tuple(item["media_type"] for item in result.artifacts), ARTIFACTS)
         self.assertEqual(
@@ -471,6 +736,11 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result.artifacts[-1]["value"]["total"], 1)
         self.assertNotIn("PRIVATE", repr(result))
+        projected = project_public_value(result.__dict__)
+        rendered = json.dumps(projected, sort_keys=True)
+        self.assertNotIn("PRIVATE QUESTION", rendered)
+        self.assertNotIn("PRIVATE GOLD", rendered)
+        self.assertNotIn("PRIVATE ANSWER", rendered)
 
 
 class DciRestrictedPiEvidenceTests(unittest.TestCase):
