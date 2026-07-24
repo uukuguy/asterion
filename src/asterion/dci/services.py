@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import stat
 import sys
@@ -17,7 +18,8 @@ from typing import Protocol, runtime_checkable
 from asterion.dci.judge import (
     JudgeConfig,
     judge_answer_async,
-    judge_public_identity,
+    judge_prompt_contract_sha256,
+    judge_request_shape_sha256,
 )
 from asterion.immutable import RedactedImmutableMapping
 from asterion.runtime.host import CancellationSignal
@@ -191,7 +193,19 @@ class _DciAnswerJudgeService:
 
     @property
     def public_identity(self) -> Mapping[str, object]:
-        return RedactedImmutableMapping(judge_public_identity(self._config))
+        return RedactedImmutableMapping(
+            {
+                "schema": "asterion.dci.answer-judge-identity/v1",
+                "adapter_id": "dci.openai-compatible",
+                "request_shape_sha256": judge_request_shape_sha256(
+                    self._config
+                ),
+                "prompt_contract_sha256": judge_prompt_contract_sha256(
+                    self._config
+                ),
+                "config_sha256": _judge_config_sha256(self._config),
+            }
+        )
 
     async def judge(
         self,
@@ -366,6 +380,43 @@ def _freeze_judge_value(value: object) -> object:
     if isinstance(value, (tuple, list)):
         return tuple(_freeze_judge_value(item) for item in value)
     return value
+
+
+def _judge_config_sha256(config: JudgeConfig) -> str:
+    behavior = {
+        "api": config.api,
+        "endpoint": config.endpoint,
+        "model": config.model,
+        "timeout_seconds": config.timeout_seconds,
+        "max_output_tokens": config.max_output_tokens,
+        "json_mode": config.json_mode,
+        "strict_json_schema": config.strict_json_schema,
+        "responses_store": config.responses_store,
+        "thinking": config.effective_thinking,
+        "pricing_per_1m": {
+            "input": config.input_price_per_1m,
+            "cached_input": config.cached_input_price_per_1m,
+            "output": config.output_price_per_1m,
+        },
+        "retry": {
+            "attempts": 3,
+            "backoff_initial_seconds": 0.25,
+            "backoff_max_seconds": 30.0,
+            "http_statuses": (408, 409, 429, "5xx"),
+        },
+        "transport": {
+            "implementation": "urllib.request",
+            "redirects": "rejected",
+            "signal_poll_seconds": 0.05,
+        },
+    }
+    canonical = json.dumps(
+        behavior,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _open_directory(path: Path) -> int:

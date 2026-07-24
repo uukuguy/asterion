@@ -18,6 +18,7 @@ from asterion.dci.services import (
     create_answer_judge_service_factory,
     create_local_corpus_service_factory,
 )
+from asterion.packages.execution import project_public_value
 from asterion.services.registry import (
     HostServiceFactoryContext,
     HostServiceRegistryError,
@@ -243,7 +244,19 @@ class LocalCorpusServiceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsInstance(service, AnswerJudgeService)
                 self.assertNotIn(sentinel_key, repr(service))
                 self.assertNotIn(sentinel_key, repr(service.public_identity))
-                self.assertEqual(len(service.public_identity["request_shape_sha256"]), 64)
+                self.assertEqual(
+                    set(service.public_identity),
+                    {
+                        "adapter_id",
+                        "config_sha256",
+                        "prompt_contract_sha256",
+                        "request_shape_sha256",
+                        "schema",
+                    },
+                )
+                self.assertEqual(
+                    len(service.public_identity["request_shape_sha256"]), 64
+                )
 
         with self.assertRaises(HostServiceRegistryError):
             async with judge.factory(
@@ -366,6 +379,84 @@ class LocalCorpusServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             str(raised.exception), "answer judge service is unavailable"
         )
+
+    async def test_judge_public_identity_is_opaque_and_behavior_bound(
+        self,
+    ) -> None:
+        context = HostServiceFactoryContext(
+            provider_id="dci-agent-lite",
+            application_id="dci.complete-application",
+            application_version="1.0.0",
+            capability_id="evaluation.answer-judge",
+            options={},
+        )
+
+        async def identity(environment: dict[str, str]) -> dict[str, object]:
+            with patch.dict(os.environ, environment, clear=True):
+                async with create_answer_judge_service_factory().factory(
+                    context
+                ) as service:
+                    raw = dict(service.public_identity)
+                    projected = project_public_value(service.public_identity)
+                    self.assertEqual(raw, projected)
+                    self.assertNotIn("SENTINEL", repr(service.public_identity))
+                    return raw
+
+        base = {
+            "DCI_EVAL_JUDGE_API_KEY": "SENTINEL_KEY_ONE",
+            "DCI_EVAL_JUDGE_API_KEY_ENV": "SENTINEL_KEY_SOURCE_ONE",
+            "DCI_EVAL_JUDGE_BASE_URL": "https://sentinel-endpoint.invalid/v1",
+            "DCI_EVAL_JUDGE_MODEL": "SENTINEL_MODEL_ONE",
+            "DCI_EVAL_JUDGE_TIMEOUT_SECONDS": "17",
+            "DCI_EVAL_JUDGE_MAX_OUTPUT_TOKENS": "23",
+            "DCI_EVAL_JUDGE_INPUT_PRICE_PER_1M": "1.25",
+            "DCI_EVAL_JUDGE_CACHED_INPUT_PRICE_PER_1M": "0.25",
+            "DCI_EVAL_JUDGE_OUTPUT_PRICE_PER_1M": "2.5",
+        }
+        original = await identity(base)
+        repeated = await identity(dict(base))
+        changed_behavior = await identity(
+            {**base, "DCI_EVAL_JUDGE_TIMEOUT_SECONDS": "19"}
+        )
+        changed_key = await identity(
+            {
+                **base,
+                "DCI_EVAL_JUDGE_API_KEY": "SENTINEL_KEY_TWO",
+            }
+        )
+        changed_key_source = await identity(
+            {
+                **base,
+                "DCI_EVAL_JUDGE_API_KEY_ENV": "SENTINEL_KEY_SOURCE_TWO",
+            }
+        )
+
+        self.assertEqual(original, repeated)
+        self.assertNotEqual(
+            original["config_sha256"],
+            changed_behavior["config_sha256"],
+        )
+        self.assertEqual(original, changed_key)
+        self.assertEqual(original, changed_key_source)
+        rendered = repr(original) + repr(project_public_value(original))
+        self.assertTrue(all(type(value) is str for value in original.values()))
+        for forbidden in (
+            "endpoint",
+            "base_url",
+            "model",
+            "api_key",
+            "timeout",
+            "token",
+            "price",
+            "retry",
+            "transport",
+            *(
+                value
+                for value in base.values()
+                if "SENTINEL" in value or value.startswith("http")
+            ),
+        ):
+            self.assertNotIn(forbidden, rendered)
 
 
 if __name__ == "__main__":

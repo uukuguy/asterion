@@ -94,14 +94,28 @@ class _CorpusService:
 
 
 class _JudgeService:
-    public_identity = {
-        "endpoint": "https://judge.invalid/v1/chat/completions",
+    _default_public_identity = {
+        "schema": "asterion.dci.answer-judge-identity/v1",
+        "adapter_id": "dci.openai-compatible",
+        "config_sha256": "c" * 64,
         "request_shape_sha256": "d" * 64,
         "prompt_contract_sha256": "e" * 64,
     }
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        public_identity: dict[str, object] | None = None,
+    ) -> None:
         self.calls: list[dict[str, object]] = []
+        self._identity = (
+            dict(self._default_public_identity)
+            if public_identity is None
+            else dict(public_identity)
+        )
+
+    @property
+    def public_identity(self):
+        return dict(self._identity)
 
     async def judge(
         self,
@@ -344,7 +358,16 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
             with (
                 patch.dict(
                     "os.environ",
-                    {"DCI_EVAL_JUDGE_API_KEY": "SENTINEL_KEY"},
+                    {
+                        "DCI_EVAL_JUDGE_API_KEY": "SENTINEL_KEY",
+                        "DCI_EVAL_JUDGE_API_KEY_ENV": "SENTINEL_KEY_SOURCE",
+                        "DCI_EVAL_JUDGE_BASE_URL": (
+                            "https://sentinel-endpoint.invalid/v1"
+                        ),
+                        "DCI_EVAL_JUDGE_MODEL": "SENTINEL_MODEL",
+                        "DCI_EVAL_JUDGE_TIMEOUT_SECONDS": "17",
+                        "DCI_EVAL_JUDGE_MAX_OUTPUT_TOKENS": "23",
+                    },
                     clear=False,
                 ),
                 patch(
@@ -394,7 +417,10 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
             "SENTINEL_GOLD",
             "PRIVATE ANSWER",
             "SENTINEL_KEY",
+            "SENTINEL_KEY_SOURCE",
             "SENTINEL_PRIVATE_PATH",
+            "sentinel-endpoint",
+            "SENTINEL_MODEL",
         ):
             self.assertNotIn(sentinel, rendered)
 
@@ -582,6 +608,68 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(PackageExecutionError):
                 await asyncio.wait_for(task, timeout=3)
             self.assertTrue(stopped.is_set())
+
+    async def test_evaluation_binds_only_the_opaque_judge_identity(self) -> None:
+        async def evaluate_with(identity: dict[str, object], directory: Path):
+            directory.mkdir()
+            stage_data = InProcessArtifactPayload(
+                private_value={
+                    "question": "SENTINEL_QUESTION",
+                    "gold_answer": "SENTINEL_GOLD",
+                    "predicted_answer": "SENTINEL_PREDICTION",
+                    "output_dir": directory,
+                },
+                public_projection={
+                    "status": "completed",
+                    "question_sha256": "a" * 64,
+                    "gold_answer_sha256": "b" * 64,
+                    "prediction_sha256": "c" * 64,
+                    "evidence_sha256": "d" * 64,
+                    "artifact_ids": ("answer",),
+                },
+            )
+            result = await DciCompleteEvaluationImplementation().execute(
+                PackageInvocation(
+                    package_ref=PackageRef("dci.evaluation", "1.0.0"),
+                    manifest={},
+                    run_id=directory.name,
+                    input_text="",
+                    upstream_artifacts=(
+                        {
+                            "artifact_id": "research",
+                            "media_type": "application/vnd.dci.research+json",
+                            "value": {
+                                "schema": "asterion.dci.complete-application/v1",
+                                "implementation_sha256": complete_application_identity(),
+                                "stage_data": stage_data,
+                            },
+                        },
+                    ),
+                    runtime=_UnusedPiRuntime(),
+                    host_services=_host_services(_JudgeService(identity)),
+                )
+            )
+            return result.artifacts[0]["value"]["judge_identity_sha256"]
+
+        baseline = {
+            "schema": "asterion.dci.answer-judge-identity/v1",
+            "adapter_id": "dci.openai-compatible",
+            "config_sha256": "1" * 64,
+            "request_shape_sha256": "2" * 64,
+            "prompt_contract_sha256": "3" * 64,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = await evaluate_with(baseline, root / "first")
+            repeated = await evaluate_with(
+                dict(reversed(tuple(baseline.items()))), root / "repeated"
+            )
+            changed = await evaluate_with(
+                {**baseline, "config_sha256": "4" * 64}, root / "changed"
+            )
+
+        self.assertEqual(first, repeated)
+        self.assertNotEqual(first, changed)
 
     async def test_cancelled_judge_stops_all_later_stages(self) -> None:
         class Signal:
