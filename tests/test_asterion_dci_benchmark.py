@@ -10,7 +10,10 @@ from unittest.mock import Mock, patch
 from asterion.dci.benchmark import BenchmarkRequest, DciBenchmarkError, run_benchmark
 from asterion.dci.config import DciRuntimeOptions, resolve_dci_paths
 from asterion.dci.judge import JudgeConfig
-from asterion.dci.provenance import dci_complete_implementation_identity
+from asterion.dci.provenance import (
+    DCI_COMPLETE_IMPLEMENTATION_RESOURCES,
+    dci_complete_implementation_identity,
+)
 from asterion.dci.run import DciRunResult, run_pi_research as _real_run_pi_research
 from asterion.runtime.host import RunEvent
 
@@ -90,8 +93,18 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory).resolve()
             request = _request(root)
-            first_identity = "1" * 64
-            second_identity = "2" * 64
+            resources = {
+                name: name.encode()
+                for name in DCI_COMPLETE_IMPLEMENTATION_RESOURCES
+            }
+            first_identity = dci_complete_implementation_identity(
+                resource_reader=resources.__getitem__
+            )
+            resources["dci/artifacts.py"] += b"\x00"
+            second_identity = dci_complete_implementation_identity(
+                resource_reader=resources.__getitem__
+            )
+            self.assertNotEqual(first_identity, second_identity)
             with patch(
                 "asterion.dci.benchmark.dci_complete_implementation_identity",
                 return_value=first_identity,

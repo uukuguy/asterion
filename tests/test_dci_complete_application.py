@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ast
 import io
 import json
 import tempfile
@@ -81,6 +82,51 @@ ARTIFACTS = (
     "application/vnd.dci.analysis+json",
     "application/vnd.dci.export+json",
 )
+DCI_EXECUTABLE_SOURCE_ROOTS = (
+    "capabilities/dci_research/complete.py",
+    "capabilities/dci_research/implementation.py",
+    "dci/benchmark.py",
+    "dci/bridge.py",
+    "dci/evaluation.py",
+    "dci/judge.py",
+    "dci/run.py",
+    "dci/services.py",
+)
+DCI_PACKAGED_RESOURCE_CLOSURE = {
+    "dci/resources/batch-profiles.json",
+    "dci/resources/context-profile.schema.json",
+    "dci/resources/context-profiles.json",
+    "dci/resources/experiment-profile.schema.json",
+    "dci/resources/experiment-profiles.json",
+    "dci/resources/gold-document-manifest.schema.json",
+    "dci/resources/gold-document-registry.schema.json",
+    "dci/resources/paper-ablation-matrix.json",
+    "dci/resources/paper-ablation.schema.json",
+    "dci/resources/paper-benchmark.schema.json",
+    "dci/resources/paper-benchmarks.json",
+    "dci/resources/paper-bounded-corpus-manifests.json",
+    "dci/resources/paper-bounded-fixtures.json",
+    "dci/resources/paper-experiment-scope.schema.json",
+    "dci/resources/paper-experiment-scopes.json",
+    "dci/resources/paper-fixtures/corpora/base-plus-one/distractor-1.txt",
+    "dci/resources/paper-fixtures/corpora/base-plus-one/doc.txt",
+    "dci/resources/paper-fixtures/corpora/base-plus-two/distractor-1.txt",
+    "dci/resources/paper-fixtures/corpora/base-plus-two/distractor-2.txt",
+    "dci/resources/paper-fixtures/corpora/base-plus-two/doc.txt",
+    "dci/resources/paper-fixtures/corpora/base/doc.txt",
+    "dci/resources/paper-fixtures/corpus/doc.txt",
+    "dci/resources/paper-fixtures/gold/qa-manifest.json",
+    "dci/resources/paper-fixtures/gold/qa-registry.json",
+    "dci/resources/paper-fixtures/ir.jsonl",
+    "dci/resources/paper-fixtures/qa.jsonl",
+    "dci/resources/paper-selected-id-manifests.json",
+    "dci/resources/pi/context-extension-manifest.json",
+    "dci/resources/pi/dci-context-extension.ts",
+    "dci/resources/reproduction-result.schema.json",
+    "dci/resources/reproduction-target.schema.json",
+    "dci/resources/reproduction-targets.json",
+    "dci/resources/trajectory-resolution.schema.json",
+}
 
 
 class _CorpusService:
@@ -150,6 +196,34 @@ def _host_services(judge: object | None = None) -> dict[str, object]:
     }
 
 
+def _dci_import_closure(roots: tuple[str, ...]) -> set[str]:
+    closure: set[str] = set()
+    pending = list(roots)
+    while pending:
+        relative = pending.pop()
+        if relative in closure:
+            continue
+        closure.add(relative)
+        tree = ast.parse(SOURCE.joinpath(relative).read_bytes())
+        for node in ast.walk(tree):
+            modules: tuple[str, ...] = ()
+            if isinstance(node, ast.Import):
+                modules = tuple(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module is not None:
+                modules = (node.module,)
+            for module in modules:
+                if not module.startswith("asterion.dci."):
+                    continue
+                imported = (
+                    "dci/"
+                    + module.removeprefix("asterion.dci.").replace(".", "/")
+                    + ".py"
+                )
+                if SOURCE.joinpath(imported).is_file() and imported not in closure:
+                    pending.append(imported)
+    return closure
+
+
 def plan(runtime_id: str):
     suffix = "claude" if runtime_id == "claude-code.reference" else "pi"
     assembly = json.loads(
@@ -166,6 +240,121 @@ def plan(runtime_id: str):
 
 
 class DciCompleteApplicationContractTests(unittest.TestCase):
+    def test_transitive_identity_contains_every_reachable_dci_product_module(
+        self,
+    ) -> None:
+        reachable = _dci_import_closure(DCI_EXECUTABLE_SOURCE_ROOTS)
+        declared = {
+            name
+            for name in DCI_COMPLETE_IMPLEMENTATION_RESOURCES
+            if name.endswith(".py")
+        }
+        self.assertEqual(declared, reachable)
+
+    def test_transitive_identity_contains_explicit_packaged_resource_closure(
+        self,
+    ) -> None:
+        declared = {
+            name
+            for name in DCI_COMPLETE_IMPLEMENTATION_RESOURCES
+            if name.startswith("dci/resources/")
+        }
+        self.assertEqual(declared, DCI_PACKAGED_RESOURCE_CLOSURE)
+
+        referenced = set()
+        root = SOURCE / "dci/resources"
+        bounded = json.loads(
+            root.joinpath("paper-bounded-fixtures.json").read_text()
+        )
+        for artifact in bounded["artifacts"].values():
+            referenced.update(
+                {
+                    f"dci/resources/{artifact['dataset_resource']}",
+                    f"dci/resources/{artifact['corpus_document_resource']}",
+                }
+            )
+        corpora = json.loads(
+            root.joinpath("paper-bounded-corpus-manifests.json").read_text()
+        )
+        for manifest in corpora["manifests"]:
+            referenced.update(
+                f"dci/resources/{document['resource']}"
+                for document in manifest["documents"]
+            )
+        extension = json.loads(
+            root.joinpath("pi/context-extension-manifest.json").read_text()
+        )
+        referenced.add(f"dci/resources/pi/{extension['resource']}")
+        registry = json.loads(
+            root.joinpath("paper-fixtures/gold/qa-registry.json").read_text()
+        )
+        referenced.update(
+            f"dci/resources/paper-fixtures/gold/{item['path']}"
+            for item in registry["manifests"]
+        )
+        self.assertLessEqual(referenced, declared)
+        basenames: dict[str, set[str]] = {}
+        for resource_name in DCI_PACKAGED_RESOURCE_CLOSURE:
+            basenames.setdefault(Path(resource_name).name, set()).add(resource_name)
+        direct_references = set()
+        for source_name in _dci_import_closure(DCI_EXECUTABLE_SOURCE_ROOTS):
+            tree = ast.parse(SOURCE.joinpath(source_name).read_bytes())
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Constant) or not isinstance(
+                    node.value, str
+                ):
+                    continue
+                matches = basenames.get(Path(node.value).name, set())
+                if len(matches) == 1:
+                    direct_references.update(matches)
+        self.assertLessEqual(direct_references, declared)
+        self.assertFalse(
+            any(
+                marker in name
+                for name in declared
+                for marker in (
+                    "data/dci-bench/",
+                    "paper-full/",
+                    "corpus/beir/",
+                    "corpus/bright_corpus/",
+                    "corpus/wiki_corpus/",
+                )
+            )
+        )
+
+    def test_generic_framework_imports_remain_outside_the_dci_product_closure(
+        self,
+    ) -> None:
+        declared = set(DCI_COMPLETE_IMPLEMENTATION_RESOURCES)
+        self.assertFalse(
+            any(
+                name.startswith(
+                    (
+                        "assembly/",
+                        "packages/",
+                        "runner/",
+                        "runtime/",
+                        "runtimes/",
+                        "services/",
+                    )
+                )
+                for name in declared
+            )
+        )
+        runtime_ids = set()
+        for assembly_path in sorted(
+            ASSEMBLIES.glob("dci-complete-application-*.json")
+        ):
+            assembly = json.loads(assembly_path.read_text())
+            self.assertEqual(assembly["protocol"], "dci.assembly/v1")
+            runtime_ids.add(assembly["runtime_id"])
+        self.assertEqual(
+            runtime_ids, {"claude-code.reference", "pi.reference"}
+        )
+        for manifest_path in sorted(MANIFESTS.glob("*.json")):
+            manifest = json.loads(manifest_path.read_text())
+            self.assertEqual(manifest["protocol"], "dci.package/v1")
+
     def test_transitive_identity_closure_matches_complete_assembly_packages(
         self,
     ) -> None:
@@ -174,20 +363,12 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
                 name
                 for name in DCI_COMPLETE_IMPLEMENTATION_RESOURCES
                 if "/manifests/" not in name
+                and not name.startswith("dci/resources/")
             },
-            {
+            _dci_import_closure(DCI_EXECUTABLE_SOURCE_ROOTS)
+            | {
                 "applications/dci_agent_lite/assemblies/dci-complete-application-claude.json",
                 "applications/dci_agent_lite/assemblies/dci-complete-application-pi.json",
-                "capabilities/dci_research/complete.py",
-                "capabilities/dci_research/implementation.py",
-                "dci/analysis.py",
-                "dci/benchmark.py",
-                "dci/bridge.py",
-                "dci/evaluation.py",
-                "dci/judge.py",
-                "dci/provenance.py",
-                "dci/run.py",
-                "dci/services.py",
             },
         )
         assembly_package_ids: set[str] | None = None
