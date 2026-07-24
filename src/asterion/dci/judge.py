@@ -35,10 +35,221 @@ JUDGE_VERDICT_SCHEMA: dict[str, object] = {
     "required": ["is_correct", "normalized_prediction", "reason"],
     "additionalProperties": False,
 }
+ASTERION_SAFE_JUDGE_CONTRACT = "asterion.dci.answer-judge/strict-json/v1"
+PAPER_JUDGE_CONTRACT = "dci.paper-answer-judge/gpt-4.1/v1"
+UPSTREAM_JUDGE_CONTRACT = (
+    "dci.upstream-answer-judge/271f37e71f053bf0c99c05ce6d2fb53b841d922e/v1"
+)
 
 
 class DciJudgeError(RuntimeError):
     """Safe public error for judge configuration, transport, or response failures."""
+
+
+@dataclass(frozen=True, slots=True)
+class JudgeVerdict:
+    """Normalized, contract-bound Judge outcome without raw provider evidence."""
+
+    is_correct: bool
+    extracted_final_answer: str
+    reason: str
+    confidence: float | None
+    contract_id: str
+    request_fingerprint: str
+
+
+def build_paper_judge_request(
+    *, question: str, gold_answer: str, predicted_answer: str
+) -> dict[str, str]:
+    """Build the reported Appendix C.3 prompt without inventing transport details."""
+
+    return {
+        "prompt": (
+            "Judge Prompt\n"
+            "Judge whether the following {Response} to the {Question} is correct or not based on the precise and unambiguous {Correct Answer} below.\n\n"
+            f"Question: {question}\n\n"
+            f"Response: {predicted_answer}\n\n"
+            "Your judgement must be in the format and criteria specified below:\n\n"
+            "Extracted_final_answer: The final exact answer extracted from the {Response}. Put the extracted answer as `None` if there is no exact, final answer to extract from the response.\n\n"
+            f"Correct Answer: {gold_answer}\n\n"
+            "Reasoning: Explain why the extracted_final_answer is correct or incorrect based on {Correct Answer}, focusing only on if there are meaningful differences between {Correct Answer} and the extracted_final_answer. Do not comment on any background to the problem, do not attempt to solve the problem, do not argue for any answer different than {Correct Answer}, focus only on whether the answers match.\n\n"
+            "Correct: Answer `yes` if extracted_final_answer matches the {Correct Answer} given above, or is within a small margin of error for numerical problems. Answer `no` otherwise, i.e. if there is any inconsistency, ambiguity, non-equivalency, or if the extracted answer is incorrect.\n\n"
+            "Confidence: The extracted confidence score between 0% and 100% from {Response}. Put 100 if there is no confidence score available.\n"
+        )
+    }
+
+
+def build_upstream_judge_request(
+    config: "JudgeConfig", *, question: str, gold_answer: str, predicted_answer: str
+) -> dict[str, object]:
+    """Build the exact pinned upstream Responses request shape."""
+
+    return {
+        "model": config.model,
+        "reasoning": {"effort": "low"},
+        "text": {"verbosity": "low"},
+        "max_output_tokens": 180,
+        "input": [
+            {
+                "role": "system",
+                "content": (
+                    "You are grading a question-answer benchmark. "
+                    "Mark the prediction correct only if it identifies the same final answer as the gold answer. "
+                    "Ignore case, surrounding punctuation, whitespace, and extra explanation or supporting file paths. "
+                    "Do not give partial credit. Return exactly one compact JSON object."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Question:\n{question}\n\n"
+                    f"Gold answer:\n{gold_answer}\n\n"
+                    f"Predicted answer:\n{predicted_answer or '[empty]'}\n\n"
+                    'Return JSON with keys "is_correct" (boolean), "normalized_prediction" (string), and "reason" (string).'
+                ),
+            },
+        ],
+    }
+
+
+def build_safe_judge_request(
+    config: "JudgeConfig", *, question: str, gold_answer: str, predicted_answer: str
+) -> dict[str, object]:
+    """Build Asterion's configurable strict JSON execution request."""
+
+    return _build_safe_judge_request(
+        config, question=question, gold_answer=gold_answer, predicted_answer=predicted_answer
+    )
+
+
+def build_judge_request_for_contract(
+    contract_id: str,
+    config: "JudgeConfig",
+    *,
+    question: str,
+    gold_answer: str,
+    predicted_answer: str,
+) -> dict[str, object]:
+    """Dispatch only by a declared Judge contract, never by model name."""
+
+    if contract_id == PAPER_JUDGE_CONTRACT:
+        return build_paper_judge_request(
+            question=question, gold_answer=gold_answer, predicted_answer=predicted_answer
+        )
+    if contract_id == UPSTREAM_JUDGE_CONTRACT:
+        return build_upstream_judge_request(
+            config, question=question, gold_answer=gold_answer, predicted_answer=predicted_answer
+        )
+    if contract_id == ASTERION_SAFE_JUDGE_CONTRACT:
+        return build_safe_judge_request(
+            config, question=question, gold_answer=gold_answer, predicted_answer=predicted_answer
+        )
+    raise DciJudgeError("DCI Judge contract is invalid")
+
+
+def parse_paper_judge_response(
+    response: object, *, request_fingerprint: str
+) -> JudgeVerdict:
+    """Strict Asterion adapter for the paper's labeled C.3 output format."""
+
+    if not isinstance(response, str):
+        raise DciJudgeError("DCI Judge response is invalid")
+    match = re.fullmatch(
+        r"Extracted_final_answer: (?P<answer>[^\n]*)\n"
+        r"Reasoning: (?P<reason>[^\n]+)\n"
+        r"Correct: (?P<correct>yes|no)\n"
+        r"Confidence: (?P<confidence>(?:100|[0-9]{1,2})%?)",
+        response,
+    )
+    if match is None:
+        raise DciJudgeError("DCI Judge response is invalid")
+    confidence = float(match["confidence"].removesuffix("%"))
+    return JudgeVerdict(
+        is_correct=match["correct"] == "yes",
+        extracted_final_answer=match["answer"],
+        reason=match["reason"],
+        confidence=confidence,
+        contract_id=PAPER_JUDGE_CONTRACT,
+        request_fingerprint=request_fingerprint,
+    )
+
+
+def parse_upstream_judge_response(
+    response: object, *, request_fingerprint: str
+) -> JudgeVerdict:
+    """Parse one exact upstream Responses JSON verdict without accepting other shapes."""
+
+    if not isinstance(response, dict):
+        raise DciJudgeError("DCI Judge response is invalid")
+    text = _responses_content(response)
+    if not isinstance(text, str):
+        raise DciJudgeError("DCI Judge response is invalid")
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
+        if match is None:
+            raise DciJudgeError("DCI Judge response is invalid") from None
+        try:
+            value = json.loads(match.group(0))
+        except json.JSONDecodeError:
+            raise DciJudgeError("DCI Judge response is invalid") from None
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"is_correct", "normalized_prediction", "reason"}
+        or type(value["is_correct"]) is not bool
+        or not isinstance(value["normalized_prediction"], str)
+        or not isinstance(value["reason"], str)
+    ):
+        raise DciJudgeError("DCI Judge response is invalid")
+    return JudgeVerdict(
+        is_correct=value["is_correct"],
+        extracted_final_answer=value["normalized_prediction"],
+        reason=value["reason"],
+        confidence=None,
+        contract_id=UPSTREAM_JUDGE_CONTRACT,
+        request_fingerprint=request_fingerprint,
+    )
+
+
+def parse_safe_judge_response(
+    response: object, *, request_fingerprint: str, api: str
+) -> JudgeVerdict:
+    """Parse Asterion's strict JSON response shape."""
+
+    if not isinstance(response, dict):
+        raise DciJudgeError("DCI Judge response is invalid")
+    parsed = _parse_verdict(response, api)
+    if parsed is None:
+        raise DciJudgeError("DCI Judge response is invalid")
+    return JudgeVerdict(
+        is_correct=parsed["is_correct"],
+        extracted_final_answer=str(parsed["normalized_prediction"]),
+        reason=str(parsed["reason"]),
+        confidence=None,
+        contract_id=ASTERION_SAFE_JUDGE_CONTRACT,
+        request_fingerprint=request_fingerprint,
+    )
+
+
+def parse_judge_response_for_contract(
+    contract_id: str,
+    response: object,
+    *,
+    request_fingerprint: str,
+    api: str = "responses",
+) -> JudgeVerdict:
+    """Dispatch response parsing by the declared contract identity."""
+
+    if contract_id == PAPER_JUDGE_CONTRACT:
+        return parse_paper_judge_response(response, request_fingerprint=request_fingerprint)
+    if contract_id == UPSTREAM_JUDGE_CONTRACT:
+        return parse_upstream_judge_response(response, request_fingerprint=request_fingerprint)
+    if contract_id == ASTERION_SAFE_JUDGE_CONTRACT:
+        return parse_safe_judge_response(
+            response, request_fingerprint=request_fingerprint, api=api
+        )
+    raise DciJudgeError("DCI Judge contract is invalid")
 
 
 @dataclass(frozen=True)
@@ -162,7 +373,7 @@ class JudgeConfig:
         }
 
 
-def build_judge_request(
+def _build_safe_judge_request(
     config: JudgeConfig, *, question: str, gold_answer: str, predicted_answer: str
 ) -> dict[str, object]:
     """Build the complete request whose canonical form is the cache identity."""
@@ -198,6 +409,19 @@ def build_judge_request(
     return payload
 
 
+def build_judge_request(
+    config: JudgeConfig, *, question: str, gold_answer: str, predicted_answer: str
+) -> dict[str, object]:
+    """Compatibility wrapper for the explicit Asterion-safe Judge contract."""
+
+    return build_safe_judge_request(
+        config,
+        question=question,
+        gold_answer=gold_answer,
+        predicted_answer=predicted_answer,
+    )
+
+
 def _judge_messages(
     question: str, gold_answer: str, predicted_answer: str
 ) -> list[dict[str, str]]:
@@ -226,24 +450,56 @@ def _judge_messages(
 
 
 def judge_request_fingerprint(
-    *, config: JudgeConfig, question: str, gold_answer: str, predicted_answer: str
+    *,
+    config: JudgeConfig,
+    question: str,
+    gold_answer: str,
+    predicted_answer: str,
+    contract_id: str = ASTERION_SAFE_JUDGE_CONTRACT,
 ) -> str:
+    """Return a body-free fingerprint bound to the selected Judge contract."""
+
     return _fingerprint(
         config,
-        build_judge_request(
+        build_judge_request_for_contract(
+            contract_id,
             config,
             question=question,
             gold_answer=gold_answer,
             predicted_answer=predicted_answer,
         ),
+        contract_id=contract_id,
     )
 
 
-def judge_prompt_contract_sha256(config: JudgeConfig) -> str:
+def judge_prompt_contract_sha256(
+    config: JudgeConfig, *, contract_id: str = ASTERION_SAFE_JUDGE_CONTRACT
+) -> str:
     """Return the canonical digest of the body-free Judge prompt contract."""
 
+    if contract_id == PAPER_JUDGE_CONTRACT:
+        return hashlib.sha256(
+            build_paper_judge_request(
+                question="__DCI_QUERY__",
+                gold_answer="__DCI_CORRECT_ANSWER__",
+                predicted_answer="__DCI_RESPONSE__",
+            )["prompt"].encode("utf-8")
+        ).hexdigest()
+    if contract_id == UPSTREAM_JUDGE_CONTRACT:
+        request = build_upstream_judge_request(
+            config,
+            question="__DCI_QUESTION__",
+            gold_answer="__DCI_GOLD_ANSWER__",
+            predicted_answer="__DCI_PREDICTED_ANSWER__",
+        )
+        input_messages = request["input"]
+        assert isinstance(input_messages, list)
+        return hashlib.sha256(
+            (str(input_messages[0]["content"]) + "\n\n" + str(input_messages[1]["content"])).encode("utf-8")
+        ).hexdigest()
     return _canonical_json_sha256(
-        build_judge_request(
+        build_judge_request_for_contract(
+            contract_id,
             config,
             question="[question]",
             gold_answer="[gold-answer]",
@@ -252,15 +508,21 @@ def judge_prompt_contract_sha256(config: JudgeConfig) -> str:
     )
 
 
-def judge_request_shape_sha256(config: JudgeConfig) -> str:
+def judge_request_shape_sha256(
+    config: JudgeConfig, *, contract_id: str = ASTERION_SAFE_JUDGE_CONTRACT
+) -> str:
     """Return the canonical digest of one sentinel-shaped Judge request."""
 
-    request = build_judge_request(
+    request = build_judge_request_for_contract(
+        contract_id,
         config,
         question="[question]",
         gold_answer="[gold-answer]",
         predicted_answer="[predicted-answer]",
     )
+    if set(request) == {"prompt"}:
+        request["prompt"] = "[content]"
+        return _canonical_json_sha256(request)
     messages_key = "input" if config.api == "responses" else "messages"
     messages = request.get(messages_key)
     if isinstance(messages, list):
@@ -273,14 +535,22 @@ def judge_request_shape_sha256(config: JudgeConfig) -> str:
     return _canonical_json_sha256(request)
 
 
-def judge_public_identity(config: JudgeConfig) -> dict[str, object]:
+def judge_public_identity(
+    config: JudgeConfig, *, contract_id: str = ASTERION_SAFE_JUDGE_CONTRACT
+) -> dict[str, object]:
     """Return complete credential- and body-free Judge cache evidence."""
 
+    _require_judge_contract(contract_id)
     return {
         **config.public_dict(),
+        "judge_contract": contract_id,
         "endpoint": config.endpoint,
-        "request_shape_sha256": judge_request_shape_sha256(config),
-        "prompt_contract_sha256": judge_prompt_contract_sha256(config),
+        "request_shape_sha256": judge_request_shape_sha256(
+            config, contract_id=contract_id
+        ),
+        "prompt_contract_sha256": judge_prompt_contract_sha256(
+            config, contract_id=contract_id
+        ),
     }
 
 
@@ -301,16 +571,25 @@ def judge_answer_sync(
     gold_answer: str,
     predicted_answer: str,
     cancel_event: threading.Event | None = None,
+    contract_id: str = ASTERION_SAFE_JUDGE_CONTRACT,
 ) -> dict[str, object]:
     """Use one bounded retry budget and return only validated safe fields."""
 
-    request_payload = build_judge_request(
+    _require_judge_contract(contract_id)
+    if contract_id == PAPER_JUDGE_CONTRACT:
+        raise DciJudgeError("DCI paper Judge transport is unreported")
+    if contract_id == UPSTREAM_JUDGE_CONTRACT and (
+        config.base_url != OFFICIAL_OPENAI_BASE_URL or config.api != "responses"
+    ):
+        raise DciJudgeError("DCI upstream Judge configuration is invalid")
+    request_payload = build_judge_request_for_contract(
+        contract_id,
         config,
         question=question,
         gold_answer=gold_answer,
         predicted_answer=predicted_answer,
     )
-    fingerprint = _fingerprint(config, request_payload)
+    fingerprint = _fingerprint(config, request_payload, contract_id=contract_id)
     headers = {"Content-Type": "application/json"}
     if config.api_key:
         headers["Authorization"] = f"Bearer {config.api_key}"
@@ -320,10 +599,11 @@ def judge_answer_sync(
         headers=headers,
         method="POST",
     )
-    parsed: dict[str, object] | None = None
+    verdict: JudgeVerdict | None = None
     usage: dict[str, object] | None = None
     last_failure = "response"
-    for attempts in range(1, 4):
+    max_attempts = 1 if contract_id == UPSTREAM_JUDGE_CONTRACT else 3
+    for attempts in range(1, max_attempts + 1):
         if cancel_event is not None and cancel_event.is_set():
             raise DciJudgeError("DCI judge request was cancelled")
         try:
@@ -337,7 +617,7 @@ def judge_answer_sync(
             if not _retryable_http_status(error.code):
                 raise DciJudgeError("DCI judge request was rejected") from error
             last_failure = "transport"
-            if attempts == 3:
+            if attempts == max_attempts:
                 break
             _wait_before_retry(
                 _retry_delay(attempts, retry_after),
@@ -346,43 +626,57 @@ def judge_answer_sync(
             continue
         except (OSError, ValueError, urllib.error.URLError):
             last_failure = "transport"
-            if attempts == 3:
+            if attempts == max_attempts:
                 break
             _wait_before_retry(_retry_delay(attempts, None), cancel_event)
             continue
         if cancel_event is not None and cancel_event.is_set():
             raise DciJudgeError("DCI judge request was cancelled")
         if not isinstance(candidate, dict):
-            if attempts < 3:
+            if attempts < max_attempts:
                 _wait_before_retry(_retry_delay(attempts, None), cancel_event)
             continue
-        parsed = _parse_verdict(candidate, config.api)
+        try:
+            verdict = parse_judge_response_for_contract(
+                contract_id,
+                candidate,
+                request_fingerprint=fingerprint,
+                api=config.api,
+            )
+        except DciJudgeError:
+            verdict = None
         usage = _normalize_usage(candidate.get("usage"))
-        if parsed is not None and usage is not None:
+        if verdict is not None and usage is not None:
             break
-        parsed = None
-        if attempts < 3:
+        verdict = None
+        if attempts < max_attempts:
             _wait_before_retry(_retry_delay(attempts, None), cancel_event)
-    if parsed is None:
+    if verdict is None:
         if last_failure == "transport":
             raise DciJudgeError("DCI judge transport failed")
         raise DciJudgeError("DCI judge response was invalid")
     assert usage is not None
     return {
         **config.public_dict(),
+        "judge_contract": contract_id,
         "judged_at": datetime.now(timezone.utc).isoformat(),
         "attempts": attempts,
         "judge_request_fingerprint": fingerprint,
-        "is_correct": parsed["is_correct"],
-        "normalized_prediction": str(parsed.get("normalized_prediction", "")),
-        "reason": str(parsed.get("reason", "")),
+        "is_correct": verdict.is_correct,
+        "normalized_prediction": verdict.extracted_final_answer,
+        "reason": verdict.reason,
         "usage": usage,
         "cost_estimate_usd": estimate_judge_cost(usage, config),
     }
 
 
 async def judge_answer_async(
-    *, config: JudgeConfig, question: str, gold_answer: str, predicted_answer: str
+    *,
+    config: JudgeConfig,
+    question: str,
+    gold_answer: str,
+    predicted_answer: str,
+    contract_id: str = ASTERION_SAFE_JUDGE_CONTRACT,
 ) -> dict[str, object]:
     """Run the blocking transport without releasing cancellation before it closes."""
 
@@ -395,6 +689,7 @@ async def judge_answer_async(
             gold_answer=gold_answer,
             predicted_answer=predicted_answer,
             cancel_event=cancel_event,
+            contract_id=contract_id,
         )
     )
     try:
@@ -495,8 +790,13 @@ def _judge_env_bool(name: str, default: bool) -> bool:
     raise ValueError(f"DCI_EVAL_JUDGE_{name} must be a boolean")
 
 
-def _fingerprint(config: JudgeConfig, request_payload: dict[str, object]) -> str:
-    public_identity = judge_public_identity(config)
+def _fingerprint(
+    config: JudgeConfig,
+    request_payload: dict[str, object],
+    *,
+    contract_id: str = ASTERION_SAFE_JUDGE_CONTRACT,
+) -> str:
+    public_identity = judge_public_identity(config, contract_id=contract_id)
     public_identity.pop("judge_api_key_env", None)
     canonical = json.dumps(
         {
@@ -508,6 +808,15 @@ def _fingerprint(config: JudgeConfig, request_payload: dict[str, object]) -> str
         sort_keys=True,
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _require_judge_contract(contract_id: str) -> None:
+    if contract_id not in {
+        ASTERION_SAFE_JUDGE_CONTRACT,
+        PAPER_JUDGE_CONTRACT,
+        UPSTREAM_JUDGE_CONTRACT,
+    }:
+        raise DciJudgeError("DCI Judge contract is invalid")
 
 
 def _open_judge_request(

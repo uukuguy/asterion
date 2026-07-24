@@ -56,7 +56,7 @@ _CURRENT_JUDGE = {
     "thinking": False, "json_object": True,
     "request_shape_sha256": "b235c27019598e623db3a0ec4a76f847dac52f9581bc1a1acc8e4324b3d56db8",
     "output_shape_identity": "json-object/v1",
-    "prompt_contract": "dci.answer-judge/v1",
+    "prompt_contract": "asterion.dci.answer-judge/strict-json/v1",
     "prompt_contract_sha256": "4d05c3ff588df3b0d60c1547ba6aa5014c5737cf79500022fed66fe8fd92fcb0",
     "pricing_identity": "usd-per-1m/input=0,cached=0,output=0/runtime-default",
 }
@@ -64,20 +64,20 @@ _PAPER_JUDGE = {
     "base_url": "https://api.openai.com/v1", "api": "responses",
     "model": "gpt-4.1", "key_source": "OPENAI_API_KEY",
     "thinking": False, "json_object": True,
-    "request_shape_sha256": "6b12b487bfde0bb179f900c10ec762daa122726883a534d80c95d954c004d093",
-    "output_shape_identity": "json-schema/strict/v1",
+    "request_shape_sha256": "dd2a62b52f888de23a88e42380b62fb6df9435914ca2710d186e2ef799d42967",
+    "output_shape_identity": "paper-labeled-output/asterion-parser-adapter/v1",
     "prompt_contract": "dci.paper-answer-judge/gpt-4.1/v1",
-    "prompt_contract_sha256": "883c0cbbc76c73ed265d956092cac08e9d35fc0191f1ad2fb73a1ec28b7339c9",
+    "prompt_contract_sha256": "47e7ae410ed9f14dc06b8e0f3f18388152b320574f83e3a5a5b7e874ab70c921",
     "pricing_identity": "paper-unreported",
 }
 _UPSTREAM_JUDGE = {
     "base_url": "https://api.openai.com/v1", "api": "responses",
     "model": "gpt-5.4-nano", "key_source": "OPENAI_API_KEY",
     "thinking": False, "json_object": True,
-    "request_shape_sha256": "ba473fe38dbc6469ba20402b0d35353962dee9d61c27e961b1c5d0f1ae4fbb34",
-    "output_shape_identity": "json-schema/strict/v1",
+    "request_shape_sha256": "4265875757baa84a703a0cab19439bfb49f488419789653a80442727ab5f0d92",
+    "output_shape_identity": "upstream-json-object/v1",
     "prompt_contract": f"dci.upstream-answer-judge/{_UPSTREAM_COMMIT}/v1",
-    "prompt_contract_sha256": "d202be4eb6ca849d00768ad61cb4531e53194e5f0021c1f7c01029344248d020",
+    "prompt_contract_sha256": "fb02b190b7513c64e937e4c071359c15d18ff0eff45fc6635535d006e65bddff",
     "pricing_identity": "upstream-unreported",
 }
 _PAPER_UNREPORTED_PARAMETERS = {

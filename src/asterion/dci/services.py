@@ -16,6 +16,7 @@ from types import MappingProxyType
 from typing import Protocol, runtime_checkable
 
 from asterion.dci.judge import (
+    ASTERION_SAFE_JUDGE_CONTRACT,
     JudgeConfig,
     judge_answer_async,
     judge_prompt_contract_sha256,
@@ -197,11 +198,12 @@ class _DciAnswerJudgeService:
             {
                 "schema": "asterion.dci.answer-judge-identity/v1",
                 "adapter_id": "dci.openai-compatible",
+                "judge_contract": ASTERION_SAFE_JUDGE_CONTRACT,
                 "request_shape_sha256": judge_request_shape_sha256(
-                    self._config
+                    self._config, contract_id=ASTERION_SAFE_JUDGE_CONTRACT
                 ),
                 "prompt_contract_sha256": judge_prompt_contract_sha256(
-                    self._config
+                    self._config, contract_id=ASTERION_SAFE_JUDGE_CONTRACT
                 ),
                 "config_sha256": _judge_config_sha256(self._config),
             }
@@ -230,6 +232,7 @@ class _DciAnswerJudgeService:
                 question=question,
                 gold_answer=gold_answer,
                 predicted_answer=predicted_answer,
+                contract_id=ASTERION_SAFE_JUDGE_CONTRACT,
             )
         )
         try:

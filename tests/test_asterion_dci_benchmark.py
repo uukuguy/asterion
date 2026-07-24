@@ -24,7 +24,12 @@ from asterion.dci.experiment_profiles import (
     experiment_profiles_sha256,
     resolve_experiment_profile,
 )
-from asterion.dci.judge import JudgeConfig
+from asterion.dci.judge import (
+    UPSTREAM_JUDGE_CONTRACT,
+    JudgeConfig,
+    judge_prompt_contract_sha256,
+    judge_request_shape_sha256,
+)
 from asterion.dci.paper_benchmarks import canonical_sha256
 from asterion.dci.pi_rpc import FINAL_ANSWER_RECOVERY_PROMPT
 from asterion.dci.prompts import (
@@ -369,30 +374,26 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         )
         self.assertEqual(
             upstream["judge"]["request_shape_sha256"],
-            canonical_sha256(
-                {
-                    "api": "responses",
-                    "reasoning_effort": "low",
-                    "text_verbosity": "low",
-                    "max_output_tokens": 180,
-                    "output_keys": [
-                        "is_correct",
-                        "normalized_prediction",
-                        "reason",
-                    ],
-                }
+            judge_request_shape_sha256(
+                JudgeConfig(
+                    base_url="https://api.openai.com/v1",
+                    api="responses",
+                    model="gpt-5.4-nano",
+                    api_key_env="OPENAI_API_KEY",
+                ),
+                contract_id=UPSTREAM_JUDGE_CONTRACT,
             ),
         )
         self.assertEqual(
             upstream["judge"]["prompt_contract_sha256"],
-            canonical_sha256(
-                {
-                    "contract": f"dci.upstream-answer-judge/{commit}/v1",
-                    "source_identity": {
-                        "repository": "DCI-Agent/DCI-Agent-Lite",
-                        "commit": commit,
-                    },
-                }
+            judge_prompt_contract_sha256(
+                JudgeConfig(
+                    base_url="https://api.openai.com/v1",
+                    api="responses",
+                    model="gpt-5.4-nano",
+                    api_key_env="OPENAI_API_KEY",
+                ),
+                contract_id=UPSTREAM_JUDGE_CONTRACT,
             ),
         )
         expected_profiles_sha256 = canonical_sha256(
@@ -909,6 +910,7 @@ def _result(output_dir: Path) -> DciRunResult:
 def _verdict(config: JudgeConfig, *, correct: bool = True) -> dict[str, object]:
     return {
         **config.public_dict(),
+        "judge_contract": "asterion.dci.answer-judge/strict-json/v1",
         "judged_at": "2026-07-14T00:00:00+00:00",
         "attempts": 1,
         "judge_request_fingerprint": "replaced-by-evaluator",

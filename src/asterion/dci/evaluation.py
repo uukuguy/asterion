@@ -19,6 +19,9 @@ from asterion.dci.artifacts import (
     validate_completed_run_evidence,
 )
 from asterion.dci.judge import (
+    ASTERION_SAFE_JUDGE_CONTRACT,
+    PAPER_JUDGE_CONTRACT,
+    UPSTREAM_JUDGE_CONTRACT,
     DciJudgeError,
     JudgeConfig,
     estimate_judge_cost,
@@ -37,6 +40,7 @@ def evaluate_run_directory(
     gold_answer: str,
     judge_config: JudgeConfig,
     predicted_answer: str | None = None,
+    judge_contract: str = ASTERION_SAFE_JUDGE_CONTRACT,
     _cancel_event: threading.Event | None = None,
     _directory_fd: int | None = None,
 ) -> dict[str, object]:
@@ -68,8 +72,11 @@ def evaluate_run_directory(
             question=question,
             gold_answer=gold_answer,
             predicted_answer=prediction,
+            contract_id=judge_contract,
         )
-        cached = _load_reusable_result(lock, state, fingerprint, judge_config)
+        cached = _load_reusable_result(
+            lock, state, fingerprint, judge_config, judge_contract=judge_contract
+        )
         if cached is not None:
             return cached
         if _cancel_event is not None and _cancel_event.is_set():
@@ -80,11 +87,14 @@ def evaluate_run_directory(
             gold_answer=gold_answer,
             predicted_answer=prediction,
             cancel_event=_cancel_event,
+            contract_id=judge_contract,
         )
         result = dict(judged)
         result["judge_request_fingerprint"] = fingerprint
         result["evaluation_commit_id"] = secrets.token_hex(32)
-        if not _valid_verdict(result, fingerprint, judge_config):
+        if not _valid_verdict(
+            result, fingerprint, judge_config, judge_contract=judge_contract
+        ):
             raise DciEvaluationError("DCI evaluation failed")
         evaluation_digest = hashlib.sha256(json_document_bytes(result)).hexdigest()
         state["evaluation"] = _evaluation_summary(result, evaluation_digest)
@@ -105,6 +115,7 @@ async def evaluate_run_directory_async(
     gold_answer: str,
     judge_config: JudgeConfig,
     predicted_answer: str | None = None,
+    judge_contract: str = ASTERION_SAFE_JUDGE_CONTRACT,
     _directory_fd: int | None = None,
 ) -> dict[str, object]:
     """Evaluate asynchronously, draining a started blocking transport on cancellation."""
@@ -117,6 +128,7 @@ async def evaluate_run_directory_async(
             gold_answer=gold_answer,
             judge_config=judge_config,
             predicted_answer=predicted_answer,
+            judge_contract=judge_contract,
             _cancel_event=cancel_event,
             _directory_fd=_directory_fd,
         )
@@ -150,12 +162,14 @@ def _load_reusable_result(
     state: dict[str, Any],
     fingerprint: str,
     config: JudgeConfig,
+    *,
+    judge_contract: str = ASTERION_SAFE_JUDGE_CONTRACT,
 ) -> dict[str, object] | None:
     document = lock.read_optional_json_document("eval_result.json")
     if document is None:
         return None
     value, raw = document
-    if not _valid_verdict(value, fingerprint, config):
+    if not _valid_verdict(value, fingerprint, config, judge_contract=judge_contract):
         return None
     digest = hashlib.sha256(raw).hexdigest()
     if state.get("evaluation") != _evaluation_summary(value, digest):
@@ -164,9 +178,11 @@ def _load_reusable_result(
 
 
 def _valid_verdict(
-    value: dict[str, Any], fingerprint: str, config: JudgeConfig
+    value: dict[str, Any], fingerprint: str, config: JudgeConfig, *,
+    judge_contract: str = ASTERION_SAFE_JUDGE_CONTRACT,
 ) -> bool:
     expected_keys = set(config.public_dict()) | {
+        "judge_contract",
         "judged_at",
         "attempts",
         "judge_request_fingerprint",
@@ -188,6 +204,13 @@ def _valid_verdict(
     return (
         set(value) == expected_keys
         and value.get("judge_request_fingerprint") == fingerprint
+        and value.get("judge_contract") == judge_contract
+        and judge_contract
+        in {
+            ASTERION_SAFE_JUDGE_CONTRACT,
+            PAPER_JUDGE_CONTRACT,
+            UPSTREAM_JUDGE_CONTRACT,
+        }
         and isinstance(value.get("is_correct"), bool)
         and isinstance(value.get("normalized_prediction"), str)
         and isinstance(value.get("reason"), str)
@@ -263,6 +286,7 @@ def _evaluation_summary(
         name: result.get(name)
         for name in (
             "judge_model",
+            "judge_contract",
             "judge_base_url",
             "judge_api",
             "judged_at",
@@ -306,6 +330,12 @@ def _valid_transaction_candidate(
     digest = hashlib.sha256(raw).hexdigest()
     return (
         isinstance(fingerprint, str)
-        and _valid_verdict(result, fingerprint, config)
+        and isinstance(result.get("judge_contract"), str)
+        and _valid_verdict(
+            result,
+            fingerprint,
+            config,
+            judge_contract=str(result.get("judge_contract")),
+        )
         and state.get("evaluation") == _evaluation_summary(result, digest)
     )

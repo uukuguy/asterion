@@ -59,6 +59,7 @@ from asterion.dci.experiment_profiles import (
     resolve_experiment_profile,
 )
 from asterion.dci.judge import (
+    ASTERION_SAFE_JUDGE_CONTRACT,
     JudgeConfig,
     judge_public_identity,
     judge_request_fingerprint,
@@ -635,7 +636,10 @@ def _prepare(
         str(canonical_input_identity(request.corpus)) if request.corpus else None
     )
     runtime = _runtime_document(request.runtime_options)
-    judge = judge_public_identity(request.judge_config)
+    judge_contract = _judge_contract_for_request(request)
+    judge = judge_public_identity(
+        request.judge_config, contract_id=judge_contract
+    )
     judge_fingerprint = _fingerprint(judge)
     implementation_sha256 = dci_complete_implementation_identity()
     dataset_identity = canonical_input_identity(request.dataset)
@@ -945,6 +949,7 @@ async def _run_row(
                     native_dir,
                     gold_answer=_qa_gold_answer(row),
                     judge_config=request.judge_config,
+                    judge_contract=_judge_contract_for_request(request),
                     _directory_fd=native_authority.fd,
                 )
                 result["is_correct"] = verdict["is_correct"]
@@ -1400,6 +1405,21 @@ def _prompt_contract_for_request(
         raise DciBenchmarkError("DCI benchmark prompt contract is invalid") from error
 
 
+def _judge_contract_for_request(request: BenchmarkRequest) -> str:
+    """Resolve exactly one Judge semantics contract for a benchmark request."""
+
+    if request.profile is None:
+        return ASTERION_SAFE_JUDGE_CONTRACT
+    try:
+        return _resolve_prompt_profile(
+            request.profile,
+            provider=request.runtime_options.provider,
+            model=request.runtime_options.model,
+        ).judge_contract
+    except ValueError as error:
+        raise DciBenchmarkError("DCI benchmark Judge contract is invalid") from error
+
+
 def _has_selected_prompt_contract(value: Mapping[str, Any]) -> bool:
     try:
         profile_id = value.get("profile")
@@ -1673,8 +1693,15 @@ def _validate_exact_reuse(
             question=question,
             gold_answer=_qa_gold_answer(row),
             predicted_answer=prediction,
+            contract_id=_judge_contract_for_request(request),
         )
-        cached = _load_reusable_result(lock, state, fingerprint, request.judge_config)
+        cached = _load_reusable_result(
+            lock,
+            state,
+            fingerprint,
+            request.judge_config,
+            judge_contract=_judge_contract_for_request(request),
+        )
         if result.get("judge_configuration_fingerprint") != item.get(
             "judge_configuration_fingerprint"
         ):

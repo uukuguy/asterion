@@ -249,6 +249,7 @@ class LocalCorpusServiceTests(unittest.IsolatedAsyncioTestCase):
                     {
                         "adapter_id",
                         "config_sha256",
+                        "judge_contract",
                         "prompt_contract_sha256",
                         "request_shape_sha256",
                         "schema",

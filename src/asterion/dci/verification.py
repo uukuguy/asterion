@@ -53,8 +53,9 @@ from asterion.dci.artifacts import DciConversationFeatures
 from asterion.dci.judge import (
     DEFAULT_JUDGE_API_KEY_ENV,
     DEFAULT_JUDGE_MODEL,
+    PAPER_JUDGE_CONTRACT,
     JudgeConfig,
-    build_judge_request,
+    judge_prompt_contract_sha256,
 )
 from asterion.dci.context_profiles import (
     context_profile_names,
@@ -532,13 +533,10 @@ def paper_judge_identity(config: JudgeConfig) -> tuple[tuple[str, object], ...]:
     """Return the credential-free Judge and request-shaping identity."""
 
     public = config.public_dict()
-    request = build_judge_request(
-        config,
-        question="[question]",
-        gold_answer="[gold-answer]",
-        predicted_answer="[predicted-answer]",
+    public["judge_contract"] = PAPER_JUDGE_CONTRACT
+    public["prompt_contract_sha256"] = judge_prompt_contract_sha256(
+        config, contract_id=PAPER_JUDGE_CONTRACT
     )
-    public["prompt_contract_sha256"] = _canonical_json_sha256(request)
     return tuple(sorted(public.items()))
 
 
@@ -858,6 +856,7 @@ def _paper_default_operation_runner(
             qa_dir,
             gold_answer=_fixture_question("qa")[1],
             judge_config=readiness.judge_config,
+            judge_contract=PAPER_JUDGE_CONTRACT,
         ).get("is_correct") is True
         evaluation = qa_dir / "eval_result.json"
         if not accepted or not _private_regular(evaluation):
@@ -944,7 +943,10 @@ def _paper_report(
         or _PUBLIC_IDENTITY.fullmatch(readiness.model) is None
         or len(dict(readiness.judge_identity)) != len(readiness.judge_identity)
         or set(dict(readiness.judge_identity))
-        != set(JudgeConfig().public_dict()) | {"prompt_contract_sha256"}
+        != set(JudgeConfig().public_dict())
+        | {"judge_contract", "prompt_contract_sha256"}
+        or dict(readiness.judge_identity).get("judge_contract")
+        != PAPER_JUDGE_CONTRACT
         or _SHA256.fullmatch(
             str(dict(readiness.judge_identity).get("prompt_contract_sha256"))
         )
