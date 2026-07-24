@@ -563,21 +563,25 @@ git commit -m "feat: transport immutable package evidence"
 
 Expected: the package execution suite passes.
 
-### Task 7: Remove fictional DCI host edges
+### Task 7: Remove fictional product host edges
 
 **Files:**
 - Modify: `src/asterion/capabilities/dci_research/manifests/dci-research.json`
+- Modify: `src/asterion/capabilities/controlled_code/manifests/code-quality-workflow.json`
+- Modify: `src/asterion/capabilities/controlled_code/manifests/execution-audit-observability.json`
 - Modify: `src/asterion/applications/dci_agent_lite/assemblies/dci-research-capability.json`
 - Modify: `src/asterion/applications/dci_agent_lite/assemblies/dci-research-capability-claude.json`
 - Modify: `src/asterion/applications/dci_agent_lite/assemblies/dci-complete-application-pi.json`
 - Modify: `src/asterion/applications/dci_agent_lite/assemblies/dci-complete-application-claude.json`
 - Modify: `src/asterion/applications/dci_agent_lite/assemblies/dci-local-research.json`
+- Modify: `src/asterion/applications/controlled_code/assemblies/controlled-code-validation.json`
 - Modify: `tests/test_dci_complete_application.py`
+- Modify: `tests/test_controlled_code_application.py`
 - Modify: `tests/test_package_execution.py`
 
 **Interfaces:**
 - Consumes: package input text as the direct research request; runtime events remain internal to the research implementation.
-- Produces: DCI graphs whose declared host edges correspond to actual runner inputs.
+- Produces: product graphs whose declared host edges correspond to actual runner inputs.
 
 - [ ] **Step 1: Write the declaration assertions**
 
@@ -595,14 +599,34 @@ self.assertEqual(manifest["consumes_events"], [])
 self.assertEqual(manifest["consumes_artifacts"], [])
 ```
 
+Assert for the controlled-code graph:
+
+```python
+self.assertEqual(workflow["consumes_events"], [])
+self.assertEqual(workflow["consumes_artifacts"], [])
+self.assertEqual(audit["consumes_events"], ["workflow.code-quality.completed"])
+self.assertEqual(
+    audit["consumes_artifacts"],
+    ["application/vnd.dci.code-quality-report+json"],
+)
+self.assertEqual(assembly["host_events"], [])
+self.assertEqual(assembly["host_artifacts"], [])
+```
+
 Run the focused tests and expect failure.
 
 - [ ] **Step 2: Correct the manifests**
 
 Remove `run.started` and `tool.result` from the research package's
 `consumes_events`, and remove `text/plain` from `consumes_artifacts`. Clear the
-matching `host_events` and `host_artifacts` in all DCI assemblies. Keep
-package-to-package completion events and typed artifacts unchanged.
+matching `host_events` and `host_artifacts` in all DCI assemblies.
+
+Also remove the controlled-code workflow's fictional `run.started`,
+`tool.result`, and `text/x-source` host inputs. The audit package keeps only
+the real workflow completion event and typed report artifact. Clear matching
+host events/artifacts from the controlled-code assembly. Keep real
+package-to-package completion events and typed artifacts unchanged in both
+product graphs.
 
 - [ ] **Step 3: Run promotion-sensitive tests**
 
@@ -610,6 +634,7 @@ package-to-package completion events and typed artifacts unchanged.
 uv run python -m unittest -v \
   tests.test_package_execution \
   tests.test_dci_complete_application \
+  tests.test_controlled_code_application \
   tests.test_installed_application_provider
 make promotion-check
 ```
@@ -620,12 +645,15 @@ Expected: all commands pass without provider requests.
 
 ```bash
 git add src/asterion/capabilities/dci_research/manifests/dci-research.json \
+  src/asterion/capabilities/controlled_code/manifests \
   src/asterion/applications/dci_agent_lite/assemblies \
-  tests/test_dci_complete_application.py tests/test_package_execution.py
-git commit -m "fix: align DCI assembly edges with runtime data flow"
+  src/asterion/applications/controlled_code/assemblies \
+  tests/test_dci_complete_application.py tests/test_controlled_code_application.py \
+  tests/test_package_execution.py
+git commit -m "fix: align product assembly edges with runtime data flow"
 ```
 
-### Task 8: Full protocol gate and documentation
+### Task 8: Protocol gate and documentation
 
 **Files:**
 - Modify: `docs/architecture/composable-packages.md`
@@ -643,20 +671,30 @@ Document canonical identifiers/arrays, matched tool lifecycle, one-provider
 composition, immutable snapshots, real evidence transport, global artifact ID
 uniqueness, and allowed-output cardinality. State explicitly that richer
 artifact identity/cardinality declarations require a future protocol version.
+Record that the repository-wide `make test` and `make check` gates are deferred
+to the application-authority plan, which owns the current unrelated generic
+CLI `.env` isolation and CI Node-version corrections.
 
-- [ ] **Step 2: Run the complete provider-free gate**
+- [ ] **Step 2: Run the focused provider-free gate**
 
 ```bash
-make test
+uv run python -m unittest -v \
+  tests.test_runtime_protocol \
+  tests.test_package_composition \
+  tests.test_package_catalog \
+  tests.test_package_execution \
+  tests.test_dci_complete_application \
+  tests.test_dci_research_capability \
+  tests.test_controlled_code_application
+npm --prefix packages/typescript/asterion-runtime test
 make lint
 make docs-check
-make check
 make promotion-check
 ```
 
-Expected: every command passes. If `make check` still fails, do not label the
-plan complete; record the exact failing command and repair it within the
-responsible task.
+Expected: every listed command passes. Do not claim that the broader
+`make test` or `make check` gate passes until the application-authority plan
+has corrected and rerun those repository-wide boundaries.
 
 - [ ] **Step 3: Commit**
 

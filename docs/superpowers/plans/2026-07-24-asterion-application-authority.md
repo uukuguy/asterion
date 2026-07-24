@@ -25,6 +25,7 @@
 
 - `src/asterion/cli.py` — generic, DCI-neutral installed-application host.
 - `src/asterion/runtime/factory.py` and `runtime/defaults.py` — exact runtime construction from explicit options.
+- `src/asterion/services/registry.py` — exact host-service factory discovery and lifecycle.
 - `src/asterion/applications/provider.py` — provider structure and runtime/assembly bijection.
 - `src/asterion/applications/dci_agent_lite/provider.py` — static DCI package bindings only.
 - `src/asterion/dci/services.py` — DCI-owned narrow corpus and Judge service protocols.
@@ -39,10 +40,12 @@
 ### Task 1: Remove DCI configuration from the generic CLI
 
 **Files:**
+- Modify: `.github/workflows/ci.yml`
 - Modify: `src/asterion/cli.py`
 - Modify: `src/asterion/runtime/factory.py`
 - Modify: `src/asterion/runtime/defaults.py`
 - Modify: `tests/test_asterion_cli.py`
+- Test: `tests/test_standalone_repository.py`
 
 **Interfaces:**
 - Consumes: CLI runtime ID and explicit generic `--runtime-option key=value` values.
@@ -134,16 +137,29 @@ if runtime_id is None:
 Pass the exact canonical ID to `registry.select()`. Do not normalize aliases in
 the generic CLI.
 
-- [ ] **Step 4: Run and commit**
+- [ ] **Step 4: Align the CI Node floor**
+
+Change the CI workflow from Node 20 to the repository's declared and tested
+Node `22.19.0` floor. Keep the workflow, README setup instructions,
+`package.json` engines, and standalone-repository assertion consistent. Run:
+
+```bash
+uv run python -m unittest -v tests.test_standalone_repository
+```
+
+- [ ] **Step 5: Run and commit**
 
 ```bash
 uv run python -m unittest -v tests.test_asterion_cli
-git add src/asterion/cli.py src/asterion/runtime/factory.py \
-  src/asterion/runtime/defaults.py tests/test_asterion_cli.py
+uv run python -m unittest -v tests.test_standalone_repository
+git add .github/workflows/ci.yml src/asterion/cli.py \
+  src/asterion/runtime/factory.py src/asterion/runtime/defaults.py \
+  tests/test_asterion_cli.py tests/test_standalone_repository.py
 git commit -m "fix: keep the generic application CLI domain neutral"
 ```
 
-Expected: all CLI tests pass from repository and temporary cwd values.
+Expected: all CLI and standalone-repository tests pass from repository and
+temporary cwd values.
 
 ### Task 2: Prove runtime-to-assembly bijection and executable closure
 
@@ -214,8 +230,7 @@ During provider validation:
 5. Run `validate_implementation_bindings()`.
 6. Compare the sorted assembly runtime IDs exactly with `runtime_ids`.
 
-If changing `validate_installed_provider()` to require a runtime registry would
-break metadata-only discovery, split validation into:
+Preserve metadata-only discovery by splitting validation into:
 
 ```python
 validate_installed_provider_metadata(
@@ -231,7 +246,8 @@ resolve_installed_provider(
 ) -> InstalledApplicationProvider
 ```
 
-`list` uses metadata validation; `run` and acceptance use resolved validation.
+`list` uses metadata validation without loading runtime factories; `run` and
+acceptance use resolved validation.
 
 - [ ] **Step 4: Run and commit**
 
@@ -390,17 +406,21 @@ Expected: all tests pass.
 ### Task 5: Inject explicit local-corpus authority
 
 **Files:**
+- Create: `src/asterion/services/registry.py`
 - Create: `src/asterion/dci/services.py`
 - Modify: `src/asterion/cli.py`
+- Modify: `src/asterion/runtime/factory.py`
 - Modify: `src/asterion/capabilities/dci_research/implementation.py`
 - Modify: `src/asterion/capabilities/dci_research/complete.py`
 - Modify: `src/asterion/applications/dci_agent_lite/assemblies/*.json`
+- Modify: `pyproject.toml`
 - Modify: `tests/test_dci_complete_application.py`
 - Modify: `tests/test_asterion_cli.py`
 
 **Interfaces:**
 - Consumes: an operator-selected local corpus root.
-- Produces: `LocalCorpusService` under host capability `corpus.local-root`.
+- Produces: `LocalCorpusService` under host capability `corpus.local-root`,
+  resolved through a generic exact host-service registry.
 
 - [ ] **Step 1: Define and test the service**
 
@@ -425,14 +445,70 @@ corpus contents through public reports.
 Test regular-directory success, missing path, symlink root, replacement after
 preflight, and sentinel path/content redaction.
 
-- [ ] **Step 2: Declare the host capability**
+- [ ] **Step 2: Add the generic exact host-service registry**
+
+Define a domain-neutral registry around:
+
+```python
+@dataclass(frozen=True)
+class HostServiceFactoryContext:
+    provider_id: str
+    application_id: str
+    application_version: str
+    capability_id: str
+    options: Mapping[str, str]
+
+HostServiceFactory = Callable[
+    [HostServiceFactoryContext],
+    AbstractAsyncContextManager[object],
+]
+
+@dataclass(frozen=True)
+class HostServiceFactoryBinding:
+    capability_id: str
+    option_names: tuple[str, ...]
+    factory: HostServiceFactory
+```
+
+Reject duplicate or noncanonical capability IDs, unsorted option names,
+duplicate or unknown options, and missing factories. Load factories only for
+capabilities declared by the selected assembly. Manage service lifetimes with
+`AsyncExitStack`.
+
+Add repeatable generic CLI syntax:
+
+```text
+--host-option CAPABILITY:KEY=VALUE
+```
+
+The generic CLI validates only the canonical capability/key/value structure
+and duplicate keys; it does not interpret DCI values.
+
+Add `host_services: Mapping[str, object]` to the frozen
+`RuntimeFactoryContext`, so the selected runtime factory can consume the
+operator-owned corpus root without any framework import of `asterion.dci`.
+
+- [ ] **Step 3: Register exact DCI service factories**
+
+Register exact entry points:
+
+```toml
+[project.entry-points."asterion.host_services"]
+corpus.local-root = "asterion.dci.services:create_local_corpus_service_factory"
+evaluation.answer-judge = "asterion.dci.services:create_answer_judge_service_factory"
+```
+
+Metadata-only `list` and `describe` do not load this group. `run` resolves only
+the selected assembly's declared capabilities.
+
+- [ ] **Step 4: Declare the host capability**
 
 Add `"corpus.local-root"` to `host_capabilities` in every provider-bound DCI
 assembly. Keep arrays sorted. The CLI must require an explicit generic host
 service factory for that capability; DCI product commands may build it from
 their already-resolved corpus option.
 
-- [ ] **Step 3: Consume the injected service**
+- [ ] **Step 5: Consume the injected service**
 
 In each DCI research implementation:
 
@@ -445,13 +521,14 @@ if not isinstance(service, LocalCorpusService):
 Pass `service.root` through the already-selected runtime configuration or
 request-owned scope. Do not call `Path.cwd()` in a package implementation.
 
-- [ ] **Step 4: Run and commit**
+- [ ] **Step 6: Run and commit**
 
 ```bash
 uv run python -m unittest -v \
   tests.test_dci_complete_application \
   tests.test_asterion_cli
-git add src/asterion/dci/services.py src/asterion/cli.py \
+git add src/asterion/services/registry.py src/asterion/dci/services.py \
+  src/asterion/cli.py src/asterion/runtime/factory.py pyproject.toml \
   src/asterion/capabilities/dci_research \
   src/asterion/applications/dci_agent_lite/assemblies \
   tests/test_dci_complete_application.py tests/test_asterion_cli.py
@@ -513,8 +590,10 @@ side-channel cleanup.
 - [ ] **Step 3: Declare and inject the service**
 
 Add `"evaluation.answer-judge"` to complete-application host capabilities only.
-The generic host must reject a complete run without this service before the
-runtime starts. Research-only application assemblies do not declare it.
+Bind its DCI-owned factory through the same exact `asterion.host_services`
+registry introduced in Task 5. The generic host must reject a complete run
+without this service before the runtime starts. Research-only application
+assemblies do not declare it.
 
 - [ ] **Step 4: Test redaction and cancellation**
 
