@@ -7,7 +7,12 @@ from pathlib import Path
 from types import MappingProxyType
 
 from asterion.assembly.protocol import resolve_assembly
-from asterion.packages.catalog import PackageRef, discover_packages
+from asterion.packages.catalog import (
+    CatalogEntry,
+    PackageCatalog,
+    PackageRef,
+    discover_packages,
+)
 from asterion.packages.execution import (
     PackageExecutionError,
     PackageExecutionResult,
@@ -15,6 +20,8 @@ from asterion.packages.execution import (
     validate_implementation_bindings,
     validate_package_result,
 )
+from asterion.runner.application import ApplicationRunError
+from asterion.runner.composed import run_composed_application
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 
 
@@ -52,12 +59,114 @@ class RecordingImplementation:
         return PackageExecutionResult(events=(), artifacts=())
 
 
+class ResultImplementation:
+    def __init__(self, result: PackageExecutionResult) -> None:
+        self.result = result
+        self.invocations: list[PackageInvocation] = []
+
+    async def execute(
+        self, invocation: PackageInvocation
+    ) -> PackageExecutionResult:
+        self.invocations.append(invocation)
+        return self.result
+
+
 def resolve_plan():
     return resolve_assembly(
         json.loads(ASSEMBLY.read_text()),
         catalog=discover_packages((MANIFEST_ROOT,)),
         runtime_manifest=FixtureRuntime.manifest.to_mapping(),
     )
+
+
+def evidence_plan():
+    producer = {
+        "protocol": "dci.package/v1",
+        "package_id": "evidence.producer",
+        "version": "1.0.0",
+        "kind": "capability",
+        "provides_capabilities": [],
+        "requires_capabilities": [],
+        "requires_policies": [],
+        "emits_events": ["producer.completed"],
+        "consumes_events": [],
+        "produces_artifacts": ["application/vnd.producer+json"],
+        "consumes_artifacts": [],
+    }
+    consumer = {
+        "protocol": "dci.package/v1",
+        "package_id": "evidence.consumer",
+        "version": "1.0.0",
+        "kind": "evaluation",
+        "provides_capabilities": [],
+        "requires_capabilities": [],
+        "requires_policies": [],
+        "emits_events": [],
+        "consumes_events": ["host.ready", "producer.completed"],
+        "produces_artifacts": ["application/vnd.consumer+json"],
+        "consumes_artifacts": [
+            "application/vnd.host-input+json",
+            "application/vnd.producer+json",
+        ],
+    }
+    catalog = PackageCatalog(
+        entries=tuple(
+            CatalogEntry(
+                ref=PackageRef(str(manifest["package_id"]), "1.0.0"),
+                source=PROJECT / f'{manifest["package_id"]}.json',
+                manifest=manifest,
+            )
+            for manifest in (consumer, producer)
+        )
+    )
+    assembly = {
+        "protocol": "dci.assembly/v1",
+        "application_id": "evidence.application",
+        "version": "1.0.0",
+        "runtime_id": "pi.reference",
+        "packages": [
+            {"package_id": "evidence.consumer", "version": "1.0.0"},
+            {"package_id": "evidence.producer", "version": "1.0.0"},
+        ],
+        "host_capabilities": [],
+        "host_policies": [],
+        "host_events": ["host.ready"],
+        "host_artifacts": ["application/vnd.host-input+json"],
+    }
+    return resolve_assembly(
+        assembly,
+        catalog=catalog,
+        runtime_manifest=FixtureRuntime.manifest.to_mapping(),
+    )
+
+
+def producer_result():
+    return PackageExecutionResult(
+        events=({
+            "type": "producer.completed",
+            "payload": {"nested": {"status": "complete"}},
+        },),
+        artifacts=({
+            "artifact_id": "producer-artifact",
+            "media_type": "application/vnd.producer+json",
+            "value": {"nested": {"status": "complete"}},
+        },),
+    )
+
+
+def host_events():
+    return ({
+        "type": "host.ready",
+        "payload": {"nested": {"status": "ready"}},
+    },)
+
+
+def host_artifacts():
+    return ({
+        "artifact_id": "host-input",
+        "media_type": "application/vnd.host-input+json",
+        "value": {"nested": {"status": "ready"}},
+    },)
 
 
 class PackageImplementationBindingTests(unittest.TestCase):
@@ -115,7 +224,20 @@ class PackageExecutionValueTests(unittest.TestCase):
             manifest=manifest,
             run_id="package-run-1",
             input_text="Read the corpus",
+            upstream_events=({
+                "type": "research.completed",
+                "payload": {"nested": {"ok": True}},
+            },),
             upstream_artifacts=({"media_type": "text/plain", "value": {"x": 1}},),
+            host_events=({
+                "type": "run.started",
+                "payload": {"nested": {"ok": True}},
+            },),
+            host_artifacts=({
+                "artifact_id": "host-input",
+                "media_type": "text/plain",
+                "value": {"nested": {"ok": True}},
+            },),
             runtime=FixtureRuntime(),
             host_services={"service.example": object()},
         )
@@ -130,7 +252,13 @@ class PackageExecutionValueTests(unittest.TestCase):
 
         self.assertIsInstance(invocation.host_services, MappingProxyType)
         with self.assertRaises(TypeError):
+            invocation.upstream_events[0]["payload"]["nested"]["ok"] = False
+        with self.assertRaises(TypeError):
             invocation.upstream_artifacts[0]["media_type"] = "changed"
+        with self.assertRaises(TypeError):
+            invocation.host_events[0]["payload"]["nested"]["ok"] = False
+        with self.assertRaises(TypeError):
+            invocation.host_artifacts[0]["value"]["nested"]["ok"] = False
         with self.assertRaises(TypeError):
             result.events[0]["type"] = "changed"
         with self.assertRaises(TypeError):
@@ -158,6 +286,12 @@ class PackageResultValidationTests(unittest.TestCase):
             ),
         )
 
+    def test_declared_outputs_are_allowed_types_not_required_outputs(self) -> None:
+        validate_package_result(
+            self.manifest(),
+            PackageExecutionResult(events=(), artifacts=()),
+        )
+
     def test_undeclared_or_malformed_outputs_are_rejected_without_content(self) -> None:
         sentinel = "SECRET-PACKAGE-OUTPUT"
         invalid = (
@@ -177,12 +311,167 @@ class PackageResultValidationTests(unittest.TestCase):
                     {"artifact_id": "same", "media_type": "application/vnd.dci.research+json", "value": {}},
                 ),
             ),
+            PackageExecutionResult(
+                events=({"type": "research.completed", "payload": sentinel},),
+                artifacts=(),
+            ),
+            PackageExecutionResult(
+                events=(),
+                artifacts=({
+                    "artifact_id": "",
+                    "media_type": "application/vnd.dci.research+json",
+                    "value": {},
+                },),
+            ),
+            PackageExecutionResult(
+                events=(),
+                artifacts=({
+                    "artifact_id": "result",
+                    "media_type": "application/vnd.dci.research+json",
+                    "value": sentinel,
+                },),
+            ),
         )
         for result in invalid:
             with self.subTest(result=result):
                 with self.assertRaises(PackageExecutionError) as raised:
                     validate_package_result(self.manifest(), result)
                 self.assertNotIn(sentinel, str(raised.exception))
+
+
+class ComposedEvidenceTransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_runner_filters_and_deeply_freezes_upstream_and_host_evidence(
+        self,
+    ) -> None:
+        producer = ResultImplementation(producer_result())
+        consumer = ResultImplementation(
+            PackageExecutionResult(events=(), artifacts=())
+        )
+
+        await run_composed_application(
+            evidence_plan(),
+            implementations=(
+                (PackageRef("evidence.producer", "1.0.0"), producer),
+                (PackageRef("evidence.consumer", "1.0.0"), consumer),
+            ),
+            runtime=FixtureRuntime(),
+            run_id="evidence-run",
+            input_text="Transport evidence",
+            host_services={},
+            host_events=host_events(),
+            host_artifacts=host_artifacts(),
+        )
+
+        invocation = consumer.invocations[0]
+        self.assertEqual(
+            tuple(event["type"] for event in invocation.upstream_events),
+            ("producer.completed",),
+        )
+        self.assertEqual(
+            tuple(item["artifact_id"] for item in invocation.upstream_artifacts),
+            ("producer-artifact",),
+        )
+        self.assertEqual(
+            tuple(event["type"] for event in invocation.host_events),
+            ("host.ready",),
+        )
+        self.assertEqual(
+            tuple(item["artifact_id"] for item in invocation.host_artifacts),
+            ("host-input",),
+        )
+        with self.assertRaises(TypeError):
+            invocation.upstream_events[0]["payload"]["nested"]["status"] = "changed"
+        with self.assertRaises(TypeError):
+            invocation.upstream_artifacts[0]["value"]["nested"]["status"] = "changed"
+        with self.assertRaises(TypeError):
+            invocation.host_events[0]["payload"]["nested"]["status"] = "changed"
+        with self.assertRaises(TypeError):
+            invocation.host_artifacts[0]["value"]["nested"]["status"] = "changed"
+
+    async def test_host_evidence_must_exactly_match_assembly_declarations(
+        self,
+    ) -> None:
+        cases = (
+            ((), host_artifacts()),
+            (
+                (
+                    *host_events(),
+                    {"type": "host.extra", "payload": {}},
+                ),
+                host_artifacts(),
+            ),
+            (host_events(), ()),
+            (
+                host_events(),
+                (
+                    *host_artifacts(),
+                    {
+                        "artifact_id": "host-extra",
+                        "media_type": "application/vnd.host-extra+json",
+                        "value": {},
+                    },
+                ),
+            ),
+        )
+        for actual_events, actual_artifacts in cases:
+            with self.subTest(
+                events=actual_events,
+                artifacts=actual_artifacts,
+            ):
+                producer = ResultImplementation(producer_result())
+                consumer = ResultImplementation(
+                    PackageExecutionResult(events=(), artifacts=())
+                )
+                with self.assertRaises(ApplicationRunError):
+                    await run_composed_application(
+                        evidence_plan(),
+                        implementations=(
+                            (
+                                PackageRef("evidence.producer", "1.0.0"),
+                                producer,
+                            ),
+                            (
+                                PackageRef("evidence.consumer", "1.0.0"),
+                                consumer,
+                            ),
+                        ),
+                        runtime=FixtureRuntime(),
+                        run_id="evidence-run",
+                        input_text="Transport evidence",
+                        host_services={},
+                        host_events=actual_events,
+                        host_artifacts=actual_artifacts,
+                    )
+                self.assertEqual(producer.invocations, [])
+                self.assertEqual(consumer.invocations, [])
+
+    async def test_artifact_ids_are_unique_across_all_package_results(self) -> None:
+        producer = ResultImplementation(producer_result())
+        consumer = ResultImplementation(
+            PackageExecutionResult(
+                events=(),
+                artifacts=({
+                    "artifact_id": "producer-artifact",
+                    "media_type": "application/vnd.consumer+json",
+                    "value": {},
+                },),
+            )
+        )
+
+        with self.assertRaises(ApplicationRunError):
+            await run_composed_application(
+                evidence_plan(),
+                implementations=(
+                    (PackageRef("evidence.producer", "1.0.0"), producer),
+                    (PackageRef("evidence.consumer", "1.0.0"), consumer),
+                ),
+                runtime=FixtureRuntime(),
+                run_id="evidence-run",
+                input_text="Transport evidence",
+                host_services={},
+                host_events=host_events(),
+                host_artifacts=host_artifacts(),
+            )
 
 
 if __name__ == "__main__":

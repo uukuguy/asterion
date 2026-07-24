@@ -32,14 +32,32 @@ class PackageInvocation:
     upstream_artifacts: tuple[Mapping[str, object], ...]
     runtime: AgentRuntimeClient
     host_services: Mapping[str, object]
+    upstream_events: tuple[Mapping[str, object], ...] = ()
+    host_events: tuple[Mapping[str, object], ...] = ()
+    host_artifacts: tuple[Mapping[str, object], ...] = ()
     signal: CancellationSignal | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "manifest", _freeze_mapping(self.manifest))
         object.__setattr__(
             self,
+            "upstream_events",
+            tuple(_freeze_mapping(event) for event in self.upstream_events),
+        )
+        object.__setattr__(
+            self,
             "upstream_artifacts",
             tuple(_freeze_mapping(artifact) for artifact in self.upstream_artifacts),
+        )
+        object.__setattr__(
+            self,
+            "host_events",
+            tuple(_freeze_mapping(event) for event in self.host_events),
+        )
+        object.__setattr__(
+            self,
+            "host_artifacts",
+            tuple(_freeze_mapping(artifact) for artifact in self.host_artifacts),
         )
         object.__setattr__(
             self, "host_services", MappingProxyType(dict(self.host_services))
