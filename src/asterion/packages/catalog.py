@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping
-from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 
 from asterion.packages.protocol import PackageProtocolError, validate_package_manifest
 
@@ -47,7 +47,7 @@ class PackageCatalog:
                 f"unknown package identity: {missing.package_id}@{missing.version}"
             )
         return tuple(
-            deepcopy(dict(entries[ref].manifest)) for ref in sorted(requested)
+            _thaw_manifest(entries[ref].manifest) for ref in sorted(requested)
         )
 
 
@@ -96,7 +96,7 @@ def discover_packages(roots: Iterable[Path]) -> PackageCatalog:
                 CatalogEntry(
                     ref=ref,
                     source=source.resolve(strict=True),
-                    manifest=manifest,
+                    manifest=_freeze(manifest),
                 )
             )
     return PackageCatalog(
@@ -122,3 +122,25 @@ def _canonicalize_roots(roots: Iterable[Path]) -> list[Path]:
         seen.add(resolved)
         canonical.append(resolved)
     return sorted(canonical)
+
+
+def _freeze(value: object) -> object:
+    if isinstance(value, Mapping):
+        return MappingProxyType({str(key): _freeze(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze(item) for item in value)
+    return value
+
+
+def _thaw_manifest(manifest: Mapping[str, object]) -> dict[str, object]:
+    thawed = _thaw(manifest)
+    assert isinstance(thawed, dict)
+    return thawed
+
+
+def _thaw(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {str(key): _thaw(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw(item) for item in value]
+    return value
