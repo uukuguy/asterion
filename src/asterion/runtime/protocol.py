@@ -268,3 +268,5 @@ def validate_event_stream(events: Iterable[Mapping[str, object]]) -> None:
 
     if not terminal_seen:
         raise ProtocolError("event stream must end with one terminal event")
+    if calls != results:
+        raise ProtocolError("every tool.call must have exactly one tool.result")

@@ -1,0 +1,3 @@
+{"protocol":"dci.agent-runtime/v1","run_id":"unmatched-call","sequence":1,"type":"run.started","payload":{"capabilities":["filesystem.read"]}}
+{"protocol":"dci.agent-runtime/v1","run_id":"unmatched-call","sequence":2,"type":"tool.call","payload":{"call_id":"call-1","name":"read","arguments":{"path":"doc.txt"}}}
+{"protocol":"dci.agent-runtime/v1","run_id":"unmatched-call","sequence":3,"type":"run.completed","payload":{"status":"completed"}}

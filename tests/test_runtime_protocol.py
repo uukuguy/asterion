@@ -46,3 +46,13 @@ class TestRuntimeProtocol(unittest.TestCase):
     def test_rejects_unsorted_started_capabilities(self) -> None:
         with self.assertRaises(ProtocolError):
             validate_event_stream(_jsonl("invalid-unsorted-started-capabilities.jsonl"))
+
+    def test_rejects_invalid_event_streams(self) -> None:
+        for name in (
+            "invalid-sequence-gap.jsonl",
+            "invalid-unmatched-tool-result.jsonl",
+            "invalid-post-terminal.jsonl",
+            "invalid-unmatched-tool-call-at-terminal.jsonl",
+        ):
+            with self.subTest(name=name), self.assertRaises(ProtocolError):
+                validate_event_stream(_jsonl(name))

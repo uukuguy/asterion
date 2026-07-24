@@ -189,5 +189,8 @@ export function validateEventStream(value: unknown): readonly RunEvent[] {
   if (!terminalSeen) {
     throw new ProtocolValidationError("event stream terminal", null);
   }
+  if (calls.size !== results.size) {
+    throw new ProtocolValidationError("event stream unmatched tool.call", null);
+  }
   return events;
 }

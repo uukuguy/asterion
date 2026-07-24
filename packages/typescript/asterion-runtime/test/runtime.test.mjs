@@ -100,6 +100,7 @@ test("validates shared requests and complete event streams", async () => {
   for (const name of [
     "invalid-sequence-gap.jsonl",
     "invalid-unmatched-tool-result.jsonl",
+    "invalid-unmatched-tool-call-at-terminal.jsonl",
     "invalid-post-terminal.jsonl",
     "invalid-unsorted-started-capabilities.jsonl",
   ]) {
