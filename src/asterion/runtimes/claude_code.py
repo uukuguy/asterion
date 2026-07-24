@@ -36,6 +36,7 @@ from asterion.runtime.host import (
 from asterion.runtime.working_directory import (
     ProcessDirectoryAuthority,
     bind_process_working_directory,
+    prepare_process_launch,
 )
 
 
@@ -363,22 +364,27 @@ def run_claude_code(
             cwd=cwd,
             authority=cwd_authority,
         ) as working:
-            descriptor_options = (
-                {"pass_fds": working.pass_fds}
-                if working.pass_fds
-                else {}
-            )
-            completed = run_process(
-                [*working.command_prefix, *command],
-                cwd=working.cwd,
-                env=process_environment,
-                input=prompt,
-                text=True,
-                capture_output=True,
-                timeout=timeout_seconds,
-                check=False,
-                **descriptor_options,
-            )
+            with prepare_process_launch(
+                working,
+                command=command,
+                environment=process_environment,
+            ) as launch:
+                descriptor_options = (
+                    {"pass_fds": launch.pass_fds}
+                    if launch.pass_fds
+                    else {}
+                )
+                completed = run_process(
+                    list(launch.command),
+                    cwd=working.cwd,
+                    env=process_environment,
+                    input=prompt,
+                    text=True,
+                    capture_output=True,
+                    timeout=timeout_seconds,
+                    check=False,
+                    **descriptor_options,
+                )
     _write_private(output_dir / "raw-events.jsonl", completed.stdout)
     _write_private(output_dir / "stderr.txt", completed.stderr)
     if completed.returncode != 0:
@@ -453,23 +459,28 @@ def _run_owned_process(
         cwd=cwd,
         authority=cwd_authority,
     ) as working:
-        launched_command = [*working.command_prefix, *command]
-        descriptor_options = (
-            {"pass_fds": working.pass_fds}
-            if working.pass_fds
-            else {}
-        )
-        process = subprocess.Popen(
-            launched_command,
-            cwd=working.cwd,
-            env=dict(environment),
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            start_new_session=os.name != "nt",
-            **descriptor_options,
-        )
+        with prepare_process_launch(
+            working,
+            command=command,
+            environment=environment,
+        ) as launch:
+            launched_command = list(launch.command)
+            descriptor_options = (
+                {"pass_fds": launch.pass_fds}
+                if launch.pass_fds
+                else {}
+            )
+            process = subprocess.Popen(
+                launched_command,
+                cwd=working.cwd,
+                env=dict(environment),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=os.name != "nt",
+                **descriptor_options,
+            )
     deadline = (
         time.monotonic() + timeout_seconds
         if timeout_seconds is not None

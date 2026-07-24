@@ -28,6 +28,7 @@ from asterion.runtime.protocol import ProtocolError, validate_event_stream
 from asterion.runtime.working_directory import (
     ProcessDirectoryAuthority,
     bind_process_working_directory,
+    prepare_process_launch,
 )
 
 
@@ -257,22 +258,26 @@ async def _collect_runtime_snapshot(
             cwd=cwd,
             authority=cwd_authority,
         ) as working:
-            descriptor_options = (
-                {"pass_fds": working.pass_fds}
-                if working.pass_fds
-                else {}
-            )
-            process = await asyncio.create_subprocess_exec(
-                *working.command_prefix,
-                *command,
-                cwd=working.cwd,
-                env=environment,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                start_new_session=os.name != "nt",
-                **descriptor_options,
-            )
+            with prepare_process_launch(
+                working,
+                command=command,
+                environment=environment,
+            ) as launch:
+                descriptor_options = (
+                    {"pass_fds": launch.pass_fds}
+                    if launch.pass_fds
+                    else {}
+                )
+                process = await asyncio.create_subprocess_exec(
+                    *launch.command,
+                    cwd=working.cwd,
+                    env=environment,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    start_new_session=os.name != "nt",
+                    **descriptor_options,
+                )
     except (OSError, TypeError, ValueError):
         raise ProtocolError("Pi runtime process failed to start") from None
 

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import tempfile
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Mapping, Sequence
 from typing import Protocol, runtime_checkable
 
 
@@ -16,6 +19,7 @@ class ProcessWorkingDirectory:
     cwd: str
     pass_fds: tuple[int, ...]
     command_prefix: tuple[str, ...] = ()
+    transport_environment: bool = False
 
     def __repr__(self) -> str:
         return "<ProcessWorkingDirectory pinned>"
@@ -33,6 +37,17 @@ class ProcessDirectoryAuthority(Protocol):
         self,
     ) -> AbstractContextManager[ProcessWorkingDirectory]:
         raise NotImplementedError
+
+
+@dataclass(frozen=True, repr=False)
+class ProcessLaunch:
+    """One redacted process launch prepared for an exact environment."""
+
+    command: tuple[str, ...]
+    pass_fds: tuple[int, ...]
+
+    def __repr__(self) -> str:
+        return "<ProcessLaunch redacted>"
 
 
 @contextmanager
@@ -63,6 +78,48 @@ def bind_process_working_directory(
             or any(type(item) is not int or item < 0 for item in working.pass_fds)
             or len(set(working.pass_fds)) != len(working.pass_fds)
             or any(type(item) is not str or not item for item in working.command_prefix)
+            or type(working.transport_environment) is not bool
         ):
             raise ValueError("process working directory authority is invalid")
         yield working
+
+
+@contextmanager
+def prepare_process_launch(
+    working: ProcessWorkingDirectory,
+    *,
+    command: Sequence[str],
+    environment: Mapping[str, str],
+):
+    """Prepare one spawn while keeping control values off argv and reprs."""
+
+    if not working.transport_environment:
+        yield ProcessLaunch(
+            command=(*working.command_prefix, *command),
+            pass_fds=working.pass_fds,
+        )
+        return
+    if any(type(key) is not str or type(value) is not str for key, value in environment.items()):
+        raise ValueError("process environment is invalid")
+    payload = json.dumps(
+        list(environment.items()),
+        ensure_ascii=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    if len(payload) > 4 * 1024 * 1024:
+        raise ValueError("process environment is invalid")
+    with tempfile.TemporaryFile() as transport:
+        transport.write(payload)
+        transport.flush()
+        transport.seek(0)
+        descriptor = transport.fileno()
+        yield ProcessLaunch(
+            command=(
+                *working.command_prefix,
+                "--env-fd",
+                str(descriptor),
+                "--",
+                *command,
+            ),
+            pass_fds=(*working.pass_fds, descriptor),
+        )

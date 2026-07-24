@@ -997,10 +997,11 @@ class DefaultRuntimeFactoryProcessAuthorityTests(
         script = (
             "import json,os,pathlib,sys;"
             "request=json.loads(sys.stdin.readline());"
-            "fd=os.environ['TEST_AUTHORITY_FD'];"
-            "fd_path=f'/proc/self/fd/{fd}';"
-            "leaked=os.path.exists(fd_path) and "
-            "'original-corpus' in os.path.realpath(fd_path);"
+            "fd_root='/proc/self/fd' if os.path.isdir('/proc/self/fd') "
+            "else '/dev/fd';"
+            "leaked=any('original-corpus' in os.path.realpath("
+            "f'{fd_root}/{fd}') for fd in range(3,256) "
+            "if os.path.exists(f'{fd_root}/{fd}'));"
             "answer=pathlib.Path('marker.txt').read_text()+"
             "(':LEAK' if leaked else ':CLEAN');"
             "print(json.dumps({'type':'response','id':request['id'],"
@@ -1060,11 +1061,6 @@ class DefaultRuntimeFactoryProcessAuthorityTests(
 
                 async def swap_then_start(*args, **kwargs):
                     nonlocal swapped
-                    environment = dict(kwargs["env"])
-                    environment["TEST_AUTHORITY_FD"] = str(
-                        kwargs["pass_fds"][0]
-                    )
-                    kwargs["env"] = environment
                     if not swapped:
                         swapped = True
                         corpus.rename(root / "original-corpus")
@@ -1112,10 +1108,14 @@ class DefaultRuntimeFactoryProcessAuthorityTests(
             executable.write_text(
                 f"#!{sys.executable}\n"
                 "import json, os, pathlib\n"
-                "fd = os.environ['TEST_AUTHORITY_FD']\n"
-                "fd_path = f'/proc/self/fd/{fd}'\n"
-                "leaked = os.path.exists(fd_path) and "
-                "'original-corpus' in os.path.realpath(fd_path)\n"
+                "fd_root = '/proc/self/fd' if "
+                "os.path.isdir('/proc/self/fd') else '/dev/fd'\n"
+                "leaked = any(\n"
+                "    'original-corpus' in "
+                "os.path.realpath(f'{fd_root}/{fd}')\n"
+                "    for fd in range(3, 256)\n"
+                "    if os.path.exists(f'{fd_root}/{fd}')\n"
+                ")\n"
                 "answer = pathlib.Path('marker.txt').read_text() + "
                 "(':LEAK' if leaked else ':CLEAN')\n"
                 "print(json.dumps({'type':'system','subtype':'init',"
@@ -1169,11 +1169,6 @@ class DefaultRuntimeFactoryProcessAuthorityTests(
 
                 def swap_then_start(*args, **kwargs):
                     nonlocal swapped
-                    environment = dict(kwargs["env"])
-                    environment["TEST_AUTHORITY_FD"] = str(
-                        kwargs["pass_fds"][0]
-                    )
-                    kwargs["env"] = environment
                     if not swapped:
                         swapped = True
                         corpus.rename(root / "original-corpus")

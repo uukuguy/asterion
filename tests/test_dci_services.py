@@ -19,7 +19,10 @@ from asterion.services.registry import (
     HostServiceFactoryContext,
     HostServiceRegistryError,
 )
-from asterion.runtime.working_directory import ProcessWorkingDirectory
+from asterion.runtime.working_directory import (
+    ProcessWorkingDirectory,
+    prepare_process_launch,
+)
 
 
 def _context(root: Path) -> HostServiceFactoryContext:
@@ -114,31 +117,42 @@ class LocalCorpusServiceTests(unittest.IsolatedAsyncioTestCase):
             async with binding.factory(_context(root)) as service:
                 with service.open_process_working_directory() as working:
                     self.assertIsInstance(working, ProcessWorkingDirectory)
-                    duplicate = working.pass_fds[0]
+                    duplicate = (
+                        working.pass_fds[0]
+                        if working.pass_fds
+                        else int(Path(working.cwd).name)
+                    )
                     moved = base / "moved"
                     os.rename(root, moved)
                     root.mkdir()
                     (root / "marker").write_text("REPLACEMENT")
-                    completed = subprocess.run(
-                        [
-                            *working.command_prefix,
+                    environment = dict(os.environ)
+                    with prepare_process_launch(
+                        working,
+                        command=(
                             sys.executable,
                             "-c",
                             "from pathlib import Path; "
                             "print(Path('marker').read_text())",
-                        ],
-                        cwd=working.cwd,
-                        pass_fds=working.pass_fds,
-                        capture_output=True,
-                        text=True,
-                        check=True,
-                    )
+                        ),
+                        environment=environment,
+                    ) as launch:
+                        completed = subprocess.run(
+                            launch.command,
+                            cwd=working.cwd,
+                            env=environment,
+                            pass_fds=launch.pass_fds,
+                            capture_output=True,
+                            text=True,
+                            check=True,
+                        )
 
                 self.assertEqual(completed.stdout.strip(), "ORIGINAL")
                 with self.assertRaises(OSError):
                     os.fstat(duplicate)
 
-    async def test_linux_process_binding_closes_fd_before_target_exec(
+    @unittest.skipUnless(sys.platform == "darwin", "Darwin exec shim")
+    async def test_exec_shim_closes_control_fds_before_target_exec(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -146,36 +160,41 @@ class LocalCorpusServiceTests(unittest.IsolatedAsyncioTestCase):
             binding = create_local_corpus_service_factory()
 
             async with binding.factory(_context(root)) as service:
-                with (
-                    patch.object(dci_services.sys, "platform", "linux"),
-                    service.open_process_working_directory() as working,
-                ):
-                    descriptor = working.pass_fds[0]
+                with service.open_process_working_directory() as working:
                     self.assertEqual(working.cwd, "/")
                     self.assertIn(
                         "asterion.runtime.cwd_exec",
                         working.command_prefix,
                     )
-                    completed = subprocess.run(
-                        [
-                            *working.command_prefix,
+                    environment = {"EXACT": "value"}
+                    with prepare_process_launch(
+                        working,
+                        command=(
                             sys.executable,
                             "-c",
-                            "import os,sys\n"
-                            "try:\n"
-                            " os.fstat(int(sys.argv[1]))\n"
-                            "except OSError:\n"
-                            " print('CLOSED')\n"
-                            "else:\n"
-                            " print('LEAK')\n",
-                            str(descriptor),
-                        ],
-                        cwd=working.cwd,
-                        pass_fds=working.pass_fds,
-                        capture_output=True,
-                        text=True,
-                        check=True,
-                    )
+                            "import os\n"
+                            "leaked = []\n"
+                            "for fd in range(3, 256):\n"
+                            " try:\n"
+                            "  os.fstat(fd)\n"
+                            " except OSError:\n"
+                            "  continue\n"
+                            " leaked.append(fd)\n"
+                            "print('LEAK' if leaked else 'CLOSED')\n",
+                        ),
+                        environment=environment,
+                    ) as launch:
+                        self.assertNotIn("value", launch.command)
+                        self.assertNotIn("value", repr(launch))
+                        completed = subprocess.run(
+                            launch.command,
+                            cwd=working.cwd,
+                            env=environment,
+                            pass_fds=launch.pass_fds,
+                            capture_output=True,
+                            text=True,
+                            check=True,
+                        )
 
                 self.assertEqual(completed.stdout.strip(), "CLOSED")
 
@@ -219,6 +238,7 @@ class LocalCorpusServiceTests(unittest.IsolatedAsyncioTestCase):
             binding = create_local_corpus_service_factory()
             cases = (
                 patch.object(os, "supports_dir_fd", set()),
+                patch.object(dci_services.sys, "platform", "win32"),
                 patch.object(
                     dci_services.os,
                     "open",

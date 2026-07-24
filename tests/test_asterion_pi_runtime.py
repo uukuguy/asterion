@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import json
 import os
 import sys
 import tempfile
@@ -12,10 +13,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from asterion.adapters.pi import map_pi_capabilities
+from asterion.dci.services import create_local_corpus_service_factory
 from asterion.runtime.host import RunRequest
 from asterion.runtime.protocol import ProtocolError, validate_event_stream
 from asterion.runtime.working_directory import ProcessWorkingDirectory
 from asterion.runtimes.pi import PiRuntimeClient
+from asterion.services.registry import HostServiceFactoryContext
 
 
 SUCCESS_SCRIPT = r'''
@@ -196,6 +199,225 @@ class RecordingDirectoryAuthority:
 
 
 class PiRuntimeClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_authority_launch_preserves_argv_and_session_identity(
+        self,
+    ) -> None:
+        script = r'''
+import json, os, sys
+request = json.loads(sys.stdin.readline())
+answer = json.dumps({
+    "argv": sys.argv[1:],
+    "session_leader": os.getsid(0) == os.getpid() == os.getpgrp(),
+}, sort_keys=True)
+print(json.dumps({"type": "response", "id": request["id"], "success": True}), flush=True)
+print(json.dumps({"type": "agent_start"}), flush=True)
+print(json.dumps({"type": "turn_start"}), flush=True)
+print(json.dumps({"type": "message_end", "message": {
+    "role": "assistant", "stopReason": "stop",
+    "usage": {"input": 1, "output": 1},
+    "content": [{"type": "text", "text": answer}],
+}}), flush=True)
+print(json.dumps({"type": "agent_end"}), flush=True)
+'''
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            corpus = root / "corpus"
+            corpus.mkdir()
+            context = HostServiceFactoryContext(
+                provider_id="dci-agent-lite",
+                application_id="dci.research-capability",
+                application_version="1.0.0",
+                capability_id="corpus.local-root",
+                options={"root": str(corpus)},
+            )
+            async with create_local_corpus_service_factory().factory(
+                context
+            ) as authority:
+                clients = (
+                    PiRuntimeClient(
+                        command=(
+                            sys.executable,
+                            "-u",
+                            "-c",
+                            script,
+                            "alpha",
+                            "two words",
+                        ),
+                        cwd=corpus,
+                        capabilities=("filesystem.read",),
+                        env={},
+                        evidence_root=root / "direct-evidence",
+                    ),
+                    PiRuntimeClient(
+                        command=(
+                            sys.executable,
+                            "-u",
+                            "-c",
+                            script,
+                            "alpha",
+                            "two words",
+                        ),
+                        cwd=None,
+                        cwd_authority=authority,
+                        capabilities=("filesystem.read",),
+                        env={},
+                        evidence_root=root / "authority-evidence",
+                    ),
+                )
+                answers: list[str] = []
+                for index, client in enumerate(clients):
+                    _ = [
+                        event
+                        async for event in client.run(
+                            RunRequest(
+                                f"argv-session-{index}",
+                                "question",
+                                requested_capabilities=(
+                                    "filesystem.read",
+                                ),
+                            )
+                        )
+                    ]
+                    run_dir = client.completed_run_dir(
+                        f"argv-session-{index}"
+                    )
+                    assert run_dir is not None
+                    answers.append((run_dir / "final.txt").read_text())
+
+            self.assertEqual(answers[1], answers[0])
+            self.assertEqual(
+                json.loads(answers[0]),
+                {
+                    "argv": ["alpha", "two words"],
+                    "session_leader": True,
+                },
+            )
+
+    async def test_authority_cancellation_matches_direct_process_reaping(
+        self,
+    ) -> None:
+        script = (
+            "import json,os,pathlib,sys,time;"
+            "json.loads(sys.stdin.readline());"
+            "pathlib.Path(os.environ['PID_FILE']).write_text(str(os.getpid()));"
+            "time.sleep(30)"
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            corpus = root / "corpus"
+            corpus.mkdir()
+            context = HostServiceFactoryContext(
+                provider_id="dci-agent-lite",
+                application_id="dci.research-capability",
+                application_version="1.0.0",
+                capability_id="corpus.local-root",
+                options={"root": str(corpus)},
+            )
+            async with create_local_corpus_service_factory().factory(
+                context
+            ) as authority:
+                for index in range(2):
+                    pid_file = root / f"pid-{index}"
+                    signal = MutableSignal()
+                    client = PiRuntimeClient(
+                        command=(sys.executable, "-u", "-c", script),
+                        cwd=corpus if index == 0 else None,
+                        cwd_authority=authority if index == 1 else None,
+                        capabilities=("filesystem.read",),
+                        env={"PID_FILE": str(pid_file)},
+                    )
+                    task = asyncio.create_task(
+                        anext(
+                            client.run(
+                                RunRequest(
+                                    f"cancel-exact-{index}",
+                                    "question",
+                                    requested_capabilities=(
+                                        "filesystem.read",
+                                    ),
+                                ),
+                                signal=signal,
+                            )
+                        )
+                    )
+                    for _ in range(200):
+                        if pid_file.exists():
+                            break
+                        await asyncio.sleep(0.01)
+                    self.assertTrue(pid_file.exists())
+                    pid = int(pid_file.read_text())
+                    signal.cancelled = True
+                    with self.assertRaises(ProtocolError):
+                        await asyncio.wait_for(task, timeout=3)
+                    with self.assertRaises(ProcessLookupError):
+                        os.kill(pid, 0)
+
+    async def test_authority_launch_restores_direct_sigpipe_behavior(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            corpus = root / "corpus"
+            corpus.mkdir()
+            context = HostServiceFactoryContext(
+                provider_id="dci-agent-lite",
+                application_id="dci.research-capability",
+                application_version="1.0.0",
+                capability_id="corpus.local-root",
+                options={"root": str(corpus)},
+            )
+            async with create_local_corpus_service_factory().factory(
+                context
+            ) as authority:
+                clients = (
+                    PiRuntimeClient(
+                        command=(
+                            "/bin/bash",
+                            "-c",
+                            "kill -s PIPE $$; printf survived > \"$0\"",
+                            str(root / "direct-survived"),
+                        ),
+                        cwd=corpus,
+                        capabilities=("filesystem.read",),
+                        env={},
+                    ),
+                    PiRuntimeClient(
+                        command=(
+                            "/bin/bash",
+                            "-c",
+                            "kill -s PIPE $$; printf survived > \"$0\"",
+                            str(root / "authority-survived"),
+                        ),
+                        cwd=None,
+                        cwd_authority=authority,
+                        capabilities=("filesystem.read",),
+                        env={},
+                    ),
+                )
+                for index, client in enumerate(clients):
+                    with (
+                        self.subTest(authority=index == 1),
+                        self.assertRaises(ProtocolError),
+                    ):
+                        await anext(
+                            client.run(
+                                RunRequest(
+                                    f"sigpipe-{index}",
+                                    "question",
+                                    requested_capabilities=(
+                                        "filesystem.read",
+                                    ),
+                                )
+                            )
+                        )
+                    self.assertFalse(
+                        (root / (
+                            "authority-survived"
+                            if index == 1
+                            else "direct-survived"
+                        )).exists()
+                    )
+
     def _client(
         self,
         root: Path,

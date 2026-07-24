@@ -14,7 +14,13 @@ from unittest.mock import Mock
 from asterion.runtime.host import RunRequest
 from asterion.runtime.protocol import validate_event_stream
 from asterion.runtime.protocol import ProtocolError
-from asterion.runtimes.claude_code import ClaudeCodeRuntimeClient
+from asterion.runtimes.claude_code import (
+    ClaudeCodeRuntimeClient,
+    _run_owned_process,
+    run_claude_code,
+)
+from asterion.dci.services import create_local_corpus_service_factory
+from asterion.services.registry import HostServiceFactoryContext
 
 
 FIXTURE = Path(__file__).parent / "fixtures/claude_code/valid-success.jsonl"
@@ -29,6 +35,103 @@ class MutableCancellation:
 
 
 class ClaudeCodeRuntimeClientTests(unittest.IsolatedAsyncioTestCase):
+    async def test_authority_owned_process_matches_direct_sigpipe_and_argv(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            corpus = root / "corpus"
+            corpus.mkdir()
+            context = HostServiceFactoryContext(
+                provider_id="dci-agent-lite",
+                application_id="dci.research-capability",
+                application_version="1.0.0",
+                capability_id="corpus.local-root",
+                options={"root": str(corpus)},
+            )
+            async with create_local_corpus_service_factory().factory(
+                context
+            ) as authority:
+                completed = []
+                for index in range(2):
+                    marker = root / f"survived-{index}"
+                    completed.append(
+                        await asyncio.to_thread(
+                            _run_owned_process,
+                            [
+                                "/bin/bash",
+                                "-c",
+                                "kill -s PIPE $$; printf survived > \"$0\"",
+                                str(marker),
+                                "exact arg",
+                            ],
+                            cwd=corpus if index == 0 else None,
+                            cwd_authority=(
+                                authority if index == 1 else None
+                            ),
+                            environment={},
+                            input_text="question",
+                            timeout_seconds=10,
+                            cancelled=None,
+                        )
+                    )
+                    self.assertFalse(marker.exists())
+
+            self.assertEqual(completed[1].returncode, completed[0].returncode)
+            self.assertLess(completed[0].returncode, 0)
+
+    async def test_authority_launch_preserves_exact_direct_environment(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            corpus = root / "corpus"
+            corpus.mkdir()
+            executable = root / "print-environment"
+            executable.write_text("#!/bin/sh\nexec /usr/bin/env -0\n")
+            executable.chmod(0o700)
+            context = HostServiceFactoryContext(
+                provider_id="dci-agent-lite",
+                application_id="dci.research-capability",
+                application_version="1.0.0",
+                capability_id="corpus.local-root",
+                options={"root": str(corpus)},
+            )
+            async with create_local_corpus_service_factory().factory(
+                context
+            ) as authority:
+                for index, environment in enumerate(
+                    ({}, {"EXACT_SENTINEL": "exact-value"})
+                ):
+                    direct_output = root / f"direct-{index}"
+                    authority_output = root / f"authority-{index}"
+                    await asyncio.to_thread(
+                        run_claude_code,
+                        prompt="question",
+                        output_dir=direct_output,
+                        cwd=corpus,
+                        tools=["Read"],
+                        timeout_seconds=10,
+                        executable=str(executable),
+                        environment=environment,
+                    )
+                    await asyncio.to_thread(
+                        run_claude_code,
+                        prompt="question",
+                        output_dir=authority_output,
+                        cwd=None,
+                        cwd_authority=authority,
+                        tools=["Read"],
+                        timeout_seconds=10,
+                        executable=str(executable),
+                        environment=environment,
+                    )
+
+                    self.assertEqual(
+                        (authority_output / "raw-events.jsonl").read_bytes(),
+                        (direct_output / "raw-events.jsonl").read_bytes(),
+                    )
+
     async def test_default_tools_produce_canonical_request_and_started_capabilities(
         self,
     ) -> None:

@@ -82,20 +82,28 @@ class _PinnedLocalCorpusService:
                 raise LocalCorpusServiceError(
                     "local corpus identity changed"
                 )
-            cwd = "/"
-            command_prefix = (
-                sys.executable,
-                "-m",
-                "asterion.runtime.cwd_exec",
-                "--fd",
-                str(descriptor),
-                "--",
-            )
+            if sys.platform == "linux":
+                cwd = _linux_process_cwd(descriptor, self._identity)
+                command_prefix: tuple[str, ...] = ()
+                pass_fds: tuple[int, ...] = ()
+                transport_environment = False
+            else:
+                cwd = "/"
+                command_prefix = (
+                    sys.executable,
+                    "-m",
+                    "asterion.runtime.cwd_exec",
+                    "--fd",
+                    str(descriptor),
+                )
+                pass_fds = (descriptor,)
+                transport_environment = True
             working = ProcessWorkingDirectory(
                 identity_path=self._root,
                 cwd=cwd,
-                pass_fds=(descriptor,),
+                pass_fds=pass_fds,
                 command_prefix=command_prefix,
+                transport_environment=transport_environment,
             )
         except LocalCorpusServiceError:
             raise
@@ -241,12 +249,42 @@ def _secure_local_corpus_available() -> bool:
             and os.open in os.supports_dir_fd
             and os.stat in os.supports_dir_fd
             and os.stat in os.supports_follow_symlinks
-            and callable(os.fchdir)
-            and callable(os.execvpe)
-            and bool(sys.executable)
+            and (
+                (
+                    sys.platform == "linux"
+                    and Path(f"/proc/{os.getpid()}/fd").is_dir()
+                )
+                or (
+                    sys.platform == "darwin"
+                    and callable(os.fchdir)
+                    and callable(os.execvpe)
+                    and bool(sys.executable)
+                )
+            )
         )
     except (AttributeError, TypeError):
         return False
+
+
+def _linux_process_cwd(
+    descriptor: int,
+    identity: tuple[int, int],
+) -> str:
+    path = f"/proc/{os.getpid()}/fd/{descriptor}"
+    try:
+        details = os.stat(path, follow_symlinks=True)
+    except (AttributeError, NotImplementedError, OSError, TypeError):
+        raise LocalCorpusServiceError(
+            "local corpus process binding is unavailable"
+        ) from None
+    if (
+        not stat.S_ISDIR(details.st_mode)
+        or (details.st_dev, details.st_ino) != identity
+    ):
+        raise LocalCorpusServiceError(
+            "local corpus process binding is unavailable"
+        )
+    return path
 
 
 def _probe_directory(path: Path) -> int:
