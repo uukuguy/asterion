@@ -11,6 +11,7 @@ from types import MappingProxyType
 from unittest.mock import Mock, patch
 
 from asterion.dci.benchmark import (
+    BenchmarkResult,
     BenchmarkRequest,
     DciBenchmarkError,
     _prepare,
@@ -243,12 +244,79 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
             with patch(
                 "asterion.dci.benchmark.paper_scope_for_profile", return_value=None
             ), patch("asterion.dci.benchmark.run_pi_research") as run:
-                with self.assertRaisesRegex(DciBenchmarkError, "prompt contract") as raised:
+                with self.assertRaisesRegex(DciBenchmarkError, "metric contract") as raised:
                     run_benchmark(request, paths=Mock())
 
         self.assertNotIn("SENTINEL-PRIVATE-QUESTION", str(raised.exception))
         self.assertNotIn(str(corpus), str(raised.exception))
         run.assert_not_called()
+
+    def test_benchmark_cli_requires_and_propagates_paper_ir_assumption(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            dataset = root / "dataset.jsonl"
+            corpus = root / "corpus"
+            corpus.mkdir()
+            dataset.write_text(
+                json.dumps(
+                    {
+                        "query_id": "q-1",
+                        "query": "question",
+                        "gold_ids": ["doc.txt"],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            captured: list[BenchmarkRequest] = []
+
+            def capture(request: BenchmarkRequest, *, paths: object) -> BenchmarkResult:
+                del paths
+                captured.append(request)
+                return BenchmarkResult(output_root=request.output_root, counts={"total": 1})
+
+            benchmark_args = [
+                "benchmark",
+                "--dataset", str(dataset),
+                "--output-root", str(root / "out"),
+                "--cwd", str(root),
+                "--corpus", str(corpus),
+                "--mode", "ir",
+                "--experiment-profile", "paper-reference/pi",
+            ]
+            with patch("asterion.dci.cli.run_benchmark", side_effect=capture), patch(
+                "asterion.dci.cli.validate_dci_run_request"
+            ):
+                stdout = __import__("io").StringIO()
+                stderr = __import__("io").StringIO()
+                code = dci_main(
+                    [
+                        *benchmark_args,
+                        "--paper-ir-duplicate-handling", "deduplicated",
+                    ],
+                    repo_root=root,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+            with patch("asterion.dci.cli.run_benchmark") as missing_run, patch(
+                "asterion.dci.cli.validate_dci_run_request"
+            ):
+                missing_stdout = __import__("io").StringIO()
+                missing_stderr = __import__("io").StringIO()
+                missing_code = dci_main(
+                    benchmark_args,
+                    repo_root=root,
+                    stdout=missing_stdout,
+                    stderr=missing_stderr,
+                )
+
+        self.assertEqual(code, 0, stderr.getvalue())
+        self.assertEqual(captured[0].profile, "paper-reference/pi")
+        self.assertEqual(captured[0].paper_ir_duplicate_handling, "deduplicated")
+        self.assertEqual(missing_code, 2)
+        self.assertEqual(missing_stderr.getvalue(), "DCI benchmark failed\n")
+        missing_run.assert_not_called()
+
 
     def test_benchmark_passes_only_the_selected_contract_recovery_to_runs(self) -> None:
         for profile_id, expected_recovery in (

@@ -116,6 +116,18 @@ class _StaleJudgeResult(RuntimeError):
     """A valid prior result needs evaluation under the current Judge identity."""
 
 
+_PAPER_IR_ASSUMPTION_LABELS = {
+    "upstream-list": (
+        "asterion.operator-assumption/paper-ir-duplicate-handling/"
+        "upstream-list/v1"
+    ),
+    "deduplicated": (
+        "asterion.operator-assumption/paper-ir-duplicate-handling/"
+        "deduplicated/v1"
+    ),
+}
+
+
 @dataclass(frozen=True)
 class BenchmarkRequest:
     dataset: Path
@@ -140,6 +152,7 @@ class BenchmarkRequest:
     resolution_segment_characters: int | None = None
     ablation_row: str | None = None
     full_execution_authorization: FullExecutionAuthorization | None = None
+    paper_ir_duplicate_handling: str | None = None
 
 
 @dataclass(frozen=True)
@@ -505,6 +518,10 @@ def _prepare(
         raise DciBenchmarkError("DCI benchmark resume policy is invalid")
     if request.figures and not request.analysis:
         raise DciBenchmarkError("DCI benchmark figures require analysis")
+    ranking_metric_contract = _metric_contract_for_request(request)
+    paper_ir_duplicate_handling_assumption = (
+        _paper_ir_assumption_label_for_request(request)
+    )
     prompt_contract, prompt_contract_sha256_value = _prompt_contract_for_request(
         request
     )
@@ -645,7 +662,6 @@ def _prepare(
         request.judge_config, contract_id=judge_contract
     )
     judge_fingerprint = _fingerprint(judge)
-    ranking_metric_contract = _metric_contract_for_request(request)
     implementation_sha256 = dci_complete_implementation_identity()
     dataset_identity = canonical_input_identity(request.dataset)
     dataset_digest = hashlib.sha256(dataset_raw).hexdigest()
@@ -684,6 +700,9 @@ def _prepare(
         "judge": judge,
         "judge_configuration_fingerprint": judge_fingerprint,
         "ranking_metric_contract": ranking_metric_contract,
+        "paper_ir_duplicate_handling_assumption": (
+            paper_ir_duplicate_handling_assumption
+        ),
         "implementation_sha256": implementation_sha256,
         "benchmark_prompt_contract": prompt_contract.contract_id,
         "benchmark_prompt_contract_sha256": prompt_contract_sha256_value,
@@ -709,7 +728,9 @@ def _prepare(
             "paper_scope": authorized_scope,
             "selected_rows": len(rows),
             "full_dataset": True,
-            "comparable": True,
+            "comparable": _paper_selection_is_comparable(
+                paper_ir_duplicate_handling_assumption
+            ),
             "authorization_profile": (
                 authorization.profile_id if authorization is not None else None
             ),
@@ -754,6 +775,9 @@ def _prepare(
             "benchmark_prompt_contract": prompt_contract.contract_id,
             "benchmark_prompt_contract_sha256": prompt_contract_sha256_value,
             "ranking_metric_contract": ranking_metric_contract,
+            "paper_ir_duplicate_handling_assumption": (
+                paper_ir_duplicate_handling_assumption
+            ),
             "prompt_resources": config["prompt_resources"],
             "implementation_sha256": implementation_sha256,
         }
@@ -866,6 +890,9 @@ async def _run_row(
                 "failed",
                 implementation_sha256=item["implementation_sha256"],
                 ranking_metric_contract=item["identity"]["ranking_metric_contract"],
+                paper_ir_duplicate_handling_assumption=item["identity"][
+                    "paper_ir_duplicate_handling_assumption"
+                ],
                 native_generation=authority.generation,
                 native_evidence_available=False,
             )
@@ -898,6 +925,9 @@ async def _run_row(
                     "failed",
                     implementation_sha256=item["implementation_sha256"],
                     ranking_metric_contract=item["identity"]["ranking_metric_contract"],
+                    paper_ir_duplicate_handling_assumption=item["identity"][
+                        "paper_ir_duplicate_handling_assumption"
+                    ],
                     native_generation=generation,
                     native_evidence_available=False,
                 )
@@ -949,6 +979,9 @@ async def _run_row(
                 "row_fingerprint": item["row_fingerprint"],
                 "implementation_sha256": item["implementation_sha256"],
                 "ranking_metric_contract": item["identity"]["ranking_metric_contract"],
+                "paper_ir_duplicate_handling_assumption": item["identity"][
+                    "paper_ir_duplicate_handling_assumption"
+                ],
                 "status": "completed",
                 "mode": request.mode,
                 "native_generation": generation,
@@ -993,6 +1026,9 @@ async def _run_row(
             "cancelled",
             implementation_sha256=item["implementation_sha256"],
             ranking_metric_contract=item["identity"]["ranking_metric_contract"],
+            paper_ir_duplicate_handling_assumption=item["identity"][
+                "paper_ir_duplicate_handling_assumption"
+            ],
             native_generation=generation,
             native_evidence_available=available,
             native_evidence_fingerprint=evidence_fingerprint,
@@ -1011,6 +1047,9 @@ async def _run_row(
             "failed",
             implementation_sha256=item["implementation_sha256"],
             ranking_metric_contract=item["identity"]["ranking_metric_contract"],
+            paper_ir_duplicate_handling_assumption=item["identity"][
+                "paper_ir_duplicate_handling_assumption"
+            ],
             native_generation=generation,
             native_evidence_available=available,
             native_evidence_fingerprint=evidence_fingerprint,
@@ -1170,6 +1209,7 @@ def _validate_config_document(
         "cwd", "runtime", "conversation_features", "max_concurrency", "max_turns",
         "analysis", "figures", "judge", "judge_configuration_fingerprint",
         "ranking_metric_contract",
+        "paper_ir_duplicate_handling_assumption",
         "implementation_sha256",
         "benchmark_prompt_contract", "benchmark_prompt_contract_sha256",
         "prompt_resources", "run_fingerprint", "batch_fingerprint",
@@ -1181,6 +1221,7 @@ def _validate_config_document(
         or value.get("schema") != "asterion.dci.batch/v1"
         or not _has_selected_prompt_contract(value)
         or not _has_selected_metric_contract(value)
+        or not _has_selected_paper_ir_assumption(value)
         or re.fullmatch(
             r"[0-9a-f]{64}", str(value.get("implementation_sha256"))
         )
@@ -1284,7 +1325,9 @@ def _validate_config_document(
                 and selection.get("paper_scope") in authorized_scopes
                 and selection.get("selected_rows") == expected_rows
                 and selection.get("full_dataset") is True
-                and selection.get("comparable") is True
+                and selection.get("comparable") is _paper_selection_is_comparable(
+                    value.get("paper_ir_duplicate_handling_assumption")
+                )
                 and type(authorization_profile) is str
             )
         elif execution_class == "non-paper":
@@ -1329,6 +1372,7 @@ def _validate_item_document(value: dict[str, Any]) -> None:
     if (
         not _has_selected_prompt_contract(identity)
         or not _has_selected_metric_contract(identity)
+        or not _has_selected_paper_ir_assumption(identity)
         or re.fullmatch(
             r"[0-9a-f]{64}", str(value.get("implementation_sha256"))
         )
@@ -1439,8 +1483,12 @@ def _metric_contract_for_request(request: BenchmarkRequest) -> str | None:
     """Resolve the profile's one executable IR metric without model heuristics."""
 
     if request.mode != "ir":
+        if request.paper_ir_duplicate_handling is not None:
+            raise DciBenchmarkError("DCI benchmark metric contract is invalid")
         return None
     if request.profile is None:
+        if request.paper_ir_duplicate_handling is not None:
+            raise DciBenchmarkError("DCI benchmark metric contract is invalid")
         return DEDUPLICATED_NDCG_CONTRACT
     try:
         profile = _resolve_prompt_profile(
@@ -1450,6 +1498,14 @@ def _metric_contract_for_request(request: BenchmarkRequest) -> str | None:
         )
     except ValueError as error:
         raise DciBenchmarkError("DCI benchmark metric contract is invalid") from error
+    if profile.source_family == "paper-reference":
+        if request.paper_ir_duplicate_handling == "upstream-list":
+            return UPSTREAM_LIST_NDCG_CONTRACT
+        if request.paper_ir_duplicate_handling == "deduplicated":
+            return DEDUPLICATED_NDCG_CONTRACT
+        raise DciBenchmarkError("DCI benchmark metric contract is unreported")
+    if request.paper_ir_duplicate_handling is not None:
+        raise DciBenchmarkError("DCI benchmark metric contract is invalid")
     contracts = tuple(
         contract
         for contract in profile.metric_contracts
@@ -1458,6 +1514,43 @@ def _metric_contract_for_request(request: BenchmarkRequest) -> str | None:
     if len(contracts) != 1:
         raise DciBenchmarkError("DCI benchmark metric contract is unreported")
     return contracts[0]
+
+
+def validate_benchmark_metric_selection(request: BenchmarkRequest) -> None:
+    """Reject missing or injected paper scoring assumptions before execution."""
+
+    _metric_contract_for_request(request)
+    _paper_ir_assumption_label_for_request(request)
+
+
+def _paper_ir_assumption_label_for_request(
+    request: BenchmarkRequest,
+) -> str | None:
+    """Return the explicit operator label without changing paper source claims."""
+
+    _metric_contract_for_request(request)
+    if request.mode != "ir" or request.profile is None:
+        return None
+    try:
+        profile = _resolve_prompt_profile(
+            request.profile,
+            provider=request.runtime_options.provider,
+            model=request.runtime_options.model,
+        )
+    except ValueError as error:
+        raise DciBenchmarkError("DCI benchmark metric contract is invalid") from error
+    if profile.source_family != "paper-reference":
+        return None
+    label = _PAPER_IR_ASSUMPTION_LABELS.get(request.paper_ir_duplicate_handling)
+    if label is None:
+        raise DciBenchmarkError("DCI benchmark metric contract is invalid")
+    return label
+
+
+def _paper_selection_is_comparable(assumption_label: object) -> bool:
+    """Paper-assumption IR results never claim paper-reported comparability."""
+
+    return assumption_label is None
 
 
 def _has_selected_prompt_contract(value: Mapping[str, Any]) -> bool:
@@ -1491,27 +1584,53 @@ def _has_selected_prompt_contract(value: Mapping[str, Any]) -> bool:
 
 def _has_selected_metric_contract(value: Mapping[str, Any]) -> bool:
     try:
-        mode = value.get("mode")
-        if mode not in {"qa", "ir"}:
-            return False
-        profile_id = value.get("profile")
-        runtime = value.get("runtime")
-        provider = runtime.get("provider") if isinstance(runtime, dict) else None
-        model = runtime.get("model") if isinstance(runtime, dict) else None
-        request = BenchmarkRequest(
-            dataset=Path("/metric-contract-input"),
-            output_root=Path("/metric-contract-output"),
-            cwd=Path("/metric-contract-cwd"),
-            judge_config=JudgeConfig(),
-            runtime_options=DciRuntimeOptions(provider=provider, model=model),
-            mode=mode,
-            profile=profile_id if isinstance(profile_id, str) else None,
-        )
+        request = _metric_request_from_evidence(value)
         return value.get("ranking_metric_contract") == _metric_contract_for_request(
             request
         )
     except (DciBenchmarkError, ValueError):
         return False
+
+
+def _has_selected_paper_ir_assumption(value: Mapping[str, Any]) -> bool:
+    try:
+        request = _metric_request_from_evidence(value)
+        return value.get("paper_ir_duplicate_handling_assumption") == (
+            _paper_ir_assumption_label_for_request(request)
+        )
+    except (DciBenchmarkError, ValueError):
+        return False
+
+
+def _metric_request_from_evidence(value: Mapping[str, Any]) -> BenchmarkRequest:
+    mode = value.get("mode")
+    if mode not in {"qa", "ir"}:
+        raise ValueError
+    profile_id = value.get("profile")
+    runtime = value.get("runtime")
+    provider = runtime.get("provider") if isinstance(runtime, dict) else None
+    model = runtime.get("model") if isinstance(runtime, dict) else None
+    label = value.get("paper_ir_duplicate_handling_assumption")
+    handling = next(
+        (
+            candidate
+            for candidate, expected_label in _PAPER_IR_ASSUMPTION_LABELS.items()
+            if label == expected_label
+        ),
+        None,
+    )
+    if label is not None and handling is None:
+        raise ValueError
+    return BenchmarkRequest(
+        dataset=Path("/metric-contract-input"),
+        output_root=Path("/metric-contract-output"),
+        cwd=Path("/metric-contract-cwd"),
+        judge_config=JudgeConfig(),
+        runtime_options=DciRuntimeOptions(provider=provider, model=model),
+        mode=mode,
+        profile=profile_id if isinstance(profile_id, str) else None,
+        paper_ir_duplicate_handling=handling,
+    )
 
 
 def _resolve_prompt_profile(
@@ -1652,6 +1771,7 @@ def _validate_result_shape(
         "schema", "query_id", "row_fingerprint", "status", "mode",
         "native_generation", "native_evidence_fingerprint",
         "implementation_sha256", "ranking_metric_contract",
+        "paper_ir_duplicate_handling_assumption",
     }
     expected = common | (
         {
@@ -1670,6 +1790,8 @@ def _validate_result_shape(
         != item.get("implementation_sha256")
         or value.get("ranking_metric_contract")
         != item.get("identity", {}).get("ranking_metric_contract")
+        or value.get("paper_ir_duplicate_handling_assumption")
+        != item.get("identity", {}).get("paper_ir_duplicate_handling_assumption")
         or value.get("status") != "completed"
         or value.get("mode") != mode
         or not isinstance(value.get("native_generation"), str)
@@ -1691,7 +1813,7 @@ def _validate_terminal_result(
             "schema", "query_id", "row_fingerprint", "status",
             "native_generation", "native_evidence_available",
             "native_evidence_fingerprint", "implementation_sha256",
-            "ranking_metric_contract",
+            "ranking_metric_contract", "paper_ir_duplicate_handling_assumption",
         }
         or value.get("schema") != "asterion.dci.batch-result/v1"
         or value.get("query_id") != item.get("query_id")
@@ -1700,6 +1822,8 @@ def _validate_terminal_result(
         != item.get("implementation_sha256")
         or value.get("ranking_metric_contract")
         != item.get("identity", {}).get("ranking_metric_contract")
+        or value.get("paper_ir_duplicate_handling_assumption")
+        != item.get("identity", {}).get("paper_ir_duplicate_handling_assumption")
         or value.get("status") not in {"failed", "cancelled", "not_started"}
         or value.get("native_generation") is not None
         and (
@@ -1867,10 +1991,14 @@ def _reusable_result(value: object, item: dict[str, object], mode: str) -> bool:
     if (
         not isinstance(value, dict)
         or not isinstance(identity, dict)
+        or "paper_ir_duplicate_handling_assumption" not in value
+        or "paper_ir_duplicate_handling_assumption" not in identity
         or value.get("status") != "completed"
         or value.get("row_fingerprint") != item["row_fingerprint"]
         or value.get("ranking_metric_contract")
         != identity.get("ranking_metric_contract")
+        or value.get("paper_ir_duplicate_handling_assumption")
+        != identity.get("paper_ir_duplicate_handling_assumption")
     ):
         return False
     if mode == "ir":
@@ -1933,6 +2061,7 @@ def _failed_result(
     *,
     implementation_sha256: object,
     ranking_metric_contract: object,
+    paper_ir_duplicate_handling_assumption: object,
     native_generation: str | None = None,
     native_evidence_available: bool = False,
     native_evidence_fingerprint: str | None = None,
@@ -1943,6 +2072,9 @@ def _failed_result(
         "row_fingerprint": row_fingerprint,
         "implementation_sha256": implementation_sha256,
         "ranking_metric_contract": ranking_metric_contract,
+        "paper_ir_duplicate_handling_assumption": (
+            paper_ir_duplicate_handling_assumption
+        ),
         "status": status,
         "native_generation": native_generation,
         "native_evidence_available": native_evidence_available,
@@ -1992,6 +2124,10 @@ def _publish_aggregates(
     summary["provenance"] = {
         "implementation_sha256": implementation_sha256,
         "ranking_metric_contract": _metric_contract_for_request(request),
+        "paper_ir_duplicate_handling_assumption": (
+            _paper_ir_assumption_label_for_request(request)
+        ),
+        "result_label": _paper_ir_assumption_label_for_request(request),
     }
     lock.write_json("summary.json", summary)
     if include_analysis and request.analysis:
@@ -2310,6 +2446,9 @@ def _terminal_results(
                 missing_status,
                 implementation_sha256=items[index]["implementation_sha256"],
                 ranking_metric_contract=items[index]["identity"]["ranking_metric_contract"],
+                paper_ir_duplicate_handling_assumption=items[index]["identity"][
+                    "paper_ir_duplicate_handling_assumption"
+                ],
             )
             query.write_json("result.json", result)
         results[index] = result

@@ -34,7 +34,12 @@ from asterion.dci.config import (
     resolve_dci_runtime_options,
 )
 from asterion.dci.context_profiles import context_profile_names
-from asterion.dci.benchmark import BenchmarkRequest, DciBenchmarkError, run_benchmark
+from asterion.dci.benchmark import (
+    BenchmarkRequest,
+    DciBenchmarkError,
+    run_benchmark,
+    validate_benchmark_metric_selection,
+)
 from asterion.dci.artifacts import DciConversationFeatures
 from asterion.dci.evaluation import DciEvaluationError, evaluate_run_directory
 from asterion.dci.export import (
@@ -126,6 +131,11 @@ def _parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--mode", choices=("qa", "ir"))
     benchmark.add_argument("--enable-ir", action="store_true")
     benchmark.add_argument("--profile")
+    benchmark.add_argument("--experiment-profile")
+    benchmark.add_argument(
+        "--paper-ir-duplicate-handling",
+        choices=("upstream-list", "deduplicated"),
+    )
     benchmark.add_argument("--ablation-row")
     benchmark.add_argument("--corpus", "--corpus-dir", dest="corpus", type=Path)
     benchmark.add_argument("--corpus-hint")
@@ -302,6 +312,8 @@ def main(
                 "dataset",
                 "cwd",
                 "profile",
+                "experiment_profile",
+                "paper_ir_duplicate_handling",
                 "corpus",
                 "mode",
                 "limit",
@@ -631,40 +643,43 @@ def main(
                 invocation_cwd=invocation_cwd,
                 repo_root=root,
             )
-            result = run_benchmark(
-                BenchmarkRequest(
-                    dataset=args.dataset,
-                    output_root=benchmark_output_root,
-                    cwd=args.cwd,
-                    judge_config=_judge_config(args),
-                    runtime_options=runtime_options,
-                    limit=args.limit,
-                    mode=args.mode,
-                    profile=args.profile,
-                    corpus=args.corpus,
-                    corpus_hint=args.corpus_hint,
-                    max_concurrency=args.max_concurrency,
-                    max_turns=args.max_turns,
-                    resume_policy=args.resume_policy,
-                    analysis=not args.no_analysis,
-                    figures=not args.no_figures,
-                    resolution_registry=benchmark_resolution_registry,
-                    resolution_segment_characters=args.resolution_segment_characters,
-                    ablation_row=(
-                        selected_ablation.row_id
-                        if selected_ablation is not None
-                        else None
-                    ),
-                    system_prompt_file=benchmark_system_prompt,
-                    append_system_prompt_file=benchmark_append_prompt,
-                    conversation_features=DciConversationFeatures(
-                        clear_tool_results=args.conversation_clear_tool_results,
-                        clear_tool_results_keep_last=args.conversation_clear_tool_results_keep_last,
-                        externalize_tool_results=args.conversation_externalize_tool_results,
-                        strip_thinking=args.conversation_strip_thinking,
-                        strip_usage=args.conversation_strip_usage,
-                    ),
+            benchmark_request = BenchmarkRequest(
+                dataset=args.dataset,
+                output_root=benchmark_output_root,
+                cwd=args.cwd,
+                judge_config=_judge_config(args),
+                runtime_options=runtime_options,
+                limit=args.limit,
+                mode=args.mode,
+                profile=args.experiment_profile,
+                paper_ir_duplicate_handling=args.paper_ir_duplicate_handling,
+                corpus=args.corpus,
+                corpus_hint=args.corpus_hint,
+                max_concurrency=args.max_concurrency,
+                max_turns=args.max_turns,
+                resume_policy=args.resume_policy,
+                analysis=not args.no_analysis,
+                figures=not args.no_figures,
+                resolution_registry=benchmark_resolution_registry,
+                resolution_segment_characters=args.resolution_segment_characters,
+                ablation_row=(
+                    selected_ablation.row_id
+                    if selected_ablation is not None
+                    else None
                 ),
+                system_prompt_file=benchmark_system_prompt,
+                append_system_prompt_file=benchmark_append_prompt,
+                conversation_features=DciConversationFeatures(
+                    clear_tool_results=args.conversation_clear_tool_results,
+                    clear_tool_results_keep_last=args.conversation_clear_tool_results_keep_last,
+                    externalize_tool_results=args.conversation_externalize_tool_results,
+                    strip_thinking=args.conversation_strip_thinking,
+                    strip_usage=args.conversation_strip_usage,
+                ),
+            )
+            validate_benchmark_metric_selection(benchmark_request)
+            result = run_benchmark(
+                benchmark_request,
                 paths=paths,
             )
         except (
