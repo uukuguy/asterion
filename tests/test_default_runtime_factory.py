@@ -519,10 +519,10 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                 (base, {"corpus.local-root": object()}),
                 (base, {"service.other": DirectoryAuthority(corpus)}),
                 (
-                    {**base, "cwd_host_capability": "corpus.local-root"},
+                    base,
                     {
                         "corpus.local-root": DirectoryAuthority(corpus),
-                        "service.other": object(),
+                        "service.other": DirectoryAuthority(corpus),
                     },
                 ),
             )
@@ -544,6 +544,136 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                         )
                     )
                 self.assertNotIn("SECRET", str(raised.exception))
+
+    def test_runtime_factories_allow_unrelated_host_services(
+        self,
+    ) -> None:
+        from asterion.runtime.defaults import default_runtime_factory_registry
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            corpus = root / "corpus"
+            corpus.mkdir()
+            direct = root / "direct"
+            direct.mkdir()
+            authority = DirectoryAuthority(corpus)
+            judge = object()
+            executable = Path(sys.executable).resolve()
+            pi_options = {
+                "command": json.dumps(
+                    [str(executable), "-u", "-c", "pass"],
+                    separators=(",", ":"),
+                ),
+                "cwd_host_capability": "corpus.local-root",
+                "environment": "{}",
+                "evidence_root": str(root / "pi-evidence"),
+                "max_turns": "4",
+                "tools": "read,grep",
+            }
+            registry = default_runtime_factory_registry()
+            pi = registry.select("pi.reference").factory(
+                RuntimeFactoryContext(
+                    provider_id="dci-agent-lite",
+                    application_id="dci.complete-application",
+                    application_version="1.0.0",
+                    runtime_id="pi.reference",
+                    assembly_path=root / "pi.json",
+                    options=pi_options,
+                    host_services={
+                        "corpus.local-root": authority,
+                        "evaluation.answer-judge": judge,
+                    },
+                )
+            )
+            direct_pi = registry.select("pi.reference").factory(
+                RuntimeFactoryContext(
+                    provider_id="provider",
+                    application_id="application",
+                    application_version="1.0.0",
+                    runtime_id="pi.reference",
+                    assembly_path=root / "standalone.json",
+                    options={
+                        **{
+                            key: value
+                            for key, value in pi_options.items()
+                            if key != "cwd_host_capability"
+                        },
+                        "cwd": str(direct),
+                    },
+                    host_services={"evaluation.answer-judge": judge},
+                )
+            )
+            with (
+                patch.dict(
+                    os.environ,
+                    {"ASTERION_CLAUDE_EXECUTABLE": "claude"},
+                    clear=True,
+                ),
+                patch(
+                    "asterion.runtime.defaults.shutil.which",
+                    return_value="/tool/claude",
+                ),
+            ):
+                claude = registry.select("claude-code.reference").factory(
+                    RuntimeFactoryContext(
+                        provider_id="dci-agent-lite",
+                        application_id="dci.complete-application",
+                        application_version="1.0.0",
+                        runtime_id="claude-code.reference",
+                        assembly_path=root / "claude.json",
+                        options={
+                            "authentication_mode": "subscription",
+                            "cwd_host_capability": "corpus.local-root",
+                            "evidence_root": str(root / "claude-evidence"),
+                            "provider": None,
+                            "model": None,
+                            "timeout_seconds": "10",
+                            "tools": "read,grep,glob",
+                        },
+                        host_services={
+                            "corpus.local-root": authority,
+                            "evaluation.answer-judge": judge,
+                        },
+                    )
+                )
+            with (
+                patch.dict(
+                    os.environ,
+                    {"ASTERION_CLAUDE_EXECUTABLE": "claude"},
+                    clear=True,
+                ),
+                patch(
+                    "asterion.runtime.defaults.shutil.which",
+                    return_value="/tool/claude",
+                ),
+            ):
+                direct_claude = registry.select(
+                    "claude-code.reference"
+                ).factory(
+                    RuntimeFactoryContext(
+                        provider_id="provider",
+                        application_id="application",
+                        application_version="1.0.0",
+                        runtime_id="claude-code.reference",
+                        assembly_path=root / "direct-claude.json",
+                        options={
+                            "authentication_mode": "subscription",
+                            "cwd": str(direct),
+                            "provider": None,
+                            "model": None,
+                            "timeout_seconds": "10",
+                            "tools": "read,grep,glob",
+                        },
+                        host_services={
+                            "evaluation.answer-judge": judge,
+                        },
+                    )
+                )
+
+        self.assertIs(pi._cwd_authority, authority)
+        self.assertIs(claude._cwd_authority, authority)
+        self.assertEqual(direct_pi._cwd, direct)
+        self.assertEqual(direct_claude._cwd, direct)
 
     def test_claude_host_directory_is_exact_and_rejects_competing_cwd(
         self,
@@ -597,6 +727,7 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
             (
                 {**base_options, "cwd": str(corpus)},
                 {"ASTERION_CLAUDE_EXECUTABLE": "claude"},
+                {"corpus.local-root": authority},
             ),
             (
                 base_options,
@@ -604,6 +735,7 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                     "ASTERION_CLAUDE_EXECUTABLE": "claude",
                     "ASTERION_RUNTIME_CWD": str(root / "other"),
                 },
+                {"corpus.local-root": authority},
             ),
             (
                 {
@@ -612,9 +744,40 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                     if key != "cwd_host_capability"
                 },
                 {"ASTERION_CLAUDE_EXECUTABLE": "claude"},
+                {"corpus.local-root": authority},
+            ),
+            (
+                {
+                    key: value
+                    for key, value in base_options.items()
+                    if key != "cwd_host_capability"
+                },
+                {
+                    "ASTERION_CLAUDE_EXECUTABLE": "claude",
+                    "ASTERION_RUNTIME_CWD": str(root / "other"),
+                },
+                {"corpus.local-root": authority},
+            ),
+            (
+                base_options,
+                {"ASTERION_CLAUDE_EXECUTABLE": "claude"},
+                {
+                    "corpus.local-root": authority,
+                    "service.other": DirectoryAuthority(corpus),
+                },
+            ),
+            (
+                base_options,
+                {"ASTERION_CLAUDE_EXECUTABLE": "claude"},
+                {"service.other": authority},
+            ),
+            (
+                base_options,
+                {"ASTERION_CLAUDE_EXECUTABLE": "claude"},
+                {"corpus.local-root": object()},
             ),
         )
-        for options, environment in cases:
+        for options, environment, services in cases:
             with (
                 self.subTest(options=tuple(options)),
                 patch.dict(os.environ, environment, clear=True),
@@ -632,7 +795,7 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                         runtime_id="claude-code.reference",
                         assembly_path=root / "assembly.json",
                         options=options,
-                        host_services={"corpus.local-root": authority},
+                        host_services=services,
                     )
                 )
 
@@ -766,16 +929,80 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
 class DefaultRuntimeFactoryProcessAuthorityTests(
     unittest.IsolatedAsyncioTestCase
 ):
-    async def test_pi_factory_starts_child_in_pinned_corpus_after_swap(
+    async def test_pi_rejects_direct_cwd_when_real_corpus_is_injected(
+        self,
+    ) -> None:
+        from asterion.runtime.defaults import default_runtime_factory_registry
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            corpus = root / "corpus"
+            corpus.mkdir()
+            unrelated = root / "unrelated"
+            unrelated.mkdir()
+            service_context = HostServiceFactoryContext(
+                provider_id="dci-agent-lite",
+                application_id="dci.research-capability",
+                application_version="1.0.0",
+                capability_id="corpus.local-root",
+                options={"root": str(corpus)},
+            )
+            async with create_local_corpus_service_factory().factory(
+                service_context
+            ) as service:
+                with (
+                    patch(
+                        "asterion.runtime.defaults.PiRuntimeClient"
+                    ) as client,
+                    self.assertRaises(RuntimeFactoryError),
+                ):
+                    default_runtime_factory_registry().select(
+                        "pi.reference"
+                    ).factory(
+                        RuntimeFactoryContext(
+                            provider_id="dci-agent-lite",
+                            application_id="dci.research-capability",
+                            application_version="1.0.0",
+                            runtime_id="pi.reference",
+                            assembly_path=root / "assembly.json",
+                            options={
+                                "command": json.dumps(
+                                    [
+                                        str(Path(sys.executable).resolve()),
+                                        "-u",
+                                        "-c",
+                                        "pass",
+                                    ],
+                                    separators=(",", ":"),
+                                ),
+                                "cwd": str(unrelated),
+                                "environment": "{}",
+                                "evidence_root": str(root / "evidence"),
+                                "max_turns": "4",
+                                "tools": "read,grep",
+                            },
+                            host_services={
+                                "corpus.local-root": service,
+                            },
+                        )
+                    )
+                client.assert_not_called()
+
+    async def test_pi_factory_starts_child_pinned_without_fd_leak(
         self,
     ) -> None:
         from asterion.runtime.defaults import default_runtime_factory_registry
         import asterion.runtimes.pi as pi_runtime
 
         script = (
-            "import json,pathlib,sys;"
+            "import json,os,pathlib,sys;"
             "request=json.loads(sys.stdin.readline());"
-            "answer=pathlib.Path('marker.txt').read_text();"
+            "fd=os.environ['TEST_AUTHORITY_FD'];"
+            "fd_path=f'/proc/self/fd/{fd}';"
+            "leaked=os.path.exists(fd_path) and "
+            "'original-corpus' in os.path.realpath(fd_path);"
+            "answer=pathlib.Path('marker.txt').read_text()+"
+            "(':LEAK' if leaked else ':CLEAN');"
             "print(json.dumps({'type':'response','id':request['id'],"
             "'success':True}),flush=True);"
             "print(json.dumps({'type':'agent_start'}),flush=True);"
@@ -833,6 +1060,11 @@ class DefaultRuntimeFactoryProcessAuthorityTests(
 
                 async def swap_then_start(*args, **kwargs):
                     nonlocal swapped
+                    environment = dict(kwargs["env"])
+                    environment["TEST_AUTHORITY_FD"] = str(
+                        kwargs["pass_fds"][0]
+                    )
+                    kwargs["env"] = environment
                     if not swapped:
                         swapped = True
                         corpus.rename(root / "original-corpus")
@@ -860,9 +1092,12 @@ class DefaultRuntimeFactoryProcessAuthorityTests(
             self.assertTrue(swapped)
             self.assertEqual(events[-1].type, "run.completed")
             assert run_dir is not None
-            self.assertEqual((run_dir / "final.txt").read_text(), "ORIGINAL")
+            self.assertEqual(
+                (run_dir / "final.txt").read_text(),
+                "ORIGINAL:CLEAN",
+            )
 
-    async def test_claude_factory_starts_child_in_pinned_corpus_after_swap(
+    async def test_claude_factory_starts_child_pinned_without_fd_leak(
         self,
     ) -> None:
         from asterion.runtime.defaults import default_runtime_factory_registry
@@ -876,8 +1111,13 @@ class DefaultRuntimeFactoryProcessAuthorityTests(
             executable = root / "fixture-claude"
             executable.write_text(
                 f"#!{sys.executable}\n"
-                "import json, pathlib\n"
-                "answer = pathlib.Path('marker.txt').read_text()\n"
+                "import json, os, pathlib\n"
+                "fd = os.environ['TEST_AUTHORITY_FD']\n"
+                "fd_path = f'/proc/self/fd/{fd}'\n"
+                "leaked = os.path.exists(fd_path) and "
+                "'original-corpus' in os.path.realpath(fd_path)\n"
+                "answer = pathlib.Path('marker.txt').read_text() + "
+                "(':LEAK' if leaked else ':CLEAN')\n"
                 "print(json.dumps({'type':'system','subtype':'init',"
                 "'tools':['Read','Grep','Glob']}))\n"
                 "print(json.dumps({'type':'assistant','message':{'role':"
@@ -929,6 +1169,11 @@ class DefaultRuntimeFactoryProcessAuthorityTests(
 
                 def swap_then_start(*args, **kwargs):
                     nonlocal swapped
+                    environment = dict(kwargs["env"])
+                    environment["TEST_AUTHORITY_FD"] = str(
+                        kwargs["pass_fds"][0]
+                    )
+                    kwargs["env"] = environment
                     if not swapped:
                         swapped = True
                         corpus.rename(root / "original-corpus")
@@ -952,7 +1197,10 @@ class DefaultRuntimeFactoryProcessAuthorityTests(
             self.assertTrue(swapped)
             self.assertEqual(events[-1].type, "run.completed")
             assert run_dir is not None
-            self.assertEqual((run_dir / "final.txt").read_text(), "ORIGINAL\n")
+            self.assertEqual(
+                (run_dir / "final.txt").read_text(),
+                "ORIGINAL:CLEAN\n",
+            )
 
 
 if __name__ == "__main__":

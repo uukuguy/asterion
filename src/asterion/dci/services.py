@@ -82,19 +82,15 @@ class _PinnedLocalCorpusService:
                 raise LocalCorpusServiceError(
                     "local corpus identity changed"
                 )
-            if sys.platform == "linux":
-                cwd = f"/proc/self/fd/{descriptor}"
-                command_prefix: tuple[str, ...] = ()
-            else:
-                cwd = "/"
-                command_prefix = (
-                    sys.executable,
-                    "-m",
-                    "asterion.runtime.cwd_exec",
-                    "--fd",
-                    str(descriptor),
-                    "--",
-                )
+            cwd = "/"
+            command_prefix = (
+                sys.executable,
+                "-m",
+                "asterion.runtime.cwd_exec",
+                "--fd",
+                str(descriptor),
+                "--",
+            )
             working = ProcessWorkingDirectory(
                 identity_path=self._root,
                 cwd=cwd,
@@ -245,18 +241,9 @@ def _secure_local_corpus_available() -> bool:
             and os.open in os.supports_dir_fd
             and os.stat in os.supports_dir_fd
             and os.stat in os.supports_follow_symlinks
-            and (
-                (
-                    sys.platform == "linux"
-                    and Path("/proc/self/fd").is_dir()
-                )
-                or (
-                    sys.platform == "darwin"
-                    and callable(os.fchdir)
-                    and callable(os.execvpe)
-                    and bool(sys.executable)
-                )
-            )
+            and callable(os.fchdir)
+            and callable(os.execvpe)
+            and bool(sys.executable)
         )
     except (AttributeError, TypeError):
         return False

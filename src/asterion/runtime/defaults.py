@@ -102,10 +102,13 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
     }
     has_cwd = "cwd" in context.options
     has_host_cwd = "cwd_host_capability" in context.options
+    directory_authorities = _directory_authorities(context)
     if (
         set(context.options) - allowed
         or not required.issubset(context.options)
         or has_cwd == has_host_cwd
+        or (directory_authorities and has_cwd)
+        or (directory_authorities and not has_host_cwd)
     ):
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
     command = list(_pi_command(context.options["command"]))
@@ -184,8 +187,6 @@ def _host_directory_authority(
     ):
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
     try:
-        if set(context.host_services) != {capability_id}:
-            raise KeyError
         service = context.host_services[capability_id]
     except Exception:
         raise RuntimeFactoryError(
@@ -193,6 +194,13 @@ def _host_directory_authority(
         ) from None
     if not isinstance(service, ProcessDirectoryAuthority):
         raise RuntimeFactoryError("runtime host directory service is invalid")
+    authorities = _directory_authorities(context)
+    if (
+        len(authorities) != 1
+        or authorities[0][0] != capability_id
+        or authorities[0][1] is not service
+    ):
+        raise RuntimeFactoryError("runtime host directory service is ambiguous")
     try:
         path = service.directory_path
     except Exception:
@@ -203,6 +211,16 @@ def _host_directory_authority(
         raise RuntimeFactoryError("runtime host directory service is invalid")
     _pi_exact_path(str(path), require_directory=True)
     return service
+
+
+def _directory_authorities(
+    context: RuntimeFactoryContext,
+) -> tuple[tuple[str, ProcessDirectoryAuthority], ...]:
+    return tuple(
+        (capability_id, service)
+        for capability_id, service in context.host_services.items()
+        if isinstance(service, ProcessDirectoryAuthority)
+    )
 
 
 def _pi_command(value: str) -> tuple[str, ...]:
@@ -330,12 +348,21 @@ def _create_claude_code_runtime(
     if set(context.options) - allowed:
         raise RuntimeFactoryError("Claude Code runtime configuration is invalid")
     executable = _configured_executable("ASTERION_CLAUDE_EXECUTABLE", "claude")
-    has_host_cwd = bool(context.host_services)
+    has_host_cwd = "cwd_host_capability" in context.options
+    directory_authorities = _directory_authorities(context)
+    has_direct_cwd = "cwd" in context.options
+    has_ambient_cwd = bool(
+        os.environ.get("ASTERION_RUNTIME_CWD", "").strip()
+    )
+    if (
+        (directory_authorities and not has_host_cwd)
+        or (directory_authorities and (has_direct_cwd or has_ambient_cwd))
+    ):
+        raise RuntimeFactoryError("Claude Code runtime configuration is invalid")
     if has_host_cwd:
         if (
-            "cwd_host_capability" not in context.options
-            or "cwd" in context.options
-            or os.environ.get("ASTERION_RUNTIME_CWD", "").strip()
+            has_direct_cwd
+            or has_ambient_cwd
             or "evidence_root" not in context.options
         ):
             raise RuntimeFactoryError("Claude Code runtime configuration is invalid")

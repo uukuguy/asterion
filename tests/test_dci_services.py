@@ -138,6 +138,47 @@ class LocalCorpusServiceTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(OSError):
                     os.fstat(duplicate)
 
+    async def test_linux_process_binding_closes_fd_before_target_exec(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            binding = create_local_corpus_service_factory()
+
+            async with binding.factory(_context(root)) as service:
+                with (
+                    patch.object(dci_services.sys, "platform", "linux"),
+                    service.open_process_working_directory() as working,
+                ):
+                    descriptor = working.pass_fds[0]
+                    self.assertEqual(working.cwd, "/")
+                    self.assertIn(
+                        "asterion.runtime.cwd_exec",
+                        working.command_prefix,
+                    )
+                    completed = subprocess.run(
+                        [
+                            *working.command_prefix,
+                            sys.executable,
+                            "-c",
+                            "import os,sys\n"
+                            "try:\n"
+                            " os.fstat(int(sys.argv[1]))\n"
+                            "except OSError:\n"
+                            " print('CLOSED')\n"
+                            "else:\n"
+                            " print('LEAK')\n",
+                            str(descriptor),
+                        ],
+                        cwd=working.cwd,
+                        pass_fds=working.pass_fds,
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
+
+                self.assertEqual(completed.stdout.strip(), "CLOSED")
+
     async def test_factory_rejects_unknown_context_and_judge_is_fail_closed(
         self,
     ) -> None:
