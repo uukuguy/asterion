@@ -505,3 +505,126 @@ git commit -m "docs: refresh protocol final-review checkpoint"
 
 Expected: documentation, Ruff, and whitespace checks pass, and the checkpoint
 contains no stale 72/252 totals or truncated report command.
+
+### Task 10: Validate static re-export provenance recursively
+
+**Files:**
+- Modify: `tests/test_standalone_repository.py`
+- Modify: `tools/check_docs.py`
+
+**Interfaces:**
+- Consumes: parsed source bindings with their defining module/package context.
+- Produces: cycle-safe explicit-symbol validation for direct bindings, local
+  and absolute re-exports, and imported Asterion module aliases.
+
+- [x] **Step 1: Add copied-tree re-export regressions**
+
+Create isolated Asterion subpackages for valid direct assignments, local and
+aliased re-exports, `from . import child`, absolute Asterion re-exports,
+`import asterion.child as Alias`, and a valid multi-hop chain. Add separate
+subpackages for a missing target module, missing target symbol, invalid target
+source, a re-export cycle, and a non-Asterion re-export. Run representative
+imports with `python -S` to prove the valid and broken fixture semantics, while
+asserting the checker itself never creates the import side-effect marker. Add a
+multi-root namespace re-export whose source and target live under different
+namespace roots.
+
+- [x] **Step 2: Run RED**
+
+```bash
+uv run python -m unittest -v \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_validates_reexport_provenance_without_importing
+```
+
+Expected: missing module/symbol, invalid source, cycle, and unsupported external
+re-export cases return false success because alias text alone is accepted.
+
+- [x] **Step 3: Preserve and validate provenance**
+
+Replace the binding-name set with frozen binding records for direct values,
+imported modules, imported symbols, and unsupported external imports. Resolve
+relative `ImportFrom` targets from the defining package with exact level
+semantics. Validate an explicit symbol recursively: direct values pass;
+Asterion module aliases require the module; imported symbols require either a
+recursively valid target binding or an importable child module. Track
+`(module, symbol)` pairs and fail a cycle closed. Keep the concrete filesystem
+resolver and multi-root namespace precedence unchanged.
+
+Use one documented fail-closed rule for non-Asterion imports: retain their
+provenance as unsupported and reject them as public documented symbols because
+this source-only checker cannot validate external module semantics without
+executing import machinery. Current documentation exposes no such symbol.
+
+- [x] **Step 4: Run GREEN and commit**
+
+```bash
+uv run python -m unittest -v \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_validates_asterion_import_snippets \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_resolves_namespace_packages_without_importing \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_validates_reexport_provenance_without_importing \
+  tests.test_standalone_repository.StandaloneRepositoryTests.test_docs_checker_handles_links_and_rejects_unsafe_targets
+make docs-check
+uv run ruff check tools/check_docs.py tests/test_standalone_repository.py
+git add tools/check_docs.py tests/test_standalone_repository.py \
+  docs/superpowers/plans/2026-07-24-protocol-final-review-fixes.md \
+  docs/status/JOURNAL.md
+git commit -m "fix: validate documented reexport provenance"
+```
+
+### Task 11: Refresh cumulative recovery after re-export validation
+
+**Files:**
+- Modify: `docs/status/RESUME-NEXT-SESSION.md`
+- Modify: `.superpowers/sdd/protocol-final-fix-report.md`
+
+**Interfaces:**
+- Consumes: committed re-export validation and fresh provider-free evidence.
+- Produces: current cumulative recovery state and append-only closure evidence.
+
+- [ ] **Step 1: Run the complete final matrix**
+
+```bash
+uv run python -m unittest -v \
+  tests.test_protocol_canonical_ordering \
+  tests.test_runtime_protocol \
+  tests.test_package_composition \
+  tests.test_package_catalog \
+  tests.test_package_execution \
+  tests.test_dci_complete_application \
+  tests.test_dci_research_capability \
+  tests.test_controlled_code_application
+uv run python -m unittest -v tests.test_runtime_adapter_redaction
+npm --prefix packages/typescript/asterion-runtime test
+make test
+make check
+make lint
+make docs-check
+make promotion-check
+git diff --check
+```
+
+Expected: all commands pass provider-free. Capture any new focused and
+repository test totals from the fresh command output.
+
+- [ ] **Step 2: Refresh checkpoint and report**
+
+Update the live checkpoint timestamp, corrective commits, provenance validation
+rule, and exact final totals. Keep final re-review first and Application
+Authority Task 2 conditional on a clean verdict. Append RED/GREEN and complete
+gate evidence to the full fix report.
+
+- [ ] **Step 3: Verify and commit recovery**
+
+```bash
+make docs-check
+uv run ruff check src tests tools
+git diff --check
+git add docs/status/RESUME-NEXT-SESSION.md \
+  .superpowers/sdd/protocol-final-fix-report.md \
+  docs/superpowers/plans/2026-07-24-protocol-final-review-fixes.md \
+  docs/status/JOURNAL.md
+git commit -m "docs: refresh reexport review checkpoint"
+```
+
+Expected: docs, Ruff, and whitespace checks pass with current cumulative
+recovery evidence.

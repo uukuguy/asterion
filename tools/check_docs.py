@@ -34,8 +34,16 @@ FORBIDDEN_LITERALS = (
 
 
 @dataclass(frozen=True)
+class _SourceBinding:
+    name: str
+    kind: str
+    target_module: str | None = None
+    target_symbol: str | None = None
+
+
+@dataclass(frozen=True)
 class _ResolvedModule:
-    bindings: frozenset[str]
+    bindings: tuple[_SourceBinding, ...]
     child_roots: tuple[Path, ...]
 
 
@@ -140,11 +148,10 @@ def _check_asterion_imports(document: Path, text: str) -> tuple[str, ...]:
                     for alias in node.names:
                         if alias.name == "*":
                             continue
-                        if alias.name in resolved.bindings:
-                            continue
-                        if (
-                            _resolve_module(f"{node.module}.{alias.name}")
-                            is not None
+                        if _valid_explicit_symbol(
+                            node.module,
+                            alias.name,
+                            frozenset(),
                         ):
                             continue
                         errors.append(
@@ -198,7 +205,12 @@ def _resolve_module(module_name: str) -> _ResolvedModule | None:
     resolved: _ResolvedModule | None = None
     parts = module_name.split(".")
     for index, component in enumerate(parts):
-        resolved = _resolve_component(component, search_roots)
+        qualified_name = ".".join(parts[: index + 1])
+        resolved = _resolve_component(
+            component,
+            qualified_name,
+            search_roots,
+        )
         if resolved is None:
             return None
         if index != len(parts) - 1:
@@ -229,6 +241,7 @@ def _filesystem_search_roots() -> tuple[Path, ...] | None:
 
 def _resolve_component(
     component: str,
+    qualified_name: str,
     search_roots: tuple[Path, ...],
 ) -> _ResolvedModule | None:
     namespace_roots: list[Path] = []
@@ -241,14 +254,22 @@ def _resolve_component(
                 init_source = package_root / "__init__.py"
                 init_mode = _path_mode(init_source)
                 if init_mode is not None and stat.S_ISREG(init_mode):
-                    bindings = _source_bindings(init_source)
+                    bindings = _source_bindings(
+                        init_source,
+                        qualified_name,
+                        is_package=True,
+                    )
                     if bindings is None:
                         return None
                     return _ResolvedModule(bindings, (package_root,))
 
             module_mode = _path_mode(module_source)
             if module_mode is not None and stat.S_ISREG(module_mode):
-                bindings = _source_bindings(module_source)
+                bindings = _source_bindings(
+                    module_source,
+                    qualified_name,
+                    is_package=False,
+                )
                 if bindings is None:
                     return None
                 return _ResolvedModule(bindings, ())
@@ -258,7 +279,7 @@ def _resolve_component(
         except OSError:
             return None
     if namespace_roots:
-        return _ResolvedModule(frozenset(), tuple(namespace_roots))
+        return _ResolvedModule((), tuple(namespace_roots))
     return None
 
 
@@ -269,29 +290,133 @@ def _path_mode(path: Path) -> int | None:
         return None
 
 
-def _source_bindings(source_path: Path) -> frozenset[str] | None:
+def _source_bindings(
+    source_path: Path,
+    module_name: str,
+    *,
+    is_package: bool,
+) -> tuple[_SourceBinding, ...] | None:
     try:
         source = source_path.read_text(encoding="utf-8")
         tree = ast.parse(source)
     except (OSError, SyntaxError, UnicodeError):
         return None
 
-    bindings: set[str] = set()
+    bindings: dict[str, _SourceBinding] = {}
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            bindings.add(node.name)
-        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else (node.target,)
+            bindings[node.name] = _SourceBinding(node.name, "direct")
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                for name in _assigned_names(target):
+                    bindings[name] = _SourceBinding(name, "direct")
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = (node.target,)
             for target in targets:
-                bindings.update(_assigned_names(target))
+                for name in _assigned_names(target):
+                    bindings[name] = _SourceBinding(name, "direct")
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                bindings.add(alias.asname or alias.name.split(".", 1)[0])
+                name = alias.asname or alias.name.split(".", 1)[0]
+                if _is_asterion_module(alias.name):
+                    bindings[name] = _SourceBinding(
+                        name,
+                        "module",
+                        target_module=alias.name,
+                    )
+                else:
+                    bindings[name] = _SourceBinding(name, "unsupported")
         elif isinstance(node, ast.ImportFrom):
+            target_module = _import_from_target(
+                node,
+                module_name,
+                is_package=is_package,
+            )
             for alias in node.names:
                 if alias.name != "*":
-                    bindings.add(alias.asname or alias.name)
-    return frozenset(bindings)
+                    name = alias.asname or alias.name
+                    if target_module is None:
+                        # External imports fail closed: this source-only checker
+                        # cannot validate them without executing import machinery.
+                        bindings[name] = _SourceBinding(name, "unsupported")
+                    else:
+                        bindings[name] = _SourceBinding(
+                            name,
+                            "symbol",
+                            target_module=target_module,
+                            target_symbol=alias.name,
+                        )
+    return tuple(bindings.values())
+
+
+def _import_from_target(
+    node: ast.ImportFrom,
+    module_name: str,
+    *,
+    is_package: bool,
+) -> str | None:
+    if node.level == 0:
+        target = node.module
+    else:
+        package_name = (
+            module_name
+            if is_package
+            else module_name.rpartition(".")[0]
+        )
+        package_parts = package_name.split(".") if package_name else []
+        if node.level > len(package_parts):
+            return None
+        retained = len(package_parts) - node.level + 1
+        target_parts = package_parts[:retained]
+        if node.module is not None:
+            target_parts.extend(node.module.split("."))
+        target = ".".join(target_parts)
+    if target is None or not _is_asterion_module(target):
+        return None
+    return target
+
+
+def _valid_explicit_symbol(
+    module_name: str,
+    symbol_name: str,
+    resolving: frozenset[tuple[str, str]],
+) -> bool:
+    key = (module_name, symbol_name)
+    if key in resolving:
+        return False
+    resolved = _resolve_module(module_name)
+    if resolved is None:
+        return False
+    binding = next(
+        (item for item in resolved.bindings if item.name == symbol_name),
+        None,
+    )
+    if binding is None:
+        return _resolve_module(f"{module_name}.{symbol_name}") is not None
+    if binding.kind == "direct":
+        return True
+    if binding.kind == "module":
+        return (
+            binding.target_module is not None
+            and _resolve_module(binding.target_module) is not None
+        )
+    if (
+        binding.kind == "symbol"
+        and binding.target_module is not None
+        and binding.target_symbol is not None
+    ):
+        return (
+            _valid_explicit_symbol(
+                binding.target_module,
+                binding.target_symbol,
+                resolving | {key},
+            )
+            or _resolve_module(
+                f"{binding.target_module}.{binding.target_symbol}"
+            )
+            is not None
+        )
+    return False
 
 
 def _assigned_names(target: ast.expr) -> frozenset[str]:

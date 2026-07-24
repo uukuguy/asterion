@@ -693,6 +693,10 @@ class StandaloneRepositoryTests(unittest.TestCase):
                 f"{side_effect_source}SIBLING_API = object()\n",
                 encoding="utf-8",
             )
+            (top_namespace_two / "public.py").write_text(
+                f"{side_effect_source}from .child import API as PUBLIC\n",
+                encoding="utf-8",
+            )
 
             def run(
                 search_roots: tuple[Path, ...],
@@ -784,6 +788,12 @@ class StandaloneRepositoryTests(unittest.TestCase):
                     True,
                 ),
                 (
+                    "top-level namespace cross-root re-export",
+                    (namespace_root_one, namespace_root_two),
+                    "from asterion.top.public import PUBLIC\n",
+                    True,
+                ),
+                (
                     "top-level namespace missing child",
                     (namespace_root_one, namespace_root_two),
                     "import asterion.top.missing\n",
@@ -816,6 +826,226 @@ class StandaloneRepositoryTests(unittest.TestCase):
                         marker.exists(),
                         "documentation checking executed imported module code",
                     )
+
+    def test_docs_checker_validates_reexport_provenance_without_importing(
+        self,
+    ) -> None:
+        checker = PROJECT / "tools/check_docs.py"
+        self.assertTrue(checker.is_file(), "standalone docs checker is missing")
+        if not checker.is_file():
+            return
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            (root / "tools").mkdir()
+            shutil.copy2(checker, root / "tools/check_docs.py")
+            (root / "docs").mkdir()
+            source_root = root / "src"
+            package = source_root / "asterion"
+            package.mkdir(parents=True)
+            marker = root / "IMPORT_SIDE_EFFECT"
+            side_effect_source = (
+                "from pathlib import Path\n"
+                'Path("IMPORT_SIDE_EFFECT").write_text("executed", encoding="utf-8")\n'
+            )
+            (package / "__init__.py").write_text(
+                side_effect_source,
+                encoding="utf-8",
+            )
+
+            valid = package / "valid"
+            valid.mkdir()
+            (valid / "__init__.py").write_text(
+                f"{side_effect_source}"
+                "DIRECT = object()\n"
+                "from .child import API\n"
+                "from .child import API as PublicAPI\n"
+                "from . import child\n"
+                "from asterion.valid.child import API as AbsoluteAPI\n"
+                "import asterion.valid.child as ChildAlias\n"
+                "from .hop_one import CHAIN_API\n",
+                encoding="utf-8",
+            )
+            (valid / "child.py").write_text(
+                f"{side_effect_source}API = object()\n",
+                encoding="utf-8",
+            )
+            (valid / "hop_one.py").write_text(
+                "from .hop_two import API as CHAIN_API\n",
+                encoding="utf-8",
+            )
+            (valid / "hop_two.py").write_text(
+                "API = object()\n",
+                encoding="utf-8",
+            )
+
+            broken_module = package / "broken_module"
+            broken_module.mkdir()
+            (broken_module / "__init__.py").write_text(
+                "from .missing import API\n",
+                encoding="utf-8",
+            )
+
+            broken_symbol = package / "broken_symbol"
+            broken_symbol.mkdir()
+            (broken_symbol / "__init__.py").write_text(
+                "from asterion.valid.child import MISSING as API\n",
+                encoding="utf-8",
+            )
+
+            broken_source = package / "broken_source"
+            broken_source.mkdir()
+            (broken_source / "__init__.py").write_text(
+                "from .target import API\n",
+                encoding="utf-8",
+            )
+            (broken_source / "target.py").write_text(
+                "API = (\n",
+                encoding="utf-8",
+            )
+
+            cycle = package / "cycle"
+            cycle.mkdir()
+            (cycle / "__init__.py").write_text(
+                "from .a import API\n",
+                encoding="utf-8",
+            )
+            (cycle / "a.py").write_text(
+                "from . import API\n",
+                encoding="utf-8",
+            )
+
+            external = package / "external"
+            external.mkdir()
+            (external / "__init__.py").write_text(
+                "from pathlib import Path as API\n",
+                encoding="utf-8",
+            )
+
+            environment = os.environ.copy()
+            environment["PYTHONPATH"] = str(source_root)
+
+            def run_checker(snippet: str) -> subprocess.CompletedProcess[str]:
+                marker.unlink(missing_ok=True)
+                (root / "README.md").write_text(
+                    f"# Root\n\n```python\n{snippet}```\n",
+                    encoding="utf-8",
+                )
+                return subprocess.run(
+                    ["python3", "-S", "tools/check_docs.py"],
+                    cwd=root,
+                    env=environment,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+
+            def run_python(snippet: str) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    ["python3", "-S", "-c", snippet],
+                    cwd=root,
+                    env=environment,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+
+            cases = (
+                (
+                    "direct assignment",
+                    "from asterion.valid import DIRECT\n",
+                    True,
+                    True,
+                ),
+                (
+                    "local re-export",
+                    "from asterion.valid import API\n",
+                    True,
+                    True,
+                ),
+                (
+                    "aliased local re-export",
+                    "from asterion.valid import PublicAPI\n",
+                    True,
+                    True,
+                ),
+                (
+                    "module as child",
+                    "from asterion.valid import child\n",
+                    True,
+                    True,
+                ),
+                (
+                    "absolute re-export",
+                    "from asterion.valid import AbsoluteAPI\n",
+                    True,
+                    True,
+                ),
+                (
+                    "imported module alias",
+                    "from asterion.valid import ChildAlias\n",
+                    True,
+                    True,
+                ),
+                (
+                    "multi-hop re-export",
+                    "from asterion.valid import CHAIN_API\n",
+                    True,
+                    True,
+                ),
+                (
+                    "missing re-export module",
+                    "from asterion.broken_module import API\n",
+                    False,
+                    False,
+                ),
+                (
+                    "missing re-export symbol",
+                    "from asterion.broken_symbol import API\n",
+                    False,
+                    False,
+                ),
+                (
+                    "invalid re-export source",
+                    "from asterion.broken_source import API\n",
+                    False,
+                    False,
+                ),
+                (
+                    "re-export cycle",
+                    "from asterion.cycle import API\n",
+                    False,
+                    False,
+                ),
+                (
+                    "external import fails closed",
+                    "from asterion.external import API\n",
+                    False,
+                    True,
+                ),
+            )
+            for label, snippet, checker_should_pass, python_should_pass in cases:
+                with self.subTest(case=label):
+                    checked = run_checker(snippet)
+                    if checker_should_pass:
+                        self.assertEqual(checked.returncode, 0, checked.stderr)
+                    else:
+                        self.assertNotEqual(checked.returncode, 0)
+                        self.assertIn(
+                            "documented import is unavailable",
+                            checked.stderr,
+                        )
+                    self.assertNotIn("Traceback", checked.stderr)
+                    self.assertFalse(
+                        marker.exists(),
+                        "documentation checking executed imported module code",
+                    )
+
+                    imported = run_python(snippet)
+                    if python_should_pass:
+                        self.assertEqual(imported.returncode, 0, imported.stderr)
+                    else:
+                        self.assertNotEqual(imported.returncode, 0)
 
 
 if __name__ == "__main__":
