@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from types import MappingProxyType
 
 from asterion.assembly.protocol import AssemblyPlan
 from asterion.packages.catalog import PackageRef
@@ -40,14 +41,24 @@ async def run_composed_application(
 ) -> ApplicationRunResult:
     """Run explicitly bound package implementations sequentially."""
 
+    try:
+        host_events_snapshot = tuple(
+            _freeze_mapping(event) for event in host_events
+        )
+        host_artifacts_snapshot = tuple(
+            _freeze_mapping(artifact) for artifact in host_artifacts
+        )
+    except Exception:
+        raise ApplicationRunError("application host evidence is invalid") from None
+
     _preflight(
         plan,
         runtime=runtime,
         run_id=run_id,
         input_text=input_text,
         host_services=host_services,
-        host_events=host_events,
-        host_artifacts=host_artifacts,
+        host_events=host_events_snapshot,
+        host_artifacts=host_artifacts_snapshot,
         signal=signal,
     )
     try:
@@ -79,11 +90,13 @@ async def run_composed_application(
             if artifact.get("media_type") in consumed_artifacts
         )
         package_host_events = tuple(
-            event for event in host_events if event.get("type") in consumed_events
+            event
+            for event in host_events_snapshot
+            if event.get("type") in consumed_events
         )
         package_host_artifacts = tuple(
             artifact
-            for artifact in host_artifacts
+            for artifact in host_artifacts_snapshot
             if artifact.get("media_type") in consumed_artifacts
         )
         invocation = PackageInvocation(
@@ -195,3 +208,17 @@ def _preflight_host_evidence(
         raise ApplicationRunError(
             "application host artifact declarations do not match"
         )
+
+
+def _freeze_mapping(value: Mapping[str, object]) -> Mapping[str, object]:
+    return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+
+
+def _freeze(value: object) -> object:
+    if isinstance(value, Mapping):
+        return _freeze_mapping(value)
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze(item) for item in value)
+    if isinstance(value, set):
+        return frozenset(_freeze(item) for item in value)
+    return value

@@ -71,6 +71,33 @@ class ResultImplementation:
         return self.result
 
 
+class MutatingImplementation(ResultImplementation):
+    def __init__(
+        self,
+        result: PackageExecutionResult,
+        *,
+        event: dict[str, object],
+        artifact: dict[str, object],
+    ) -> None:
+        super().__init__(result)
+        self.event = event
+        self.artifact = artifact
+
+    async def execute(
+        self, invocation: PackageInvocation
+    ) -> PackageExecutionResult:
+        self.invocations.append(invocation)
+        self.event["type"] = "host.changed"
+        event_payload = self.event["payload"]
+        assert isinstance(event_payload, dict)
+        event_payload["nested"] = {"status": "changed"}
+        self.artifact["media_type"] = "application/vnd.host-changed+json"
+        artifact_value = self.artifact["value"]
+        assert isinstance(artifact_value, dict)
+        artifact_value["nested"] = {"status": "changed"}
+        return self.result
+
+
 def resolve_plan():
     return resolve_assembly(
         json.loads(ASSEMBLY.read_text()),
@@ -198,7 +225,7 @@ class PackageImplementationBindingTests(unittest.TestCase):
         self.assertIsInstance(resolved, MappingProxyType)
         self.assertNotIn(PackageRef("policy.local-corpus", "1.0.0"), resolved)
         with self.assertRaises(TypeError):
-            resolved[PackageRef("other", "1.0.0")] = implementation
+            resolved[PackageRef("other", "1.0.0")] = implementation  # type: ignore[reportIndexIssue]
 
     def test_unknown_exact_binding_is_rejected(self) -> None:
         implementation = RecordingImplementation()
@@ -252,17 +279,17 @@ class PackageExecutionValueTests(unittest.TestCase):
 
         self.assertIsInstance(invocation.host_services, MappingProxyType)
         with self.assertRaises(TypeError):
-            invocation.upstream_events[0]["payload"]["nested"]["ok"] = False
+            invocation.upstream_events[0]["payload"]["nested"]["ok"] = False  # type: ignore[reportIndexIssue]
         with self.assertRaises(TypeError):
-            invocation.upstream_artifacts[0]["media_type"] = "changed"
+            invocation.upstream_artifacts[0]["media_type"] = "changed"  # type: ignore[reportIndexIssue]
         with self.assertRaises(TypeError):
-            invocation.host_events[0]["payload"]["nested"]["ok"] = False
+            invocation.host_events[0]["payload"]["nested"]["ok"] = False  # type: ignore[reportIndexIssue]
         with self.assertRaises(TypeError):
-            invocation.host_artifacts[0]["value"]["nested"]["ok"] = False
+            invocation.host_artifacts[0]["value"]["nested"]["ok"] = False  # type: ignore[reportIndexIssue]
         with self.assertRaises(TypeError):
-            result.events[0]["type"] = "changed"
+            result.events[0]["type"] = "changed"  # type: ignore[reportIndexIssue]
         with self.assertRaises(TypeError):
-            result.artifacts[0]["value"]["answer_artifact_uri"] = "changed"
+            result.artifacts[0]["value"]["answer_artifact_uri"] = "changed"  # type: ignore[reportIndexIssue]
 
 
 class PackageResultValidationTests(unittest.TestCase):
@@ -380,13 +407,65 @@ class ComposedEvidenceTransportTests(unittest.IsolatedAsyncioTestCase):
             ("host-input",),
         )
         with self.assertRaises(TypeError):
-            invocation.upstream_events[0]["payload"]["nested"]["status"] = "changed"
+            invocation.upstream_events[0]["payload"]["nested"]["status"] = "changed"  # type: ignore[reportIndexIssue]
         with self.assertRaises(TypeError):
-            invocation.upstream_artifacts[0]["value"]["nested"]["status"] = "changed"
+            invocation.upstream_artifacts[0]["value"]["nested"]["status"] = "changed"  # type: ignore[reportIndexIssue]
         with self.assertRaises(TypeError):
-            invocation.host_events[0]["payload"]["nested"]["status"] = "changed"
+            invocation.host_events[0]["payload"]["nested"]["status"] = "changed"  # type: ignore[reportIndexIssue]
         with self.assertRaises(TypeError):
-            invocation.host_artifacts[0]["value"]["nested"]["status"] = "changed"
+            invocation.host_artifacts[0]["value"]["nested"]["status"] = "changed"  # type: ignore[reportIndexIssue]
+
+    async def test_runner_snapshots_all_host_evidence_once_before_package_work(
+        self,
+    ) -> None:
+        caller_event = {
+            "type": "host.ready",
+            "payload": {"nested": {"status": "ready"}},
+        }
+        caller_artifact = {
+            "artifact_id": "host-input",
+            "media_type": "application/vnd.host-input+json",
+            "value": {"nested": {"status": "ready"}},
+        }
+        producer = MutatingImplementation(
+            producer_result(),
+            event=caller_event,
+            artifact=caller_artifact,
+        )
+        consumer = ResultImplementation(
+            PackageExecutionResult(events=(), artifacts=())
+        )
+
+        await run_composed_application(
+            evidence_plan(),
+            implementations=(
+                (PackageRef("evidence.producer", "1.0.0"), producer),
+                (PackageRef("evidence.consumer", "1.0.0"), consumer),
+            ),
+            runtime=FixtureRuntime(),
+            run_id="evidence-run",
+            input_text="Transport evidence",
+            host_services={},
+            host_events=(caller_event,),
+            host_artifacts=(caller_artifact,),
+        )
+
+        invocation = consumer.invocations[0]
+        self.assertEqual(
+            invocation.host_events[0],
+            {
+                "type": "host.ready",
+                "payload": {"nested": {"status": "ready"}},
+            },
+        )
+        self.assertEqual(
+            invocation.host_artifacts[0],
+            {
+                "artifact_id": "host-input",
+                "media_type": "application/vnd.host-input+json",
+                "value": {"nested": {"status": "ready"}},
+            },
+        )
 
     async def test_host_evidence_must_exactly_match_assembly_declarations(
         self,
@@ -442,6 +521,87 @@ class ComposedEvidenceTransportTests(unittest.IsolatedAsyncioTestCase):
                         host_events=actual_events,
                         host_artifacts=actual_artifacts,
                     )
+                self.assertEqual(producer.invocations, [])
+                self.assertEqual(consumer.invocations, [])
+
+    async def test_malformed_host_evidence_fails_closed_without_package_work(
+        self,
+    ) -> None:
+        sentinel = "SECRET-HOST-EVIDENCE"
+        cases = (
+            (
+                "event-extra-field",
+                ({
+                    "type": "host.ready",
+                    "payload": {},
+                    "extra": sentinel,
+                },),
+                host_artifacts(),
+            ),
+            (
+                "event-payload-not-mapping",
+                ({"type": "host.ready", "payload": sentinel},),
+                host_artifacts(),
+            ),
+            (
+                "artifact-extra-field",
+                host_events(),
+                ({
+                    "artifact_id": "host-input",
+                    "media_type": "application/vnd.host-input+json",
+                    "value": {},
+                    "extra": sentinel,
+                },),
+            ),
+            (
+                "artifact-value-not-mapping",
+                host_events(),
+                ({
+                    "artifact_id": "host-input",
+                    "media_type": "application/vnd.host-input+json",
+                    "value": sentinel,
+                },),
+            ),
+            (
+                "duplicate-artifact-id",
+                host_events(),
+                (
+                    *host_artifacts(),
+                    {
+                        "artifact_id": "host-input",
+                        "media_type": "application/vnd.host-input+json",
+                        "value": {"sentinel": sentinel},
+                    },
+                ),
+            ),
+        )
+        for name, actual_events, actual_artifacts in cases:
+            with self.subTest(name=name):
+                producer = ResultImplementation(producer_result())
+                consumer = ResultImplementation(
+                    PackageExecutionResult(events=(), artifacts=())
+                )
+                with self.assertRaises(ApplicationRunError) as raised:
+                    await run_composed_application(
+                        evidence_plan(),
+                        implementations=(
+                            (
+                                PackageRef("evidence.producer", "1.0.0"),
+                                producer,
+                            ),
+                            (
+                                PackageRef("evidence.consumer", "1.0.0"),
+                                consumer,
+                            ),
+                        ),
+                        runtime=FixtureRuntime(),
+                        run_id="evidence-run",
+                        input_text="Transport evidence",
+                        host_services={},
+                        host_events=actual_events,
+                        host_artifacts=actual_artifacts,
+                    )
+                self.assertNotIn(sentinel, str(raised.exception))
                 self.assertEqual(producer.invocations, [])
                 self.assertEqual(consumer.invocations, [])
 
