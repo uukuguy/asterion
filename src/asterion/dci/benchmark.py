@@ -293,13 +293,16 @@ def _receipt_operation_counts(receipt: object) -> tuple[int, int]:
     ledger = receipt.get("ledger")
     if not isinstance(ledger, dict):
         raise DciBenchmarkError("DCI benchmark authorization receipt is invalid")
-    values = (
-        ledger.get("completed_agent_operations"),
-        ledger.get("completed_judge_operations"),
-    )
-    if any(type(value) is not int or value < 0 for value in values):
+    agent_operations = ledger.get("completed_agent_operations")
+    judge_operations = ledger.get("completed_judge_operations")
+    if (
+        type(agent_operations) is not int
+        or agent_operations < 0
+        or type(judge_operations) is not int
+        or judge_operations < 0
+    ):
         raise DciBenchmarkError("DCI benchmark authorization receipt is invalid")
-    return values[0], values[1]
+    return agent_operations, judge_operations
 
 
 @dataclass

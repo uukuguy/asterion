@@ -15,7 +15,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
-from typing import TextIO
+from typing import TextIO, TypedDict
 
 from asterion.dci.ablation import (
     bounded_ablation_input_paths,
@@ -77,6 +77,14 @@ _EXPERIMENT_PROFILE_CLI_ALIASES = {
     "current-default/claude-subscription": "asterion-safe/claude-subscription",
     "current-default/claude-minimax": "asterion-safe/claude-minimax",
 }
+
+
+class _ReproductionLimits(TypedDict):
+    max_agent_operations: int
+    max_judge_operations: int
+    max_cost_usd: float
+    max_agent_cost_per_operation_usd: float
+    max_judge_cost_per_operation_usd: float
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -904,7 +912,15 @@ def _paper_reproduce_cli(
         scope_ids=selected_scope_ids,
         output_root=parent_output_root,
         invocation_authorized=True,
-        **limits,
+        max_agent_operations=limits["max_agent_operations"],
+        max_judge_operations=limits["max_judge_operations"],
+        max_cost_usd=limits["max_cost_usd"],
+        max_agent_cost_per_operation_usd=limits[
+            "max_agent_cost_per_operation_usd"
+        ],
+        max_judge_cost_per_operation_usd=limits[
+            "max_judge_cost_per_operation_usd"
+        ],
     )
     from asterion.dci.experiment_profiles import authorized_scope_output_root
 
@@ -941,7 +957,7 @@ def _paper_reproduce_cli(
     return 0
 
 
-def _reproduction_limit_kwargs(args: argparse.Namespace) -> dict[str, float | int]:
+def _reproduction_limit_kwargs(args: argparse.Namespace) -> _ReproductionLimits:
     values = {
         "max_agent_operations": args.max_agent_operations,
         "max_judge_operations": args.max_judge_operations,
