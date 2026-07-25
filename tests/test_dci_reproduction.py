@@ -5,15 +5,17 @@ import hashlib
 import json
 import os
 import tempfile
+import threading
 import unittest
 from importlib import resources
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Callable
+from typing import Any, Callable, cast
 from unittest.mock import patch
 
+from asterion.dci.artifacts import DciConversationFeatures
 from asterion.dci.benchmark import BenchmarkRequest, run_benchmark
-from asterion.dci.config import DciRuntimeOptions, resolve_dci_paths
+from asterion.dci.config import DciPaths, DciRuntimeOptions, resolve_dci_paths
 from asterion.dci.experiment_profiles import resolve_experiment_profile
 from asterion.dci.judge import JudgeConfig
 from asterion.dci.paper_benchmarks import canonical_sha256
@@ -24,7 +26,11 @@ from asterion.dci.reproduction import (
     compile_run_manifest,
     validate_run_manifest,
 )
-from asterion.dci.run import run_pi_research as _real_run_pi_research
+from asterion.dci.run import (
+    DciRunRequest,
+    DciRunResult,
+    run_pi_research as _real_run_pi_research,
+)
 
 
 class _FixtureClient:
@@ -54,9 +60,30 @@ class _FixtureClient:
         pass
 
 
-def _recorded_run(paths: object, request: object, **kwargs: object) -> object:
+def _recorded_run(
+    paths: DciPaths,
+    request: DciRunRequest,
+    *,
+    output_dir: Path | None = None,
+    conversation_features: DciConversationFeatures | None = None,
+    _cancel_event: threading.Event | None = None,
+    _output_directory_fd: int | None = None,
+    _resource_fds: tuple[int, ...] = (),
+    _system_prompt_override: Path | None = None,
+    _append_system_prompt_override: Path | None = None,
+) -> DciRunResult:
     with patch("asterion.dci.run.PiRpcClient", _FixtureClient):
-        return _real_run_pi_research(paths, request, **kwargs)
+        return _real_run_pi_research(
+            paths,
+            request,
+            output_dir=output_dir,
+            conversation_features=conversation_features,
+            _cancel_event=_cancel_event,
+            _output_directory_fd=_output_directory_fd,
+            _resource_fds=_resource_fds,
+            _system_prompt_override=_system_prompt_override,
+            _append_system_prompt_override=_append_system_prompt_override,
+        )
 
 
 def _verdict(config: JudgeConfig, *, correct: bool = True) -> dict[str, object]:
@@ -407,7 +434,8 @@ class TestDciRunManifestCompiler(unittest.TestCase):
                     "configuration_sha256": _fingerprint(dict(profile.judge)),
                 },
             )
-            self.assertIn("results.jsonl", payload["artifact_digests"])
+            artifact_digests = cast(dict[str, object], payload["artifact_digests"])
+            self.assertIn("results.jsonl", artifact_digests)
             rendered = json.dumps(manifest.to_dict(), sort_keys=True)
             for forbidden in (
                 "What is hidden",
@@ -440,7 +468,10 @@ class TestDciRunManifestCompiler(unittest.TestCase):
             validate_run_manifest(manifest)
             self.assertEqual(manifest.dataset_id, "bright.biology")
             self.assertEqual(manifest.metric_identities, ("ndcg@10-binary-deduplicated",))
-            self.assertAlmostEqual(manifest.aggregates.mean_ndcg_at_10, (0.9 + 0.2) / 3)
+            mean_ndcg_at_10 = manifest.aggregates.mean_ndcg_at_10
+            self.assertIsNotNone(mean_ndcg_at_10)
+            assert mean_ndcg_at_10 is not None
+            self.assertAlmostEqual(mean_ndcg_at_10, (0.9 + 0.2) / 3)
 
     def test_compile_run_manifest_rejects_identity_and_digest_mutations(self) -> None:
         def mutate_config(key: str, value: object) -> Callable[[Path, dict[str, Any]], None]:
@@ -663,13 +694,19 @@ class TestDciRunManifestCompiler(unittest.TestCase):
             )
             validate_run_manifest(manifest)
             self.assertEqual(manifest.corpus_identity, profile.corpus_identity)
-            self.assertEqual(manifest.corpus_content_identity["file_count"], 2)
+            corpus_content_identity = manifest.corpus_content_identity
+            self.assertIsNotNone(corpus_content_identity)
+            assert corpus_content_identity is not None
+            self.assertEqual(corpus_content_identity["file_count"], 2)
             payload = manifest.to_dict()
             payload["corpus_content_identity"] = MappingProxyType(
-                dict(manifest.corpus_content_identity)
+                dict(corpus_content_identity)
             )
             reparsed = validate_run_manifest(payload)
-            self.assertEqual(reparsed.corpus_content_identity["sha256"], "7" * 64)
+            reparsed_corpus_content_identity = reparsed.corpus_content_identity
+            self.assertIsNotNone(reparsed_corpus_content_identity)
+            assert reparsed_corpus_content_identity is not None
+            self.assertEqual(reparsed_corpus_content_identity["sha256"], "7" * 64)
 
     def test_compile_run_manifest_rejects_public_permissions(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -721,7 +758,8 @@ class TestDciRunManifestCompiler(unittest.TestCase):
             validate_run_manifest(manifest)
             payload = manifest.to_dict()
             self.assertEqual(payload["source_identity"], manifest.source_identity)
-            self.assertIn("q-real/reproduction-evidence.json", payload["artifact_digests"])
+            artifact_digests = cast(dict[str, object], payload["artifact_digests"])
+            self.assertIn("q-real/reproduction-evidence.json", artifact_digests)
             self.assertEqual(manifest.queries[0].operations.agent, 1)
             self.assertEqual(manifest.queries[0].operations.judge, 1)
             self.assertEqual(manifest.aggregates.failed_count, 1)
