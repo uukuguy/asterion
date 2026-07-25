@@ -572,6 +572,10 @@ Expected: tests and docs check pass.
 
 ### Task 8: Make authorization consumable and budgets enforceable
 
+> Supplemental approved design and executable TDD plan:
+> `docs/superpowers/specs/2026-07-25-dci-reproduction-authority-budget-design.md`
+> and `docs/superpowers/plans/2026-07-25-dci-reproduction-authority-budget.md`.
+
 **Files:**
 - Modify: `src/asterion/dci/experiment_profiles.py`
 - Modify: `src/asterion/dci/cli.py`
