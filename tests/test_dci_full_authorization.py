@@ -78,6 +78,32 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
             ):
                 authorize(parent, scopes=())
 
+    def test_new_authority_rejects_legacy_parameter_mixing(self) -> None:
+        profile = resolve_experiment_profile("paper-reference/pi")
+        legacy_values = (
+            {"profile_id": "paper-reference/pi"},
+            {"estimated_budget_usd": 1.0},
+            {"preflight_profile_sha256": profile.identity_sha256},
+            {"invocation_provider": "fixture"},
+        )
+        for index, legacy in enumerate(legacy_values):
+            with self.subTest(legacy=tuple(legacy)), tempfile.TemporaryDirectory() as temporary:
+                output_root = Path(temporary) / f"private-{index}"
+                with self.assertRaises(ExperimentAuthorizationError):
+                    authorize_full_execution(
+                        profile=profile,
+                        scope_ids=("bright.biology.main.full",),
+                        output_root=output_root,
+                        max_agent_operations=1,
+                        max_judge_operations=1,
+                        max_cost_usd=1.0,
+                        max_agent_cost_per_operation_usd=0.5,
+                        max_judge_cost_per_operation_usd=0.5,
+                        invocation_authorized=True,
+                        **legacy,
+                    )
+                self.assertFalse(output_root.exists())
+
     def test_constructor_is_private(self) -> None:
         with self.assertRaisesRegex(
             TypeError,
@@ -132,6 +158,25 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
             child.mkdir(mode=0o700)
             with self.assertRaises(ExperimentAuthorizationError):
                 authorized_scope_output_root(authority, scope)
+
+    def test_output_root_rejects_existing_and_intermediate_symlink_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            existing = base / "existing"
+            existing.mkdir()
+            with self.assertRaises(ExperimentAuthorizationError):
+                authorize(existing)
+
+            target = base / "target"
+            target.mkdir()
+            intermediate = base / "intermediate"
+            intermediate.symlink_to(target, target_is_directory=True)
+            redirected = intermediate / "private"
+            with self.assertRaises(ExperimentAuthorizationError) as raised:
+                authorize(redirected)
+            self.assertFalse((target / "private").exists())
+            self.assertNotIn(str(redirected), str(raised.exception))
+            self.assertNotIn(str(target), str(raised.exception))
 
     def test_failures_are_redacted(self) -> None:
         sentinel = "credential-should-never-appear"
@@ -331,6 +376,29 @@ class FullExecutionBudgetTests(unittest.TestCase):
                 "^full execution USD budget is exhausted$",
             ):
                 reserve_full_execution_operation(authority, self.scope_id, "agent")
+
+    def test_decimal_budget_accounting_has_no_binary_float_residue(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            authority = authorize(
+                Path(temporary) / "private",
+                max_agents=1,
+                max_judges=1,
+                max_cost=0.3,
+                max_agent_cost=0.1,
+                max_judge_cost=0.2,
+            )
+            self.consume(authority)
+            agent = reserve_full_execution_operation(
+                authority, self.scope_id, "agent"
+            )
+            judge = reserve_full_execution_operation(
+                authority, self.scope_id, "judge"
+            )
+            reconcile_full_execution_operation(authority, agent, 0.1)
+            reconcile_full_execution_operation(authority, judge, 0.2)
+            receipt = consumed_full_execution_authorization_snapshot(authority)
+            self.assertEqual(receipt["ledger"]["reserved_cost_usd"], 0.0)
+            self.assertEqual(receipt["ledger"]["actual_cost_usd"], 0.3)
 
     def test_failure_and_cancellation_preserve_potential_spend(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

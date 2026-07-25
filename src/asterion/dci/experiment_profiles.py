@@ -11,6 +11,7 @@ import secrets
 import stat
 import threading
 from dataclasses import dataclass, field, replace
+from decimal import Decimal
 from functools import lru_cache
 from importlib import resources
 from pathlib import Path
@@ -259,7 +260,7 @@ class _ReservationRecord:
     issuer: FullExecutionReservation
     scope_id: str
     kind: str
-    upper_bound_usd: float
+    upper_bound_usd: Decimal
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,8 +280,8 @@ class _AuthorizationRecord:
     reserved_judge_operations: int
     completed_agent_operations: int
     completed_judge_operations: int
-    reserved_cost_usd: float
-    actual_cost_usd: float
+    reserved_cost_usd: Decimal
+    actual_cost_usd: Decimal
     cancelled: bool
     finalized: bool
 
@@ -609,33 +610,121 @@ def experiment_profile_sha256(profile_id: str, *, invocation_provider: str | Non
     return canonical_sha256(profile.to_canonical_dict())
 
 
+def _open_directory_chain(path: Path, *, create: bool = False) -> int:
+    absolute = Path(os.path.abspath(os.path.normpath(path)))
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    if not getattr(os, "O_NOFOLLOW", 0):
+        raise OSError("no-follow directory traversal is unavailable")
+    descriptor = os.open(absolute.anchor, flags)
+    try:
+        for component in absolute.parts[1:]:
+            try:
+                next_descriptor = os.open(
+                    component,
+                    flags,
+                    dir_fd=descriptor,
+                )
+            except FileNotFoundError:
+                if not create:
+                    raise
+                os.mkdir(component, mode=0o755, dir_fd=descriptor)
+                next_descriptor = os.open(
+                    component,
+                    flags,
+                    dir_fd=descriptor,
+                )
+            except OSError:
+                component_metadata = os.stat(
+                    component,
+                    dir_fd=descriptor,
+                    follow_symlinks=False,
+                )
+                parent_metadata = os.fstat(descriptor)
+                trusted_system_alias = (
+                    stat.S_ISLNK(component_metadata.st_mode)
+                    and component_metadata.st_uid == 0
+                    and parent_metadata.st_uid == 0
+                    and stat.S_IMODE(parent_metadata.st_mode) & 0o022 == 0
+                )
+                if not trusted_system_alias:
+                    raise
+                next_descriptor = os.open(
+                    component,
+                    flags & ~getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=descriptor,
+                )
+            os.close(descriptor)
+            descriptor = next_descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+    return descriptor
+
+
 def _fresh_private_output_root(output_root: Path) -> Path:
-    requested = Path(os.path.abspath(os.path.normpath(Path(output_root).expanduser())))
-    if requested.is_symlink():
-        raise ValueError("DCI full output root must not be a symlink")
-    absolute = requested.parent.resolve() / requested.name
-    if absolute.exists():
-        raise ValueError("DCI full output root must be fresh")
-    absolute.mkdir(parents=True, mode=0o700)
-    absolute.chmod(0o700)
-    if stat.S_IMODE(absolute.stat().st_mode) != 0o700:
-        raise ValueError("DCI full output root must be private")
-    return absolute
+    requested = Path(
+        os.path.abspath(os.path.normpath(Path(output_root).expanduser()))
+    )
+    parent_descriptor = _open_directory_chain(requested.parent, create=True)
+    created = False
+    try:
+        try:
+            os.stat(
+                requested.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            pass
+        else:
+            raise ValueError("DCI full output root must be fresh")
+        os.mkdir(requested.name, mode=0o700, dir_fd=parent_descriptor)
+        created = True
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        child_descriptor = os.open(
+            requested.name,
+            flags,
+            dir_fd=parent_descriptor,
+        )
+        try:
+            os.fchmod(child_descriptor, 0o700)
+            metadata = os.fstat(child_descriptor)
+        finally:
+            os.close(child_descriptor)
+        if stat.S_IMODE(metadata.st_mode) != 0o700:
+            raise ValueError("DCI full output root must be private")
+    except BaseException:
+        if created:
+            try:
+                os.rmdir(requested.name, dir_fd=parent_descriptor)
+            except OSError:
+                pass
+        raise
+    finally:
+        os.close(parent_descriptor)
+    return requested
 
 
 def _private_root_identity(output_root: Path) -> tuple[int, int]:
     try:
+        descriptor = _open_directory_chain(output_root)
+        try:
+            opened = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
         metadata = output_root.lstat()
         if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
             raise ValueError("DCI full execution output root identity is invalid")
         if stat.S_IMODE(metadata.st_mode) != 0o700:
             raise ValueError("DCI full execution output root permissions changed")
-        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-        descriptor = os.open(output_root, flags)
-        try:
-            opened = os.fstat(descriptor)
-        finally:
-            os.close(descriptor)
     except OSError:
         raise ValueError("DCI full execution output root identity is invalid") from None
     if (opened.st_dev, opened.st_ino) != (metadata.st_dev, metadata.st_ino):
@@ -689,20 +778,27 @@ def _positive_operation_limit(value: object) -> bool:
     return type(value) is int and value > 0
 
 
+def _usd_decimal(value: object) -> Decimal:
+    if (
+        type(value) not in {int, float}
+        or not math.isfinite(float(value))
+    ):
+        raise ValueError("USD value is invalid")
+    return Decimal(str(value))
+
+
 def _positive_usd_limit(value: object) -> bool:
-    return (
-        type(value) in {int, float}
-        and math.isfinite(float(value))
-        and float(value) > 0
-    )
+    try:
+        return _usd_decimal(value) > 0
+    except ValueError:
+        return False
 
 
 def _private_scope_output_root(parent: Path, scope_id: str) -> _ScopeOutputIdentity:
     name = hashlib.sha256(scope_id.encode("utf-8")).hexdigest()
     child = parent / name
     try:
-        child.mkdir(mode=0o700)
-        child.chmod(0o700)
+        child = _fresh_private_output_root(child)
         device, inode = _private_root_identity(child)
     except (OSError, ValueError):
         raise ExperimentAuthorizationError(
@@ -839,6 +935,23 @@ def authorize_full_execution(
             else max_judge_cost_per_operation_usd
         )
     else:
+        if any(
+            value is not None
+            for value in (
+                profile_id,
+                estimated_budget_usd,
+                preflight_profile_sha256,
+                preflight_dataset_inventory_sha256,
+                preflight_experiment_scopes_sha256,
+                preflight_scope_ids,
+                preflight_selected_ids_sha256,
+                invocation_provider,
+                invocation_model,
+            )
+        ):
+            raise ExperimentAuthorizationError(
+                "full execution authorization inputs are ambiguous"
+            )
         if type(profile) is not ExperimentProfile:
             raise ExperimentAuthorizationError("full execution profile is invalid")
         try:
@@ -894,8 +1007,13 @@ def authorize_full_execution(
         )
     ):
         raise ExperimentAuthorizationError("full execution authorization is invalid")
-    private_root = _fresh_private_output_root(output_root)
-    device, inode = _private_root_identity(private_root)
+    try:
+        private_root = _fresh_private_output_root(output_root)
+        device, inode = _private_root_identity(private_root)
+    except (OSError, ValueError):
+        raise ExperimentAuthorizationError(
+            "full execution output root identity is invalid"
+        ) from None
     token = secrets.token_hex(32)
     authorization = _issue_authorization(
         profile_id=profile.profile_id,
@@ -937,10 +1055,25 @@ def authorize_full_execution(
         max_judge_cost_per_operation_usd=float(max_judge_cost_per_operation_usd),
         issuance_token=token,
     )
-    scope_outputs = {
-        scope_id: _private_scope_output_root(private_root, scope_id)
-        for scope_id in requested_scope_ids
-    }
+    try:
+        scope_outputs = {
+            scope_id: _private_scope_output_root(private_root, scope_id)
+            for scope_id in requested_scope_ids
+        }
+    except ExperimentAuthorizationError:
+        for scope_id in requested_scope_ids:
+            child = private_root / hashlib.sha256(
+                scope_id.encode("utf-8")
+            ).hexdigest()
+            try:
+                child.rmdir()
+            except OSError:
+                pass
+        try:
+            private_root.rmdir()
+        except OSError:
+            pass
+        raise
     with _AUTHORIZATION_LOCK:
         _AUTHORIZATION_REGISTRY[token] = _AuthorizationRecord(
             authorization,
@@ -953,8 +1086,8 @@ def authorize_full_execution(
             0,
             0,
             0,
-            0.0,
-            0.0,
+            Decimal("0"),
+            Decimal("0"),
             False,
             False,
         )
@@ -1006,13 +1139,17 @@ def _reservation_for(
         raise ExperimentAuthorizationError("full execution reservation is invalid")
     token = getattr(reservation, "_reservation_token", None)
     item = record.active_reservations.get(token)
+    try:
+        reservation_upper_bound = _usd_decimal(reservation.upper_bound_usd)
+    except ValueError:
+        reservation_upper_bound = None
     if (
         item is None
         or item.issuer is not reservation
         or reservation._authorization_token != record.snapshot.issuance_token
         or reservation.scope_id != item.scope_id
         or reservation.kind != item.kind
-        or reservation.upper_bound_usd != item.upper_bound_usd
+        or reservation_upper_bound != item.upper_bound_usd
     ):
         raise ExperimentAuthorizationError("full execution reservation is invalid")
     return record, item
@@ -1034,13 +1171,17 @@ def reserve_full_execution_operation(
             reserved = record.reserved_agent_operations
             completed = record.completed_agent_operations
             limit = record.snapshot.max_agent_operations
-            upper_bound = record.snapshot.max_agent_cost_per_operation_usd
+            upper_bound_value = (
+                record.snapshot.max_agent_cost_per_operation_usd
+            )
             label = "Agent"
         elif kind == "judge":
             reserved = record.reserved_judge_operations
             completed = record.completed_judge_operations
             limit = record.snapshot.max_judge_operations
-            upper_bound = record.snapshot.max_judge_cost_per_operation_usd
+            upper_bound_value = (
+                record.snapshot.max_judge_cost_per_operation_usd
+            )
             label = "Judge"
         else:
             raise ExperimentAuthorizationError("full execution operation kind is invalid")
@@ -1048,16 +1189,17 @@ def reserve_full_execution_operation(
             raise ExperimentAuthorizationError(
                 f"full execution {label} operation budget is exhausted"
             )
+        upper_bound = _usd_decimal(upper_bound_value)
         projected = (
             record.actual_cost_usd + record.reserved_cost_usd + upper_bound
         )
-        if projected > record.snapshot.max_cost_usd:
+        if projected > _usd_decimal(record.snapshot.max_cost_usd):
             raise ExperimentAuthorizationError("full execution USD budget is exhausted")
         token = secrets.token_hex(32)
         reservation = _issue_reservation(
             scope_id=scope_id,
             kind=kind,
-            upper_bound_usd=upper_bound,
+            upper_bound_usd=upper_bound_value,
             _authorization_token=record.snapshot.issuance_token,
             _reservation_token=token,
         )
@@ -1076,7 +1218,7 @@ def _settle_reservation(
     record: _AuthorizationRecord,
     reservation: FullExecutionReservation,
     item: _ReservationRecord,
-    actual_cost_usd: float,
+    actual_cost_usd: Decimal,
 ) -> None:
     token = reservation._reservation_token
     del record.active_reservations[token]
@@ -1100,18 +1242,17 @@ def reconcile_full_execution_operation(
 
     with _AUTHORIZATION_LOCK:
         record, item = _reservation_for(authority, reservation)
-        if (
-            type(actual_cost_usd) not in {int, float}
-            or not math.isfinite(float(actual_cost_usd))
-            or actual_cost_usd < 0
-            or actual_cost_usd > item.upper_bound_usd
-        ):
+        try:
+            actual_cost = _usd_decimal(actual_cost_usd)
+        except ValueError:
+            actual_cost = Decimal("-1")
+        if actual_cost < 0 or actual_cost > item.upper_bound_usd:
             _settle_reservation(
                 record, reservation, item, item.upper_bound_usd
             )
             record.cancelled = True
             raise ExperimentAuthorizationError("full execution actual cost is invalid")
-        _settle_reservation(record, reservation, item, float(actual_cost_usd))
+        _settle_reservation(record, reservation, item, actual_cost)
 
 
 def fail_full_execution_operation(
@@ -1194,6 +1335,7 @@ def consumed_full_execution_authorization_snapshot(
                 "full execution authorization has active reservations"
             )
         record.finalized = True
+        record.settled_reservations.clear()
         return {
             "schema": "dci.full-execution-authorization-receipt/v1",
             "profile_id": snapshot.profile_id,
@@ -1220,8 +1362,8 @@ def consumed_full_execution_authorization_snapshot(
                 "reserved_judge_operations": record.reserved_judge_operations,
                 "completed_agent_operations": record.completed_agent_operations,
                 "completed_judge_operations": record.completed_judge_operations,
-                "reserved_cost_usd": record.reserved_cost_usd,
-                "actual_cost_usd": record.actual_cost_usd,
+                "reserved_cost_usd": float(record.reserved_cost_usd),
+                "actual_cost_usd": float(record.actual_cost_usd),
                 "cancelled": record.cancelled,
                 "finalized": record.finalized,
             },
