@@ -642,6 +642,42 @@ class AuthorizedBenchmarkTests(unittest.TestCase):
                     )
             read.assert_not_called()
 
+    def test_scope_is_consumed_only_after_selected_rows_match(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            authority = authorize(root / "selection-mismatch")
+            request = self.request(root, authority)
+            dataset = root / "dataset.jsonl"
+            dataset.write_text(
+                json.dumps(
+                    {
+                        "query_id": "q-1",
+                        "query": "question",
+                        "answer": "gold",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            request = replace(
+                request,
+                dataset=dataset,
+                profile="paper-reference/pi",
+            )
+            with patch(
+                "asterion.dci.benchmark._paper_scope_for_rows",
+                return_value="bright.earth-science.main.full",
+            ):
+                with self.assertRaisesRegex(
+                    DciBenchmarkError,
+                    "^DCI benchmark authorization scope changed$",
+                ):
+                    run_benchmark(request, paths=Mock())
+            self.assertEqual(
+                authorized_scope_output_root(authority, self.scope_id),
+                request.output_root,
+            )
+
             authority = authorize(root / "changed-scope")
             request = self.request(root, authority)
             with patch("asterion.dci.benchmark._read_input_snapshot") as read:
@@ -918,6 +954,62 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
                         run_benchmark(request, paths=resolve_dci_paths(root))
             self.assertEqual(run.call_count, 1)
             evaluate.assert_not_called()
+
+    def test_missing_or_malformed_agent_cost_evidence_fails_closed(self) -> None:
+        from asterion.dci.benchmark import _validated_agent_cost_from_state
+
+        messages = [
+            {
+                "event": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "usage": {"cost": {"total": 0.25}},
+                },
+            }
+        ]
+        self.assertEqual(
+            _validated_agent_cost_from_state({"messages": messages}),
+            0.25,
+        )
+        invalid_values = (
+            None,
+            True,
+            "0.25",
+            -0.25,
+            float("inf"),
+            float("nan"),
+        )
+        for value in invalid_values:
+            with self.subTest(value=value):
+                malformed = json.loads(json.dumps(messages))
+                malformed[0]["message"]["usage"]["cost"]["total"] = value
+                with self.assertRaisesRegex(
+                    DciBenchmarkError,
+                    "^DCI benchmark Agent cost evidence is invalid$",
+                ):
+                    _validated_agent_cost_from_state({"messages": malformed})
+        for state in (
+            {},
+            {"messages": []},
+            {"messages": [{"event": "message_end", "message": {}}]},
+            {
+                "messages": [
+                    {
+                        "event": "message_end",
+                        "message": {
+                            "role": "assistant",
+                            "usage": {},
+                        },
+                    }
+                ]
+            },
+        ):
+            with self.subTest(state=state):
+                with self.assertRaisesRegex(
+                    DciBenchmarkError,
+                    "^DCI benchmark Agent cost evidence is invalid$",
+                ):
+                    _validated_agent_cost_from_state(state)
 
     def test_compatible_judge_cache_uses_no_judge_reservation_or_transport(
         self,

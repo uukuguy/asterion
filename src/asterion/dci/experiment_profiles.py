@@ -1169,6 +1169,21 @@ def authorized_scope_output_root(
         return output.path
 
 
+def _authorized_scope_output_identity(
+    authority: FullExecutionAuthorization, scope_id: str
+) -> tuple[Path, int, int]:
+    """Return one unconsumed descriptor-verified child identity."""
+
+    with _AUTHORIZATION_LOCK:
+        record = _validate_authorization(authority)
+        output = _validate_scope_output(record, scope_id)
+        if scope_id in record.consumed_scopes:
+            raise ExperimentAuthorizationError(
+                "full execution authorization replay is invalid"
+            )
+        return output.path, output.device, output.inode
+
+
 def _issue_reservation(**values: object) -> FullExecutionReservation:
     reservation = object.__new__(FullExecutionReservation)
     for name, value in values.items():

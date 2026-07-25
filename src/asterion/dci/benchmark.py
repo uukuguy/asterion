@@ -215,8 +215,13 @@ async def run_benchmark_async(
     """Run one bounded batch while retaining its writer lock until all work drains."""
 
     authorized_identity = _authorize_paper_execution_before_inputs(request)
+    rows, output_root, config, row_documents, snapshots = _prepare(request)
     try:
-        rows, output_root, config, row_documents, snapshots = _prepare(request)
+        authorized_identity = _consume_paper_execution_after_inputs(
+            request,
+            output_root,
+            authorized_identity,
+        )
     except BaseException:
         _cancel_request_authorization(request)
         raise
@@ -410,7 +415,7 @@ def _authorize_paper_execution_before_inputs(
 
     from asterion.dci.experiment_profiles import (
         ExperimentAuthorizationError,
-        _consumed_authorized_output_identity,
+        _authorized_scope_output_identity,
         authorized_scope_output_root,
     )
 
@@ -424,10 +429,36 @@ def _authorize_paper_execution_before_inputs(
     if requested_root != authorized_root:
         raise DciBenchmarkError("DCI benchmark authorization root changed")
     try:
-        require_af320_executable_scope(scope_id, authorization)
-        return _consumed_authorized_output_identity(authorization, scope_id)
+        return _authorized_scope_output_identity(authorization, scope_id)
     except (ExperimentAuthorizationError, RuntimeError, ValueError) as error:
         raise DciBenchmarkError("DCI benchmark authorization is invalid") from error
+
+
+def _consume_paper_execution_after_inputs(
+    request: BenchmarkRequest,
+    output_root: Path,
+    expected_identity: tuple[Path, int, int] | None,
+) -> tuple[Path, int, int] | None:
+    if expected_identity is None:
+        return None
+    authorization = request.full_execution_authorization
+    scope_id = request.experiment_scope_id
+    if authorization is None or scope_id is None:
+        raise DciBenchmarkError("DCI benchmark authorization is invalid")
+    from asterion.dci.experiment_profiles import (
+        _consumed_authorized_output_identity,
+    )
+
+    try:
+        require_af320_executable_scope(scope_id, authorization)
+        consumed_identity = _consumed_authorized_output_identity(
+            authorization, scope_id
+        )
+    except (ExperimentAuthorizationError, RuntimeError, ValueError) as error:
+        raise DciBenchmarkError("DCI benchmark authorization is invalid") from error
+    if consumed_identity != expected_identity or consumed_identity[0] != output_root:
+        raise DciBenchmarkError("DCI benchmark authorization root changed")
+    return consumed_identity
 
 
 def _cancel_request_authorization(request: BenchmarkRequest) -> None:
@@ -1337,10 +1368,7 @@ def _validated_agent_cost(native: _Directory, display_path: Path) -> float:
     try:
         lock = DciRunLock.acquire_fd(native.fd, path=display_path, wait=True)
         state, _question, _prediction = validate_completed_run_evidence(lock)
-        return _validated_cost(
-            extract_agent_usage_metrics(state).get("cost_total"),
-            source="Agent",
-        )
+        return _validated_agent_cost_from_state(state)
     except DciBenchmarkError:
         raise
     except (DciArtifactError, OSError, TypeError, ValueError) as error:
@@ -1350,6 +1378,39 @@ def _validated_agent_cost(native: _Directory, display_path: Path) -> float:
     finally:
         if lock is not None:
             lock.release()
+
+
+def _validated_agent_cost_from_state(state: object) -> float:
+    if not isinstance(state, Mapping):
+        raise DciBenchmarkError("DCI benchmark Agent cost evidence is invalid")
+    messages = state.get("messages")
+    if not isinstance(messages, list):
+        raise DciBenchmarkError("DCI benchmark Agent cost evidence is invalid")
+    found = False
+    for item in messages:
+        if not isinstance(item, Mapping) or item.get("event") != "message_end":
+            continue
+        message = item.get("message")
+        if not isinstance(message, Mapping):
+            raise DciBenchmarkError(
+                "DCI benchmark Agent cost evidence is invalid"
+            )
+        if message.get("role") != "assistant":
+            continue
+        usage = message.get("usage")
+        cost = usage.get("cost") if isinstance(usage, Mapping) else None
+        if not isinstance(cost, Mapping):
+            raise DciBenchmarkError(
+                "DCI benchmark Agent cost evidence is invalid"
+            )
+        _validated_cost(cost.get("total"), source="Agent")
+        found = True
+    if not found:
+        raise DciBenchmarkError("DCI benchmark Agent cost evidence is invalid")
+    return _validated_cost(
+        extract_agent_usage_metrics(state).get("cost_total"),
+        source="Agent",
+    )
 
 
 def _validated_judge_cost(verdict: object) -> float:
