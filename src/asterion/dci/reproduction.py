@@ -24,6 +24,11 @@ from asterion.dci.experiment_profiles import (
 from asterion.dci.paper_benchmarks import canonical_sha256
 from asterion.dci.paper_benchmarks import resolve_paper_benchmark
 from asterion.dci.paper_benchmarks import resolve_paper_experiment_scope
+from asterion.dci.prompts import (
+    PromptContractError,
+    prompt_contract_sha256,
+    resolve_prompt_contract,
+)
 
 try:
     import fcntl
@@ -77,9 +82,13 @@ _BATCH_REQUIRED_CONFIG = {
     "mode",
     "corpus_identity",
     "runtime",
+    "corpus_contract",
+    "corpus_content_identity",
     "benchmark_prompt_contract_sha256",
     "judge_configuration_fingerprint",
     "ranking_metric_contract",
+    "runtime_contract",
+    "context_contract",
     "implementation_sha256",
 }
 
@@ -152,6 +161,7 @@ _MANIFEST_KEYS = {
     "selection_id",
     "selection_sha256",
     "corpus_identity",
+    "corpus_content_identity",
     "effective_config_sha256",
     "product_effective_config_sha256",
     "prompt_identity",
@@ -657,6 +667,33 @@ def _parse_artifact_digests(value: object) -> Mapping[str, str]:
     return MappingProxyType(dict(result))
 
 
+def _parse_corpus_content_identity(value: object) -> Mapping[str, object] | None:
+    if value is None:
+        return None
+    item = _require_exact_mapping(
+        value,
+        {"schema", "contract", "sha256", "file_count"},
+        "corpus content identity",
+    )
+    file_count = item["file_count"]
+    if type(file_count) is not int or file_count < 0:
+        raise ValueError("DCI reproduction corpus content identity is invalid")
+    return MappingProxyType(
+        {
+            "schema": _require_public_id(
+                item["schema"], "corpus content identity schema"
+            ),
+            "contract": _require_public_id(
+                item["contract"], "corpus content identity contract"
+            ),
+            "sha256": _require_sha256(
+                item["sha256"], "corpus content identity digest"
+            ),
+            "file_count": file_count,
+        }
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class OperationCounts:
     agent: int
@@ -1006,6 +1043,7 @@ class RunManifest:
     selection_id: str
     selection_sha256: str
     corpus_identity: str | None
+    corpus_content_identity: Mapping[str, object] | None
     effective_config_sha256: str
     product_effective_config_sha256: str
     prompt_identity: Mapping[str, str]
@@ -1036,6 +1074,11 @@ class RunManifest:
         )
         if self.corpus_identity is not None:
             _require_public_id(self.corpus_identity, "corpus identity")
+        object.__setattr__(
+            self,
+            "corpus_content_identity",
+            _parse_corpus_content_identity(self.corpus_content_identity),
+        )
         object.__setattr__(
             self,
             "prompt_identity",
@@ -1195,6 +1238,9 @@ class RunManifest:
                 if item["corpus_identity"] is None
                 else _require_public_id(item["corpus_identity"], "corpus identity")
             ),
+            corpus_content_identity=_parse_corpus_content_identity(
+                item["corpus_content_identity"]
+            ),
             effective_config_sha256=_require_sha256(
                 item["effective_config_sha256"], "effective configuration digest"
             ),
@@ -1239,6 +1285,11 @@ class RunManifest:
             "selection_id": self.selection_id,
             "selection_sha256": self.selection_sha256,
             "corpus_identity": self.corpus_identity,
+            "corpus_content_identity": (
+                None
+                if self.corpus_content_identity is None
+                else dict(self.corpus_content_identity)
+            ),
             "effective_config_sha256": self.effective_config_sha256,
             "product_effective_config_sha256": self.product_effective_config_sha256,
             "prompt_identity": dict(self.prompt_identity),
@@ -1260,7 +1311,7 @@ class RunManifest:
 def validate_run_manifest(manifest: RunManifest | Mapping[str, object]) -> RunManifest:
     """Validate a body-free run manifest and return its immutable representation."""
 
-    if type(manifest) is RunManifest:
+    if isinstance(manifest, RunManifest):
         manifest.__post_init__()
         return manifest
     return RunManifest.from_mapping(dict(manifest))
@@ -1323,13 +1374,18 @@ def _locked_batch_documents(batch_root: Path) -> tuple[
         query_documents: list[
             tuple[dict[str, Any], dict[str, Any], dict[str, Any] | None, str]
         ] = []
+        allowed_artifacts = {"results.jsonl", "summary.json"}
         for result in results:
             query_id = _require_public_id(result.get("query_id"), "query ID")
             query_fd = _open_private_query_at(root_fd, query_id)
             try:
+                query_names = set(os.listdir(query_fd))
+                reproduction_present = "reproduction-evidence.json" in query_names
                 item_raw = _read_private_bytes_at(query_fd, "item.json")
                 result_raw = _read_private_bytes_at(query_fd, "result.json")
                 reproduction_raw: bytes | None = None
+                allowed_artifacts.add(f"{query_id}/item.json")
+                allowed_artifacts.add(f"{query_id}/result.json")
                 _require_artifact_digest(
                     artifact_digests,
                     f"{query_id}/item.json",
@@ -1340,7 +1396,8 @@ def _locked_batch_documents(batch_root: Path) -> tuple[
                     f"{query_id}/result.json",
                     _sha256_bytes(result_raw),
                 )
-                if f"{query_id}/reproduction-evidence.json" in artifact_digests:
+                if reproduction_present:
+                    allowed_artifacts.add(f"{query_id}/reproduction-evidence.json")
                     reproduction_raw = _read_private_bytes_at(
                         query_fd, "reproduction-evidence.json"
                     )
@@ -1397,6 +1454,8 @@ def _locked_batch_documents(batch_root: Path) -> tuple[
                 )
             finally:
                 os.close(query_fd)
+        if set(artifact_digests) != allowed_artifacts:
+            raise ValueError("DCI reproduction artifact digest inventory is invalid")
         return config, results, summary, tuple(query_documents)
     finally:
         if lock_fd >= 0:
@@ -1408,6 +1467,7 @@ def _locked_batch_documents(batch_root: Path) -> tuple[
 
 
 def _require_batch_config(config: dict[str, Any], profile: ExperimentProfile) -> None:
+    mode = config.get("mode")
     if (
         not _BATCH_REQUIRED_CONFIG.issubset(config)
         or config.get("schema") != _BATCH_SCHEMA
@@ -1419,8 +1479,88 @@ def _require_batch_config(config: dict[str, Any], profile: ExperimentProfile) ->
         raise ValueError("DCI reproduction batch identity drifted")
     runtime = config.get("runtime")
     runtime_id = runtime.get("runtime_id") if isinstance(runtime, Mapping) else None
-    if runtime_id is not None and runtime_id != profile.runtime:
+    if (
+        not isinstance(runtime, Mapping)
+        or (runtime_id is not None and runtime_id != profile.runtime)
+        or runtime.get("provider") != profile.provider
+        or runtime.get("model") != profile.model
+        or runtime.get("tools") != profile.tools
+        or config.get("runtime_contract") != profile.runtime_contract
+        or config.get("context_contract") != profile.context_contract
+    ):
         raise ValueError("DCI reproduction runtime identity drifted")
+    try:
+        prompt_contract = resolve_prompt_contract(profile.prompt_contract)
+        expected_prompt_sha256 = prompt_contract_sha256(prompt_contract, str(mode))
+    except PromptContractError as error:
+        raise ValueError("DCI reproduction prompt identity is invalid") from error
+    if (
+        config.get("benchmark_prompt_contract") != profile.prompt_contract
+        or config.get("benchmark_prompt_contract_sha256") != expected_prompt_sha256
+    ):
+        raise ValueError("DCI reproduction prompt identity drifted")
+    judge = config.get("judge")
+    if (
+        not _judge_matches_profile(judge, profile)
+        or config.get("judge_configuration_fingerprint") != _fingerprint(judge)
+    ):
+        raise ValueError("DCI reproduction Judge identity drifted")
+    if config.get("source_identity") is not None:
+        expected_source = (
+            dict(profile.source_identity)
+            if isinstance(profile.source_identity, Mapping)
+            else profile.source_identity
+        )
+        if config.get("source_identity") != expected_source:
+            raise ValueError("DCI reproduction source identity drifted")
+    if mode == "qa":
+        if config.get("ranking_metric_contract") is not None:
+            raise ValueError("DCI reproduction metric identity drifted")
+    elif mode == "ir":
+        _normalize_metric_identity(config.get("ranking_metric_contract"), mode=mode)
+    else:
+        raise ValueError("DCI reproduction batch identity drifted")
+    product_config = _require_sha256(
+        config.get("product_effective_config_sha256"),
+        "product effective configuration digest",
+    )
+    if product_config != _expected_product_config_sha256(config):
+        raise ValueError("DCI reproduction product configuration drifted")
+
+
+def _expected_product_config_sha256(config: Mapping[str, Any]) -> str:
+    return canonical_sha256(
+        {
+            "product": config.get("product"),
+            "runtime": config.get("runtime"),
+            "prompt": config.get("benchmark_prompt_contract_sha256"),
+            "judge": config.get("judge_configuration_fingerprint"),
+            "corpus_identity": config.get("corpus_identity"),
+            "corpus_contract": config.get("corpus_contract"),
+            "corpus_content_identity": config.get("corpus_content_identity"),
+            "runtime_contract": config.get("runtime_contract"),
+            "context_contract": config.get("context_contract"),
+        }
+    )
+
+
+def _judge_matches_profile(value: object, profile: ExperimentProfile) -> bool:
+    expected = dict(profile.judge)
+    if value == expected:
+        return True
+    if not isinstance(value, Mapping):
+        return False
+    return (
+        value.get("judge_base_url") == expected.get("base_url")
+        and value.get("judge_api") == expected.get("api")
+        and value.get("judge_model") == expected.get("model")
+        and value.get("judge_api_key_env") == expected.get("key_source")
+        and value.get("judge_contract") == profile.judge_contract
+        and value.get("request_shape_sha256")
+        == expected.get("request_shape_sha256")
+        and value.get("prompt_contract_sha256")
+        == expected.get("prompt_contract_sha256")
+    )
 
 
 def _batch_dataset_id(config: Mapping[str, Any]) -> str:
@@ -1430,12 +1570,21 @@ def _batch_dataset_id(config: Mapping[str, Any]) -> str:
     return _require_public_id(dataset.get("dataset_id"), "dataset ID")
 
 
-def _batch_selection(config: Mapping[str, Any], query_ids: tuple[str, ...]) -> tuple[str, str]:
+def _batch_selection(
+    config: Mapping[str, Any],
+    query_ids: tuple[str, ...],
+    profile: ExperimentProfile,
+    dataset_id: str,
+) -> tuple[str, str]:
     selection = config.get("selection")
     if not isinstance(selection, Mapping):
         raise ValueError("DCI reproduction selection identity is invalid")
+    execution_class = selection.get("execution_class")
+    paper_scope = selection.get("paper_scope")
+    if execution_class == "non-paper" and paper_scope is not None:
+        raise ValueError("DCI reproduction selection identity is invalid")
     selection_id = _require_public_id(
-        selection.get("paper_scope") or selection.get("id"), "selection ID"
+        paper_scope or selection.get("id"), "selection ID"
     )
     selection_sha256 = _require_sha256(
         selection.get("selected_ids_sha256"), "selected ID digest"
@@ -1445,17 +1594,42 @@ def _batch_selection(config: Mapping[str, Any], query_ids: tuple[str, ...]) -> t
         or selection.get("selected_rows") != len(query_ids)
     ):
         raise ValueError("DCI reproduction selected IDs drifted")
+    if execution_class == "paper-full-authorized":
+        _validate_published_target_selection(
+            profile,
+            dataset_id,
+            selection_id,
+            selection_sha256,
+            query_ids,
+            len(query_ids),
+        )
     return selection_id, selection_sha256
 
 
-def _public_corpus_identity(
+def _corpus_identities(
     config: Mapping[str, Any], profile: ExperimentProfile
-) -> str | None:
+) -> tuple[str | None, Mapping[str, object] | None]:
+    contract = config.get("corpus_contract")
+    if contract != profile.corpus_identity:
+        raise ValueError("DCI reproduction corpus identity drifted")
+    content_identity = _parse_corpus_content_identity(
+        config.get("corpus_content_identity")
+    )
+    if (
+        content_identity is not None
+        and content_identity.get("contract") != profile.corpus_identity
+    ):
+        raise ValueError("DCI reproduction corpus identity drifted")
     value = config.get("corpus_identity")
+    if value is None:
+        return None, content_identity
     if type(value) is str and _PUBLIC_ID.fullmatch(value) is not None:
-        return value
-    profile_value = profile.corpus_identity
-    return profile_value if _PUBLIC_ID.fullmatch(profile_value) is not None else None
+        if value != profile.corpus_identity:
+            raise ValueError("DCI reproduction corpus identity drifted")
+        return value, content_identity
+    if type(value) is str and content_identity is not None:
+        return profile.corpus_identity, content_identity
+    raise ValueError("DCI reproduction corpus identity drifted")
 
 
 def _query_evidence_from_batch(
@@ -1606,32 +1780,21 @@ def compile_run_manifest(
     )
     query_ids = tuple(row.query_id for row in queries)
     dataset_id = _batch_dataset_id(config)
-    selection_id, selection_sha256 = _batch_selection(config, query_ids)
+    selection_id, selection_sha256 = _batch_selection(
+        config, query_ids, resolved_profile, dataset_id
+    )
     metric_identity = _normalize_metric_identity(
         config.get("ranking_metric_contract"), mode=config.get("mode")
     )
-    corpus_identity = _public_corpus_identity(config, resolved_profile)
+    corpus_identity, corpus_content_identity = _corpus_identities(
+        config, resolved_profile
+    )
     aggregates = _computed_aggregates(
         queries, (metric_identity,), resolved_profile.profile_id
     )
     _validate_summary_totals(summary, aggregates)
     product = config.get("product", "asterion-dci")
     product_config = config.get("product_effective_config_sha256")
-    if product_config is None:
-        product_config = canonical_sha256(
-            {
-                "schema": "dci.reproduction-product-config/v1",
-                "product": product,
-                "runtime": config.get("runtime"),
-                "prompt_contract_sha256": config.get(
-                    "benchmark_prompt_contract_sha256"
-                ),
-                "judge_configuration_fingerprint": config.get(
-                    "judge_configuration_fingerprint"
-                ),
-                "corpus_identity": config.get("corpus_identity"),
-            }
-        )
     _require_sha256(product_config, "product effective configuration digest")
     effective_config = canonical_sha256(
         {
@@ -1643,6 +1806,11 @@ def compile_run_manifest(
             "selection_id": selection_id,
             "selection_sha256": selection_sha256,
             "corpus_identity": corpus_identity,
+            "corpus_content_identity": (
+                None
+                if corpus_content_identity is None
+                else dict(corpus_content_identity)
+            ),
             "prompt_contract": resolved_profile.prompt_contract,
             "prompt_contract_sha256": config.get("benchmark_prompt_contract_sha256"),
             "judge_contract": resolved_profile.judge_contract,
@@ -1675,6 +1843,11 @@ def compile_run_manifest(
         "selection_id": selection_id,
         "selection_sha256": selection_sha256,
         "corpus_identity": corpus_identity,
+        "corpus_content_identity": (
+            None
+            if corpus_content_identity is None
+            else dict(corpus_content_identity)
+        ),
         "effective_config_sha256": effective_config,
         "product_effective_config_sha256": product_config,
         "prompt_identity": {

@@ -16,6 +16,7 @@ from asterion.dci.config import DciRuntimeOptions, resolve_dci_paths
 from asterion.dci.experiment_profiles import resolve_experiment_profile
 from asterion.dci.judge import JudgeConfig
 from asterion.dci.paper_benchmarks import canonical_sha256
+from asterion.dci.prompts import prompt_contract_sha256, resolve_prompt_contract
 from asterion.dci.reproduction import (
     RunManifest,
     compare_reproduction,
@@ -101,6 +102,54 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _refresh_batch_hashes(root: Path) -> None:
+    query_ids = sorted(
+        path.name
+        for path in root.iterdir()
+        if path.is_dir() and path.name.startswith("q")
+    )
+    rows = []
+    for query_id in query_ids:
+        item_path = root / query_id / "item.json"
+        result_path = root / query_id / "result.json"
+        item = json.loads(item_path.read_text(encoding="utf-8"))
+        item["row_fingerprint"] = _fingerprint(item["identity"])
+        _write_json(item_path, item)
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        result["row_fingerprint"] = item["row_fingerprint"]
+        _write_json(result_path, result)
+        reproduction_path = root / query_id / "reproduction-evidence.json"
+        if reproduction_path.exists():
+            reproduction = json.loads(reproduction_path.read_text(encoding="utf-8"))
+            reproduction["row_fingerprint"] = item["row_fingerprint"]
+            _write_json(reproduction_path, reproduction)
+        rows.append(result)
+    rows.sort(key=lambda row: row["query_id"])
+    (root / "results.jsonl").write_text(
+        "".join(
+            json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+            for row in rows
+        ),
+        encoding="utf-8",
+    )
+    (root / "results.jsonl").chmod(0o600)
+    config = json.loads((root / "config.json").read_text(encoding="utf-8"))
+    artifacts: dict[str, str] = {
+        "results.jsonl": _sha256(root / "results.jsonl"),
+        "summary.json": _sha256(root / "summary.json"),
+    }
+    for query_id in query_ids:
+        artifacts[f"{query_id}/item.json"] = _sha256(root / query_id / "item.json")
+        artifacts[f"{query_id}/result.json"] = _sha256(root / query_id / "result.json")
+        reproduction_path = root / query_id / "reproduction-evidence.json"
+        if reproduction_path.exists():
+            artifacts[f"{query_id}/reproduction-evidence.json"] = _sha256(
+                reproduction_path
+            )
+    config["artifact_digests"] = dict(sorted(artifacts.items()))
+    _write_json(root / "config.json", config)
+
+
 class TestDciRunManifestCompiler(unittest.TestCase):
     def _batch(
         self,
@@ -109,19 +158,20 @@ class TestDciRunManifestCompiler(unittest.TestCase):
         mode: str = "qa",
         mutations: tuple[Callable[[Path, dict[str, Any]], None], ...] = (),
     ) -> Path:
-        profile = resolve_experiment_profile("paper-reference/pi")
+        profile = resolve_experiment_profile(
+            "paper-reference/pi" if mode == "qa" else "asterion-safe/pi"
+        )
         query_ids = ("q001", "q002", "q003", "q004")
         dataset_id = "browsecomp-plus" if mode == "qa" else "bright.biology"
-        selection_id = (
-            "browsecomp-plus.main.all830"
-            if mode == "qa"
-            else "bright.biology.main.full"
-        )
         metric_identity = (
-            "llm-answer-correctness"
+            None
             if mode == "qa"
-            else "ndcg@10-binary-deduplicated"
+            else "ndcg@10-binary-deduplicated/v1"
         )
+        prompt_sha256 = prompt_contract_sha256(
+            resolve_prompt_contract(profile.prompt_contract), mode
+        )
+        judge_fingerprint = _fingerprint(dict(profile.judge))
         config: dict[str, Any] = {
             "schema": "asterion.dci.batch/v1",
             "run_id": f"synthetic-{mode}",
@@ -136,7 +186,9 @@ class TestDciRunManifestCompiler(unittest.TestCase):
             },
             "selection": {
                 "schema": "asterion.dci.selection/v1",
-                "paper_scope": selection_id,
+                "execution_class": "non-paper",
+                "id": f"synthetic-{mode}",
+                "paper_scope": None,
                 "selected_ids_sha256": canonical_sha256(query_ids),
                 "selected_rows": len(query_ids),
                 "full_dataset": False,
@@ -144,18 +196,22 @@ class TestDciRunManifestCompiler(unittest.TestCase):
             },
             "mode": mode,
             "corpus_identity": "dci.paper-corpora/af-320-v1",
+            "corpus_contract": profile.corpus_identity,
+            "corpus_content_identity": None,
             "cwd": "/private/tmp/should-not-leak",
+            "runtime_contract": profile.runtime_contract,
+            "context_contract": profile.context_contract,
             "runtime": {
                 "runtime_id": "pi",
-                "provider": "openai",
-                "model": "gpt-5.4-nano",
-                "tools": "read,bash",
+                "provider": profile.provider,
+                "model": profile.model,
+                "tools": profile.tools,
                 "context_contract": profile.context_contract,
             },
             "benchmark_prompt_contract": profile.prompt_contract,
-            "benchmark_prompt_contract_sha256": "b" * 64,
-            "judge": {"contract": profile.judge_contract, "model": "gpt-4.1"},
-            "judge_configuration_fingerprint": "c" * 64,
+            "benchmark_prompt_contract_sha256": prompt_sha256,
+            "judge": dict(profile.judge),
+            "judge_configuration_fingerprint": judge_fingerprint,
             "ranking_metric_contract": metric_identity,
             "implementation_sha256": profile.implementation_sha256,
             "product_effective_config_sha256": None,
@@ -167,6 +223,10 @@ class TestDciRunManifestCompiler(unittest.TestCase):
                 "prompt": config["benchmark_prompt_contract_sha256"],
                 "judge": config["judge_configuration_fingerprint"],
                 "corpus_identity": config["corpus_identity"],
+                "corpus_contract": config["corpus_contract"],
+                "corpus_content_identity": config["corpus_content_identity"],
+                "runtime_contract": config["runtime_contract"],
+                "context_contract": config["context_contract"],
             }
         )
         rows: list[dict[str, Any]] = []
@@ -334,14 +394,16 @@ class TestDciRunManifestCompiler(unittest.TestCase):
                 payload["prompt_identity"],
                 {
                     "contract": profile.prompt_contract,
-                    "sha256": "b" * 64,
+                    "sha256": prompt_contract_sha256(
+                        resolve_prompt_contract(profile.prompt_contract), "qa"
+                    ),
                 },
             )
             self.assertEqual(
                 payload["judge_identity"],
                 {
                     "contract": profile.judge_contract,
-                    "configuration_sha256": "c" * 64,
+                    "configuration_sha256": _fingerprint(dict(profile.judge)),
                 },
             )
             self.assertIn("results.jsonl", payload["artifact_digests"])
@@ -372,7 +434,7 @@ class TestDciRunManifestCompiler(unittest.TestCase):
             root = Path(temporary)
             batch = self._batch(root, mode="ir")
             manifest = compile_run_manifest(
-                batch, resolve_experiment_profile("paper-reference/pi")
+                batch, resolve_experiment_profile("asterion-safe/pi")
             )
             validate_run_manifest(manifest)
             self.assertEqual(manifest.dataset_id, "bright.biology")
@@ -442,6 +504,91 @@ class TestDciRunManifestCompiler(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     compile_run_manifest(batch, profile)
 
+    def test_compile_run_manifest_rejects_self_consistent_contract_forgery(self) -> None:
+        def forge_every_mutable_contract(root: Path, _state: dict[str, Any]) -> None:
+            config = json.loads((root / "config.json").read_text(encoding="utf-8"))
+            config["source_identity"] = "attacker.source/v1"
+            config["corpus_identity"] = "/private/attacker/corpus"
+            config["benchmark_prompt_contract"] = "attacker.prompt/v1"
+            config["benchmark_prompt_contract_sha256"] = "4" * 64
+            config["judge"] = {"contract": "attacker.judge/v1", "model": "evil"}
+            config["judge_configuration_fingerprint"] = "5" * 64
+            config["ranking_metric_contract"] = "llm-answer-correctness"
+            config["runtime"]["context_contract"] = "attacker.context/v1"
+            config["product_effective_config_sha256"] = canonical_sha256(
+                {
+                    "product": config["product"],
+                    "runtime": config["runtime"],
+                    "prompt": config["benchmark_prompt_contract_sha256"],
+                    "judge": config["judge_configuration_fingerprint"],
+                    "corpus_identity": config["corpus_identity"],
+                }
+            )
+            _write_json(root / "config.json", config)
+
+            for query_dir in sorted(path for path in root.iterdir() if path.is_dir()):
+                item_path = query_dir / "item.json"
+                result_path = query_dir / "result.json"
+                item = json.loads(item_path.read_text(encoding="utf-8"))
+                item["identity"]["corpus_identity"] = config["corpus_identity"]
+                item["identity"]["runtime"] = config["runtime"]
+                item["identity"]["benchmark_prompt_contract_sha256"] = config[
+                    "benchmark_prompt_contract_sha256"
+                ]
+                item["identity"]["judge_configuration_fingerprint"] = config[
+                    "judge_configuration_fingerprint"
+                ]
+                item["identity"]["ranking_metric_contract"] = config[
+                    "ranking_metric_contract"
+                ]
+                item["judge_configuration_fingerprint"] = config[
+                    "judge_configuration_fingerprint"
+                ]
+                _write_json(item_path, item)
+                result = json.loads(result_path.read_text(encoding="utf-8"))
+                result["ranking_metric_contract"] = config["ranking_metric_contract"]
+                result["judge_configuration_fingerprint"] = config[
+                    "judge_configuration_fingerprint"
+                ]
+                _write_json(result_path, result)
+            _refresh_batch_hashes(root)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            batch = self._batch(
+                Path(temporary), mutations=(forge_every_mutable_contract,)
+            )
+            with self.assertRaises(ValueError):
+                compile_run_manifest(
+                    batch, resolve_experiment_profile("paper-reference/pi")
+                )
+
+    def test_compile_run_manifest_rejects_extra_artifact_inventory_entries(self) -> None:
+        def add_extra_digest(root: Path, _state: dict[str, Any]) -> None:
+            config = json.loads((root / "config.json").read_text(encoding="utf-8"))
+            config["artifact_digests"]["provider-payload.json"] = "6" * 64
+            _write_json(root / "config.json", config)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            batch = self._batch(Path(temporary), mutations=(add_extra_digest,))
+            with self.assertRaises(ValueError):
+                compile_run_manifest(
+                    batch, resolve_experiment_profile("paper-reference/pi")
+                )
+
+    def test_compile_run_manifest_rejects_nonpaper_paper_scope_masquerade(self) -> None:
+        def masquerade(root: Path, _state: dict[str, Any]) -> None:
+            config = json.loads((root / "config.json").read_text(encoding="utf-8"))
+            config["selection"]["paper_scope"] = "browsecomp-plus.main.all830"
+            _write_json(root / "config.json", config)
+            _refresh_batch_hashes(root)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            batch = self._batch(Path(temporary), mutations=(masquerade,))
+            with self.assertRaises(ValueError):
+                compile_run_manifest(
+                    batch, resolve_experiment_profile("paper-reference/pi")
+                )
+
     def test_compile_run_manifest_rejects_public_permissions(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -469,7 +616,7 @@ class TestDciRunManifestCompiler(unittest.TestCase):
                 dataset=dataset,
                 output_root=root / "out",
                 cwd=root,
-                judge_config=JudgeConfig(base_url="https://judge.example.test/v1"),
+                judge_config=JudgeConfig(),
                 runtime_options=DciRuntimeOptions(
                     provider="openai-codex", model="gpt-5.6-luna"
                 ),
@@ -490,7 +637,7 @@ class TestDciRunManifestCompiler(unittest.TestCase):
             self.assertEqual(payload["source_identity"], manifest.source_identity)
             self.assertIn("q-real/reproduction-evidence.json", payload["artifact_digests"])
             self.assertEqual(manifest.queries[0].operations.agent, 1)
-            self.assertEqual(manifest.queries[0].operations.judge, 0)
+            self.assertEqual(manifest.queries[0].operations.judge, 1)
             self.assertEqual(manifest.aggregates.failed_count, 1)
             rendered = json.dumps(manifest.to_dict(), sort_keys=True)
             self.assertNotIn("Question body", rendered)

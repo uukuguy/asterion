@@ -980,6 +980,7 @@ def _prepare(
         str(canonical_input_identity(request.corpus)) if request.corpus else None
     )
     context_contract: str | None = None
+    selected_profile: ExperimentProfile | None = None
     if request.profile is not None:
         try:
             selected_profile = _resolve_prompt_profile(
@@ -1000,6 +1001,12 @@ def _prepare(
             raise DciBenchmarkError(
                 "DCI benchmark context policy is invalid"
             ) from error
+    corpus_contract = selected_profile.corpus_identity if selected_profile else None
+    corpus_content_identity = (
+        _batch_corpus_content_identity(request.corpus, corpus_contract)
+        if request.corpus is not None and corpus_contract is not None
+        else None
+    )
     runtime = _runtime_document(
         request.runtime_options,
         context_contract=context_contract,
@@ -1034,7 +1041,13 @@ def _prepare(
         "mode": request.mode,
         "profile": request.profile,
         "corpus_identity": corpus_identity,
+        "corpus_contract": corpus_contract,
+        "corpus_content_identity": corpus_content_identity,
         "corpus_hint": request.corpus_hint,
+        "runtime_contract": (
+            selected_profile.runtime_contract if selected_profile is not None else None
+        ),
+        "context_contract": context_contract,
         "cwd": str(canonical_input_identity(request.cwd)),
         "runtime": runtime,
         "conversation_features": (
@@ -1057,12 +1070,7 @@ def _prepare(
         "benchmark_prompt_contract_sha256": prompt_contract_sha256_value,
         "prompt_resources": prompt_resources,
     }
-    if request.profile is not None:
-        selected_profile = _resolve_prompt_profile(
-            request.profile,
-            provider=request.runtime_options.provider,
-            model=request.runtime_options.model,
-        )
+    if selected_profile is not None:
         config["profile_sha256"] = selected_profile.identity_sha256
         config["source_identity"] = (
             dict(selected_profile.source_identity)
@@ -1134,6 +1142,10 @@ def _prepare(
             "prompt": config["benchmark_prompt_contract_sha256"],
             "judge": config["judge_configuration_fingerprint"],
             "corpus_identity": config["corpus_identity"],
+            "corpus_contract": config["corpus_contract"],
+            "corpus_content_identity": config["corpus_content_identity"],
+            "runtime_contract": config["runtime_contract"],
+            "context_contract": config["context_contract"],
         }
     )
     config["run_fingerprint"] = _fingerprint(
@@ -1200,6 +1212,40 @@ def _paper_scope_for_rows(rows: tuple[BenchmarkRow, ...]) -> str | None:
     return paper_scope_for_selected_ids(
         tuple(row.query_id for row in rows)
     )
+
+
+def _batch_corpus_content_identity(path: Path, contract: str) -> dict[str, object]:
+    root = Path(os.path.abspath(os.path.normpath(path)))
+    _reject_symlink_components(root)
+    if not root.is_dir():
+        raise DciBenchmarkError("DCI benchmark corpus identity is invalid")
+    files: list[dict[str, str]] = []
+    try:
+        for directory, directories, filenames in os.walk(root, followlinks=False):
+            current = Path(directory)
+            for dirname in tuple(directories):
+                if (current / dirname).is_symlink():
+                    raise DciBenchmarkError("DCI benchmark corpus identity is invalid")
+            directories.sort()
+            for filename in sorted(filenames):
+                file_path = current / filename
+                if file_path.is_symlink() or not file_path.is_file():
+                    raise DciBenchmarkError("DCI benchmark corpus identity is invalid")
+                relative = file_path.relative_to(root).as_posix()
+                files.append(
+                    {
+                        "path": relative,
+                        "sha256": hashlib.sha256(file_path.read_bytes()).hexdigest(),
+                    }
+                )
+    except OSError as error:
+        raise DciBenchmarkError("DCI benchmark corpus identity is invalid") from error
+    return {
+        "schema": "asterion.dci.corpus-content/v1",
+        "contract": contract,
+        "file_count": len(files),
+        "sha256": canonical_sha256(files),
+    }
 
 
 async def _run_row(
@@ -1415,6 +1461,7 @@ async def _run_row(
                         request, "judge"
                     )
                     try:
+                        judge_operation_performed = True
                         verdict = await evaluate_run_directory_async(
                             native_dir,
                             gold_answer=_qa_gold_answer(row),
@@ -1422,7 +1469,6 @@ async def _run_row(
                             judge_contract=_judge_contract_for_request(request),
                             _directory_fd=native_authority.fd,
                         )
-                        judge_operation_performed = True
                         actual_cost = _validated_judge_cost(verdict)
                         judge_operation_cost_usd = actual_cost
                         if judge_reservation is not None:
@@ -1888,7 +1934,8 @@ def _validate_config_document(
         raise DciBenchmarkError("DCI benchmark configuration evidence is invalid")
     expected = {
         "schema", "run_id", "product", "dataset", "mode", "profile",
-        "corpus_identity", "corpus_hint", "cwd", "runtime",
+        "corpus_identity", "corpus_contract", "corpus_content_identity",
+        "corpus_hint", "runtime_contract", "context_contract", "cwd", "runtime",
         "conversation_features", "max_concurrency", "max_turns", "analysis",
         "figures", "judge", "judge_configuration_fingerprint",
         "ranking_metric_contract",

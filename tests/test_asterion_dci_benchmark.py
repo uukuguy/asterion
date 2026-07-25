@@ -1573,6 +1573,32 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         self.assertEqual(summary["reproduction_totals"]["agent_operations"], 0)
         self.assertEqual(summary["reproduction_totals"]["judge_operations"], 0)
 
+    def test_failed_judge_attempt_reports_current_judge_operation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            request = _request(root)
+            with patch(
+                "asterion.dci.benchmark.run_pi_research", side_effect=_recorded_run
+            ), patch(
+                "asterion.dci.benchmark.evaluate_run_directory_async",
+                side_effect=RuntimeError("judge transport failed"),
+            ) as evaluate:
+                result = run_benchmark(request, paths=resolve_dci_paths(root))
+            evidence = json.loads(
+                (result.output_root / "q-1" / "reproduction-evidence.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            summary = json.loads(
+                (result.output_root / "summary.json").read_text(encoding="utf-8")
+            )
+
+        evaluate.assert_called_once()
+        self.assertEqual(result.counts["failed"], 1)
+        self.assertEqual(evidence["agent_operations"], 1)
+        self.assertEqual(evidence["judge_operations"], 1)
+        self.assertEqual(summary["reproduction_totals"]["judge_operations"], 1)
+
     def test_changed_judge_configuration_reevaluates_without_rerunning_pi(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory).resolve()
