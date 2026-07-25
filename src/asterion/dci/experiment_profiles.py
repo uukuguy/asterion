@@ -995,9 +995,9 @@ def _issue_reservation(**values: object) -> FullExecutionReservation:
 
 
 def _reservation_for(
-    authority: object, reservation: object, *, allow_cancelled: bool = False
+    authority: object, reservation: object
 ) -> tuple[_AuthorizationRecord, _ReservationRecord]:
-    record = _validate_authorization(authority, require_active=not allow_cancelled)
+    record = _validate_authorization(authority, require_active=False)
     if not isinstance(reservation, FullExecutionReservation):
         raise ExperimentAuthorizationError("full execution reservation is invalid")
     token = getattr(reservation, "_reservation_token", None)
@@ -1022,6 +1022,10 @@ def reserve_full_execution_operation(
     with _AUTHORIZATION_LOCK:
         record = _validate_authorization(authority)
         _validate_scope_output(record, scope_id)
+        if scope_id not in record.consumed_scopes:
+            raise ExperimentAuthorizationError(
+                "full execution authorization scope is not consumed"
+            )
         if kind == "agent":
             reserved = record.reserved_agent_operations
             completed = record.completed_agent_operations
@@ -1088,13 +1092,18 @@ def reconcile_full_execution_operation(
 ) -> None:
     """Record a completed operation's bounded actual spend exactly once."""
 
-    if not _positive_usd_limit(actual_cost_usd) and actual_cost_usd != 0.0:
-        raise ExperimentAuthorizationError("full execution actual cost is invalid")
-    if type(actual_cost_usd) is bool or not math.isfinite(float(actual_cost_usd)):
-        raise ExperimentAuthorizationError("full execution actual cost is invalid")
     with _AUTHORIZATION_LOCK:
         record, item = _reservation_for(authority, reservation)
-        if actual_cost_usd > item.upper_bound_usd:
+        if (
+            type(actual_cost_usd) not in {int, float}
+            or not math.isfinite(float(actual_cost_usd))
+            or actual_cost_usd < 0
+            or actual_cost_usd > item.upper_bound_usd
+        ):
+            _settle_reservation(
+                record, reservation, item, item.upper_bound_usd
+            )
+            record.cancelled = True
             raise ExperimentAuthorizationError("full execution actual cost is invalid")
         _settle_reservation(record, reservation, item, float(actual_cost_usd))
 
@@ -1117,7 +1126,7 @@ def cancel_full_execution_authorization(
     """Prevent future reservations while retaining every active spend bound."""
 
     with _AUTHORIZATION_LOCK:
-        record = _validate_authorization(authority)
+        record = _validate_authorization(authority, require_active=False)
         record.cancelled = True
 
 
@@ -1149,24 +1158,27 @@ def _consumed_authorized_output_identity(
 def consumed_full_execution_authorization_snapshot(
     authorization: FullExecutionAuthorization,
 ) -> dict[str, object]:
-    """Return a durable body-free receipt only after every issued scope was consumed."""
+    """Return a body-free receipt after every scope and reservation is settled."""
 
-    if not isinstance(authorization, FullExecutionAuthorization):
-        raise ValueError("DCI full execution authorization is invalid")
-    token = getattr(authorization, "_issuance_token", None)
     with _AUTHORIZATION_LOCK:
-        record = _AUTHORIZATION_REGISTRY.get(token)
-        if (
-            record is None
-            or record.issuer is not authorization
-            or not _authorization_matches_snapshot(authorization, record.snapshot)
-            or record.consumed_scopes != set(record.snapshot.authorized_scope_ids)
-        ):
-            raise ValueError("DCI full execution authorization is not fully consumed")
+        record = _validate_authorization(authorization, require_active=False)
         snapshot = record.snapshot
-        device, inode = _private_root_identity(snapshot.output_root)
-        if (device, inode) != (snapshot.output_root_device, snapshot.output_root_inode):
-            raise ValueError("DCI full execution output root identity changed")
+        if record.consumed_scopes != set(snapshot.authorized_scope_ids):
+            raise ExperimentAuthorizationError(
+                "full execution authorization is not fully consumed"
+            )
+        for scope_id in snapshot.authorized_scope_ids:
+            _validate_scope_output(record, scope_id)
+        if (
+            record.active_reservations
+            or record.reserved_agent_operations
+            or record.reserved_judge_operations
+            or record.reserved_cost_usd
+        ):
+            raise ExperimentAuthorizationError(
+                "full execution authorization has active reservations"
+            )
+        record.finalized = True
         return {
             "schema": "dci.full-execution-authorization-receipt/v1",
             "profile_id": snapshot.profile_id,
@@ -1179,7 +1191,23 @@ def consumed_full_execution_authorization_snapshot(
             "output_root_inode": snapshot.output_root_inode,
             "estimated_budget_usd": snapshot.estimated_budget_usd,
             "invocation_authorized": snapshot.invocation_authorized,
-            "issuance_token_sha256": hashlib.sha256(
-                snapshot.issuance_token.encode()
-            ).hexdigest(),
+            "max_agent_operations": snapshot.max_agent_operations,
+            "max_judge_operations": snapshot.max_judge_operations,
+            "max_cost_usd": snapshot.max_cost_usd,
+            "max_agent_cost_per_operation_usd": (
+                snapshot.max_agent_cost_per_operation_usd
+            ),
+            "max_judge_cost_per_operation_usd": (
+                snapshot.max_judge_cost_per_operation_usd
+            ),
+            "ledger": {
+                "reserved_agent_operations": record.reserved_agent_operations,
+                "reserved_judge_operations": record.reserved_judge_operations,
+                "completed_agent_operations": record.completed_agent_operations,
+                "completed_judge_operations": record.completed_judge_operations,
+                "reserved_cost_usd": record.reserved_cost_usd,
+                "actual_cost_usd": record.actual_cost_usd,
+                "cancelled": record.cancelled,
+                "finalized": record.finalized,
+            },
         }

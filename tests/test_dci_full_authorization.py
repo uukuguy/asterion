@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import io
+import json
 import math
 import os
 import stat
@@ -17,11 +19,13 @@ from asterion.dci.experiment_profiles import (
     authorize_full_execution,
     consume_full_execution_authorization,
     cancel_full_execution_authorization,
+    consumed_full_execution_authorization_snapshot,
     fail_full_execution_operation,
     reconcile_full_execution_operation,
     reserve_full_execution_operation,
     resolve_experiment_profile,
 )
+from asterion.dci.verification import paper_reproduce_main
 
 
 def authorize(
@@ -148,9 +152,29 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
 class FullExecutionBudgetTests(unittest.TestCase):
     scope_id = "bright.biology.main.full"
 
+    def consume(self, authority: FullExecutionAuthorization) -> None:
+        consume_full_execution_authorization(authority, self.scope_id)
+
+    def test_reservation_requires_consumed_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            authority = authorize(Path(temporary) / "private")
+            with self.assertRaisesRegex(
+                ExperimentAuthorizationError,
+                "^full execution authorization scope is not consumed$",
+            ):
+                reserve_full_execution_operation(
+                    authority, self.scope_id, "agent"
+                )
+            self.consume(authority)
+            reservation = reserve_full_execution_operation(
+                authority, self.scope_id, "agent"
+            )
+            reconcile_full_execution_operation(authority, reservation, 0.5)
+
     def test_operation_count_budget(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             authority = authorize(Path(temporary) / "private", max_agents=1)
+            self.consume(authority)
             first = reserve_full_execution_operation(
                 authority, self.scope_id, "agent"
             )
@@ -164,30 +188,59 @@ class FullExecutionBudgetTests(unittest.TestCase):
     def test_invalid_kinds_and_actual_costs_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             authority = authorize(Path(temporary) / "private")
+            self.consume(authority)
             with self.assertRaises(ExperimentAuthorizationError):
                 reserve_full_execution_operation(authority, self.scope_id, "tool")
 
         for value in (-0.1, math.inf, -math.inf, math.nan, True):
             with self.subTest(value=value), tempfile.TemporaryDirectory() as temporary:
-                authority = authorize(Path(temporary) / "private")
-                reservation = reserve_full_execution_operation(
+                authority = authorize(
+                    Path(temporary) / "private", max_agents=3
+                )
+                self.consume(authority)
+                offending = reserve_full_execution_operation(
+                    authority, self.scope_id, "agent"
+                )
+                later = reserve_full_execution_operation(
                     authority, self.scope_id, "agent"
                 )
                 with self.assertRaises(ExperimentAuthorizationError):
                     reconcile_full_execution_operation(
-                        authority, reservation, value
+                        authority, offending, value
+                    )
+                with self.assertRaises(ExperimentAuthorizationError):
+                    reconcile_full_execution_operation(
+                        authority, offending, 0.1
+                    )
+                reconcile_full_execution_operation(authority, later, 0.5)
+                with self.assertRaisesRegex(
+                    ExperimentAuthorizationError,
+                    "^full execution authorization is inactive$",
+                ):
+                    reserve_full_execution_operation(
+                        authority, self.scope_id, "agent"
                     )
 
         with tempfile.TemporaryDirectory() as temporary:
-            authority = authorize(Path(temporary) / "private")
-            reservation = reserve_full_execution_operation(
+            authority = authorize(
+                Path(temporary) / "private", max_agents=3
+            )
+            self.consume(authority)
+            offending = reserve_full_execution_operation(
+                authority, self.scope_id, "agent"
+            )
+            later = reserve_full_execution_operation(
                 authority, self.scope_id, "agent"
             )
             with self.assertRaises(ExperimentAuthorizationError):
-                reconcile_full_execution_operation(authority, reservation, 2.1)
-            reconcile_full_execution_operation(authority, reservation, 1.0)
+                reconcile_full_execution_operation(authority, offending, 2.1)
             with self.assertRaises(ExperimentAuthorizationError):
-                reconcile_full_execution_operation(authority, reservation, 1.0)
+                reconcile_full_execution_operation(authority, offending, 1.0)
+            reconcile_full_execution_operation(authority, later, 1.0)
+            with self.assertRaises(ExperimentAuthorizationError):
+                reserve_full_execution_operation(
+                    authority, self.scope_id, "agent"
+                )
 
     def test_reservations_are_bound_to_their_original_scope_and_authority(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -198,6 +251,7 @@ class FullExecutionBudgetTests(unittest.TestCase):
                     "bright.earth-science.main.full",
                 ),
             )
+            self.consume(authority)
             reservation = reserve_full_execution_operation(
                 authority, self.scope_id, "agent"
             )
@@ -206,8 +260,36 @@ class FullExecutionBudgetTests(unittest.TestCase):
             )
             with self.assertRaises(ExperimentAuthorizationError):
                 reconcile_full_execution_operation(authority, reservation, 0.5)
-            self.assertNotIn("_authorization_token", repr(reservation))
-            self.assertNotIn("_reservation_token", repr(reservation))
+            rendered = repr(reservation)
+            self.assertNotIn("_authorization_token", rendered)
+            self.assertNotIn("_reservation_token", rendered)
+            self.assertNotIn(reservation._authorization_token, rendered)
+            self.assertNotIn(reservation._reservation_token, rendered)
+
+    def test_cross_authority_and_reservation_replay_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            first_authority = authorize(Path(temporary) / "first")
+            second_authority = authorize(Path(temporary) / "second")
+            self.consume(first_authority)
+            self.consume(second_authority)
+            reservation = reserve_full_execution_operation(
+                first_authority, self.scope_id, "agent"
+            )
+            with self.assertRaises(ExperimentAuthorizationError) as raised:
+                reconcile_full_execution_operation(
+                    second_authority, reservation, 0.5
+                )
+            self.assertNotIn(str(Path(temporary)), str(raised.exception))
+            self.assertNotIn(
+                reservation._reservation_token, str(raised.exception)
+            )
+            reconcile_full_execution_operation(
+                first_authority, reservation, 0.5
+            )
+            with self.assertRaises(ExperimentAuthorizationError):
+                reconcile_full_execution_operation(
+                    first_authority, reservation, 0.5
+                )
 
     def test_active_reservations_cannot_exceed_total_usd_budget(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -217,6 +299,7 @@ class FullExecutionBudgetTests(unittest.TestCase):
                 max_cost=3.0,
                 max_agent_cost=2.0,
             )
+            self.consume(authority)
             reserve_full_execution_operation(authority, self.scope_id, "agent")
             with self.assertRaisesRegex(
                 ExperimentAuthorizationError,
@@ -229,22 +312,95 @@ class FullExecutionBudgetTests(unittest.TestCase):
             authority = authorize(
                 Path(temporary) / "private", max_agents=2, max_cost=4.0
             )
+            self.consume(authority)
             first = reserve_full_execution_operation(authority, self.scope_id, "agent")
             later = reserve_full_execution_operation(authority, self.scope_id, "agent")
             fail_full_execution_operation(authority, first)
+            fail_full_execution_operation(authority, later)
             with self.assertRaises(ExperimentAuthorizationError):
-                reconcile_full_execution_operation(authority, later, 0.1)
+                fail_full_execution_operation(authority, later)
 
         with tempfile.TemporaryDirectory() as temporary:
-            authority = authorize(Path(temporary) / "private")
-            active = reserve_full_execution_operation(
+            authority = authorize(
+                Path(temporary) / "private", max_agents=2
+            )
+            self.consume(authority)
+            completed = reserve_full_execution_operation(
+                authority, self.scope_id, "agent"
+            )
+            failed = reserve_full_execution_operation(
                 authority, self.scope_id, "agent"
             )
             cancel_full_execution_authorization(authority)
             with self.assertRaises(ExperimentAuthorizationError):
                 reserve_full_execution_operation(authority, self.scope_id, "agent")
+            reconcile_full_execution_operation(authority, completed, 0.1)
+            fail_full_execution_operation(authority, failed)
+            cancel_full_execution_authorization(authority)
+
+    def test_receipt_waits_for_drain_and_contains_exact_body_free_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            parent = Path(temporary) / "private"
+            authority = authorize(
+                parent,
+                max_agents=3,
+                max_judges=2,
+                max_cost=9.0,
+                max_agent_cost=2.5,
+                max_judge_cost=1.25,
+            )
+            self.consume(authority)
+            agent = reserve_full_execution_operation(
+                authority, self.scope_id, "agent"
+            )
+            judge = reserve_full_execution_operation(
+                authority, self.scope_id, "judge"
+            )
             with self.assertRaises(ExperimentAuthorizationError):
-                reconcile_full_execution_operation(authority, active, 0.1)
+                consumed_full_execution_authorization_snapshot(authority)
+            reconcile_full_execution_operation(authority, agent, 1.5)
+            fail_full_execution_operation(authority, judge)
+            receipt = consumed_full_execution_authorization_snapshot(authority)
+            self.assertEqual(
+                {
+                    "max_agent_operations": receipt["max_agent_operations"],
+                    "max_judge_operations": receipt["max_judge_operations"],
+                    "max_cost_usd": receipt["max_cost_usd"],
+                    "max_agent_cost_per_operation_usd": receipt[
+                        "max_agent_cost_per_operation_usd"
+                    ],
+                    "max_judge_cost_per_operation_usd": receipt[
+                        "max_judge_cost_per_operation_usd"
+                    ],
+                },
+                {
+                    "max_agent_operations": 3,
+                    "max_judge_operations": 2,
+                    "max_cost_usd": 9.0,
+                    "max_agent_cost_per_operation_usd": 2.5,
+                    "max_judge_cost_per_operation_usd": 1.25,
+                },
+            )
+            self.assertEqual(
+                receipt["ledger"],
+                {
+                    "reserved_agent_operations": 0,
+                    "reserved_judge_operations": 0,
+                    "completed_agent_operations": 1,
+                    "completed_judge_operations": 1,
+                    "reserved_cost_usd": 0.0,
+                    "actual_cost_usd": 2.75,
+                    "cancelled": True,
+                    "finalized": True,
+                },
+            )
+            rendered = json.dumps(receipt, sort_keys=True)
+            self.assertNotIn(str(parent), rendered)
+            self.assertNotIn(authority._issuance_token, rendered)
+            self.assertNotIn(agent._reservation_token, rendered)
+            self.assertNotIn(judge._reservation_token, rendered)
+            self.assertNotIn("token", rendered)
+            self.assertNotIn("path", rendered)
 
     def test_reservation_constructor_is_private(self) -> None:
         with self.assertRaisesRegex(
@@ -253,3 +409,32 @@ class FullExecutionBudgetTests(unittest.TestCase):
             "reserve_full_execution_operation$",
         ):
             FullExecutionReservation()
+
+
+class LegacyFullAuthorizationTests(unittest.TestCase):
+    def test_legacy_helper_redacts_authorization_errors(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with tempfile.TemporaryDirectory(
+            prefix="private-credential-sentinel-"
+        ) as temporary:
+            result = paper_reproduce_main(
+                [
+                    "--profile",
+                    "paper-reference/pi",
+                    "--output-root",
+                    str(Path(temporary) / "private"),
+                    "--estimated-budget-usd",
+                    "0",
+                    "--authorize-full",
+                ],
+                stdout=stdout,
+                stderr=stderr,
+            )
+        self.assertEqual(result, 2)
+        self.assertEqual(
+            stderr.getvalue(),
+            "DCI paper reproduction authorization failed\n",
+        )
+        self.assertNotIn("credential-sentinel", stdout.getvalue())
+        self.assertNotIn("credential-sentinel", stderr.getvalue())

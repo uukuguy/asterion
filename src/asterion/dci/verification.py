@@ -63,6 +63,7 @@ from asterion.dci.context_profiles import (
 )
 from asterion.dci.experiment_profiles import (
     EXPERIMENT_AUTHORIZATION_SCHEMA,
+    ExperimentAuthorizationError,
     authorize_full_execution,
     experiment_profile_schema_sha256,
     experiment_profiles_sha256,
@@ -652,7 +653,7 @@ def paper_reproduce_main(
             preflight_scope_ids=profile.scope_ids,
             preflight_selected_ids_sha256=profile.selected_ids_sha256,
         )
-    except (ValueError, OSError):
+    except (ExperimentAuthorizationError, ValueError, OSError):
         stderr.write("DCI paper reproduction authorization failed\n")
         return 2
     stdout.write("reproduction_authorized=yes\n")
