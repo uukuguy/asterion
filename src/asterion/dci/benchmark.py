@@ -892,11 +892,11 @@ def _prepare(
         )
     if authorized_scope is not None and not bounded_paper_selection:
         authorization = request.full_execution_authorization
-        if authorization is None or authorization.output_root != output_root:
+        if authorization is None:
             raise DciBenchmarkError("DCI benchmark requires AF-340 authorization")
         try:
             require_af320_executable_scope(authorized_scope, authorization)
-        except ValueError as error:
+        except (RuntimeError, ValueError) as error:
             raise DciBenchmarkError(str(error)) from error
     return rows, output_root, config, tuple(documents), snapshots
 

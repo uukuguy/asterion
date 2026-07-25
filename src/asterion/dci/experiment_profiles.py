@@ -195,7 +195,6 @@ class FullExecutionAuthorization:
     experiment_scopes_sha256: str
     authorized_scope_ids: tuple[str, ...]
     selected_ids_sha256: tuple[str, ...]
-    output_root: Path = field(repr=False)
     output_root_device: int
     output_root_inode: int
     estimated_budget_usd: float
@@ -263,6 +262,11 @@ class _ReservationRecord:
     upper_bound_usd: float
 
 
+@dataclass(frozen=True, slots=True)
+class _SettledReservationRecord:
+    issuer: FullExecutionReservation
+
+
 @dataclass(slots=True)
 class _AuthorizationRecord:
     issuer: FullExecutionAuthorization
@@ -270,6 +274,7 @@ class _AuthorizationRecord:
     scope_outputs: dict[str, _ScopeOutputIdentity]
     consumed_scopes: set[str]
     active_reservations: dict[str, _ReservationRecord]
+    settled_reservations: dict[str, _SettledReservationRecord]
     reserved_agent_operations: int
     reserved_judge_operations: int
     completed_agent_operations: int
@@ -665,7 +670,6 @@ def _authorization_matches_snapshot(
             )
         )
         == snapshot.scope_selections
-        and authorization.output_root == snapshot.output_root
         and authorization.output_root_device == snapshot.output_root_device
         and authorization.output_root_inode == snapshot.output_root_inode
         and authorization.estimated_budget_usd == snapshot.estimated_budget_usd
@@ -900,7 +904,6 @@ def authorize_full_execution(
         experiment_scopes_sha256=profile.experiment_scopes_sha256,
         authorized_scope_ids=requested_scope_ids,
         selected_ids_sha256=selected_digests,
-        output_root=private_root,
         output_root_device=device,
         output_root_inode=inode,
         estimated_budget_usd=float(max_cost_usd),
@@ -944,6 +947,7 @@ def authorize_full_execution(
             snapshot,
             scope_outputs,
             set(),
+            {},
             {},
             0,
             0,
@@ -1074,7 +1078,9 @@ def _settle_reservation(
     item: _ReservationRecord,
     actual_cost_usd: float,
 ) -> None:
-    del record.active_reservations[reservation._reservation_token]
+    token = reservation._reservation_token
+    del record.active_reservations[token]
+    record.settled_reservations[token] = _SettledReservationRecord(reservation)
     record.reserved_cost_usd -= item.upper_bound_usd
     if item.kind == "agent":
         record.reserved_agent_operations -= 1
@@ -1115,6 +1121,17 @@ def fail_full_execution_operation(
     """Conservatively settle a failed operation and close the authority."""
 
     with _AUTHORIZATION_LOCK:
+        record = _validate_authorization(authority, require_active=False)
+        if not isinstance(reservation, FullExecutionReservation):
+            raise ExperimentAuthorizationError("full execution reservation is invalid")
+        token = getattr(reservation, "_reservation_token", None)
+        settled = record.settled_reservations.get(token)
+        if (
+            settled is not None
+            and settled.issuer is reservation
+            and reservation._authorization_token == record.snapshot.issuance_token
+        ):
+            return
         record, item = _reservation_for(authority, reservation)
         _settle_reservation(record, reservation, item, item.upper_bound_usd)
         record.cancelled = True
@@ -1127,6 +1144,10 @@ def cancel_full_execution_authorization(
 
     with _AUTHORIZATION_LOCK:
         record = _validate_authorization(authority, require_active=False)
+        if record.finalized:
+            raise ExperimentAuthorizationError(
+                "full execution authorization is inactive"
+            )
         record.cancelled = True
 
 
@@ -1135,18 +1156,12 @@ def _consumed_authorized_output_identity(
 ) -> tuple[Path, int, int]:
     """Return an independent root identity only after exact capability consumption."""
 
-    if not isinstance(authorization, FullExecutionAuthorization):
-        raise ValueError("DCI full execution authorization is invalid")
-    token = getattr(authorization, "_issuance_token", None)
     with _AUTHORIZATION_LOCK:
-        record = _AUTHORIZATION_REGISTRY.get(token)
-        if (
-            record is None
-            or not record.consumed_scopes
-            or record.issuer is not authorization
-            or not _authorization_matches_snapshot(authorization, record.snapshot)
-        ):
-            raise ValueError("DCI full execution authorization is invalid")
+        record = _validate_authorization(authorization)
+        if not record.consumed_scopes:
+            raise ExperimentAuthorizationError(
+                "full execution authorization is invalid"
+            )
         snapshot = record.snapshot
         return (
             snapshot.output_root,
