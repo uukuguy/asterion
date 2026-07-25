@@ -148,6 +148,18 @@ def reproduction_metric_contract_sha256(profile_id: str) -> str:
             ),
         }
     )
+
+
+def _metric_contract_strings(profile_id: str, key: str) -> tuple[str, ...]:
+    value = _metric_contract(profile_id)[key]
+    if (
+        not isinstance(value, tuple)
+        or any(type(item) is not str for item in value)
+    ):
+        raise ValueError("DCI reproduction metric contract is invalid")
+    return value
+
+
 _MANIFEST_KEYS = {
     "schema",
     "run_id",
@@ -670,11 +682,10 @@ def _parse_artifact_digests(value: object) -> Mapping[str, str]:
 def _parse_corpus_content_identity(value: object) -> Mapping[str, object] | None:
     if value is None:
         return None
-    item = _require_exact_mapping(
-        value,
-        {"schema", "contract", "sha256", "file_count"},
-        "corpus content identity",
-    )
+    keys = {"schema", "contract", "sha256", "file_count"}
+    if not isinstance(value, Mapping) or set(value) != keys:
+        raise ValueError("DCI reproduction corpus content identity schema is invalid")
+    item = dict(value)
     file_count = item["file_count"]
     if type(file_count) is not int or file_count < 0:
         raise ValueError("DCI reproduction corpus content identity is invalid")
@@ -941,8 +952,9 @@ def _computed_aggregates(
     metric_identities: tuple[str, ...],
     profile_id: str,
 ) -> RunAggregates:
-    contract = _metric_contract(profile_id)
-    allowed_statuses = set(contract["allowed_exclusion_statuses"])
+    allowed_statuses = set(
+        _metric_contract_strings(profile_id, "allowed_exclusion_statuses")
+    )
     included = tuple(
         row
         for row in queries
@@ -1157,7 +1169,7 @@ class RunManifest:
             if _NDCG_METRIC in self.metric_identities and row.ndcg_at_10 is None:
                 raise ValueError("DCI reproduction declared NDCG evidence is missing")
         allowed_reasons = set(
-            _metric_contract(self.profile_id)["allowed_exclusion_reasons"]
+            _metric_contract_strings(self.profile_id, "allowed_exclusion_reasons")
         )
         if any(
             row.exclusion_reason is not None
@@ -1184,7 +1196,15 @@ class RunManifest:
         if item["schema"] != RUN_MANIFEST_SCHEMA:
             raise ValueError("DCI reproduction run schema is invalid")
         supplied_identity = _require_sha256(item["identity_sha256"], "run identity")
+        corpus_content_identity = _parse_corpus_content_identity(
+            item["corpus_content_identity"]
+        )
         unsigned = {key: data for key, data in item.items() if key != "identity_sha256"}
+        unsigned["corpus_content_identity"] = (
+            None
+            if corpus_content_identity is None
+            else dict(corpus_content_identity)
+        )
         if supplied_identity != canonical_sha256(unsigned):
             raise ValueError("DCI reproduction run identity is invalid")
         raw_metrics = item["metric_identities"]
@@ -1238,9 +1258,7 @@ class RunManifest:
                 if item["corpus_identity"] is None
                 else _require_public_id(item["corpus_identity"], "corpus identity")
             ),
-            corpus_content_identity=_parse_corpus_content_identity(
-                item["corpus_content_identity"]
-            ),
+            corpus_content_identity=corpus_content_identity,
             effective_config_sha256=_require_sha256(
                 item["effective_config_sha256"], "effective configuration digest"
             ),
@@ -1583,9 +1601,10 @@ def _batch_selection(
     paper_scope = selection.get("paper_scope")
     if execution_class == "non-paper" and paper_scope is not None:
         raise ValueError("DCI reproduction selection identity is invalid")
-    selection_id = _require_public_id(
-        paper_scope or selection.get("id"), "selection ID"
-    )
+    if execution_class == "paper-full-authorized":
+        selection_id = _require_public_id(paper_scope, "selection ID")
+    else:
+        selection_id = _require_public_id(selection.get("id"), "selection ID")
     selection_sha256 = _require_sha256(
         selection.get("selected_ids_sha256"), "selected ID digest"
     )
@@ -2913,7 +2932,7 @@ def _expected_report_metrics(
         "qa": _ACCURACY_METRIC,
         "ir": _NDCG_METRIC,
     }.get(benchmark.mode)
-    contract_metrics = tuple(_metric_contract(profile.profile_id)["metric_identities"])
+    contract_metrics = _metric_contract_strings(profile.profile_id, "metric_identities")
     if (
         mode_metric is None
         or benchmark.metric != mode_metric
@@ -2931,9 +2950,12 @@ def _validate_report_evidence(
     metric_identities: tuple[str, ...],
     profile_id: str,
 ) -> None:
-    contract = _metric_contract(profile_id)
-    allowed_reasons = set(contract["allowed_exclusion_reasons"])
-    allowed_statuses = set(contract["allowed_exclusion_statuses"])
+    allowed_reasons = set(
+        _metric_contract_strings(profile_id, "allowed_exclusion_reasons")
+    )
+    allowed_statuses = set(
+        _metric_contract_strings(profile_id, "allowed_exclusion_statuses")
+    )
     for exclusion in exclusions:
         baseline = exclusion.baseline
         candidate = exclusion.candidate
@@ -3126,9 +3148,12 @@ def compare_reproduction_runs(
         or candidate_by_id[query_id].exclusion_reason is not None
     )
     exclusions: list[_ExclusionEvidence] = []
-    metric_contract = _metric_contract(profile.profile_id)
-    allowed_reasons = set(metric_contract["allowed_exclusion_reasons"])
-    allowed_statuses = set(metric_contract["allowed_exclusion_statuses"])
+    allowed_reasons = set(
+        _metric_contract_strings(profile.profile_id, "allowed_exclusion_reasons")
+    )
+    allowed_statuses = set(
+        _metric_contract_strings(profile.profile_id, "allowed_exclusion_statuses")
+    )
     for query_id in exclusion_ids:
         baseline_row = baseline_by_id[query_id]
         candidate_row = candidate_by_id[query_id]

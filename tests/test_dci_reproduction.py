@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from importlib import resources
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Callable
 from unittest.mock import patch
 
@@ -589,6 +590,87 @@ class TestDciRunManifestCompiler(unittest.TestCase):
                     batch, resolve_experiment_profile("paper-reference/pi")
                 )
 
+    def test_compile_run_manifest_preserves_bounded_selection_identity(self) -> None:
+        def bounded(root: Path, _state: dict[str, Any]) -> None:
+            config = json.loads((root / "config.json").read_text(encoding="utf-8"))
+            config["selection"] = {
+                **config["selection"],
+                "execution_class": "paper-bounded",
+                "id": "limit-1",
+                "paper_scope": "browsecomp-plus.main.all830",
+                "selected_rows": 4,
+                "full_dataset": False,
+                "comparable": False,
+                "authorization_profile": None,
+            }
+            _write_json(root / "config.json", config)
+            _refresh_batch_hashes(root)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            profile = resolve_experiment_profile("paper-reference/pi")
+            manifest = compile_run_manifest(
+                self._batch(Path(temporary), mutations=(bounded,)), profile
+            )
+            validate_run_manifest(manifest)
+            self.assertEqual(manifest.selection_id, "limit-1")
+            baseline = RunManifest.from_mapping(
+                self._manifest_dict_without_identity(
+                    manifest,
+                    product="original-dci",
+                    implementation_sha256="0" * 64,
+                    product_effective_config_sha256="1" * 64,
+                )
+            )
+            comparison = compare_reproduction(baseline, manifest, profile)
+            self.assertEqual(comparison.selection_id, "limit-1")
+
+    def test_compile_run_manifest_preserves_corpus_content_identity(self) -> None:
+        def add_corpus_evidence(root: Path, _state: dict[str, Any]) -> None:
+            config = json.loads((root / "config.json").read_text(encoding="utf-8"))
+            config["corpus_identity"] = "/private/corpus/root"
+            config["corpus_content_identity"] = {
+                "schema": "asterion.dci.corpus-content/v1",
+                "contract": config["corpus_contract"],
+                "sha256": "7" * 64,
+                "file_count": 2,
+            }
+            config["product_effective_config_sha256"] = canonical_sha256(
+                {
+                    "product": config["product"],
+                    "runtime": config["runtime"],
+                    "prompt": config["benchmark_prompt_contract_sha256"],
+                    "judge": config["judge_configuration_fingerprint"],
+                    "corpus_identity": config["corpus_identity"],
+                    "corpus_contract": config["corpus_contract"],
+                    "corpus_content_identity": config["corpus_content_identity"],
+                    "runtime_contract": config["runtime_contract"],
+                    "context_contract": config["context_contract"],
+                }
+            )
+            for query_dir in sorted(path for path in root.iterdir() if path.is_dir()):
+                item_path = query_dir / "item.json"
+                item = json.loads(item_path.read_text(encoding="utf-8"))
+                item["identity"]["corpus_identity"] = config["corpus_identity"]
+                _write_json(item_path, item)
+            _write_json(root / "config.json", config)
+            _refresh_batch_hashes(root)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            profile = resolve_experiment_profile("paper-reference/pi")
+            manifest = compile_run_manifest(
+                self._batch(Path(temporary), mutations=(add_corpus_evidence,)),
+                profile,
+            )
+            validate_run_manifest(manifest)
+            self.assertEqual(manifest.corpus_identity, profile.corpus_identity)
+            self.assertEqual(manifest.corpus_content_identity["file_count"], 2)
+            payload = manifest.to_dict()
+            payload["corpus_content_identity"] = MappingProxyType(
+                dict(manifest.corpus_content_identity)
+            )
+            reparsed = validate_run_manifest(payload)
+            self.assertEqual(reparsed.corpus_content_identity["sha256"], "7" * 64)
+
     def test_compile_run_manifest_rejects_public_permissions(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -612,10 +694,14 @@ class TestDciRunManifestCompiler(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
+            corpus = root / "corpus"
+            corpus.mkdir()
+            (corpus / "doc.txt").write_text("body-free corpus digest source\n")
             request = BenchmarkRequest(
                 dataset=dataset,
                 output_root=root / "out",
                 cwd=root,
+                corpus=corpus,
                 judge_config=JudgeConfig(),
                 runtime_options=DciRuntimeOptions(
                     provider="openai-codex", model="gpt-5.6-luna"
@@ -639,6 +725,7 @@ class TestDciRunManifestCompiler(unittest.TestCase):
             self.assertEqual(manifest.queries[0].operations.agent, 1)
             self.assertEqual(manifest.queries[0].operations.judge, 1)
             self.assertEqual(manifest.aggregates.failed_count, 1)
+            self.assertIsNotNone(manifest.corpus_content_identity)
             rendered = json.dumps(manifest.to_dict(), sort_keys=True)
             self.assertNotIn("Question body", rendered)
             self.assertNotIn("Answer body", rendered)
