@@ -859,9 +859,9 @@ def _paper_reproduce_cli(
     stdout.write(f"Selected queries: {max_agent_operations}\n")
     stdout.write(f"Maximum agent operations: {max_agent_operations}\n")
     stdout.write(f"Maximum Judge operations: {max_judge_operations}\n")
-    stdout.write("Agent operations performed: 0\nJudge operations performed: 0\n")
     stdout.write("Execution requested: " + ("yes\n" if args.execute else "no\n"))
     if not args.execute:
+        stdout.write("Agent operations performed: 0\nJudge operations performed: 0\n")
         stdout.write("Full authorization issued: no\n")
         stdout.write("reproduction_authorized=no\n")
         stdout.write("operation_count=0\n")
@@ -908,28 +908,35 @@ def _paper_reproduce_cli(
     )
     from asterion.dci.experiment_profiles import authorized_scope_output_root
 
-    execution_items = tuple(
-        AuthorizedBenchmarkExecution(
-            scope_id=scope_id,
-            request=replace(
-                request,
-                output_root=authorized_scope_output_root(authority, scope_id),
-                full_execution_authorization=authority,
-                experiment_scope_id=scope_id,
-            ),
-            paths=paths,
+    try:
+        execution_items = tuple(
+            AuthorizedBenchmarkExecution(
+                scope_id=scope_id,
+                request=replace(
+                    request,
+                    output_root=authorized_scope_output_root(authority, scope_id),
+                    full_execution_authorization=authority,
+                    experiment_scope_id=scope_id,
+                ),
+                paths=paths,
+            )
+            for scope_id, request in zip(
+                selected_scope_ids, preflight_requests, strict=True
+            )
         )
-        for scope_id, request in zip(
-            selected_scope_ids, preflight_requests, strict=True
+        result = benchmark_module.execute_authorized_reproduction(
+            authority=authority,
+            profile=profile,
+            scope_ids=selected_scope_ids,
+            output_root=parent_output_root,
+            execution_items=execution_items,
         )
-    )
-    result = benchmark_module.execute_authorized_reproduction(
-        authority=authority,
-        profile=profile,
-        scope_ids=selected_scope_ids,
-        output_root=parent_output_root,
-        execution_items=execution_items,
-    )
+    except BaseException:
+        try:
+            experiment_profile_module.cancel_full_execution_authorization(authority)
+        except Exception:
+            pass
+        raise
     _write_reproduction_execution_result(stdout, result)
     return 0
 
@@ -1008,6 +1015,7 @@ def _reproduction_scope_ids(
         if require_executable and (
             paper_scope.launcher_origin == "unavailable"
             or benchmark.batch_profile is None
+            or paper_scope.selection_count != benchmark.source_count
         ):
             raise ValueError("paper reproduction scope is unavailable")
     return scope_ids

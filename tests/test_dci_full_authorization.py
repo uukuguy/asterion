@@ -1289,6 +1289,69 @@ class ReproductionCliTests(unittest.TestCase):
                     authorize.assert_not_called()
                     execute.assert_not_called()
 
+    def test_execute_rejects_partial_selection_scopes_before_authorization(self) -> None:
+        cases = (
+            ("beir.arguana.main.random50", "beir.arguana"),
+            ("browsecomp-plus.analysis.n100", "bcplus.openai"),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            from asterion.dci.paper_benchmarks import resolve_paper_benchmark
+
+            for scope_id, batch_profile in cases:
+                with self.subTest(scope=scope_id):
+                    benchmark = resolve_paper_benchmark(
+                        "beir.arguana"
+                        if batch_profile == "beir.arguana"
+                        else "browsecomp-plus"
+                    )
+                    output_root = root / scope_id.replace(".", "_")
+                    stdout = io.StringIO()
+                    stderr = io.StringIO()
+                    with patch(
+                        "asterion.dci.cli._load_batch_profiles",
+                        return_value={
+                            batch_profile: {
+                                "dataset": benchmark.dataset_path,
+                                "output_root": f"outputs/{scope_id}",
+                                "corpus": benchmark.corpus_path,
+                                "mode": benchmark.mode,
+                                "provider": "openai",
+                                "model": "gpt-5.4-nano",
+                                "tools": "read,bash",
+                                "max_turns": 300,
+                                "max_concurrency": 1,
+                                "runtime_context_level": "level3",
+                                "thinking_level": "high",
+                                "node_max_old_space_size_mb": 4096,
+                            }
+                        },
+                    ), patch(
+                        "asterion.dci.cli._preflight_benchmark_host_inputs"
+                    ), patch(
+                        "asterion.dci.cli._preflight_scope_selected_ids",
+                        return_value=("q1",),
+                    ), patch(
+                        "asterion.dci.cli.validate_dci_run_request"
+                    ), patch(
+                        "asterion.dci.cli.validate_benchmark_metric_selection"
+                    ), patch(
+                        "asterion.dci.experiment_profiles.authorize_full_execution"
+                    ) as authorize, patch(
+                        "asterion.dci.benchmark.execute_authorized_reproduction",
+                        create=True,
+                    ) as execute:
+                        code = dci_main(
+                            self._execute_argv(output_root, scopes=(scope_id,)),
+                            repo_root=root,
+                            stdout=stdout,
+                            stderr=stderr,
+                        )
+                    self.assertEqual(code, 2)
+                    self.assertFalse(output_root.exists())
+                    authorize.assert_not_called()
+                    execute.assert_not_called()
+
     def test_execute_rejects_profile_incompatible_scope_before_output_creation(
         self,
     ) -> None:
@@ -1450,6 +1513,89 @@ class ReproductionCliTests(unittest.TestCase):
         self.assertIn("Judge operations performed: 0", stdout.getvalue())
         self.assertNotIn(authority._issuance_token, combined)
         self.assertNotIn(repr(authority), combined)
+
+    def test_execute_output_reports_actual_operations_once(self) -> None:
+        scopes = ("bright.biology.main.full",)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            output_root = root / "reproduction"
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with patch(
+                "asterion.dci.cli._load_batch_profiles",
+                return_value=self._fixture_batch_profiles(root),
+            ), patch(
+                "asterion.dci.cli._preflight_scope_selected_ids",
+                return_value=("q1",),
+            ), patch(
+                "asterion.dci.cli.validate_dci_run_request"
+            ), patch(
+                "asterion.dci.benchmark.execute_authorized_reproduction",
+                return_value={
+                    "schema": "dci.paper-reproduction-result/v1",
+                    "operation_counts": {"agent": 3, "judge": 1, "total": 4},
+                    "outputs": [{"scope_id": scopes[0]}],
+                },
+                create=True,
+            ):
+                code = dci_main(
+                    self._execute_argv(output_root, scopes=scopes),
+                    repo_root=root,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+        self.assertEqual(code, 0, stderr.getvalue())
+        self.assertEqual(stdout.getvalue().count("Agent operations performed:"), 1)
+        self.assertEqual(stdout.getvalue().count("Judge operations performed:"), 1)
+        self.assertIn("Agent operations performed: 3", stdout.getvalue())
+        self.assertIn("Judge operations performed: 1", stdout.getvalue())
+        self.assertNotIn("Agent operations performed: 0", stdout.getvalue())
+        self.assertNotIn("Judge operations performed: 0", stdout.getvalue())
+
+    def test_execute_cancels_authority_when_child_root_lookup_fails(self) -> None:
+        captured: dict[str, FullExecutionAuthorization] = {}
+        original_authorize = authorize_full_execution
+        scope_id = "bright.biology.main.full"
+
+        def authorize_spy(*args: object, **kwargs: object) -> FullExecutionAuthorization:
+            authority = original_authorize(*args, **kwargs)
+            captured["authority"] = authority
+            return authority
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            output_root = root / "reproduction"
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with patch(
+                "asterion.dci.cli._load_batch_profiles",
+                return_value=self._fixture_batch_profiles(root),
+            ), patch(
+                "asterion.dci.cli._preflight_scope_selected_ids",
+                return_value=("q1",),
+            ), patch(
+                "asterion.dci.cli.validate_dci_run_request"
+            ), patch(
+                "asterion.dci.experiment_profiles.authorize_full_execution",
+                side_effect=authorize_spy,
+            ), patch(
+                "asterion.dci.experiment_profiles.authorized_scope_output_root",
+                side_effect=ExperimentAuthorizationError("safe failure"),
+            ):
+                code = dci_main(
+                    self._execute_argv(output_root, scopes=(scope_id,)),
+                    repo_root=root,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+            self.assertEqual(code, 2)
+            with self.assertRaisesRegex(
+                ExperimentAuthorizationError,
+                "inactive|cancelled",
+            ):
+                reserve_full_execution_operation(
+                    captured["authority"], scope_id, "agent"
+                )
 
 
 class LegacyFullAuthorizationTests(unittest.TestCase):
