@@ -148,15 +148,18 @@ uv run asterion-dci paper reproduce \
   --output-root ./evidence/reproduction
 ```
 
-完整执行必须显式 opt in，且每个 bound 都是必填项；scope 必须逐个重复传入，并且
-Task 8.3 当前要求选择必须覆盖 profile 的完整 method/target closure。当前
-`paper-reference/pi` profile 含有 unavailable/partial closure，所以没有可直接运行的
-完整执行示例。
+执行必须显式 opt in，且每个 bound 都是必填项；`--scope` 必须逐个重复传入，整体
+按字典序排序，且每个 scope 都必须属于所选 profile、来源为 `paper-reference`、执行类为
+`paper-full`、launcher 可用、存在 batch profile，并且 `selection_count == source_count`。
+满足这些条件的有界 scope 子集可以执行，但不能表述为 whole-profile 或 published-score
+复现。当前 profile 的完整 method/target closure 仍含有 unavailable/partial scope，所以
+`paper_full_executable=false` 仍是当前真值。
 
 执行 synopsis：`uv run asterion-dci paper reproduce --profile PROFILE --scope
-SCOPE ... --output-root OUTPUT_ROOT --execute --max-agent-operations N
---max-judge-operations N --max-cost-usd USD --max-agent-cost-per-operation-usd
-USD --max-judge-cost-per-operation-usd USD`。所有 `N` 和 `USD` 都必须是正数。
+AVAILABLE_FULL_SCOPE ... --output-root OUTPUT_ROOT --execute --max-agent-operations
+N --max-judge-operations N --max-cost-usd USD --max-agent-cost-per-operation-usd
+USD --max-judge-cost-per-operation-usd USD`。所有 `AVAILABLE_FULL_SCOPE` 必须显式、
+排序且可用；所有 `N` 和 `USD` 都必须是正数。
 
 预算值只限制已显式授权的同进程执行；它们本身从不授予 authority。执行前会先解析精确
 dataset、corpus、runtime 和 Judge 输入，preflight 失败不会创建输出目录或签发完整执行授权。
