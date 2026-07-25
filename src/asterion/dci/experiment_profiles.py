@@ -183,6 +183,10 @@ class ExperimentProfile:
         }
 
 
+class ExperimentAuthorizationError(RuntimeError):
+    """Safe public failure for invalid full-execution authority or budget."""
+
+
 @dataclass(frozen=True, slots=True, init=False)
 class FullExecutionAuthorization:
     profile_id: str
@@ -191,15 +195,35 @@ class FullExecutionAuthorization:
     experiment_scopes_sha256: str
     authorized_scope_ids: tuple[str, ...]
     selected_ids_sha256: tuple[str, ...]
-    output_root: Path
+    output_root: Path = field(repr=False)
     output_root_device: int
     output_root_inode: int
     estimated_budget_usd: float
     invocation_authorized: bool
+    max_agent_operations: int
+    max_judge_operations: int
+    max_cost_usd: float
+    max_agent_cost_per_operation_usd: float
+    max_judge_cost_per_operation_usd: float
     _issuance_token: str = field(repr=False, compare=False)
 
     def __init__(self, *_args: object, **_kwargs: object) -> None:
         raise TypeError("FullExecutionAuthorization is issued only by authorize_full_execution")
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class FullExecutionReservation:
+    scope_id: str
+    kind: str
+    upper_bound_usd: float
+    _authorization_token: str = field(repr=False, compare=False)
+    _reservation_token: str = field(repr=False, compare=False)
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        raise TypeError(
+            "FullExecutionReservation is issued only by "
+            "reserve_full_execution_operation"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,14 +240,44 @@ class _AuthorizationSnapshot:
     output_root_inode: int
     estimated_budget_usd: float
     invocation_authorized: bool
+    max_agent_operations: int
+    max_judge_operations: int
+    max_cost_usd: float
+    max_agent_cost_per_operation_usd: float
+    max_judge_cost_per_operation_usd: float
     issuance_token: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ScopeOutputIdentity:
+    path: Path
+    device: int
+    inode: int
+
+
+@dataclass(slots=True)
+class _ReservationRecord:
+    issuer: FullExecutionReservation
+    scope_id: str
+    kind: str
+    upper_bound_usd: float
 
 
 @dataclass(slots=True)
 class _AuthorizationRecord:
     issuer: FullExecutionAuthorization
     snapshot: _AuthorizationSnapshot
+    scope_outputs: dict[str, _ScopeOutputIdentity]
     consumed_scopes: set[str]
+    active_reservations: dict[str, _ReservationRecord]
+    reserved_agent_operations: int
+    reserved_judge_operations: int
+    completed_agent_operations: int
+    completed_judge_operations: int
+    reserved_cost_usd: float
+    actual_cost_usd: float
+    cancelled: bool
+    finalized: bool
 
 
 _AUTHORIZATION_REGISTRY: dict[str, _AuthorizationRecord] = {}
@@ -616,50 +670,226 @@ def _authorization_matches_snapshot(
         and authorization.output_root_inode == snapshot.output_root_inode
         and authorization.estimated_budget_usd == snapshot.estimated_budget_usd
         and authorization.invocation_authorized is snapshot.invocation_authorized
+        and authorization.max_agent_operations == snapshot.max_agent_operations
+        and authorization.max_judge_operations == snapshot.max_judge_operations
+        and authorization.max_cost_usd == snapshot.max_cost_usd
+        and authorization.max_agent_cost_per_operation_usd
+        == snapshot.max_agent_cost_per_operation_usd
+        and authorization.max_judge_cost_per_operation_usd
+        == snapshot.max_judge_cost_per_operation_usd
         and authorization._issuance_token == snapshot.issuance_token
     )
 
 
-def authorize_full_execution(
-    profile_id: str,
-    output_root: Path,
-    estimated_budget_usd: float,
-    invocation_authorized: bool,
+def _positive_operation_limit(value: object) -> bool:
+    return type(value) is int and value > 0
+
+
+def _positive_usd_limit(value: object) -> bool:
+    return (
+        type(value) in {int, float}
+        and math.isfinite(float(value))
+        and float(value) > 0
+    )
+
+
+def _private_scope_output_root(parent: Path, scope_id: str) -> _ScopeOutputIdentity:
+    name = hashlib.sha256(scope_id.encode("utf-8")).hexdigest()
+    child = parent / name
+    try:
+        child.mkdir(mode=0o700)
+        child.chmod(0o700)
+        device, inode = _private_root_identity(child)
+    except (OSError, ValueError):
+        raise ExperimentAuthorizationError(
+            "full execution output root identity is invalid"
+        ) from None
+    return _ScopeOutputIdentity(child, device, inode)
+
+
+def _validate_authorization(
+    authorization: object,
     *,
-    preflight_profile_sha256: str,
-    preflight_dataset_inventory_sha256: str,
-    preflight_experiment_scopes_sha256: str,
-    preflight_scope_ids: Sequence[str],
-    preflight_selected_ids_sha256: Sequence[str],
+    require_active: bool = True,
+) -> _AuthorizationRecord:
+    if not isinstance(authorization, FullExecutionAuthorization):
+        raise ExperimentAuthorizationError("full execution authorization is invalid")
+    token = getattr(authorization, "_issuance_token", None)
+    record = _AUTHORIZATION_REGISTRY.get(token)
+    if (
+        record is None
+        or record.issuer is not authorization
+        or not _authorization_matches_snapshot(authorization, record.snapshot)
+    ):
+        raise ExperimentAuthorizationError("full execution authorization is invalid")
+    snapshot = record.snapshot
+    try:
+        current_profile = resolve_experiment_profile(snapshot.profile_id)
+    except (RuntimeError, ValueError):
+        raise ExperimentAuthorizationError("full execution authorization is invalid") from None
+    if (
+        current_profile.identity_sha256 != snapshot.profile_sha256
+        or current_profile.dataset_inventory_sha256
+        != snapshot.dataset_inventory_sha256
+        or current_profile.experiment_scopes_sha256
+        != snapshot.experiment_scopes_sha256
+        or snapshot.dataset_inventory_sha256 != paper_benchmark_inventory_sha256()
+        or snapshot.experiment_scopes_sha256 != paper_experiment_scopes_sha256()
+        or snapshot.invocation_authorized is not True
+    ):
+        raise ExperimentAuthorizationError("full execution authorization is invalid")
+    try:
+        device, inode = _private_root_identity(snapshot.output_root)
+    except ValueError:
+        raise ExperimentAuthorizationError(
+            "full execution output root identity is invalid"
+        ) from None
+    if (device, inode) != (
+        snapshot.output_root_device,
+        snapshot.output_root_inode,
+    ):
+        raise ExperimentAuthorizationError(
+            "full execution output root identity changed"
+        )
+    if require_active and (record.cancelled or record.finalized):
+        raise ExperimentAuthorizationError("full execution authorization is inactive")
+    return record
+
+
+def _validate_scope_output(
+    record: _AuthorizationRecord, scope_id: object
+) -> _ScopeOutputIdentity:
+    if type(scope_id) is not str or scope_id not in record.snapshot.authorized_scope_ids:
+        raise ExperimentAuthorizationError("full execution authorization scope is invalid")
+    output = record.scope_outputs.get(scope_id)
+    if output is None:
+        raise ExperimentAuthorizationError("full execution authorization scope is invalid")
+    try:
+        device, inode = _private_root_identity(output.path)
+    except ValueError:
+        raise ExperimentAuthorizationError(
+            "full execution scope output identity is invalid"
+        ) from None
+    if (device, inode) != (output.device, output.inode):
+        raise ExperimentAuthorizationError(
+            "full execution scope output identity changed"
+        )
+    return output
+
+
+def authorize_full_execution(
+    profile_id: str | None = None,
+    output_root: Path | None = None,
+    estimated_budget_usd: float | None = None,
+    invocation_authorized: bool = False,
+    *,
+    profile: ExperimentProfile | None = None,
+    scope_ids: Sequence[str] | None = None,
+    max_agent_operations: int | None = None,
+    max_judge_operations: int | None = None,
+    max_cost_usd: float | None = None,
+    max_agent_cost_per_operation_usd: float | None = None,
+    max_judge_cost_per_operation_usd: float | None = None,
+    preflight_profile_sha256: str | None = None,
+    preflight_dataset_inventory_sha256: str | None = None,
+    preflight_experiment_scopes_sha256: str | None = None,
+    preflight_scope_ids: Sequence[str] | None = None,
+    preflight_selected_ids_sha256: Sequence[str] | None = None,
     invocation_provider: str | None = None,
     invocation_model: str | None = None,
     cache_only: bool = False,
 ) -> FullExecutionAuthorization:
-    profile = resolve_experiment_profile(profile_id, invocation_provider=invocation_provider, invocation_model=invocation_model)
-    profile_sha256 = experiment_profile_sha256(
-        profile_id,
-        invocation_provider=invocation_provider,
-        invocation_model=invocation_model,
-    )
+    if output_root is None:
+        raise ExperimentAuthorizationError("full execution output root is invalid")
+    legacy = profile is None
+    if profile is None:
+        if type(profile_id) is not str:
+            raise ExperimentAuthorizationError("full execution profile is invalid")
+        profile = resolve_experiment_profile(
+            profile_id,
+            invocation_provider=invocation_provider,
+            invocation_model=invocation_model,
+        )
+        profile_sha256 = experiment_profile_sha256(
+            profile_id,
+            invocation_provider=invocation_provider,
+            invocation_model=invocation_model,
+        )
+        scope_ids = preflight_scope_ids
+        selected_digests = preflight_selected_ids_sha256
+        max_cost_usd = estimated_budget_usd
+        max_agent_operations = (
+            1 if max_agent_operations is None else max_agent_operations
+        )
+        max_judge_operations = (
+            1 if max_judge_operations is None else max_judge_operations
+        )
+        max_agent_cost_per_operation_usd = (
+            float(max_cost_usd)
+            if max_agent_cost_per_operation_usd is None and max_cost_usd is not None
+            else max_agent_cost_per_operation_usd
+        )
+        max_judge_cost_per_operation_usd = (
+            float(max_cost_usd)
+            if max_judge_cost_per_operation_usd is None and max_cost_usd is not None
+            else max_judge_cost_per_operation_usd
+        )
+    else:
+        if type(profile) is not ExperimentProfile:
+            raise ExperimentAuthorizationError("full execution profile is invalid")
+        try:
+            expected_profile = resolve_experiment_profile(profile.profile_id)
+        except (RuntimeError, ValueError):
+            raise ExperimentAuthorizationError("full execution profile is invalid") from None
+        if profile.identity_sha256 != expected_profile.identity_sha256:
+            raise ExperimentAuthorizationError("full execution profile is invalid")
+        profile_sha256 = profile.identity_sha256
+        selected_digests = tuple(
+            dict(zip(profile.scope_ids, profile.selected_ids_sha256, strict=True)).get(
+                item, ""
+            )
+            for item in (scope_ids or ())
+        )
     if invocation_authorized is not True:
-        raise ValueError("DCI full execution requires invocation authorization")
-    if isinstance(estimated_budget_usd, bool) or not isinstance(estimated_budget_usd, (int, float)) or not math.isfinite(float(estimated_budget_usd)) or float(estimated_budget_usd) < 0:
-        raise ValueError("DCI full execution budget is invalid")
-    if cache_only:
-        raise ValueError("DCI full execution cannot be authorized by cache evidence")
-    scope_ids = tuple(preflight_scope_ids)
-    selected_digests = tuple(preflight_selected_ids_sha256)
-    expected = dict(zip(profile.scope_ids, profile.selected_ids_sha256, strict=True))
-    if (
-        preflight_profile_sha256 != profile_sha256
-        or preflight_dataset_inventory_sha256 != profile.dataset_inventory_sha256
-        or preflight_experiment_scopes_sha256 != profile.experiment_scopes_sha256
-        or not scope_ids
-        or len(scope_ids) != len(set(scope_ids))
-        or len(scope_ids) != len(selected_digests)
-        or any(expected.get(scope_id) != digest for scope_id, digest in zip(scope_ids, selected_digests, strict=True))
+        raise ExperimentAuthorizationError(
+            "full execution requires invocation authorization"
+        )
+    if not all(
+        _positive_operation_limit(value)
+        for value in (max_agent_operations, max_judge_operations)
+    ) or not all(
+        _positive_usd_limit(value)
+        for value in (
+            max_cost_usd,
+            max_agent_cost_per_operation_usd,
+            max_judge_cost_per_operation_usd,
+        )
     ):
-        raise ValueError("DCI full execution preflight identity mismatch")
+        raise ExperimentAuthorizationError("full execution limits are invalid")
+    if cache_only:
+        raise ExperimentAuthorizationError(
+            "full execution cannot be authorized by cache evidence"
+        )
+    requested_scope_ids = tuple(scope_ids or ())
+    selected_digests = tuple(selected_digests or ())
+    expected = dict(zip(profile.scope_ids, profile.selected_ids_sha256, strict=True))
+    if not requested_scope_ids:
+        raise ExperimentAuthorizationError("full execution requires explicit scopes")
+    if (
+        (legacy and preflight_profile_sha256 != profile_sha256)
+        or (legacy and preflight_dataset_inventory_sha256 != profile.dataset_inventory_sha256)
+        or (legacy and preflight_experiment_scopes_sha256 != profile.experiment_scopes_sha256)
+        or len(requested_scope_ids) != len(set(requested_scope_ids))
+        or tuple(sorted(requested_scope_ids)) != requested_scope_ids
+        or len(requested_scope_ids) != len(selected_digests)
+        or any(
+            expected.get(scope_id) != digest
+            for scope_id, digest in zip(
+                requested_scope_ids, selected_digests, strict=True
+            )
+        )
+    ):
+        raise ExperimentAuthorizationError("full execution authorization is invalid")
     private_root = _fresh_private_output_root(output_root)
     device, inode = _private_root_identity(private_root)
     token = secrets.token_hex(32)
@@ -668,13 +898,18 @@ def authorize_full_execution(
         profile_sha256=profile_sha256,
         dataset_inventory_sha256=profile.dataset_inventory_sha256,
         experiment_scopes_sha256=profile.experiment_scopes_sha256,
-        authorized_scope_ids=scope_ids,
+        authorized_scope_ids=requested_scope_ids,
         selected_ids_sha256=selected_digests,
         output_root=private_root,
         output_root_device=device,
         output_root_inode=inode,
-        estimated_budget_usd=float(estimated_budget_usd),
+        estimated_budget_usd=float(max_cost_usd),
         invocation_authorized=True,
+        max_agent_operations=max_agent_operations,
+        max_judge_operations=max_judge_operations,
+        max_cost_usd=float(max_cost_usd),
+        max_agent_cost_per_operation_usd=float(max_agent_cost_per_operation_usd),
+        max_judge_cost_per_operation_usd=float(max_judge_cost_per_operation_usd),
         _issuance_token=token,
     )
     snapshot = _AuthorizationSnapshot(
@@ -682,19 +917,42 @@ def authorize_full_execution(
         profile_sha256=profile_sha256,
         dataset_inventory_sha256=profile.dataset_inventory_sha256,
         experiment_scopes_sha256=profile.experiment_scopes_sha256,
-        authorized_scope_ids=scope_ids,
+        authorized_scope_ids=requested_scope_ids,
         selected_ids_sha256=selected_digests,
-        scope_selections=tuple(zip(scope_ids, selected_digests, strict=True)),
+        scope_selections=tuple(
+            zip(requested_scope_ids, selected_digests, strict=True)
+        ),
         output_root=private_root,
         output_root_device=device,
         output_root_inode=inode,
-        estimated_budget_usd=float(estimated_budget_usd),
+        estimated_budget_usd=float(max_cost_usd),
         invocation_authorized=True,
+        max_agent_operations=max_agent_operations,
+        max_judge_operations=max_judge_operations,
+        max_cost_usd=float(max_cost_usd),
+        max_agent_cost_per_operation_usd=float(max_agent_cost_per_operation_usd),
+        max_judge_cost_per_operation_usd=float(max_judge_cost_per_operation_usd),
         issuance_token=token,
     )
+    scope_outputs = {
+        scope_id: _private_scope_output_root(private_root, scope_id)
+        for scope_id in requested_scope_ids
+    }
     with _AUTHORIZATION_LOCK:
         _AUTHORIZATION_REGISTRY[token] = _AuthorizationRecord(
-            authorization, snapshot, set()
+            authorization,
+            snapshot,
+            scope_outputs,
+            set(),
+            {},
+            0,
+            0,
+            0,
+            0,
+            0.0,
+            0.0,
+            False,
+            False,
         )
     return authorization
 
@@ -704,33 +962,163 @@ def consume_full_execution_authorization(
 ) -> None:
     """Consume one exact scope capability after revalidating its private root."""
 
-    if not isinstance(authorization, FullExecutionAuthorization):
-        raise ValueError("DCI full execution authorization is invalid")
-    token = getattr(authorization, "_issuance_token", None)
     with _AUTHORIZATION_LOCK:
-        record = _AUTHORIZATION_REGISTRY.get(token)
-        if (
-            record is None
-            or record.issuer is not authorization
-            or not _authorization_matches_snapshot(authorization, record.snapshot)
-        ):
-            raise ValueError("DCI full execution authorization is invalid")
-        issued = record.snapshot
-        if (
-            issued.invocation_authorized is not True
-            or scope_id not in issued.authorized_scope_ids
-            or issued.dataset_inventory_sha256 != paper_benchmark_inventory_sha256()
-            or issued.experiment_scopes_sha256 != paper_experiment_scopes_sha256()
-            or not math.isfinite(issued.estimated_budget_usd)
-            or issued.estimated_budget_usd < 0
-        ):
-            raise ValueError("DCI full execution authorization scope is invalid")
+        record = _validate_authorization(authorization)
+        _validate_scope_output(record, scope_id)
         if scope_id in record.consumed_scopes:
-            raise ValueError("DCI full execution authorization replay is invalid")
-        device, inode = _private_root_identity(issued.output_root)
-        if (device, inode) != (issued.output_root_device, issued.output_root_inode):
-            raise ValueError("DCI full execution output root identity changed")
+            raise ExperimentAuthorizationError(
+                "full execution authorization replay is invalid"
+            )
         record.consumed_scopes.add(scope_id)
+
+
+def authorized_scope_output_root(
+    authority: FullExecutionAuthorization, scope_id: str
+) -> Path:
+    """Return an exact descriptor-verified private root for one selected scope."""
+
+    with _AUTHORIZATION_LOCK:
+        record = _validate_authorization(authority)
+        output = _validate_scope_output(record, scope_id)
+        if scope_id in record.consumed_scopes:
+            raise ExperimentAuthorizationError(
+                "full execution authorization replay is invalid"
+            )
+        return output.path
+
+
+def _issue_reservation(**values: object) -> FullExecutionReservation:
+    reservation = object.__new__(FullExecutionReservation)
+    for name, value in values.items():
+        object.__setattr__(reservation, name, value)
+    return reservation
+
+
+def _reservation_for(
+    authority: object, reservation: object, *, allow_cancelled: bool = False
+) -> tuple[_AuthorizationRecord, _ReservationRecord]:
+    record = _validate_authorization(authority, require_active=not allow_cancelled)
+    if not isinstance(reservation, FullExecutionReservation):
+        raise ExperimentAuthorizationError("full execution reservation is invalid")
+    token = getattr(reservation, "_reservation_token", None)
+    item = record.active_reservations.get(token)
+    if (
+        item is None
+        or item.issuer is not reservation
+        or reservation._authorization_token != record.snapshot.issuance_token
+        or reservation.scope_id != item.scope_id
+        or reservation.kind != item.kind
+        or reservation.upper_bound_usd != item.upper_bound_usd
+    ):
+        raise ExperimentAuthorizationError("full execution reservation is invalid")
+    return record, item
+
+
+def reserve_full_execution_operation(
+    authority: FullExecutionAuthorization, scope_id: str, kind: str
+) -> FullExecutionReservation:
+    """Atomically reserve a bounded agent or judge operation."""
+
+    with _AUTHORIZATION_LOCK:
+        record = _validate_authorization(authority)
+        _validate_scope_output(record, scope_id)
+        if kind == "agent":
+            reserved = record.reserved_agent_operations
+            completed = record.completed_agent_operations
+            limit = record.snapshot.max_agent_operations
+            upper_bound = record.snapshot.max_agent_cost_per_operation_usd
+            label = "Agent"
+        elif kind == "judge":
+            reserved = record.reserved_judge_operations
+            completed = record.completed_judge_operations
+            limit = record.snapshot.max_judge_operations
+            upper_bound = record.snapshot.max_judge_cost_per_operation_usd
+            label = "Judge"
+        else:
+            raise ExperimentAuthorizationError("full execution operation kind is invalid")
+        if reserved + completed >= limit:
+            raise ExperimentAuthorizationError(
+                f"full execution {label} operation budget is exhausted"
+            )
+        projected = (
+            record.actual_cost_usd + record.reserved_cost_usd + upper_bound
+        )
+        if projected > record.snapshot.max_cost_usd:
+            raise ExperimentAuthorizationError("full execution USD budget is exhausted")
+        token = secrets.token_hex(32)
+        reservation = _issue_reservation(
+            scope_id=scope_id,
+            kind=kind,
+            upper_bound_usd=upper_bound,
+            _authorization_token=record.snapshot.issuance_token,
+            _reservation_token=token,
+        )
+        record.active_reservations[token] = _ReservationRecord(
+            reservation, scope_id, kind, upper_bound
+        )
+        if kind == "agent":
+            record.reserved_agent_operations += 1
+        else:
+            record.reserved_judge_operations += 1
+        record.reserved_cost_usd += upper_bound
+        return reservation
+
+
+def _settle_reservation(
+    record: _AuthorizationRecord,
+    reservation: FullExecutionReservation,
+    item: _ReservationRecord,
+    actual_cost_usd: float,
+) -> None:
+    del record.active_reservations[reservation._reservation_token]
+    record.reserved_cost_usd -= item.upper_bound_usd
+    if item.kind == "agent":
+        record.reserved_agent_operations -= 1
+        record.completed_agent_operations += 1
+    else:
+        record.reserved_judge_operations -= 1
+        record.completed_judge_operations += 1
+    record.actual_cost_usd += actual_cost_usd
+
+
+def reconcile_full_execution_operation(
+    authority: FullExecutionAuthorization,
+    reservation: FullExecutionReservation,
+    actual_cost_usd: float,
+) -> None:
+    """Record a completed operation's bounded actual spend exactly once."""
+
+    if not _positive_usd_limit(actual_cost_usd) and actual_cost_usd != 0.0:
+        raise ExperimentAuthorizationError("full execution actual cost is invalid")
+    if type(actual_cost_usd) is bool or not math.isfinite(float(actual_cost_usd)):
+        raise ExperimentAuthorizationError("full execution actual cost is invalid")
+    with _AUTHORIZATION_LOCK:
+        record, item = _reservation_for(authority, reservation)
+        if actual_cost_usd > item.upper_bound_usd:
+            raise ExperimentAuthorizationError("full execution actual cost is invalid")
+        _settle_reservation(record, reservation, item, float(actual_cost_usd))
+
+
+def fail_full_execution_operation(
+    authority: FullExecutionAuthorization,
+    reservation: FullExecutionReservation,
+) -> None:
+    """Conservatively settle a failed operation and close the authority."""
+
+    with _AUTHORIZATION_LOCK:
+        record, item = _reservation_for(authority, reservation)
+        _settle_reservation(record, reservation, item, item.upper_bound_usd)
+        record.cancelled = True
+
+
+def cancel_full_execution_authorization(
+    authority: FullExecutionAuthorization,
+) -> None:
+    """Prevent future reservations while retaining every active spend bound."""
+
+    with _AUTHORIZATION_LOCK:
+        record = _validate_authorization(authority)
+        record.cancelled = True
 
 
 def _consumed_authorized_output_identity(
