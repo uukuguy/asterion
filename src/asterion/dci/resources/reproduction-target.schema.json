@@ -8,12 +8,21 @@
     "schema": {"const": "dci.reproduction-target/v1"},
     "targets": {
       "type": "array",
-      "minItems": 1,
-      "maxItems": 1,
+      "minItems": 12,
+      "uniqueItems": true,
       "items": {"$ref": "#/$defs/target"}
     }
   },
   "$defs": {
+    "publicId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/+@-]*$"
+    },
+    "unitOrNull": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1
+    },
     "target": {
       "type": "object",
       "additionalProperties": false,
@@ -22,26 +31,102 @@
         "profile_id",
         "source_id",
         "source_url",
+        "source_label",
+        "target_status",
+        "target_role",
+        "paper_table",
+        "paper_row",
+        "metric_contract",
+        "method_parameters",
         "agentic_search_accuracy",
         "qa_accuracy",
         "ir_ndcg_at_10",
         "dataset_targets"
       ],
       "properties": {
-        "target_id": {"const": "paper.2605.05242v1/dci-agent-cc/main"},
-        "profile_id": {"const": "paper-reference/claude-code"},
+        "target_id": {"$ref": "#/$defs/publicId"},
+        "profile_id": {
+          "enum": ["paper-reference/pi", "paper-reference/claude-code"]
+        },
         "source_id": {"const": "arxiv:2605.05242v1"},
         "source_url": {"const": "https://arxiv.org/pdf/2605.05242v1"},
-        "agentic_search_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
-        "qa_accuracy": {"type": "number", "minimum": 0, "maximum": 1},
-        "ir_ndcg_at_10": {"type": "number", "minimum": 0, "maximum": 1},
+        "source_label": {"enum": ["DCI-Agent-Lite", "DCI-Agent-CC"]},
+        "target_status": {
+          "enum": ["executable-comparable", "method-incomplete"]
+        },
+        "target_role": {
+          "enum": ["main", "tools", "context", "corpus"]
+        },
+        "paper_table": {"type": "string", "minLength": 1},
+        "paper_row": {"type": "string", "minLength": 1},
+        "metric_contract": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema", "metric_identities", "comparison_kind"],
+          "properties": {
+            "schema": {
+              "const": "dci.reproduction-target-metric-contract/v1"
+            },
+            "metric_identities": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "enum": [
+                  "llm-answer-correctness",
+                  "ndcg@10-binary-deduplicated"
+                ]
+              }
+            },
+            "comparison_kind": {
+              "enum": ["published-target", "reported-ablation"]
+            }
+          }
+        },
+        "method_parameters": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema", "values", "unreported"],
+          "properties": {
+            "schema": {"const": "dci.reproduction-target-method/v1"},
+            "values": {
+              "type": "object",
+              "additionalProperties": {
+                "type": ["string", "number", "boolean", "null"]
+              }
+            },
+            "unreported": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "agentic_search_accuracy": {"$ref": "#/$defs/unitOrNull"},
+        "qa_accuracy": {"$ref": "#/$defs/unitOrNull"},
+        "ir_ndcg_at_10": {"$ref": "#/$defs/unitOrNull"},
         "dataset_targets": {
           "type": "object",
-          "minProperties": 13,
-          "maxProperties": 13,
-          "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}
+          "additionalProperties": {"$ref": "#/$defs/unitOrNull"}
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "target_status": {"const": "executable-comparable"}
+            }
+          },
+          "then": {
+            "properties": {
+              "agentic_search_accuracy": {"type": "number"},
+              "qa_accuracy": {"type": "number"},
+              "ir_ndcg_at_10": {"type": "number"},
+              "dataset_targets": {"minProperties": 13}
+            }
+          }
+        }
+      ]
     }
   }
 }

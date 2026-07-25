@@ -77,6 +77,7 @@ from asterion.dci.judge import (
     judge_request_fingerprint,
 )
 from asterion.dci.paper_benchmarks import (
+    canonical_sha256,
     paper_scope_for_profile,
     paper_scope_for_selected_ids,
     published_scope_selected_ids,
@@ -1027,6 +1028,8 @@ def _prepare(
         }
     config: dict[str, object] = {
         "schema": "asterion.dci.batch/v1",
+        "run_id": f"batch-{dataset_digest[:16]}",
+        "product": "asterion-dci",
         "dataset": {"identity": str(dataset_identity), "sha256": dataset_digest},
         "mode": request.mode,
         "profile": request.profile,
@@ -1053,6 +1056,27 @@ def _prepare(
         "benchmark_prompt_contract": prompt_contract.contract_id,
         "benchmark_prompt_contract_sha256": prompt_contract_sha256_value,
         "prompt_resources": prompt_resources,
+    }
+    if request.profile is not None:
+        selected_profile = _resolve_prompt_profile(
+            request.profile,
+            provider=request.runtime_options.provider,
+            model=request.runtime_options.model,
+        )
+        config["profile_sha256"] = selected_profile.identity_sha256
+        config["source_identity"] = (
+            dict(selected_profile.source_identity)
+            if isinstance(selected_profile.source_identity, Mapping)
+            else selected_profile.source_identity
+        )
+    dataset_id = (
+        resolve_paper_experiment_scope(selected_scope).dataset_id
+        if selected_scope is not None
+        else "dataset.local"
+    )
+    config["dataset"] = {
+        **config["dataset"],  # type: ignore[arg-type]
+        "dataset_id": dataset_id,
     }
     if bounded_paper_selection:
         selection = {
@@ -1093,6 +1117,9 @@ def _prepare(
             "comparable": False,
             "authorization_profile": None,
         }
+    selection["selected_ids_sha256"] = canonical_sha256(
+        tuple(sorted(row.query_id for row in rows))
+    )
     config["selection"] = selection
     if resolution_config:
         config["resolution"] = resolution_config
@@ -1100,8 +1127,26 @@ def _prepare(
         config["ablation"] = ablation_identity
     if paper_authorization_identity is not None:
         config["paper_full_authorization"] = paper_authorization_identity
+    config["product_effective_config_sha256"] = canonical_sha256(
+        {
+            "product": config["product"],
+            "runtime": config["runtime"],
+            "prompt": config["benchmark_prompt_contract_sha256"],
+            "judge": config["judge_configuration_fingerprint"],
+            "corpus_identity": config["corpus_identity"],
+        }
+    )
     config["run_fingerprint"] = _fingerprint(
-        {key: value for key, value in config.items() if key not in {"judge", "judge_configuration_fingerprint"}}
+        {
+            key: value
+            for key, value in config.items()
+            if key
+            not in {
+                "judge",
+                "judge_configuration_fingerprint",
+                "product_effective_config_sha256",
+            }
+        }
     )
     config["batch_fingerprint"] = _fingerprint(config)
     documents: list[dict[str, object]] = []
@@ -1174,6 +1219,10 @@ async def _run_row(
     )
     agent_started_at: str | None = None
     agent_finished_at: str | None = None
+    agent_operation_performed = False
+    judge_operation_performed = False
+    agent_operation_cost_usd = 0.0
+    judge_operation_cost_usd = 0.0
     try:
         existing_item = query.read_optional_json("item.json")
         if existing_item is not None:
@@ -1211,14 +1260,22 @@ async def _run_row(
                 except _StaleJudgeResult:
                     pass
                 else:
+                    reused = {
+                        **existing,
+                        "agent_operation_performed": False,
+                        "judge_operation_performed": False,
+                        "agent_operation_cost_usd": 0.0,
+                        "judge_operation_cost_usd": 0.0,
+                    }
+                    query.write_json("result.json", reused)
                     _write_query_timing(
                         query,
-                        existing,
+                        reused,
                         prior_timing=prior_timing,
                         started_at=None,
                         finished_at=None,
                     )
-                    return existing
+                    return reused
             finally:
                 native.close()
 
@@ -1301,6 +1358,7 @@ async def _run_row(
                 agent_reservation = _reserve_authorized_operation(request, "agent")
                 try:
                     try:
+                        agent_operation_performed = True
                         await _run_pi_async(
                             paths,
                             native_request,
@@ -1318,6 +1376,7 @@ async def _run_row(
                             actual_cost = _validated_agent_cost(
                                 native_authority, native_dir
                             )
+                            agent_operation_cost_usd = actual_cost
                             _reconcile_authorized_operation(
                                 request, agent_reservation, actual_cost
                             )
@@ -1338,6 +1397,10 @@ async def _run_row(
                 "status": "completed",
                 "mode": request.mode,
                 "native_generation": generation,
+                "agent_operation_performed": agent_operation_performed,
+                "judge_operation_performed": judge_operation_performed,
+                "agent_operation_cost_usd": agent_operation_cost_usd,
+                "judge_operation_cost_usd": judge_operation_cost_usd,
             }
             if request.mode == "qa":
                 assert row.answer is not None
@@ -1359,8 +1422,10 @@ async def _run_row(
                             judge_contract=_judge_contract_for_request(request),
                             _directory_fd=native_authority.fd,
                         )
+                        judge_operation_performed = True
+                        actual_cost = _validated_judge_cost(verdict)
+                        judge_operation_cost_usd = actual_cost
                         if judge_reservation is not None:
-                            actual_cost = _validated_judge_cost(verdict)
                             _reconcile_authorized_operation(
                                 request, judge_reservation, actual_cost
                             )
@@ -1374,6 +1439,8 @@ async def _run_row(
                 result["judge_request_fingerprint"] = verdict[
                     "judge_request_fingerprint"
                 ]
+                result["judge_operation_performed"] = judge_operation_performed
+                result["judge_operation_cost_usd"] = judge_operation_cost_usd
             result["native_evidence_fingerprint"] = _native_evidence_fingerprint(
                 native_authority, request.mode
             )
@@ -1404,6 +1471,10 @@ async def _run_row(
             native_generation=generation,
             native_evidence_available=available,
             native_evidence_fingerprint=evidence_fingerprint,
+            agent_operation_performed=agent_operation_performed,
+            judge_operation_performed=judge_operation_performed,
+            agent_operation_cost_usd=agent_operation_cost_usd,
+            judge_operation_cost_usd=judge_operation_cost_usd,
         )
         query.write_json("result.json", result)
         raise
@@ -1425,6 +1496,10 @@ async def _run_row(
             native_generation=generation,
             native_evidence_available=available,
             native_evidence_fingerprint=evidence_fingerprint,
+            agent_operation_performed=agent_operation_performed,
+            judge_operation_performed=judge_operation_performed,
+            agent_operation_cost_usd=agent_operation_cost_usd,
+            judge_operation_cost_usd=judge_operation_cost_usd,
         )
         query.write_json("result.json", result)
         return result
@@ -1714,6 +1789,7 @@ def _legacy_nonpaper_run_fingerprint(config: dict[str, object]) -> str:
             not in {
                 "judge",
                 "judge_configuration_fingerprint",
+                "product_effective_config_sha256",
                 "run_fingerprint",
                 "batch_fingerprint",
             }
@@ -1811,16 +1887,26 @@ def _validate_config_document(
     }:
         raise DciBenchmarkError("DCI benchmark configuration evidence is invalid")
     expected = {
-        "schema", "dataset", "mode", "profile", "corpus_identity", "corpus_hint",
-        "cwd", "runtime", "conversation_features", "max_concurrency", "max_turns",
-        "analysis", "figures", "judge", "judge_configuration_fingerprint",
+        "schema", "run_id", "product", "dataset", "mode", "profile",
+        "corpus_identity", "corpus_hint", "cwd", "runtime",
+        "conversation_features", "max_concurrency", "max_turns", "analysis",
+        "figures", "judge", "judge_configuration_fingerprint",
         "ranking_metric_contract",
         "paper_ir_duplicate_handling_assumption",
         "implementation_sha256",
         "benchmark_prompt_contract", "benchmark_prompt_contract_sha256",
-        "prompt_resources", "run_fingerprint", "batch_fingerprint",
+        "prompt_resources", "product_effective_config_sha256",
+        "run_fingerprint", "batch_fingerprint",
     }
-    optional = {"resolution", "ablation", "paper_full_authorization", "selection"}
+    optional = {
+        "resolution",
+        "ablation",
+        "paper_full_authorization",
+        "selection",
+        "profile_sha256",
+        "source_identity",
+        "artifact_digests",
+    }
     if (
         not expected.issubset(value)
         or not set(value).issubset(expected | optional)
@@ -1840,6 +1926,13 @@ def _validate_config_document(
             r"[0-9a-f]{64}", str(value.get("implementation_sha256"))
         )
         is None
+        or re.fullmatch(
+            r"[0-9a-f]{64}", str(value.get("product_effective_config_sha256"))
+        )
+        is None
+        or not isinstance(value.get("run_id"), str)
+        or not value["run_id"]
+        or value.get("product") != "asterion-dci"
     ):
         raise DciBenchmarkError("DCI benchmark configuration evidence is invalid")
     paper_authorization = value.get("paper_full_authorization")
@@ -1909,9 +2002,14 @@ def _validate_config_document(
             "full_dataset",
             "comparable",
             "authorization_profile",
+            "selected_ids_sha256",
         }
         or selection.get("schema") != "asterion.dci.selection/v1"
         or type(selection.get("selected_rows")) is not int
+        or re.fullmatch(
+            r"[0-9a-f]{64}", str(selection.get("selected_ids_sha256"))
+        )
+        is None
     ):
         raise DciBenchmarkError("DCI benchmark configuration evidence is invalid")
     if isinstance(selection, dict):
@@ -1968,15 +2066,30 @@ def _validate_config_document(
                 "DCI benchmark configuration evidence is invalid"
             )
     batch_payload = dict(value)
+    batch_payload.pop("artifact_digests", None)
     batch_fingerprint = batch_payload.pop("batch_fingerprint", None)
     if batch_fingerprint != _fingerprint(batch_payload):
         raise DciBenchmarkError("DCI benchmark configuration evidence is invalid")
     run_payload = {
         key: item
         for key, item in batch_payload.items()
+        if key
+        not in {
+            "judge",
+            "judge_configuration_fingerprint",
+            "product_effective_config_sha256",
+            "run_fingerprint",
+        }
+    }
+    legacy_run_payload = {
+        key: item
+        for key, item in batch_payload.items()
         if key not in {"judge", "judge_configuration_fingerprint", "run_fingerprint"}
     }
-    if value.get("run_fingerprint") != _fingerprint(run_payload):
+    if value.get("run_fingerprint") not in {
+        _fingerprint(run_payload),
+        _fingerprint(legacy_run_payload),
+    }:
         raise DciBenchmarkError("DCI benchmark configuration evidence is invalid")
 
 
@@ -2413,6 +2526,8 @@ def _validate_result_shape(
         "native_generation", "native_evidence_fingerprint",
         "implementation_sha256", "ranking_metric_contract",
         "paper_ir_duplicate_handling_assumption",
+        "agent_operation_performed", "judge_operation_performed",
+        "agent_operation_cost_usd", "judge_operation_cost_usd",
     }
     expected = common | (
         {
@@ -2440,6 +2555,16 @@ def _validate_result_shape(
         or not isinstance(value.get("native_evidence_fingerprint"), str)
         or re.fullmatch(r"[0-9a-f]{64}", value["native_evidence_fingerprint"])
         is None
+        or type(value.get("agent_operation_performed")) is not bool
+        or type(value.get("judge_operation_performed")) is not bool
+        or not isinstance(value.get("agent_operation_cost_usd"), (int, float))
+        or isinstance(value.get("agent_operation_cost_usd"), bool)
+        or not math.isfinite(float(value["agent_operation_cost_usd"]))
+        or float(value["agent_operation_cost_usd"]) < 0
+        or not isinstance(value.get("judge_operation_cost_usd"), (int, float))
+        or isinstance(value.get("judge_operation_cost_usd"), bool)
+        or not math.isfinite(float(value["judge_operation_cost_usd"]))
+        or float(value["judge_operation_cost_usd"]) < 0
         or (mode == "qa" and type(value.get("is_correct")) is not bool)
     ):
         raise DciBenchmarkError("DCI benchmark result evidence is invalid")
@@ -2455,6 +2580,8 @@ def _validate_terminal_result(
             "native_generation", "native_evidence_available",
             "native_evidence_fingerprint", "implementation_sha256",
             "ranking_metric_contract", "paper_ir_duplicate_handling_assumption",
+            "agent_operation_performed", "judge_operation_performed",
+            "agent_operation_cost_usd", "judge_operation_cost_usd",
         }
         or value.get("schema") != "asterion.dci.batch-result/v1"
         or value.get("query_id") != item.get("query_id")
@@ -2484,6 +2611,10 @@ def _validate_terminal_result(
                 value.get("native_generation") is not None
                 or value.get("native_evidence_available") is not False
                 or value.get("native_evidence_fingerprint") is not None
+                or value.get("agent_operation_performed") is not False
+                or value.get("judge_operation_performed") is not False
+                or value.get("agent_operation_cost_usd") != 0.0
+                or value.get("judge_operation_cost_usd") != 0.0
             )
         )
         or (
@@ -2498,6 +2629,16 @@ def _validate_terminal_result(
             value.get("native_evidence_available") is False
             and value.get("native_evidence_fingerprint") is not None
         )
+        or type(value.get("agent_operation_performed")) is not bool
+        or type(value.get("judge_operation_performed")) is not bool
+        or not isinstance(value.get("agent_operation_cost_usd"), (int, float))
+        or isinstance(value.get("agent_operation_cost_usd"), bool)
+        or not math.isfinite(float(value["agent_operation_cost_usd"]))
+        or float(value["agent_operation_cost_usd"]) < 0
+        or not isinstance(value.get("judge_operation_cost_usd"), (int, float))
+        or isinstance(value.get("judge_operation_cost_usd"), bool)
+        or not math.isfinite(float(value["judge_operation_cost_usd"]))
+        or float(value["judge_operation_cost_usd"]) < 0
     ):
         raise DciBenchmarkError("DCI benchmark terminal result is invalid")
 
@@ -2706,6 +2847,10 @@ def _failed_result(
     native_generation: str | None = None,
     native_evidence_available: bool = False,
     native_evidence_fingerprint: str | None = None,
+    agent_operation_performed: bool = False,
+    judge_operation_performed: bool = False,
+    agent_operation_cost_usd: float = 0.0,
+    judge_operation_cost_usd: float = 0.0,
 ) -> dict[str, object]:
     return {
         "schema": "asterion.dci.batch-result/v1",
@@ -2720,6 +2865,10 @@ def _failed_result(
         "native_generation": native_generation,
         "native_evidence_available": native_evidence_available,
         "native_evidence_fingerprint": native_evidence_fingerprint,
+        "agent_operation_performed": agent_operation_performed,
+        "judge_operation_performed": judge_operation_performed,
+        "agent_operation_cost_usd": agent_operation_cost_usd,
+        "judge_operation_cost_usd": judge_operation_cost_usd,
     }
 
 
@@ -2761,7 +2910,15 @@ def _publish_aggregates(
         input_snapshots=input_snapshots,
         resolution_config=resolution_config if include_analysis else None,
     )
+    reproduction_totals = _publish_reproduction_evidence(
+        rows=rows,
+        results=ordered,
+        metrics=metrics,
+        request=request,
+        authorities=authorities,
+    )
     summary = aggregate_results(metrics)
+    summary["reproduction_totals"] = reproduction_totals
     summary["provenance"] = {
         "implementation_sha256": implementation_sha256,
         "ranking_metric_contract": _metric_contract_for_request(request),
@@ -2788,6 +2945,158 @@ def _publish_aggregates(
                 directory.write_bytes(leaf, value)
             finally:
                 directory.close()
+    _publish_artifact_digest_inventory(lock, ordered)
+
+
+def _metric_number(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    result = float(value)
+    return result if math.isfinite(result) else 0.0
+
+
+def _metric_count(value: object) -> int:
+    number = _metric_number(value)
+    if number < 0 or not number.is_integer():
+        raise DciBenchmarkError("DCI benchmark reproduction evidence is invalid")
+    return int(number)
+
+
+def _publish_reproduction_evidence(
+    *,
+    rows: tuple[BenchmarkRow, ...],
+    results: list[dict[str, object]],
+    metrics: list[dict[str, Any]],
+    request: BenchmarkRequest,
+    authorities: dict[int, _RowAuthority],
+) -> dict[str, object]:
+    if len(results) > len(rows):
+        raise DciBenchmarkError("DCI benchmark reproduction evidence is invalid")
+    result_ids = {str(result.get("query_id")) for result in results}
+    metric_by_id: dict[str, dict[str, Any]] = {}
+    for metric in metrics:
+        query_id = str(metric.get("query_id"))
+        if query_id in metric_by_id or query_id not in result_ids:
+            raise DciBenchmarkError("DCI benchmark reproduction evidence is invalid")
+        metric_by_id[query_id] = metric
+    totals = {
+        "agent_operations": 0,
+        "judge_operations": 0,
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "cost_usd": 0.0,
+    }
+    for index, result in enumerate(results):
+        query_id = str(result.get("query_id"))
+        metric = metric_by_id.get(query_id)
+        if metric is None:
+            if result.get("status") == "completed":
+                metric = {
+                    "query_id": query_id,
+                    "is_correct": result.get("is_correct"),
+                    "ndcg_at_10": result.get("ndcg_at_10"),
+                }
+            else:
+                metric = {}
+        if index not in authorities:
+            raise DciBenchmarkError("DCI benchmark reproduction evidence is invalid")
+        agent = metric.get("agent_usage")
+        judge = metric.get("judge_usage")
+        judge_cost = metric.get("judge_cost_estimate_usd")
+        agent_usage = agent if isinstance(agent, Mapping) else {}
+        judge_usage = judge if isinstance(judge, Mapping) else {}
+        judge_costs = judge_cost if isinstance(judge_cost, Mapping) else {}
+        agent_performed = result.get("agent_operation_performed")
+        judge_performed = result.get("judge_operation_performed")
+        if type(agent_performed) is not bool or type(judge_performed) is not bool:
+            raise DciBenchmarkError("DCI benchmark reproduction evidence is invalid")
+        agent_input_tokens = _metric_count(agent_usage.get("input_tokens"))
+        judge_input_tokens = _metric_count(judge_usage.get("input_tokens"))
+        cached_tokens = (
+            _metric_count(agent_usage.get("cache_read_tokens"))
+            + _metric_count(agent_usage.get("cache_write_tokens"))
+            if agent_performed
+            else 0
+        )
+        input_tokens = (
+            (agent_input_tokens if agent_performed else 0)
+            + (judge_input_tokens if judge_performed else 0)
+        )
+        output_tokens = (
+            (_metric_count(agent_usage.get("output_tokens")) if agent_performed else 0)
+            + (_metric_count(judge_usage.get("output_tokens")) if judge_performed else 0)
+        )
+        agent_cost = _metric_number(agent_usage.get("cost_total"))
+        judge_total_cost = _metric_number(judge_costs.get("total_cost"))
+        status = str(result.get("status"))
+        agent_operations = 1 if agent_performed else 0
+        judge_operations = 1 if judge_performed else 0
+        current_cost = (
+            (agent_cost if agent_performed else 0.0)
+            + (judge_total_cost if judge_performed else 0.0)
+        )
+        evidence = {
+            "schema": "asterion.dci.reproduction-evidence/v1",
+            "query_id": query_id,
+            "row_fingerprint": result.get("row_fingerprint"),
+            "status": status,
+            "mode": request.mode,
+            "is_correct": metric.get("is_correct"),
+            "ndcg_at_10": metric.get("ndcg_at_10"),
+            "failure_class": None if status == "completed" else "runtime.failed/v1",
+            "exclusion_reason": None,
+            "agent_operations": agent_operations,
+            "judge_operations": judge_operations,
+            "tokens": {
+                "input": input_tokens,
+                "cached_input": cached_tokens,
+                "output": output_tokens,
+            },
+            "cost_usd": current_cost,
+        }
+        query = authorities[index].query
+        query.write_json("reproduction-evidence.json", evidence)
+        totals["agent_operations"] += agent_operations
+        totals["judge_operations"] += judge_operations
+        totals["input_tokens"] += input_tokens
+        totals["cached_input_tokens"] += cached_tokens
+        totals["output_tokens"] += output_tokens
+        totals["total_tokens"] += input_tokens + cached_tokens + output_tokens
+        totals["cost_usd"] = float(totals["cost_usd"]) + current_cost
+    return totals
+
+
+def _artifact_text_digest(directory: _Directory, name: str) -> str:
+    value = directory.read_optional_text(name)
+    if value is None:
+        raise DciBenchmarkError("DCI benchmark artifact digest inventory is invalid")
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _publish_artifact_digest_inventory(
+    lock: _BatchLock, results: list[dict[str, object]]
+) -> None:
+    config = lock.read_optional_json("config.json")
+    if config is None:
+        raise DciBenchmarkError("DCI benchmark artifact digest inventory is invalid")
+    digests: dict[str, str] = {
+        "results.jsonl": _artifact_text_digest(lock, "results.jsonl"),
+        "summary.json": _artifact_text_digest(lock, "summary.json"),
+    }
+    for result in results:
+        query_id = str(result.get("query_id"))
+        query = lock.open_existing_query(query_id)
+        if query is None:
+            raise DciBenchmarkError("DCI benchmark artifact digest inventory is invalid")
+        try:
+            for name in ("item.json", "result.json", "reproduction-evidence.json"):
+                digests[f"{query_id}/{name}"] = _artifact_text_digest(query, name)
+        finally:
+            query.close()
+    config["artifact_digests"] = dict(sorted(digests.items()))
+    lock.write_json("config.json", config)
 
 
 def _analysis_results(

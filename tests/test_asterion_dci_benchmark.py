@@ -1552,10 +1552,26 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 run_benchmark(request, paths=resolve_dci_paths(root))
             with patch("asterion.dci.benchmark.run_pi_research") as run:
                 with patch("asterion.dci.benchmark.evaluate_run_directory_async") as evaluate:
-                    run_benchmark(request, paths=resolve_dci_paths(root))
+                    result = run_benchmark(request, paths=resolve_dci_paths(root))
+            evidence = json.loads(
+                (result.output_root / "q-1" / "reproduction-evidence.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            summary = json.loads(
+                (result.output_root / "summary.json").read_text(encoding="utf-8")
+            )
 
         run.assert_not_called()
         evaluate.assert_not_called()
+        self.assertEqual(evidence["agent_operations"], 0)
+        self.assertEqual(evidence["judge_operations"], 0)
+        self.assertEqual(evidence["tokens"]["input"], 0)
+        self.assertEqual(evidence["tokens"]["cached_input"], 0)
+        self.assertEqual(evidence["tokens"]["output"], 0)
+        self.assertEqual(evidence["cost_usd"], 0.0)
+        self.assertEqual(summary["reproduction_totals"]["agent_operations"], 0)
+        self.assertEqual(summary["reproduction_totals"]["judge_operations"], 0)
 
     def test_changed_judge_configuration_reevaluates_without_rerunning_pi(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

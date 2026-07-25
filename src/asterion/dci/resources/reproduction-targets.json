@@ -2,10 +2,233 @@
   "schema": "dci.reproduction-target/v1",
   "targets": [
     {
+      "target_id": "paper.2605.05242v1/context/level0",
+      "profile_id": "paper-reference/pi",
+      "source_id": "arxiv:2605.05242v1",
+      "source_url": "https://arxiv.org/pdf/2605.05242v1",
+      "source_label": "DCI-Agent-Lite",
+      "target_status": "method-incomplete",
+      "target_role": "context",
+      "paper_table": "context-ablation",
+      "paper_row": "L0",
+      "metric_contract": {
+        "schema": "dci.reproduction-target-metric-contract/v1",
+        "metric_identities": ["llm-answer-correctness"],
+        "comparison_kind": "reported-ablation"
+      },
+      "method_parameters": {
+        "schema": "dci.reproduction-target-method/v1",
+        "values": {"context_level": "level0", "tools": "read,bash"},
+        "unreported": ["ablation_launcher", "selection_seed"]
+      },
+      "agentic_search_accuracy": null,
+      "qa_accuracy": null,
+      "ir_ndcg_at_10": null,
+      "dataset_targets": {}
+    },
+    {
+      "target_id": "paper.2605.05242v1/context/level1",
+      "profile_id": "paper-reference/pi",
+      "source_id": "arxiv:2605.05242v1",
+      "source_url": "https://arxiv.org/pdf/2605.05242v1",
+      "source_label": "DCI-Agent-Lite",
+      "target_status": "method-incomplete",
+      "target_role": "context",
+      "paper_table": "context-ablation",
+      "paper_row": "L1",
+      "metric_contract": {
+        "schema": "dci.reproduction-target-metric-contract/v1",
+        "metric_identities": ["llm-answer-correctness"],
+        "comparison_kind": "reported-ablation"
+      },
+      "method_parameters": {
+        "schema": "dci.reproduction-target-method/v1",
+        "values": {"context_level": "level1", "tools": "read,bash"},
+        "unreported": ["ablation_launcher", "selection_seed"]
+      },
+      "agentic_search_accuracy": null,
+      "qa_accuracy": null,
+      "ir_ndcg_at_10": null,
+      "dataset_targets": {}
+    },
+    {
+      "target_id": "paper.2605.05242v1/context/level2",
+      "profile_id": "paper-reference/pi",
+      "source_id": "arxiv:2605.05242v1",
+      "source_url": "https://arxiv.org/pdf/2605.05242v1",
+      "source_label": "DCI-Agent-Lite",
+      "target_status": "method-incomplete",
+      "target_role": "context",
+      "paper_table": "context-ablation",
+      "paper_row": "L2",
+      "metric_contract": {
+        "schema": "dci.reproduction-target-metric-contract/v1",
+        "metric_identities": ["llm-answer-correctness"],
+        "comparison_kind": "reported-ablation"
+      },
+      "method_parameters": {
+        "schema": "dci.reproduction-target-method/v1",
+        "values": {"context_level": "level2", "tools": "read,bash"},
+        "unreported": ["ablation_launcher", "selection_seed"]
+      },
+      "agentic_search_accuracy": null,
+      "qa_accuracy": null,
+      "ir_ndcg_at_10": null,
+      "dataset_targets": {}
+    },
+    {
+      "target_id": "paper.2605.05242v1/context/level3",
+      "profile_id": "paper-reference/pi",
+      "source_id": "arxiv:2605.05242v1",
+      "source_url": "https://arxiv.org/pdf/2605.05242v1",
+      "source_label": "DCI-Agent-Lite",
+      "target_status": "method-incomplete",
+      "target_role": "context",
+      "paper_table": "context-ablation",
+      "paper_row": "L3",
+      "metric_contract": {
+        "schema": "dci.reproduction-target-metric-contract/v1",
+        "metric_identities": ["llm-answer-correctness"],
+        "comparison_kind": "reported-ablation"
+      },
+      "method_parameters": {
+        "schema": "dci.reproduction-target-method/v1",
+        "values": {"context_level": "level3", "tools": "read,bash"},
+        "unreported": ["ablation_launcher", "selection_seed"]
+      },
+      "agentic_search_accuracy": null,
+      "qa_accuracy": null,
+      "ir_ndcg_at_10": null,
+      "dataset_targets": {}
+    },
+    {
+      "target_id": "paper.2605.05242v1/context/level4",
+      "profile_id": "paper-reference/pi",
+      "source_id": "arxiv:2605.05242v1",
+      "source_url": "https://arxiv.org/pdf/2605.05242v1",
+      "source_label": "DCI-Agent-Lite",
+      "target_status": "method-incomplete",
+      "target_role": "context",
+      "paper_table": "context-ablation",
+      "paper_row": "L4",
+      "metric_contract": {
+        "schema": "dci.reproduction-target-metric-contract/v1",
+        "metric_identities": ["llm-answer-correctness"],
+        "comparison_kind": "reported-ablation"
+      },
+      "method_parameters": {
+        "schema": "dci.reproduction-target-method/v1",
+        "values": {"context_level": "level4", "tools": "read,bash"},
+        "unreported": ["ablation_launcher", "selection_seed"]
+      },
+      "agentic_search_accuracy": null,
+      "qa_accuracy": null,
+      "ir_ndcg_at_10": null,
+      "dataset_targets": {}
+    },
+    {
+      "target_id": "paper.2605.05242v1/corpus/100k",
+      "profile_id": "paper-reference/pi",
+      "source_id": "arxiv:2605.05242v1",
+      "source_url": "https://arxiv.org/pdf/2605.05242v1",
+      "source_label": "DCI-Agent-Lite",
+      "target_status": "method-incomplete",
+      "target_role": "corpus",
+      "paper_table": "corpus-scaling",
+      "paper_row": "100k",
+      "metric_contract": {
+        "schema": "dci.reproduction-target-metric-contract/v1",
+        "metric_identities": ["llm-answer-correctness"],
+        "comparison_kind": "reported-ablation"
+      },
+      "method_parameters": {
+        "schema": "dci.reproduction-target-method/v1",
+        "values": {"corpus_document_count": 100000, "tools": "read,bash"},
+        "unreported": ["fineweb_selection_seed"]
+      },
+      "agentic_search_accuracy": null,
+      "qa_accuracy": null,
+      "ir_ndcg_at_10": null,
+      "dataset_targets": {}
+    },
+    {
+      "target_id": "paper.2605.05242v1/corpus/200k",
+      "profile_id": "paper-reference/pi",
+      "source_id": "arxiv:2605.05242v1",
+      "source_url": "https://arxiv.org/pdf/2605.05242v1",
+      "source_label": "DCI-Agent-Lite",
+      "target_status": "method-incomplete",
+      "target_role": "corpus",
+      "paper_table": "corpus-scaling",
+      "paper_row": "200k",
+      "metric_contract": {
+        "schema": "dci.reproduction-target-metric-contract/v1",
+        "metric_identities": ["llm-answer-correctness"],
+        "comparison_kind": "reported-ablation"
+      },
+      "method_parameters": {
+        "schema": "dci.reproduction-target-method/v1",
+        "values": {"corpus_document_count": 200000, "tools": "read,bash"},
+        "unreported": ["fineweb_selection_seed"]
+      },
+      "agentic_search_accuracy": null,
+      "qa_accuracy": null,
+      "ir_ndcg_at_10": null,
+      "dataset_targets": {}
+    },
+    {
+      "target_id": "paper.2605.05242v1/corpus/400k",
+      "profile_id": "paper-reference/pi",
+      "source_id": "arxiv:2605.05242v1",
+      "source_url": "https://arxiv.org/pdf/2605.05242v1",
+      "source_label": "DCI-Agent-Lite",
+      "target_status": "method-incomplete",
+      "target_role": "corpus",
+      "paper_table": "corpus-scaling",
+      "paper_row": "400k",
+      "metric_contract": {
+        "schema": "dci.reproduction-target-metric-contract/v1",
+        "metric_identities": ["llm-answer-correctness"],
+        "comparison_kind": "reported-ablation"
+      },
+      "method_parameters": {
+        "schema": "dci.reproduction-target-method/v1",
+        "values": {"corpus_document_count": 400000, "tools": "read,bash"},
+        "unreported": ["fineweb_selection_seed"]
+      },
+      "agentic_search_accuracy": null,
+      "qa_accuracy": null,
+      "ir_ndcg_at_10": null,
+      "dataset_targets": {}
+    },
+    {
       "target_id": "paper.2605.05242v1/dci-agent-cc/main",
       "profile_id": "paper-reference/claude-code",
       "source_id": "arxiv:2605.05242v1",
       "source_url": "https://arxiv.org/pdf/2605.05242v1",
+      "source_label": "DCI-Agent-CC",
+      "target_status": "executable-comparable",
+      "target_role": "main",
+      "paper_table": "main-results",
+      "paper_row": "DCI-Agent-CC",
+      "metric_contract": {
+        "schema": "dci.reproduction-target-metric-contract/v1",
+        "metric_identities": [
+          "llm-answer-correctness",
+          "ndcg@10-binary-deduplicated"
+        ],
+        "comparison_kind": "published-target"
+      },
+      "method_parameters": {
+        "schema": "dci.reproduction-target-method/v1",
+        "values": {
+          "context_level": "level3",
+          "max_turns": 300,
+          "runtime": "claude-code",
+          "tools": "read,grep"
+        },
+        "unreported": []
+      },
       "agentic_search_accuracy": 0.8,
       "qa_accuracy": 0.83,
       "ir_ndcg_at_10": 0.685,
@@ -24,6 +247,94 @@
         "qa.nq": 0.78,
         "qa.triviaqa": 0.96
       }
+    },
+    {
+      "target_id": "paper.2605.05242v1/dci-agent-lite/main",
+      "profile_id": "paper-reference/pi",
+      "source_id": "arxiv:2605.05242v1",
+      "source_url": "https://arxiv.org/pdf/2605.05242v1",
+      "source_label": "DCI-Agent-Lite",
+      "target_status": "method-incomplete",
+      "target_role": "main",
+      "paper_table": "main-results",
+      "paper_row": "DCI-Agent-Lite",
+      "metric_contract": {
+        "schema": "dci.reproduction-target-metric-contract/v1",
+        "metric_identities": [
+          "llm-answer-correctness",
+          "ndcg@10-binary-deduplicated"
+        ],
+        "comparison_kind": "published-target"
+      },
+      "method_parameters": {
+        "schema": "dci.reproduction-target-method/v1",
+        "values": {
+          "context_level": "level3",
+          "max_turns": 300,
+          "runtime": "pi",
+          "tools": "read,bash"
+        },
+        "unreported": [
+          "duplicate_handling",
+          "read_minimum_evidence_overlap",
+          "segment_characters",
+          "selection_seeds"
+        ]
+      },
+      "agentic_search_accuracy": null,
+      "qa_accuracy": null,
+      "ir_ndcg_at_10": null,
+      "dataset_targets": {}
+    },
+    {
+      "target_id": "paper.2605.05242v1/tools/read-bash",
+      "profile_id": "paper-reference/pi",
+      "source_id": "arxiv:2605.05242v1",
+      "source_url": "https://arxiv.org/pdf/2605.05242v1",
+      "source_label": "DCI-Agent-Lite",
+      "target_status": "method-incomplete",
+      "target_role": "tools",
+      "paper_table": "tool-ablation",
+      "paper_row": "read+bash",
+      "metric_contract": {
+        "schema": "dci.reproduction-target-metric-contract/v1",
+        "metric_identities": ["llm-answer-correctness"],
+        "comparison_kind": "reported-ablation"
+      },
+      "method_parameters": {
+        "schema": "dci.reproduction-target-method/v1",
+        "values": {"context_level": "level4", "tools": "read,bash"},
+        "unreported": ["ablation_launcher", "selection_seed"]
+      },
+      "agentic_search_accuracy": null,
+      "qa_accuracy": null,
+      "ir_ndcg_at_10": null,
+      "dataset_targets": {}
+    },
+    {
+      "target_id": "paper.2605.05242v1/tools/read-grep",
+      "profile_id": "paper-reference/pi",
+      "source_id": "arxiv:2605.05242v1",
+      "source_url": "https://arxiv.org/pdf/2605.05242v1",
+      "source_label": "DCI-Agent-Lite",
+      "target_status": "method-incomplete",
+      "target_role": "tools",
+      "paper_table": "tool-ablation",
+      "paper_row": "read+grep",
+      "metric_contract": {
+        "schema": "dci.reproduction-target-metric-contract/v1",
+        "metric_identities": ["llm-answer-correctness"],
+        "comparison_kind": "reported-ablation"
+      },
+      "method_parameters": {
+        "schema": "dci.reproduction-target-method/v1",
+        "values": {"context_level": "level4", "tools": "read,grep"},
+        "unreported": ["ablation_launcher", "selection_seed"]
+      },
+      "agentic_search_accuracy": null,
+      "qa_accuracy": null,
+      "ir_ndcg_at_10": null,
+      "dataset_targets": {}
     }
   ]
 }

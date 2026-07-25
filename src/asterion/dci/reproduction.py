@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import os
 import random
@@ -24,6 +25,11 @@ from asterion.dci.paper_benchmarks import canonical_sha256
 from asterion.dci.paper_benchmarks import resolve_paper_benchmark
 from asterion.dci.paper_benchmarks import resolve_paper_experiment_scope
 
+try:
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None  # type: ignore[assignment]
+
 RUN_MANIFEST_SCHEMA = "dci.reproduction-run/v1"
 COMPARISON_SCHEMA = "dci.reproduction-comparison/v1"
 RESULT_SCHEMA = "dci.reproduction-results/v1"
@@ -40,6 +46,42 @@ _PRODUCTS = ("original-dci", "asterion-dci")
 _ACCURACY_METRIC = "llm-answer-correctness"
 _NDCG_METRIC = "ndcg@10-binary-deduplicated"
 _METRIC_IDENTITIES = {_ACCURACY_METRIC, _NDCG_METRIC}
+_TARGET_STATUSES = {"executable-comparable", "method-incomplete"}
+_TARGET_REQUIRED_KEYS = {
+    "target_id",
+    "profile_id",
+    "source_id",
+    "source_url",
+    "source_label",
+    "target_status",
+    "target_role",
+    "paper_table",
+    "paper_row",
+    "metric_contract",
+    "method_parameters",
+    "agentic_search_accuracy",
+    "qa_accuracy",
+    "ir_ndcg_at_10",
+    "dataset_targets",
+}
+_BATCH_SCHEMA = "asterion.dci.batch/v1"
+_BATCH_LOCK_NAME = ".asterion-dci-batch.lock"
+_BATCH_RESULT_SCHEMA = "asterion.dci.batch-result/v1"
+_BATCH_ITEM_SCHEMA = "asterion.dci.batch-item/v1"
+_BATCH_SUMMARY_SCHEMA = "asterion.dci.batch-summary/v1"
+_BATCH_REQUIRED_CONFIG = {
+    "schema",
+    "profile",
+    "dataset",
+    "selection",
+    "mode",
+    "corpus_identity",
+    "runtime",
+    "benchmark_prompt_contract_sha256",
+    "judge_configuration_fingerprint",
+    "ranking_metric_contract",
+    "implementation_sha256",
+}
 
 
 def _is_published_target_scope(selection_id: str) -> bool:
@@ -104,14 +146,20 @@ _MANIFEST_KEYS = {
     "implementation_sha256",
     "profile_id",
     "profile_sha256",
+    "source_identity",
     "runtime",
     "dataset_id",
     "selection_id",
     "selection_sha256",
+    "corpus_identity",
     "effective_config_sha256",
     "product_effective_config_sha256",
+    "prompt_identity",
+    "judge_identity",
+    "context_identity",
     "metric_contract_sha256",
     "metric_identities",
+    "artifact_digests",
     "queries",
     "aggregates",
     "identity_sha256",
@@ -185,7 +233,7 @@ _COMPARISON_KEYS = {
 }
 _FORBIDDEN_KEY_PARTS = (
     "answer",
-    "prompt",
+    "prompt_body",
     "credential",
     "secret",
     "api_key",
@@ -227,35 +275,107 @@ def reproduction_targets_sha256() -> str:
     value = _resource_mapping("reproduction-targets.json")
     if value.get("schema") != "dci.reproduction-target/v1":
         raise RuntimeError("DCI reproduction target registry is invalid")
+    _target_registry_entries(value)
     return canonical_sha256(value)
+
+
+def _target_registry_entries(registry: Mapping[str, object]) -> tuple[Mapping[str, object], ...]:
+    targets = registry.get("targets")
+    if registry.get("schema") != "dci.reproduction-target/v1" or type(targets) is not list:
+        raise RuntimeError("DCI reproduction target registry is invalid")
+    target_ids: list[str] = []
+    validated: list[Mapping[str, object]] = []
+    for target in targets:
+        if type(target) is not dict or set(target) != _TARGET_REQUIRED_KEYS:
+            raise RuntimeError("DCI reproduction target registry is invalid")
+        target_id = _require_public_id(target["target_id"], "published target ID")
+        _require_public_id(target["profile_id"], "published target profile")
+        for key in (
+            "source_id",
+            "source_url",
+            "source_label",
+            "target_status",
+            "target_role",
+            "paper_table",
+            "paper_row",
+        ):
+            if type(target[key]) is not str or not target[key]:
+                raise RuntimeError("DCI reproduction target registry is invalid")
+        if target["target_status"] not in _TARGET_STATUSES:
+            raise RuntimeError("DCI reproduction target registry is invalid")
+        metric_contract = target["metric_contract"]
+        method_parameters = target["method_parameters"]
+        dataset_targets = target["dataset_targets"]
+        if (
+            type(metric_contract) is not dict
+            or set(metric_contract)
+            != {"schema", "metric_identities", "comparison_kind"}
+            or metric_contract.get("schema")
+            != "dci.reproduction-target-metric-contract/v1"
+            or type(metric_contract.get("metric_identities")) is not list
+            or not metric_contract["metric_identities"]
+            or any(
+                metric not in _METRIC_IDENTITIES
+                for metric in metric_contract["metric_identities"]
+            )
+            or len(set(metric_contract["metric_identities"]))
+            != len(metric_contract["metric_identities"])
+            or metric_contract.get("comparison_kind")
+            not in {"published-target", "reported-ablation"}
+            or type(method_parameters) is not dict
+            or set(method_parameters) != {"schema", "values", "unreported"}
+            or method_parameters.get("schema")
+            != "dci.reproduction-target-method/v1"
+            or type(method_parameters.get("values")) is not dict
+            or type(method_parameters.get("unreported")) is not list
+            or any(type(item) is not str or not item for item in method_parameters["unreported"])
+            or type(dataset_targets) is not dict
+            or any(
+                type(dataset_id) is not str
+                or _PUBLIC_ID.fullmatch(dataset_id) is None
+                or _require_optional_unit(value, "published target") is None
+                and target["target_status"] == "executable-comparable"
+                for dataset_id, value in dataset_targets.items()
+            )
+        ):
+            raise RuntimeError("DCI reproduction target registry is invalid")
+        for key in ("agentic_search_accuracy", "qa_accuracy", "ir_ndcg_at_10"):
+            if (
+                target["target_status"] == "executable-comparable"
+                and _require_optional_unit(target[key], key) is None
+            ):
+                raise RuntimeError("DCI reproduction target registry is invalid")
+            if (
+                target["target_status"] == "method-incomplete"
+                and target[key] is not None
+            ):
+                _require_optional_unit(target[key], key)
+        target_ids.append(target_id)
+        validated.append(MappingProxyType(dict(target)))
+    if target_ids != sorted(target_ids) or len(set(target_ids)) != len(target_ids):
+        raise RuntimeError("DCI reproduction target registry is invalid")
+    return tuple(validated)
 
 
 def _published_target(profile_id: str) -> Mapping[str, object]:
     registry = _resource_mapping("reproduction-targets.json")
-    targets = registry.get("targets")
-    if registry.get("schema") != "dci.reproduction-target/v1" or type(targets) is not list:
-        raise RuntimeError("DCI reproduction target registry is invalid")
+    profile = resolve_experiment_profile(profile_id)
+    target_label = profile.comparison.get("published_target")
+    if type(target_label) is not str:
+        raise ValueError("DCI reproduction published target is unavailable")
     matches = [
         target
-        for target in targets
-        if type(target) is dict and target.get("profile_id") == profile_id
+        for target in _target_registry_entries(registry)
+        if target.get("profile_id") == profile_id
+        and target.get("source_label") == target_label
+        and target.get("target_role") == "main"
     ]
     if len(matches) != 1:
         raise ValueError("DCI reproduction published target is unavailable")
     target = matches[0]
-    required = {
-        "target_id",
-        "profile_id",
-        "source_id",
-        "source_url",
-        "agentic_search_accuracy",
-        "qa_accuracy",
-        "ir_ndcg_at_10",
-        "dataset_targets",
-    }
     dataset_targets = target.get("dataset_targets")
     if (
-        set(target) != required
+        target.get("target_status") != "executable-comparable"
         or type(dataset_targets) is not dict
         or not dataset_targets
         or any(
@@ -266,9 +386,7 @@ def _published_target(profile_id: str) -> Mapping[str, object]:
         )
     ):
         raise RuntimeError("DCI reproduction target registry is invalid")
-    _require_public_id(target["target_id"], "published target ID")
-    _require_public_id(target["profile_id"], "published target profile")
-    return MappingProxyType(dict(target))
+    return target
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -332,6 +450,211 @@ def _reject_body_fields(value: object) -> None:
     elif isinstance(value, list):
         for item in value:
             _reject_body_fields(item)
+
+
+def _fingerprint(value: object) -> str:
+    raw = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _reject_symlink(path: Path, *, label: str) -> None:
+    try:
+        if Path(path).is_symlink():
+            raise ValueError(f"DCI reproduction {label} must not be a symlink")
+    except OSError as error:
+        raise ValueError(f"DCI reproduction {label} is invalid") from error
+
+
+def _private_directory_fd(path: Path) -> int:
+    _reject_symlink(path, label="batch directory")
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISDIR(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o700:
+            raise ValueError("DCI reproduction batch directory is invalid")
+        return descriptor
+    except ValueError:
+        try:
+            os.close(descriptor)  # type: ignore[possibly-undefined]
+        except (OSError, UnboundLocalError):
+            pass
+        raise
+    except OSError as error:
+        raise ValueError("DCI reproduction batch directory is invalid") from error
+
+
+def _open_private_file_at(directory_fd: int, name: str) -> int:
+    if not name or name in {".", ".."} or Path(name).name != name:
+        raise ValueError("DCI reproduction artifact name is invalid")
+    try:
+        descriptor = os.open(
+            name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0), dir_fd=directory_fd
+        )
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+        ):
+            raise ValueError("DCI reproduction artifact permissions are invalid")
+        return descriptor
+    except ValueError:
+        try:
+            os.close(descriptor)  # type: ignore[possibly-undefined]
+        except (OSError, UnboundLocalError):
+            pass
+        raise
+    except OSError as error:
+        raise ValueError("DCI reproduction artifact is invalid") from error
+
+
+def _read_private_bytes_at(directory_fd: int, name: str) -> bytes:
+    descriptor = _open_private_file_at(directory_fd, name)
+    try:
+        with os.fdopen(descriptor, "rb") as handle:
+            descriptor = -1
+            return handle.read()
+    except OSError as error:
+        raise ValueError("DCI reproduction artifact is invalid") from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _read_private_json_at(directory_fd: int, name: str) -> dict[str, Any]:
+    try:
+        value = json.loads(
+            _read_private_bytes_at(directory_fd, name).decode("utf-8"),
+            object_pairs_hook=_unique_object,
+        )
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("DCI reproduction artifact JSON is invalid") from error
+    if type(value) is not dict:
+        raise ValueError("DCI reproduction artifact JSON is invalid")
+    return value
+
+
+def _read_private_jsonl_at(directory_fd: int, name: str) -> tuple[dict[str, Any], ...]:
+    try:
+        lines = _read_private_bytes_at(directory_fd, name).decode("utf-8").splitlines()
+        values = tuple(
+            json.loads(line, object_pairs_hook=_unique_object)
+            for line in lines
+            if line
+        )
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError("DCI reproduction artifact JSONL is invalid") from error
+    if not values or any(type(value) is not dict for value in values):
+        raise ValueError("DCI reproduction artifact JSONL is invalid")
+    return values  # type: ignore[return-value]
+
+
+def _open_private_query_at(directory_fd: int, name: str) -> int:
+    _require_public_id(name, "query directory")
+    if Path(name).name != name or name in {".", ".."}:
+        raise ValueError("DCI reproduction query directory is invalid")
+    try:
+        descriptor = os.open(
+            name,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=directory_fd,
+        )
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISDIR(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o700:
+            raise ValueError("DCI reproduction query directory is invalid")
+        return descriptor
+    except ValueError:
+        try:
+            os.close(descriptor)  # type: ignore[possibly-undefined]
+        except (OSError, UnboundLocalError):
+            pass
+        raise
+    except OSError as error:
+        raise ValueError("DCI reproduction query directory is invalid") from error
+
+
+def _sha256_bytes(raw: bytes) -> str:
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _require_artifact_digest(
+    artifact_digests: Mapping[str, object],
+    name: str,
+    actual: str,
+) -> None:
+    if artifact_digests.get(name) != actual:
+        raise ValueError("DCI reproduction artifact digest drifted")
+
+
+def _normalize_metric_identity(value: object, *, mode: object = None) -> str:
+    if value is None and mode == "qa":
+        return _ACCURACY_METRIC
+    if value == "ndcg@10-binary-deduplicated/v1":
+        return _NDCG_METRIC
+    if value in _METRIC_IDENTITIES:
+        return str(value)
+    raise ValueError("DCI reproduction metric identity is invalid")
+
+
+def _require_optional_reason(value: object, label: str) -> str | None:
+    if value is None:
+        return None
+    if type(value) is not str or _VERSIONED_REASON.fullmatch(value) is None:
+        raise ValueError(f"DCI reproduction {label} is invalid")
+    return value
+
+
+def _require_body_free_identity(value: object, label: str) -> object:
+    if type(value) is str:
+        return _require_public_id(value, label)
+    if type(value) is not dict or not value:
+        raise ValueError(f"DCI reproduction {label} is invalid")
+    result: dict[str, object] = {}
+    for key, item in value.items():
+        if type(key) is not str or _PUBLIC_ID.fullmatch(key) is None:
+            raise ValueError(f"DCI reproduction {label} is invalid")
+        if type(item) is str:
+            if not item:
+                raise ValueError(f"DCI reproduction {label} is invalid")
+            result[key] = item
+        else:
+            raise ValueError(f"DCI reproduction {label} is invalid")
+    return dict(sorted(result.items()))
+
+
+def _parse_identity_pair(value: object, keys: set[str], label: str) -> Mapping[str, str]:
+    item = _require_exact_mapping(value, keys, label)
+    result: dict[str, str] = {}
+    for key, data in item.items():
+        if type(data) is not str or not data:
+            raise ValueError(f"DCI reproduction {label} is invalid")
+        result[key] = data
+    return MappingProxyType(result)
+
+
+def _parse_artifact_digests(value: object) -> Mapping[str, str]:
+    if type(value) is not dict or not value:
+        raise ValueError("DCI reproduction artifact digests are invalid")
+    result: dict[str, str] = {}
+    for name, digest in value.items():
+        if (
+            type(name) is not str
+            or not name
+            or name.startswith("/")
+            or ".." in Path(name).parts
+            or _require_sha256(digest, "artifact digest") is None
+        ):
+            raise ValueError("DCI reproduction artifact digests are invalid")
+        result[name] = digest
+    if tuple(result) != tuple(sorted(result)):
+        raise ValueError("DCI reproduction artifact digests are invalid")
+    return MappingProxyType(dict(result))
 
 
 @dataclass(frozen=True, slots=True)
@@ -677,14 +1000,20 @@ class RunManifest:
     implementation_sha256: str
     profile_id: str
     profile_sha256: str
+    source_identity: object
     runtime: str
     dataset_id: str
     selection_id: str
     selection_sha256: str
+    corpus_identity: str | None
     effective_config_sha256: str
     product_effective_config_sha256: str
+    prompt_identity: Mapping[str, str]
+    judge_identity: Mapping[str, str]
+    context_identity: Mapping[str, str]
     metric_contract_sha256: str
     metric_identities: tuple[str, ...]
+    artifact_digests: Mapping[str, str]
     queries: tuple[QueryEvidence, ...]
     aggregates: RunAggregates
     identity_sha256: str
@@ -700,6 +1029,41 @@ class RunManifest:
             _require_public_id(value, label)
         if type(self.product) is not str or self.product not in _PRODUCTS:
             raise ValueError("DCI reproduction product role is invalid")
+        object.__setattr__(
+            self,
+            "source_identity",
+            _require_body_free_identity(self.source_identity, "source identity"),
+        )
+        if self.corpus_identity is not None:
+            _require_public_id(self.corpus_identity, "corpus identity")
+        object.__setattr__(
+            self,
+            "prompt_identity",
+            _parse_identity_pair(
+                dict(self.prompt_identity), {"contract", "sha256"}, "prompt identity"
+            ),
+        )
+        object.__setattr__(
+            self,
+            "judge_identity",
+            _parse_identity_pair(
+                dict(self.judge_identity),
+                {"contract", "configuration_sha256"},
+                "Judge identity",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "context_identity",
+            _parse_identity_pair(
+                dict(self.context_identity),
+                {"runtime_contract", "context_contract"},
+                "context identity",
+            ),
+        )
+        object.__setattr__(
+            self, "artifact_digests", _parse_artifact_digests(dict(self.artifact_digests))
+        )
         for value, label in (
             (self.implementation_sha256, "implementation digest"),
             (self.profile_sha256, "profile digest"),
@@ -817,11 +1181,19 @@ class RunManifest:
             ),
             profile_id=_require_public_id(item["profile_id"], "profile ID"),
             profile_sha256=_require_sha256(item["profile_sha256"], "profile digest"),
+            source_identity=_require_body_free_identity(
+                item["source_identity"], "source identity"
+            ),
             runtime=_require_public_id(item["runtime"], "runtime ID"),
             dataset_id=_require_public_id(item["dataset_id"], "dataset ID"),
             selection_id=_require_public_id(item["selection_id"], "selection ID"),
             selection_sha256=_require_sha256(
                 item["selection_sha256"], "selection digest"
+            ),
+            corpus_identity=(
+                None
+                if item["corpus_identity"] is None
+                else _require_public_id(item["corpus_identity"], "corpus identity")
             ),
             effective_config_sha256=_require_sha256(
                 item["effective_config_sha256"], "effective configuration digest"
@@ -830,10 +1202,24 @@ class RunManifest:
                 item["product_effective_config_sha256"],
                 "product effective configuration digest",
             ),
+            prompt_identity=_parse_identity_pair(
+                item["prompt_identity"], {"contract", "sha256"}, "prompt identity"
+            ),
+            judge_identity=_parse_identity_pair(
+                item["judge_identity"],
+                {"contract", "configuration_sha256"},
+                "Judge identity",
+            ),
+            context_identity=_parse_identity_pair(
+                item["context_identity"],
+                {"runtime_contract", "context_contract"},
+                "context identity",
+            ),
             metric_contract_sha256=_require_sha256(
                 item["metric_contract_sha256"], "metric contract digest"
             ),
             metric_identities=tuple(raw_metrics),
+            artifact_digests=_parse_artifact_digests(item["artifact_digests"]),
             queries=queries,
             aggregates=aggregates,
             identity_sha256=supplied_identity,
@@ -847,14 +1233,20 @@ class RunManifest:
             "implementation_sha256": self.implementation_sha256,
             "profile_id": self.profile_id,
             "profile_sha256": self.profile_sha256,
+            "source_identity": self.source_identity,
             "runtime": self.runtime,
             "dataset_id": self.dataset_id,
             "selection_id": self.selection_id,
             "selection_sha256": self.selection_sha256,
+            "corpus_identity": self.corpus_identity,
             "effective_config_sha256": self.effective_config_sha256,
             "product_effective_config_sha256": self.product_effective_config_sha256,
+            "prompt_identity": dict(self.prompt_identity),
+            "judge_identity": dict(self.judge_identity),
+            "context_identity": dict(self.context_identity),
             "metric_contract_sha256": self.metric_contract_sha256,
             "metric_identities": list(self.metric_identities),
+            "artifact_digests": dict(self.artifact_digests),
             "queries": [row.to_dict() for row in self.queries],
             "aggregates": self.aggregates.to_dict(),
             "identity_sha256": self.identity_sha256,
@@ -863,6 +1255,451 @@ class RunManifest:
     def to_dict(self) -> dict[str, object]:
         self.__post_init__()
         return self._raw_dict()
+
+
+def validate_run_manifest(manifest: RunManifest | Mapping[str, object]) -> RunManifest:
+    """Validate a body-free run manifest and return its immutable representation."""
+
+    if type(manifest) is RunManifest:
+        manifest.__post_init__()
+        return manifest
+    return RunManifest.from_mapping(dict(manifest))
+
+
+def _locked_batch_documents(batch_root: Path) -> tuple[
+    dict[str, Any],
+    tuple[dict[str, Any], ...],
+    dict[str, Any],
+    tuple[tuple[dict[str, Any], dict[str, Any], dict[str, Any] | None, str], ...],
+]:
+    if fcntl is None:
+        raise ValueError("DCI reproduction batch locking is unavailable")
+    root = Path(os.path.abspath(os.path.normpath(batch_root)))
+    root_fd = _private_directory_fd(root)
+    lock_fd = -1
+    try:
+        lock_fd = _open_private_file_at(root_fd, _BATCH_LOCK_NAME)
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise ValueError("DCI reproduction batch is still running") from error
+        config_raw = _read_private_bytes_at(root_fd, "config.json")
+        try:
+            config = json.loads(
+                config_raw.decode("utf-8"), object_pairs_hook=_unique_object
+            )
+        except (UnicodeError, json.JSONDecodeError) as error:
+            raise ValueError("DCI reproduction batch config is invalid") from error
+        if type(config) is not dict:
+            raise ValueError("DCI reproduction batch config is invalid")
+        artifact_digests = config.get("artifact_digests")
+        if type(artifact_digests) is not dict:
+            raise ValueError("DCI reproduction artifact digest inventory is invalid")
+        result_lines_raw = _read_private_bytes_at(root_fd, "results.jsonl")
+        summary_raw = _read_private_bytes_at(root_fd, "summary.json")
+        _require_artifact_digest(
+            artifact_digests, "results.jsonl", _sha256_bytes(result_lines_raw)
+        )
+        _require_artifact_digest(
+            artifact_digests, "summary.json", _sha256_bytes(summary_raw)
+        )
+        try:
+            results = tuple(
+                json.loads(line, object_pairs_hook=_unique_object)
+                for line in result_lines_raw.decode("utf-8").splitlines()
+                if line
+            )
+            summary = json.loads(
+                summary_raw.decode("utf-8"), object_pairs_hook=_unique_object
+            )
+        except (UnicodeError, json.JSONDecodeError) as error:
+            raise ValueError("DCI reproduction batch result artifact is invalid") from error
+        if (
+            not results
+            or any(type(result) is not dict for result in results)
+            or type(summary) is not dict
+        ):
+            raise ValueError("DCI reproduction batch result artifact is invalid")
+        query_documents: list[
+            tuple[dict[str, Any], dict[str, Any], dict[str, Any] | None, str]
+        ] = []
+        for result in results:
+            query_id = _require_public_id(result.get("query_id"), "query ID")
+            query_fd = _open_private_query_at(root_fd, query_id)
+            try:
+                item_raw = _read_private_bytes_at(query_fd, "item.json")
+                result_raw = _read_private_bytes_at(query_fd, "result.json")
+                reproduction_raw: bytes | None = None
+                _require_artifact_digest(
+                    artifact_digests,
+                    f"{query_id}/item.json",
+                    _sha256_bytes(item_raw),
+                )
+                _require_artifact_digest(
+                    artifact_digests,
+                    f"{query_id}/result.json",
+                    _sha256_bytes(result_raw),
+                )
+                if f"{query_id}/reproduction-evidence.json" in artifact_digests:
+                    reproduction_raw = _read_private_bytes_at(
+                        query_fd, "reproduction-evidence.json"
+                    )
+                    _require_artifact_digest(
+                        artifact_digests,
+                        f"{query_id}/reproduction-evidence.json",
+                        _sha256_bytes(reproduction_raw),
+                    )
+                try:
+                    item = json.loads(
+                        item_raw.decode("utf-8"), object_pairs_hook=_unique_object
+                    )
+                    result_document = json.loads(
+                        result_raw.decode("utf-8"), object_pairs_hook=_unique_object
+                    )
+                    reproduction_document = (
+                        None
+                        if reproduction_raw is None
+                        else json.loads(
+                            reproduction_raw.decode("utf-8"),
+                            object_pairs_hook=_unique_object,
+                        )
+                    )
+                except (UnicodeError, json.JSONDecodeError) as error:
+                    raise ValueError(
+                        "DCI reproduction query artifact is invalid"
+                    ) from error
+                if (
+                    type(item) is not dict
+                    or type(result_document) is not dict
+                    or (
+                        reproduction_document is not None
+                        and type(reproduction_document) is not dict
+                    )
+                ):
+                    raise ValueError("DCI reproduction query artifact is invalid")
+                if result_document != result:
+                    raise ValueError("DCI reproduction result artifact drifted")
+                evidence_sha256 = canonical_sha256(
+                    {
+                        "schema": "dci.reproduction-query-evidence/v1",
+                        "query_id": query_id,
+                        "item_sha256": _sha256_bytes(item_raw),
+                        "result_sha256": _sha256_bytes(result_raw),
+                        "reproduction_sha256": (
+                            None
+                            if reproduction_raw is None
+                            else _sha256_bytes(reproduction_raw)
+                        ),
+                    }
+                )
+                query_documents.append(
+                    (item, result_document, reproduction_document, evidence_sha256)
+                )
+            finally:
+                os.close(query_fd)
+        return config, results, summary, tuple(query_documents)
+    finally:
+        if lock_fd >= 0:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            finally:
+                os.close(lock_fd)
+        os.close(root_fd)
+
+
+def _require_batch_config(config: dict[str, Any], profile: ExperimentProfile) -> None:
+    if (
+        not _BATCH_REQUIRED_CONFIG.issubset(config)
+        or config.get("schema") != _BATCH_SCHEMA
+        or config.get("profile") != profile.profile_id
+        or config.get("profile_sha256", profile.identity_sha256)
+        != profile.identity_sha256
+        or config.get("implementation_sha256") != profile.implementation_sha256
+    ):
+        raise ValueError("DCI reproduction batch identity drifted")
+    runtime = config.get("runtime")
+    runtime_id = runtime.get("runtime_id") if isinstance(runtime, Mapping) else None
+    if runtime_id is not None and runtime_id != profile.runtime:
+        raise ValueError("DCI reproduction runtime identity drifted")
+
+
+def _batch_dataset_id(config: Mapping[str, Any]) -> str:
+    dataset = config.get("dataset")
+    if not isinstance(dataset, Mapping):
+        raise ValueError("DCI reproduction dataset identity is invalid")
+    return _require_public_id(dataset.get("dataset_id"), "dataset ID")
+
+
+def _batch_selection(config: Mapping[str, Any], query_ids: tuple[str, ...]) -> tuple[str, str]:
+    selection = config.get("selection")
+    if not isinstance(selection, Mapping):
+        raise ValueError("DCI reproduction selection identity is invalid")
+    selection_id = _require_public_id(
+        selection.get("paper_scope") or selection.get("id"), "selection ID"
+    )
+    selection_sha256 = _require_sha256(
+        selection.get("selected_ids_sha256"), "selected ID digest"
+    )
+    if (
+        selection_sha256 != canonical_sha256(tuple(sorted(query_ids)))
+        or selection.get("selected_rows") != len(query_ids)
+    ):
+        raise ValueError("DCI reproduction selected IDs drifted")
+    return selection_id, selection_sha256
+
+
+def _public_corpus_identity(
+    config: Mapping[str, Any], profile: ExperimentProfile
+) -> str | None:
+    value = config.get("corpus_identity")
+    if type(value) is str and _PUBLIC_ID.fullmatch(value) is not None:
+        return value
+    profile_value = profile.corpus_identity
+    return profile_value if _PUBLIC_ID.fullmatch(profile_value) is not None else None
+
+
+def _query_evidence_from_batch(
+    *,
+    item: Mapping[str, Any],
+    result: Mapping[str, Any],
+    reproduction: Mapping[str, Any] | None,
+    config: Mapping[str, Any],
+    evidence_sha256: str,
+) -> QueryEvidence:
+    query_id = _require_public_id(result.get("query_id"), "query ID")
+    identity = item.get("identity")
+    if (
+        item.get("schema") != _BATCH_ITEM_SCHEMA
+        or result.get("schema") != _BATCH_RESULT_SCHEMA
+        or item.get("query_id") != query_id
+        or not isinstance(identity, Mapping)
+        or item.get("row_fingerprint") != _fingerprint(identity)
+        or result.get("row_fingerprint") != item.get("row_fingerprint")
+        or result.get("implementation_sha256") != config.get("implementation_sha256")
+        or item.get("implementation_sha256") != config.get("implementation_sha256")
+        or (
+            result.get("judge_configuration_fingerprint") is not None
+            and result.get("judge_configuration_fingerprint")
+            != config.get("judge_configuration_fingerprint")
+        )
+        or item.get("judge_configuration_fingerprint")
+        != config.get("judge_configuration_fingerprint")
+        or _normalize_metric_identity(
+            result.get("ranking_metric_contract"), mode=config.get("mode")
+        )
+        != _normalize_metric_identity(
+            config.get("ranking_metric_contract"), mode=config.get("mode")
+        )
+        or identity.get("corpus_identity") != config.get("corpus_identity")
+        or identity.get("benchmark_prompt_contract_sha256")
+        != config.get("benchmark_prompt_contract_sha256")
+        or identity.get("implementation_sha256") != config.get("implementation_sha256")
+    ):
+        raise ValueError("DCI reproduction query identity drifted")
+    source = result if reproduction is None else reproduction
+    if reproduction is not None and (
+        reproduction.get("schema") != "asterion.dci.reproduction-evidence/v1"
+        or reproduction.get("query_id") != query_id
+        or reproduction.get("row_fingerprint") != result.get("row_fingerprint")
+        or (
+            result.get("mode") is not None
+            and reproduction.get("mode") != result.get("mode")
+        )
+    ):
+        raise ValueError("DCI reproduction query evidence drifted")
+    status = source.get("status")
+    if status == "not_started":
+        status = "missing"
+    if type(status) is not str or status not in _STATUSES:
+        raise ValueError("DCI reproduction query status is invalid")
+    tokens = source.get("tokens")
+    if not isinstance(tokens, Mapping):
+        raise ValueError("DCI reproduction query totals are invalid")
+    verdict = source.get("is_correct")
+    if verdict is not None and type(verdict) is not bool:
+        raise ValueError("DCI reproduction Judge verdict is invalid")
+    ndcg = source.get("ndcg_at_10")
+    if ndcg is not None:
+        ndcg = _require_optional_unit(ndcg, "NDCG@10")
+    return QueryEvidence(
+        query_id=query_id,
+        status=status,
+        judge_verdict=verdict,
+        ndcg_at_10=ndcg,
+        failure_class=_require_optional_reason(
+            source.get("failure_class"), "failure class"
+        ),
+        exclusion_reason=_require_optional_reason(
+            source.get("exclusion_reason"), "exclusion reason"
+        ),
+        evidence_sha256=evidence_sha256,
+        operations=OperationCounts(
+            agent=_require_count(source.get("agent_operations"), "agent operations"),
+            judge=_require_count(source.get("judge_operations"), "Judge operations"),
+        ),
+        tokens=TokenCounts(
+            input=_require_count(tokens.get("input"), "input tokens"),
+            cached_input=_require_count(
+                tokens.get("cached_input"), "cached input tokens"
+            ),
+            output=_require_count(tokens.get("output"), "output tokens"),
+        ),
+        cost_usd=_require_finite(source.get("cost_usd"), "cost", minimum=0.0),
+    )
+
+
+def _validate_summary_totals(summary: Mapping[str, Any], aggregates: RunAggregates) -> None:
+    if summary.get("schema") != _BATCH_SUMMARY_SCHEMA:
+        raise ValueError("DCI reproduction summary artifact is invalid")
+    totals = summary.get("reproduction_totals")
+    if totals is None:
+        totals = summary.get("totals")
+    if not isinstance(totals, Mapping):
+        raise ValueError("DCI reproduction summary totals are invalid")
+    expected = {
+        "agent_operations": aggregates.agent_operations,
+        "judge_operations": aggregates.judge_operations,
+        "input_tokens": aggregates.input_tokens,
+        "cached_input_tokens": aggregates.cached_input_tokens,
+        "output_tokens": aggregates.output_tokens,
+        "total_tokens": aggregates.total_tokens,
+        "cost_usd": aggregates.cost_usd,
+    }
+    for key, expected_value in expected.items():
+        actual = totals.get(key)
+        if isinstance(expected_value, float):
+            if not isinstance(actual, (int, float)) or not math.isclose(
+                float(actual), expected_value, abs_tol=1e-12
+            ):
+                raise ValueError("DCI reproduction summary totals drifted")
+        elif actual != expected_value:
+            raise ValueError("DCI reproduction summary totals drifted")
+
+
+def compile_run_manifest(
+    batch_root: Path,
+    profile: ExperimentProfile | str,
+) -> RunManifest:
+    """Compile one locked private DCI batch into a body-free reproduction manifest."""
+
+    resolved_profile = (
+        resolve_experiment_profile(profile) if type(profile) is str else profile
+    )
+    if type(resolved_profile) is not ExperimentProfile:
+        raise ValueError("DCI reproduction profile is invalid")
+    config, _results, summary, query_documents = _locked_batch_documents(batch_root)
+    _require_batch_config(config, resolved_profile)
+    queries = tuple(
+        sorted(
+            (
+                _query_evidence_from_batch(
+                    item=item,
+                    result=result,
+                    reproduction=reproduction,
+                    config=config,
+                    evidence_sha256=evidence_sha256,
+                )
+                for item, result, reproduction, evidence_sha256 in query_documents
+            ),
+            key=lambda row: row.query_id,
+        )
+    )
+    query_ids = tuple(row.query_id for row in queries)
+    dataset_id = _batch_dataset_id(config)
+    selection_id, selection_sha256 = _batch_selection(config, query_ids)
+    metric_identity = _normalize_metric_identity(
+        config.get("ranking_metric_contract"), mode=config.get("mode")
+    )
+    corpus_identity = _public_corpus_identity(config, resolved_profile)
+    aggregates = _computed_aggregates(
+        queries, (metric_identity,), resolved_profile.profile_id
+    )
+    _validate_summary_totals(summary, aggregates)
+    product = config.get("product", "asterion-dci")
+    product_config = config.get("product_effective_config_sha256")
+    if product_config is None:
+        product_config = canonical_sha256(
+            {
+                "schema": "dci.reproduction-product-config/v1",
+                "product": product,
+                "runtime": config.get("runtime"),
+                "prompt_contract_sha256": config.get(
+                    "benchmark_prompt_contract_sha256"
+                ),
+                "judge_configuration_fingerprint": config.get(
+                    "judge_configuration_fingerprint"
+                ),
+                "corpus_identity": config.get("corpus_identity"),
+            }
+        )
+    _require_sha256(product_config, "product effective configuration digest")
+    effective_config = canonical_sha256(
+        {
+            "schema": "dci.reproduction-effective-config/v1",
+            "profile_id": resolved_profile.profile_id,
+            "profile_sha256": resolved_profile.identity_sha256,
+            "source_identity": resolved_profile.source_identity,
+            "dataset_id": dataset_id,
+            "selection_id": selection_id,
+            "selection_sha256": selection_sha256,
+            "corpus_identity": corpus_identity,
+            "prompt_contract": resolved_profile.prompt_contract,
+            "prompt_contract_sha256": config.get("benchmark_prompt_contract_sha256"),
+            "judge_contract": resolved_profile.judge_contract,
+            "judge_configuration_fingerprint": config.get(
+                "judge_configuration_fingerprint"
+            ),
+            "metric_identity": metric_identity,
+            "runtime": config.get("runtime"),
+        }
+    )
+    run_id = config.get("run_id")
+    if run_id is None:
+        run_id = f"{resolved_profile.profile_id}:{selection_id}:{dataset_id}".replace(
+            "#", ":"
+        )
+    unsigned = {
+        "schema": RUN_MANIFEST_SCHEMA,
+        "run_id": run_id,
+        "product": product,
+        "implementation_sha256": config["implementation_sha256"],
+        "profile_id": resolved_profile.profile_id,
+        "profile_sha256": resolved_profile.identity_sha256,
+        "source_identity": (
+            dict(resolved_profile.source_identity)
+            if isinstance(resolved_profile.source_identity, Mapping)
+            else resolved_profile.source_identity
+        ),
+        "runtime": resolved_profile.runtime,
+        "dataset_id": dataset_id,
+        "selection_id": selection_id,
+        "selection_sha256": selection_sha256,
+        "corpus_identity": corpus_identity,
+        "effective_config_sha256": effective_config,
+        "product_effective_config_sha256": product_config,
+        "prompt_identity": {
+            "contract": resolved_profile.prompt_contract,
+            "sha256": config["benchmark_prompt_contract_sha256"],
+        },
+        "judge_identity": {
+            "contract": resolved_profile.judge_contract,
+            "configuration_sha256": config["judge_configuration_fingerprint"],
+        },
+        "context_identity": {
+            "runtime_contract": resolved_profile.runtime_contract,
+            "context_contract": resolved_profile.context_contract,
+        },
+        "metric_contract_sha256": reproduction_metric_contract_sha256(
+            resolved_profile.profile_id
+        ),
+        "metric_identities": [metric_identity],
+        "artifact_digests": dict(sorted(config["artifact_digests"].items())),
+        "queries": [row.to_dict() for row in queries],
+        "aggregates": aggregates.to_dict(),
+    }
+    return RunManifest.from_mapping(
+        {**unsigned, "identity_sha256": canonical_sha256(unsigned)}
+    )
 
 
 def load_run_manifest(path: Path) -> RunManifest:
@@ -2200,6 +3037,19 @@ def compare_reproduction_runs(
     return ComparisonReport(
         **values, identity_sha256=canonical_sha256(unsigned)  # type: ignore[arg-type]
     )
+
+
+def compare_reproduction(
+    baseline: RunManifest | None,
+    candidate: RunManifest,
+    target: ExperimentProfile | str,
+) -> ComparisonReport:
+    """Compatibility wrapper for comparing one compiled reproduction manifest."""
+
+    profile = resolve_experiment_profile(target) if type(target) is str else target
+    if type(profile) is not ExperimentProfile:
+        raise ValueError("DCI reproduction comparison profile is invalid")
+    return compare_reproduction_runs(baseline, candidate, profile)
 
 
 def write_comparison_report(path: Path, report: ComparisonReport) -> None:
