@@ -138,6 +138,36 @@ uv run asterion-dci paper describe
 
 该命令描述实验矩阵、ablation、授权边界与预期产物；它不运行论文实验，也不声称复现完整数据集分数。
 
+论文复现入口默认只渲染 body-free plan，不需要预算配置，不创建输出目录，也不执行
+Agent/Judge：
+
+```bash
+# Provider-free plan; no budget configuration required.
+uv run asterion-dci paper reproduce \
+  --profile paper-reference/pi \
+  --output-root ./evidence/reproduction
+```
+
+完整执行必须显式 opt in，且每个 bound 都是必填项；scope 必须逐个重复传入，并且只能是
+精确绑定、可用的 paper scope：
+
+```bash
+# Explicit execution; every bound is required.
+uv run asterion-dci paper reproduce \
+  --profile paper-reference/pi \
+  --scope bright.biology.main.full \
+  --output-root ./evidence/reproduction \
+  --execute \
+  --max-agent-operations 103 \
+  --max-judge-operations 1 \
+  --max-cost-usd 25 \
+  --max-agent-cost-per-operation-usd 0.20 \
+  --max-judge-cost-per-operation-usd 0.05
+```
+
+预算值只限制已显式授权的同进程执行；它们本身从不授予 authority。执行前会先解析精确
+dataset、corpus、runtime 和 Judge 输入，preflight 失败不会创建输出目录或签发完整执行授权。
+
 ## Benchmark DCI-Agent-Lite
 
 [`benchmark.py`](../../src/asterion/dci/benchmark.py) 负责有限数据集切片、并发运行、精确 reuse、Judge 缓存、QA/IR 汇总与中断恢复：

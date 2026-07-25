@@ -24,6 +24,9 @@ from asterion.dci.artifacts import DciConversationFeatures
 from asterion.dci.cli import main as dci_main
 from asterion.dci.config import DciRuntimeOptions, resolve_dci_paths
 from asterion.dci.experiment_profiles import (
+    authorize_full_execution,
+    authorized_scope_output_root,
+    consume_full_execution_authorization,
     experiment_profile_ids,
     experiment_profile_schema_sha256,
     experiment_profiles_sha256,
@@ -875,6 +878,142 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         )
         self.assertNotIn("current-default", canonical_evidence)
         self.assertIn("asterion-safe/pi", canonical_evidence)
+
+    def test_authorized_reproduction_coordinator_dispatches_exact_child_roots(
+        self,
+    ) -> None:
+        from asterion.dci import benchmark as benchmark_module
+
+        scopes = (
+            "bright.biology.main.full",
+            "bright.earth-science.main.full",
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            profile = resolve_experiment_profile("paper-reference/pi")
+            authority = authorize_full_execution(
+                profile=profile,
+                scope_ids=scopes,
+                output_root=root / "authorized",
+                max_agent_operations=10,
+                max_judge_operations=1,
+                max_cost_usd=5.0,
+                max_agent_cost_per_operation_usd=0.1,
+                max_judge_cost_per_operation_usd=0.1,
+                invocation_authorized=True,
+            )
+            paths = resolve_dci_paths(root)
+            items = []
+            for scope in scopes:
+                request = BenchmarkRequest(
+                    dataset=root / f"{scope}.jsonl",
+                    output_root=authorized_scope_output_root(authority, scope),
+                    cwd=root,
+                    judge_config=JudgeConfig(),
+                    runtime_options=DciRuntimeOptions(
+                        provider="openai", model="gpt-5.4-nano"
+                    ),
+                    mode="ir",
+                    profile=profile.profile_id,
+                    full_execution_authorization=authority,
+                    experiment_scope_id=scope,
+                    paper_ir_duplicate_handling="deduplicated",
+                )
+                items.append(
+                    benchmark_module.AuthorizedBenchmarkExecution(
+                        scope_id=scope,
+                        request=request,
+                        paths=paths,
+                    )
+                )
+            calls: list[tuple[str, Path]] = []
+
+            def run_spy(
+                request: BenchmarkRequest, *, paths: object
+            ) -> BenchmarkResult:
+                del paths
+                calls.append((request.experiment_scope_id or "", request.output_root))
+                consume_full_execution_authorization(
+                    request.full_execution_authorization,
+                    request.experiment_scope_id or "",
+                )
+                return BenchmarkResult(request.output_root, {"total": 1})
+
+            with patch(
+                "asterion.dci.benchmark.run_benchmark",
+                side_effect=run_spy,
+            ):
+                result = benchmark_module.execute_authorized_reproduction(
+                    authority=authority,
+                    profile=profile,
+                    scope_ids=scopes,
+                    output_root=root / "authorized",
+                    execution_items=tuple(items),
+                )
+
+        self.assertEqual(tuple(scope for scope, _root in calls), scopes)
+        self.assertNotEqual(calls[0][1], calls[1][1])
+        self.assertEqual(result["operation_counts"]["agent"], 0)
+        self.assertEqual(result["operation_counts"]["judge"], 0)
+        self.assertEqual(
+            [item["scope_id"] for item in result["outputs"]],
+            list(scopes),
+        )
+        rendered = json.dumps(result, sort_keys=True)
+        self.assertNotIn("query", rendered)
+        self.assertNotIn("_issuance_token", rendered)
+
+    def test_authorized_reproduction_coordinator_rejects_mismatch_before_run(
+        self,
+    ) -> None:
+        from asterion.dci import benchmark as benchmark_module
+
+        scopes = ("bright.biology.main.full",)
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            profile = resolve_experiment_profile("paper-reference/pi")
+            authority = authorize_full_execution(
+                profile=profile,
+                scope_ids=scopes,
+                output_root=root / "authorized",
+                max_agent_operations=10,
+                max_judge_operations=1,
+                max_cost_usd=5.0,
+                max_agent_cost_per_operation_usd=0.1,
+                max_judge_cost_per_operation_usd=0.1,
+                invocation_authorized=True,
+            )
+            item = benchmark_module.AuthorizedBenchmarkExecution(
+                scope_id=scopes[0],
+                request=BenchmarkRequest(
+                    dataset=root / "dataset.jsonl",
+                    output_root=root / "wrong-root",
+                    cwd=root,
+                    judge_config=JudgeConfig(),
+                    runtime_options=DciRuntimeOptions(
+                        provider="openai", model="gpt-5.4-nano"
+                    ),
+                    mode="ir",
+                    profile=profile.profile_id,
+                    full_execution_authorization=authority,
+                    experiment_scope_id=scopes[0],
+                    paper_ir_duplicate_handling="deduplicated",
+                ),
+                paths=resolve_dci_paths(root),
+            )
+            with patch("asterion.dci.benchmark.run_benchmark") as run:
+                with self.assertRaisesRegex(
+                    DciBenchmarkError,
+                    "authorization root changed",
+                ):
+                    benchmark_module.execute_authorized_reproduction(
+                        authority=authority,
+                        profile=profile,
+                        scope_ids=scopes,
+                        output_root=root / "authorized",
+                        execution_items=(item,),
+                    )
+        run.assert_not_called()
 
     def test_context_source_identity_requires_exact_family_and_contract(self) -> None:
         from asterion.dci.context_profiles import (

@@ -58,9 +58,12 @@ from asterion.dci.evaluation import (
 from asterion.dci.experiment_profiles import (
     EXPERIMENT_AUTHORIZATION_SCHEMA,
     ExperimentAuthorizationError,
+    ExperimentProfile,
     FullExecutionAuthorization,
     FullExecutionReservation,
+    authorized_scope_output_root,
     cancel_full_execution_authorization,
+    consumed_full_execution_authorization_snapshot,
     experiment_profiles_sha256,
     fail_full_execution_operation,
     reconcile_full_execution_operation,
@@ -175,10 +178,113 @@ class BenchmarkRequest:
     paper_ir_duplicate_handling: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class AuthorizedBenchmarkExecution:
+    scope_id: str
+    request: BenchmarkRequest
+    paths: DciPaths
+
+
 @dataclass(frozen=True)
 class BenchmarkResult:
     output_root: Path
     counts: dict[str, int]
+
+
+def execute_authorized_reproduction(
+    *,
+    authority: FullExecutionAuthorization,
+    profile: ExperimentProfile,
+    scope_ids: tuple[str, ...],
+    output_root: Path,
+    execution_items: tuple[AuthorizedBenchmarkExecution, ...],
+) -> dict[str, object]:
+    """Run one already-authorized paper reproduction plan in this process."""
+
+    requested_root = Path(os.path.abspath(os.path.normpath(output_root)))
+    if (
+        not isinstance(authority, FullExecutionAuthorization)
+        or type(profile) is not ExperimentProfile
+        or authority.profile_id != profile.profile_id
+        or authority.profile_sha256 != profile.identity_sha256
+        or tuple(scope_ids) != tuple(authority.authorized_scope_ids)
+        or tuple(scope_ids) != tuple(item.scope_id for item in execution_items)
+        or len(scope_ids) != len(execution_items)
+    ):
+        raise DciBenchmarkError("DCI benchmark authorization scope changed")
+    expected_digests = tuple(
+        dict(zip(profile.scope_ids, profile.selected_ids_sha256, strict=True)).get(
+            scope_id, ""
+        )
+        for scope_id in scope_ids
+    )
+    if expected_digests != tuple(authority.selected_ids_sha256):
+        raise DciBenchmarkError("DCI benchmark authorization scope changed")
+
+    output_identities: list[dict[str, object]] = []
+    expected_roots: dict[str, Path] = {}
+    for item in execution_items:
+        request = item.request
+        scope_id = item.scope_id
+        try:
+            authorized_root = authorized_scope_output_root(authority, scope_id)
+        except ExperimentAuthorizationError as error:
+            raise DciBenchmarkError("DCI benchmark authorization scope changed") from error
+        if (
+            request.full_execution_authorization is not authority
+            or request.experiment_scope_id != scope_id
+            or request.profile != profile.profile_id
+            or Path(os.path.abspath(os.path.normpath(request.output_root)))
+            != authorized_root
+            or requested_root not in authorized_root.parents
+        ):
+            raise DciBenchmarkError("DCI benchmark authorization root changed")
+        metadata = authorized_root.stat()
+        output_identities.append(
+            {
+                "scope_id": scope_id,
+                "output_root_device": metadata.st_dev,
+                "output_root_inode": metadata.st_ino,
+            }
+        )
+        expected_roots[scope_id] = authorized_root
+
+    benchmark_totals: dict[str, int] = {}
+    try:
+        for item in execution_items:
+            result = run_benchmark(item.request, paths=item.paths)
+            if Path(os.path.abspath(os.path.normpath(result.output_root))) != (
+                expected_roots[item.scope_id]
+            ):
+                raise DciBenchmarkError("DCI benchmark authorization root changed")
+            for key, value in result.counts.items():
+                if type(value) is int:
+                    benchmark_totals[key] = benchmark_totals.get(key, 0) + value
+        receipt = consumed_full_execution_authorization_snapshot(authority)
+    except BaseException:
+        try:
+            cancel_full_execution_authorization(authority)
+        except ExperimentAuthorizationError:
+            pass
+        raise
+
+    ledger = receipt["ledger"]
+    agent_operations = int(ledger["completed_agent_operations"])
+    judge_operations = int(ledger["completed_judge_operations"])
+    return {
+        "schema": "dci.paper-reproduction-result/v1",
+        "profile_id": profile.profile_id,
+        "profile_sha256": authority.profile_sha256,
+        "authorized_scope_ids": list(scope_ids),
+        "operation_counts": {
+            "agent": agent_operations,
+            "judge": judge_operations,
+            "total": agent_operations + judge_operations,
+            "benchmark_total": benchmark_totals.get("total", 0),
+        },
+        "outputs": output_identities,
+        "receipt": receipt,
+    }
 
 
 @dataclass

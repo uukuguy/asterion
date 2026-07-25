@@ -1101,6 +1101,62 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
 
 
 class ReproductionCliTests(unittest.TestCase):
+    def _execute_argv(
+        self,
+        output_root: Path,
+        *,
+        scopes: tuple[str, ...] = ("bright.biology.main.full",),
+    ) -> list[str]:
+        argv = [
+            "paper",
+            "reproduce",
+            "--profile",
+            "paper-reference/pi",
+            "--output-root",
+            str(output_root),
+            "--execute",
+            "--max-agent-operations",
+            "103",
+            "--max-judge-operations",
+            "1",
+            "--max-cost-usd",
+            "25",
+            "--max-agent-cost-per-operation-usd",
+            "0.20",
+            "--max-judge-cost-per-operation-usd",
+            "0.05",
+        ]
+        for scope in scopes:
+            argv.extend(("--scope", scope))
+        return argv
+
+    def _fixture_batch_profiles(self, root: Path) -> dict[str, dict[str, object]]:
+        from asterion.dci.paper_benchmarks import resolve_paper_benchmark
+
+        profiles: dict[str, dict[str, object]] = {}
+        for name in ("bright.biology", "bright.earth-science"):
+            benchmark = resolve_paper_benchmark(name)
+            dataset = root / benchmark.dataset_path
+            corpus = root / benchmark.corpus_path
+            dataset.parent.mkdir(parents=True, exist_ok=True)
+            corpus.mkdir(parents=True, exist_ok=True)
+            dataset.write_text('{"query_id":"q1","query":"q","gold_ids":["d"]}\n')
+            profiles[name] = {
+                "dataset": benchmark.dataset_path,
+                "output_root": f"outputs/{name}",
+                "corpus": benchmark.corpus_path,
+                "mode": "ir",
+                "provider": "openai",
+                "model": "gpt-5.4-nano",
+                "tools": "read,bash",
+                "max_turns": 300,
+                "max_concurrency": 1,
+                "runtime_context_level": "level3",
+                "thinking_level": "high",
+                "node_max_old_space_size_mb": 4096,
+            }
+        return profiles
+
     def test_plan_mode_is_default_and_needs_no_budget_configuration(self) -> None:
         stdout = io.StringIO()
         stderr = io.StringIO()
@@ -1138,31 +1194,314 @@ class ReproductionCliTests(unittest.TestCase):
             authorize.assert_not_called()
             execute.assert_not_called()
 
+    def test_execute_requires_all_limits_and_scope_before_authorization(self) -> None:
+        required_flags = (
+            "--max-agent-operations",
+            "--max-judge-operations",
+            "--max-cost-usd",
+            "--max-agent-cost-per-operation-usd",
+            "--max-judge-cost-per-operation-usd",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            for missing in (*required_flags, "--scope"):
+                with self.subTest(missing=missing):
+                    output_root = root / missing.removeprefix("--")
+                    argv = self._execute_argv(output_root)
+                    if missing == "--scope":
+                        scope_index = argv.index("--scope")
+                        del argv[scope_index : scope_index + 2]
+                    else:
+                        flag_index = argv.index(missing)
+                        del argv[flag_index : flag_index + 2]
+                    stdout = io.StringIO()
+                    stderr = io.StringIO()
+                    with patch(
+                        "asterion.dci.experiment_profiles.authorize_full_execution"
+                    ) as authorize, patch(
+                        "asterion.dci.benchmark.execute_authorized_reproduction",
+                        create=True,
+                    ) as execute:
+                        code = dci_main(
+                            argv,
+                            repo_root=root,
+                            stdout=stdout,
+                            stderr=stderr,
+                        )
+                    self.assertEqual(code, 2)
+                    self.assertFalse(output_root.exists())
+                    authorize.assert_not_called()
+                    execute.assert_not_called()
+
+    def test_execute_without_scope_does_not_fall_back_to_profile_scopes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            output_root = root / "no-scope"
+            argv = self._execute_argv(output_root)
+            scope_index = argv.index("--scope")
+            del argv[scope_index : scope_index + 2]
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with patch(
+                "asterion.dci.paper_benchmarks.resolve_experiment_scope"
+            ) as resolve_scope, patch(
+                "asterion.dci.experiment_profiles.authorize_full_execution"
+            ) as authorize:
+                code = dci_main(
+                    argv,
+                    repo_root=root,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+        self.assertEqual(code, 2)
+        self.assertFalse(output_root.exists())
+        resolve_scope.assert_not_called()
+        authorize.assert_not_called()
+
+    def test_execute_rejects_invalid_scopes_before_output_creation(self) -> None:
+        cases = (
+            ("duplicate", ("bright.biology.main.full", "bright.biology.main.full")),
+            ("unknown", ("unknown.scope",)),
+            ("upstream-only", ("qa.bamboogle.upstream.sample50",)),
+            ("unavailable", ("qa.bamboogle.main.full",)),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            for label, scopes in cases:
+                with self.subTest(label=label):
+                    output_root = root / label
+                    stdout = io.StringIO()
+                    stderr = io.StringIO()
+                    with patch(
+                        "asterion.dci.experiment_profiles.authorize_full_execution"
+                    ) as authorize, patch(
+                        "asterion.dci.benchmark.execute_authorized_reproduction",
+                        create=True,
+                    ) as execute:
+                        code = dci_main(
+                            self._execute_argv(output_root, scopes=scopes),
+                            repo_root=root,
+                            stdout=stdout,
+                            stderr=stderr,
+                        )
+                    self.assertEqual(code, 2)
+                    self.assertFalse(output_root.exists())
+                    authorize.assert_not_called()
+                    execute.assert_not_called()
+
+    def test_execute_rejects_profile_incompatible_scope_before_output_creation(
+        self,
+    ) -> None:
+        real_profile = resolve_experiment_profile("paper-reference/pi")
+        compatible_scope = "bright.earth-science.main.full"
+        compatible_digest = real_profile.selected_ids_sha256[
+            real_profile.scope_ids.index(compatible_scope)
+        ]
+        narrowed_profile = replace(
+            real_profile,
+            scope_ids=(compatible_scope,),
+            selected_ids_sha256=(compatible_digest,),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            output_root = root / "incompatible"
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with patch(
+                "asterion.dci.experiment_profiles.resolve_experiment_profile",
+                return_value=narrowed_profile,
+            ), patch(
+                "asterion.dci.experiment_profiles.authorize_full_execution"
+            ) as authorize, patch(
+                "asterion.dci.benchmark.execute_authorized_reproduction",
+                create=True,
+            ) as execute:
+                code = dci_main(
+                    self._execute_argv(output_root),
+                    repo_root=root,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+            self.assertEqual(code, 2)
+            self.assertFalse(output_root.exists())
+            authorize.assert_not_called()
+            execute.assert_not_called()
+
+    def test_execute_authorizes_and_dispatches_exact_same_process_plan(self) -> None:
+        original_authorize = authorize_full_execution
+        captured: dict[str, object] = {}
+
+        def authorize_spy(*args: object, **kwargs: object) -> FullExecutionAuthorization:
+            captured.setdefault("order", []).append("authorize")
+            authority = original_authorize(*args, **kwargs)
+            captured["authorize_args"] = args
+            captured["authorize_kwargs"] = kwargs
+            captured["authority"] = authority
+            return authority
+
+        def execute_spy(*args: object, **kwargs: object) -> dict[str, object]:
+            captured["execute_args"] = args
+            captured["execute_kwargs"] = kwargs
+            authority = kwargs["authority"]
+            items = tuple(kwargs["execution_items"])
+            captured["dataset_files"] = tuple(
+                item.request.dataset.is_file() for item in items
+            )
+            captured["corpus_dirs"] = tuple(
+                item.request.corpus.is_dir() for item in items
+            )
+            return {
+                "schema": "dci.paper-reproduction-result/v1",
+                "profile_id": kwargs["profile"].profile_id,
+                "authorized_scope_ids": list(kwargs["scope_ids"]),
+                "operation_counts": {
+                    "agent": 7,
+                    "judge": 0,
+                    "total": 7,
+                },
+                "outputs": [
+                    {
+                        "scope_id": item.scope_id,
+                        "output_root": str(item.request.output_root),
+                    }
+                    for item in items
+                ],
+                "receipt": {
+                    "schema": "dci.full-execution-authorization-receipt/v1",
+                    "profile_id": authority.profile_id,
+                },
+            }
+
+        scopes = (
+            "bright.biology.main.full",
+            "bright.earth-science.main.full",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            output_root = root / "reproduction"
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with patch(
+                "asterion.dci.cli._load_batch_profiles",
+                return_value=self._fixture_batch_profiles(root),
+            ), patch(
+                "asterion.dci.cli._preflight_scope_selected_ids",
+                side_effect=lambda _request, _scope: captured.setdefault(
+                    "order", []
+                ).append("selected-ids")
+                or ("q1",),
+            ), patch(
+                "asterion.dci.cli.validate_dci_run_request"
+            ) as validate_run, patch(
+                "asterion.dci.experiment_profiles.authorize_full_execution",
+                side_effect=authorize_spy,
+            ) as authorize, patch(
+                "asterion.dci.benchmark.execute_authorized_reproduction",
+                side_effect=execute_spy,
+                create=True,
+            ) as execute:
+                code = dci_main(
+                    self._execute_argv(output_root, scopes=scopes),
+                    repo_root=root,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+        self.assertEqual(code, 0, stderr.getvalue())
+        authorize.assert_called_once()
+        execute.assert_called_once()
+        validate_run.assert_called()
+        self.assertEqual(captured["authorize_args"], ())
+        self.assertEqual(
+            captured["order"],
+            ["selected-ids", "selected-ids", "authorize"],
+        )
+        authorize_kwargs = captured["authorize_kwargs"]
+        self.assertEqual(authorize_kwargs["profile"].profile_id, "paper-reference/pi")
+        self.assertEqual(authorize_kwargs["scope_ids"], scopes)
+        self.assertEqual(authorize_kwargs["output_root"], output_root)
+        self.assertEqual(authorize_kwargs["max_agent_operations"], 103)
+        self.assertEqual(authorize_kwargs["max_judge_operations"], 1)
+        self.assertEqual(authorize_kwargs["max_cost_usd"], 25.0)
+        self.assertEqual(authorize_kwargs["max_agent_cost_per_operation_usd"], 0.2)
+        self.assertEqual(authorize_kwargs["max_judge_cost_per_operation_usd"], 0.05)
+        authority = captured["authority"]
+        execute_kwargs = captured["execute_kwargs"]
+        self.assertIs(execute_kwargs["authority"], authority)
+        self.assertIs(execute_kwargs["profile"], authorize_kwargs["profile"])
+        self.assertEqual(execute_kwargs["scope_ids"], scopes)
+        self.assertEqual(execute_kwargs["output_root"], output_root)
+        items = tuple(execute_kwargs["execution_items"])
+        self.assertEqual(tuple(item.scope_id for item in items), scopes)
+        self.assertNotEqual(items[0].request.output_root, items[1].request.output_root)
+        self.assertEqual(
+            tuple(item.request.experiment_scope_id for item in items), scopes
+        )
+        self.assertTrue(
+            all(item.request.full_execution_authorization is authority for item in items)
+        )
+        self.assertTrue(
+            all(item.request.paper_ir_duplicate_handling == "deduplicated" for item in items)
+        )
+        self.assertTrue(all(captured["dataset_files"]))
+        self.assertTrue(all(captured["corpus_dirs"]))
+        combined = stdout.getvalue() + stderr.getvalue()
+        self.assertIn("Execution requested: yes", stdout.getvalue())
+        self.assertIn("Agent operations performed: 7", stdout.getvalue())
+        self.assertIn("Judge operations performed: 0", stdout.getvalue())
+        self.assertNotIn(authority._issuance_token, combined)
+        self.assertNotIn(repr(authority), combined)
+
 
 class LegacyFullAuthorizationTests(unittest.TestCase):
-    def test_legacy_helper_redacts_authorization_errors(self) -> None:
+    def test_legacy_helper_delegates_to_default_off_cli_without_authority(self) -> None:
         stdout = io.StringIO()
         stderr = io.StringIO()
-        with tempfile.TemporaryDirectory(
-            prefix="private-credential-sentinel-"
-        ) as temporary:
-            result = paper_reproduce_main(
-                [
-                    "--profile",
-                    "paper-reference/pi",
-                    "--output-root",
-                    str(Path(temporary) / "private"),
-                    "--estimated-budget-usd",
-                    "0",
-                    "--authorize-full",
-                ],
-                stdout=stdout,
-                stderr=stderr,
-            )
+        with tempfile.TemporaryDirectory() as temporary:
+            output_root = Path(temporary) / "private"
+            with patch(
+                "asterion.dci.experiment_profiles.authorize_full_execution"
+            ) as authorize, patch(
+                "asterion.dci.benchmark.execute_authorized_reproduction",
+                create=True,
+            ) as execute:
+                result = paper_reproduce_main(
+                    [
+                        "--profile",
+                        "paper-reference/pi",
+                        "--output-root",
+                        str(output_root),
+                    ],
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+        self.assertEqual(result, 0, stderr.getvalue())
+        self.assertIn("Execution requested: no", stdout.getvalue())
+        self.assertFalse(output_root.exists())
+        authorize.assert_not_called()
+        execute.assert_not_called()
+
+    def test_legacy_issue_and_exit_flags_are_rejected_without_authority(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with tempfile.TemporaryDirectory() as temporary:
+            output_root = Path(temporary) / "private"
+            with patch(
+                "asterion.dci.experiment_profiles.authorize_full_execution"
+            ) as authorize:
+                result = paper_reproduce_main(
+                    [
+                        "--profile",
+                        "paper-reference/pi",
+                        "--output-root",
+                        str(output_root),
+                        "--estimated-budget-usd",
+                        "0",
+                        "--authorize-full",
+                    ],
+                    stdout=stdout,
+                    stderr=stderr,
+                )
         self.assertEqual(result, 2)
-        self.assertEqual(
-            stderr.getvalue(),
-            "DCI paper reproduction authorization failed\n",
-        )
-        self.assertNotIn("credential-sentinel", stdout.getvalue())
-        self.assertNotIn("credential-sentinel", stderr.getvalue())
+        self.assertEqual(stderr.getvalue(), "DCI paper command failed\n")
+        self.assertFalse(output_root.exists())
+        authorize.assert_not_called()

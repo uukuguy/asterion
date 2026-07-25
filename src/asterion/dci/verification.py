@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import math
+import importlib
 import json
 import os
 import re
@@ -63,11 +63,8 @@ from asterion.dci.context_profiles import (
 )
 from asterion.dci.experiment_profiles import (
     EXPERIMENT_AUTHORIZATION_SCHEMA,
-    ExperimentAuthorizationError,
-    authorize_full_execution,
     experiment_profile_schema_sha256,
     experiment_profiles_sha256,
-    experiment_profile_sha256,
     resolve_experiment_profile,
 )
 from asterion.dci.paper_benchmarks import (
@@ -552,18 +549,6 @@ def _paper_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _paper_reproduce_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="asterion-dci paper reproduce", exit_on_error=False
-    )
-    parser.add_argument("--profile", required=True)
-    parser.add_argument("--output-root", type=Path, required=True)
-    parser.add_argument("--estimated-budget-usd", type=float, required=True)
-    parser.add_argument("--authorize-full", action="store_true")
-    parser.add_argument("--dry-run", action="store_true")
-    return parser
-
-
 def _paper_compare_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="asterion-dci paper compare", exit_on_error=False
@@ -575,94 +560,23 @@ def _paper_compare_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _paper_profile_operations(profile_id: str) -> dict[str, int]:
-    profile = resolve_experiment_profile(profile_id)
-    max_agents = 0
-    max_judges = 0
-    for scope_id in profile.paper_scope_ids:
-        selected_scope = resolve_paper_experiment_scope(scope_id)
-        max_agents += selected_scope.selection_count
-        dataset = resolve_paper_benchmark(selected_scope.dataset_id)
-        if dataset.mode == "qa":
-            max_judges += selected_scope.selection_count
-    return {
-        "max_agent_operations": max_agents,
-        "max_judge_operations": max_judges,
-        "max_external_operations": max_agents + max_judges,
-    }
-
-
-def _paper_reproduce_plan(profile_id: str) -> dict[str, object]:
-    profile = resolve_experiment_profile(profile_id)
-    operations = _paper_profile_operations(profile_id)
-    return {
-        "schema": "dci.paper-reproduction-plan/v1",
-        "profile_id": profile.profile_id,
-        "profile_identity_sha256": profile.identity_sha256,
-        "paper_scope_ids": list(profile.paper_scope_ids),
-        "paper_scope_dataset_ids": list(profile.paper_scope_dataset_ids),
-        "paper_experiment_scopes_sha256": paper_experiment_scopes_sha256(),
-        "dataset_count": len(profile.paper_scope_dataset_ids),
-        **operations,
-    }
-
-
 def paper_reproduce_main(
     argv: Sequence[str] | None = None,
     *,
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
 ) -> int:
-    """Prepare or authorize paper reproduction intent without provider execution."""
+    """Delegate paper reproduction to the package-local CLI implementation."""
 
     stdout = sys.stdout if stdout is None else stdout
     stderr = sys.stderr if stderr is None else stderr
-    try:
-        args = _paper_reproduce_parser().parse_args(argv)
-        plan = _paper_reproduce_plan(args.profile)
-    except (argparse.ArgumentError, OSError, RuntimeError, TypeError, ValueError):
-        stderr.write("DCI paper reproduction plan failed\n")
-        return 2
-    profile = resolve_experiment_profile(args.profile)
-    if not math.isfinite(args.estimated_budget_usd) or args.estimated_budget_usd < 0:
-        stderr.write("DCI paper reproduction plan failed\n")
-        return 2
-    stdout.write(f"profile={profile.profile_id}\n")
-    stdout.write(f"estimated_budget_usd={args.estimated_budget_usd}\n")
-    stdout.write(f"dataset_count={plan['dataset_count']}\n")
-    stdout.write(f"max_agent_operations={plan['max_agent_operations']}\n")
-    stdout.write(f"max_judge_operations={plan['max_judge_operations']}\n")
-    stdout.write(f"max_external_operations={plan['max_external_operations']}\n")
-    stdout.write(f"profile_identity_sha256={plan['profile_identity_sha256']}\n")
-    stdout.write(
-        f"paper_experiment_scopes_sha256={plan['paper_experiment_scopes_sha256']}\n"
+    dci_main = importlib.import_module("asterion.dci.cli").main
+
+    return dci_main(
+        ["paper", "reproduce", *(list(argv or ()))],
+        stdout=stdout,
+        stderr=stderr,
     )
-    if not args.authorize_full:
-        stdout.write("reproduction_authorized=no\n")
-        stdout.write("operation_count=0\n")
-        return 0
-    try:
-        authorize_full_execution(
-            profile_id=args.profile,
-            output_root=args.output_root,
-            estimated_budget_usd=args.estimated_budget_usd,
-            invocation_authorized=True,
-            preflight_profile_sha256=experiment_profile_sha256(args.profile),
-            preflight_dataset_inventory_sha256=profile.dataset_inventory_sha256,
-            preflight_experiment_scopes_sha256=profile.experiment_scopes_sha256,
-            preflight_scope_ids=profile.scope_ids,
-            preflight_selected_ids_sha256=profile.selected_ids_sha256,
-        )
-    except (ExperimentAuthorizationError, ValueError, OSError):
-        stderr.write("DCI paper reproduction authorization failed\n")
-        return 2
-    stdout.write("reproduction_authorized=yes\n")
-    if args.dry_run:
-        stdout.write("operation_count=0\n")
-        return 0
-    stdout.write("operation_count=0\n")
-    stdout.write("full execution is deferred\n")
-    return 0
 
 
 def paper_compare_main(

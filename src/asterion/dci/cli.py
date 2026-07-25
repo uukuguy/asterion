@@ -6,6 +6,7 @@ import argparse
 import contextlib
 import io
 import json
+import math
 import os
 import secrets
 import stat
@@ -34,6 +35,7 @@ from asterion.dci.config import (
 )
 from asterion.dci.context_profiles import context_profile_names
 from asterion.dci.benchmark import (
+    AuthorizedBenchmarkExecution,
     BenchmarkRequest,
     DciBenchmarkError,
     run_benchmark,
@@ -432,58 +434,18 @@ def main(
                 )
                 return 0 if report.accepted is not False else 3
             if args.paper_command == "reproduce":
-                from asterion.dci.experiment_profiles import (
-                    experiment_profile_sha256,
-                    resolve_experiment_profile,
+                root = (
+                    Path.cwd().resolve()
+                    if repo_root is None
+                    else Path(repo_root).resolve()
                 )
-                from asterion.dci.paper_benchmarks import (
-                    paper_benchmark_ids,
-                    resolve_paper_benchmark,
-                    resolve_paper_experiment_scope,
+                invocation_cwd = Path.cwd().resolve()
+                return _paper_reproduce_cli(
+                    args,
+                    repo_root=root,
+                    invocation_cwd=invocation_cwd,
+                    stdout=stdout,
                 )
-
-                profile = resolve_experiment_profile(
-                    args.profile,
-                    invocation_provider=args.provider,
-                    invocation_model=args.model,
-                )
-                profile_sha256 = experiment_profile_sha256(
-                    args.profile,
-                    invocation_provider=args.provider,
-                    invocation_model=args.model,
-                )
-                selected_scope_ids = tuple(args.scope or profile.paper_scope_ids)
-                selected_count = sum(
-                    resolve_paper_experiment_scope(scope_id).selection_count
-                    for scope_id in selected_scope_ids
-                )
-                judge_count = sum(
-                    resolve_paper_experiment_scope(scope_id).selection_count
-                    for scope_id in selected_scope_ids
-                    if resolve_paper_benchmark(
-                        resolve_paper_experiment_scope(scope_id).dataset_id
-                    ).mode == "qa"
-                )
-                stdout.write(f"Profile: {profile.profile_id}\n")
-                stdout.write(f"Profile SHA-256: {profile_sha256}\n")
-                stdout.write(f"Dataset inventory SHA-256: {profile.dataset_inventory_sha256}\n")
-                stdout.write(f"Experiment scopes SHA-256: {profile.experiment_scopes_sha256}\n")
-                stdout.write(f"Datasets: {len(paper_benchmark_ids())}\n")
-                stdout.write(f"Experiment scopes: {len(selected_scope_ids)}\n")
-                stdout.write(f"Selected queries: {selected_count}\n")
-                stdout.write(f"Maximum agent operations: {selected_count}\n")
-                stdout.write(f"Maximum Judge operations: {judge_count}\n")
-                stdout.write("Agent operations performed: 0\nJudge operations performed: 0\n")
-                stdout.write(
-                    "Execution requested: "
-                    + ("yes\n" if args.execute else "no\n")
-                )
-                if not args.execute:
-                    stdout.write("Full authorization issued: no\n")
-                    stdout.write("reproduction_authorized=no\n")
-                    stdout.write("operation_count=0\n")
-                    return 0
-                raise ValueError("DCI full execution is not configured")
             verify_argv = []
             if args.provider_backed:
                 verify_argv.append("--provider-backed")
@@ -851,6 +813,398 @@ def main(
         return 0
     _write_run_result(stdout, result)
     return 0
+
+
+def _paper_reproduce_cli(
+    args: argparse.Namespace,
+    *,
+    repo_root: Path,
+    invocation_cwd: Path,
+    stdout: TextIO,
+) -> int:
+    from asterion.dci import benchmark as benchmark_module
+    from asterion.dci import experiment_profiles as experiment_profile_module
+    from asterion.dci.experiment_profiles import experiment_profile_sha256
+    from asterion.dci.paper_benchmarks import paper_benchmark_ids
+
+    profile = experiment_profile_module.resolve_experiment_profile(
+        args.profile,
+        invocation_provider=args.provider,
+        invocation_model=args.model,
+    )
+    profile_sha256 = experiment_profile_sha256(
+        args.profile,
+        invocation_provider=args.provider,
+        invocation_model=args.model,
+    )
+    raw_scope_ids = tuple(args.scope or ())
+    selected_scope_ids = _reproduction_scope_ids(
+        raw_scope_ids if args.execute else (raw_scope_ids or profile.paper_scope_ids),
+        profile=profile,
+        require_executable=args.execute,
+    )
+    max_agent_operations, max_judge_operations = _paper_scope_operation_counts(
+        selected_scope_ids
+    )
+    stdout.write(f"Profile: {profile.profile_id}\n")
+    stdout.write(f"Profile SHA-256: {profile_sha256}\n")
+    stdout.write(
+        f"Dataset inventory SHA-256: {profile.dataset_inventory_sha256}\n"
+    )
+    stdout.write(
+        f"Experiment scopes SHA-256: {profile.experiment_scopes_sha256}\n"
+    )
+    stdout.write(f"Datasets: {len(paper_benchmark_ids())}\n")
+    stdout.write(f"Experiment scopes: {len(selected_scope_ids)}\n")
+    stdout.write(f"Selected queries: {max_agent_operations}\n")
+    stdout.write(f"Maximum agent operations: {max_agent_operations}\n")
+    stdout.write(f"Maximum Judge operations: {max_judge_operations}\n")
+    stdout.write("Agent operations performed: 0\nJudge operations performed: 0\n")
+    stdout.write("Execution requested: " + ("yes\n" if args.execute else "no\n"))
+    if not args.execute:
+        stdout.write("Full authorization issued: no\n")
+        stdout.write("reproduction_authorized=no\n")
+        stdout.write("operation_count=0\n")
+        return 0
+
+    limits = _reproduction_limit_kwargs(args)
+    load_asterion_dci_env(repo_root)
+    paths = resolve_dci_paths(repo_root)
+    parent_output_root = _output_path_from_invocation(args.output_root, invocation_cwd)
+    preflight_requests = tuple(
+        _preflight_reproduction_request(
+            profile,
+            scope_id=scope_id,
+            parent_output_root=parent_output_root,
+            repo_root=repo_root,
+            invocation_cwd=invocation_cwd,
+        )
+        for scope_id in selected_scope_ids
+    )
+    for scope_id, request in zip(
+        selected_scope_ids, preflight_requests, strict=True
+    ):
+        _preflight_benchmark_host_inputs(request)
+        _preflight_scope_selected_ids(request, scope_id)
+        runtime_preflight = replace(
+            request_from_runtime_options(
+                request.runtime_options,
+                run_id="asterion-dci-paper-reproduce-preflight",
+                question="Asterion DCI paper reproduction preflight",
+                cwd=request.cwd,
+                stream_text=False,
+            ),
+            max_turns=request.max_turns,
+        )
+        validate_dci_run_request(runtime_preflight)
+        validate_benchmark_metric_selection(request)
+
+    authority = experiment_profile_module.authorize_full_execution(
+        profile=profile,
+        scope_ids=selected_scope_ids,
+        output_root=parent_output_root,
+        invocation_authorized=True,
+        **limits,
+    )
+    from asterion.dci.experiment_profiles import authorized_scope_output_root
+
+    execution_items = tuple(
+        AuthorizedBenchmarkExecution(
+            scope_id=scope_id,
+            request=replace(
+                request,
+                output_root=authorized_scope_output_root(authority, scope_id),
+                full_execution_authorization=authority,
+                experiment_scope_id=scope_id,
+            ),
+            paths=paths,
+        )
+        for scope_id, request in zip(
+            selected_scope_ids, preflight_requests, strict=True
+        )
+    )
+    result = benchmark_module.execute_authorized_reproduction(
+        authority=authority,
+        profile=profile,
+        scope_ids=selected_scope_ids,
+        output_root=parent_output_root,
+        execution_items=execution_items,
+    )
+    _write_reproduction_execution_result(stdout, result)
+    return 0
+
+
+def _reproduction_limit_kwargs(args: argparse.Namespace) -> dict[str, float | int]:
+    values = {
+        "max_agent_operations": args.max_agent_operations,
+        "max_judge_operations": args.max_judge_operations,
+        "max_cost_usd": args.max_cost_usd,
+        "max_agent_cost_per_operation_usd": (
+            args.max_agent_cost_per_operation_usd
+        ),
+        "max_judge_cost_per_operation_usd": (
+            args.max_judge_cost_per_operation_usd
+        ),
+    }
+    if any(value is None for value in values.values()):
+        raise ValueError("full execution limits are required")
+    if any(
+        type(values[name]) is not int or int(values[name]) < 1
+        for name in ("max_agent_operations", "max_judge_operations")
+    ):
+        raise ValueError("full execution limits are invalid")
+    money = (
+        values["max_cost_usd"],
+        values["max_agent_cost_per_operation_usd"],
+        values["max_judge_cost_per_operation_usd"],
+    )
+    if any(
+        type(value) not in {int, float}
+        or not math.isfinite(float(value))
+        or float(value) <= 0
+        for value in money
+    ):
+        raise ValueError("full execution limits are invalid")
+    return {
+        "max_agent_operations": int(values["max_agent_operations"]),
+        "max_judge_operations": int(values["max_judge_operations"]),
+        "max_cost_usd": float(values["max_cost_usd"]),
+        "max_agent_cost_per_operation_usd": float(
+            values["max_agent_cost_per_operation_usd"]
+        ),
+        "max_judge_cost_per_operation_usd": float(
+            values["max_judge_cost_per_operation_usd"]
+        ),
+    }
+
+
+def _reproduction_scope_ids(
+    scope_ids: tuple[str, ...],
+    *,
+    profile: object,
+    require_executable: bool,
+) -> tuple[str, ...]:
+    from asterion.dci.paper_benchmarks import (
+        resolve_experiment_scope,
+        resolve_paper_benchmark,
+        resolve_paper_experiment_scope,
+    )
+
+    if require_executable and not scope_ids:
+        raise ValueError("full execution requires explicit scopes")
+    if len(scope_ids) != len(set(scope_ids)) or tuple(sorted(scope_ids)) != scope_ids:
+        raise ValueError("paper reproduction scopes are invalid")
+    profile_scope_ids = set(profile.paper_scope_ids)
+    for scope_id in scope_ids:
+        source_scope = resolve_experiment_scope(scope_id)
+        if (
+            source_scope.source_family != "paper-reference"
+            or source_scope.execution_class != "paper-full"
+            or scope_id not in profile_scope_ids
+        ):
+            raise ValueError("paper reproduction scope is invalid")
+        paper_scope = resolve_paper_experiment_scope(scope_id)
+        benchmark = resolve_paper_benchmark(paper_scope.dataset_id)
+        if require_executable and (
+            paper_scope.launcher_origin == "unavailable"
+            or benchmark.batch_profile is None
+        ):
+            raise ValueError("paper reproduction scope is unavailable")
+    return scope_ids
+
+
+def _paper_scope_operation_counts(scope_ids: tuple[str, ...]) -> tuple[int, int]:
+    from asterion.dci.paper_benchmarks import (
+        resolve_paper_benchmark,
+        resolve_paper_experiment_scope,
+    )
+
+    agent_count = 0
+    judge_count = 0
+    for scope_id in scope_ids:
+        scope = resolve_paper_experiment_scope(scope_id)
+        benchmark = resolve_paper_benchmark(scope.dataset_id)
+        agent_count += scope.selection_count
+        if benchmark.mode == "qa":
+            judge_count += scope.selection_count
+    return agent_count, judge_count
+
+
+def _preflight_reproduction_request(
+    profile: object,
+    *,
+    scope_id: str,
+    parent_output_root: Path,
+    repo_root: Path,
+    invocation_cwd: Path,
+) -> BenchmarkRequest:
+    from asterion.dci.paper_benchmarks import (
+        resolve_paper_benchmark,
+        resolve_paper_experiment_scope,
+    )
+
+    scope = resolve_paper_experiment_scope(scope_id)
+    benchmark = resolve_paper_benchmark(scope.dataset_id)
+    batch_profiles = _load_batch_profiles()
+    batch_profile = (
+        None
+        if benchmark.batch_profile is None
+        else batch_profiles.get(benchmark.batch_profile)
+    )
+    if (
+        batch_profile is None
+        or batch_profile.get("dataset") != benchmark.dataset_path
+        or batch_profile.get("corpus") != benchmark.corpus_path
+        or batch_profile.get("mode") != benchmark.mode
+    ):
+        raise ValueError("paper reproduction batch profile is invalid")
+    args = argparse.Namespace(
+        profile=benchmark.batch_profile,
+        dataset=None,
+        output_root=parent_output_root / scope_id.replace(".", "_"),
+        corpus=None,
+        cwd=None,
+        mode=None,
+        enable_ir=False,
+        provider=None,
+        model=None,
+        tools=None,
+        rpc_timeout_seconds=None,
+        runtime_context_level=None,
+        thinking_level=None,
+        node_max_old_space_size_mb=None,
+        keep_session=None,
+        extra_arg=None,
+        max_turns=None,
+        max_concurrency=None,
+        resume_policy=None,
+    )
+    _apply_benchmark_profile(args, repo_root=repo_root, invocation_cwd=invocation_cwd)
+    return BenchmarkRequest(
+        dataset=args.dataset,
+        output_root=args.output_root,
+        cwd=args.cwd,
+        judge_config=_profile_judge_config(profile),
+        runtime_options=_profile_runtime_options(profile),
+        mode=args.mode,
+        profile=profile.profile_id,
+        corpus=args.corpus,
+        max_concurrency=args.max_concurrency,
+        max_turns=profile.max_turns,
+        resume_policy=args.resume_policy,
+        paper_ir_duplicate_handling=(
+            "deduplicated" if args.mode == "ir" else None
+        ),
+        conversation_features=DciConversationFeatures(
+            externalize_tool_results=True,
+            strip_thinking=True,
+            strip_usage=True,
+        ),
+    )
+
+
+def _profile_runtime_options(profile: object) -> DciRuntimeOptions:
+    return DciRuntimeOptions(
+        runtime=profile.runtime,
+        provider=profile.provider,
+        model=profile.model,
+        tools=profile.tools,
+        runtime_context_level=profile.context_profile,
+        thinking_level=profile.reasoning,
+        node_max_old_space_size_mb=None,
+        keep_session=False,
+        extra_args=(),
+        authentication_mode=profile.authentication_mode,
+    )
+
+
+def _profile_judge_config(profile: object) -> JudgeConfig:
+    judge = profile.judge
+    api_key_env = str(judge["key_source"])
+    return JudgeConfig(
+        base_url=str(judge["base_url"]),
+        api=str(judge["api"]),
+        model=str(judge["model"]),
+        json_mode=bool(judge["json_object"]),
+        thinking="enabled" if judge["thinking"] is True else "disabled",
+        api_key_env=api_key_env,
+        api_key=os.environ.get(api_key_env, "").strip(),
+    )
+
+
+def _preflight_benchmark_host_inputs(request: BenchmarkRequest) -> None:
+    if not request.dataset.is_file() or _path_has_symlink(request.dataset):
+        raise ValueError("paper reproduction dataset is unavailable")
+    if request.corpus is None or not request.corpus.is_dir() or _path_has_symlink(
+        request.corpus
+    ):
+        raise ValueError("paper reproduction corpus is unavailable")
+    if not request.cwd.is_dir() or _path_has_symlink(request.cwd):
+        raise ValueError("paper reproduction cwd is unavailable")
+    with request.dataset.open("rb"):
+        pass
+    with os.scandir(request.corpus):
+        pass
+
+
+def _preflight_scope_selected_ids(
+    request: BenchmarkRequest, scope_id: str
+) -> tuple[str, ...]:
+    from asterion.dci.datasets import (
+        DatasetError,
+        load_beir_benchmark_rows_bytes,
+        load_benchmark_rows_bytes,
+        load_bright_benchmark_rows_bytes,
+    )
+    from asterion.dci.paper_benchmarks import (
+        resolve_paper_benchmark,
+        resolve_paper_experiment_scope,
+        select_and_verify_scope_ids,
+    )
+
+    scope = resolve_paper_experiment_scope(scope_id)
+    benchmark = resolve_paper_benchmark(scope.dataset_id)
+    raw = request.dataset.read_bytes()
+    try:
+        if benchmark.dataset_id.startswith("bright."):
+            rows = load_bright_benchmark_rows_bytes(
+                raw, expected_count=benchmark.source_count
+            )
+        elif benchmark.dataset_id.startswith("beir."):
+            rows = load_beir_benchmark_rows_bytes(
+                raw, expected_count=benchmark.source_count
+            )
+        else:
+            rows = load_benchmark_rows_bytes(raw)
+        return select_and_verify_scope_ids(
+            scope_id, tuple(row.query_id for row in rows)
+        )
+    except (DatasetError, ValueError) as error:
+        raise ValueError("paper reproduction selected IDs are invalid") from error
+
+
+def _write_reproduction_execution_result(
+    stdout: TextIO, result: dict[str, object]
+) -> None:
+    operation_counts = result.get("operation_counts")
+    if not isinstance(operation_counts, dict):
+        raise ValueError("paper reproduction result is invalid")
+    agent_operations = int(operation_counts.get("agent", 0))
+    judge_operations = int(operation_counts.get("judge", 0))
+    stdout.write("Full authorization issued: yes\n")
+    stdout.write("reproduction_authorized=yes\n")
+    stdout.write(f"Agent operations performed: {agent_operations}\n")
+    stdout.write(f"Judge operations performed: {judge_operations}\n")
+    stdout.write(f"operation_count={agent_operations + judge_operations}\n")
+    outputs = result.get("outputs")
+    if not isinstance(outputs, list):
+        raise ValueError("paper reproduction result is invalid")
+    for output in outputs:
+        if not isinstance(output, dict) or not isinstance(
+            output.get("scope_id"), str
+        ):
+            raise ValueError("paper reproduction result is invalid")
+        stdout.write(f"output_scope={output['scope_id']}\n")
 
 
 def _read_question(
