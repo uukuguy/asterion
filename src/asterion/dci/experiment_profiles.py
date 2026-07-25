@@ -665,52 +665,72 @@ def _open_directory_chain(path: Path, *, create: bool = False) -> int:
     return descriptor
 
 
-def _fresh_private_output_root(output_root: Path) -> Path:
-    requested = Path(
-        os.path.abspath(os.path.normpath(Path(output_root).expanduser()))
-    )
-    parent_descriptor = _open_directory_chain(requested.parent, create=True)
-    created = False
+def _rmdir_if_identity(
+    parent_descriptor: int,
+    name: str,
+    *,
+    device: int,
+    inode: int,
+) -> None:
     try:
+        current = os.stat(
+            name,
+            dir_fd=parent_descriptor,
+            follow_symlinks=False,
+        )
+    except OSError:
+        return
+    if (
+        stat.S_ISDIR(current.st_mode)
+        and (current.st_dev, current.st_ino) == (device, inode)
+    ):
         try:
-            os.stat(
-                requested.name,
-                dir_fd=parent_descriptor,
-                follow_symlinks=False,
-            )
-        except FileNotFoundError:
+            os.rmdir(name, dir_fd=parent_descriptor)
+        except OSError:
             pass
-        else:
-            raise ValueError("DCI full output root must be fresh")
-        os.mkdir(requested.name, mode=0o700, dir_fd=parent_descriptor)
-        created = True
+
+
+def _create_private_directory(
+    parent_descriptor: int,
+    name: str,
+) -> tuple[int, int, int]:
+    if not name or name in {".", ".."} or os.sep in name:
+        raise ValueError("DCI full output root identity is invalid")
+    try:
+        os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+    except FileNotFoundError:
+        pass
+    else:
+        raise ValueError("DCI full output root must be fresh")
+
+    os.mkdir(name, mode=0o700, dir_fd=parent_descriptor)
+    descriptor: int | None = None
+    identity: tuple[int, int] | None = None
+    try:
         flags = (
             os.O_RDONLY
             | getattr(os, "O_DIRECTORY", 0)
             | getattr(os, "O_NOFOLLOW", 0)
         )
-        child_descriptor = os.open(
-            requested.name,
-            flags,
-            dir_fd=parent_descriptor,
-        )
-        try:
-            os.fchmod(child_descriptor, 0o700)
-            metadata = os.fstat(child_descriptor)
-        finally:
-            os.close(child_descriptor)
+        descriptor = os.open(name, flags, dir_fd=parent_descriptor)
+        metadata = os.fstat(descriptor)
+        identity = (metadata.st_dev, metadata.st_ino)
+        os.fchmod(descriptor, 0o700)
+        metadata = os.fstat(descriptor)
         if stat.S_IMODE(metadata.st_mode) != 0o700:
             raise ValueError("DCI full output root must be private")
+        return descriptor, metadata.st_dev, metadata.st_ino
     except BaseException:
-        if created:
-            try:
-                os.rmdir(requested.name, dir_fd=parent_descriptor)
-            except OSError:
-                pass
+        if descriptor is not None:
+            os.close(descriptor)
+        if identity is not None:
+            _rmdir_if_identity(
+                parent_descriptor,
+                name,
+                device=identity[0],
+                inode=identity[1],
+            )
         raise
-    finally:
-        os.close(parent_descriptor)
-    return requested
 
 
 def _private_root_identity(output_root: Path) -> tuple[int, int]:
@@ -779,10 +799,13 @@ def _positive_operation_limit(value: object) -> bool:
 
 
 def _usd_decimal(value: object) -> Decimal:
-    if (
-        type(value) not in {int, float}
-        or not math.isfinite(float(value))
-    ):
+    if type(value) not in {int, float}:
+        raise ValueError("USD value is invalid")
+    try:
+        finite_value = math.isfinite(float(value))
+    except (OverflowError, TypeError, ValueError):
+        raise ValueError("USD value is invalid") from None
+    if not finite_value:
         raise ValueError("USD value is invalid")
     return Decimal(str(value))
 
@@ -792,19 +815,6 @@ def _positive_usd_limit(value: object) -> bool:
         return _usd_decimal(value) > 0
     except ValueError:
         return False
-
-
-def _private_scope_output_root(parent: Path, scope_id: str) -> _ScopeOutputIdentity:
-    name = hashlib.sha256(scope_id.encode("utf-8")).hexdigest()
-    child = parent / name
-    try:
-        child = _fresh_private_output_root(child)
-        device, inode = _private_root_identity(child)
-    except (OSError, ValueError):
-        raise ExperimentAuthorizationError(
-            "full execution output root identity is invalid"
-        ) from None
-    return _ScopeOutputIdentity(child, device, inode)
 
 
 def _validate_authorization(
@@ -1007,13 +1017,67 @@ def authorize_full_execution(
         )
     ):
         raise ExperimentAuthorizationError("full execution authorization is invalid")
+    private_root = Path(
+        os.path.abspath(os.path.normpath(Path(output_root).expanduser()))
+    )
+    parent_descriptor: int | None = None
+    root_descriptor: int | None = None
+    root_identity: tuple[int, int] | None = None
+    created_children: list[tuple[str, int, int]] = []
+    scope_outputs: dict[str, _ScopeOutputIdentity] = {}
     try:
-        private_root = _fresh_private_output_root(output_root)
-        device, inode = _private_root_identity(private_root)
+        parent_descriptor = _open_directory_chain(
+            private_root.parent,
+            create=True,
+        )
+        root_descriptor, device, inode = _create_private_directory(
+            parent_descriptor,
+            private_root.name,
+        )
+        root_identity = (device, inode)
+        for scope_id in requested_scope_ids:
+            child_name = hashlib.sha256(scope_id.encode("utf-8")).hexdigest()
+            child_descriptor, child_device, child_inode = (
+                _create_private_directory(root_descriptor, child_name)
+            )
+            try:
+                scope_outputs[scope_id] = _ScopeOutputIdentity(
+                    private_root / child_name,
+                    child_device,
+                    child_inode,
+                )
+                created_children.append(
+                    (child_name, child_device, child_inode)
+                )
+            finally:
+                os.close(child_descriptor)
     except (OSError, ValueError):
+        if root_descriptor is not None:
+            for child_name, child_device, child_inode in reversed(
+                created_children
+            ):
+                _rmdir_if_identity(
+                    root_descriptor,
+                    child_name,
+                    device=child_device,
+                    inode=child_inode,
+                )
+            os.close(root_descriptor)
+        if parent_descriptor is not None:
+            if root_identity is not None:
+                _rmdir_if_identity(
+                    parent_descriptor,
+                    private_root.name,
+                    device=root_identity[0],
+                    inode=root_identity[1],
+                )
+            os.close(parent_descriptor)
         raise ExperimentAuthorizationError(
             "full execution output root identity is invalid"
         ) from None
+    else:
+        os.close(root_descriptor)
+        os.close(parent_descriptor)
     token = secrets.token_hex(32)
     authorization = _issue_authorization(
         profile_id=profile.profile_id,
@@ -1055,25 +1119,6 @@ def authorize_full_execution(
         max_judge_cost_per_operation_usd=float(max_judge_cost_per_operation_usd),
         issuance_token=token,
     )
-    try:
-        scope_outputs = {
-            scope_id: _private_scope_output_root(private_root, scope_id)
-            for scope_id in requested_scope_ids
-        }
-    except ExperimentAuthorizationError:
-        for scope_id in requested_scope_ids:
-            child = private_root / hashlib.sha256(
-                scope_id.encode("utf-8")
-            ).hexdigest()
-            try:
-                child.rmdir()
-            except OSError:
-                pass
-        try:
-            private_root.rmdir()
-        except OSError:
-            pass
-        raise
     with _AUTHORIZATION_LOCK:
         _AUTHORIZATION_REGISTRY[token] = _AuthorizationRecord(
             authorization,

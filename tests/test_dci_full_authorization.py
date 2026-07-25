@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import math
@@ -10,6 +11,7 @@ import stat
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from asterion.dci.experiment_profiles import (
     ExperimentAuthorizationError,
@@ -177,6 +179,58 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
             self.assertFalse((target / "private").exists())
             self.assertNotIn(str(redirected), str(raised.exception))
             self.assertNotIn(str(target), str(raised.exception))
+
+    def test_output_root_is_cleaned_when_post_creation_identity_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output_root = Path(temporary) / "private"
+            with patch(
+                "asterion.dci.experiment_profiles.os.fchmod",
+                side_effect=OSError("credential-path-sentinel"),
+            ):
+                with self.assertRaises(ExperimentAuthorizationError) as raised:
+                    authorize(output_root)
+            self.assertFalse(output_root.exists())
+            self.assertNotIn("credential-path-sentinel", str(raised.exception))
+
+    def test_failed_creation_never_cleans_through_a_replaced_root_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            output_root = base / "private"
+            moved_root = base / "moved-private"
+            replacement_target = base / "replacement-target"
+            replacement_target.mkdir()
+            child_name = hashlib.sha256(
+                b"bright.biology.main.full"
+            ).hexdigest()
+            replacement_child = replacement_target / child_name
+            replacement_child.mkdir()
+            real_mkdir = os.mkdir
+
+            def replace_root_before_child_creation(
+                path: str,
+                mode: int = 0o777,
+                *,
+                dir_fd: int | None = None,
+            ) -> None:
+                if path == child_name:
+                    os.rename(output_root, moved_root)
+                    output_root.symlink_to(
+                        replacement_target,
+                        target_is_directory=True,
+                    )
+                    raise OSError("credential-path-sentinel")
+                real_mkdir(path, mode=mode, dir_fd=dir_fd)
+
+            with patch(
+                "asterion.dci.experiment_profiles.os.mkdir",
+                side_effect=replace_root_before_child_creation,
+            ):
+                with self.assertRaises(ExperimentAuthorizationError) as raised:
+                    authorize(output_root)
+            self.assertTrue(replacement_child.is_dir())
+            self.assertTrue(output_root.is_symlink())
+            self.assertTrue(moved_root.is_dir())
+            self.assertNotIn("credential-path-sentinel", str(raised.exception))
 
     def test_failures_are_redacted(self) -> None:
         sentinel = "credential-should-never-appear"
@@ -399,6 +453,13 @@ class FullExecutionBudgetTests(unittest.TestCase):
             receipt = consumed_full_execution_authorization_snapshot(authority)
             self.assertEqual(receipt["ledger"]["reserved_cost_usd"], 0.0)
             self.assertEqual(receipt["ledger"]["actual_cost_usd"], 0.3)
+
+    def test_unrepresentable_numeric_limits_use_the_safe_public_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output_root = Path(temporary) / "private"
+            with self.assertRaises(ExperimentAuthorizationError):
+                authorize(output_root, max_cost=10**400)
+            self.assertFalse(output_root.exists())
 
     def test_failure_and_cancellation_preserve_potential_spend(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
