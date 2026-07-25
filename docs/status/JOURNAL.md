@@ -48,3 +48,76 @@
 - 23:19 Validated re-export targets recursively to prevent documented API false positives [3402675]
 - 23:23 Refreshed re-export checkpoint and provider-free evidence for final review [1c4590e]
 - 23:39 Closed protocol/composition hardening after a fresh CLEAN whole-branch review and provider-free promotion gate
+- 23:40 Closed protocol hardening recovery boundary after CLEAN review and promotion verification [b6ba396]
+
+## 2026-07-25
+
+- 00:00 Resolved application runtime assemblies into exact executable closures before runtime construction [668af4e]
+- 00:00 Closed binding, snapshot identity, and typed-error gaps found by independent review [9735589]
+- 00:33 Separated packaged, bound, composed, and executable acceptance evidence with safe unbound inventory [e42dcba]
+- 00:33 Preserved named application evidence across independent layer failures [5eccbc4]
+- 00:33 Localized profile and paper identity damage to exact named checks [89516c6]
+- 00:33 Localized runtime registry failures to composition and executable checks [3170f0f]
+- 01:19 Routed all DCI research execution through the selected runtime client [820d7f2]
+- 01:19 Hardened Pi completion, evidence publication, process cleanup, and exact factory authority [1eae3d4]
+- 03:02 Injected explicit local corpus services into provider-bound DCI applications [d10caf2]
+- 03:02 Pinned Pi and Claude process starts to descriptor-backed corpus authority [f4ed9e2]
+- 03:02 Closed cwd bypass, multi-service coexistence, and final agent descriptor leakage [c3384b2]
+- 03:02 Preserved exact environment, signal, argv, process-group, and cancellation semantics across authority launches [0c555ba]
+- 03:02 Isolated packaged Darwin cwd helper from target Python environment and verified installed wheel execution [79a87ad]
+- 03:02 Closed Application Task 5 after fresh CLEAN review and provider-free promotion verification
+- 03:33 Replaced mutable complete-attempt state with immutable private artifacts and explicit Judge authority [9de51d2]
+- 03:33 Reduced Judge public identity to opaque behavior digests excluding credentials and configuration values [0724973]
+- 03:33 Closed Application Task 6 after independent CLEAN review and provider-free promotion verification
+- 04:11 Bound complete artifacts and benchmark reuse to deterministic DCI implementation identity [69dd600]
+- 04:11 Expanded implementation identity to the exact 65-resource transitive product closure [ee4809f]
+- 04:11 Closed Application Task 7 after independent mutation, reuse, and packaged-identity review
+- 04:38 Documented installed runtime, service, artifact, reachability, and implementation identity boundaries [6449dc6]
+- 04:38 Moved application documentation audit to historical Closed after independent claim review [49e944a]
+- 04:38 Closed Application Task 8 after provider-free gates and independent claim review
+- 04:52 Closed application authority after whole-branch CLEAN review and provider-free promotion verification
+- 05:08 Separated paper, pinned upstream, and Asterion experiment provenance to prevent evidence-family mixing [12d2a2e]
+- 05:30 Bound DCI prompts to immutable source contracts, preventing mixed provenance evidence [835e50f]
+- 06:00 Restored explicit safe recovery across every executing DCI composition root [9ecb2f0]
+- 06:00 Closed Provenance Task 2 after exact-source, recovery, and packaged-promotion review
+- 06:27 Separated paper, pinned upstream, and Asterion Judge contracts to prevent semantic identity mixing [c6349d0]
+- 06:27 Closed Provenance Task 3 after independent source, evidence, redaction, and provider-free review
+- 07:16 Separated pinned upstream list and Asterion-safe deduplicated NDCG identities [efe9e78]
+- 07:16 Required explicit body-free operator assumptions for paper IR duplicate handling [8122872]
+- 07:16 Closed Provenance Task 4 after CLEAN re-review and provider-free promotion verification
+- 07:51 Aligned trajectory evidence from verified output and labelled unreported parameters to prevent false paper provenance [cc4e81e]
+- 07:51 Closed Provenance Task 5 after CLEAN re-review and provider-free promotion verification
+- 08:33 Bound verified L0-L4 behavior to exact source identities to prevent context provenance mixing [cbda0ba]
+- 08:59 Separated paper datasets, upstream launchers, and Asterion additions to prevent provenance scope mixing [a3ac785]
+- 09:14 Designed opt-in multi-scope budget enforcement so default reproduction remains provider-free [87e1460]
+- 09:23 Planned three TDD budget layers to isolate authority, operations, and opt-in CLI execution [8662ad9]
+- 13:06 Added descriptor-bound multi-scope operation and cost authority with atomic fail-closed accounting [9314c27]
+- 13:17 Closed budget-ledger review gaps for cost cancellation, scope consumption, draining, receipts, and legacy errors [df8c35e]
+- 13:31 Sealed authorization terminal states and removed private paths from public capabilities [fcdfb61]
+- 13:44 Made budget arithmetic exact and output-root traversal descriptor-bound to prevent false exhaustion and symlink redirection [fec9f3d]
+- 13:45 Verified 413 provider-free Python tests after final authorization hardening
+- 13:52 Made authority-tree creation transactional so cleanup never follows replaced paths [641c331]
+- 13:54 Closed Task 8.1 after independent CLEAN review of budget, identity, cancellation, and path boundaries
+- 14:09 Bound exact scope children and budgets around Agent/Judge calls so authorized reproduction fails closed [3804a06]
+- 14:09 Verified 422 provider-free Python tests after benchmark budget enforcement
+- 14:17 Delayed scope consumption and rejected malformed Agent cost evidence to prevent capability loss and budget undercount [730c9f3]
+- 14:18 Verified 424 provider-free Python tests after Task 8.2 review fixes
+- 14:21 Corrected the scope-boundary contract wording so documentation matches validate-before-read and consume-after-selection [982c179]
+- 14:22 Closed Task 8.2 after independent CLEAN review of scope, cost, cache, cancellation, and redaction boundaries
+- 14:28 Made reproduction plan-only by default so no budget config, authority, output root, or provider work is required [ac88413]
+- 14:28 Verified 425 provider-free Python tests after default-off CLI enforcement
+- 15:07 Joined explicit reproduction authorization to exact preflighted multi-scope execution [37a8424]
+- 15:21 Rejected partial scopes and cancelled every post-authorization failure path [9ef8c72]
+- 15:26 Narrowed reproduction result and budget types after independent review [dd27856]
+- 15:28 Closed Task 8.3 after CLEAN opt-in execution, cancellation, redaction, and type review
+- 15:33 Verified 437 tests and provider-free promotion with zero operations and no full dataset
+- 15:36 Closed Task 8 after CLEAN nine-property authority, budget, privacy, and promotion review
+- 16:14 Compiled locked benchmark evidence into explicit body-free RunManifest identities [477aa93]
+- 16:34 Bound RunManifest provenance to canonical contracts and closed artifact inventories [4a33eec]
+- 16:46 Preserved bounded selection and corpus content identities through RunManifest validation [688e255]
+- 16:51 Cleared RunManifest compiler and test type diagnostics after review [d270f17]
+- 16:54 Closed Task 9 after CLEAN locked-evidence, provenance, privacy, and comparison review
+- 17:10 Published accurate DCI provenance, local-corpus, and default-off reproduction boundaries [36e7c3c]
+- 17:13 Corrected execution docs to permit sorted available paper-full scope subsets [99ff926]
+- 17:18 Verified 450 tests and promotion with zero provider operations and no full dataset
+- 17:18 Closed Task 10 after CLEAN independent documentation and claim review
