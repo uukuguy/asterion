@@ -376,7 +376,7 @@ def run_benchmark(request: BenchmarkRequest, *, paths: DciPaths) -> BenchmarkRes
 def _authorize_paper_execution_before_inputs(
     request: BenchmarkRequest,
 ) -> tuple[Path, int, int] | None:
-    """Consume an exact paper capability before reading operator inputs."""
+    """Validate an exact paper capability before reading operator inputs."""
 
     try:
         paper_scope = paper_scope_for_profile(request.profile)
