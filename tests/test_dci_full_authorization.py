@@ -21,6 +21,7 @@ from asterion.dci.benchmark import (
     run_benchmark,
     run_benchmark_async,
 )
+from asterion.dci.cli import main as dci_main
 from asterion.dci.config import DciRuntimeOptions, resolve_dci_paths
 from asterion.dci.experiment_profiles import (
     ExperimentAuthorizationError,
@@ -1097,6 +1098,45 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
                     )
 
         asyncio.run(scenario())
+
+
+class ReproductionCliTests(unittest.TestCase):
+    def test_plan_mode_is_default_and_needs_no_budget_configuration(self) -> None:
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            output_root = root / "reproduction"
+            with patch(
+                "asterion.dci.experiment_profiles.authorize_full_execution"
+            ) as authorize, patch(
+                "asterion.dci.benchmark.execute_authorized_reproduction",
+                create=True,
+            ) as execute:
+                code = dci_main(
+                    [
+                        "paper",
+                        "reproduce",
+                        "--profile",
+                        "paper-reference/pi",
+                        "--output-root",
+                        str(output_root),
+                    ],
+                    repo_root=root,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+            self.assertEqual(code, 0, stderr.getvalue())
+            self.assertIn("Execution requested: no", stdout.getvalue())
+            self.assertIn(
+                "Agent operations performed: 0", stdout.getvalue()
+            )
+            self.assertIn(
+                "Judge operations performed: 0", stdout.getvalue()
+            )
+            self.assertFalse(output_root.exists())
+            authorize.assert_not_called()
+            execute.assert_not_called()
 
 
 class LegacyFullAuthorizationTests(unittest.TestCase):

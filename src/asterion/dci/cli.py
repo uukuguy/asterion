@@ -6,7 +6,6 @@ import argparse
 import contextlib
 import io
 import json
-import math
 import os
 import secrets
 import stat
@@ -203,9 +202,17 @@ def _parser() -> argparse.ArgumentParser:
     paper_reproduce = paper_commands.add_parser("reproduce")
     paper_reproduce.add_argument("--profile", required=True)
     paper_reproduce.add_argument("--output-root", type=Path, required=True)
-    paper_reproduce.add_argument("--estimated-budget-usd", type=float, required=True)
-    paper_reproduce.add_argument("--authorize-full", action="store_true")
-    paper_reproduce.add_argument("--dry-run", action="store_true")
+    paper_reproduce.add_argument("--scope", action="append")
+    paper_reproduce.add_argument("--execute", action="store_true")
+    paper_reproduce.add_argument("--max-agent-operations", type=int)
+    paper_reproduce.add_argument("--max-judge-operations", type=int)
+    paper_reproduce.add_argument("--max-cost-usd", type=float)
+    paper_reproduce.add_argument(
+        "--max-agent-cost-per-operation-usd", type=float
+    )
+    paper_reproduce.add_argument(
+        "--max-judge-cost-per-operation-usd", type=float
+    )
     paper_reproduce.add_argument("--provider")
     paper_reproduce.add_argument("--model")
     paper_compare = paper_commands.add_parser("compare")
@@ -426,7 +433,6 @@ def main(
                 return 0 if report.accepted is not False else 3
             if args.paper_command == "reproduce":
                 from asterion.dci.experiment_profiles import (
-                    authorize_full_execution,
                     experiment_profile_sha256,
                     resolve_experiment_profile,
                 )
@@ -446,22 +452,14 @@ def main(
                     invocation_provider=args.provider,
                     invocation_model=args.model,
                 )
-                if (
-                    not math.isfinite(args.estimated_budget_usd)
-                    or args.estimated_budget_usd < 0
-                ):
-                    raise ValueError("DCI full execution budget is invalid")
-                if args.authorize_full and (
-                    args.output_root.exists() or args.output_root.is_symlink()
-                ):
-                    raise ValueError("DCI full output root must be fresh")
+                selected_scope_ids = tuple(args.scope or profile.paper_scope_ids)
                 selected_count = sum(
                     resolve_paper_experiment_scope(scope_id).selection_count
-                    for scope_id in profile.scope_ids
+                    for scope_id in selected_scope_ids
                 )
                 judge_count = sum(
                     resolve_paper_experiment_scope(scope_id).selection_count
-                    for scope_id in profile.scope_ids
+                    for scope_id in selected_scope_ids
                     if resolve_paper_benchmark(
                         resolve_paper_experiment_scope(scope_id).dataset_id
                     ).mode == "qa"
@@ -471,44 +469,21 @@ def main(
                 stdout.write(f"Dataset inventory SHA-256: {profile.dataset_inventory_sha256}\n")
                 stdout.write(f"Experiment scopes SHA-256: {profile.experiment_scopes_sha256}\n")
                 stdout.write(f"Datasets: {len(paper_benchmark_ids())}\n")
-                stdout.write(f"Experiment scopes: {len(profile.scope_ids)}\n")
+                stdout.write(f"Experiment scopes: {len(selected_scope_ids)}\n")
                 stdout.write(f"Selected queries: {selected_count}\n")
                 stdout.write(f"Maximum agent operations: {selected_count}\n")
                 stdout.write(f"Maximum Judge operations: {judge_count}\n")
-                stdout.write(f"Estimated budget USD: {args.estimated_budget_usd:g}\n")
                 stdout.write("Agent operations performed: 0\nJudge operations performed: 0\n")
                 stdout.write(
-                    "Full authorization requested: "
-                    + ("yes\n" if args.authorize_full else "no\n")
+                    "Execution requested: "
+                    + ("yes\n" if args.execute else "no\n")
                 )
-                if args.dry_run:
+                if not args.execute:
                     stdout.write("Full authorization issued: no\n")
                     stdout.write("reproduction_authorized=no\n")
                     stdout.write("operation_count=0\n")
                     return 0
-                if not args.authorize_full:
-                    stdout.write("Full authorization issued: no\n")
-                    stdout.write("reproduction_authorized=no\n")
-                    stdout.write("operation_count=0\n")
-                    return 2
-                authorize_full_execution(
-                    args.profile,
-                    args.output_root,
-                    args.estimated_budget_usd,
-                    args.authorize_full,
-                    preflight_profile_sha256=profile_sha256,
-                    preflight_dataset_inventory_sha256=profile.dataset_inventory_sha256,
-                    preflight_experiment_scopes_sha256=profile.experiment_scopes_sha256,
-                    invocation_provider=args.provider,
-                    invocation_model=args.model,
-                    preflight_scope_ids=profile.scope_ids,
-                    preflight_selected_ids_sha256=profile.selected_ids_sha256,
-                )
-                stdout.write("Full authorization issued: yes\n")
-                stdout.write("Execution delegated: no\n")
-                stdout.write("reproduction_authorized=yes\n")
-                stdout.write("operation_count=0\n")
-                return 0
+                raise ValueError("DCI full execution is not configured")
             verify_argv = []
             if args.provider_backed:
                 verify_argv.append("--provider-backed")
