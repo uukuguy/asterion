@@ -182,6 +182,16 @@ scripts/beir/benchmark_arguana.sh
 scripts/beir/benchmark_scifact.sh
 ```
 
+这些 launcher 覆盖的来源必须与论文数据集 identity 分开读取：锁定的上游 GitHub
+commit 有 12 个 launcher、11 个唯一数据集；Asterion 在此基础上新增 ArguAna 和
+SciFact，因此本仓库有 13 个数据集 identity 和 14 个 standalone launcher。所有
+13 个数据集 row 仍是论文 `arxiv:2605.05242v1` 的完整数据集 identity；launcher
+只记录可追溯的执行入口，不能授权不同的选择范围。
+
+尤其是 Bamboogle 的论文完整 scope 是 125 条、`paper-reference`、`paper-full`，而
+锁定上游 launcher 的固定 50-ID scope 是 `upstream-github`、`upstream-reference`。
+二者是不兼容的 scope：sample-50 launcher 不绑定、也不授权论文完整的 125 条数据集。
+
 它们都从自身位置解析项目根，通过 `uv run --project "$PROJECT_ROOT"` 运行。数据/corpus 默认位于项目根，也可显式放在 `ASTERION_DCI_RESOURCE_ROOT`。实际运行前必须使用有限 `--limit`。
 
 ## 指标、分析、图表与导出

@@ -48,6 +48,15 @@ _EXPECTED_SCOPE_IDS = (
     "qa.nq.main.random50",
     "qa.triviaqa.main.random50",
 )
+_EXPECTED_ALL_SCOPE_IDS = _EXPECTED_SCOPE_IDS + (
+    "qa.bamboogle.upstream.sample50",
+)
+_PAPER_SOURCE_REFERENCE = "arxiv:2605.05242v1"
+_UPSTREAM_BAMBOOGLE_SOURCE_REFERENCE = (
+    "github:DCI-Agent/DCI-Agent-Lite@271f37e71f053bf0c99c05ce6d2fb53b841d922e;"
+    "hf:datasets/DCI-Agent/dci-bench@7fdd41059ef06df2a22d10d0f704768d44f1031b"
+    "#data/bamboogle/test.jsonl"
+)
 _PAPER_PROFILE_SCOPES = {
     "beir.arguana": "beir.arguana.main.random50",
     "beir.scifact": "beir.scifact.main.random50",
@@ -79,6 +88,12 @@ _DATASET_FIELDS = frozenset(
         "bounded_fixture",
         "batch_profile",
         "launcher",
+        "source_family",
+        "source_reference",
+        "launcher_origin",
+        "selection_kind",
+        "selection_count",
+        "selection_seed_status",
         "execution_class",
     }
 )
@@ -87,7 +102,11 @@ _SCOPE_FIELDS = frozenset(
         "scope_id",
         "dataset_id",
         "experiment",
+        "source_family",
+        "source_reference",
+        "launcher_origin",
         "selection_mode",
+        "selection_kind",
         "selection_count",
         "selection_seed",
         "selection_seed_status",
@@ -111,21 +130,35 @@ _DATASET_PROPERTY_SCHEMAS = {
     "bounded_fixture": {"type": "string", "minLength": 1},
     "batch_profile": {"type": ["string", "null"], "minLength": 1},
     "launcher": {"type": ["string", "null"], "minLength": 1},
+    "source_family": {"const": "paper-reference"},
+    "source_reference": {"const": _PAPER_SOURCE_REFERENCE},
+    "launcher_origin": {"enum": ["upstream-github", "asterion-added"]},
+    "selection_kind": {"const": "full"},
+    "selection_count": {"type": "integer", "minimum": 1},
+    "selection_seed_status": {"const": "reported"},
     "execution_class": {"const": "paper-full"},
 }
 _SCOPE_PROPERTY_SCHEMAS = {
     "scope_id": {"type": "string", "minLength": 1},
     "dataset_id": {"type": "string", "minLength": 1},
     "experiment": {"type": "string", "minLength": 1},
-    "selection_mode": {"enum": ["all", "deterministic-sample", "random-sample"]},
+    "source_family": {"enum": ["paper-reference", "upstream-github"]},
+    "source_reference": {"type": "string", "minLength": 1},
+    "launcher_origin": {
+        "enum": ["upstream-github", "asterion-added", "unavailable"]
+    },
+    "selection_mode": {
+        "enum": ["all", "deterministic-sample", "random-sample", "fixed-selected-ids"]
+    },
+    "selection_kind": {"enum": ["full", "random-sample", "fixed-selected-ids"]},
     "selection_count": {"type": "integer", "minimum": 1},
     "selection_seed": {"type": ["integer", "null"], "minimum": 0},
     "selection_seed_status": {
-        "enum": ["asterion-defined", "paper-unreported", "not-applicable"]
+        "enum": ["reported", "asterion-defined", "paper-unreported"]
     },
     "selection_algorithm": {"type": "string", "minLength": 1},
     "selected_ids_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "execution_class": {"const": "paper-full"},
+    "execution_class": {"enum": ["paper-full", "upstream-reference"]},
 }
 
 
@@ -155,6 +188,12 @@ class PaperBenchmark:
     bounded_fixture: str
     batch_profile: str | None
     launcher: str | None
+    source_family: str
+    source_reference: str
+    launcher_origin: str
+    selection_kind: str
+    selection_count: int
+    selection_seed_status: str
     execution_class: str
     identity_sha256: str
 
@@ -164,7 +203,11 @@ class PaperExperimentScope:
     scope_id: str
     dataset_id: str
     experiment: str
+    source_family: str
+    source_reference: str
+    launcher_origin: str
     selection_mode: str
+    selection_kind: str
     selection_count: int
     selection_seed: int | None
     selection_seed_status: str
@@ -374,6 +417,14 @@ def _is_safe_relative_path(value: str) -> bool:
     return bool(value) and not path.is_absolute() and ".." not in path.parts
 
 
+def _is_launcher_path(value: object) -> bool:
+    return (
+        type(value) is str
+        and value.startswith("scripts/")
+        and _is_safe_relative_path(value)
+    )
+
+
 def _require_string(value: object) -> str:
     if type(value) is not str or not value:
         raise RuntimeError("DCI paper benchmark contract is invalid")
@@ -426,14 +477,26 @@ def _benchmarks() -> Mapping[str, PaperBenchmark]:
             and profile.get("dataset") == item["dataset_path"]
             and profile.get("corpus") == item["corpus_path"]
             and profile.get("mode") == mode
-            and type(item["launcher"]) is str
-            and _is_safe_relative_path(item["launcher"])
+            and _is_launcher_path(item["launcher"])
         )
         intentionally_unbound = (
             dataset_id == "qa.bamboogle"
             and item["batch_profile"] is None
-            and item["launcher"] is None
+            and item["launcher"] == "scripts/qa/run_bamboogle_test_sample50.sh"
             and item["dataset_path"] == "paper-full/data/bamboogle/test-125.jsonl"
+        )
+        expected_origin = (
+            "asterion-added"
+            if dataset_id in {"beir.arguana", "beir.scifact"}
+            else "upstream-github"
+        )
+        source_contract = (
+            item["source_family"] == "paper-reference"
+            and item["source_reference"] == _PAPER_SOURCE_REFERENCE
+            and item["launcher_origin"] == expected_origin
+            and item["selection_kind"] == "full"
+            and item["selection_count"] == source_count
+            and item["selection_seed_status"] == "reported"
         )
         if (
             dataset_id in parsed
@@ -442,6 +505,7 @@ def _benchmarks() -> Mapping[str, PaperBenchmark]:
             or source_count <= 0
             or type(judge_contract) not in {str, type(None)}
             or not (bound_profile or intentionally_unbound)
+            or not source_contract
             or fixture != (dataset_id, mode)
             or not _is_safe_relative_path(item["dataset_path"])
             or not _is_safe_relative_path(item["corpus_path"])
@@ -453,6 +517,7 @@ def _benchmarks() -> Mapping[str, PaperBenchmark]:
             "judge_contract",
             "batch_profile",
             "launcher",
+            "selection_count",
         }:
             _require_string(item[field])
         parsed[dataset_id] = PaperBenchmark(
@@ -471,7 +536,7 @@ def _scopes() -> Mapping[str, PaperExperimentScope]:
         fields=_SCOPE_FIELDS,
         schema_id=PAPER_EXPERIMENT_SCOPE_SCHEMA,
         collection="scopes",
-        count=16,
+        count=17,
         property_schemas=_SCOPE_PROPERTY_SCHEMAS,
     )
     payload = _load_resource(
@@ -489,10 +554,11 @@ def _scopes() -> Mapping[str, PaperExperimentScope]:
         algorithm = item["selection_algorithm"]
         dataset = datasets.get(item["dataset_id"])
         published = _published_manifests().get(scope_id)
-        selection_contract = (
+        paper_selection_contract = (
             mode == "all"
             and seed is None
-            and seed_status == "not-applicable"
+            and seed_status == "reported"
+            and item["selection_kind"] == "full"
             and algorithm == "sorted-selected-id-manifest/v1"
             and published is None
         ) or (
@@ -500,23 +566,64 @@ def _scopes() -> Mapping[str, PaperExperimentScope]:
             and type(seed) is int
             and seed >= 0
             and seed_status == "asterion-defined"
+            and item["selection_kind"]
+            == ("fixed-selected-ids" if mode == "deterministic-sample" else "random-sample")
             and algorithm == "sha256(seed-colon-id)-ascending/v1"
             and published is None
         ) or (
             mode == "random-sample"
             and seed is None
             and seed_status == "paper-unreported"
+            and item["selection_kind"] == "random-sample"
             and algorithm == "published-selected-id-manifest/v1"
             and published is not None
+        )
+        upstream_selection_contract = (
+            scope_id == "qa.bamboogle.upstream.sample50"
+            and item["source_family"] == "upstream-github"
+            and item["source_reference"] == _UPSTREAM_BAMBOOGLE_SOURCE_REFERENCE
+            and item["launcher_origin"] == "upstream-github"
+            and mode == "fixed-selected-ids"
+            and item["selection_kind"] == "fixed-selected-ids"
+            and seed is None
+            and seed_status == "reported"
+            and algorithm == "pinned-selected-id-manifest/v1"
+            and item["execution_class"] == "upstream-reference"
+            and published is not None
+        )
+        expected_origin = (
+            "asterion-added"
+            if scope_id in {"beir.arguana.main.random50", "beir.scifact.main.random50"}
+            else "unavailable"
+            if scope_id
+            in {
+                "browsecomp-plus.analysis.n100",
+                "browsecomp-plus.appendix-a1.random50",
+                "browsecomp-plus.context-ablation.random100",
+                "qa.bamboogle.main.full",
+            }
+            else "upstream-github"
+        )
+        paper_source_contract = (
+            item["source_family"] == "paper-reference"
+            and item["source_reference"] == _PAPER_SOURCE_REFERENCE
+            and item["launcher_origin"] == expected_origin
+            and item["execution_class"] == "paper-full"
         )
         if (
             scope_id in parsed
             or dataset is None
-            or not selection_contract
+            or not (upstream_selection_contract or (paper_source_contract and paper_selection_contract))
             or type(item["selection_count"]) is not int
             or item["selection_count"] <= 0
-            or item["selection_count"] > dataset.source_count
-            or (mode == "all" and item["selection_count"] != dataset.source_count)
+            or (
+                item["source_family"] == "paper-reference"
+                and item["selection_count"] > dataset.source_count
+            )
+            or (
+                mode == "all"
+                and item["selection_count"] != dataset.source_count
+            )
             or _SHA256.fullmatch(str(item["selected_ids_sha256"])) is None
             or (
                 published is not None
@@ -525,7 +632,6 @@ def _scopes() -> Mapping[str, PaperExperimentScope]:
                     or canonical_sha256(published) != item["selected_ids_sha256"]
                 )
             )
-            or item["execution_class"] != "paper-full"
         ):
             raise RuntimeError("DCI paper benchmark contract is invalid")
         for field in _SCOPE_FIELDS - {"selection_count", "selection_seed"}:
@@ -533,7 +639,7 @@ def _scopes() -> Mapping[str, PaperExperimentScope]:
         parsed[scope_id] = PaperExperimentScope(
             **item, identity_sha256=canonical_sha256(item)
         )
-    if tuple(parsed) != _EXPECTED_SCOPE_IDS:
+    if tuple(parsed) != _EXPECTED_ALL_SCOPE_IDS:
         raise RuntimeError("DCI paper benchmark contract is invalid")
     return MappingProxyType(parsed)
 
@@ -543,6 +649,13 @@ def paper_benchmark_ids() -> tuple[str, ...]:
 
 
 def paper_experiment_scope_ids() -> tuple[str, ...]:
+    _scopes()
+    return _EXPECTED_SCOPE_IDS
+
+
+def all_experiment_scope_ids() -> tuple[str, ...]:
+    """Return all source-labelled scopes, including upstream-only references."""
+
     return tuple(_scopes())
 
 
@@ -553,8 +666,16 @@ def resolve_paper_benchmark(value: object) -> PaperBenchmark:
 
 
 def resolve_paper_experiment_scope(value: object) -> PaperExperimentScope:
-    if type(value) is not str or value not in _scopes():
+    if type(value) is not str or value not in _EXPECTED_SCOPE_IDS:
         raise ValueError("DCI paper experiment scope is invalid")
+    return _scopes()[value]
+
+
+def resolve_experiment_scope(value: object) -> PaperExperimentScope:
+    """Resolve one source-labelled scope without granting paper authority."""
+
+    if type(value) is not str or value not in _scopes():
+        raise ValueError("DCI experiment scope is invalid")
     return _scopes()[value]
 
 
@@ -583,8 +704,9 @@ def paper_scope_for_selected_ids(source_ids: object) -> str | None:
     identity = canonical_sha256(tuple(sorted(values)))
     matches = tuple(
         scope.scope_id
-        for scope in _scopes().values()
-        if scope.selection_count == len(values)
+        for scope_id, scope in _scopes().items()
+        if scope_id in _EXPECTED_SCOPE_IDS
+        and scope.selection_count == len(values)
         and scope.selected_ids_sha256 == identity
     )
     if len(matches) > 1:
@@ -639,6 +761,28 @@ def select_and_verify_scope_ids(
     if canonical_sha256(selected) != scope.selected_ids_sha256:
         raise ValueError("DCI paper selected-ID manifest is invalid")
     return selected
+
+
+def select_and_verify_experiment_scope_ids(
+    scope_id: object, source_ids: object
+) -> tuple[str, ...]:
+    """Verify one source-labelled scope without assuming paper-full input size."""
+
+    scope = resolve_experiment_scope(scope_id)
+    if scope.scope_id in _EXPECTED_SCOPE_IDS:
+        return select_and_verify_scope_ids(scope_id, source_ids)
+    if type(source_ids) not in {list, tuple}:
+        raise ValueError("DCI experiment selected-ID manifest is invalid")
+    values = tuple(source_ids)
+    if (
+        len(values) != scope.selection_count
+        or any(type(value) is not str or not value for value in values)
+        or len(values) != len(set(values))
+        or tuple(sorted(values)) != values
+        or canonical_sha256(values) != scope.selected_ids_sha256
+    ):
+        raise ValueError("DCI experiment selected-ID manifest is invalid")
+    return values
 
 
 def published_scope_selected_ids(scope_id: object) -> tuple[str, ...]:

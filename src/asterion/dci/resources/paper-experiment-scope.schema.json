@@ -6,24 +6,28 @@
   "required": ["schema", "scopes"],
   "properties": {
     "schema": {"const": "dci.paper-experiment-scopes/v1"},
-    "scopes": {"type": "array", "minItems": 16, "maxItems": 16, "items": {"$ref": "#/$defs/scope"}}
+    "scopes": {"type": "array", "minItems": 17, "maxItems": 17, "items": {"$ref": "#/$defs/scope"}}
   },
   "$defs": {
     "scope": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["scope_id", "dataset_id", "experiment", "selection_mode", "selection_count", "selection_seed", "selection_seed_status", "selection_algorithm", "selected_ids_sha256", "execution_class"],
+      "required": ["scope_id", "dataset_id", "experiment", "source_family", "source_reference", "launcher_origin", "selection_mode", "selection_kind", "selection_count", "selection_seed", "selection_seed_status", "selection_algorithm", "selected_ids_sha256", "execution_class"],
       "properties": {
         "scope_id": {"type": "string", "minLength": 1},
         "dataset_id": {"type": "string", "minLength": 1},
         "experiment": {"type": "string", "minLength": 1},
-        "selection_mode": {"enum": ["all", "deterministic-sample", "random-sample"]},
+        "source_family": {"enum": ["paper-reference", "upstream-github"]},
+        "source_reference": {"type": "string", "minLength": 1},
+        "launcher_origin": {"enum": ["upstream-github", "asterion-added", "unavailable"]},
+        "selection_mode": {"enum": ["all", "deterministic-sample", "random-sample", "fixed-selected-ids"]},
+        "selection_kind": {"enum": ["full", "random-sample", "fixed-selected-ids"]},
         "selection_count": {"type": "integer", "minimum": 1},
         "selection_seed": {"type": ["integer", "null"], "minimum": 0},
-        "selection_seed_status": {"enum": ["asterion-defined", "paper-unreported", "not-applicable"]},
+        "selection_seed_status": {"enum": ["reported", "asterion-defined", "paper-unreported"]},
         "selection_algorithm": {"type": "string", "minLength": 1},
         "selected_ids_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "execution_class": {"const": "paper-full"}
+        "execution_class": {"enum": ["paper-full", "upstream-reference"]}
       }
     }
   }

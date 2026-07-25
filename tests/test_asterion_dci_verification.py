@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import shutil
 import subprocess
 import tempfile
@@ -88,6 +89,162 @@ def acceptance_request(*, acceptance_root: Path | None = None) -> VerificationRe
 
 
 class InstalledAcceptanceTests(unittest.TestCase):
+    def test_paper_inventory_separates_dataset_and_launcher_provenance(self) -> None:
+        """Paper-full Bamboogle must remain distinct from upstream sample-50."""
+
+        resource_root = PROJECT / "src/asterion/dci/resources"
+        benchmarks = json.loads(
+            (resource_root / "paper-benchmarks.json").read_text(encoding="utf-8")
+        )["datasets"]
+        scopes = json.loads(
+            (resource_root / "paper-experiment-scopes.json").read_text(
+                encoding="utf-8"
+            )
+        )["scopes"]
+        by_dataset = {item["dataset_id"]: item for item in benchmarks}
+        by_scope = {item["scope_id"]: item for item in scopes}
+
+        self.assertEqual(len(benchmarks), 13)
+        self.assertEqual(
+            {item["source_family"] for item in benchmarks}, {"paper-reference"}
+        )
+        self.assertTrue(
+            all(item["source_reference"] == "arxiv:2605.05242v1" for item in benchmarks)
+        )
+        self.assertTrue(
+            all(
+                item["selection_kind"] == "full"
+                and item["selection_count"] == item["source_count"]
+                and item["selection_seed_status"] == "reported"
+                for item in benchmarks
+            )
+        )
+        self.assertEqual(
+            sum(item["launcher_origin"] == "upstream-github" for item in benchmarks),
+            11,
+        )
+        self.assertEqual(
+            {
+                item["dataset_id"]
+                for item in benchmarks
+                if item["launcher_origin"] == "asterion-added"
+            },
+            {"beir.arguana", "beir.scifact"},
+        )
+        self.assertEqual(by_dataset["qa.bamboogle"]["source_count"], 125)
+        self.assertIsNone(by_dataset["qa.bamboogle"]["batch_profile"])
+        self.assertEqual(
+            by_dataset["qa.bamboogle"]["launcher"],
+            "scripts/qa/run_bamboogle_test_sample50.sh",
+        )
+        for item in benchmarks:
+            launcher = item["launcher"]
+            if launcher is not None:
+                self.assertTrue(launcher.startswith("scripts/"))
+                self.assertNotIn("asterion/scripts/", launcher)
+                self.assertTrue((PROJECT / launcher).is_file())
+
+        launcher_paths = tuple(
+            sorted(
+                path.relative_to(PROJECT).as_posix()
+                for path in (PROJECT / "scripts").rglob("*.sh")
+                if path.name != "setup_pi.sh"
+            )
+        )
+        self.assertEqual(len(launcher_paths), 14)
+        for launcher_path in launcher_paths:
+            self.assertIn(
+                "# Provenance: ",
+                (PROJECT / launcher_path).read_text(encoding="utf-8"),
+            )
+
+        self.assertEqual(len(scopes), 17)
+        self.assertTrue(
+            all(
+                item["source_family"] == "paper-reference"
+                and item["source_reference"] == "arxiv:2605.05242v1"
+                for item in scopes
+                if item["scope_id"] != "qa.bamboogle.upstream.sample50"
+            )
+        )
+        self.assertTrue(
+            all(
+                item["selection_kind"] == "full"
+                and item["selection_seed_status"] == "reported"
+                for item in scopes
+                if item["selection_mode"] == "all"
+            )
+        )
+        self.assertTrue(
+            all(
+                item["selection_kind"]
+                in {"full", "random-sample", "fixed-selected-ids"}
+                and item["launcher_origin"]
+                in {"upstream-github", "asterion-added", "unavailable"}
+                for item in scopes
+            )
+        )
+        upstream_bamboogle = by_scope["qa.bamboogle.upstream.sample50"]
+        self.assertEqual(upstream_bamboogle["selection_kind"], "fixed-selected-ids")
+        self.assertEqual(upstream_bamboogle["selection_count"], 50)
+        self.assertIsNone(upstream_bamboogle["selection_seed"])
+        self.assertEqual(
+            upstream_bamboogle["selected_ids_sha256"],
+            "8b51d12a1a899aab455e6c20c4c36ae5fd5a0eca30816614f85bd2304e5a642d",
+        )
+        paper_bamboogle = by_scope["qa.bamboogle.main.full"]
+        self.assertNotEqual(
+            paper_bamboogle["source_family"], upstream_bamboogle["source_family"]
+        )
+        self.assertNotEqual(
+            paper_bamboogle["execution_class"],
+            upstream_bamboogle["execution_class"],
+        )
+        for item in scopes:
+            if item["source_family"] == "paper-reference":
+                self.assertEqual(item["source_reference"], "arxiv:2605.05242v1")
+                self.assertEqual(item["execution_class"], "paper-full")
+            else:
+                self.assertEqual(item["source_family"], "upstream-github")
+                self.assertEqual(
+                    item["source_reference"],
+                    "github:DCI-Agent/DCI-Agent-Lite@271f37e71f053bf0c99c05ce6d2fb53b841d922e;"
+                    "hf:datasets/DCI-Agent/dci-bench@7fdd41059ef06df2a22d10d0f704768d44f1031b"
+                    "#data/bamboogle/test.jsonl",
+                )
+                self.assertEqual(item["execution_class"], "upstream-reference")
+
+        from asterion.dci.paper_benchmarks import (
+            all_experiment_scope_ids,
+            paper_experiment_scope_ids,
+            resolve_experiment_scope,
+            select_and_verify_experiment_scope_ids,
+        )
+
+        self.assertEqual(len(all_experiment_scope_ids()), 17)
+        self.assertEqual(len(paper_experiment_scope_ids()), 16)
+        self.assertNotIn(
+            "qa.bamboogle.upstream.sample50", paper_experiment_scope_ids()
+        )
+        self.assertEqual(
+            resolve_experiment_scope("qa.bamboogle.main.full").selection_count, 125
+        )
+        self.assertEqual(
+            resolve_experiment_scope("qa.bamboogle.upstream.sample50").selection_count,
+            50,
+        )
+        selected_ids = json.loads(
+            (resource_root / "paper-selected-id-manifests.json").read_text(
+                encoding="utf-8"
+            )
+        )["manifests"]["qa.bamboogle.upstream.sample50"]
+        self.assertEqual(
+            select_and_verify_experiment_scope_ids(
+                "qa.bamboogle.upstream.sample50", selected_ids
+            ),
+            tuple(selected_ids),
+        )
+
     def test_builtin_provider_and_resource_closure_has_exact_counts(self) -> None:
         providers = (
             validate_installed_provider(
