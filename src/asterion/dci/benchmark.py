@@ -52,12 +52,19 @@ from asterion.dci.prompts import (
 )
 from asterion.dci.evaluation import (
     _load_reusable_result,
+    _valid_transaction_candidate,
     evaluate_run_directory_async,
 )
 from asterion.dci.experiment_profiles import (
     EXPERIMENT_AUTHORIZATION_SCHEMA,
+    ExperimentAuthorizationError,
     FullExecutionAuthorization,
+    FullExecutionReservation,
+    cancel_full_execution_authorization,
     experiment_profiles_sha256,
+    fail_full_execution_operation,
+    reconcile_full_execution_operation,
+    reserve_full_execution_operation,
     resolve_experiment_profile,
 )
 from asterion.dci.judge import (
@@ -77,6 +84,7 @@ from asterion.dci.paper_benchmarks import (
 from asterion.dci.provenance import dci_complete_implementation_identity
 from asterion.dci.analysis import (
     aggregate_results,
+    extract_agent_usage_metrics,
     gather_query_metrics,
     write_analysis_artifacts,
 )
@@ -163,6 +171,7 @@ class BenchmarkRequest:
     resolution_read_minimum_evidence_overlap: float | None = None
     ablation_row: str | None = None
     full_execution_authorization: FullExecutionAuthorization | None = None
+    experiment_scope_id: str | None = None
     paper_ir_duplicate_handling: str | None = None
 
 
@@ -205,20 +214,23 @@ async def run_benchmark_async(
 ) -> BenchmarkResult:
     """Run one bounded batch while retaining its writer lock until all work drains."""
 
-    rows, output_root, config, row_documents, snapshots = _prepare(request)
-    expected_identity = None
-    if request.full_execution_authorization is not None:
-        from asterion.dci.experiment_profiles import (
-            _consumed_authorized_output_identity,
-        )
-
-        authorized_root, device, inode = _consumed_authorized_output_identity(
-            request.full_execution_authorization
-        )
+    authorized_identity = _authorize_paper_execution_before_inputs(request)
+    try:
+        rows, output_root, config, row_documents, snapshots = _prepare(request)
+    except BaseException:
+        _cancel_request_authorization(request)
+        raise
+    expected_identity: tuple[int, int] | None = None
+    if authorized_identity is not None:
+        authorized_root, device, inode = authorized_identity
         if authorized_root != output_root:
             raise DciBenchmarkError("DCI benchmark authorization root changed")
         expected_identity = (device, inode)
-    lock = _BatchLock.acquire(output_root, expected_identity=expected_identity)
+    try:
+        lock = _BatchLock.acquire(output_root, expected_identity=expected_identity)
+    except BaseException:
+        _cancel_request_authorization(request)
+        raise
     tasks: list[asyncio.Task[tuple[int, dict[str, object]]]] = []
     results: dict[int, dict[str, object]] = {}
     snapshot_authority: _SnapshotAuthority | None = None
@@ -287,6 +299,7 @@ async def run_benchmark_async(
         _publish_batch_state(lock, "completed", results)
         return BenchmarkResult(output_root=output_root, counts=counts)
     except asyncio.CancelledError:
+        _cancel_request_authorization(request)
         if not batch_started:
             raise
         for task in tasks:
@@ -312,6 +325,7 @@ async def run_benchmark_async(
         _publish_batch_state(lock, "cancelled", results)
         raise
     except BaseException:
+        _cancel_request_authorization(request)
         if not batch_started:
             raise
         for task in tasks:
@@ -352,6 +366,78 @@ def run_benchmark(request: BenchmarkRequest, *, paths: DciPaths) -> BenchmarkRes
     except RuntimeError:
         return asyncio.run(run_benchmark_async(request, paths=paths))
     raise DciBenchmarkError("DCI benchmark sync API cannot run inside an event loop")
+
+
+def _authorize_paper_execution_before_inputs(
+    request: BenchmarkRequest,
+) -> tuple[Path, int, int] | None:
+    """Consume an exact paper capability before reading operator inputs."""
+
+    try:
+        paper_scope = paper_scope_for_profile(request.profile)
+    except ValueError as error:
+        raise DciBenchmarkError("DCI benchmark authorization scope changed") from error
+    authorization = request.full_execution_authorization
+    bounded_paper_selection = (
+        paper_scope is not None
+        and authorization is None
+        and type(request.limit) is int
+        and request.limit == 1
+        and request.experiment_scope_id is None
+    )
+    if authorization is None:
+        if request.experiment_scope_id is not None or (
+            paper_scope is not None and not bounded_paper_selection
+        ):
+            raise DciBenchmarkError(
+                "DCI benchmark requires full execution authorization"
+            )
+        return None
+    if (
+        not isinstance(authorization, FullExecutionAuthorization)
+        or not isinstance(request.experiment_scope_id, str)
+        or (
+            paper_scope is not None
+            and request.experiment_scope_id != paper_scope
+        )
+    ):
+        raise DciBenchmarkError("DCI benchmark authorization scope changed")
+    scope_id = request.experiment_scope_id
+    try:
+        resolve_paper_experiment_scope(scope_id)
+    except ValueError as error:
+        raise DciBenchmarkError("DCI benchmark authorization scope changed") from error
+
+    from asterion.dci.experiment_profiles import (
+        ExperimentAuthorizationError,
+        _consumed_authorized_output_identity,
+        authorized_scope_output_root,
+    )
+
+    try:
+        authorized_root = authorized_scope_output_root(authorization, scope_id)
+    except ExperimentAuthorizationError as error:
+        raise DciBenchmarkError("DCI benchmark authorization scope changed") from error
+    requested_root = Path(
+        os.path.abspath(os.path.normpath(request.output_root))
+    )
+    if requested_root != authorized_root:
+        raise DciBenchmarkError("DCI benchmark authorization root changed")
+    try:
+        require_af320_executable_scope(scope_id, authorization)
+        return _consumed_authorized_output_identity(authorization, scope_id)
+    except (ExperimentAuthorizationError, RuntimeError, ValueError) as error:
+        raise DciBenchmarkError("DCI benchmark authorization is invalid") from error
+
+
+def _cancel_request_authorization(request: BenchmarkRequest) -> None:
+    authorization = request.full_execution_authorization
+    if authorization is None:
+        return
+    try:
+        cancel_full_execution_authorization(authorization)
+    except ExperimentAuthorizationError:
+        pass
 
 
 def _scan_corpus_content(corpus: Path) -> list[dict[str, object]]:
@@ -655,15 +741,14 @@ def _prepare(
         and request.full_execution_authorization is None
         and type(request.limit) is int
         and request.limit == 1
+        and request.experiment_scope_id is None
     )
     if (
         paper_scope is not None
         and request.full_execution_authorization is None
         and not bounded_paper_selection
     ):
-        raise DciBenchmarkError(
-            "DCI paper scope is not executable in AF-320 without AF-340 authorization"
-        )
+        raise DciBenchmarkError("DCI benchmark requires full execution authorization")
     try:
         dataset_raw = _read_input_snapshot(request.dataset)
         beir_scope = {
@@ -703,6 +788,13 @@ def _prepare(
     if request.limit is not None:
         rows = rows[: request.limit]
     selected_scope = _paper_scope_for_rows(rows)
+    bounded_paper_selection = (
+        request.full_execution_authorization is None
+        and type(request.limit) is int
+        and request.limit == 1
+        and request.experiment_scope_id is None
+        and (paper_scope is not None or source_scope is not None)
+    )
     if any((row.is_ir if request.mode == "qa" else not row.is_ir) for row in rows):
         raise DciBenchmarkError("DCI benchmark dataset does not match its mode")
     _resolution_paths, resolution_config, resolution_snapshots = (
@@ -711,6 +803,17 @@ def _prepare(
     output_root = Path(os.path.abspath(os.path.normpath(request.output_root)))
     _reject_symlink_components(output_root)
     authorized_scope = paper_scope or source_scope or selected_scope
+    if (
+        authorized_scope is not None
+        and not bounded_paper_selection
+        and request.full_execution_authorization is None
+    ):
+        raise DciBenchmarkError("DCI benchmark requires full execution authorization")
+    if (
+        request.full_execution_authorization is not None
+        and request.experiment_scope_id != authorized_scope
+    ):
+        raise DciBenchmarkError("DCI benchmark authorization scope changed")
     if (
         paper_scope is not None
         and not bounded_paper_selection
@@ -890,14 +993,6 @@ def _prepare(
                 "implementation_sha256": implementation_sha256,
             }
         )
-    if authorized_scope is not None and not bounded_paper_selection:
-        authorization = request.full_execution_authorization
-        if authorization is None:
-            raise DciBenchmarkError("DCI benchmark requires AF-340 authorization")
-        try:
-            require_af320_executable_scope(authorized_scope, authorization)
-        except (RuntimeError, ValueError) as error:
-            raise DciBenchmarkError(str(error)) from error
     return rows, output_root, config, tuple(documents), snapshots
 
 
@@ -1048,18 +1143,32 @@ async def _run_row(
                         final_answer_recovery=prompt_contract.final_answer_recovery,
                     )
                 agent_started_at = _utc_now()
+                agent_reservation = _reserve_authorized_operation(request, "agent")
                 try:
-                    await _run_pi_async(
-                        paths,
-                        native_request,
-                        output_dir=native_dir,
-                        output_directory_fd=native_authority.fd,
-                        resource_fds=snapshots.fds,
-                        system_prompt_override=snapshots.paths.get("system_prompt_file"),
-                        append_system_prompt_override=snapshots.paths.get(
-                            "append_system_prompt_file"
-                        ),
-                    )
+                    try:
+                        await _run_pi_async(
+                            paths,
+                            native_request,
+                            output_dir=native_dir,
+                            output_directory_fd=native_authority.fd,
+                            resource_fds=snapshots.fds,
+                            system_prompt_override=snapshots.paths.get(
+                                "system_prompt_file"
+                            ),
+                            append_system_prompt_override=snapshots.paths.get(
+                                "append_system_prompt_file"
+                            ),
+                        )
+                        if agent_reservation is not None:
+                            actual_cost = _validated_agent_cost(
+                                native_authority, native_dir
+                            )
+                            _reconcile_authorized_operation(
+                                request, agent_reservation, actual_cost
+                            )
+                    except BaseException:
+                        _fail_authorized_operation(request, agent_reservation)
+                        raise
                 finally:
                     agent_finished_at = _utc_now()
             result: dict[str, object] = {
@@ -1077,13 +1186,32 @@ async def _run_row(
             }
             if request.mode == "qa":
                 assert row.answer is not None
-                verdict = await evaluate_run_directory_async(
+                verdict = _reusable_judge_verdict(
+                    native_authority,
                     native_dir,
-                    gold_answer=_qa_gold_answer(row),
-                    judge_config=request.judge_config,
-                    judge_contract=_judge_contract_for_request(request),
-                    _directory_fd=native_authority.fd,
+                    row,
+                    request,
                 )
+                if verdict is None:
+                    judge_reservation = _reserve_authorized_operation(
+                        request, "judge"
+                    )
+                    try:
+                        verdict = await evaluate_run_directory_async(
+                            native_dir,
+                            gold_answer=_qa_gold_answer(row),
+                            judge_config=request.judge_config,
+                            judge_contract=_judge_contract_for_request(request),
+                            _directory_fd=native_authority.fd,
+                        )
+                        if judge_reservation is not None:
+                            actual_cost = _validated_judge_cost(verdict)
+                            _reconcile_authorized_operation(
+                                request, judge_reservation, actual_cost
+                            )
+                    except BaseException:
+                        _fail_authorized_operation(request, judge_reservation)
+                        raise
                 result["is_correct"] = verdict["is_correct"]
                 result["judge_configuration_fingerprint"] = item[
                     "judge_configuration_fingerprint"
@@ -1145,6 +1273,131 @@ async def _run_row(
         )
         query.write_json("result.json", result)
         return result
+
+
+def _reserve_authorized_operation(
+    request: BenchmarkRequest, kind: str
+) -> FullExecutionReservation | None:
+    authorization = request.full_execution_authorization
+    if authorization is None:
+        return None
+    scope_id = request.experiment_scope_id
+    if scope_id is None:
+        raise DciBenchmarkError("DCI benchmark authorization scope changed")
+    try:
+        return reserve_full_execution_operation(authorization, scope_id, kind)
+    except ExperimentAuthorizationError as error:
+        raise DciBenchmarkError(str(error)) from error
+
+
+def _reconcile_authorized_operation(
+    request: BenchmarkRequest,
+    reservation: FullExecutionReservation,
+    actual_cost: float,
+) -> None:
+    authorization = request.full_execution_authorization
+    if authorization is None:
+        raise DciBenchmarkError("DCI benchmark authorization is invalid")
+    try:
+        reconcile_full_execution_operation(
+            authorization, reservation, actual_cost
+        )
+    except ExperimentAuthorizationError as error:
+        raise DciBenchmarkError(str(error)) from error
+
+
+def _fail_authorized_operation(
+    request: BenchmarkRequest,
+    reservation: FullExecutionReservation | None,
+) -> None:
+    if reservation is None:
+        return
+    authorization = request.full_execution_authorization
+    if authorization is None:
+        return
+    try:
+        fail_full_execution_operation(authorization, reservation)
+    except ExperimentAuthorizationError:
+        pass
+
+
+def _validated_cost(value: object, *, source: str) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or float(value) < 0
+    ):
+        raise DciBenchmarkError(f"DCI benchmark {source} cost evidence is invalid")
+    return float(value)
+
+
+def _validated_agent_cost(native: _Directory, display_path: Path) -> float:
+    lock: DciRunLock | None = None
+    try:
+        lock = DciRunLock.acquire_fd(native.fd, path=display_path, wait=True)
+        state, _question, _prediction = validate_completed_run_evidence(lock)
+        return _validated_cost(
+            extract_agent_usage_metrics(state).get("cost_total"),
+            source="Agent",
+        )
+    except DciBenchmarkError:
+        raise
+    except (DciArtifactError, OSError, TypeError, ValueError) as error:
+        raise DciBenchmarkError(
+            "DCI benchmark Agent cost evidence is invalid"
+        ) from error
+    finally:
+        if lock is not None:
+            lock.release()
+
+
+def _validated_judge_cost(verdict: object) -> float:
+    if not isinstance(verdict, Mapping):
+        raise DciBenchmarkError("DCI benchmark Judge cost evidence is invalid")
+    cost = verdict.get("cost_estimate_usd")
+    if not isinstance(cost, Mapping):
+        raise DciBenchmarkError("DCI benchmark Judge cost evidence is invalid")
+    return _validated_cost(cost.get("total_cost"), source="Judge")
+
+
+def _reusable_judge_verdict(
+    native: _Directory,
+    display_path: Path,
+    row: BenchmarkRow,
+    request: BenchmarkRequest,
+) -> dict[str, object] | None:
+    lock: DciRunLock | None = None
+    try:
+        lock = DciRunLock.acquire_fd(native.fd, path=display_path, wait=True)
+        state, question, prediction = validate_completed_run_evidence(lock)
+        if lock.recover_evaluation_transaction(
+            validate_candidate=_valid_transaction_candidate
+        ):
+            state, question, prediction = validate_completed_run_evidence(lock)
+        fingerprint = judge_request_fingerprint(
+            config=request.judge_config,
+            question=question,
+            gold_answer=_qa_gold_answer(row),
+            predicted_answer=prediction,
+            contract_id=_judge_contract_for_request(request),
+        )
+        return _load_reusable_result(
+            lock,
+            state,
+            fingerprint,
+            request.judge_config,
+            judge_contract=_judge_contract_for_request(request),
+        )
+    except DciBenchmarkError:
+        raise
+    except (DciArtifactError, OSError, TypeError, ValueError) as error:
+        raise DciBenchmarkError(
+            "DCI benchmark Judge cache evidence is invalid"
+        ) from error
+    finally:
+        if lock is not None:
+            lock.release()
 
 
 async def _run_pi_async(

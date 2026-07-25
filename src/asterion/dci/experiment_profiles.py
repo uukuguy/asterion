@@ -1339,21 +1339,18 @@ def cancel_full_execution_authorization(
 
 def _consumed_authorized_output_identity(
     authorization: FullExecutionAuthorization,
+    scope_id: str,
 ) -> tuple[Path, int, int]:
-    """Return an independent root identity only after exact capability consumption."""
+    """Return one exact child identity after its capability is consumed."""
 
     with _AUTHORIZATION_LOCK:
         record = _validate_authorization(authorization)
-        if not record.consumed_scopes:
+        output = _validate_scope_output(record, scope_id)
+        if scope_id not in record.consumed_scopes:
             raise ExperimentAuthorizationError(
                 "full execution authorization is invalid"
             )
-        snapshot = record.snapshot
-        return (
-            snapshot.output_root,
-            snapshot.output_root_device,
-            snapshot.output_root_inode,
-        )
+        return output.path, output.device, output.inode
 
 
 def consumed_full_execution_authorization_snapshot(

@@ -10,9 +10,18 @@ import os
 import stat
 import tempfile
 import unittest
+import asyncio
+from dataclasses import replace
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+from asterion.dci.benchmark import (
+    BenchmarkRequest,
+    DciBenchmarkError,
+    run_benchmark,
+    run_benchmark_async,
+)
+from asterion.dci.config import DciRuntimeOptions, resolve_dci_paths
 from asterion.dci.experiment_profiles import (
     ExperimentAuthorizationError,
     FullExecutionAuthorization,
@@ -28,6 +37,7 @@ from asterion.dci.experiment_profiles import (
     reserve_full_execution_operation,
     resolve_experiment_profile,
 )
+from asterion.dci.judge import JudgeConfig
 from asterion.dci.verification import paper_reproduce_main
 
 
@@ -560,16 +570,20 @@ class FullExecutionBudgetTests(unittest.TestCase):
     ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             authority = authorize(Path(temporary) / "private")
+            child = authorized_scope_output_root(authority, self.scope_id)
+            child_stat = child.stat()
             self.consume(authority)
             self.assertEqual(
-                _consumed_authorized_output_identity(authority)[1:],
-                (authority.output_root_device, authority.output_root_inode),
+                _consumed_authorized_output_identity(
+                    authority, self.scope_id
+                )[1:],
+                (child_stat.st_dev, child_stat.st_ino),
             )
             receipt = consumed_full_execution_authorization_snapshot(authority)
             with self.assertRaises(ExperimentAuthorizationError):
                 cancel_full_execution_authorization(authority)
             with self.assertRaises(ExperimentAuthorizationError):
-                _consumed_authorized_output_identity(authority)
+                _consumed_authorized_output_identity(authority, self.scope_id)
             self.assertEqual(
                 consumed_full_execution_authorization_snapshot(authority),
                 receipt,
@@ -581,7 +595,7 @@ class FullExecutionBudgetTests(unittest.TestCase):
             cancel_full_execution_authorization(authority)
             cancel_full_execution_authorization(authority)
             with self.assertRaises(ExperimentAuthorizationError):
-                _consumed_authorized_output_identity(authority)
+                _consumed_authorized_output_identity(authority, self.scope_id)
 
     def test_reservation_constructor_is_private(self) -> None:
         with self.assertRaisesRegex(
@@ -590,6 +604,407 @@ class FullExecutionBudgetTests(unittest.TestCase):
             "reserve_full_execution_operation$",
         ):
             FullExecutionReservation()
+
+
+class AuthorizedBenchmarkTests(unittest.TestCase):
+    scope_id = "bright.biology.main.full"
+
+    def request(
+        self,
+        root: Path,
+        authority: FullExecutionAuthorization,
+    ) -> BenchmarkRequest:
+        return BenchmarkRequest(
+            dataset=root / "must-not-be-read.jsonl",
+            output_root=authorized_scope_output_root(authority, self.scope_id),
+            cwd=root,
+            judge_config=JudgeConfig(base_url="https://judge.example.test/v1"),
+            runtime_options=DciRuntimeOptions(provider=None, model=None),
+            profile="bright.biology",
+            full_execution_authorization=authority,
+            experiment_scope_id=self.scope_id,
+        )
+
+    def test_requires_exact_authority_scope_and_child_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+
+            authority = authorize(root / "missing-authority")
+            request = self.request(root, authority)
+            with patch("asterion.dci.benchmark._read_input_snapshot") as read:
+                with self.assertRaisesRegex(
+                    DciBenchmarkError,
+                    "^DCI benchmark requires full execution authorization$",
+                ):
+                    run_benchmark(
+                        replace(request, full_execution_authorization=None),
+                        paths=Mock(),
+                    )
+            read.assert_not_called()
+
+            authority = authorize(root / "changed-scope")
+            request = self.request(root, authority)
+            with patch("asterion.dci.benchmark._read_input_snapshot") as read:
+                with self.assertRaisesRegex(
+                    DciBenchmarkError,
+                    "^DCI benchmark authorization scope changed$",
+                ):
+                    run_benchmark(
+                        replace(
+                            request,
+                            experiment_scope_id="bright.earth-science.main.full",
+                        ),
+                        paths=Mock(),
+                    )
+            read.assert_not_called()
+
+            authority = authorize(root / "parent-root")
+            request = self.request(root, authority)
+            with patch("asterion.dci.benchmark._read_input_snapshot") as read:
+                with self.assertRaisesRegex(
+                    DciBenchmarkError,
+                    "^DCI benchmark authorization root changed$",
+                ):
+                    run_benchmark(
+                        replace(request, output_root=root / "parent-root"),
+                        paths=Mock(),
+                    )
+            read.assert_not_called()
+
+            authority = authorize(
+                root / "other-child",
+                scopes=(
+                    self.scope_id,
+                    "bright.earth-science.main.full",
+                ),
+            )
+            request = self.request(root, authority)
+            other = authorized_scope_output_root(
+                authority, "bright.earth-science.main.full"
+            )
+            with patch("asterion.dci.benchmark._read_input_snapshot") as read:
+                with self.assertRaisesRegex(
+                    DciBenchmarkError,
+                    "^DCI benchmark authorization root changed$",
+                ):
+                    run_benchmark(
+                        replace(request, output_root=other),
+                        paths=Mock(),
+                    )
+            read.assert_not_called()
+
+
+class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
+    scope_id = "bright.biology.main.full"
+
+    def request(
+        self,
+        root: Path,
+        authority: FullExecutionAuthorization,
+        *,
+        rows: int = 2,
+        max_concurrency: int = 1,
+    ) -> BenchmarkRequest:
+        dataset = root / "dataset.jsonl"
+        dataset.write_text(
+            "".join(
+                json.dumps(
+                    {
+                        "query_id": f"q-{index}",
+                        "query": f"question {index}",
+                        "answer": "gold",
+                    }
+                )
+                + "\n"
+                for index in range(1, rows + 1)
+            ),
+            encoding="utf-8",
+        )
+        return BenchmarkRequest(
+            dataset=dataset,
+            output_root=authorized_scope_output_root(authority, self.scope_id),
+            cwd=root,
+            judge_config=JudgeConfig(base_url="https://judge.example.test/v1"),
+            runtime_options=DciRuntimeOptions(provider=None, model=None),
+            profile="paper-reference/pi",
+            max_concurrency=max_concurrency,
+            analysis=False,
+            figures=False,
+            full_execution_authorization=authority,
+            experiment_scope_id=self.scope_id,
+        )
+
+    def patches(
+        self,
+        *,
+        agent,
+        judge,
+        agent_cost,
+    ):
+        from contextlib import ExitStack
+
+        stack = ExitStack()
+        stack.enter_context(
+            patch(
+                "asterion.dci.benchmark._paper_scope_for_rows",
+                return_value=self.scope_id,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "asterion.dci.benchmark.resolve_paper_benchmark",
+                return_value=Mock(dataset_id="fixture-dataset"),
+            )
+        )
+        stack.enter_context(
+            patch("asterion.dci.benchmark._run_pi_async", side_effect=agent)
+        )
+        stack.enter_context(
+            patch(
+                "asterion.dci.benchmark._validated_agent_cost",
+                side_effect=agent_cost,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "asterion.dci.benchmark._reusable_judge_verdict",
+                return_value=None,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "asterion.dci.benchmark.evaluate_run_directory_async",
+                side_effect=judge,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "asterion.dci.benchmark._native_evidence_fingerprint",
+                return_value="0" * 64,
+            )
+        )
+        stack.enter_context(
+            patch("asterion.dci.benchmark._publish_aggregates")
+        )
+        return stack
+
+    @staticmethod
+    def verdict(*, cost: float = 0.0) -> dict[str, object]:
+        return {
+            "is_correct": True,
+            "judge_request_fingerprint": "fixture-fingerprint",
+            "cost_estimate_usd": {"total_cost": cost},
+        }
+
+    def test_agent_and_judge_caps_stop_before_external_operation(self) -> None:
+        async def agent(*_args: object, **_kwargs: object) -> None:
+            return None
+
+        async def judge(*_args: object, **_kwargs: object) -> dict[str, object]:
+            return self.verdict()
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            authority = authorize(
+                root / "agent-cap",
+                max_agents=1,
+                max_judges=2,
+            )
+            request = self.request(root, authority)
+            with self.patches(agent=agent, judge=judge, agent_cost=lambda *_: 0.0):
+                with patch(
+                    "asterion.dci.benchmark._run_pi_async",
+                    side_effect=agent,
+                ) as run, patch(
+                    "asterion.dci.benchmark.evaluate_run_directory_async",
+                    side_effect=judge,
+                ) as evaluate:
+                    with self.assertRaises(DciBenchmarkError):
+                        run_benchmark(request, paths=resolve_dci_paths(root))
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(evaluate.call_count, 1)
+
+            authority = authorize(
+                root / "judge-cap",
+                max_agents=2,
+                max_judges=1,
+            )
+            request = self.request(root, authority)
+            with self.patches(agent=agent, judge=judge, agent_cost=lambda *_: 0.0):
+                with patch(
+                    "asterion.dci.benchmark._run_pi_async",
+                    side_effect=agent,
+                ) as run, patch(
+                    "asterion.dci.benchmark.evaluate_run_directory_async",
+                    side_effect=judge,
+                ) as evaluate:
+                    with self.assertRaises(DciBenchmarkError):
+                        run_benchmark(request, paths=resolve_dci_paths(root))
+            self.assertEqual(run.call_count, 2)
+            self.assertEqual(evaluate.call_count, 1)
+
+    def test_usd_cap_stops_before_the_operation_that_would_exceed_it(self) -> None:
+        async def agent(*_args: object, **_kwargs: object) -> None:
+            return None
+
+        async def judge(*_args: object, **_kwargs: object) -> dict[str, object]:
+            return self.verdict(cost=0.5)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            authority = authorize(
+                root / "usd-cap",
+                max_agents=2,
+                max_judges=2,
+                max_cost=2.5,
+                max_agent_cost=2.0,
+                max_judge_cost=1.0,
+            )
+            request = self.request(root, authority)
+            with self.patches(agent=agent, judge=judge, agent_cost=lambda *_: 1.5):
+                with patch(
+                    "asterion.dci.benchmark._run_pi_async",
+                    side_effect=agent,
+                ) as run, patch(
+                    "asterion.dci.benchmark.evaluate_run_directory_async",
+                    side_effect=judge,
+                ) as evaluate:
+                    with self.assertRaisesRegex(
+                        DciBenchmarkError,
+                        "^full execution USD budget is exhausted$",
+                    ):
+                        run_benchmark(request, paths=resolve_dci_paths(root))
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(evaluate.call_count, 1)
+
+    def test_actual_costs_reconcile_and_excess_cancels_authority(self) -> None:
+        async def agent(*_args: object, **_kwargs: object) -> None:
+            return None
+
+        async def judge(*_args: object, **_kwargs: object) -> dict[str, object]:
+            return self.verdict(cost=0.2)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            authority = authorize(
+                root / "reconcile",
+                max_agents=1,
+                max_judges=1,
+            )
+            request = self.request(root, authority, rows=1)
+            with self.patches(agent=agent, judge=judge, agent_cost=lambda *_: 0.4):
+                result = run_benchmark(request, paths=resolve_dci_paths(root))
+            self.assertEqual(result.counts["total"], 1)
+            self.assertEqual(result.counts["failed"], 0)
+            receipt = consumed_full_execution_authorization_snapshot(authority)
+            self.assertEqual(receipt["ledger"]["actual_cost_usd"], 0.6)
+
+            authority = authorize(
+                root / "excess",
+                max_agents=2,
+                max_judges=2,
+                max_agent_cost=0.5,
+            )
+            request = self.request(root, authority)
+            with self.patches(agent=agent, judge=judge, agent_cost=lambda *_: 0.6):
+                with patch(
+                    "asterion.dci.benchmark._run_pi_async",
+                    side_effect=agent,
+                ) as run, patch(
+                    "asterion.dci.benchmark.evaluate_run_directory_async",
+                    side_effect=judge,
+                ) as evaluate:
+                    with self.assertRaises(DciBenchmarkError):
+                        run_benchmark(request, paths=resolve_dci_paths(root))
+            self.assertEqual(run.call_count, 1)
+            evaluate.assert_not_called()
+
+    def test_compatible_judge_cache_uses_no_judge_reservation_or_transport(
+        self,
+    ) -> None:
+        async def agent(*_args: object, **_kwargs: object) -> None:
+            return None
+
+        async def judge(*_args: object, **_kwargs: object) -> dict[str, object]:
+            raise AssertionError("Judge transport must not run for a cache hit")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            authority = authorize(
+                root / "judge-cache",
+                max_agents=1,
+                max_judges=1,
+            )
+            request = self.request(root, authority, rows=1)
+            with self.patches(agent=agent, judge=judge, agent_cost=lambda *_: 0.25):
+                with patch(
+                    "asterion.dci.benchmark._reusable_judge_verdict",
+                    return_value=self.verdict(),
+                ), patch(
+                    "asterion.dci.benchmark.evaluate_run_directory_async",
+                    side_effect=judge,
+                ) as evaluate:
+                    run_benchmark(request, paths=resolve_dci_paths(root))
+            evaluate.assert_not_called()
+            receipt = consumed_full_execution_authorization_snapshot(authority)
+            self.assertEqual(
+                receipt["ledger"]["completed_agent_operations"], 1
+            )
+            self.assertEqual(
+                receipt["ledger"]["completed_judge_operations"], 0
+            )
+            self.assertEqual(receipt["ledger"]["actual_cost_usd"], 0.25)
+
+    def test_external_cancellation_blocks_waiting_rows(self) -> None:
+        async def scenario() -> None:
+            started = asyncio.Event()
+            release = asyncio.Event()
+            calls = 0
+
+            async def agent(*_args: object, **_kwargs: object) -> None:
+                nonlocal calls
+                calls += 1
+                started.set()
+                await release.wait()
+
+            async def judge(
+                *_args: object, **_kwargs: object
+            ) -> dict[str, object]:
+                return self.verdict()
+
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                authority = authorize(
+                    root / "cancel",
+                    max_agents=2,
+                    max_judges=2,
+                )
+                request = self.request(root, authority, max_concurrency=1)
+                with self.patches(
+                    agent=agent,
+                    judge=judge,
+                    agent_cost=lambda *_: 0.0,
+                ):
+                    task = asyncio.create_task(
+                        run_benchmark_async(
+                            request,
+                            paths=resolve_dci_paths(root),
+                        )
+                    )
+                    await started.wait()
+                    task.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await task
+                self.assertEqual(calls, 1)
+                with self.assertRaisesRegex(
+                    ExperimentAuthorizationError,
+                    "^full execution authorization is inactive$",
+                ):
+                    reserve_full_execution_operation(
+                        authority, self.scope_id, "agent"
+                    )
+
+        asyncio.run(scenario())
 
 
 class LegacyFullAuthorizationTests(unittest.TestCase):
