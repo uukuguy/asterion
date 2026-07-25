@@ -15,7 +15,10 @@ if TYPE_CHECKING:
 
 
 CONTEXT_PROFILE_CONTRACT_VERSION = "dci.context-profile/v1"
+CONTEXT_SOURCE_IDENTITY_SCHEMA = "dci.context-source-identity/v1"
 ContextProfileName = Literal["level0", "level1", "level2", "level3", "level4"]
+
+_UPSTREAM_COMMIT = "271f37e71f053bf0c99c05ce6d2fb53b841d922e"
 
 _PROFILE_NAMES: tuple[ContextProfileName, ...] = (
     "level0",
@@ -108,6 +111,87 @@ def context_policy_identity(
         "extension_version": extension.version,
         "extension_sha256": extension.sha256,
     }
+
+
+def context_contract_for_source(
+    source_family: object,
+    profile_name: object,
+) -> str:
+    """Return one exact source-family contract without aliases or ranges."""
+
+    if not isinstance(profile_name, str) or profile_name not in _PROFILE_NAMES:
+        raise ValueError("DCI context source identity is invalid")
+    contracts = {
+        "paper-reference": f"dci.paper-context/{profile_name}/v1",
+        "upstream-github": (
+            "dci.upstream-github-context/"
+            f"{_UPSTREAM_COMMIT}/{profile_name}/v1"
+        ),
+        "asterion-safe": f"dci.asterion-safe-context/{profile_name}/v1",
+    }
+    if not isinstance(source_family, str) or source_family not in contracts:
+        raise ValueError("DCI context source identity is invalid")
+    return contracts[source_family]
+
+
+def context_source_identity(
+    context_contract: object,
+    profile: DciContextProfile,
+    extension: ResolvedContextExtension,
+) -> Mapping[str, object]:
+    """Bind one exact source-labelled contract to verified executable behavior."""
+
+    if type(profile) is not DciContextProfile:
+        raise ValueError("DCI context source identity is invalid")
+    canonical_profile = _profiles().get(profile.name)
+    if canonical_profile != profile:
+        raise ValueError("DCI context source identity is invalid")
+    contracts: Mapping[str, tuple[str, object, str]] = MappingProxyType(
+        {
+            context_contract_for_source("paper-reference", profile.name): (
+                "paper-reference",
+                "arxiv:2605.05242v1",
+                "paper-reported-golden-verified",
+            ),
+            context_contract_for_source("upstream-github", profile.name): (
+                "upstream-github",
+                MappingProxyType(
+                    {
+                        "repository": "DCI-Agent/DCI-Agent-Lite",
+                        "commit": _UPSTREAM_COMMIT,
+                    }
+                ),
+                "upstream-readme-qualitative-only",
+            ),
+            context_contract_for_source("asterion-safe", profile.name): (
+                "asterion-safe",
+                "asterion.dci.complete-implementation/v1",
+                "asterion-golden-verified",
+            ),
+        }
+    )
+    selected = contracts.get(context_contract) if isinstance(context_contract, str) else None
+    if selected is None:
+        raise ValueError("DCI context source identity is invalid")
+    try:
+        effective = context_policy_identity(profile, extension)
+    except (AttributeError, TypeError, ValueError):
+        raise ValueError("DCI context source identity is invalid") from None
+    source_family, source_identity, parity_status = selected
+    return MappingProxyType(
+        {
+            "schema": CONTEXT_SOURCE_IDENTITY_SCHEMA,
+            "status": "effective",
+            "source_family": source_family,
+            "source_identity": source_identity,
+            "context_contract": context_contract,
+            "context_profile": profile.name,
+            "parity_status": parity_status,
+            "profile": MappingProxyType(dict(effective["profile"])),
+            "extension_version": effective["extension_version"],
+            "extension_sha256": effective["extension_sha256"],
+        }
+    )
 
 
 @lru_cache(maxsize=1)

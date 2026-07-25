@@ -1,6 +1,7 @@
 export const PROFILE_CONTRACT_VERSION = "dci.context-profile/v1";
-export const EXTENSION_VERSION = "0.2.0";
+export const EXTENSION_VERSION = "0.3.0";
 export const TRUNCATION_MARKER = "\n[DCI tool result truncated]";
+export const COMPACTION_PLACEHOLDER = "[DCI tool result compacted]";
 
 export const PROFILE_DEFINITIONS = {
   level0: {
@@ -180,7 +181,7 @@ function originalToolCharacters(content: Content[]): number {
     .reduce((total, item) => total + item.text.length, 0);
 }
 
-export function planCompaction(
+export function needsCompaction(
   profile: ProfileDefinition,
   state: PolicyState,
 ): boolean {
@@ -189,6 +190,53 @@ export function planCompaction(
     trigger !== null &&
     state.accumulatedOriginalToolCharacters > trigger &&
     !state.compactionPending
+  );
+}
+
+export const planCompaction = needsCompaction;
+
+function textCharacters(messages: unknown): number {
+  if (!Array.isArray(messages)) return 0;
+  return messages.reduce((total, message) => {
+    if (typeof message !== "object" || message === null) return total;
+    const content = (message as Message).content;
+    if (typeof content === "string") return total + content.length;
+    if (!Array.isArray(content)) return total;
+    return total + content
+      .filter((item): item is TextContent =>
+        typeof item === "object" && item !== null &&
+        (item as TextContent).type === "text" && typeof (item as TextContent).text === "string",
+      )
+      .reduce((characters, item) => characters + item.text.length, 0);
+  }, 0);
+}
+
+export function estimatePostCompactionTokens(preparation: unknown): number {
+  if (typeof preparation !== "object" || preparation === null) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const value = preparation as Record<string, unknown>;
+  const settings = value.settings as Record<string, unknown> | undefined;
+  const keepRecentTokens = settings?.keepRecentTokens;
+  if (
+    typeof keepRecentTokens !== "number" ||
+    !Number.isInteger(keepRecentTokens) ||
+    keepRecentTokens < 0
+  ) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return keepRecentTokens + Math.ceil(textCharacters(value.turnPrefixMessages) / 4);
+}
+
+export function needsPostCompactionSummary(
+  profile: ProfileDefinition,
+  estimatedPostCompactionTokens: number,
+): boolean {
+  return (
+    profile.profile === "level4" &&
+    Number.isFinite(estimatedPostCompactionTokens) &&
+    profile.summary_recent_token_target !== null &&
+    estimatedPostCompactionTokens > profile.summary_recent_token_target
   );
 }
 
@@ -238,10 +286,11 @@ export function transformContext(
   if (userIndexes.length <= profile.retained_turns) return messages.slice();
   const firstKeptIndex = userIndexes[userIndexes.length - profile.retained_turns];
   if (firstKeptIndex === undefined) return messages.slice();
-  return [
-    ...messages.slice(0, firstKeptIndex).filter((message) => message.role === "system"),
-    ...messages.slice(firstKeptIndex),
-  ];
+  return messages.map((message, index) =>
+    index < firstKeptIndex && message.role === "toolResult"
+      ? { ...message, content: [{ type: "text", text: COMPACTION_PLACEHOLDER }] }
+      : message,
+  );
 }
 
 function validatePolicyState(value: unknown): PolicyState {
@@ -299,6 +348,37 @@ function preservedTurnsFrom(entries: SessionEntry[], firstKeptEntryId: string | 
     .filter((entry) => entry.type === "message" && entry.message?.role === "user").length;
 }
 
+function messageText(message: Message): string {
+  if (typeof message.content === "string") return message.content;
+  if (!Array.isArray(message.content)) return "";
+  return message.content
+    .filter((item): item is TextContent =>
+      typeof item === "object" && item !== null &&
+      (item as TextContent).type === "text" && typeof (item as TextContent).text === "string",
+    )
+    .map((item) => item.text)
+    .join("\n");
+}
+
+function deterministicPlaceholderSummary(
+  entries: SessionEntry[],
+  firstKeptEntryId: string | undefined,
+): string {
+  if (firstKeptEntryId === undefined) return "";
+  const first = entries.findIndex((entry) => entry.id === firstKeptEntryId);
+  if (first <= 0) return "";
+  return entries.slice(0, first)
+    .flatMap((entry) => {
+      const message = entry.message;
+      if (message === undefined) return [];
+      if (message.role === "toolResult") {
+        return [`toolResult: ${COMPACTION_PLACEHOLDER}`];
+      }
+      return [`${message.role}: ${messageText(message)}`];
+    })
+    .join("\n");
+}
+
 export default function dciContextExtension(pi: ExtensionApi): void {
   pi.registerFlag("dci-context-profile", {
     type: "string",
@@ -311,6 +391,7 @@ export default function dciContextExtension(pi: ExtensionApi): void {
 
   let profile: ProfileDefinition | undefined;
   let state = createPolicyState();
+  let summaryAttemptPending = false;
 
   const persist = (event: string): void => {
     if (profile === undefined) throw new Error("DCI context profile is unavailable");
@@ -387,24 +468,26 @@ export default function dciContextExtension(pi: ExtensionApi): void {
   });
 
   pi.on("turn_end", (_event, context) => {
-    if (profile === undefined || !planCompaction(profile, state)) return;
+    if (profile === undefined || !needsCompaction(profile, state)) return;
     state = { ...state, compactionPending: true };
-    const summaryWasSuppressed = profile.profile === "level4" && state.summarySuppressed;
+    summaryAttemptPending = false;
     persist("compaction_requested");
     context.compact({
       onComplete: () => {
-        if (profile?.profile === "level4" && !summaryWasSuppressed) {
+        if (profile?.profile === "level4" && summaryAttemptPending) {
           state = recordSummaryResult(profile, state, true);
         }
         else state = { ...state, compactionPending: false };
+        summaryAttemptPending = false;
         persist("compaction_complete");
       },
       onError: () => {
         if (profile === undefined) return;
         state =
-          profile.profile === "level4" && !summaryWasSuppressed
+          profile.profile === "level4" && summaryAttemptPending
             ? recordSummaryResult(profile, state, false)
             : { ...state, compactionPending: false };
+        summaryAttemptPending = false;
         persist("compaction_failed");
       },
     });
@@ -413,24 +496,36 @@ export default function dciContextExtension(pi: ExtensionApi): void {
   pi.on("session_before_compact", (event) => {
     if (profile === undefined) throw new Error("DCI context profile is unavailable");
     const branchEntries = event.branchEntries as SessionEntry[];
-    if (profile.profile === "level4" && !state.summarySuppressed) {
+    if (profile.profile === "level4") {
       if (event.preparation?.settings?.keepRecentTokens !== 20_000) {
         throw new Error("DCI level4 requires a 20000-token compaction boundary");
       }
+      const firstKeptEntryId =
+        firstEntryForRecentTurns(branchEntries, profile.retained_turns ?? 0) ??
+        event.preparation.firstKeptEntryId;
       state = {
         ...state,
         preservedTurns: preservedTurnsFrom(
           branchEntries,
-          event.preparation.firstKeptEntryId,
+          firstKeptEntryId,
         ),
       };
-      return undefined;
+      summaryAttemptPending =
+        !state.summarySuppressed &&
+        needsPostCompactionSummary(
+          profile,
+          estimatePostCompactionTokens(event.preparation),
+        );
+      if (summaryAttemptPending) return undefined;
+      return {
+        compaction: {
+          summary: deterministicPlaceholderSummary(branchEntries, firstKeptEntryId),
+          firstKeptEntryId,
+          tokensBefore: event.preparation.tokensBefore,
+        },
+      };
     }
-    if (
-      (profile.profile !== "level3" &&
-        !(profile.profile === "level4" && state.summarySuppressed)) ||
-      profile.retained_turns === null
-    ) {
+    if (profile.profile !== "level3" || profile.retained_turns === null) {
       return undefined;
     }
     const firstKeptEntryId =
@@ -442,7 +537,7 @@ export default function dciContextExtension(pi: ExtensionApi): void {
     };
     return {
       compaction: {
-        summary: "",
+        summary: deterministicPlaceholderSummary(branchEntries, firstKeptEntryId),
         firstKeptEntryId,
         tokensBefore: event.preparation.tokensBefore,
       },

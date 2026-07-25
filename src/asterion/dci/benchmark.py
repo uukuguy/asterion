@@ -31,7 +31,9 @@ from asterion.dci.context_extension import (
     resolve_context_extension,
 )
 from asterion.dci.context_profiles import (
+    context_contract_for_source,
     context_policy_identity,
+    context_source_identity,
     resolve_context_profile,
 )
 from asterion.dci.datasets import (
@@ -718,7 +720,31 @@ def _prepare(
     corpus_identity = (
         str(canonical_input_identity(request.corpus)) if request.corpus else None
     )
-    runtime = _runtime_document(request.runtime_options)
+    context_contract: str | None = None
+    if request.profile is not None:
+        try:
+            selected_profile = _resolve_prompt_profile(
+                request.profile,
+                provider=request.runtime_options.provider,
+                model=request.runtime_options.model,
+            )
+            context_contract = selected_profile.context_contract
+            if (
+                request.ablation_row is not None
+                and request.runtime_options.runtime_context_level is not None
+            ):
+                context_contract = context_contract_for_source(
+                    selected_profile.source_family,
+                    request.runtime_options.runtime_context_level,
+                )
+        except ValueError as error:
+            raise DciBenchmarkError(
+                "DCI benchmark context policy is invalid"
+            ) from error
+    runtime = _runtime_document(
+        request.runtime_options,
+        context_contract=context_contract,
+    )
     judge_contract = _judge_contract_for_request(request)
     judge = judge_public_identity(
         request.judge_config, contract_id=judge_contract
@@ -1568,14 +1594,29 @@ def _read_public_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def _runtime_document(options: DciRuntimeOptions) -> dict[str, object]:
+def _runtime_document(
+    options: DciRuntimeOptions,
+    *,
+    context_contract: str | None = None,
+) -> dict[str, object]:
     try:
         profile = resolve_context_profile(options.runtime_context_level)
         if profile is None:
             policy_identity = None
         else:
             with resolve_context_extension() as extension:
-                policy_identity = context_policy_identity(profile, extension)
+                if context_contract is None:
+                    policy_identity = context_policy_identity(profile, extension)
+                else:
+                    source_identity = context_source_identity(
+                        context_contract,
+                        profile,
+                        extension,
+                    )
+                    policy_identity = {
+                        key: dict(value) if isinstance(value, Mapping) else value
+                        for key, value in source_identity.items()
+                    }
     except (ContextExtensionError, ValueError) as error:
         raise DciBenchmarkError("DCI benchmark context policy is invalid") from error
     return {

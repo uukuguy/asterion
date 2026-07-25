@@ -404,10 +404,15 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
             root = Path(temporary_directory).resolve()
             corpus = root / "corpus"
             corpus.mkdir()
+            base_request = _request(root)
             request = replace(
-                _request(root),
+                base_request,
                 profile="asterion-safe/pi",
                 corpus=corpus,
+                runtime_options=replace(
+                    base_request.runtime_options,
+                    runtime_context_level="level3",
+                ),
             )
             _rows, _output, config, items, _snapshots = _prepare(request)
 
@@ -419,6 +424,18 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         self.assertEqual(
             items[0]["identity"]["benchmark_prompt_contract_sha256"],
             expected_sha256,
+        )
+        self.assertEqual(
+            config["runtime"]["context_policy_identity"]["source_family"],
+            "asterion-safe",
+        )
+        self.assertEqual(
+            config["runtime"]["context_policy_identity"]["context_contract"],
+            "dci.asterion-safe-context/level3/v1",
+        )
+        self.assertEqual(
+            items[0]["identity"]["runtime"]["context_policy_identity"],
+            config["runtime"]["context_policy_identity"],
         )
 
     def test_benchmark_uses_minimax_invocation_identity_for_profile_selection(self) -> None:
@@ -861,6 +878,189 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         )
         self.assertNotIn("current-default", canonical_evidence)
         self.assertIn("asterion-safe/pi", canonical_evidence)
+
+    def test_context_source_identity_requires_exact_family_and_contract(self) -> None:
+        from asterion.dci.context_profiles import (
+            context_contract_for_source,
+            context_policy_identity,
+            context_source_identity,
+            resolve_context_profile,
+        )
+        from asterion.dci.context_extension import resolve_context_extension
+
+        commit = "271f37e71f053bf0c99c05ce6d2fb53b841d922e"
+        profile = resolve_context_profile("level3")
+        contracts = {
+            "paper-reference": "dci.paper-context/level3/v1",
+            "upstream-github": (
+                f"dci.upstream-github-context/{commit}/level3/v1"
+            ),
+            "asterion-safe": "dci.asterion-safe-context/level3/v1",
+        }
+        with resolve_context_extension() as extension:
+            identities = {
+                family: context_source_identity(contract, profile, extension)
+                for family, contract in contracts.items()
+            }
+            generic_identity = context_policy_identity(profile, extension)
+
+        paper_identity = identities["paper-reference"]
+        upstream_identity = identities["upstream-github"]
+        safe_identity = identities["asterion-safe"]
+        for family, contract in contracts.items():
+            with self.subTest(source_family=family):
+                identity = identities[family]
+                self.assertIsInstance(identity, MappingProxyType)
+                self.assertEqual(identity["source_family"], family)
+                self.assertEqual(identity["context_contract"], contract)
+                self.assertEqual(identity["context_profile"], "level3")
+                self.assertEqual(identity["extension_version"], extension.version)
+                self.assertEqual(identity["extension_sha256"], extension.sha256)
+                self.assertIsInstance(identity["profile"], MappingProxyType)
+                self.assertEqual(identity["profile"]["profile"], "level3")
+                self.assertNotIn("path", identity)
+                self.assertNotIn("tool_body", identity)
+
+        self.assertEqual(
+            paper_identity["source_identity"],
+            "arxiv:2605.05242v1",
+        )
+        self.assertEqual(
+            paper_identity["parity_status"],
+            "paper-reported-golden-verified",
+        )
+        self.assertNotIn(commit, repr(paper_identity))
+        self.assertEqual(
+            dict(upstream_identity["source_identity"]),
+            {
+                "repository": "DCI-Agent/DCI-Agent-Lite",
+                "commit": commit,
+            },
+        )
+        self.assertEqual(
+            upstream_identity["parity_status"],
+            "upstream-readme-qualitative-only",
+        )
+        self.assertNotIn("arxiv:2605.05242v1", repr(upstream_identity))
+        self.assertEqual(
+            safe_identity["source_identity"],
+            "asterion.dci.complete-implementation/v1",
+        )
+        self.assertEqual(
+            safe_identity["parity_status"],
+            "asterion-golden-verified",
+        )
+        with self.assertRaises(TypeError):
+            paper_identity["source_family"] = "asterion-safe"
+        with self.assertRaises(TypeError):
+            upstream_identity["source_identity"]["commit"] = "0" * 40
+
+        self.assertEqual(
+            generic_identity["schema"],
+            "dci.context-policy-identity/v1",
+        )
+        self.assertEqual(generic_identity["profile"]["profile"], "level3")
+
+        with resolve_context_extension() as extension:
+            for level in ("level0", "level1", "level2", "level3", "level4"):
+                level_profile = resolve_context_profile(level)
+                for source_family in contracts:
+                    with self.subTest(
+                        source_family=source_family,
+                        context_profile=level,
+                    ):
+                        contract = context_contract_for_source(
+                            source_family,
+                            level,
+                        )
+                        identity = context_source_identity(
+                            contract,
+                            level_profile,
+                            extension,
+                        )
+                        self.assertEqual(
+                            identity["source_family"],
+                            source_family,
+                        )
+                        self.assertEqual(identity["context_profile"], level)
+
+        invalid_contracts = (
+            "dci.paper-context/level4/v1",
+            "dci.paper-context/LEVEL3/v1",
+            "dci.paper-context/level3",
+            f"dci.upstream-github-context/{'f' * 40}/level3/v1",
+            "dci.upstream-context/level3/v1",
+            "dci.asterion-safe-context/level03/v1",
+        )
+        with resolve_context_extension() as extension:
+            for contract in invalid_contracts:
+                with self.subTest(invalid_contract=contract):
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "DCI context source identity is invalid",
+                    ):
+                        context_source_identity(contract, profile, extension)
+            with self.assertRaisesRegex(
+                ValueError,
+                "DCI context source identity is invalid",
+            ):
+                context_source_identity(
+                    contracts["paper-reference"],
+                    replace(profile, retained_turns=11),
+                    extension,
+                )
+            for source_family, level in (
+                ("paper", "level3"),
+                ("paper-reference", "LEVEL3"),
+                (None, "level3"),
+            ):
+                with self.subTest(
+                    invalid_source_family=source_family,
+                    invalid_level=level,
+                ):
+                    with self.assertRaisesRegex(
+                        ValueError,
+                        "DCI context source identity is invalid",
+                    ):
+                        context_contract_for_source(source_family, level)
+
+    def test_experiment_context_contracts_match_profile_and_source_family(
+        self,
+    ) -> None:
+        from asterion.dci.context_extension import resolve_context_extension
+        from asterion.dci.context_profiles import (
+            context_source_identity,
+            resolve_context_profile,
+        )
+
+        with resolve_context_extension() as extension:
+            for profile_id in experiment_profile_ids():
+                experiment = (
+                    resolve_experiment_profile(
+                        profile_id,
+                        invocation_provider="minimax",
+                        invocation_model="MiniMax-M2.5",
+                    )
+                    if profile_id == "asterion-safe/claude-minimax"
+                    else resolve_experiment_profile(profile_id)
+                )
+                context_profile = resolve_context_profile(
+                    experiment.context_profile
+                )
+                with self.subTest(profile_id=profile_id):
+                    identity = context_source_identity(
+                        experiment.context_contract,
+                        context_profile,
+                        extension,
+                    )
+                    self.assertEqual(
+                        identity["source_family"],
+                        experiment.source_family,
+                    )
+                    self.assertEqual(
+                        identity["context_profile"],
+                        experiment.context_profile,
+                    )
 
     def test_paper_product_contract_marks_resolution_parameters_as_asterion_defined(self) -> None:
         from asterion.dci.verification import paper_product_contract
