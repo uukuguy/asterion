@@ -46,6 +46,8 @@ make doctor
 
 凭据只保存在 `.env`、已导出环境或 Pi 自己的受管认证中。Asterion 不在描述、错误、公开证据或 body-free application 结果中输出密钥值。
 
+“本地语料”表示 Asterion 不使用托管检索服务，也不把 corpus 打包进 wheel；它不表示所有内容都停留在本机。Agent 运行时，相关语料片段仍可能被发送给已配置的模型 provider。
+
 `make setup-resources-basic` 只准备 `wiki_corpus` 和 `bc_plus_docs`。
 `make setup-resources-benchmark` 另行检查/准备 launcher 清单；无法自动取得的
 BEIR 或 gated 资源会报告精确路径与来源，不会换成其他数据。所有 setup/check
@@ -154,7 +156,15 @@ uv run asterion-dci paper --help
 | `complete` | 有界，执行前显示 | 有界，执行前显示 | 否 |
 | benchmark full/paper score | 需独立授权 | 需独立授权 | 可能，默认禁止 |
 
-零费用验证只用 `acceptance`、`make check` 或 `make promotion-check`。`.env`、缓存或历史报告不能隐式授权新请求。
+论文复现默认命令是 plan-only，不需要预算、不创建输出目录、不调用 provider：
+
+```bash
+uv run asterion-dci paper reproduce \
+  --profile paper-reference/pi \
+  --output-root ./evidence/reproduction
+```
+
+只有显式加入 `--execute` 才可能授权执行；同时必须提供明确 scopes 和五个正数上限：`--max-agent-operations`、`--max-judge-operations`、`--max-cost-usd`、`--max-agent-cost-per-operation-usd`、`--max-judge-cost-per-operation-usd`。零费用验证只用 `acceptance`、`make check` 或 `make promotion-check`。`.env`、缓存或历史报告不能隐式授权新请求。
 
 ## 产物与隐私
 

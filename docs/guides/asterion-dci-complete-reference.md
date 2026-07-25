@@ -148,25 +148,22 @@ uv run asterion-dci paper reproduce \
   --output-root ./evidence/reproduction
 ```
 
-完整执行必须显式 opt in，且每个 bound 都是必填项；scope 必须逐个重复传入，并且只能是
-精确绑定、可用的 paper scope：
+完整执行必须显式 opt in，且每个 bound 都是必填项；scope 必须逐个重复传入，并且
+Task 8.3 当前要求选择必须覆盖 profile 的完整 method/target closure。当前
+`paper-reference/pi` profile 含有 unavailable/partial closure，所以没有可直接运行的
+完整执行示例。
 
-```bash
-# Explicit execution; every bound is required.
-uv run asterion-dci paper reproduce \
-  --profile paper-reference/pi \
-  --scope bright.biology.main.full \
-  --output-root ./evidence/reproduction \
-  --execute \
-  --max-agent-operations 103 \
-  --max-judge-operations 1 \
-  --max-cost-usd 25 \
-  --max-agent-cost-per-operation-usd 0.20 \
-  --max-judge-cost-per-operation-usd 0.05
-```
+执行 synopsis：`uv run asterion-dci paper reproduce --profile PROFILE --scope
+SCOPE ... --output-root OUTPUT_ROOT --execute --max-agent-operations N
+--max-judge-operations N --max-cost-usd USD --max-agent-cost-per-operation-usd
+USD --max-judge-cost-per-operation-usd USD`。所有 `N` 和 `USD` 都必须是正数。
 
 预算值只限制已显式授权的同进程执行；它们本身从不授予 authority。执行前会先解析精确
 dataset、corpus、runtime 和 Judge 输入，preflight 失败不会创建输出目录或签发完整执行授权。
+目前 `paper_full_executable` 必须从完整 method/target closure 推导，而不是从清单数量推导：
+13 个 dataset identity 和 16 个 paper scope 已打包，但 Bamboogle 论文完整 125 条没有 batch
+profile，BrowseComp+ 的 analysis、appendix-a1、context-ablation scopes 的 launcher origin 为
+`unavailable`，因此完整 profile 仍不是 full executable。
 
 ## Benchmark DCI-Agent-Lite
 
@@ -214,9 +211,11 @@ scripts/beir/benchmark_scifact.sh
 
 这些 launcher 覆盖的来源必须与论文数据集 identity 分开读取：锁定的上游 GitHub
 commit 有 12 个 launcher、11 个唯一数据集；Asterion 在此基础上新增 ArguAna 和
-SciFact，因此本仓库有 13 个数据集 identity 和 14 个 standalone launcher。所有
-13 个数据集 row 仍是论文 `arxiv:2605.05242v1` 的完整数据集 identity；launcher
-只记录可追溯的执行入口，不能授权不同的选择范围。
+SciFact 两个 BEIR launcher，因此本仓库有 13 个数据集 identity 和 14 个 standalone
+launcher。所有 13 个数据集 row 仍是论文 `arxiv:2605.05242v1` 的完整数据集
+identity；launcher 只记录可追溯的执行入口，不能授权不同的选择范围。涉及论文未报告的
+selection seeds、重复处理、segment 大小或 evidence overlap 的位置必须保留
+`paper-unreported` 或 `asterion-defined` 标签，不能静默提升为论文事实。
 
 尤其是 Bamboogle 的论文完整 scope 是 125 条、`paper-reference`、`paper-full`，而
 锁定上游 launcher 的固定 50-ID scope 是 `upstream-github`、`upstream-reference`。

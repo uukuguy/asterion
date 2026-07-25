@@ -9,7 +9,7 @@ read architecture documents when extending the framework.
   discovery, four verification levels, configuration, costs, and outputs.
 - [Complete Asterion DCI reference](guides/asterion-dci-complete-reference.md) —
   research, resume, context management, Judge, benchmark, analysis, export, and
-  evidence semantics.
+  paper reproduction boundaries.
 - [Functional verification guide](verification/asterion-dci-validation-guide.md)
   — provider-free closure, external prerequisites, bounded verification, and
   troubleshooting.
@@ -57,6 +57,10 @@ make docs-check
   Pi, data, a service, or credentials.
 - **Not rerun** — the implementation exists, but a full dataset or published
   score was not reproduced in the current work.
+
+Paper reproduction docs distinguish three source families: paper-reference,
+upstream-github, and Asterion-safe. The default `paper reproduce` path is a
+provider-free plan and does not authorize or execute full reproduction.
 
 The historical `538/538` selector result is **mixed-repository only** integration
 evidence. Standalone installed acceptance is package-owned and provider-free;

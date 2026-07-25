@@ -75,6 +75,11 @@ declared sources and reports every unavailable/gated launcher path with its
 expected upstream; it never substitutes another corpus. Use the corresponding
 `check-resources-*` targets for read-only checks.
 
+Local corpus access means Asterion points Pi or Claude Code at operator-owned
+files instead of a hosted retrieval service. It does not mean every relevant
+document fragment stays on-device: selected corpus content can still be sent to
+the configured Agent model provider during a run.
+
 Keep Agent and Judge credentials in `.env`, exported environment variables, or
 the selected Pi agent directory; never commit them. External `pi/`, `data/`,
 `corpus/`, generated outputs, and private evidence remain outside the
@@ -89,7 +94,21 @@ distribution.
 - `basic` performs bounded Agent/Judge work when correctly configured.
 - `complete` includes the bounded provider-backed path plus acceptance.
 - Full datasets, paper-score reproduction, and publication require separate
-  governance, an explicit invocation, and a finite budget.
+  governance, `asterion-dci paper reproduce --execute`, explicit scopes, and all
+  five positive limits: `--max-agent-operations`, `--max-judge-operations`,
+  `--max-cost-usd`, `--max-agent-cost-per-operation-usd`, and
+  `--max-judge-cost-per-operation-usd`.
+
+The default paper reproduction command is provider-free and plan-only:
+
+```bash
+uv run asterion-dci paper reproduce \
+  --profile paper-reference/pi \
+  --output-root ./evidence/reproduction
+```
+
+Without `--execute`, it creates no output root, issues no authority, performs no
+Agent/Judge work, and runs no full dataset.
 
 Use `make help` to see the same boundary beside every command group.
 

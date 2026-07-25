@@ -95,7 +95,7 @@ unbound assembly instead of promoting packaged inventory to reachability.
 | Private/local document assistant | Corpora remain operator-owned local files and are not uploaded to a hosted retrieval service | Partially supported | Relevant document content can still be sent to the selected model provider; do not claim that data never leaves the machine |
 | L0–L4 context management | Five immutable context profiles and a TypeScript Pi extension are packaged | Partial | Numeric settings match the paper table; L3/L4 behavioral equivalence is not yet proven |
 | QA and IR benchmark coverage | Thirteen dataset identities and sixteen experiment scopes are packaged | Implemented as contracts | Full datasets and published scores were not rerun |
-| Reported benchmark superiority | Reproduction targets and comparison schemas exist | Not verified | A contract or dry-run plan is not experimental evidence |
+| Reported benchmark superiority | Reproduction targets and comparison schemas exist | Not verified | A contract or plan-only reproduction command is not experimental evidence |
 
 ## Dataset and launcher reconciliation
 
@@ -272,32 +272,56 @@ ablation rows; these are Asterion-defined parameters and must be labelled.
 Trajectory alignment is not yet comparable to the paper:
 
 - exact `path:line:text` grep output is validated against the corpus;
+- piped bash output in `path:line:text` and `path:line` form is validated
+  against the corpus when it carries enough path and line identity;
 - a read result must occur uniquely in the gold document, otherwise it falls
   back to full-document localization;
-- bash pipelines return only full-document fallbacks for gold document paths
-  literally present in the command;
 - dominant paper patterns such as `rg | head` and `rg | rg` normally expose
-  paths in output rather than as command arguments, so current alignment can
-  miss both coverage and localization;
-- path-only output is not recognized as surfaced evidence.
+  paths in output rather than as command arguments, so body-free alignment still
+  depends on parseable output and can fall back when line identity is absent;
+- path-only output is recognized as surfaced document evidence but cannot
+  establish line-level localization by itself.
 
 ## Full reproduction boundary
 
 `asterion-dci paper describe` currently reports
-`paper_full_executable=false`. A dry-run can enumerate thirteen datasets,
-sixteen scopes, 1,978 Agent operations, and 1,455 Judge operations, but it does
-not execute them.
+`paper_full_executable=false`. The truth value is derived from complete method
+and target closure, not from the existence of inventory rows. Current packaged
+inventory has thirteen dataset identities and sixteen paper scopes, but complete
+profile execution is not closed:
 
-The current full-execution authorization is an in-memory object. The
-`paper reproduce --authorize-full` command can issue the object and then exits;
-the benchmark CLI has no supported route to consume that authority. The
-estimated budget is metadata, accepts zero, and is not an enforced operation
-or currency cap.
+- Bamboogle's paper-full target is 125 examples and has no batch profile.
+- BrowseComp+ `analysis.n100`, `appendix-a1.random50`, and
+  `context-ablation.random100` have `launcher_origin=unavailable`.
+- Paper-unreported method details remain labelled, including selection seeds,
+  duplicate handling, segment size, and evidence-overlap assumptions.
 
-Reproduction comparison consumes a `RunManifest`, but production benchmark
-output has no complete path that compiles its evidence into that manifest.
-Only the DCI-Agent-CC main target is represented; Lite and the tool, context,
-and corpus ablations do not form a complete executable target matrix.
+The supported default command is plan-only:
+
+```bash
+uv run asterion-dci paper reproduce \
+  --profile paper-reference/pi \
+  --output-root ./evidence/reproduction
+```
+
+Without `--execute`, it enumerates the selected profile plan, including 1,978
+maximum Agent operations and 1,455 maximum Judge operations for the full
+paper-reference scope set, but performs zero Agent operations, zero Judge
+operations, issues no full authorization, and creates no output root.
+
+The supported full-execution route is the same process `paper reproduce
+--execute` path. It rejects missing scopes, unavailable scopes, partial method
+selections, missing resources, and missing/invalid limits before creating output
+or issuing authority. All five limits are mandatory and must be positive:
+`--max-agent-operations`, `--max-judge-operations`, `--max-cost-usd`,
+`--max-agent-cost-per-operation-usd`, and
+`--max-judge-cost-per-operation-usd`. Authorization is consumed by bounded
+benchmark execution in that process and is not granted by `.env`, caches, prior
+evidence, or a plan-only command.
+
+Reproduction comparison consumes compiled, body-free `RunManifest` evidence.
+Validated manifest compilation exists, but no provider-backed full reproduction
+or published paper-score rerun has been performed for this audit.
 
 ## Prioritized gap register
 
@@ -319,11 +343,11 @@ The remaining current gaps are:
 
 | ID | Priority | Open gap | Completion evidence |
 | --- | --- | --- | --- |
-| E1 | Blocker | `paper-reference` mixes paper, GitHub, and Asterion semantics | Three distinct immutable provenance families and cache keys exist |
+| E1 | Blocker | Full paper-reference method/target closure is not executable | `paper_full_executable=false`; unavailable and partial scopes are rejected before authority |
 | E2 | High | Context L3/L4 behavioral parity is unproven | Golden trajectory tests cover thresholds, retained turns, summary gating, failure limit |
-| E3 | High | Pipeline/path-only evidence is missed | Hand-calculated trajectory fixtures match expected coverage/localization |
-| E4 | High | Full authorization and budget are not executable authority | One authorized bounded scope consumes authority once and enforces a positive cap |
-| E5 | High | Benchmark evidence cannot compile into comparison input | Validated RunManifest is emitted and accepted by compare without manual conversion |
+| E3 | High | Trajectory alignment remains body-free and lower fidelity than paper logs | Piped `path:line:text`, `path:line`, and path-only fixtures validate current coverage/localization limits |
+| E4 | High | Full execution still requires external provider/data authorization | Same-process `--execute` consumes authority once and enforces positive operation/cost caps |
+| E5 | High | Published scores remain not rerun | Provider-backed full reproduction evidence is absent by design in provider-free gates |
 
 ## Delivery sequence
 

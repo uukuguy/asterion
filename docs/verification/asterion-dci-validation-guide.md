@@ -57,6 +57,11 @@ checkout locked by `pi-revision.txt`; `DCI_PI_AGENT_DIR` points to separately
 managed authentication. Never commit `.env`, credentials, external resources,
 or private outputs.
 
+Local corpus verification proves files are operator-owned and not served through
+a hosted retrieval API. It does not prove that all relevant content stays
+on-device during an Agent run; selected content can be included in provider
+requests.
+
 ## Standalone provider-free verification
 
 ### 1. Discover the installed product
@@ -214,6 +219,25 @@ The profile registry covers BC+, six QA datasets, four BRIGHT datasets, and two
 BEIR datasets. `benchmark` supports finite limits, concurrency, exact reuse,
 Judge cache identity, QA/IR modes, analysis, figures, and body-free exports.
 Full-dataset execution is **Not rerun** and requires separate authorization.
+
+Paper reproduction has its own provider-free plan gate:
+
+```bash
+uv run asterion-dci paper describe
+uv run asterion-dci paper verify
+plan_parent=$(mktemp -d)
+plan_root="$plan_parent/not-created"
+uv run asterion-dci paper reproduce \
+  --profile paper-reference/pi \
+  --output-root "$plan_root"
+test ! -e "$plan_root"
+```
+
+The last command is intentionally run without `--execute`. It must report zero
+performed Agent/Judge operations, no full authorization, and no output root
+creation. Full execution requires explicit scopes plus all five positive limits:
+maximum Agent operations, maximum Judge operations, total USD cap, per-Agent
+operation USD cap, and per-Judge operation USD cap.
 
 ## Artifacts and pass criteria
 
