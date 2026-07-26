@@ -1380,14 +1380,21 @@ class ReproductionCliTests(unittest.TestCase):
         output_root: Path,
         *,
         scopes: tuple[str, ...] = ("bright.biology.main.full",),
+        limit: int | None = None,
+        max_agent_operations: int | None = None,
+        max_judge_operations: int = 1,
     ) -> list[str]:
-        try:
-            max_agent_operations = sum(
-                resolve_paper_experiment_scope(scope).selection_count
-                for scope in scopes
-            )
-        except ValueError:
-            max_agent_operations = 103 * len(scopes)
+        if max_agent_operations is None:
+            if limit is not None:
+                max_agent_operations = limit * len(scopes)
+            else:
+                try:
+                    max_agent_operations = sum(
+                        resolve_paper_experiment_scope(scope).selection_count
+                        for scope in scopes
+                    )
+                except ValueError:
+                    max_agent_operations = 103 * len(scopes)
         argv = [
             "paper",
             "reproduce",
@@ -1399,7 +1406,7 @@ class ReproductionCliTests(unittest.TestCase):
             "--max-agent-operations",
             str(max_agent_operations),
             "--max-judge-operations",
-            "1",
+            str(max_judge_operations),
             "--max-cost-usd",
             "25",
             "--max-agent-cost-per-operation-usd",
@@ -1407,6 +1414,8 @@ class ReproductionCliTests(unittest.TestCase):
             "--max-judge-cost-per-operation-usd",
             "0.05",
         ]
+        if limit is not None:
+            argv.extend(("--limit", str(limit)))
         for scope in scopes:
             argv.extend(("--scope", scope))
         return argv
@@ -1415,18 +1424,23 @@ class ReproductionCliTests(unittest.TestCase):
         from asterion.dci.paper_benchmarks import resolve_paper_benchmark
 
         profiles: dict[str, dict[str, object]] = {}
-        for name in ("bright.biology", "bright.earth-science"):
+        for name in (
+            "bright.biology",
+            "bright.earth-science",
+            "browsecomp-plus",
+        ):
             benchmark = resolve_paper_benchmark(name)
             dataset = root / benchmark.dataset_path
             corpus = root / benchmark.corpus_path
             dataset.parent.mkdir(parents=True, exist_ok=True)
             corpus.mkdir(parents=True, exist_ok=True)
             dataset.write_text('{"query_id":"q1","query":"q","gold_ids":["d"]}\n')
-            profiles[name] = {
+            self.assertIsNotNone(benchmark.batch_profile)
+            profiles[cast(str, benchmark.batch_profile)] = {
                 "dataset": benchmark.dataset_path,
                 "output_root": f"outputs/{name}",
                 "corpus": benchmark.corpus_path,
-                "mode": "ir",
+                "mode": benchmark.mode,
                 "provider": "openai",
                 "model": "gpt-5.4-nano",
                 "tools": "read,bash",
@@ -1474,6 +1488,95 @@ class ReproductionCliTests(unittest.TestCase):
             self.assertFalse(output_root.exists())
             authorize.assert_not_called()
             execute.assert_not_called()
+
+    def test_plan_only_limit_one_is_zero_operation_and_creates_no_root(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output_root = Path(temporary) / "absent"
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with patch(
+                "asterion.dci.cli.load_asterion_dci_env"
+            ) as load_env, patch(
+                "asterion.dci.cli._preflight_scope_selected_ids"
+            ) as read_selected_ids, patch(
+                "asterion.dci.experiment_profiles.authorize_full_execution"
+            ) as authorize:
+                code = dci_main(
+                    [
+                        "paper",
+                        "reproduce",
+                        "--profile",
+                        "paper-reference/pi",
+                        "--scope",
+                        "bright.robotics.main.full",
+                        "--limit",
+                        "1",
+                        "--output-root",
+                        str(output_root),
+                    ],
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+        self.assertEqual(code, 0, stderr.getvalue())
+        self.assertFalse(output_root.exists())
+        self.assertIn("Selected queries: 1", stdout.getvalue())
+        self.assertIn("Maximum agent operations: 1", stdout.getvalue())
+        self.assertIn("Maximum Judge operations: 0", stdout.getvalue())
+        self.assertIn("Agent operations performed: 0", stdout.getvalue())
+        self.assertIn("Full authorization issued: no", stdout.getvalue())
+        load_env.assert_not_called()
+        read_selected_ids.assert_not_called()
+        authorize.assert_not_called()
+
+    def test_limit_validation_fails_before_authority(self) -> None:
+        scope_id = "bright.robotics.main.full"
+        cases = (
+            ("zero", "0"),
+            ("negative", "-1"),
+            ("boolean-like", "true"),
+            (
+                "above-scope-count",
+                str(resolve_paper_experiment_scope(scope_id).selection_count + 1),
+            ),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            for label, limit in cases:
+                with self.subTest(label=label):
+                    output_root = root / label
+                    stdout = io.StringIO()
+                    stderr = io.StringIO()
+                    with patch(
+                        "asterion.dci.cli.load_asterion_dci_env"
+                    ) as load_env, patch(
+                        "asterion.dci.cli._preflight_scope_selected_ids"
+                    ) as read_selected_ids, patch(
+                        "asterion.dci.experiment_profiles.authorize_full_execution"
+                    ) as authorize:
+                        code = dci_main(
+                            [
+                                "paper",
+                                "reproduce",
+                                "--profile",
+                                "paper-reference/pi",
+                                "--scope",
+                                scope_id,
+                                "--limit",
+                                limit,
+                                "--output-root",
+                                str(output_root),
+                            ],
+                            repo_root=root,
+                            stdout=stdout,
+                            stderr=stderr,
+                        )
+                    self.assertEqual(code, 2)
+                    self.assertFalse(output_root.exists())
+                    load_env.assert_not_called()
+                    read_selected_ids.assert_not_called()
+                    authorize.assert_not_called()
 
     def test_execute_requires_all_limits_and_scope_before_authorization(self) -> None:
         required_flags = (
@@ -1671,6 +1774,44 @@ class ReproductionCliTests(unittest.TestCase):
             authorize.assert_not_called()
             execute.assert_not_called()
 
+    def test_execute_rejects_caps_below_bounded_plan(self) -> None:
+        scope_id = "browsecomp-plus.main.all830"
+        cases = (
+            ("agent", 1, 2),
+            ("judge", 2, 1),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            for label, max_agents, max_judges in cases:
+                with self.subTest(label=label):
+                    output_root = root / label
+                    stdout = io.StringIO()
+                    stderr = io.StringIO()
+                    with patch(
+                        "asterion.dci.cli.load_asterion_dci_env"
+                    ) as load_env, patch(
+                        "asterion.dci.cli._preflight_scope_selected_ids"
+                    ) as read_selected_ids, patch(
+                        "asterion.dci.experiment_profiles.authorize_full_execution"
+                    ) as authorize:
+                        code = dci_main(
+                            self._execute_argv(
+                                output_root,
+                                scopes=(scope_id,),
+                                limit=2,
+                                max_agent_operations=max_agents,
+                                max_judge_operations=max_judges,
+                            ),
+                            repo_root=root,
+                            stdout=stdout,
+                            stderr=stderr,
+                        )
+                    self.assertEqual(code, 2)
+                    self.assertFalse(output_root.exists())
+                    load_env.assert_not_called()
+                    read_selected_ids.assert_not_called()
+                    authorize.assert_not_called()
+
     def test_execute_authorizes_and_dispatches_exact_same_process_plan(self) -> None:
         original_authorize = authorize_full_execution
         captured: dict[str, Any] = {}
@@ -1726,10 +1867,7 @@ class ReproductionCliTests(unittest.TestCase):
             )
             return ("q1",)
 
-        scopes = (
-            "bright.biology.main.full",
-            "bright.earth-science.main.full",
-        )
+        scopes = ("bright.biology.main.full",)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             output_root = root / "reproduction"
@@ -1752,7 +1890,11 @@ class ReproductionCliTests(unittest.TestCase):
                 create=True,
             ) as execute:
                 code = dci_main(
-                    self._execute_argv(output_root, scopes=scopes),
+                    self._execute_argv(
+                        output_root,
+                        scopes=scopes,
+                        limit=1,
+                    ),
                     repo_root=root,
                     stdout=stdout,
                     stderr=stderr,
@@ -1764,17 +1906,24 @@ class ReproductionCliTests(unittest.TestCase):
         self.assertEqual(captured["authorize_args"], ())
         self.assertEqual(
             captured["order"],
-            ["selected-ids", "selected-ids", "authorize"],
+            ["selected-ids", "authorize"],
         )
         authorize_kwargs = cast(dict[str, Any], captured["authorize_kwargs"])
         self.assertEqual(authorize_kwargs["profile"].profile_id, "paper-reference/pi")
         self.assertEqual(authorize_kwargs["scope_ids"], scopes)
         self.assertEqual(authorize_kwargs["output_root"], output_root)
-        self.assertEqual(authorize_kwargs["max_agent_operations"], 219)
+        self.assertEqual(authorize_kwargs["max_agent_operations"], 1)
         self.assertEqual(authorize_kwargs["max_judge_operations"], 1)
         self.assertEqual(authorize_kwargs["max_cost_usd"], 25.0)
         self.assertEqual(authorize_kwargs["max_agent_cost_per_operation_usd"], 0.2)
         self.assertEqual(authorize_kwargs["max_judge_cost_per_operation_usd"], 0.05)
+        self.assertEqual(authorize_kwargs["selected_query_counts"], (1,))
+        self.assertEqual(authorize_kwargs["planned_agent_operations"], 1)
+        self.assertEqual(authorize_kwargs["planned_judge_operations"], 0)
+        self.assertEqual(
+            authorize_kwargs["bounded_selected_ids_sha256"],
+            (canonical_sha256(("q1",)),),
+        )
         authority = cast(FullExecutionAuthorization, captured["authority"])
         execute_kwargs = cast(dict[str, Any], captured["execute_kwargs"])
         self.assertIs(execute_kwargs["authority"], authority)
@@ -1783,7 +1932,7 @@ class ReproductionCliTests(unittest.TestCase):
         self.assertEqual(execute_kwargs["output_root"], output_root)
         items = tuple(execute_kwargs["execution_items"])
         self.assertEqual(tuple(item.scope_id for item in items), scopes)
-        self.assertNotEqual(items[0].request.output_root, items[1].request.output_root)
+        self.assertEqual(tuple(item.request.limit for item in items), (1,))
         self.assertEqual(
             tuple(item.request.experiment_scope_id for item in items), scopes
         )
@@ -1801,6 +1950,84 @@ class ReproductionCliTests(unittest.TestCase):
         self.assertIn("Judge operations performed: 0", stdout.getvalue())
         self.assertNotIn(authority._issuance_token, combined)
         self.assertNotIn(repr(authority), combined)
+
+    def test_execute_applies_limit_per_scope_across_ir_and_qa(self) -> None:
+        original_authorize = authorize_full_execution
+        captured: dict[str, Any] = {}
+
+        def authorize_spy(
+            *args: Any, **kwargs: Any
+        ) -> FullExecutionAuthorization:
+            authority = original_authorize(*args, **kwargs)
+            captured["authorize_kwargs"] = kwargs
+            captured["authority"] = authority
+            return authority
+
+        def execute_spy(*args: Any, **kwargs: Any) -> dict[str, object]:
+            captured["execution_items"] = tuple(kwargs["execution_items"])
+            return {
+                "schema": "dci.paper-reproduction-result/v1",
+                "operation_counts": {"agent": 2, "judge": 1, "total": 3},
+                "outputs": [
+                    {"scope_id": item.scope_id}
+                    for item in kwargs["execution_items"]
+                ],
+            }
+
+        scopes = (
+            "bright.biology.main.full",
+            "browsecomp-plus.main.all830",
+        )
+        source_ids = (
+            ("ir-prefix", "ir-later"),
+            ("qa-prefix", "qa-later"),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            output_root = root / "reproduction"
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with patch(
+                "asterion.dci.cli._load_batch_profiles",
+                return_value=self._fixture_batch_profiles(root),
+            ), patch(
+                "asterion.dci.cli._preflight_scope_selected_ids",
+                side_effect=source_ids,
+            ), patch(
+                "asterion.dci.cli.validate_dci_run_request"
+            ), patch(
+                "asterion.dci.experiment_profiles.authorize_full_execution",
+                side_effect=authorize_spy,
+            ), patch(
+                "asterion.dci.benchmark.execute_authorized_reproduction",
+                side_effect=execute_spy,
+                create=True,
+            ):
+                code = dci_main(
+                    self._execute_argv(
+                        output_root,
+                        scopes=scopes,
+                        limit=1,
+                        max_judge_operations=1,
+                    ),
+                    repo_root=root,
+                    stdout=stdout,
+                    stderr=stderr,
+                )
+        self.assertEqual(code, 0, stderr.getvalue())
+        authorize_kwargs = cast(dict[str, Any], captured["authorize_kwargs"])
+        self.assertEqual(authorize_kwargs["selected_query_counts"], (1, 1))
+        self.assertEqual(authorize_kwargs["planned_agent_operations"], 2)
+        self.assertEqual(authorize_kwargs["planned_judge_operations"], 1)
+        self.assertEqual(
+            authorize_kwargs["bounded_selected_ids_sha256"],
+            (
+                canonical_sha256(("ir-prefix",)),
+                canonical_sha256(("qa-prefix",)),
+            ),
+        )
+        items = cast(tuple[Any, ...], captured["execution_items"])
+        self.assertEqual(tuple(item.request.limit for item in items), (1, 1))
 
     def test_execute_output_reports_actual_operations_once(self) -> None:
         scopes = ("bright.biology.main.full",)
@@ -1827,7 +2054,11 @@ class ReproductionCliTests(unittest.TestCase):
                 create=True,
             ):
                 code = dci_main(
-                    self._execute_argv(output_root, scopes=scopes),
+                    self._execute_argv(
+                        output_root,
+                        scopes=scopes,
+                        limit=1,
+                    ),
                     repo_root=root,
                     stdout=stdout,
                     stderr=stderr,
@@ -1873,7 +2104,11 @@ class ReproductionCliTests(unittest.TestCase):
                 side_effect=ExperimentAuthorizationError("safe failure"),
             ):
                 code = dci_main(
-                    self._execute_argv(output_root, scopes=(scope_id,)),
+                    self._execute_argv(
+                        output_root,
+                        scopes=(scope_id,),
+                        limit=1,
+                    ),
                     repo_root=root,
                     stdout=stdout,
                     stderr=stderr,

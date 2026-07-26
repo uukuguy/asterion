@@ -15,7 +15,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from importlib import resources
 from pathlib import Path
-from typing import TextIO, TypedDict
+from typing import TYPE_CHECKING, TextIO, TypedDict
 
 from asterion.dci.ablation import (
     bounded_ablation_input_paths,
@@ -71,6 +71,9 @@ from asterion.dci.run import (
     validate_dci_run_request,
 )
 from asterion.dci.system_prompt import render_pi_system_prompt
+
+if TYPE_CHECKING:
+    from asterion.dci.experiment_profiles import ExperimentProfile
 
 _EXPERIMENT_PROFILE_CLI_ALIASES = {
     "current-default/pi": "asterion-safe/pi",
@@ -213,6 +216,7 @@ def _parser() -> argparse.ArgumentParser:
     paper_reproduce.add_argument("--profile", required=True)
     paper_reproduce.add_argument("--output-root", type=Path, required=True)
     paper_reproduce.add_argument("--scope", action="append")
+    paper_reproduce.add_argument("--limit", type=int)
     paper_reproduce.add_argument("--execute", action="store_true")
     paper_reproduce.add_argument("--max-agent-operations", type=int)
     paper_reproduce.add_argument("--max-judge-operations", type=int)
@@ -303,6 +307,9 @@ def main(
     stdin = sys.stdin if stdin is None else stdin
     stdout = sys.stdout if stdout is None else stdout
     stderr = sys.stderr if stderr is None else stderr
+    assert stdin is not None
+    assert stdout is not None
+    assert stderr is not None
     effective_argv = list(sys.argv[1:] if argv is None else argv)
     parser = _parser()
     if effective_argv == ["--help"]:
@@ -806,6 +813,7 @@ def main(
         stderr.write("DCI Pi execution failed\n")
         return 2
     if args.eval_answer is not None or args.eval_answer_file is not None:
+        assert evaluation_answer is not None
         try:
             verdict = evaluate_run_directory(
                 result.output_dir,
@@ -833,7 +841,10 @@ def _paper_reproduce_cli(
     from asterion.dci import benchmark as benchmark_module
     from asterion.dci import experiment_profiles as experiment_profile_module
     from asterion.dci.experiment_profiles import experiment_profile_sha256
-    from asterion.dci.paper_benchmarks import paper_benchmark_ids
+    from asterion.dci.paper_benchmarks import (
+        canonical_sha256,
+        paper_benchmark_ids,
+    )
 
     profile = experiment_profile_module.resolve_experiment_profile(
         args.profile,
@@ -852,7 +863,8 @@ def _paper_reproduce_cli(
         require_executable=args.execute,
     )
     max_agent_operations, max_judge_operations = _paper_scope_operation_counts(
-        selected_scope_ids
+        selected_scope_ids,
+        args.limit,
     )
     stdout.write(f"Profile: {profile.profile_id}\n")
     stdout.write(f"Profile SHA-256: {profile_sha256}\n")
@@ -876,6 +888,11 @@ def _paper_reproduce_cli(
         return 0
 
     limits = _reproduction_limit_kwargs(args)
+    if (
+        limits["max_agent_operations"] < max_agent_operations
+        or limits["max_judge_operations"] < max_judge_operations
+    ):
+        raise ValueError("full execution operation limits are insufficient")
     load_asterion_dci_env(repo_root)
     paths = resolve_dci_paths(repo_root)
     parent_output_root = _output_path_from_invocation(args.output_root, invocation_cwd)
@@ -886,6 +903,7 @@ def _paper_reproduce_cli(
             parent_output_root=parent_output_root,
             repo_root=repo_root,
             invocation_cwd=invocation_cwd,
+            limit=args.limit,
         )
         for scope_id in selected_scope_ids
     )
@@ -893,7 +911,6 @@ def _paper_reproduce_cli(
         selected_scope_ids, preflight_requests, strict=True
     ):
         _preflight_benchmark_host_inputs(request)
-        _preflight_scope_selected_ids(request, scope_id)
         runtime_preflight = replace(
             request_from_runtime_options(
                 request.runtime_options,
@@ -907,6 +924,21 @@ def _paper_reproduce_cli(
         validate_dci_run_request(runtime_preflight)
         validate_benchmark_metric_selection(request)
 
+    preflight_selected_ids = tuple(
+        _preflight_scope_selected_ids(request, scope_id)
+        for scope_id, request in zip(
+            selected_scope_ids, preflight_requests, strict=True
+        )
+    )
+    bounded_selected_ids = tuple(
+        selected if args.limit is None else selected[: args.limit]
+        for selected in preflight_selected_ids
+    )
+    bounded_digests = tuple(
+        canonical_sha256(tuple(sorted(selected)))
+        for selected in bounded_selected_ids
+    )
+    selected_counts = tuple(len(selected) for selected in bounded_selected_ids)
     authority = experiment_profile_module.authorize_full_execution(
         profile=profile,
         scope_ids=selected_scope_ids,
@@ -921,6 +953,10 @@ def _paper_reproduce_cli(
         max_judge_cost_per_operation_usd=limits[
             "max_judge_cost_per_operation_usd"
         ],
+        bounded_selected_ids_sha256=bounded_digests,
+        selected_query_counts=selected_counts,
+        planned_agent_operations=max_agent_operations,
+        planned_judge_operations=max_judge_operations,
     )
     from asterion.dci.experiment_profiles import authorized_scope_output_root
 
@@ -1004,7 +1040,7 @@ def _reproduction_limit_kwargs(args: argparse.Namespace) -> _ReproductionLimits:
 def _reproduction_scope_ids(
     scope_ids: tuple[str, ...],
     *,
-    profile: object,
+    profile: ExperimentProfile,
     require_executable: bool,
 ) -> tuple[str, ...]:
     from asterion.dci.paper_benchmarks import (
@@ -1037,30 +1073,39 @@ def _reproduction_scope_ids(
     return scope_ids
 
 
-def _paper_scope_operation_counts(scope_ids: tuple[str, ...]) -> tuple[int, int]:
+def _paper_scope_operation_counts(
+    scope_ids: tuple[str, ...],
+    limit: int | None,
+) -> tuple[int, int]:
     from asterion.dci.paper_benchmarks import (
         resolve_paper_benchmark,
         resolve_paper_experiment_scope,
     )
 
+    if limit is not None and (type(limit) is not int or limit < 1):
+        raise ValueError("paper reproduction limit is invalid")
     agent_count = 0
     judge_count = 0
     for scope_id in scope_ids:
         scope = resolve_paper_experiment_scope(scope_id)
+        if limit is not None and limit > scope.selection_count:
+            raise ValueError("paper reproduction limit is invalid")
+        selected_count = scope.selection_count if limit is None else limit
         benchmark = resolve_paper_benchmark(scope.dataset_id)
-        agent_count += scope.selection_count
+        agent_count += selected_count
         if benchmark.mode == "qa":
-            judge_count += scope.selection_count
+            judge_count += selected_count
     return agent_count, judge_count
 
 
 def _preflight_reproduction_request(
-    profile: object,
+    profile: ExperimentProfile,
     *,
     scope_id: str,
     parent_output_root: Path,
     repo_root: Path,
     invocation_cwd: Path,
+    limit: int | None,
 ) -> BenchmarkRequest:
     from asterion.dci.paper_benchmarks import (
         resolve_paper_benchmark,
@@ -1116,6 +1161,7 @@ def _preflight_reproduction_request(
         max_concurrency=args.max_concurrency,
         max_turns=profile.max_turns,
         resume_policy=args.resume_policy,
+        limit=limit,
         paper_ir_duplicate_handling=(
             "deduplicated" if args.mode == "ir" else None
         ),
@@ -1127,7 +1173,7 @@ def _preflight_reproduction_request(
     )
 
 
-def _profile_runtime_options(profile: object) -> DciRuntimeOptions:
+def _profile_runtime_options(profile: ExperimentProfile) -> DciRuntimeOptions:
     return DciRuntimeOptions(
         runtime=profile.runtime,
         provider=profile.provider,
@@ -1142,7 +1188,7 @@ def _profile_runtime_options(profile: object) -> DciRuntimeOptions:
     )
 
 
-def _profile_judge_config(profile: object) -> JudgeConfig:
+def _profile_judge_config(profile: ExperimentProfile) -> JudgeConfig:
     judge = profile.judge
     api_key_env = str(judge["key_source"])
     return JudgeConfig(
@@ -1200,9 +1246,9 @@ def _preflight_scope_selected_ids(
             )
         else:
             rows = load_benchmark_rows_bytes(raw)
-        return select_and_verify_scope_ids(
-            scope_id, tuple(row.query_id for row in rows)
-        )
+        source_ids = tuple(row.query_id for row in rows)
+        select_and_verify_scope_ids(scope_id, source_ids)
+        return source_ids
     except (DatasetError, ValueError) as error:
         raise ValueError("paper reproduction selected IDs are invalid") from error
 
