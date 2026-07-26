@@ -22,7 +22,8 @@ or changing provider-free defaults.
 
 - Support `paper reproduce --scope SCOPE --limit 1 --execute` as an explicitly
   authorized, at-most-one-query execution.
-- Reuse the benchmark runner's deterministic source-order prefix selection.
+- Reuse the benchmark runner's deterministic dataset-source-order prefix
+  selection.
 - Bind the actual bounded selection to preflight, authorization, execution,
   evidence, and RunManifest identity.
 - Preserve the existing five positive limit requirements.
@@ -45,10 +46,10 @@ or changing provider-free defaults.
 ### Selected: one deterministic limit applied per explicit scope
 
 Add a positive integer `--limit` to `paper reproduce`. For every explicit
-scope, the bounded selection is the first `limit` query IDs in the already
-verified canonical source order. The same limit applies independently to every
-selected scope. Execution rejects a limit greater than any selected scope's
-published selection count.
+scope, the bounded selection is the first `limit` query IDs in the verified
+dataset source order already used by benchmark execution. The same limit
+applies independently to every selected scope. Execution rejects a limit
+greater than any selected scope's published selection count.
 
 This reuses the benchmark's existing selection semantics, keeps the CLI small,
 and makes operation counts deterministic before authority is issued.
