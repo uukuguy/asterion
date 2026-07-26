@@ -3,15 +3,19 @@ from __future__ import annotations
 import io
 import json
 import os
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 import unittest
 
+from tools import dci_benchmark_orchestrator as orchestrator
 from tools.dci_benchmark_orchestrator import (
+    PROJECT,
     BenchmarkTask,
     OrchestratorError,
     RunOptions,
@@ -20,6 +24,7 @@ from tools.dci_benchmark_orchestrator import (
     execute_plan,
     render_plan,
     select_tasks,
+    stream_command,
 )
 
 
@@ -228,11 +233,88 @@ class FakeExecutor:
 
     def __call__(self, command, *, cwd, environment, on_line):
         self.commands.append(tuple(command))
-        on_line("child sentinel-secret private-root-value\n")
+        on_line(
+            "child sentinel-secret private-root-value "
+            f"{PROJECT} {environment.get('HOME', '')} "
+            f"{environment.get('CACHE_PATH', '')} "
+            "dataset-body prompt-body answer-body provider-payload\n"
+        )
         outcome = self.outcomes.pop(0) if self.outcomes else 0
         if isinstance(outcome, BaseException):
             raise outcome
         return outcome
+
+
+class _FakeStdout:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def __iter__(self):
+        yield "callback-content\n"
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _StubbornFakeProcess:
+    def __init__(self) -> None:
+        self.stdout = _FakeStdout()
+        self.sent_signals: list[int] = []
+        self.terminated = False
+        self.killed = False
+        self.wait_timeouts: list[float | None] = []
+
+    def send_signal(self, value: int) -> None:
+        self.sent_signals.append(value)
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def kill(self) -> None:
+        self.killed = True
+
+    def wait(self, timeout=None) -> int:
+        self.wait_timeouts.append(timeout)
+        if len(self.wait_timeouts) == 1:
+            raise subprocess.TimeoutExpired(("fake-child",), timeout)
+        return -9
+
+
+class StreamCommandTests(unittest.TestCase):
+    def test_callback_failures_stop_with_bounded_wait_kill_and_reap(self) -> None:
+        for exception, expected_signal in (
+            (RuntimeError("callback failed"), None),
+            (KeyboardInterrupt(), signal.SIGINT),
+        ):
+            with self.subTest(exception=type(exception).__name__):
+                process = _StubbornFakeProcess()
+
+                def fail_callback(line: str) -> None:
+                    raise exception
+
+                with (
+                    patch(
+                        "tools.dci_benchmark_orchestrator.subprocess.Popen",
+                        return_value=process,
+                    ),
+                    self.assertRaises(type(exception)),
+                ):
+                    stream_command(
+                        ("fake-command",),
+                        cwd=PROJECT,
+                        environment={},
+                        on_line=fail_callback,
+                    )
+
+                self.assertTrue(process.stdout.closed)
+                self.assertEqual(
+                    process.sent_signals,
+                    [] if expected_signal is None else [expected_signal],
+                )
+                self.assertEqual(process.terminated, expected_signal is None)
+                self.assertTrue(process.killed)
+                self.assertEqual(len(process.wait_timeouts), 2)
+                self.assertIsNotNone(process.wait_timeouts[0])
 
 
 class BenchmarkExecutionTests(unittest.TestCase):
@@ -242,7 +324,9 @@ class BenchmarkExecutionTests(unittest.TestCase):
             f"ASTERION_DCI_RESOURCE_ROOT={root / 'resources'}\n"
             f"ASTERION_DCI_OUTPUT_ROOT={root / 'outputs'}\n"
             "DEEPSEEK_API_KEY=sentinel-secret\n"
-            "PRIVATE_PATH=private-root-value\n",
+            "PRIVATE_PATH=private-root-value\n"
+            f"HOME={Path.home()}\n"
+            f"CACHE_PATH={root / 'cache-private'}\n",
             encoding="utf-8",
         )
         options = RunOptions(
@@ -329,6 +413,17 @@ class BenchmarkExecutionTests(unittest.TestCase):
             )
             self.assertNotIn("sentinel-secret", stream.getvalue())
             self.assertNotIn("private-root-value", stream.getvalue())
+            for private_text in (
+                "child",
+                str(PROJECT),
+                str(Path.home()),
+                str(root / "cache-private"),
+                "dataset-body",
+                "prompt-body",
+                "answer-body",
+                "provider-payload",
+            ):
+                self.assertNotIn(private_text, stream.getvalue())
 
             summary = json.loads((root / "run" / "summary.json").read_text())
             self.assertEqual(
@@ -341,12 +436,21 @@ class BenchmarkExecutionTests(unittest.TestCase):
                 ),
                 0o600,
             )
+            self.assertEqual(
+                stat.S_IMODE(
+                    (root / "run" / "bcplus.level3").stat().st_mode
+                ),
+                0o700,
+            )
             runner_log = (
                 root / "run" / "bcplus.level3" / "runner.log"
             ).read_text(encoding="utf-8")
             self.assertIn("<redacted>", runner_log)
             self.assertNotIn("sentinel-secret", runner_log)
             self.assertNotIn("private-root-value", runner_log)
+            self.assertNotIn(str(PROJECT), runner_log)
+            self.assertNotIn(str(Path.home()), runner_log)
+            self.assertNotIn(str(root / "cache-private"), runner_log)
             self.assertEqual(summary["tasks"][0]["status"], "DONE")
             self.assertEqual(summary["tasks"][1]["status"], "FAILED")
             self.assertTrue(
@@ -356,6 +460,119 @@ class BenchmarkExecutionTests(unittest.TestCase):
             self.assertNotIn(str(root), encoded)
             self.assertNotIn("sentinel-secret", encoded)
             self.assertNotIn("private-root-value", encoded)
+            for private_text in (
+                str(PROJECT),
+                str(Path.home()),
+                str(root / "cache-private"),
+                "dataset-body",
+                "prompt-body",
+                "answer-body",
+                "provider-payload",
+            ):
+                self.assertNotIn(private_text, encoded)
+
+    def test_summary_schema_references_and_closed_batch_layout_are_exact(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plan = self._plan(root)
+            plan = replace(plan, tasks=(plan.tasks[0],))
+            clock_values = iter((10.0, 10.125))
+
+            self.assertEqual(
+                execute_plan(
+                    plan,
+                    stream=io.StringIO(),
+                    executor=FakeExecutor([0, 0]),
+                    clock=lambda: next(clock_values),
+                ),
+                0,
+            )
+
+            summary = json.loads((plan.output_base / "summary.json").read_text())
+            self.assertEqual(
+                set(summary),
+                {
+                    "schema",
+                    "suite",
+                    "run_label",
+                    "limit",
+                    "max_concurrency",
+                    "status",
+                    "tasks",
+                },
+            )
+            self.assertEqual(
+                summary["schema"],
+                "asterion.dci.benchmark-orchestrator-summary/v1",
+            )
+            self.assertEqual(summary["status"], "PASS")
+            self.assertEqual(len(summary["tasks"]), 1)
+            row = summary["tasks"][0]
+            self.assertEqual(
+                set(row),
+                {
+                    "task_id",
+                    "selection_variant",
+                    "status",
+                    "exit_code",
+                    "elapsed_seconds",
+                    "output",
+                    "log",
+                    "skip_reason",
+                },
+            )
+            self.assertEqual(
+                row,
+                {
+                    "task_id": "bcplus.level3",
+                    "selection_variant": "github-level3",
+                    "status": "DONE",
+                    "exit_code": 0,
+                    "elapsed_seconds": 0.125,
+                    "output": "bcplus.level3/batch",
+                    "log": "bcplus.level3/runner.log",
+                    "skip_reason": None,
+                },
+            )
+            task_root = plan.output_base / "bcplus.level3"
+            batch_root = task_root / "batch"
+            self.assertTrue(batch_root.is_dir())
+            self.assertEqual(stat.S_IMODE(task_root.stat().st_mode), 0o700)
+            self.assertEqual(stat.S_IMODE(batch_root.stat().st_mode), 0o700)
+            self.assertTrue((task_root / "runner.log").is_file())
+            self.assertEqual(tuple(batch_root.iterdir()), ())
+
+    def test_unsafe_or_ambiguous_slugs_fail_before_any_child_work(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plan = self._plan(root)
+            executor = FakeExecutor()
+            for task_id in ("", ".", "..", "x" * 256):
+                with self.subTest(task_id=task_id):
+                    unsafe = replace(plan.tasks[0], task_id=task_id)
+                    with self.assertRaisesRegex(
+                        OrchestratorError,
+                        "^DCI benchmark task binding is invalid$",
+                    ):
+                        execute_plan(
+                            replace(plan, tasks=(unsafe,)),
+                            stream=io.StringIO(),
+                            executor=executor,
+                        )
+            first = replace(plan.tasks[0], task_id="A/B")
+            second = replace(plan.tasks[1], task_id="A?B")
+            with self.assertRaisesRegex(
+                OrchestratorError,
+                "^DCI benchmark task binding is ambiguous$",
+            ):
+                execute_plan(
+                    replace(plan, tasks=(first, second)),
+                    stream=io.StringIO(),
+                    executor=executor,
+                )
+            self.assertEqual(executor.commands, [])
 
     def test_failed_resource_check_creates_no_run_output(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -419,6 +636,137 @@ class BenchmarkExecutionTests(unittest.TestCase):
                 all(item["status"] == "NOT_RUN" for item in summary["tasks"][1:])
             )
 
+    def test_child_start_failure_is_summarized_and_stops(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plan = self._plan(root)
+            executor = FakeExecutor(
+                [
+                    0,
+                    OrchestratorError(
+                        "DCI benchmark child process failed to start"
+                    ),
+                ]
+            )
+            stream = io.StringIO()
+
+            self.assertEqual(
+                execute_plan(plan, stream=stream, executor=executor),
+                2,
+            )
+
+            summary = json.loads((plan.output_base / "summary.json").read_text())
+            self.assertEqual(summary["status"], "FAIL")
+            self.assertEqual(summary["tasks"][0]["status"], "FAILED")
+            self.assertEqual(summary["tasks"][0]["exit_code"], 2)
+            self.assertTrue(
+                all(item["status"] == "NOT_RUN" for item in summary["tasks"][1:])
+            )
+            self.assertNotIn(
+                "DCI benchmark child process failed to start",
+                stream.getvalue(),
+            )
+
+    def test_log_descriptor_failures_are_stable_and_summarized(self) -> None:
+        real_open = os.open
+        real_fstat = os.fstat
+        real_fchmod = os.fchmod
+
+        def fail_log_open(path, flags, mode=0o777, *, dir_fd=None):
+            if os.fspath(path).endswith("runner.log"):
+                raise OSError("private-path-open")
+            return real_open(path, flags, mode, dir_fd=dir_fd)
+
+        fstat_failed = False
+
+        def fail_first_regular_fstat(descriptor):
+            nonlocal fstat_failed
+            metadata = real_fstat(descriptor)
+            if stat.S_ISREG(metadata.st_mode) and not fstat_failed:
+                fstat_failed = True
+                raise OSError("private-path-fstat")
+            return metadata
+
+        fchmod_failed = False
+
+        def fail_first_regular_fchmod(descriptor, mode):
+            nonlocal fchmod_failed
+            metadata = real_fstat(descriptor)
+            if stat.S_ISREG(metadata.st_mode) and not fchmod_failed:
+                fchmod_failed = True
+                raise OSError("private-path-fchmod")
+            return real_fchmod(descriptor, mode)
+
+        failures = (
+            ("os.open", fail_log_open),
+            ("os.fstat", fail_first_regular_fstat),
+            ("os.fchmod", fail_first_regular_fchmod),
+        )
+        for target, side_effect in failures:
+            with self.subTest(target=target), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                plan = self._plan(root)
+                plan = replace(plan, tasks=(plan.tasks[0],))
+                fstat_failed = False
+                fchmod_failed = False
+                stream = io.StringIO()
+                with patch(
+                    f"tools.dci_benchmark_orchestrator.{target}",
+                    side_effect=side_effect,
+                ):
+                    result = execute_plan(
+                        plan,
+                        stream=stream,
+                        executor=FakeExecutor([0, 0]),
+                    )
+
+                self.assertEqual(result, 2)
+                summary = json.loads(
+                    (plan.output_base / "summary.json").read_text()
+                )
+                self.assertEqual(summary["tasks"][0]["status"], "FAILED")
+                self.assertEqual(summary["tasks"][0]["exit_code"], 2)
+                self.assertNotIn("private-path", stream.getvalue())
+
+    def test_unsafe_summary_descriptor_is_normalized_and_cleaned(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plan = self._plan(root)
+            plan = replace(plan, tasks=(plan.tasks[0],))
+            real_fstat = os.fstat
+            regular_descriptors = 0
+
+            def replace_summary_metadata(descriptor):
+                nonlocal regular_descriptors
+                metadata = real_fstat(descriptor)
+                if stat.S_ISREG(metadata.st_mode):
+                    regular_descriptors += 1
+                    if regular_descriptors == 2:
+                        values = list(metadata)
+                        values[0] = stat.S_IFDIR | 0o700
+                        return os.stat_result(values)
+                return metadata
+
+            with (
+                patch(
+                    "tools.dci_benchmark_orchestrator.os.fstat",
+                    side_effect=replace_summary_metadata,
+                ),
+                self.assertRaisesRegex(
+                    OrchestratorError,
+                    "^DCI benchmark summary is unsafe$",
+                ),
+            ):
+                execute_plan(
+                    plan,
+                    stream=io.StringIO(),
+                    executor=FakeExecutor([0, 0]),
+                )
+
+            self.assertFalse(
+                (plan.output_base / ".summary.json.tmp").exists()
+            )
+
     def test_existing_non_private_or_symlink_run_root_fails(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -462,6 +810,79 @@ class BenchmarkExecutionTests(unittest.TestCase):
                     plan, stream=io.StringIO(), executor=replacing_executor
                 )
             self.assertEqual(calls, 2)
+
+    def test_replaced_task_or_batch_root_fails_closed(self) -> None:
+        for replaced_name in ("task", "batch"):
+            with (
+                self.subTest(replaced_name=replaced_name),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                plan = self._plan(root)
+                plan = replace(plan, tasks=(plan.tasks[0],))
+                calls = 0
+
+                def replacing_executor(
+                    command, *, cwd, environment, on_line
+                ):
+                    nonlocal calls
+                    calls += 1
+                    if calls == 2:
+                        task_root = plan.output_base / "bcplus.level3"
+                        replaced = (
+                            task_root
+                            if replaced_name == "task"
+                            else task_root / "batch"
+                        )
+                        moved = replaced.with_name(f"moved-{replaced.name}")
+                        replaced.rename(moved)
+                        replaced.mkdir(mode=0o700)
+                    return 0
+
+                with self.assertRaisesRegex(
+                    OrchestratorError,
+                    "^DCI benchmark task root changed$",
+                ):
+                    execute_plan(
+                        plan,
+                        stream=io.StringIO(),
+                        executor=replacing_executor,
+                    )
+                self.assertEqual(calls, 2)
+                self.assertFalse((plan.output_base / "summary.json").exists())
+
+    def test_batch_replacement_after_log_open_fails_before_launch(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plan = self._plan(root)
+            plan = replace(plan, tasks=(plan.tasks[0],))
+            executor = FakeExecutor([0, 0])
+            real_open_log = orchestrator._open_private_log
+
+            def replace_batch_after_log_open(task_root):
+                handle = real_open_log(task_root)
+                batch = task_root.path / "batch"
+                batch.rename(task_root.path / "moved-batch")
+                batch.mkdir(mode=0o700)
+                return handle
+
+            with (
+                patch(
+                    "tools.dci_benchmark_orchestrator._open_private_log",
+                    side_effect=replace_batch_after_log_open,
+                ),
+                self.assertRaisesRegex(
+                    OrchestratorError,
+                    "^DCI benchmark task root changed$",
+                ),
+            ):
+                execute_plan(
+                    plan,
+                    stream=io.StringIO(),
+                    executor=executor,
+                )
+
+            self.assertEqual(len(executor.commands), 1)
 
 
 if __name__ == "__main__":

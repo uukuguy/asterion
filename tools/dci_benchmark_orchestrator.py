@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import stat
 import subprocess
 import sys
@@ -24,6 +25,14 @@ SuiteName = Literal["github", "paper-main", "all"]
 PROJECT = Path(__file__).resolve().parents[1]
 _SECRET_NAME = re.compile(r"(?:KEY|TOKEN|SECRET|PASSWORD)", re.IGNORECASE)
 CommandExecutor = Callable[..., int]
+_CHILD_FAILURE_EXIT = 2
+_CHILD_STOP_TIMEOUT_SECONDS = 5.0
+_DIRECTORY_FLAGS = (
+    os.O_RDONLY
+    | getattr(os, "O_DIRECTORY", 0)
+    | getattr(os, "O_NOFOLLOW", 0)
+)
+_PATH_NAME = re.compile(r"(?:^HOME$|PATH|DIR|FILE|ROOT)", re.IGNORECASE)
 
 
 class OrchestratorError(RuntimeError):
@@ -306,10 +315,28 @@ def stream_command(
     try:
         for line in process.stdout:
             on_line(line)
+        process.stdout.close()
         return process.wait()
-    except KeyboardInterrupt:
-        process.terminate()
-        process.wait()
+    except BaseException as error:
+        try:
+            process.stdout.close()
+        except OSError:
+            pass
+        try:
+            if isinstance(error, KeyboardInterrupt):
+                process.send_signal(signal.SIGINT)
+            else:
+                process.terminate()
+        except OSError:
+            pass
+        try:
+            process.wait(timeout=_CHILD_STOP_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            try:
+                process.kill()
+            except OSError:
+                pass
+            process.wait()
         raise
 
 
@@ -317,10 +344,17 @@ def _redactor(plan: RunPlan) -> Callable[[str], str]:
     values = {
         value
         for name, value in plan.environment.items()
-        if value and (_SECRET_NAME.search(name) or name.endswith("_ROOT"))
+        if value and (_SECRET_NAME.search(name) or _PATH_NAME.search(name))
     }
     values.update(plan.private_values)
-    values.update((str(plan.resource_root), str(plan.output_base)))
+    values.update(
+        (
+            str(PROJECT),
+            str(Path.home()),
+            str(plan.resource_root),
+            str(plan.output_base),
+        )
+    )
     ordered = sorted(
         (value for value in values if len(value) >= 4),
         key=len,
@@ -335,80 +369,181 @@ def _redactor(plan: RunPlan) -> Callable[[str], str]:
     return redact
 
 
-def _prepare_private_directory(path: Path) -> tuple[int, int]:
+@dataclass(slots=True)
+class _DirectoryBinding:
+    path: Path
+    descriptor: int
+    identity: tuple[int, int]
+    parent: _DirectoryBinding | None = None
+    name: str | None = None
+
+    def close(self) -> None:
+        if self.descriptor < 0:
+            return
+        try:
+            os.close(self.descriptor)
+        except OSError:
+            pass
+        self.descriptor = -1
+
+
+def _valid_private_directory(metadata: os.stat_result) -> bool:
+    return (
+        stat.S_ISDIR(metadata.st_mode)
+        and stat.S_IMODE(metadata.st_mode) == 0o700
+    )
+
+
+def _prepare_private_directory(path: Path) -> _DirectoryBinding:
+    descriptor = -1
     try:
-        if path.is_symlink():
-            raise OrchestratorError("DCI benchmark output root is unsafe")
-        if path.exists():
-            metadata = path.stat()
-            if (
-                not stat.S_ISDIR(metadata.st_mode)
-                or stat.S_IMODE(metadata.st_mode) != 0o700
-            ):
-                raise OrchestratorError("DCI benchmark output root is unsafe")
-        else:
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
             path.mkdir(parents=True, mode=0o700)
             path.chmod(0o700)
-            metadata = path.stat()
-        descriptor = os.open(
-            path,
-            os.O_RDONLY
-            | getattr(os, "O_DIRECTORY", 0)
-            | getattr(os, "O_NOFOLLOW", 0),
+            metadata = path.lstat()
+        if not _valid_private_directory(metadata):
+            raise OrchestratorError("DCI benchmark output root is unsafe")
+        descriptor = os.open(path, _DIRECTORY_FLAGS)
+        opened = os.fstat(descriptor)
+        if (
+            not _valid_private_directory(opened)
+            or (opened.st_dev, opened.st_ino)
+            != (metadata.st_dev, metadata.st_ino)
+        ):
+            raise OrchestratorError("DCI benchmark output root is unsafe")
+        return _DirectoryBinding(
+            path=path,
+            descriptor=descriptor,
+            identity=(opened.st_dev, opened.st_ino),
         )
-        try:
-            opened = os.fstat(descriptor)
-            if (
-                not stat.S_ISDIR(opened.st_mode)
-                or stat.S_IMODE(opened.st_mode) != 0o700
-                or (opened.st_dev, opened.st_ino)
-                != (metadata.st_dev, metadata.st_ino)
-            ):
-                raise OrchestratorError("DCI benchmark output root is unsafe")
-            return opened.st_dev, opened.st_ino
-        finally:
-            os.close(descriptor)
     except OrchestratorError:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
         raise
     except OSError:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
         raise OrchestratorError("DCI benchmark output root is unsafe") from None
 
 
-def _assert_identity(path: Path, identity: tuple[int, int]) -> None:
+def _assert_identity(binding: _DirectoryBinding) -> None:
+    message = (
+        "DCI benchmark output root changed"
+        if binding.parent is None
+        else "DCI benchmark task root changed"
+    )
     try:
-        metadata = path.lstat()
+        opened = os.fstat(binding.descriptor)
+        if binding.parent is None:
+            metadata = binding.path.lstat()
+        else:
+            _assert_identity(binding.parent)
+            assert binding.name is not None
+            metadata = os.stat(
+                binding.name,
+                dir_fd=binding.parent.descriptor,
+                follow_symlinks=False,
+            )
+    except OrchestratorError:
+        raise
     except OSError:
-        raise OrchestratorError("DCI benchmark output root changed") from None
+        raise OrchestratorError(message) from None
     if (
-        not stat.S_ISDIR(metadata.st_mode)
-        or stat.S_IMODE(metadata.st_mode) != 0o700
-        or (metadata.st_dev, metadata.st_ino) != identity
+        not _valid_private_directory(opened)
+        or not _valid_private_directory(metadata)
+        or (opened.st_dev, opened.st_ino) != binding.identity
+        or (metadata.st_dev, metadata.st_ino) != binding.identity
     ):
-        raise OrchestratorError("DCI benchmark output root changed")
+        raise OrchestratorError(message)
+
+
+def _prepare_private_child(
+    parent: _DirectoryBinding,
+    name: str,
+) -> _DirectoryBinding:
+    descriptor = -1
+    _assert_identity(parent)
+    if (
+        not name
+        or name in (".", "..")
+        or "/" in name
+        or os.sep in name
+    ):
+        raise OrchestratorError("DCI benchmark task binding is invalid")
+    try:
+        try:
+            metadata = os.stat(
+                name,
+                dir_fd=parent.descriptor,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            os.mkdir(name, mode=0o700, dir_fd=parent.descriptor)
+            metadata = os.stat(
+                name,
+                dir_fd=parent.descriptor,
+                follow_symlinks=False,
+            )
+        if not _valid_private_directory(metadata):
+            raise OrchestratorError("DCI benchmark task root is unsafe")
+        descriptor = os.open(
+            name,
+            _DIRECTORY_FLAGS,
+            dir_fd=parent.descriptor,
+        )
+        os.fchmod(descriptor, 0o700)
+        opened = os.fstat(descriptor)
+        if (
+            not _valid_private_directory(opened)
+            or (opened.st_dev, opened.st_ino)
+            != (metadata.st_dev, metadata.st_ino)
+        ):
+            raise OrchestratorError("DCI benchmark task root is unsafe")
+        binding = _DirectoryBinding(
+            path=parent.path / name,
+            descriptor=descriptor,
+            identity=(opened.st_dev, opened.st_ino),
+            parent=parent,
+            name=name,
+        )
+        _assert_identity(binding)
+        return binding
+    except OrchestratorError:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        raise
+    except OSError:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        raise OrchestratorError("DCI benchmark task root is unsafe") from None
 
 
 def _write_summary(
-    root: Path, identity: tuple[int, int], payload: object
+    root: _DirectoryBinding,
+    payload: object,
+    *,
+    required_directories: tuple[_DirectoryBinding, ...] = (),
 ) -> None:
-    directory_flags = (
-        os.O_RDONLY
-        | getattr(os, "O_DIRECTORY", 0)
-        | getattr(os, "O_NOFOLLOW", 0)
-    )
-    try:
-        directory = os.open(root, directory_flags)
-    except OSError:
-        raise OrchestratorError("DCI benchmark output root changed") from None
+    _assert_identity(root)
+    for binding in required_directories:
+        _assert_identity(binding)
     temporary = ".summary.json.tmp"
     descriptor = -1
     try:
-        opened = os.fstat(directory)
-        if (
-            not stat.S_ISDIR(opened.st_mode)
-            or stat.S_IMODE(opened.st_mode) != 0o700
-            or (opened.st_dev, opened.st_ino) != identity
-        ):
-            raise OrchestratorError("DCI benchmark output root changed")
         try:
             descriptor = os.open(
                 temporary,
@@ -417,52 +552,100 @@ def _write_summary(
                 | os.O_EXCL
                 | getattr(os, "O_NOFOLLOW", 0),
                 0o600,
-                dir_fd=directory,
+                dir_fd=root.descriptor,
             )
-        except OSError:
-            raise OrchestratorError("DCI benchmark summary is unsafe") from None
-        os.fchmod(descriptor, 0o600)
-        handle = os.fdopen(descriptor, "w", encoding="utf-8")
-        descriptor = -1
-        try:
+            os.fchmod(descriptor, 0o600)
+            opened = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or stat.S_IMODE(opened.st_mode) != 0o600
+                or opened.st_nlink != 1
+            ):
+                raise OrchestratorError("DCI benchmark summary is unsafe")
+            handle = os.fdopen(descriptor, "w", encoding="utf-8")
+            descriptor = -1
             with handle:
                 json.dump(payload, handle, sort_keys=True)
                 handle.write("\n")
+            _assert_identity(root)
+            for binding in required_directories:
+                _assert_identity(binding)
             os.replace(
                 temporary,
                 "summary.json",
-                src_dir_fd=directory,
-                dst_dir_fd=directory,
+                src_dir_fd=root.descriptor,
+                dst_dir_fd=root.descriptor,
             )
+        except OrchestratorError:
+            try:
+                os.unlink(temporary, dir_fd=root.descriptor)
+            except OSError:
+                pass
+            raise
         except (OSError, TypeError, ValueError):
             try:
-                os.unlink(temporary, dir_fd=directory)
+                os.unlink(temporary, dir_fd=root.descriptor)
             except OSError:
                 pass
             raise OrchestratorError("DCI benchmark summary is unsafe") from None
     finally:
         if descriptor >= 0:
-            os.close(descriptor)
-        os.close(directory)
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
 
 
-def _open_private_log(path: Path):
+def _open_private_log(task_root: _DirectoryBinding):
     flags = (
         os.O_WRONLY
         | os.O_CREAT
         | os.O_APPEND
         | getattr(os, "O_NOFOLLOW", 0)
     )
+    descriptor = -1
+    _assert_identity(task_root)
     try:
-        descriptor = os.open(path, flags, 0o600)
+        descriptor = os.open(
+            "runner.log",
+            flags,
+            0o600,
+            dir_fd=task_root.descriptor,
+        )
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise OrchestratorError("DCI benchmark task log is unsafe")
+        os.fchmod(descriptor, 0o600)
+        linked = os.stat(
+            "runner.log",
+            dir_fd=task_root.descriptor,
+            follow_symlinks=False,
+        )
+        if (
+            not stat.S_ISREG(linked.st_mode)
+            or linked.st_nlink != 1
+            or (linked.st_dev, linked.st_ino)
+            != (metadata.st_dev, metadata.st_ino)
+        ):
+            raise OrchestratorError("DCI benchmark task log is unsafe")
+        _assert_identity(task_root)
+        handle = os.fdopen(descriptor, "a", encoding="utf-8")
+        descriptor = -1
+        return handle
+    except OrchestratorError:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        raise
     except OSError:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
         raise OrchestratorError("DCI benchmark task log is unsafe") from None
-    metadata = os.fstat(descriptor)
-    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
-        os.close(descriptor)
-        raise OrchestratorError("DCI benchmark task log is unsafe")
-    os.fchmod(descriptor, 0o600)
-    return os.fdopen(descriptor, "a", encoding="utf-8")
 
 
 def _progress(
@@ -484,6 +667,15 @@ def _initial_rows(
     slugs = tuple(
         re.sub(r"[^a-z0-9._-]", "-", task.task_id.lower()) for task in tasks
     )
+    if any(
+        not slug
+        or slug in (".", "..")
+        or len(os.fsencode(slug)) > 255
+        or re.fullmatch(r"[a-z0-9._-]+", slug) is None
+        or Path(slug).name != slug
+        for slug in slugs
+    ):
+        raise OrchestratorError("DCI benchmark task binding is invalid")
     if len(slugs) != len(set(slugs)):
         raise OrchestratorError("DCI benchmark task binding is ambiguous")
     rows = [
@@ -538,10 +730,11 @@ def execute_plan(
     clock: Callable[[], float] = time.monotonic,
 ) -> int:
     _validate_task_bindings(plan.tasks)
+    rows, slugs = _initial_rows(plan.tasks)
     redact = _redactor(plan)
 
-    def emit_check(line: str) -> None:
-        print(redact(line), end="", file=stream, flush=True)
+    def discard_check_output(line: str) -> None:
+        del line
 
     check_command = (
         sys.executable,
@@ -554,100 +747,108 @@ def execute_plan(
         check_command,
         cwd=PROJECT,
         environment=plan.environment,
-        on_line=emit_check,
+        on_line=discard_check_output,
     )
     if check_exit != 0:
         return check_exit
 
-    rows, slugs = _initial_rows(plan.tasks)
-    run_identity = _prepare_private_directory(plan.output_base)
+    run_root = _prepare_private_directory(plan.output_base)
+    bound_directories = [run_root]
     total = len(plan.tasks)
     result = 0
+    task_bindings: list[
+        tuple[_DirectoryBinding, _DirectoryBinding]
+    ] = []
+    try:
+        for index, (task, slug, row) in enumerate(
+            zip(plan.tasks, slugs, rows), start=1
+        ):
+            _assert_identity(run_root)
+            if task.skip_reason is not None:
+                row["status"] = "SKIP"
+                _progress(
+                    stream,
+                    index,
+                    total,
+                    task.task_id,
+                    f"SKIP reason={task.skip_reason}",
+                )
+                continue
 
-    for index, (task, slug, row) in enumerate(
-        zip(plan.tasks, slugs, rows), start=1
-    ):
-        _assert_identity(plan.output_base, run_identity)
-        if task.skip_reason is not None:
-            row["status"] = "SKIP"
-            _progress(
-                stream,
-                index,
-                total,
-                task.task_id,
-                f"SKIP reason={task.skip_reason}",
+            task_root = _prepare_private_child(run_root, slug)
+            bound_directories.append(task_root)
+            batch_root = _prepare_private_child(task_root, "batch")
+            bound_directories.append(batch_root)
+            task_bindings.append((task_root, batch_root))
+            row["output"] = f"{slug}/batch"
+            row["log"] = f"{slug}/runner.log"
+            started = clock()
+            note = "" if not task.note else f" note={task.note}"
+            start_line = _progress(
+                stream, index, total, task.task_id, f"START{note}"
             )
-            continue
-
-        container = plan.output_base / slug
-        _prepare_private_directory(container)
-        batch_root = container / "batch"
-        row["output"] = f"{slug}/batch"
-        row["log"] = f"{slug}/runner.log"
-        started = clock()
-        note = "" if not task.note else f" note={task.note}"
-        start_line = _progress(
-            stream, index, total, task.task_id, f"START{note}"
-        )
-        try:
-            with _open_private_log(container / "runner.log") as log:
-                log.write(start_line + "\n")
-                log.flush()
-
-                def emit_child(line: str) -> None:
-                    safe_line = redact(line)
-                    print(safe_line, end="", file=stream, flush=True)
-                    log.write(safe_line)
+            try:
+                with _open_private_log(task_root) as log:
+                    log.write(start_line + "\n")
                     log.flush()
 
-                exit_code = executor(
-                    build_task_command(plan, task, batch_root),
-                    cwd=PROJECT,
-                    environment=plan.environment,
-                    on_line=emit_child,
-                )
-        except KeyboardInterrupt:
+                    def record_child(line: str) -> None:
+                        log.write(redact(line))
+                        log.flush()
+
+                    _assert_identity(task_root)
+                    _assert_identity(batch_root)
+                    exit_code = executor(
+                        build_task_command(plan, task, batch_root.path),
+                        cwd=PROJECT,
+                        environment=plan.environment,
+                        on_line=record_child,
+                    )
+            except KeyboardInterrupt:
+                exit_code = 130
+            except Exception:
+                exit_code = _CHILD_FAILURE_EXIT
+
+            _assert_identity(run_root)
+            _assert_identity(task_root)
+            _assert_identity(batch_root)
             elapsed = round(clock() - started, 3)
-            row.update(
-                status="FAILED", exit_code=130, elapsed_seconds=elapsed
-            )
-            result = 130
+            row.update(exit_code=exit_code, elapsed_seconds=elapsed)
+            if exit_code == 0:
+                row["status"] = "DONE"
+                _progress(
+                    stream,
+                    index,
+                    total,
+                    task.task_id,
+                    f"DONE elapsed={elapsed:.3f}s",
+                )
+                continue
+            row["status"] = "FAILED"
+            result = exit_code
             _progress(
                 stream,
                 index,
                 total,
                 task.task_id,
-                f"FAILED exit=130 elapsed={elapsed:.3f}s",
+                f"FAILED exit={exit_code} elapsed={elapsed:.3f}s",
             )
             break
 
-        elapsed = round(clock() - started, 3)
-        row.update(exit_code=exit_code, elapsed_seconds=elapsed)
-        if exit_code == 0:
-            row["status"] = "DONE"
-            _progress(
-                stream,
-                index,
-                total,
-                task.task_id,
-                f"DONE elapsed={elapsed:.3f}s",
-            )
-            continue
-        row["status"] = "FAILED"
-        result = exit_code
-        _progress(
-            stream,
-            index,
-            total,
-            task.task_id,
-            f"FAILED exit={exit_code} elapsed={elapsed:.3f}s",
+        _assert_identity(run_root)
+        for task_root, batch_root in task_bindings:
+            _assert_identity(task_root)
+            _assert_identity(batch_root)
+        _write_summary(
+            run_root,
+            _summary_payload(plan, rows, passed=result == 0),
+            required_directories=tuple(
+                binding
+                for task_binding in task_bindings
+                for binding in task_binding
+            ),
         )
-        break
-
-    _assert_identity(plan.output_base, run_identity)
-    _write_summary(
-        plan.output_base,
-        run_identity,
-        _summary_payload(plan, rows, passed=result == 0),
-    )
-    return result
+        return result
+    finally:
+        for binding in reversed(bound_directories):
+            binding.close()
