@@ -25,6 +25,8 @@ from asterion.dci.cli import main as dci_main
 from asterion.dci.config import DciRuntimeOptions, resolve_dci_paths
 from asterion.dci.experiment_profiles import (
     ExperimentAuthorizationError,
+    ExperimentProfile,
+    FullExecutionAuthorization,
     authorize_full_execution,
     authorized_scope_output_root,
     consume_full_execution_authorization,
@@ -54,6 +56,37 @@ from asterion.dci.provenance import (
 )
 from asterion.dci.run import DciRunResult, run_pi_research as _real_run_pi_research
 from asterion.runtime.host import RunEvent
+
+
+def _bounded_authorize_full_execution(
+    *,
+    profile: ExperimentProfile,
+    scope_ids: tuple[str, ...],
+    output_root: Path,
+    max_agent_operations: int,
+    max_judge_operations: int,
+    max_cost_usd: float,
+    max_agent_cost_per_operation_usd: float,
+    max_judge_cost_per_operation_usd: float,
+) -> FullExecutionAuthorization:
+    query_ids = tuple((f"{scope_id}.fixture-q-1",) for scope_id in scope_ids)
+    return authorize_full_execution(
+        profile=profile,
+        scope_ids=scope_ids,
+        bounded_selected_ids_sha256=tuple(
+            canonical_sha256(ids) for ids in query_ids
+        ),
+        selected_query_counts=tuple(len(ids) for ids in query_ids),
+        planned_agent_operations=sum(len(ids) for ids in query_ids),
+        planned_judge_operations=0,
+        output_root=output_root,
+        max_agent_operations=max_agent_operations,
+        max_judge_operations=max_judge_operations,
+        max_cost_usd=max_cost_usd,
+        max_agent_cost_per_operation_usd=max_agent_cost_per_operation_usd,
+        max_judge_cost_per_operation_usd=max_judge_cost_per_operation_usd,
+        invocation_authorized=True,
+    )
 
 
 class _FixtureClient:
@@ -893,7 +926,7 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory).resolve()
             profile = resolve_experiment_profile("paper-reference/pi")
-            authority = authorize_full_execution(
+            authority = _bounded_authorize_full_execution(
                 profile=profile,
                 scope_ids=scopes,
                 output_root=root / "authorized",
@@ -902,7 +935,6 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 max_cost_usd=5.0,
                 max_agent_cost_per_operation_usd=0.1,
                 max_judge_cost_per_operation_usd=0.1,
-                invocation_authorized=True,
             )
             paths = resolve_dci_paths(root)
             items = []
@@ -962,7 +994,7 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
             list(scopes),
         )
         rendered = json.dumps(result, sort_keys=True)
-        self.assertNotIn("query", rendered)
+        self.assertNotIn("fixture-q-1", rendered)
         self.assertNotIn("_issuance_token", rendered)
 
     def test_authorized_reproduction_coordinator_rejects_mismatch_before_run(
@@ -974,7 +1006,7 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory).resolve()
             profile = resolve_experiment_profile("paper-reference/pi")
-            authority = authorize_full_execution(
+            authority = _bounded_authorize_full_execution(
                 profile=profile,
                 scope_ids=scopes,
                 output_root=root / "authorized",
@@ -983,7 +1015,6 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 max_cost_usd=5.0,
                 max_agent_cost_per_operation_usd=0.1,
                 max_judge_cost_per_operation_usd=0.1,
-                invocation_authorized=True,
             )
             item = benchmark_module.AuthorizedBenchmarkExecution(
                 scope_id=scopes[0],
@@ -1026,7 +1057,7 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory).resolve()
             profile = resolve_experiment_profile("paper-reference/pi")
-            authority = authorize_full_execution(
+            authority = _bounded_authorize_full_execution(
                 profile=profile,
                 scope_ids=scopes,
                 output_root=root / "authorized",
@@ -1035,7 +1066,6 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 max_cost_usd=5.0,
                 max_agent_cost_per_operation_usd=0.1,
                 max_judge_cost_per_operation_usd=0.1,
-                invocation_authorized=True,
             )
             item = benchmark_module.AuthorizedBenchmarkExecution(
                 scope_id=scopes[0],

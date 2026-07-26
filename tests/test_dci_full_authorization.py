@@ -52,6 +52,10 @@ def receipt_ledger(receipt: dict[str, object]) -> dict[str, object]:
     return cast(dict[str, object], receipt["ledger"])
 
 
+def query_ids(count: int) -> tuple[str, ...]:
+    return tuple(f"q-{index}" for index in range(1, count + 1))
+
+
 def authorize(
     output_root: Path,
     *,
@@ -62,12 +66,15 @@ def authorize(
     max_agent_cost: float = 2.0,
     max_judge_cost: float = 1.0,
     selected_query_ids_by_scope: dict[str, tuple[str, ...]] | None = None,
+    selected_query_ids: tuple[str, ...] | None = None,
 ) -> FullExecutionAuthorization:
+    if selected_query_ids_by_scope is not None and selected_query_ids is not None:
+        raise ValueError("selected query fixture is ambiguous")
     query_ids_by_scope = {
         scope: (
             selected_query_ids_by_scope.get(scope, ("q-001",))
             if selected_query_ids_by_scope is not None
-            else ("q-001",)
+            else (selected_query_ids or ("q-001",))
         )
         for scope in scopes
     }
@@ -428,6 +435,26 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
             self.assertNotIn(str(private_path), message)
             self.assertNotIn(str(private_path), repr(authority))
             self.assertNotIn(issuance_token, repr(authority))
+
+    def test_bounded_authority_fields_are_forgery_checked(self) -> None:
+        forged_values = {
+            "bounded_selected_ids_sha256": ("1" * 64,),
+            "selected_query_counts": (2,),
+            "planned_agent_operations": 2,
+            "planned_judge_operations": 1,
+        }
+        for field, value in forged_values.items():
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as temporary:
+                authority = authorize(Path(temporary) / "private")
+                object.__setattr__(authority, field, value)
+                with self.assertRaises(ExperimentAuthorizationError) as raised:
+                    profiles._authorized_scope_selection_identity(
+                        authority, "bright.biology.main.full"
+                    )
+                self.assertEqual(
+                    str(raised.exception),
+                    "full execution authorization is invalid",
+                )
 
 
 class FullExecutionBudgetTests(unittest.TestCase):
@@ -804,6 +831,35 @@ class FullExecutionBudgetTests(unittest.TestCase):
             with self.assertRaises(ExperimentAuthorizationError):
                 profiles._authorized_manifest_output_identity(authority)
 
+    def test_bounded_receipt_fields_are_immutable(self) -> None:
+        mutations = {
+            "bounded_selected_ids_sha256": lambda receipt: receipt[
+                "bounded_selected_ids_sha256"
+            ].append("1" * 64),
+            "selected_query_counts": lambda receipt: receipt[
+                "selected_query_counts"
+            ].append(2),
+            "planned_agent_operations": lambda receipt: receipt.__setitem__(
+                "planned_agent_operations", 2
+            ),
+            "planned_judge_operations": lambda receipt: receipt.__setitem__(
+                "planned_judge_operations", 1
+            ),
+        }
+        for field, mutate in mutations.items():
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as temporary:
+                authority = authorize(Path(temporary) / "private")
+                self.consume(authority)
+                receipt = consumed_full_execution_authorization_snapshot(
+                    authority
+                )
+                original_receipt = json.loads(json.dumps(receipt))
+                mutate(receipt)
+                self.assertEqual(
+                    consumed_full_execution_authorization_snapshot(authority),
+                    original_receipt,
+                )
+
     def test_reservation_constructor_is_private(self) -> None:
         with self.assertRaisesRegex(
             TypeError,
@@ -852,7 +908,10 @@ class AuthorizedBenchmarkTests(unittest.TestCase):
     def test_scope_is_consumed_only_after_selected_rows_match(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
-            authority = authorize(root / "selection-mismatch")
+            authority = authorize(
+                root / "selection-mismatch",
+                selected_query_ids=query_ids(1),
+            )
             request = self.request(root, authority)
             dataset = root / "dataset.jsonl"
             dataset.write_text(
@@ -1052,6 +1111,7 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
                 root / "agent-cap",
                 max_agents=1,
                 max_judges=2,
+                selected_query_ids=query_ids(1),
             )
             request = self.request(root, authority)
             with self.patches(agent=agent, judge=judge, agent_cost=lambda *_: 0.0):
@@ -1071,6 +1131,7 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
                 root / "judge-cap",
                 max_agents=2,
                 max_judges=1,
+                selected_query_ids=query_ids(2),
             )
             request = self.request(root, authority)
             with self.patches(agent=agent, judge=judge, agent_cost=lambda *_: 0.0):
@@ -1102,6 +1163,7 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
                 max_cost=2.5,
                 max_agent_cost=2.0,
                 max_judge_cost=1.0,
+                selected_query_ids=query_ids(1),
             )
             request = self.request(root, authority)
             with self.patches(agent=agent, judge=judge, agent_cost=lambda *_: 1.5):
@@ -1133,6 +1195,7 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
                 root / "reconcile",
                 max_agents=1,
                 max_judges=1,
+                selected_query_ids=query_ids(1),
             )
             request = self.request(root, authority, rows=1)
             with self.patches(agent=agent, judge=judge, agent_cost=lambda *_: 0.4):
@@ -1148,6 +1211,7 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
                 max_agents=2,
                 max_judges=2,
                 max_agent_cost=0.5,
+                selected_query_ids=query_ids(1),
             )
             request = self.request(root, authority)
             with self.patches(agent=agent, judge=judge, agent_cost=lambda *_: 0.6):
@@ -1234,6 +1298,7 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
                 root / "judge-cache",
                 max_agents=1,
                 max_judges=1,
+                selected_query_ids=query_ids(1),
             )
             request = self.request(root, authority, rows=1)
             with self.patches(agent=agent, judge=judge, agent_cost=lambda *_: 0.25):
@@ -1279,6 +1344,7 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
                     root / "cancel",
                     max_agents=2,
                     max_judges=2,
+                    selected_query_ids=query_ids(1),
                 )
                 request = self.request(root, authority, max_concurrency=1)
                 with self.patches(
