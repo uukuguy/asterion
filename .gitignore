@@ -44,3 +44,6 @@ packages/rust/**/target/
 # Promotion/build scratch
 .promotion-*/
 tmp/
+
+# Isolated feature worktrees
+.worktrees/
