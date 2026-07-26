@@ -1180,6 +1180,10 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                     full_execution_authorization=authority,
                     experiment_scope_id=scope,
                     paper_ir_duplicate_handling="deduplicated",
+                    dataset_input_binding=_authority_dataset_binding(
+                        authority,
+                        scope,
+                    ),
                 )
                 items.append(
                     benchmark_module.AuthorizedBenchmarkExecution(
@@ -1195,16 +1199,18 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
             ) -> BenchmarkResult:
                 del paths
                 calls.append((request.experiment_scope_id or "", request.output_root))
+                scope = request.experiment_scope_id or ""
+                self.assertIsNotNone(request.dataset_input_binding)
+                self.assertIs(
+                    request.dataset_input_binding,
+                    _authority_dataset_binding(authority, scope),
+                )
                 consume_full_execution_authorization(
                     request.full_execution_authorization,
-                    request.experiment_scope_id or "",
-                    request.dataset_input_binding
-                    or _authority_dataset_binding(
-                        cast(
-                            FullExecutionAuthorization,
-                            request.full_execution_authorization,
-                        ),
-                        request.experiment_scope_id or "",
+                    scope,
+                    cast(
+                        DatasetInputBinding,
+                        request.dataset_input_binding,
                     ),
                 )
                 return BenchmarkResult(request.output_root, {"total": 1})
@@ -1284,6 +1290,10 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                         full_execution_authorization=authority,
                         experiment_scope_id=scope,
                         paper_ir_duplicate_handling="deduplicated",
+                        dataset_input_binding=_authority_dataset_binding(
+                            authority,
+                            scope,
+                        ),
                     ),
                     paths=paths,
                 )
@@ -1304,16 +1314,17 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 del paths
                 scope = request.experiment_scope_id or ""
                 events.append(("run", scope))
+                self.assertIsNotNone(request.dataset_input_binding)
+                self.assertIs(
+                    request.dataset_input_binding,
+                    _authority_dataset_binding(authority, scope),
+                )
                 consume_full_execution_authorization(
                     request.full_execution_authorization,
                     scope,
-                    request.dataset_input_binding
-                    or _authority_dataset_binding(
-                        cast(
-                            FullExecutionAuthorization,
-                            request.full_execution_authorization,
-                        ),
-                        scope,
+                    cast(
+                        DatasetInputBinding,
+                        request.dataset_input_binding,
                     ),
                 )
                 return BenchmarkResult(request.output_root, {"total": 1})
@@ -1671,6 +1682,10 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                             full_execution_authorization=authority,
                             experiment_scope_id=scope,
                             paper_ir_duplicate_handling="deduplicated",
+                            dataset_input_binding=_authority_dataset_binding(
+                                authority,
+                                scope,
+                            ),
                         ),
                         paths=paths,
                     )
@@ -1684,16 +1699,17 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                     del paths
                     scope = request.experiment_scope_id or ""
                     started.append(scope)
+                    self.assertIsNotNone(request.dataset_input_binding)
+                    self.assertIs(
+                        request.dataset_input_binding,
+                        _authority_dataset_binding(authority, scope),
+                    )
                     consume_full_execution_authorization(
                         request.full_execution_authorization,
                         scope,
-                        request.dataset_input_binding
-                        or _authority_dataset_binding(
-                            cast(
-                                FullExecutionAuthorization,
-                                request.full_execution_authorization,
-                            ),
-                            scope,
+                        cast(
+                            DatasetInputBinding,
+                            request.dataset_input_binding,
                         ),
                     )
                     return BenchmarkResult(request.output_root, {"total": 1})

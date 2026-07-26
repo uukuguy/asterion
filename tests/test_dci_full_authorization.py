@@ -10,6 +10,7 @@ import math
 import os
 import stat
 import tempfile
+import traceback
 import unittest
 import asyncio
 from dataclasses import FrozenInstanceError, replace
@@ -51,6 +52,14 @@ from asterion.dci.paper_benchmarks import (
     resolve_paper_experiment_scope,
 )
 from asterion.dci.verification import paper_reproduce_main
+
+
+class AlwaysEqualStr(str):
+    def __eq__(self, other: object) -> bool:
+        del other
+        return True
+
+    __hash__ = str.__hash__
 
 
 def receipt_ledger(receipt: dict[str, object]) -> dict[str, object]:
@@ -216,6 +225,12 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
         invalid_cases = (
             {"raw_content_sha256": "not-a-digest"},
             {"paper_benchmark_identity_sha256": "not-a-digest"},
+            {"raw_content_sha256": AlwaysEqualStr("a" * 64)},
+            {
+                "paper_benchmark_identity_sha256": AlwaysEqualStr(
+                    "b" * 64
+                )
+            },
             {"device": -1},
             {"inode": 0},
         )
@@ -244,7 +259,7 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
         if reader is None:
             return
         with tempfile.TemporaryDirectory() as temporary:
-            dataset = Path(temporary) / "dataset.jsonl"
+            dataset = Path(temporary).resolve() / "dataset.jsonl"
             raw = b'{"query_id":"q-001","query":"sentinel body","gold_ids":["d"]}\n'
             dataset.write_bytes(raw)
             benchmark = resolve_paper_benchmark("bright.biology")
@@ -260,6 +275,78 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
                 inode=metadata.st_ino,
             ),
         )
+
+    def test_dataset_reader_rejects_symlinked_parent_and_closes_all_fds(
+        self,
+    ) -> None:
+        benchmark = resolve_paper_benchmark("bright.biology")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            real_parent = root / "real"
+            real_parent.mkdir()
+            dataset = real_parent / "dataset.jsonl"
+            dataset.write_text('{"query_id":"q-001","query":"body"}\n')
+            linked_parent = root / "linked"
+            linked_parent.symlink_to(real_parent, target_is_directory=True)
+            with self.assertRaises((OSError, ValueError)):
+                paper_benchmarks.read_paper_benchmark_dataset(
+                    linked_parent / dataset.name,
+                    benchmark,
+                )
+
+            nested = root / "a" / "b"
+            nested.mkdir(parents=True)
+            nested_dataset = nested / "dataset.jsonl"
+            nested_dataset.write_text(
+                '{"query_id":"q-001","query":"body"}\n'
+            )
+            opened_descriptors: list[int] = []
+            real_open = os.open
+
+            def tracking_open(
+                path: (
+                    str
+                    | bytes
+                    | os.PathLike[str]
+                    | os.PathLike[bytes]
+                ),
+                flags: int,
+                mode: int = 0o777,
+                *,
+                dir_fd: int | None = None,
+            ) -> int:
+                if dir_fd is None:
+                    descriptor = real_open(path, flags, mode)
+                else:
+                    descriptor = real_open(
+                        path,
+                        flags,
+                        mode,
+                        dir_fd=dir_fd,
+                    )
+                opened_descriptors.append(descriptor)
+                return descriptor
+
+            with patch.object(
+                paper_benchmarks.os,
+                "open",
+                side_effect=tracking_open,
+            ), patch.object(
+                paper_benchmarks,
+                "_read_paper_dataset_descriptor",
+                side_effect=OSError("SENTINEL read fault"),
+            ):
+                with self.assertRaises(OSError):
+                    paper_benchmarks.read_paper_benchmark_dataset(
+                        nested_dataset,
+                        benchmark,
+                    )
+            self.assertGreaterEqual(len(opened_descriptors), 3)
+            for descriptor in opened_descriptors:
+                with self.subTest(descriptor=descriptor), self.assertRaises(
+                    OSError
+                ):
+                    os.fstat(descriptor)
 
     def test_dataset_input_bindings_are_scope_bound_and_consumption_gated(
         self,
@@ -304,11 +391,20 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
             )
             self.assertEqual(authority.dataset_input_bindings, bindings)
             for scope, binding in zip(scopes, bindings, strict=True):
-                self.assertIs(
+                public_binding = authority.dataset_input_bindings[
+                    scopes.index(scope)
+                ]
+                self.assertIsNot(public_binding, binding)
+                private_copy = (
                     profiles._authorized_scope_dataset_input_binding(
                         authority, scope
-                    ),
-                    binding,
+                    )
+                )
+                self.assertEqual(private_copy, binding)
+                self.assertIsNot(private_copy, binding)
+                self.assertIsNot(
+                    private_copy,
+                    public_binding,
                 )
 
             with self.assertRaisesRegex(
@@ -342,6 +438,76 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
             ):
                 profiles._authorized_scope_dataset_input_binding(
                     authority, scopes[1]
+                )
+
+    def test_public_and_accessor_binding_mutations_never_change_private_state(
+        self,
+    ) -> None:
+        scope_id = "bright.biology.main.full"
+        mutations: tuple[tuple[str, object], ...] = (
+            ("raw_content_sha256", "b" * 64),
+            ("paper_benchmark_identity_sha256", "c" * 64),
+            ("device", 999),
+            ("inode", 999),
+            ("raw_content_sha256", AlwaysEqualStr("0" * 64)),
+            (
+                "paper_benchmark_identity_sha256",
+                AlwaysEqualStr("0" * 64),
+            ),
+        )
+        for field, value in mutations:
+            with self.subTest(field=field, value_type=type(value).__name__):
+                with tempfile.TemporaryDirectory() as temporary:
+                    authority = authorize(Path(temporary) / "private")
+                    public_binding = authority.dataset_input_bindings[0]
+                    object.__setattr__(public_binding, field, value)
+                    with self.assertRaisesRegex(
+                        ExperimentAuthorizationError,
+                        "^full execution authorization is invalid$",
+                    ):
+                        profiles._authorized_scope_dataset_input_binding(
+                            authority,
+                            scope_id,
+                        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            authority = authorize(Path(temporary) / "private")
+            first = profiles._authorized_scope_dataset_input_binding(
+                authority,
+                scope_id,
+            )
+            original = replace(first)
+            object.__setattr__(first, "inode", 999)
+            second = profiles._authorized_scope_dataset_input_binding(
+                authority,
+                scope_id,
+            )
+            self.assertEqual(second, original)
+            self.assertIsNot(first, second)
+            consume_full_execution_authorization(
+                authority,
+                scope_id,
+                second,
+            )
+
+    def test_consume_rejects_hostile_binding_fields(self) -> None:
+        scope_id = "bright.biology.main.full"
+        with tempfile.TemporaryDirectory() as temporary:
+            authority = authorize(Path(temporary) / "private")
+            forged = fixture_dataset_binding(scope_id)
+            object.__setattr__(
+                forged,
+                "raw_content_sha256",
+                AlwaysEqualStr("0" * 64),
+            )
+            with self.assertRaisesRegex(
+                ExperimentAuthorizationError,
+                "^full execution dataset input binding is invalid$",
+            ):
+                consume_full_execution_authorization(
+                    authority,
+                    scope_id,
+                    forged,
                 )
 
     def test_invalid_dataset_input_bindings_fail_before_output_creation(
@@ -1368,6 +1534,22 @@ class FullExecutionBudgetTests(unittest.TestCase):
 class AuthorizedBenchmarkTests(unittest.TestCase):
     scope_id = "bright.biology.main.full"
 
+    def test_benchmark_request_preserves_legacy_sixth_positional_limit(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            request = BenchmarkRequest(
+                root / "dataset.jsonl",
+                root / "output",
+                root,
+                JudgeConfig(base_url="https://judge.example.test/v1"),
+                DciRuntimeOptions(provider=None, model=None),
+                7,
+            )
+        self.assertEqual(request.limit, 7)
+        self.assertIsNone(request.dataset_input_binding)
+
     def request(
         self,
         root: Path,
@@ -1677,6 +1859,60 @@ class AuthorizedBenchmarkTests(unittest.TestCase):
                         authority, self.scope_id, "agent"
                     )
 
+    def test_hostile_request_binding_never_consumes_or_reserves(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            authority, request, _dataset, _raw = self._bound_request(
+                root,
+                scope_id=self.scope_id,
+                rows=(
+                    {
+                        "query_id": "q-001",
+                        "query": "private query",
+                        "gold_ids": ["doc-1"],
+                    },
+                ),
+                mode="ir",
+            )
+            self.assertIsNotNone(request.dataset_input_binding)
+            object.__setattr__(
+                cast(DatasetInputBinding, request.dataset_input_binding),
+                "raw_content_sha256",
+                AlwaysEqualStr("0" * 64),
+            )
+            with patch(
+                "asterion.dci.benchmark._paper_scope_for_rows",
+                return_value=self.scope_id,
+            ), patch(
+                "asterion.dci.benchmark.require_af320_executable_scope"
+            ) as consume, patch(
+                "asterion.dci.benchmark.reserve_full_execution_operation"
+            ) as reserve, patch(
+                "asterion.dci.benchmark._run_pi_async"
+            ) as agent:
+                with self.assertRaisesRegex(
+                    DciBenchmarkError,
+                    "^DCI benchmark authorization dataset changed$",
+                ):
+                    run_benchmark(
+                        request,
+                        paths=resolve_dci_paths(root),
+                    )
+            consume.assert_not_called()
+            reserve.assert_not_called()
+            agent.assert_not_called()
+            with self.assertRaisesRegex(
+                ExperimentAuthorizationError,
+                "^full execution authorization is (?:invalid|inactive)$",
+            ):
+                reserve_full_execution_operation(
+                    authority,
+                    self.scope_id,
+                    "agent",
+                )
+
     def test_runner_dataset_io_errors_cancel_before_reservation(
         self,
     ) -> None:
@@ -1722,6 +1958,12 @@ class AuthorizedBenchmarkTests(unittest.TestCase):
                 agent.assert_not_called()
                 reserve.assert_not_called()
                 self.assertNotIn("SENTINEL", str(raised.exception))
+                self.assertIsNone(raised.exception.__cause__)
+                self.assertIsNone(raised.exception.__context__)
+                rendered = "".join(
+                    traceback.format_exception(raised.exception)
+                )
+                self.assertNotIn("SENTINEL", rendered)
                 with self.assertRaisesRegex(
                     ExperimentAuthorizationError,
                     "^full execution authorization is inactive$",
@@ -2579,6 +2821,77 @@ class ReproductionCliTests(unittest.TestCase):
                     ):
                         self.assertNotIn(forbidden, rendered)
 
+    def test_preflight_translated_errors_have_no_sensitive_exception_chain(
+        self,
+    ) -> None:
+        scope_id = "bright.biology.main.full"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            batch_profiles = self._fixture_batch_profiles(root)
+            profile = batch_profiles["bright.biology"]
+            request = BenchmarkRequest(
+                dataset=root / cast(str, profile["dataset"]),
+                output_root=root / "output",
+                cwd=root,
+                judge_config=JudgeConfig(
+                    base_url="https://judge.example.test/v1"
+                ),
+                runtime_options=DciRuntimeOptions(
+                    provider=None,
+                    model=None,
+                ),
+                corpus=root / cast(str, profile["corpus"]),
+                profile="bright.biology",
+            )
+            cases = (
+                (
+                    "open",
+                    "asterion.dci.paper_benchmarks."
+                    "_open_paper_dataset_descriptor",
+                    lambda: cli_module._preflight_scope_selected_ids(
+                        request,
+                        scope_id,
+                    ),
+                ),
+                (
+                    "read",
+                    "asterion.dci.paper_benchmarks."
+                    "_read_paper_dataset_descriptor",
+                    lambda: cli_module._preflight_scope_selected_ids(
+                        request,
+                        scope_id,
+                    ),
+                ),
+                (
+                    "corpus",
+                    "asterion.dci.cli.os.scandir",
+                    lambda: cli_module._preflight_benchmark_host_inputs(
+                        request
+                    ),
+                ),
+            )
+            for label, target, invoke in cases:
+                with self.subTest(label=label), patch(
+                    target,
+                    side_effect=OSError(
+                        "SENTINEL /private/dataset answer gold_ids"
+                    ),
+                ):
+                    with self.assertRaises(ValueError) as raised:
+                        invoke()
+                self.assertIsNone(raised.exception.__cause__)
+                self.assertIsNone(raised.exception.__context__)
+                rendered = "".join(
+                    traceback.format_exception(raised.exception)
+                )
+                for forbidden in (
+                    "SENTINEL",
+                    "/private/dataset",
+                    "answer",
+                    "gold_ids",
+                ):
+                    self.assertNotIn(forbidden, rendered)
+
     def test_limit_validation_fails_before_authority(self) -> None:
         scope_id = "bright.robotics.main.full"
         cases = (
@@ -2979,7 +3292,14 @@ class ReproductionCliTests(unittest.TestCase):
         )
         self.assertEqual(len(dataset_bindings), 1)
         authority = cast(FullExecutionAuthorization, captured["authority"])
-        self.assertIs(authority.dataset_input_bindings[0], dataset_bindings[0])
+        self.assertEqual(
+            authority.dataset_input_bindings[0],
+            dataset_bindings[0],
+        )
+        self.assertIsNot(
+            authority.dataset_input_bindings[0],
+            dataset_bindings[0],
+        )
         execute_kwargs = cast(dict[str, Any], captured["execute_kwargs"])
         self.assertIs(execute_kwargs["authority"], authority)
         self.assertIs(execute_kwargs["profile"], authorize_kwargs["profile"])

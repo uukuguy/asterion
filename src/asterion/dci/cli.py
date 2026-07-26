@@ -1220,14 +1220,25 @@ def _profile_judge_config(profile: ExperimentProfile) -> JudgeConfig:
 
 
 def _preflight_benchmark_host_inputs(request: BenchmarkRequest) -> None:
-    if request.corpus is None or not request.corpus.is_dir() or _path_has_symlink(
-        request.corpus
-    ):
-        raise ValueError("paper reproduction corpus is unavailable")
-    if not request.cwd.is_dir() or _path_has_symlink(request.cwd):
-        raise ValueError("paper reproduction cwd is unavailable")
-    with os.scandir(request.corpus):
-        pass
+    try:
+        if (
+            request.corpus is None
+            or not request.corpus.is_dir()
+            or _path_has_symlink(request.corpus)
+        ):
+            raise ValueError("paper reproduction corpus is unavailable")
+        if not request.cwd.is_dir() or _path_has_symlink(request.cwd):
+            raise ValueError("paper reproduction cwd is unavailable")
+        with os.scandir(request.corpus):
+            pass
+    except OSError:
+        host_input_failed = True
+    else:
+        host_input_failed = False
+    if host_input_failed:
+        raise ValueError(
+            "paper reproduction host inputs are unavailable"
+        ) from None
 
 
 def _preflight_scope_selected_ids(
@@ -1248,6 +1259,9 @@ def _preflight_scope_selected_ids(
 
     scope = resolve_paper_experiment_scope(scope_id)
     benchmark = resolve_paper_benchmark(scope.dataset_id)
+    preflight_result: (
+        tuple[tuple[str, ...], DatasetInputBinding] | None
+    ) = None
     try:
         raw, binding = read_paper_benchmark_dataset(
             request.dataset,
@@ -1265,9 +1279,14 @@ def _preflight_scope_selected_ids(
             rows = load_benchmark_rows_bytes(raw)
         source_ids = tuple(row.query_id for row in rows)
         select_and_verify_scope_ids(scope_id, source_ids)
-        return source_ids, binding
-    except (DatasetError, OSError, ValueError) as error:
-        raise ValueError("paper reproduction selected IDs are invalid") from error
+        preflight_result = (source_ids, binding)
+    except (DatasetError, OSError, ValueError):
+        pass
+    if preflight_result is None:
+        raise ValueError(
+            "paper reproduction selected IDs are invalid"
+        ) from None
+    return preflight_result
 
 
 def _write_reproduction_execution_result(

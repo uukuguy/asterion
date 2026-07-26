@@ -80,6 +80,8 @@ from asterion.dci.judge import (
 )
 from asterion.dci.paper_benchmarks import (
     DatasetInputBinding,
+    _dataset_input_binding_identity,
+    _dataset_input_binding_matches,
     canonical_sha256,
     paper_scope_for_profile,
     paper_scope_for_selected_ids,
@@ -161,7 +163,6 @@ class BenchmarkRequest:
     cwd: Path
     judge_config: JudgeConfig
     runtime_options: DciRuntimeOptions
-    dataset_input_binding: DatasetInputBinding | None = None
     limit: int | None = None
     mode: str = "qa"
     profile: str | None = None
@@ -182,6 +183,7 @@ class BenchmarkRequest:
     full_execution_authorization: FullExecutionAuthorization | None = None
     experiment_scope_id: str | None = None
     paper_ir_duplicate_handling: str | None = None
+    dataset_input_binding: DatasetInputBinding | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -538,6 +540,10 @@ def run_benchmark(request: BenchmarkRequest, *, paths: DciPaths) -> BenchmarkRes
     try:
         asyncio.get_running_loop()
     except RuntimeError:
+        has_running_loop = False
+    else:
+        has_running_loop = True
+    if not has_running_loop:
         return asyncio.run(run_benchmark_async(request, paths=paths))
     raise DciBenchmarkError("DCI benchmark sync API cannot run inside an event loop")
 
@@ -593,9 +599,12 @@ def _authorize_paper_execution_before_inputs(
         authorized_binding = _authorized_scope_dataset_input_binding(
             authorization, scope_id
         )
-        if (
-            type(request.dataset_input_binding) is not DatasetInputBinding
-            or request.dataset_input_binding != authorized_binding
+        authorized_binding_identity = _dataset_input_binding_identity(
+            authorized_binding
+        )
+        if not _dataset_input_binding_matches(
+            request.dataset_input_binding,
+            authorized_binding_identity,
         ):
             raise DciBenchmarkError(
                 "DCI benchmark authorization dataset changed"
@@ -603,6 +612,10 @@ def _authorize_paper_execution_before_inputs(
         authorized_root = authorized_scope_output_root(authorization, scope_id)
     except ExperimentAuthorizationError as error:
         raise DciBenchmarkError("DCI benchmark authorization scope changed") from error
+    except ValueError:
+        raise DciBenchmarkError(
+            "DCI benchmark authorization dataset changed"
+        ) from None
     requested_root = Path(
         os.path.abspath(os.path.normpath(request.output_root))
     )
@@ -970,6 +983,7 @@ def _prepare(
         request.full_execution_authorization is not None
         and request.experiment_scope_id is not None
     ):
+        dataset_result: tuple[bytes, DatasetInputBinding] | None = None
         try:
             authorized_dataset_benchmark = resolve_paper_benchmark(
                 resolve_paper_experiment_scope(
@@ -982,10 +996,14 @@ def _prepare(
                     authorized_dataset_benchmark,
                 )
             )
-        except (OSError, ValueError) as error:
+            dataset_result = (dataset_raw, opened_dataset_binding)
+        except (OSError, ValueError):
+            pass
+        if dataset_result is None:
             raise DciBenchmarkError(
                 "DCI benchmark dataset is unavailable"
-            ) from error
+            ) from None
+        dataset_raw, opened_dataset_binding = dataset_result
     else:
         dataset_raw = _read_input_snapshot(request.dataset)
     try:
@@ -1067,11 +1085,23 @@ def _prepare(
             raise DciBenchmarkError(
                 "DCI benchmark authorization selection changed"
             ) from error
+        try:
+            authorized_dataset_identity = _dataset_input_binding_identity(
+                authorized_dataset_binding
+            )
+        except ValueError:
+            raise DciBenchmarkError(
+                "DCI benchmark authorization dataset changed"
+            ) from None
         if (
-            type(request.dataset_input_binding) is not DatasetInputBinding
-            or opened_dataset_binding is None
-            or opened_dataset_binding != request.dataset_input_binding
-            or opened_dataset_binding != authorized_dataset_binding
+            not _dataset_input_binding_matches(
+                request.dataset_input_binding,
+                authorized_dataset_identity,
+            )
+            or not _dataset_input_binding_matches(
+                opened_dataset_binding,
+                authorized_dataset_identity,
+            )
         ):
             raise DciBenchmarkError(
                 "DCI benchmark authorization dataset changed"

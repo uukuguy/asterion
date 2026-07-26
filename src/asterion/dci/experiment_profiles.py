@@ -20,6 +20,10 @@ from typing import Any, Mapping, Sequence
 
 from asterion.dci.paper_benchmarks import (
     DatasetInputBinding,
+    _DatasetInputBindingIdentity,
+    _copy_dataset_input_binding,
+    _dataset_input_binding_identity,
+    _dataset_input_binding_matches,
     canonical_sha256,
     paper_benchmark_inventory_sha256,
     paper_experiment_scope_ids,
@@ -240,7 +244,7 @@ class _AuthorizationSnapshot:
     dataset_inventory_sha256: str
     experiment_scopes_sha256: str
     authorized_scope_ids: tuple[str, ...]
-    dataset_input_bindings: tuple[DatasetInputBinding, ...]
+    dataset_input_bindings: tuple[_DatasetInputBindingIdentity, ...]
     selected_ids_sha256: tuple[str, ...]
     bounded_selected_ids_sha256: tuple[str, ...]
     selected_query_counts: tuple[int, ...]
@@ -775,6 +779,7 @@ def _issue_authorization(**values: object) -> FullExecutionAuthorization:
 def _authorization_matches_snapshot(
     authorization: FullExecutionAuthorization, snapshot: _AuthorizationSnapshot
 ) -> bool:
+    public_bindings = authorization.dataset_input_bindings
     return (
         authorization.profile_id == snapshot.profile_id
         and authorization.profile_sha256 == snapshot.profile_sha256
@@ -783,8 +788,16 @@ def _authorization_matches_snapshot(
         and authorization.experiment_scopes_sha256
         == snapshot.experiment_scopes_sha256
         and authorization.authorized_scope_ids == snapshot.authorized_scope_ids
-        and authorization.dataset_input_bindings
-        == snapshot.dataset_input_bindings
+        and type(public_bindings) is tuple
+        and len(public_bindings) == len(snapshot.dataset_input_bindings)
+        and all(
+            _dataset_input_binding_matches(binding, expected)
+            for binding, expected in zip(
+                public_bindings,
+                snapshot.dataset_input_bindings,
+                strict=True,
+            )
+        )
         and authorization.selected_ids_sha256 == snapshot.selected_ids_sha256
         and authorization.bounded_selected_ids_sha256
         == snapshot.bounded_selected_ids_sha256
@@ -1081,26 +1094,32 @@ def authorize_full_execution(
         raise ExperimentAuthorizationError(
             "full execution authorization is invalid"
         ) from None
-    input_bindings = tuple(dataset_input_bindings or ())
-    if (
-        len(input_bindings) != len(requested_scope_ids)
-        or any(type(binding) is not DatasetInputBinding for binding in input_bindings)
-        or any(
-            re.fullmatch(r"[0-9a-f]{64}", binding.raw_content_sha256) is None
-            or type(binding.device) is not int
-            or binding.device < 0
-            or type(binding.inode) is not int
-            or binding.inode < 1
-            or binding.paper_benchmark_identity_sha256
-            != resolve_paper_benchmark(scope.dataset_id).identity_sha256
-            for binding, scope in zip(
-                input_bindings, scope_contracts, strict=True
-            )
+    supplied_bindings = (
+        () if dataset_input_bindings is None else tuple(dataset_input_bindings)
+    )
+    try:
+        input_binding_identities = tuple(
+            _dataset_input_binding_identity(binding)
+            for binding in supplied_bindings
+        )
+    except ValueError:
+        input_binding_identities = ()
+    if len(input_binding_identities) != len(requested_scope_ids) or any(
+        identity[1]
+        != resolve_paper_benchmark(scope.dataset_id).identity_sha256
+        for identity, scope in zip(
+            input_binding_identities,
+            scope_contracts,
+            strict=True,
         )
     ):
         raise ExperimentAuthorizationError(
             "full execution dataset input binding is invalid"
         )
+    public_input_bindings = tuple(
+        _copy_dataset_input_binding(identity)
+        for identity in input_binding_identities
+    )
     default_counts = tuple(scope.selection_count for scope in scope_contracts)
     bounded_digests = (
         selected_digests
@@ -1246,7 +1265,7 @@ def authorize_full_execution(
         dataset_inventory_sha256=profile.dataset_inventory_sha256,
         experiment_scopes_sha256=profile.experiment_scopes_sha256,
         authorized_scope_ids=requested_scope_ids,
-        dataset_input_bindings=input_bindings,
+        dataset_input_bindings=public_input_bindings,
         selected_ids_sha256=selected_digests,
         bounded_selected_ids_sha256=bounded_digests,
         selected_query_counts=selected_counts,
@@ -1269,7 +1288,7 @@ def authorize_full_execution(
         dataset_inventory_sha256=profile.dataset_inventory_sha256,
         experiment_scopes_sha256=profile.experiment_scopes_sha256,
         authorized_scope_ids=requested_scope_ids,
-        dataset_input_bindings=input_bindings,
+        dataset_input_bindings=input_binding_identities,
         selected_ids_sha256=selected_digests,
         bounded_selected_ids_sha256=bounded_digests,
         selected_query_counts=selected_counts,
@@ -1332,9 +1351,10 @@ def consume_full_execution_authorization(
                 "full execution authorization scope is invalid"
             ) from None
         if (
-            type(dataset_input_binding) is not DatasetInputBinding
-            or dataset_input_binding
-            != record.snapshot.dataset_input_bindings[binding_index]
+            not _dataset_input_binding_matches(
+                dataset_input_binding,
+                record.snapshot.dataset_input_bindings[binding_index],
+            )
         ):
             raise ExperimentAuthorizationError(
                 "full execution dataset input binding is invalid"
@@ -1418,7 +1438,9 @@ def _authorized_scope_dataset_input_binding(
             raise ExperimentAuthorizationError(
                 "full execution authorization scope is invalid"
             ) from None
-        return record.snapshot.dataset_input_bindings[index]
+        return _copy_dataset_input_binding(
+            record.snapshot.dataset_input_bindings[index]
+        )
 
 
 def _issue_reservation(**values: object) -> FullExecutionReservation:
