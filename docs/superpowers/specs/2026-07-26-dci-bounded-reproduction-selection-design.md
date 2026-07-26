@@ -114,8 +114,8 @@ The existing profile-selected digest continues to identify the complete
 published selection for each scope. Bounded execution adds two immutable values
 per scope:
 
-- `bounded_selected_ids_sha256`: canonical digest of the exact ordered query IDs
-  selected after applying `limit`;
+- `bounded_selected_ids_sha256`: canonical digest of the exact selected query
+  IDs, sorted into the existing evidence identity order after applying `limit`;
 - `selected_query_count`: exact number of selected query IDs.
 
 The full selection digest and bounded selection digest are distinct fields.
