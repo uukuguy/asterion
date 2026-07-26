@@ -1920,6 +1920,103 @@ def compile_run_manifest(
     )
 
 
+def write_run_manifest(
+    manifest_root: Path,
+    expected_identity: tuple[int, int],
+    scope_id: str,
+    manifest: RunManifest | Mapping[str, object],
+) -> str:
+    """Persist one validated manifest beneath its descriptor-bound private root."""
+
+    validated = validate_run_manifest(manifest)
+    try:
+        canonical_scope = resolve_paper_experiment_scope(scope_id).scope_id
+    except ValueError:
+        raise ValueError("DCI reproduction manifest scope is invalid") from None
+    if canonical_scope != scope_id:
+        raise ValueError("DCI reproduction manifest scope is invalid")
+    if (
+        type(expected_identity) is not tuple
+        or len(expected_identity) != 2
+        or any(type(value) is not int or value < 0 for value in expected_identity)
+    ):
+        raise ValueError("DCI reproduction manifest root identity is invalid")
+
+    artifact_name = hashlib.sha256(scope_id.encode("utf-8")).hexdigest() + ".json"
+    payload = (
+        json.dumps(
+            validated.to_dict(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("ascii")
+        + b"\n"
+    )
+    root_descriptor = -1
+    artifact_descriptor = -1
+    created = False
+    verified = False
+    try:
+        root_flags = (
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        root_descriptor = os.open(manifest_root, root_flags)
+        root_metadata = os.fstat(root_descriptor)
+        if (
+            not stat.S_ISDIR(root_metadata.st_mode)
+            or stat.S_IMODE(root_metadata.st_mode) != 0o700
+            or (root_metadata.st_dev, root_metadata.st_ino) != expected_identity
+        ):
+            raise ValueError("DCI reproduction manifest root identity changed")
+
+        flags = (
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        artifact_descriptor = os.open(
+            artifact_name,
+            flags,
+            0o600,
+            dir_fd=root_descriptor,
+        )
+        created = True
+        os.fchmod(artifact_descriptor, 0o600)
+        with os.fdopen(artifact_descriptor, "wb", closefd=False) as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.close(artifact_descriptor)
+        artifact_descriptor = -1
+        os.fsync(root_descriptor)
+
+        written = RunManifest.from_mapping(
+            _read_private_json_at(root_descriptor, artifact_name)
+        )
+        if written != validated:
+            raise ValueError("DCI reproduction manifest verification failed")
+        verified = True
+        return artifact_name
+    except ValueError:
+        raise
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise ValueError("DCI reproduction manifest write failed") from None
+    finally:
+        if artifact_descriptor >= 0:
+            os.close(artifact_descriptor)
+        if created and root_descriptor >= 0:
+            try:
+                if not verified:
+                    os.unlink(artifact_name, dir_fd=root_descriptor)
+            except OSError:
+                pass
+        if root_descriptor >= 0:
+            os.close(root_descriptor)
+
+
 def load_run_manifest(path: Path) -> RunManifest:
     """Load one exact, duplicate-key-free, body-free reproduction manifest."""
 

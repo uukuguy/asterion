@@ -61,6 +61,7 @@ from asterion.dci.experiment_profiles import (
     ExperimentProfile,
     FullExecutionAuthorization,
     FullExecutionReservation,
+    _authorized_manifest_output_identity,
     authorized_scope_output_root,
     cancel_full_execution_authorization,
     consumed_full_execution_authorization_snapshot,
@@ -70,6 +71,7 @@ from asterion.dci.experiment_profiles import (
     reserve_full_execution_operation,
     resolve_experiment_profile,
 )
+from asterion.dci.reproduction import compile_run_manifest, write_run_manifest
 from asterion.dci.judge import (
     ASTERION_SAFE_JUDGE_CONTRACT,
     JudgeConfig,
@@ -254,12 +256,36 @@ def execute_authorized_reproduction(
             expected_roots[scope_id] = authorized_root
 
         benchmark_totals: dict[str, int] = {}
-        for item in execution_items:
+        for index, item in enumerate(execution_items):
             result = run_benchmark(item.request, paths=item.paths)
             if Path(os.path.abspath(os.path.normpath(result.output_root))) != (
                 expected_roots[item.scope_id]
             ):
                 raise DciBenchmarkError("DCI benchmark authorization root changed")
+            try:
+                manifest = compile_run_manifest(result.output_root, profile)
+                manifest_root, manifest_device, manifest_inode = (
+                    _authorized_manifest_output_identity(authority)
+                )
+                manifest_artifact = write_run_manifest(
+                    manifest_root,
+                    (manifest_device, manifest_inode),
+                    item.scope_id,
+                    manifest,
+                )
+            except (
+                ExperimentAuthorizationError,
+                OSError,
+                RuntimeError,
+                ValueError,
+            ) as error:
+                raise DciBenchmarkError(
+                    "DCI benchmark manifest evidence failed"
+                ) from error
+            output_identities[index]["manifest_artifact"] = manifest_artifact
+            output_identities[index]["manifest_identity_sha256"] = (
+                manifest.identity_sha256
+            )
             for key, value in result.counts.items():
                 if type(value) is int:
                     benchmark_totals[key] = benchmark_totals.get(key, 0) + value

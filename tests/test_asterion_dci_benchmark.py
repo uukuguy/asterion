@@ -1104,9 +1104,21 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 )
                 return BenchmarkResult(request.output_root, {"total": 1})
 
-            with patch(
-                "asterion.dci.benchmark.run_benchmark",
-                side_effect=run_spy,
+            with (
+                patch(
+                    "asterion.dci.benchmark.run_benchmark",
+                    side_effect=run_spy,
+                ),
+                patch(
+                    "asterion.dci.benchmark.compile_run_manifest",
+                    return_value=Mock(identity_sha256="a" * 64),
+                ),
+                patch(
+                    "asterion.dci.benchmark.write_run_manifest",
+                    side_effect=lambda _root, _identity, scope, _manifest: (
+                        hashlib.sha256(scope.encode()).hexdigest() + ".json"
+                    ),
+                ),
             ):
                 result = benchmark_module.execute_authorized_reproduction(
                     authority=authority,
@@ -1127,6 +1139,261 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         rendered = json.dumps(result, sort_keys=True)
         self.assertNotIn("fixture-q-1", rendered)
         self.assertNotIn("_issuance_token", rendered)
+
+    def test_authorized_reproduction_compiles_each_manifest_before_next_scope(
+        self,
+    ) -> None:
+        from asterion.dci import benchmark as benchmark_module
+
+        scopes = (
+            "bright.biology.main.full",
+            "bright.earth-science.main.full",
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            profile = resolve_experiment_profile("paper-reference/pi")
+            authority = _bounded_authorize_full_execution(
+                profile=profile,
+                scope_ids=scopes,
+                output_root=root / "authorized",
+                max_agent_operations=10,
+                max_judge_operations=1,
+                max_cost_usd=5.0,
+                max_agent_cost_per_operation_usd=0.1,
+                max_judge_cost_per_operation_usd=0.1,
+            )
+            paths = resolve_dci_paths(root)
+            items = tuple(
+                benchmark_module.AuthorizedBenchmarkExecution(
+                    scope_id=scope,
+                    request=BenchmarkRequest(
+                        dataset=root / f"{scope}.jsonl",
+                        output_root=authorized_scope_output_root(authority, scope),
+                        cwd=root,
+                        judge_config=JudgeConfig(),
+                        runtime_options=DciRuntimeOptions(
+                            provider="openai", model="gpt-5.4-nano"
+                        ),
+                        mode="ir",
+                        profile=profile.profile_id,
+                        full_execution_authorization=authority,
+                        experiment_scope_id=scope,
+                        paper_ir_duplicate_handling="deduplicated",
+                    ),
+                    paths=paths,
+                )
+                for scope in scopes
+            )
+            events: list[tuple[str, str]] = []
+            manifests = {
+                scope: Mock(identity_sha256=hashlib.sha256(scope.encode()).hexdigest())
+                for scope in scopes
+            }
+            scope_by_root = {
+                item.request.output_root: item.scope_id for item in items
+            }
+
+            def run_spy(
+                request: BenchmarkRequest, *, paths: object
+            ) -> BenchmarkResult:
+                del paths
+                scope = request.experiment_scope_id or ""
+                events.append(("run", scope))
+                consume_full_execution_authorization(
+                    request.full_execution_authorization,
+                    scope,
+                )
+                return BenchmarkResult(request.output_root, {"total": 1})
+
+            def compile_spy(
+                output_root: Path, supplied_profile: ExperimentProfile
+            ) -> object:
+                self.assertIs(supplied_profile, profile)
+                scope = scope_by_root[output_root]
+                events.append(("compile", scope))
+                return manifests[scope]
+
+            def write_spy(
+                manifest_root: Path,
+                expected_identity: tuple[int, int],
+                scope_id: str,
+                manifest: object,
+            ) -> str:
+                metadata = manifest_root.stat()
+                self.assertEqual(
+                    expected_identity, (metadata.st_dev, metadata.st_ino)
+                )
+                self.assertIs(manifest, manifests[scope_id])
+                events.append(("write", scope_id))
+                return hashlib.sha256(scope_id.encode()).hexdigest() + ".json"
+
+            with (
+                patch(
+                    "asterion.dci.benchmark.run_benchmark",
+                    side_effect=run_spy,
+                ),
+                patch(
+                    "asterion.dci.benchmark.compile_run_manifest",
+                    side_effect=compile_spy,
+                ),
+                patch(
+                    "asterion.dci.benchmark.write_run_manifest",
+                    side_effect=write_spy,
+                ),
+            ):
+                result = benchmark_module.execute_authorized_reproduction(
+                    authority=authority,
+                    profile=profile,
+                    scope_ids=scopes,
+                    output_root=root / "authorized",
+                    execution_items=items,
+                )
+
+        self.assertEqual(
+            events,
+            [
+                ("run", scopes[0]),
+                ("compile", scopes[0]),
+                ("write", scopes[0]),
+                ("run", scopes[1]),
+                ("compile", scopes[1]),
+                ("write", scopes[1]),
+            ],
+        )
+        for index, scope in enumerate(scopes):
+            output = result["outputs"][index]
+            self.assertEqual(
+                set(output),
+                {
+                    "scope_id",
+                    "output_root_device",
+                    "output_root_inode",
+                    "manifest_artifact",
+                    "manifest_identity_sha256",
+                },
+            )
+            self.assertEqual(output["scope_id"], scope)
+            self.assertRegex(
+                output["manifest_artifact"], r"^[0-9a-f]{64}\.json$"
+            )
+            self.assertRegex(
+                output["manifest_identity_sha256"], r"^[0-9a-f]{64}$"
+            )
+
+    def test_manifest_failure_cancels_authority_and_stops(self) -> None:
+        from asterion.dci import benchmark as benchmark_module
+
+        scopes = (
+            "bright.biology.main.full",
+            "bright.earth-science.main.full",
+        )
+        sentinels = (
+            "fixture-private-query-id",
+            "/private/sentinel/output",
+            "SECRET prompt body",
+        )
+        for failure_phase in ("compiler", "writer"):
+            with (
+                self.subTest(failure_phase=failure_phase),
+                tempfile.TemporaryDirectory() as temporary_directory,
+            ):
+                root = Path(temporary_directory).resolve()
+                profile = resolve_experiment_profile("paper-reference/pi")
+                authority = _bounded_authorize_full_execution(
+                    profile=profile,
+                    scope_ids=scopes,
+                    output_root=root / "authorized",
+                    max_agent_operations=10,
+                    max_judge_operations=1,
+                    max_cost_usd=5.0,
+                    max_agent_cost_per_operation_usd=0.1,
+                    max_judge_cost_per_operation_usd=0.1,
+                )
+                paths = resolve_dci_paths(root)
+                items = tuple(
+                    benchmark_module.AuthorizedBenchmarkExecution(
+                        scope_id=scope,
+                        request=BenchmarkRequest(
+                            dataset=root / f"{scope}.jsonl",
+                            output_root=authorized_scope_output_root(authority, scope),
+                            cwd=root,
+                            judge_config=JudgeConfig(),
+                            runtime_options=DciRuntimeOptions(
+                                provider="openai", model="gpt-5.4-nano"
+                            ),
+                            mode="ir",
+                            profile=profile.profile_id,
+                            full_execution_authorization=authority,
+                            experiment_scope_id=scope,
+                            paper_ir_duplicate_handling="deduplicated",
+                        ),
+                        paths=paths,
+                    )
+                    for scope in scopes
+                )
+                started: list[str] = []
+
+                def run_spy(
+                    request: BenchmarkRequest, *, paths: object
+                ) -> BenchmarkResult:
+                    del paths
+                    scope = request.experiment_scope_id or ""
+                    started.append(scope)
+                    consume_full_execution_authorization(
+                        request.full_execution_authorization,
+                        scope,
+                    )
+                    return BenchmarkResult(request.output_root, {"total": 1})
+
+                unsafe_error = (
+                    RuntimeError(" ".join(sentinels))
+                    if failure_phase == "compiler"
+                    else ValueError(" ".join(sentinels))
+                )
+                compile_side_effect: object = (
+                    unsafe_error
+                    if failure_phase == "compiler"
+                    else Mock(identity_sha256="a" * 64)
+                )
+                write_side_effect: object = (
+                    unsafe_error
+                    if failure_phase == "writer"
+                    else "a" * 64 + ".json"
+                )
+                with (
+                    patch(
+                        "asterion.dci.benchmark.run_benchmark",
+                        side_effect=run_spy,
+                    ),
+                    patch(
+                        "asterion.dci.benchmark.compile_run_manifest",
+                        side_effect=compile_side_effect,
+                    ),
+                    patch(
+                        "asterion.dci.benchmark.write_run_manifest",
+                        side_effect=write_side_effect,
+                    ),
+                    self.assertRaises(DciBenchmarkError) as raised,
+                ):
+                    benchmark_module.execute_authorized_reproduction(
+                        authority=authority,
+                        profile=profile,
+                        scope_ids=scopes,
+                        output_root=root / "authorized",
+                        execution_items=items,
+                    )
+
+                self.assertEqual(started, [scopes[0]])
+                public_error = str(raised.exception)
+                for sentinel in sentinels:
+                    self.assertNotIn(sentinel, public_error)
+                with self.assertRaisesRegex(
+                    ExperimentAuthorizationError,
+                    "inactive|cancelled",
+                ):
+                    reserve_full_execution_operation(
+                        authority, scopes[1], "agent"
+                    )
 
     def test_authorized_reproduction_coordinator_rejects_mismatch_before_run(
         self,

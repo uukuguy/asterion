@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import Mock, patch
 
+from asterion.dci import cli as cli_module
 from asterion.dci import experiment_profiles as profiles
 from asterion.dci.benchmark import (
     BenchmarkRequest,
@@ -54,6 +55,18 @@ def receipt_ledger(receipt: dict[str, object]) -> dict[str, object]:
 
 def query_ids(count: int) -> tuple[str, ...]:
     return tuple(f"q-{index}" for index in range(1, count + 1))
+
+
+def reproduction_output(scope_id: str, *, identity: int = 1) -> dict[str, object]:
+    return {
+        "scope_id": scope_id,
+        "output_root_device": identity,
+        "output_root_inode": identity,
+        "manifest_artifact": hashlib.sha256(scope_id.encode()).hexdigest() + ".json",
+        "manifest_identity_sha256": hashlib.sha256(
+            f"manifest:{scope_id}".encode()
+        ).hexdigest(),
+    }
 
 
 def authorize(
@@ -1977,11 +1990,8 @@ class ReproductionCliTests(unittest.TestCase):
                     "total": 7,
                 },
                 "outputs": [
-                    {
-                        "scope_id": item.scope_id,
-                        "output_root": str(item.request.output_root),
-                    }
-                    for item in items
+                    reproduction_output(item.scope_id, identity=index)
+                    for index, item in enumerate(items, 1)
                 ],
                 "receipt": {
                     "schema": "dci.full-execution-authorization-receipt/v1",
@@ -2097,8 +2107,8 @@ class ReproductionCliTests(unittest.TestCase):
                 "schema": "dci.paper-reproduction-result/v1",
                 "operation_counts": {"agent": 2, "judge": 1, "total": 3},
                 "outputs": [
-                    {"scope_id": item.scope_id}
-                    for item in kwargs["execution_items"]
+                    reproduction_output(item.scope_id, identity=index)
+                    for index, item in enumerate(kwargs["execution_items"], 1)
                 ],
             }
 
@@ -2177,7 +2187,7 @@ class ReproductionCliTests(unittest.TestCase):
                 return_value={
                     "schema": "dci.paper-reproduction-result/v1",
                     "operation_counts": {"agent": 3, "judge": 1, "total": 4},
-                    "outputs": [{"scope_id": scopes[0]}],
+                    "outputs": [reproduction_output(scopes[0])],
                 },
                 create=True,
             ):
@@ -2198,6 +2208,93 @@ class ReproductionCliTests(unittest.TestCase):
         self.assertIn("Judge operations performed: 1", stdout.getvalue())
         self.assertNotIn("Agent operations performed: 0", stdout.getvalue())
         self.assertNotIn("Judge operations performed: 0", stdout.getvalue())
+
+    def test_execution_result_prints_only_body_free_manifest_evidence(self) -> None:
+        stdout = io.StringIO()
+        scope_id = "bright.biology.main.full"
+        artifact = hashlib.sha256(scope_id.encode()).hexdigest() + ".json"
+        cli_module._write_reproduction_execution_result(
+            stdout,
+            {
+                "operation_counts": {"agent": 3, "judge": 1, "total": 4},
+                "outputs": [
+                    {
+                        "scope_id": scope_id,
+                        "output_root_device": 123,
+                        "output_root_inode": 456,
+                        "manifest_artifact": artifact,
+                        "manifest_identity_sha256": "a" * 64,
+                    }
+                ],
+            },
+        )
+
+        rendered = stdout.getvalue()
+        self.assertIn(f"manifest_scope={scope_id}\n", rendered)
+        self.assertIn(f"manifest_artifact={artifact}\n", rendered)
+        self.assertIn(f"manifest_identity_sha256={'a' * 64}\n", rendered)
+        for sentinel in (
+            "output_root_device",
+            "output_root_inode",
+            "/private/sentinel",
+            "fixture-query-id",
+            "SECRET prompt body",
+        ):
+            self.assertNotIn(sentinel, rendered)
+
+    def test_execution_result_rejects_malformed_manifest_evidence(self) -> None:
+        scope_id = "bright.biology.main.full"
+        artifact = hashlib.sha256(scope_id.encode()).hexdigest() + ".json"
+        valid_output = {
+            "scope_id": scope_id,
+            "output_root_device": 123,
+            "output_root_inode": 456,
+            "manifest_artifact": artifact,
+            "manifest_identity_sha256": "a" * 64,
+        }
+        invalid_outputs = {
+            "absolute artifact": {**valid_output, "manifest_artifact": "/tmp/a.json"},
+            "separator artifact": {
+                **valid_output,
+                "manifest_artifact": "private/a.json",
+            },
+            "traversal artifact": {
+                **valid_output,
+                "manifest_artifact": "../a.json",
+            },
+            "malformed artifact": {
+                **valid_output,
+                "manifest_artifact": "A" * 64 + ".json",
+            },
+            "malformed digest": {
+                **valid_output,
+                "manifest_identity_sha256": "not-a-digest",
+            },
+            "extra private path": {
+                **valid_output,
+                "private_path": "/private/sentinel",
+            },
+            "extra query body": {
+                **valid_output,
+                "query": "fixture-query-id SECRET prompt body",
+            },
+        }
+        for label, output in invalid_outputs.items():
+            with self.subTest(label=label):
+                stdout = io.StringIO()
+                with self.assertRaises(ValueError):
+                    cli_module._write_reproduction_execution_result(
+                        stdout,
+                        {
+                            "operation_counts": {
+                                "agent": 3,
+                                "judge": 1,
+                                "total": 4,
+                            },
+                            "outputs": [output],
+                        },
+                    )
+                self.assertEqual(stdout.getvalue(), "")
 
     def test_execute_cancels_authority_when_child_root_lookup_fails(self) -> None:
         captured: dict[str, FullExecutionAuthorization] = {}

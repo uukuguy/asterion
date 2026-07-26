@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import os
+import stat
 import tempfile
 import threading
 import unittest
@@ -13,6 +14,7 @@ from types import MappingProxyType
 from typing import Any, Callable, cast
 from unittest.mock import patch
 
+from asterion.dci import reproduction as reproduction_module
 from asterion.dci.artifacts import DciConversationFeatures
 from asterion.dci.benchmark import BenchmarkRequest, run_benchmark
 from asterion.dci.config import DciPaths, DciRuntimeOptions, resolve_dci_paths
@@ -24,6 +26,7 @@ from asterion.dci.reproduction import (
     RunManifest,
     compare_reproduction,
     compile_run_manifest,
+    load_run_manifest,
     validate_run_manifest,
 )
 from asterion.dci.run import (
@@ -411,6 +414,142 @@ class TestDciRunManifestCompiler(unittest.TestCase):
         payload.pop("identity_sha256")
         payload["identity_sha256"] = canonical_sha256(payload)
         return payload
+
+    def test_write_run_manifest_is_private_and_descriptor_bound(self) -> None:
+        scope_id = "bright.biology.main.full"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            batch = root / "batch"
+            batch.mkdir(mode=0o700)
+            self._batch(batch)
+            manifest_root = root / "manifests"
+            manifest_root.mkdir(mode=0o700)
+            manifest = compile_run_manifest(
+                batch, resolve_experiment_profile("paper-reference/pi")
+            )
+            expected_identity = (
+                manifest_root.stat().st_dev,
+                manifest_root.stat().st_ino,
+            )
+            batch_inventory = tuple(
+                sorted(path.relative_to(batch).as_posix() for path in batch.rglob("*"))
+            )
+
+            artifact = reproduction_module.write_run_manifest(
+                manifest_root,
+                expected_identity,
+                scope_id,
+                manifest,
+            )
+
+            self.assertEqual(
+                artifact,
+                hashlib.sha256(scope_id.encode("utf-8")).hexdigest() + ".json",
+            )
+            written = manifest_root / artifact
+            self.assertEqual(stat.S_IMODE(written.stat().st_mode), 0o600)
+            self.assertEqual(load_run_manifest(written), manifest)
+            self.assertEqual(
+                tuple(
+                    sorted(
+                        path.relative_to(batch).as_posix()
+                        for path in batch.rglob("*")
+                    )
+                ),
+                batch_inventory,
+            )
+
+            invalid_manifests = (
+                {**manifest.to_dict(), "profile_sha256": "0" * 64},
+                {**manifest.to_dict(), "prompt": "/private/sentinel/body"},
+            )
+            for invalid in invalid_manifests:
+                with self.subTest(kind="invalid manifest"):
+                    with self.assertRaises(ValueError):
+                        reproduction_module.write_run_manifest(
+                            manifest_root,
+                            expected_identity,
+                            "bright.earth-science.main.full",
+                            invalid,
+                        )
+            with self.assertRaises(ValueError):
+                reproduction_module.write_run_manifest(
+                    manifest_root,
+                    expected_identity,
+                    "../private/sentinel",
+                    manifest,
+                )
+            self.assertEqual(
+                tuple(
+                    sorted(
+                        path.relative_to(batch).as_posix()
+                        for path in batch.rglob("*")
+                    )
+                ),
+                batch_inventory,
+            )
+
+    def test_write_run_manifest_rejects_replacement_and_overwrite(self) -> None:
+        scope_id = "bright.biology.main.full"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            batch = root / "batch"
+            batch.mkdir(mode=0o700)
+            self._batch(batch)
+            manifest = compile_run_manifest(
+                batch, resolve_experiment_profile("paper-reference/pi")
+            )
+            batch_inventory = tuple(
+                sorted(path.relative_to(batch).as_posix() for path in batch.rglob("*"))
+            )
+
+            replaced = root / "replaced-manifests"
+            replaced.mkdir(mode=0o700)
+            replaced_identity = (replaced.stat().st_dev, replaced.stat().st_ino)
+            replaced.rename(root / "original-manifests")
+            replaced.mkdir(mode=0o700)
+            with self.assertRaises(ValueError):
+                reproduction_module.write_run_manifest(
+                    replaced,
+                    replaced_identity,
+                    scope_id,
+                    manifest,
+                )
+
+            target = root / "target-manifests"
+            target.mkdir(mode=0o700)
+            symlink = root / "symlink-manifests"
+            symlink.symlink_to(target, target_is_directory=True)
+            target_identity = (target.stat().st_dev, target.stat().st_ino)
+            with self.assertRaises(ValueError):
+                reproduction_module.write_run_manifest(
+                    symlink,
+                    target_identity,
+                    scope_id,
+                    manifest,
+                )
+
+            artifact = hashlib.sha256(scope_id.encode("utf-8")).hexdigest() + ".json"
+            existing = target / artifact
+            existing.write_text("do not overwrite\n", encoding="utf-8")
+            existing.chmod(0o600)
+            with self.assertRaises(ValueError):
+                reproduction_module.write_run_manifest(
+                    target,
+                    target_identity,
+                    scope_id,
+                    manifest,
+                )
+            self.assertEqual(existing.read_text(encoding="utf-8"), "do not overwrite\n")
+            self.assertEqual(
+                tuple(
+                    sorted(
+                        path.relative_to(batch).as_posix()
+                        for path in batch.rglob("*")
+                    )
+                ),
+                batch_inventory,
+            )
 
     def test_compile_run_manifest_validates_locked_batch_and_compares_body_free(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

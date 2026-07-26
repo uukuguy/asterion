@@ -8,6 +8,7 @@ import io
 import json
 import math
 import os
+import re
 import secrets
 import stat
 import sys
@@ -1259,22 +1260,79 @@ def _write_reproduction_execution_result(
     operation_counts = result.get("operation_counts")
     if not isinstance(operation_counts, dict):
         raise ValueError("paper reproduction result is invalid")
-    agent_operations = int(operation_counts.get("agent", 0))
-    judge_operations = int(operation_counts.get("judge", 0))
-    stdout.write("Full authorization issued: yes\n")
-    stdout.write("reproduction_authorized=yes\n")
-    stdout.write(f"Agent operations performed: {agent_operations}\n")
-    stdout.write(f"Judge operations performed: {judge_operations}\n")
-    stdout.write(f"operation_count={agent_operations + judge_operations}\n")
-    outputs = result.get("outputs")
-    if not isinstance(outputs, list):
+    agent_operations = operation_counts.get("agent")
+    judge_operations = operation_counts.get("judge")
+    if (
+        type(agent_operations) is not int
+        or agent_operations < 0
+        or type(judge_operations) is not int
+        or judge_operations < 0
+    ):
         raise ValueError("paper reproduction result is invalid")
+    outputs = result.get("outputs")
+    if not isinstance(outputs, list) or not outputs:
+        raise ValueError("paper reproduction result is invalid")
+    output_keys = {
+        "scope_id",
+        "output_root_device",
+        "output_root_inode",
+        "manifest_artifact",
+        "manifest_identity_sha256",
+    }
+    rendered_outputs: list[str] = []
     for output in outputs:
-        if not isinstance(output, dict) or not isinstance(
-            output.get("scope_id"), str
+        if not isinstance(output, dict) or set(output) != output_keys:
+            raise ValueError("paper reproduction result is invalid")
+        scope_id = output["scope_id"]
+        artifact = output["manifest_artifact"]
+        manifest_identity = output["manifest_identity_sha256"]
+        output_device = output["output_root_device"]
+        output_inode = output["output_root_inode"]
+        if (
+            type(scope_id) is not str
+            or type(artifact) is not str
+            or re.fullmatch(r"[0-9a-f]{64}\.json", artifact) is None
+            or Path(artifact).is_absolute()
+            or Path(artifact).name != artifact
+            or "/" in artifact
+            or "\\" in artifact
+            or type(manifest_identity) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", manifest_identity) is None
+            or type(output_device) is not int
+            or output_device < 0
+            or type(output_inode) is not int
+            or output_inode < 0
         ):
             raise ValueError("paper reproduction result is invalid")
-        stdout.write(f"output_scope={output['scope_id']}\n")
+        try:
+            from asterion.dci.paper_benchmarks import (
+                resolve_paper_experiment_scope,
+            )
+
+            canonical_scope = resolve_paper_experiment_scope(scope_id).scope_id
+        except ValueError:
+            raise ValueError("paper reproduction result is invalid") from None
+        if canonical_scope != scope_id:
+            raise ValueError("paper reproduction result is invalid")
+        rendered_outputs.extend(
+            (
+                f"manifest_scope={scope_id}\n",
+                f"manifest_artifact={artifact}\n",
+                f"manifest_identity_sha256={manifest_identity}\n",
+            )
+        )
+    stdout.write(
+        "".join(
+            (
+                "Full authorization issued: yes\n",
+                "reproduction_authorized=yes\n",
+                f"Agent operations performed: {agent_operations}\n",
+                f"Judge operations performed: {judge_operations}\n",
+                f"operation_count={agent_operations + judge_operations}\n",
+                *rendered_outputs,
+            )
+        )
+    )
 
 
 def _read_question(
