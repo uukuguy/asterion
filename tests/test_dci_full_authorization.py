@@ -44,6 +44,7 @@ from asterion.dci.experiment_profiles import (
 from asterion.dci.judge import JudgeConfig
 from asterion.dci.paper_benchmarks import (
     canonical_sha256,
+    resolve_paper_benchmark,
     resolve_paper_experiment_scope,
 )
 from asterion.dci.verification import paper_reproduce_main
@@ -91,6 +92,14 @@ def authorize(
         )
         for scope in scopes
     }
+    expected_judge_operations = sum(
+        len(query_ids_by_scope[scope])
+        for scope in scopes
+        if resolve_paper_benchmark(
+            resolve_paper_experiment_scope(scope).dataset_id
+        ).mode
+        == "qa"
+    )
     return authorize_full_execution(
         profile=resolve_experiment_profile("paper-reference/pi"),
         scope_ids=scopes,
@@ -104,7 +113,7 @@ def authorize(
         planned_agent_operations=sum(
             len(query_ids_by_scope[scope]) for scope in scopes
         ),
-        planned_judge_operations=0,
+        planned_judge_operations=expected_judge_operations,
         output_root=output_root,
         max_agent_operations=max_agents,
         max_judge_operations=max_judges,
@@ -116,6 +125,163 @@ def authorize(
 
 
 class FullExecutionAuthorizationTests(unittest.TestCase):
+    def test_requires_exact_scope_derived_judge_operation_plan(self) -> None:
+        invalid_cases = {
+            "QA understated": {
+                "scope_ids": ("browsecomp-plus.main.all830",),
+                "selected_query_counts": (1,),
+                "planned_judge_operations": 0,
+                "max_judge_operations": 2,
+            },
+            "QA overstated": {
+                "scope_ids": ("browsecomp-plus.main.all830",),
+                "selected_query_counts": (1,),
+                "planned_judge_operations": 2,
+                "max_judge_operations": 2,
+            },
+            "IR nonzero": {
+                "scope_ids": ("bright.biology.main.full",),
+                "selected_query_counts": (1,),
+                "planned_judge_operations": 1,
+                "max_judge_operations": 2,
+            },
+            "mixed scope mismatch": {
+                "scope_ids": (
+                    "bright.biology.main.full",
+                    "browsecomp-plus.main.all830",
+                ),
+                "selected_query_counts": (2, 3),
+                "planned_judge_operations": 2,
+                "max_judge_operations": 3,
+            },
+            "exact plan exceeds Judge cap": {
+                "scope_ids": ("browsecomp-plus.main.all830",),
+                "selected_query_counts": (2,),
+                "planned_judge_operations": 2,
+                "max_judge_operations": 1,
+            },
+        }
+        for label, case in invalid_cases.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary:
+                output_root = Path(temporary) / "private-output-must-not-exist"
+                selected_counts = cast(
+                    tuple[int, ...], case["selected_query_counts"]
+                )
+                with self.assertRaisesRegex(
+                    ExperimentAuthorizationError,
+                    "^full execution bounded operation plan is invalid$",
+                ) as raised:
+                    authorize_full_execution(
+                        profile=resolve_experiment_profile("paper-reference/pi"),
+                        scope_ids=cast(tuple[str, ...], case["scope_ids"]),
+                        bounded_selected_ids_sha256=tuple(
+                            canonical_sha256(query_ids(count))
+                            for count in selected_counts
+                        ),
+                        selected_query_counts=selected_counts,
+                        planned_agent_operations=sum(selected_counts),
+                        planned_judge_operations=cast(
+                            int, case["planned_judge_operations"]
+                        ),
+                        output_root=output_root,
+                        max_agent_operations=sum(selected_counts),
+                        max_judge_operations=cast(
+                            int, case["max_judge_operations"]
+                        ),
+                        max_cost_usd=10,
+                        max_agent_cost_per_operation_usd=2,
+                        max_judge_cost_per_operation_usd=1,
+                        invocation_authorized=True,
+                    )
+                self.assertEqual(
+                    str(raised.exception),
+                    "full execution bounded operation plan is invalid",
+                )
+                self.assertFalse(output_root.exists())
+
+        valid_cases = {
+            "QA exact": {
+                "scope_ids": ("browsecomp-plus.main.all830",),
+                "selected_query_counts": (2,),
+                "planned_judge_operations": 2,
+            },
+            "IR exact": {
+                "scope_ids": ("bright.biology.main.full",),
+                "selected_query_counts": (2,),
+                "planned_judge_operations": 0,
+            },
+            "mixed exact": {
+                "scope_ids": (
+                    "bright.biology.main.full",
+                    "browsecomp-plus.main.all830",
+                ),
+                "selected_query_counts": (2, 3),
+                "planned_judge_operations": 3,
+            },
+        }
+        for label, case in valid_cases.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary:
+                selected_counts = cast(
+                    tuple[int, ...], case["selected_query_counts"]
+                )
+                authority = authorize_full_execution(
+                    profile=resolve_experiment_profile("paper-reference/pi"),
+                    scope_ids=cast(tuple[str, ...], case["scope_ids"]),
+                    bounded_selected_ids_sha256=tuple(
+                        canonical_sha256(query_ids(count))
+                        for count in selected_counts
+                    ),
+                    selected_query_counts=selected_counts,
+                    planned_agent_operations=sum(selected_counts),
+                    planned_judge_operations=cast(
+                        int, case["planned_judge_operations"]
+                    ),
+                    output_root=Path(temporary) / "private",
+                    max_agent_operations=sum(selected_counts),
+                    max_judge_operations=max(
+                        1, cast(int, case["planned_judge_operations"])
+                    ),
+                    max_cost_usd=10,
+                    max_agent_cost_per_operation_usd=2,
+                    max_judge_cost_per_operation_usd=1,
+                    invocation_authorized=True,
+                )
+                self.assertEqual(
+                    authority.planned_judge_operations,
+                    case["planned_judge_operations"],
+                )
+
+    def test_legacy_omitted_plans_default_to_exact_scope_derived_counts(self) -> None:
+        profile = resolve_experiment_profile("paper-reference/pi")
+        scope_id = "browsecomp-plus.main.all830"
+        selected_digest = dict(
+            zip(profile.scope_ids, profile.selected_ids_sha256, strict=True)
+        )[scope_id]
+        with tempfile.TemporaryDirectory() as temporary:
+            authority = authorize_full_execution(
+                profile_id=profile.profile_id,
+                output_root=Path(temporary) / "private",
+                estimated_budget_usd=10,
+                invocation_authorized=True,
+                preflight_profile_sha256=profile.identity_sha256,
+                preflight_dataset_inventory_sha256=(
+                    profile.dataset_inventory_sha256
+                ),
+                preflight_experiment_scopes_sha256=(
+                    profile.experiment_scopes_sha256
+                ),
+                preflight_scope_ids=(scope_id,),
+                preflight_selected_ids_sha256=(selected_digest,),
+                bounded_selected_ids_sha256=(canonical_sha256(("q-001",)),),
+                selected_query_counts=(1,),
+                max_agent_operations=1,
+                max_judge_operations=1,
+                max_agent_cost_per_operation_usd=2,
+                max_judge_cost_per_operation_usd=1,
+            )
+        self.assertEqual(authority.planned_agent_operations, 1)
+        self.assertEqual(authority.planned_judge_operations, 1)
+
     def test_bounded_selection_and_manifest_root_are_identity_bound(self) -> None:
         scope_id = "bright.biology.main.full"
         bounded_digest = canonical_sha256(("q-001",))

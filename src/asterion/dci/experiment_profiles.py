@@ -23,6 +23,7 @@ from asterion.dci.paper_benchmarks import (
     paper_benchmark_inventory_sha256,
     paper_experiment_scope_ids,
     paper_experiment_scopes_sha256,
+    resolve_paper_benchmark,
     resolve_paper_experiment_scope,
 )
 from asterion.dci.provenance import dci_complete_implementation_identity
@@ -1090,9 +1091,6 @@ def authorize_full_execution(
         if planned_agent_operations is None
         else planned_agent_operations
     )
-    planned_judge_count = (
-        0 if planned_judge_operations is None else planned_judge_operations
-    )
     if (
         len(bounded_digests) != len(requested_scope_ids)
         or len(selected_counts) != len(requested_scope_ids)
@@ -1113,12 +1111,23 @@ def authorize_full_execution(
         raise ExperimentAuthorizationError(
             "full execution bounded selection is invalid"
         )
+    expected_judge_count = sum(
+        count
+        for count, scope in zip(selected_counts, scope_contracts, strict=True)
+        if resolve_paper_benchmark(scope.dataset_id).mode == "qa"
+    )
+    planned_judge_count = (
+        expected_judge_count
+        if planned_judge_operations is None
+        else planned_judge_operations
+    )
     if (
         type(planned_agent_count) is not int
         or planned_agent_count < 1
         or type(planned_judge_count) is not int
         or planned_judge_count < 0
         or sum(selected_counts) != planned_agent_count
+        or planned_judge_count != expected_judge_count
         or planned_agent_count > agent_operation_limit
         or planned_judge_count > judge_operation_limit
     ):
