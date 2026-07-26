@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
 import tempfile
 import unittest
 from importlib import resources
@@ -547,6 +548,76 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
 
         self.assertEqual(code, 0, stderr.getvalue())
         self.assertEqual(captured[0].resolution_read_minimum_evidence_overlap, 0.75)
+
+    def test_benchmark_cli_propagates_coordinator_output_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            dataset = root / "dataset.jsonl"
+            corpus = root / "corpus"
+            output = root / "out"
+            corpus.mkdir()
+            output.mkdir(mode=0o700)
+            dataset.write_text(
+                json.dumps(
+                    {
+                        "query_id": "q-1",
+                        "query": "question",
+                        "answer": "answer",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            metadata = output.stat()
+            captured: list[BenchmarkRequest] = []
+
+            def capture(
+                request: BenchmarkRequest, *, paths: object
+            ) -> BenchmarkResult:
+                del paths
+                captured.append(request)
+                return BenchmarkResult(request.output_root, {"total": 1})
+
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "ASTERION_DCI_EXPECTED_OUTPUT_DEVICE": str(
+                            metadata.st_dev
+                        ),
+                        "ASTERION_DCI_EXPECTED_OUTPUT_INODE": str(
+                            metadata.st_ino
+                        ),
+                    },
+                ),
+                patch(
+                    "asterion.dci.cli.run_benchmark",
+                    side_effect=capture,
+                ),
+                patch("asterion.dci.cli.validate_dci_run_request"),
+            ):
+                code = dci_main(
+                    [
+                        "benchmark",
+                        "--dataset",
+                        str(dataset),
+                        "--output-root",
+                        str(output),
+                        "--cwd",
+                        str(root),
+                        "--corpus",
+                        str(corpus),
+                    ],
+                    repo_root=root,
+                    stdout=__import__("io").StringIO(),
+                    stderr=__import__("io").StringIO(),
+                )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            captured[0].expected_output_root_identity,
+            (metadata.st_dev, metadata.st_ino),
+        )
 
     def test_ablation_propagates_its_exact_resolution_overlap(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -2427,6 +2498,36 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                     run_benchmark(request, paths=Mock())
 
         run.assert_not_called()
+
+    def test_expected_output_identity_rejects_replacement_before_evidence_write(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            output_root = root / "out"
+            output_root.mkdir(mode=0o700)
+            metadata = output_root.stat()
+            request = replace(
+                _request(root),
+                expected_output_root_identity=(
+                    metadata.st_dev,
+                    metadata.st_ino,
+                ),
+            )
+            output_root.rename(root / "original-out")
+            output_root.mkdir(mode=0o700)
+
+            with (
+                patch("asterion.dci.benchmark.run_pi_research") as run,
+                self.assertRaisesRegex(
+                    DciBenchmarkError,
+                    "output root identity changed",
+                ),
+            ):
+                run_benchmark(request, paths=Mock())
+
+            run.assert_not_called()
+            self.assertEqual(tuple(output_root.iterdir()), ())
 
 
 def _request(root: Path, *, query_id: str = "q-1") -> BenchmarkRequest:

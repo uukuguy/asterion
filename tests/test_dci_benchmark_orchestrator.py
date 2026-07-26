@@ -8,6 +8,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
@@ -137,6 +138,67 @@ class BenchmarkPlanTests(unittest.TestCase):
             self.assertEqual(plan.environment["DCI_MODEL"], "process-model")
             self.assertEqual(plan.resource_root, (root / "process-root").resolve())
 
+    def test_relative_resource_root_is_canonical_in_the_child_environment(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            env_directory = root / "configuration"
+            env_directory.mkdir()
+            env_file = env_directory / "operator.env"
+            env_file.write_text(
+                "ASTERION_DCI_RESOURCE_ROOT=../resources\n",
+                encoding="utf-8",
+            )
+
+            plan = build_plan(
+                RunOptions(env_file=env_file),
+                process_environment={},
+                invocation_cwd=root / "unrelated-cwd",
+                run_label="fixture-run",
+            )
+
+            expected = str((root / "resources").resolve())
+            self.assertEqual(plan.resource_root, Path(expected))
+            self.assertEqual(
+                plan.environment["ASTERION_DCI_RESOURCE_ROOT"],
+                expected,
+            )
+            launcher = next(task for task in plan.tasks if task.launcher is not None)
+            direct = next(task for task in plan.tasks if task.launcher is None)
+            command = build_task_command(plan, direct, root / "batch")
+            self.assertTrue(
+                command[command.index("--dataset") + 1].startswith(expected)
+            )
+            self.assertTrue(
+                command[command.index("--corpus") + 1].startswith(expected)
+            )
+            child_environments: list[dict[str, str]] = []
+
+            def capture_environment(
+                command, *, cwd, environment, on_line
+            ) -> int:
+                del command, cwd, on_line
+                child_environments.append(dict(environment))
+                return 0
+
+            bounded = replace(plan, tasks=(launcher, direct))
+            self.assertEqual(
+                execute_plan(
+                    bounded,
+                    stream=io.StringIO(),
+                    executor=capture_environment,
+                ),
+                0,
+            )
+            self.assertEqual(len(child_environments), 3)
+            self.assertTrue(
+                all(
+                    environment["ASTERION_DCI_RESOURCE_ROOT"] == expected
+                    for environment in child_environments
+                )
+            )
+
     def test_invalid_positive_integer_and_missing_env_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -224,6 +286,37 @@ class BenchmarkCliTests(unittest.TestCase):
                 self.assertIn(option, result.stdout)
         self.assertNotIn("--cost", result.stdout)
         self.assertNotIn("--usd", result.stdout.lower())
+
+    def test_cli_argument_failures_are_stable_body_free_and_unabbreviated(
+        self,
+    ) -> None:
+        sentinel = "/private/SENTINEL-operator-path"
+        cases = (
+            ("invalid-suite", ("--suite", sentinel)),
+            ("invalid-integer", ("--limit", sentinel)),
+            ("unknown-option", (f"--unknown={sentinel}",)),
+            ("abbreviation", ("--max-conc", "1")),
+        )
+        for label, arguments in cases:
+            with self.subTest(label=label):
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        "tools/run_dci_benchmarks.py",
+                        *arguments,
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(
+                    result.stderr,
+                    "ERROR: DCI benchmark arguments are invalid\n",
+                )
+                self.assertEqual(result.stdout, "")
+                self.assertNotIn(sentinel, result.stderr)
 
 
 class BenchmarkEntrypointTests(unittest.TestCase):
@@ -316,6 +409,12 @@ class _StubbornFakeProcess:
         return -9
 
 
+class _IrreapableFakeProcess(_StubbornFakeProcess):
+    def wait(self, timeout=None) -> int:
+        self.wait_timeouts.append(timeout)
+        raise subprocess.TimeoutExpired(("fake-child",), timeout)
+
+
 class _RaisingStream:
     def write(self, value: str) -> int:
         raise BrokenPipeError("private-stream-path")
@@ -359,6 +458,95 @@ class StreamCommandTests(unittest.TestCase):
                 self.assertTrue(process.killed)
                 self.assertEqual(len(process.wait_timeouts), 2)
                 self.assertIsNotNone(process.wait_timeouts[0])
+
+    def test_cleanup_waits_are_bounded_when_a_child_cannot_be_reaped(
+        self,
+    ) -> None:
+        process = _IrreapableFakeProcess()
+
+        with (
+            patch(
+                "tools.dci_benchmark_orchestrator.subprocess.Popen",
+                return_value=process,
+            ),
+            self.assertRaisesRegex(
+                OrchestratorError,
+                "^DCI benchmark child process cleanup failed$",
+            ),
+        ):
+            stream_command(
+                ("fake-command",),
+                cwd=PROJECT,
+                environment={},
+                on_line=lambda line: (_ for _ in ()).throw(
+                    RuntimeError("callback failed")
+                ),
+            )
+
+        self.assertEqual(len(process.wait_timeouts), 2)
+        self.assertTrue(
+            all(timeout is not None for timeout in process.wait_timeouts)
+        )
+
+    @unittest.skipUnless(
+        hasattr(os, "killpg") and os.name == "posix",
+        "process groups require POSIX",
+    )
+    def test_callback_failure_stops_a_real_descendant_process(self) -> None:
+        descendant_pid: int | None = None
+        script = (
+            "import signal, subprocess, sys, time\n"
+            "child = subprocess.Popen([sys.executable, '-c', "
+            "\"import signal,time; "
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)\"])\n"
+            "print(f'DESCENDANT={child.pid}', flush=True)\n"
+            "time.sleep(60)\n"
+        )
+
+        def fail_after_descendant(line: str) -> None:
+            nonlocal descendant_pid
+            if line.startswith("DESCENDANT="):
+                descendant_pid = int(line.partition("=")[2])
+            raise RuntimeError("callback failed")
+
+        try:
+            with (
+                patch.object(
+                    orchestrator,
+                    "_CHILD_STOP_TIMEOUT_SECONDS",
+                    0.2,
+                ),
+                self.assertRaisesRegex(RuntimeError, "^callback failed$"),
+            ):
+                stream_command(
+                    (sys.executable, "-c", script),
+                    cwd=PROJECT,
+                    environment=os.environ,
+                    on_line=fail_after_descendant,
+                )
+
+            self.assertIsNotNone(descendant_pid)
+            assert descendant_pid is not None
+            deadline = time.monotonic() + 2.0
+            running = True
+            while time.monotonic() < deadline:
+                status = subprocess.run(
+                    ["ps", "-o", "stat=", "-p", str(descendant_pid)],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+                running = bool(status) and not status.startswith("Z")
+                if not running:
+                    break
+                time.sleep(0.02)
+            self.assertFalse(running, "descendant process survived cleanup")
+        finally:
+            if descendant_pid is not None:
+                try:
+                    os.kill(descendant_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
 
 class BenchmarkExecutionTests(unittest.TestCase):
@@ -881,6 +1069,67 @@ class BenchmarkExecutionTests(unittest.TestCase):
                 replacement.read_text(encoding="utf-8"),
                 '{"unsafe": "provider-body"}\n',
             )
+
+    def test_replaced_batch_root_is_attested_before_any_child_write(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plan = self._plan(root)
+            plan = replace(plan, tasks=(plan.tasks[0],))
+            calls = 0
+            replacement: Path | None = None
+
+            def identity_checking_child(
+                command, *, cwd, environment, on_line
+            ):
+                del cwd, on_line
+                nonlocal calls, replacement
+                calls += 1
+                if calls == 1:
+                    return 0
+                output_root = Path(
+                    command[command.index("--output-root") + 1]
+                )
+                moved = output_root.with_name("original-batch")
+                output_root.rename(moved)
+                output_root.mkdir(mode=0o700)
+                replacement = output_root
+                metadata = output_root.stat()
+                if (
+                    "ASTERION_DCI_EXPECTED_OUTPUT_DEVICE" not in environment
+                    or "ASTERION_DCI_EXPECTED_OUTPUT_INODE" not in environment
+                ):
+                    (output_root / "provider-private.json").write_text(
+                        '{"private": true}\n',
+                        encoding="utf-8",
+                    )
+                    return 0
+                expected = (
+                    int(environment["ASTERION_DCI_EXPECTED_OUTPUT_DEVICE"]),
+                    int(environment["ASTERION_DCI_EXPECTED_OUTPUT_INODE"]),
+                )
+                if (metadata.st_dev, metadata.st_ino) != expected:
+                    return 2
+                (output_root / "provider-private.json").write_text(
+                    '{"private": true}\n',
+                    encoding="utf-8",
+                )
+                return 0
+
+            with self.assertRaisesRegex(
+                OrchestratorError,
+                "^DCI benchmark task root changed$",
+            ):
+                execute_plan(
+                    plan,
+                    stream=io.StringIO(),
+                    executor=identity_checking_child,
+                )
+
+            self.assertIsNotNone(replacement)
+            assert replacement is not None
+            self.assertEqual(tuple(replacement.iterdir()), ())
 
     def test_unsafe_promoted_summary_is_removed_when_still_bound(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

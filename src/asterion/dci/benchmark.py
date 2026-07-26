@@ -184,6 +184,7 @@ class BenchmarkRequest:
     experiment_scope_id: str | None = None
     paper_ir_duplicate_handling: str | None = None
     dataset_input_binding: DatasetInputBinding | None = None
+    expected_output_root_identity: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -381,6 +382,7 @@ async def run_benchmark_async(
 ) -> BenchmarkResult:
     """Run one bounded batch while retaining its writer lock until all work drains."""
 
+    expected_identity = _expected_output_root_identity(request)
     try:
         authorized_identity = _authorize_paper_execution_before_inputs(request)
         rows, output_root, config, row_documents, snapshots = _prepare(request)
@@ -396,12 +398,19 @@ async def run_benchmark_async(
     except BaseException:
         _cancel_request_authorization(request)
         raise
-    expected_identity: tuple[int, int] | None = None
     if authorized_identity is not None:
         authorized_root, device, inode = authorized_identity
         if authorized_root != output_root:
             raise DciBenchmarkError("DCI benchmark authorization root changed")
-        expected_identity = (device, inode)
+        authorized_pair = (device, inode)
+        if (
+            expected_identity is not None
+            and expected_identity != authorized_pair
+        ):
+            raise DciBenchmarkError(
+                "DCI benchmark authorized output root identity changed"
+            )
+        expected_identity = authorized_pair
     try:
         lock = _BatchLock.acquire(output_root, expected_identity=expected_identity)
     except BaseException:
@@ -532,6 +541,23 @@ async def run_benchmark_async(
         for authority in row_authorities.values():
             authority.close()
         lock.release()
+
+
+def _expected_output_root_identity(
+    request: BenchmarkRequest,
+) -> tuple[int, int] | None:
+    identity = request.expected_output_root_identity
+    if identity is None:
+        return None
+    if (
+        type(identity) is not tuple
+        or len(identity) != 2
+        or any(type(value) is not int or value < 0 for value in identity)
+    ):
+        raise DciBenchmarkError(
+            "DCI benchmark output root identity is invalid"
+        )
+    return identity
 
 
 def run_benchmark(request: BenchmarkRequest, *, paths: DciPaths) -> BenchmarkResult:

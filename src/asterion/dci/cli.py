@@ -82,6 +82,8 @@ _EXPERIMENT_PROFILE_CLI_ALIASES = {
     "current-default/claude-subscription": "asterion-safe/claude-subscription",
     "current-default/claude-minimax": "asterion-safe/claude-minimax",
 }
+_EXPECTED_OUTPUT_DEVICE = "ASTERION_DCI_EXPECTED_OUTPUT_DEVICE"
+_EXPECTED_OUTPUT_INODE = "ASTERION_DCI_EXPECTED_OUTPUT_INODE"
 
 
 class _ReproductionLimits(TypedDict):
@@ -637,6 +639,9 @@ def main(
                     externalize_tool_results=args.conversation_externalize_tool_results,
                     strip_thinking=args.conversation_strip_thinking,
                     strip_usage=args.conversation_strip_usage,
+                ),
+                expected_output_root_identity=(
+                    _expected_benchmark_output_identity()
                 ),
             )
             validate_benchmark_metric_selection(benchmark_request)
@@ -1217,6 +1222,21 @@ def _profile_judge_config(profile: ExperimentProfile) -> JudgeConfig:
         api_key_env=api_key_env,
         api_key=os.environ.get(api_key_env, "").strip(),
     )
+
+
+def _expected_benchmark_output_identity() -> tuple[int, int] | None:
+    device = os.environ.get(_EXPECTED_OUTPUT_DEVICE)
+    inode = os.environ.get(_EXPECTED_OUTPUT_INODE)
+    if device is None and inode is None:
+        return None
+    if (
+        device is None
+        or inode is None
+        or re.fullmatch(r"[0-9]{1,32}", device) is None
+        or re.fullmatch(r"[0-9]{1,32}", inode) is None
+    ):
+        raise ValueError("benchmark output identity is invalid")
+    return int(device), int(inode)
 
 
 def _preflight_benchmark_host_inputs(request: BenchmarkRequest) -> None:

@@ -28,6 +28,9 @@ _SECRET_NAME = re.compile(r"(?:KEY|TOKEN|SECRET|PASSWORD)", re.IGNORECASE)
 CommandExecutor = Callable[..., int]
 _CHILD_FAILURE_EXIT = 2
 _CHILD_STOP_TIMEOUT_SECONDS = 5.0
+_KILL_SIGNAL = getattr(signal, "SIGKILL", signal.SIGTERM)
+_EXPECTED_OUTPUT_DEVICE = "ASTERION_DCI_EXPECTED_OUTPUT_DEVICE"
+_EXPECTED_OUTPUT_INODE = "ASTERION_DCI_EXPECTED_OUTPUT_INODE"
 _DIRECTORY_FLAGS = (
     os.O_RDONLY
     | getattr(os, "O_DIRECTORY", 0)
@@ -208,6 +211,7 @@ def build_plan(
         if not resource_value.strip()
         else _configured_path(resource_value, base=env_file.parent)
     )
+    environment["ASTERION_DCI_RESOURCE_ROOT"] = str(resource_root)
     output_value = environment.get("ASTERION_DCI_OUTPUT_ROOT", "")
     configured_output = (
         PROJECT / "outputs" / "asterion-dci-runs"
@@ -307,6 +311,7 @@ def stream_command(
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            start_new_session=os.name == "posix",
         )
     except OSError:
         raise OrchestratorError(
@@ -323,22 +328,48 @@ def stream_command(
             process.stdout.close()
         except OSError:
             pass
-        try:
-            if isinstance(error, KeyboardInterrupt):
-                process.send_signal(signal.SIGINT)
-            else:
-                process.terminate()
-        except OSError:
-            pass
+        initial_signal = (
+            signal.SIGINT if isinstance(error, KeyboardInterrupt) else signal.SIGTERM
+        )
+        used_process_group = _signal_process_tree(process, initial_signal)
+        timed_out = False
         try:
             process.wait(timeout=_CHILD_STOP_TIMEOUT_SECONDS)
         except subprocess.TimeoutExpired:
-            try:
-                process.kill()
-            except OSError:
-                pass
-            process.wait()
+            timed_out = True
+        if used_process_group or timed_out:
+            _signal_process_tree(process, _KILL_SIGNAL, force=True)
+        try:
+            process.wait(timeout=_CHILD_STOP_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            raise OrchestratorError(
+                "DCI benchmark child process cleanup failed"
+            ) from None
         raise
+
+
+def _signal_process_tree(
+    process: subprocess.Popen[str],
+    value: int,
+    *,
+    force: bool = False,
+) -> bool:
+    if os.name == "posix" and hasattr(os, "killpg"):
+        try:
+            os.killpg(process.pid, value)
+            return True
+        except (AttributeError, OSError, TypeError):
+            pass
+    try:
+        if force:
+            process.kill()
+        elif value == signal.SIGTERM:
+            process.terminate()
+        else:
+            process.send_signal(value)
+    except OSError:
+        pass
+    return False
 
 
 def _redactor(plan: RunPlan) -> Callable[[str], str]:
@@ -923,10 +954,17 @@ def execute_plan(
                 _assert_identity(task_root)
                 _assert_identity(batch_root)
                 _assert_log_identity(log_binding)
+                task_environment = dict(plan.environment)
+                task_environment[_EXPECTED_OUTPUT_DEVICE] = str(
+                    batch_root.identity[0]
+                )
+                task_environment[_EXPECTED_OUTPUT_INODE] = str(
+                    batch_root.identity[1]
+                )
                 exit_code = executor(
                     build_task_command(plan, task, batch_root.path),
                     cwd=PROJECT,
-                    environment=plan.environment,
+                    environment=MappingProxyType(task_environment),
                     on_line=record_child,
                 )
             except KeyboardInterrupt:

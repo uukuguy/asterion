@@ -16,8 +16,17 @@ from dci_benchmark_orchestrator import (
 )
 
 
+class _StableArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        del message
+        raise OrchestratorError("DCI benchmark arguments are invalid")
+
+
 def parse_args(argv: Sequence[str] | None = None) -> RunOptions:
-    parser = argparse.ArgumentParser(description="Run Asterion DCI benchmarks")
+    parser = _StableArgumentParser(
+        description="Run Asterion DCI benchmarks",
+        allow_abbrev=False,
+    )
     parser.add_argument("--suite", choices=("github", "paper-main", "all"), default="all")
     parser.add_argument("--limit", type=int, default=1)
     parser.add_argument("--max-concurrency", type=int, default=1)
