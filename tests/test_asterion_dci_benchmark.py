@@ -45,8 +45,11 @@ from asterion.dci.judge import (
     judge_request_shape_sha256,
 )
 from asterion.dci.paper_benchmarks import (
+    DatasetInputBinding,
     canonical_sha256,
     published_scope_selected_ids,
+    resolve_paper_benchmark,
+    resolve_paper_experiment_scope,
 )
 from asterion.dci.pi_rpc import FINAL_ANSWER_RECOVERY_PROMPT
 from asterion.dci.prompts import (
@@ -64,6 +67,45 @@ from asterion.dci.run import DciRunResult, run_pi_research as _real_run_pi_resea
 from asterion.runtime.host import RunEvent
 
 
+def _fixture_dataset_binding(
+    scope_id: str,
+    *,
+    raw_content_sha256: str = "a" * 64,
+    device: int = 1,
+    inode: int = 2,
+) -> DatasetInputBinding:
+    benchmark = resolve_paper_benchmark(
+        resolve_paper_experiment_scope(scope_id).dataset_id
+    )
+    return DatasetInputBinding(
+        raw_content_sha256=raw_content_sha256,
+        paper_benchmark_identity_sha256=benchmark.identity_sha256,
+        device=device,
+        inode=inode,
+    )
+
+
+def _dataset_binding_for_path(
+    path: Path,
+    scope_id: str,
+) -> DatasetInputBinding:
+    metadata = path.stat()
+    return _fixture_dataset_binding(
+        scope_id,
+        raw_content_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+        device=metadata.st_dev,
+        inode=metadata.st_ino,
+    )
+
+
+def _authority_dataset_binding(
+    authority: FullExecutionAuthorization,
+    scope_id: str,
+) -> DatasetInputBinding:
+    index = authority.authorized_scope_ids.index(scope_id)
+    return authority.dataset_input_bindings[index]
+
+
 def _bounded_authorize_full_execution(
     *,
     profile: ExperimentProfile,
@@ -79,6 +121,10 @@ def _bounded_authorize_full_execution(
     return authorize_full_execution(
         profile=profile,
         scope_ids=scope_ids,
+        dataset_input_bindings=tuple(
+            _fixture_dataset_binding(scope_id, inode=index)
+            for index, scope_id in enumerate(scope_ids, 2)
+        ),
         bounded_selected_ids_sha256=tuple(
             canonical_sha256(ids) for ids in query_ids
         ),
@@ -174,21 +220,6 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         query_id = "q-001"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
-            authority = authorize_full_execution(
-                profile=resolve_experiment_profile("paper-reference/pi"),
-                scope_ids=(scope_id,),
-                bounded_selected_ids_sha256=(canonical_sha256((query_id,)),),
-                selected_query_counts=(1,),
-                planned_agent_operations=1,
-                planned_judge_operations=0,
-                output_root=root / "private",
-                max_agent_operations=1,
-                max_judge_operations=1,
-                max_cost_usd=1,
-                max_agent_cost_per_operation_usd=1,
-                max_judge_cost_per_operation_usd=1,
-                invocation_authorized=True,
-            )
             dataset = root / "dataset.jsonl"
             dataset.write_text(
                 json.dumps(
@@ -201,8 +232,26 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
+            dataset_binding = _dataset_binding_for_path(dataset, scope_id)
+            authority = authorize_full_execution(
+                profile=resolve_experiment_profile("paper-reference/pi"),
+                scope_ids=(scope_id,),
+                dataset_input_bindings=(dataset_binding,),
+                bounded_selected_ids_sha256=(canonical_sha256((query_id,)),),
+                selected_query_counts=(1,),
+                planned_agent_operations=1,
+                planned_judge_operations=0,
+                output_root=root / "private",
+                max_agent_operations=1,
+                max_judge_operations=1,
+                max_cost_usd=1,
+                max_agent_cost_per_operation_usd=1,
+                max_judge_cost_per_operation_usd=1,
+                invocation_authorized=True,
+            )
             request = BenchmarkRequest(
                 dataset=dataset,
+                dataset_input_binding=dataset_binding,
                 output_root=authorized_scope_output_root(authority, scope_id),
                 cwd=root,
                 judge_config=JudgeConfig(),
@@ -242,21 +291,6 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         scope_id = "bright.biology.main.full"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
-            authority = authorize_full_execution(
-                profile=resolve_experiment_profile("paper-reference/pi"),
-                scope_ids=(scope_id,),
-                bounded_selected_ids_sha256=(canonical_sha256(("q-001",)),),
-                selected_query_counts=(1,),
-                planned_agent_operations=1,
-                planned_judge_operations=0,
-                output_root=root / "private-output-must-not-leak",
-                max_agent_operations=1,
-                max_judge_operations=1,
-                max_cost_usd=1,
-                max_agent_cost_per_operation_usd=1,
-                max_judge_cost_per_operation_usd=1,
-                invocation_authorized=True,
-            )
             dataset = root / "private-dataset.jsonl"
             dataset.write_text(
                 json.dumps(
@@ -269,8 +303,26 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
+            dataset_binding = _dataset_binding_for_path(dataset, scope_id)
+            authority = authorize_full_execution(
+                profile=resolve_experiment_profile("paper-reference/pi"),
+                scope_ids=(scope_id,),
+                dataset_input_bindings=(dataset_binding,),
+                bounded_selected_ids_sha256=(canonical_sha256(("q-001",)),),
+                selected_query_counts=(1,),
+                planned_agent_operations=1,
+                planned_judge_operations=0,
+                output_root=root / "private-output-must-not-leak",
+                max_agent_operations=1,
+                max_judge_operations=1,
+                max_cost_usd=1,
+                max_agent_cost_per_operation_usd=1,
+                max_judge_cost_per_operation_usd=1,
+                invocation_authorized=True,
+            )
             request = BenchmarkRequest(
                 dataset=dataset,
+                dataset_input_binding=dataset_binding,
                 output_root=authorized_scope_output_root(authority, scope_id),
                 cwd=root,
                 judge_config=JudgeConfig(),
@@ -1146,6 +1198,14 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 consume_full_execution_authorization(
                     request.full_execution_authorization,
                     request.experiment_scope_id or "",
+                    request.dataset_input_binding
+                    or _authority_dataset_binding(
+                        cast(
+                            FullExecutionAuthorization,
+                            request.full_execution_authorization,
+                        ),
+                        request.experiment_scope_id or "",
+                    ),
                 )
                 return BenchmarkResult(request.output_root, {"total": 1})
 
@@ -1247,6 +1307,14 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 consume_full_execution_authorization(
                     request.full_execution_authorization,
                     scope,
+                    request.dataset_input_binding
+                    or _authority_dataset_binding(
+                        cast(
+                            FullExecutionAuthorization,
+                            request.full_execution_authorization,
+                        ),
+                        scope,
+                    ),
                 )
                 return BenchmarkResult(request.output_root, {"total": 1})
 
@@ -1358,9 +1426,11 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 encoding="utf-8",
             )
             profile = resolve_experiment_profile("paper-reference/pi")
+            dataset_binding = _dataset_binding_for_path(dataset, scope_id)
             authority = authorize_full_execution(
                 profile=profile,
                 scope_ids=(scope_id,),
+                dataset_input_bindings=(dataset_binding,),
                 bounded_selected_ids_sha256=(canonical_sha256(bounded_ids),),
                 selected_query_counts=(1,),
                 planned_agent_operations=1,
@@ -1381,6 +1451,7 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
             )
             request = BenchmarkRequest(
                 dataset=dataset,
+                dataset_input_binding=dataset_binding,
                 output_root=authorized_scope_output_root(authority, scope_id),
                 cwd=root,
                 judge_config=judge_config,
@@ -1494,7 +1565,11 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 request: BenchmarkRequest, *, paths: object
             ) -> BenchmarkResult:
                 del paths
-                consume_full_execution_authorization(authority, scope_id)
+                consume_full_execution_authorization(
+                    authority,
+                    scope_id,
+                    _authority_dataset_binding(authority, scope_id),
+                )
                 manifest_root.rename(root / "replaced-manifest-root")
                 manifest_root.mkdir(mode=0o700)
                 return BenchmarkResult(request.output_root, {"total": 1})
@@ -1612,6 +1687,14 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                     consume_full_execution_authorization(
                         request.full_execution_authorization,
                         scope,
+                        request.dataset_input_binding
+                        or _authority_dataset_binding(
+                            cast(
+                                FullExecutionAuthorization,
+                                request.full_execution_authorization,
+                            ),
+                            scope,
+                        ),
                     )
                     return BenchmarkResult(request.output_root, {"total": 1})
 

@@ -75,6 +75,7 @@ from asterion.dci.system_prompt import render_pi_system_prompt
 
 if TYPE_CHECKING:
     from asterion.dci.experiment_profiles import ExperimentProfile
+    from asterion.dci.paper_benchmarks import DatasetInputBinding
 
 _EXPERIMENT_PROFILE_CLI_ALIASES = {
     "current-default/pi": "asterion-safe/pi",
@@ -475,7 +476,7 @@ def main(
                 stdout=stdout,
                 stderr=stderr,
             )
-        except (RuntimeError, ValueError):
+        except (OSError, RuntimeError, ValueError):
             stderr.write("DCI paper command failed\n")
             return 2
     try:
@@ -925,10 +926,24 @@ def _paper_reproduce_cli(
         validate_dci_run_request(runtime_preflight)
         validate_benchmark_metric_selection(request)
 
-    preflight_selected_ids = tuple(
+    preflight_datasets = tuple(
         _preflight_scope_selected_ids(request, scope_id)
         for scope_id, request in zip(
             selected_scope_ids, preflight_requests, strict=True
+        )
+    )
+    preflight_selected_ids = tuple(
+        selected_ids for selected_ids, _binding in preflight_datasets
+    )
+    dataset_input_bindings = tuple(
+        binding for _selected_ids, binding in preflight_datasets
+    )
+    preflight_requests = tuple(
+        replace(request, dataset_input_binding=binding)
+        for request, binding in zip(
+            preflight_requests,
+            dataset_input_bindings,
+            strict=True,
         )
     )
     bounded_selected_ids = tuple(
@@ -954,6 +969,7 @@ def _paper_reproduce_cli(
         max_judge_cost_per_operation_usd=limits[
             "max_judge_cost_per_operation_usd"
         ],
+        dataset_input_bindings=dataset_input_bindings,
         bounded_selected_ids_sha256=bounded_digests,
         selected_query_counts=selected_counts,
         planned_agent_operations=max_agent_operations,
@@ -1204,23 +1220,19 @@ def _profile_judge_config(profile: ExperimentProfile) -> JudgeConfig:
 
 
 def _preflight_benchmark_host_inputs(request: BenchmarkRequest) -> None:
-    if not request.dataset.is_file() or _path_has_symlink(request.dataset):
-        raise ValueError("paper reproduction dataset is unavailable")
     if request.corpus is None or not request.corpus.is_dir() or _path_has_symlink(
         request.corpus
     ):
         raise ValueError("paper reproduction corpus is unavailable")
     if not request.cwd.is_dir() or _path_has_symlink(request.cwd):
         raise ValueError("paper reproduction cwd is unavailable")
-    with request.dataset.open("rb"):
-        pass
     with os.scandir(request.corpus):
         pass
 
 
 def _preflight_scope_selected_ids(
     request: BenchmarkRequest, scope_id: str
-) -> tuple[str, ...]:
+) -> tuple[tuple[str, ...], DatasetInputBinding]:
     from asterion.dci.datasets import (
         DatasetError,
         load_beir_benchmark_rows_bytes,
@@ -1230,13 +1242,17 @@ def _preflight_scope_selected_ids(
     from asterion.dci.paper_benchmarks import (
         resolve_paper_benchmark,
         resolve_paper_experiment_scope,
+        read_paper_benchmark_dataset,
         select_and_verify_scope_ids,
     )
 
     scope = resolve_paper_experiment_scope(scope_id)
     benchmark = resolve_paper_benchmark(scope.dataset_id)
-    raw = request.dataset.read_bytes()
     try:
+        raw, binding = read_paper_benchmark_dataset(
+            request.dataset,
+            benchmark,
+        )
         if benchmark.dataset_id.startswith("bright."):
             rows = load_bright_benchmark_rows_bytes(
                 raw, expected_count=benchmark.source_count
@@ -1249,8 +1265,8 @@ def _preflight_scope_selected_ids(
             rows = load_benchmark_rows_bytes(raw)
         source_ids = tuple(row.query_id for row in rows)
         select_and_verify_scope_ids(scope_id, source_ids)
-        return source_ids
-    except (DatasetError, ValueError) as error:
+        return source_ids, binding
+    except (DatasetError, OSError, ValueError) as error:
         raise ValueError("paper reproduction selected IDs are invalid") from error
 
 

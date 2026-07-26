@@ -19,6 +19,7 @@ from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
 from asterion.dci.paper_benchmarks import (
+    DatasetInputBinding,
     canonical_sha256,
     paper_benchmark_inventory_sha256,
     paper_experiment_scope_ids,
@@ -196,6 +197,7 @@ class FullExecutionAuthorization:
     dataset_inventory_sha256: str
     experiment_scopes_sha256: str
     authorized_scope_ids: tuple[str, ...]
+    dataset_input_bindings: tuple[DatasetInputBinding, ...] = field(repr=False)
     selected_ids_sha256: tuple[str, ...]
     bounded_selected_ids_sha256: tuple[str, ...]
     selected_query_counts: tuple[int, ...]
@@ -238,6 +240,7 @@ class _AuthorizationSnapshot:
     dataset_inventory_sha256: str
     experiment_scopes_sha256: str
     authorized_scope_ids: tuple[str, ...]
+    dataset_input_bindings: tuple[DatasetInputBinding, ...]
     selected_ids_sha256: tuple[str, ...]
     bounded_selected_ids_sha256: tuple[str, ...]
     selected_query_counts: tuple[int, ...]
@@ -780,6 +783,8 @@ def _authorization_matches_snapshot(
         and authorization.experiment_scopes_sha256
         == snapshot.experiment_scopes_sha256
         and authorization.authorized_scope_ids == snapshot.authorized_scope_ids
+        and authorization.dataset_input_bindings
+        == snapshot.dataset_input_bindings
         and authorization.selected_ids_sha256 == snapshot.selected_ids_sha256
         and authorization.bounded_selected_ids_sha256
         == snapshot.bounded_selected_ids_sha256
@@ -938,6 +943,7 @@ def authorize_full_execution(
     max_cost_usd: float | None = None,
     max_agent_cost_per_operation_usd: float | None = None,
     max_judge_cost_per_operation_usd: float | None = None,
+    dataset_input_bindings: Sequence[DatasetInputBinding] | None = None,
     bounded_selected_ids_sha256: Sequence[str] | None = None,
     selected_query_counts: Sequence[int] | None = None,
     planned_agent_operations: int | None = None,
@@ -1075,6 +1081,26 @@ def authorize_full_execution(
         raise ExperimentAuthorizationError(
             "full execution authorization is invalid"
         ) from None
+    input_bindings = tuple(dataset_input_bindings or ())
+    if (
+        len(input_bindings) != len(requested_scope_ids)
+        or any(type(binding) is not DatasetInputBinding for binding in input_bindings)
+        or any(
+            re.fullmatch(r"[0-9a-f]{64}", binding.raw_content_sha256) is None
+            or type(binding.device) is not int
+            or binding.device < 0
+            or type(binding.inode) is not int
+            or binding.inode < 1
+            or binding.paper_benchmark_identity_sha256
+            != resolve_paper_benchmark(scope.dataset_id).identity_sha256
+            for binding, scope in zip(
+                input_bindings, scope_contracts, strict=True
+            )
+        )
+    ):
+        raise ExperimentAuthorizationError(
+            "full execution dataset input binding is invalid"
+        )
     default_counts = tuple(scope.selection_count for scope in scope_contracts)
     bounded_digests = (
         selected_digests
@@ -1220,6 +1246,7 @@ def authorize_full_execution(
         dataset_inventory_sha256=profile.dataset_inventory_sha256,
         experiment_scopes_sha256=profile.experiment_scopes_sha256,
         authorized_scope_ids=requested_scope_ids,
+        dataset_input_bindings=input_bindings,
         selected_ids_sha256=selected_digests,
         bounded_selected_ids_sha256=bounded_digests,
         selected_query_counts=selected_counts,
@@ -1242,6 +1269,7 @@ def authorize_full_execution(
         dataset_inventory_sha256=profile.dataset_inventory_sha256,
         experiment_scopes_sha256=profile.experiment_scopes_sha256,
         authorized_scope_ids=requested_scope_ids,
+        dataset_input_bindings=input_bindings,
         selected_ids_sha256=selected_digests,
         bounded_selected_ids_sha256=bounded_digests,
         selected_query_counts=selected_counts,
@@ -1288,13 +1316,29 @@ def authorize_full_execution(
 
 
 def consume_full_execution_authorization(
-    authorization: FullExecutionAuthorization, scope_id: str
+    authorization: FullExecutionAuthorization,
+    scope_id: str,
+    dataset_input_binding: DatasetInputBinding | None = None,
 ) -> None:
     """Consume one exact scope capability after revalidating its private root."""
 
     with _AUTHORIZATION_LOCK:
         record = _validate_authorization(authorization)
         _validate_scope_output(record, scope_id)
+        try:
+            binding_index = record.snapshot.authorized_scope_ids.index(scope_id)
+        except ValueError:
+            raise ExperimentAuthorizationError(
+                "full execution authorization scope is invalid"
+            ) from None
+        if (
+            type(dataset_input_binding) is not DatasetInputBinding
+            or dataset_input_binding
+            != record.snapshot.dataset_input_bindings[binding_index]
+        ):
+            raise ExperimentAuthorizationError(
+                "full execution dataset input binding is invalid"
+            )
         if scope_id in record.consumed_scopes:
             raise ExperimentAuthorizationError(
                 "full execution authorization replay is invalid"
@@ -1360,6 +1404,21 @@ def _authorized_scope_selection_identity(
             record.snapshot.bounded_selected_ids_sha256[index],
             record.snapshot.selected_query_counts[index],
         )
+
+
+def _authorized_scope_dataset_input_binding(
+    authority: FullExecutionAuthorization,
+    scope_id: str,
+) -> DatasetInputBinding:
+    with _AUTHORIZATION_LOCK:
+        record = _validate_authorization(authority)
+        try:
+            index = record.snapshot.authorized_scope_ids.index(scope_id)
+        except ValueError:
+            raise ExperimentAuthorizationError(
+                "full execution authorization scope is invalid"
+            ) from None
+        return record.snapshot.dataset_input_bindings[index]
 
 
 def _issue_reservation(**values: object) -> FullExecutionReservation:

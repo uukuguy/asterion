@@ -79,10 +79,12 @@ from asterion.dci.judge import (
     judge_request_fingerprint,
 )
 from asterion.dci.paper_benchmarks import (
+    DatasetInputBinding,
     canonical_sha256,
     paper_scope_for_profile,
     paper_scope_for_selected_ids,
     published_scope_selected_ids,
+    read_paper_benchmark_dataset,
     require_af320_executable_scope,
     resolve_paper_benchmark,
     resolve_paper_experiment_scope,
@@ -159,6 +161,7 @@ class BenchmarkRequest:
     cwd: Path
     judge_config: JudgeConfig
     runtime_options: DciRuntimeOptions
+    dataset_input_binding: DatasetInputBinding | None = None
     limit: int | None = None
     mode: str = "qa"
     profile: str | None = None
@@ -376,8 +379,8 @@ async def run_benchmark_async(
 ) -> BenchmarkResult:
     """Run one bounded batch while retaining its writer lock until all work drains."""
 
-    authorized_identity = _authorize_paper_execution_before_inputs(request)
     try:
+        authorized_identity = _authorize_paper_execution_before_inputs(request)
         rows, output_root, config, row_documents, snapshots = _prepare(request)
     except BaseException:
         _cancel_request_authorization(request)
@@ -581,11 +584,22 @@ def _authorize_paper_execution_before_inputs(
 
     from asterion.dci.experiment_profiles import (
         ExperimentAuthorizationError,
+        _authorized_scope_dataset_input_binding,
         _authorized_scope_output_identity,
         authorized_scope_output_root,
     )
 
     try:
+        authorized_binding = _authorized_scope_dataset_input_binding(
+            authorization, scope_id
+        )
+        if (
+            type(request.dataset_input_binding) is not DatasetInputBinding
+            or request.dataset_input_binding != authorized_binding
+        ):
+            raise DciBenchmarkError(
+                "DCI benchmark authorization dataset changed"
+            )
         authorized_root = authorized_scope_output_root(authorization, scope_id)
     except ExperimentAuthorizationError as error:
         raise DciBenchmarkError("DCI benchmark authorization scope changed") from error
@@ -616,7 +630,11 @@ def _consume_paper_execution_after_inputs(
     )
 
     try:
-        require_af320_executable_scope(scope_id, authorization)
+        require_af320_executable_scope(
+            scope_id,
+            authorization,
+            request.dataset_input_binding,
+        )
         consumed_identity = _consumed_authorized_output_identity(
             authorization, scope_id
         )
@@ -946,22 +964,48 @@ def _prepare(
         and not bounded_paper_selection
     ):
         raise DciBenchmarkError("DCI benchmark requires full execution authorization")
-    try:
+    opened_dataset_binding: DatasetInputBinding | None = None
+    authorized_dataset_benchmark = None
+    if (
+        request.full_execution_authorization is not None
+        and request.experiment_scope_id is not None
+    ):
+        try:
+            authorized_dataset_benchmark = resolve_paper_benchmark(
+                resolve_paper_experiment_scope(
+                    request.experiment_scope_id
+                ).dataset_id
+            )
+            dataset_raw, opened_dataset_binding = (
+                read_paper_benchmark_dataset(
+                    request.dataset,
+                    authorized_dataset_benchmark,
+                )
+            )
+        except (OSError, ValueError) as error:
+            raise DciBenchmarkError(
+                "DCI benchmark dataset is unavailable"
+            ) from error
+    else:
         dataset_raw = _read_input_snapshot(request.dataset)
+    try:
         beir_scope = {
             "beir.arguana": "beir.arguana.main.random50",
             "beir.scifact": "beir.scifact.main.random50",
         }.get(request.profile)
-        bright_benchmark = None
+        paper_dataset_benchmark = None
         if paper_scope is not None:
             candidate = resolve_paper_benchmark(
                 resolve_paper_experiment_scope(paper_scope).dataset_id
             )
-            if candidate.dataset_id.startswith("bright."):
-                bright_benchmark = candidate
-        if bright_benchmark is not None:
+            paper_dataset_benchmark = candidate
+        if (
+            paper_dataset_benchmark is not None
+            and paper_dataset_benchmark.dataset_id.startswith("bright.")
+        ):
             rows = load_bright_benchmark_rows_bytes(
-                dataset_raw, expected_count=bright_benchmark.source_count
+                dataset_raw,
+                expected_count=paper_dataset_benchmark.source_count,
             )
         elif beir_scope is None:
             try:
@@ -1002,10 +1046,17 @@ def _prepare(
         if authorized_scope is None:
             raise DciBenchmarkError("DCI benchmark authorization scope changed")
         from asterion.dci.experiment_profiles import (
+            _authorized_scope_dataset_input_binding,
             _authorized_scope_selection_identity,
         )
 
         try:
+            authorized_dataset_binding = (
+                _authorized_scope_dataset_input_binding(
+                    request.full_execution_authorization,
+                    authorized_scope,
+                )
+            )
             authorized_selection_sha256, authorized_selection_count = (
                 _authorized_scope_selection_identity(
                     request.full_execution_authorization,
@@ -1016,6 +1067,15 @@ def _prepare(
             raise DciBenchmarkError(
                 "DCI benchmark authorization selection changed"
             ) from error
+        if (
+            type(request.dataset_input_binding) is not DatasetInputBinding
+            or opened_dataset_binding is None
+            or opened_dataset_binding != request.dataset_input_binding
+            or opened_dataset_binding != authorized_dataset_binding
+        ):
+            raise DciBenchmarkError(
+                "DCI benchmark authorization dataset changed"
+            )
         bounded_selected_ids_sha256 = canonical_sha256(
             tuple(sorted(row.query_id for row in rows))
         )
