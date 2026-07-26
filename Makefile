@@ -75,7 +75,7 @@ check-resources-benchmark:
 	$(UV_BIN) run python tools/setup_resources.py --profile benchmark --check
 
 doctor:
-	$(UV_BIN) run asterion verify --provider $(ASTERION_PROVIDER) --level preflight $(ASTERION_ARGS)
+	$(UV_BIN) run asterion verify --provider $(ASTERION_PROVIDER) --level preflight --env-file "$(CURDIR)/.env" $(ASTERION_ARGS)
 
 asterion-list:
 	$(UV_BIN) run asterion list $(ASTERION_ARGS)

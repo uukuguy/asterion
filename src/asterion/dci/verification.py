@@ -1431,9 +1431,14 @@ class DciProductVerifier:
                 provider_backed_operation_count=0,
                 full_dataset_ran=False,
             )
-        paths = resolve_dci_paths(self.repo_root)
+        operator_root = (
+            self.repo_root
+            if request.env_file is None
+            else Path(request.env_file).expanduser().resolve().parent
+        )
+        paths = resolve_dci_paths(operator_root)
         options = resolve_dci_runtime_options()
-        corpus_root = _corpus_root(self.repo_root, request.corpus_root)
+        corpus_root = _corpus_root(operator_root, request.corpus_root)
         output_root = (
             paths.output_root
             if request.output_root is None
@@ -1494,10 +1499,15 @@ class DciProductVerifier:
     def preflight(
         self, *, env_file: Path | None, corpus_root: Path | None
     ) -> VerificationResult:
-        loaded = load_asterion_dci_env(self.repo_root, env_file=env_file)
-        paths = resolve_dci_paths(self.repo_root)
+        requested_env = (
+            self.repo_root / ".env"
+            if env_file is None
+            else Path(env_file).expanduser().resolve()
+        )
+        operator_root = self.repo_root if env_file is None else requested_env.parent
+        loaded = load_asterion_dci_env(operator_root, env_file=requested_env)
+        paths = resolve_dci_paths(operator_root)
         options = resolve_dci_runtime_options()
-        requested_env = self.repo_root / ".env" if env_file is None else env_file
         environment_ready = loaded is not None and requested_env.is_file()
         provider_key = _provider_key_name(options.provider)
         pi_auth = paths.pi.agent_dir / "auth.json"
@@ -1527,7 +1537,7 @@ class DciProductVerifier:
             pi_checkout_ready
             and (paths.pi.package_dir / "dist" / "cli.js").is_file()
         )
-        resolved_corpus = _corpus_root(self.repo_root, corpus_root)
+        resolved_corpus = _corpus_root(operator_root, corpus_root)
         resources_ready = all(
             (resolved_corpus / name).is_dir()
             and any(item.is_file() for item in (resolved_corpus / name).rglob("*"))

@@ -351,6 +351,8 @@ class StandaloneRepositoryTests(unittest.TestCase):
                 "dci-agent-lite",
                 "--level",
                 "preflight",
+                "--env-file",
+                str(PROJECT / ".env"),
             ),
         )
 

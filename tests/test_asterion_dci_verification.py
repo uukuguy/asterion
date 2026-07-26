@@ -27,6 +27,7 @@ from asterion.dci.verification import (
     create_dci_product,
 )
 from asterion.dci.config import resolve_dci_paths
+from asterion.dci.run import DciRunResult
 from asterion.runtime.factory import RuntimeFactoryError
 
 
@@ -76,6 +77,28 @@ class PreflightBackend:
     def evaluate_case(self, *args, **kwargs):
         self.calls.append((args, kwargs))
         raise AssertionError("preflight called the Judge")
+
+
+class RecordingBasicBackend:
+    def __init__(self) -> None:
+        self.paths = []
+
+    def node_version(self) -> tuple[int, int, int] | None:
+        return (22, 19, 0)
+
+    def run_research_case(self, paths, request, *, output_dir):
+        del request
+        self.paths.append(paths)
+        return DciRunResult(
+            output_dir=output_dir,
+            final_text="fixture",
+            events=(),
+            status="completed",
+        )
+
+    def evaluate_case(self, output_dir, *, expected_answer, judge_config):
+        del output_dir, expected_answer, judge_config
+        return True
 
 
 def acceptance_request(*, acceptance_root: Path | None = None) -> VerificationRequest:
@@ -469,6 +492,84 @@ class FirstRunPreflightTests(unittest.TestCase):
         self.assertEqual(result.provider_backed_operation_count, 0)
         self.assertFalse(result.full_dataset_ran)
         self.assertEqual(backend.calls, [])
+        self.assertNotIn("SECRET-JUDGE", repr(result))
+
+    def test_explicit_environment_anchors_relative_operator_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            operator_root = Path(temp_dir)
+            package = operator_root / "pi/packages/coding-agent"
+            (package / "dist").mkdir(parents=True)
+            (package / "package.json").write_text("{}")
+            (package / "dist/cli.js").write_text("// fixture\n")
+            for corpus in ("wiki_corpus", "bc_plus_docs"):
+                directory = operator_root / "corpus" / corpus
+                directory.mkdir(parents=True)
+                (directory / "fixture.txt").write_text("fixture\n")
+            agent = operator_root / "user-agent"
+            agent.mkdir()
+            (agent / "auth.json").write_text("{}")
+            env_file = operator_root / ".env"
+            env_file.write_text(
+                "DCI_PROVIDER=openai-codex\n"
+                "DCI_MODEL=gpt-5.6-luna\n"
+                "DCI_PI_DIR=./pi\n"
+                "DCI_PI_AGENT_DIR=./user-agent\n"
+                "ASTERION_DCI_CORPUS_ROOT=./corpus\n"
+                "DCI_EVAL_JUDGE_MODEL=fixture-judge\n"
+                "DCI_EVAL_JUDGE_API_KEY_ENV=JUDGE_KEY\n"
+                "JUDGE_KEY=SECRET-JUDGE\n"
+            )
+            backend = PreflightBackend()
+            verifier = DciProductVerifier(repo_root=SOURCE, backend=backend)
+            with patch.dict(os.environ, {}, clear=True):
+                result = verifier.preflight(env_file=env_file, corpus_root=None)
+
+        self.assertEqual(result.status, "PASS")
+        self.assertEqual(backend.calls, [])
+        self.assertNotIn("SECRET-JUDGE", repr(result))
+
+    def test_basic_execution_reuses_the_preflight_operator_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            operator_root = Path(temp_dir)
+            package = operator_root / "pi/packages/coding-agent"
+            (package / "dist").mkdir(parents=True)
+            (package / "package.json").write_text("{}")
+            (package / "dist/cli.js").write_text("// fixture\n")
+            for corpus in ("wiki_corpus", "bc_plus_docs"):
+                directory = operator_root / "corpus" / corpus
+                directory.mkdir(parents=True)
+                (directory / "fixture.txt").write_text("fixture\n")
+            agent = operator_root / "user-agent"
+            agent.mkdir()
+            (agent / "auth.json").write_text("{}")
+            env_file = operator_root / ".env"
+            env_file.write_text(
+                "DCI_PROVIDER=openai-codex\n"
+                "DCI_MODEL=gpt-5.6-luna\n"
+                "DCI_PI_DIR=./pi\n"
+                "DCI_PI_AGENT_DIR=./user-agent\n"
+                "ASTERION_DCI_CORPUS_ROOT=./corpus\n"
+                "DCI_EVAL_JUDGE_MODEL=fixture-judge\n"
+                "DCI_EVAL_JUDGE_API_KEY_ENV=JUDGE_KEY\n"
+                "JUDGE_KEY=SECRET-JUDGE\n"
+            )
+            backend = RecordingBasicBackend()
+            verifier = DciProductVerifier(repo_root=SOURCE, backend=backend)
+            request = VerificationRequest(
+                level="basic",
+                env_file=env_file,
+                corpus_root=None,
+                output_root=operator_root / "outputs",
+                acceptance_root=None,
+            )
+            with patch.dict(os.environ, {}, clear=True):
+                result = verifier.basic(request)
+
+        self.assertEqual(result.status, "PASS")
+        self.assertEqual(len(backend.paths), 2)
+        self.assertTrue(
+            all(paths.repo_root == operator_root.resolve() for paths in backend.paths)
+        )
         self.assertNotIn("SECRET-JUDGE", repr(result))
 
     def test_symlinked_agent_directory_fails_closed(self) -> None:
