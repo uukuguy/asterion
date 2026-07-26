@@ -1,56 +1,44 @@
-# Next-Session Handoff
+# Live Session Checkpoint
 
-> Updated: 2026-07-26 14:56 end of session.
+> Updated: 2026-07-26 20:39. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- Asterion 框架及 DCI 能力包在当前声明边界内已实现、验证并可正常运行。
-- `make doctor` 假阴性已修复；现在 8/8 PASS，且 preflight/basic 使用同一 operator 配置根。
-- 当前无活动工作包。完整论文复现仍未闭合，任何 External-limited 执行仍需新的精确授权。
+- Asterion DCI benchmark 编排器已在 `main@76a83d5` 闭环；隔离 worktree
+  与 feature 分支均已移除。
+- 默认入口仅预览 15 个任务，边界为 `--limit 1 --max-concurrency 1`；
+  只有显式 `--execute` 才执行。
+- 协调器没有金额、USD 或价格输入；本轮未执行任何 provider、Agent/Judge
+  benchmark、下载或完整数据运行。
 
 ## Where things stand
 
-- `main` 包含 doctor 修复提交 `2358d49`；未获授权 push。
-- `make doctor`：8/8 PASS，provider operations 0，full dataset no。
-- `make check`：495 Python、29 TypeScript、19 Rust 测试及 lint、文档、构建全部 PASS。
-- `make promotion-check`：19/19 PASS。
-- 用户已确认 `make dci-basic-example` 和
-  `make dci-runtime-context-example` 可正常执行。
-- `paper_full_executable=false`；不能把有限执行表述为完整论文或已发表分数复现。
-- `MEMORY.md` 已按 verified-active、current-judgment、
-  superseded 分类；技术决策单独索引在 `docs/status/DECISIONS.md`。
+- 操作入口：`scripts/run_dci_benchmarks.sh`。
+- suite 为 `github`、`paper-main`、`all`；`all` 保留 15 个有序任务变体，
+  Bamboogle GitHub sample-50 与 paper full-125 分开。
+- `.env` 由 Python 解析而非 shell source；相对资源根按 env 文件位置规范化。
+- 执行严格串行、失败即停、兼容恢复；子进程树有界清理。
+- 任务 evidence 使用私有目录/文件权限、目录身份绑定和 descriptor-relative
+  writer；公开进度不输出 child body 或私有路径。
+- 最终独立审查：Critical 0、Important 0、Minor 0。
+- 合并后验证：PLAN 15，聚焦测试 84/84，`make check` 536 个 Python 测试
+  及 TypeScript/Rust/文档/构建全部 PASS。
+- `make promotion-check`：19 条 provider-free 命令 PASS；
+  resource profile：22/22 present。
 
-## What this session delivered
+## Next action
 
-- `2358d49`：让 `make doctor` 显式选择仓库 `.env`。
-- 相对 Pi、Agent、corpus 和 output 路径以显式 `.env` 所在目录为 operator root。
-- preflight 与 basic 复用同一 operator root，避免诊断 PASS 后执行走错路径。
-- 新增 doctor 命令、相对 operator 路径及 basic 路径一致性回归测试。
-- 纠正“Pi、.env、basic resources 未配置”的错误结论。
-- 建立可自动加载、带分类索引的 `MEMORY.md`。
-- 建立并索引 operator-root 架构决策。
+1. 预览任务：`scripts/run_dci_benchmarks.sh`。
+2. 用户准备实际运行时：
+   `scripts/run_dci_benchmarks.sh --suite all --limit 1 --max-concurrency 1 --execute`。
+3. 查看私有输出根中的 `summary.json` 和每任务 `runner.log`，按失败任务修复后
+   使用兼容恢复重跑。
 
-## Next steps
+## Boundaries and ruled-out paths
 
-1. 新会话运行 `project-state resume`，恢复本文件、结构快照、日志、决策和 MEMORY。
-2. 等待用户选择下一个工作目标。
-3. 只有用户提供新的精确 scope、limit、private output root 和五项有限预算后，才执行 External-limited reproduction。
-
-## Don't go down these paths again
-
-- 不要因单个 preflight 结果否定已经成功运行的真实示例；先追踪配置和路径边界。
-- 不要把 installed package resource root 当作 operator configuration root。
-- 不要把 `paper verify` PASS 或单查询证据表述为完整论文复现。
-- 不要复用旧授权、缓存或证据作为新的执行权限。
-
-## Ready-to-paste commands
-
-```bash
-git status --short --branch
-git log --oneline -10
-make doctor
-make check
-make promotion-check
-uv run asterion-dci paper describe
-uv run asterion-dci paper verify
-```
+- `.env`、本地数据和既有 evidence 不构成自动执行授权；必须显式 `--execute`。
+- 不自动下载、转换或修复用户已配置的数据。
+- 不调用 `paper reproduce`，也不把 Asterion benchmark 结果表述为论文分数复现。
+- 不公开 prompts、answers、provider payloads、corpus text、raw child output
+  或私有绝对路径。
+- 已删除的 worktree 路径和 feature 分支不再是恢复入口；后续工作从 `main` 开始。
