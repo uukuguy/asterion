@@ -94,21 +94,53 @@ distribution.
 - `basic` performs bounded Agent/Judge work when correctly configured.
 - `complete` includes the bounded provider-backed path plus acceptance.
 - Full datasets, paper-score reproduction, and publication require separate
-  governance, `asterion-dci paper reproduce --execute`, explicit scopes, and all
-  five positive limits: `--max-agent-operations`, `--max-judge-operations`,
-  `--max-cost-usd`, `--max-agent-cost-per-operation-usd`, and
-  `--max-judge-cost-per-operation-usd`.
+  governance. The bounded execution interface is **External-limited** and does
+  not make `paper_full_executable=false` true.
 
-The default paper reproduction command is provider-free and plan-only:
+The default one-query command is provider-free and plan-only:
+
+```bash
+plan_parent=$(mktemp -d)
+plan_root="$plan_parent/not-created"
+uv run asterion-dci paper reproduce \
+  --profile paper-reference/pi \
+  --scope bright.robotics.main.full \
+  --limit 1 \
+  --output-root "$plan_root"
+test ! -e "$plan_root"
+```
+
+Without `--execute`, it creates no output root, issues no authority, performs no
+Agent/Judge work, and runs no full dataset. The full scope identity still names
+the complete published selection; `--limit 1` deterministically selects its
+first source-order query and binds a separate bounded digest and count. This
+plan is not full paper reproduction or published-score verification.
+
+Execution is a separate, explicit command. First obtain operator approval for
+the exact profile, scope, limit, private output root, and all five finite
+positive caps; then substitute those approved values:
 
 ```bash
 uv run asterion-dci paper reproduce \
   --profile paper-reference/pi \
-  --output-root ./evidence/reproduction
+  --scope bright.robotics.main.full \
+  --limit 1 \
+  --output-root "$OPERATOR_SELECTED_PRIVATE_ROOT" \
+  --execute \
+  --max-agent-operations 1 \
+  --max-judge-operations 1 \
+  --max-cost-usd "$APPROVED_TOTAL_USD_CAP" \
+  --max-agent-cost-per-operation-usd "$APPROVED_AGENT_USD_CAP" \
+  --max-judge-cost-per-operation-usd "$APPROVED_JUDGE_USD_CAP"
 ```
 
-Without `--execute`, it creates no output root, issues no authority, performs no
-Agent/Judge work, and runs no full dataset.
+No placeholder, credential, existing output, or prior plan grants authority.
+A successful bounded run writes body-free RunManifest evidence to a separate
+descriptor-bound private manifest directory. The CLI prints safe authorization
+and operation counts plus the scope, opaque relative artifact name, and
+manifest digest; it does not print bodies or private paths. Its comparison
+status is **External-limited**, never a full or published-score reproduction
+result.
 
 Use `make help` to see the same boundary beside every command group.
 

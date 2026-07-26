@@ -229,15 +229,61 @@ plan_parent=$(mktemp -d)
 plan_root="$plan_parent/not-created"
 uv run asterion-dci paper reproduce \
   --profile paper-reference/pi \
+  --scope bright.robotics.main.full \
+  --limit 1 \
   --output-root "$plan_root"
 test ! -e "$plan_root"
 ```
 
 The last command is intentionally run without `--execute`. It must report zero
-performed Agent/Judge operations, no full authorization, and no output root
-creation. Full execution requires explicit scopes plus all five positive limits:
-maximum Agent operations, maximum Judge operations, total USD cap, per-Agent
-operation USD cap, and per-Judge operation USD cap.
+performed Agent/Judge operations, no full authorization, one selected query,
+one maximum Agent operation, zero maximum Judge operations, and no output root
+creation. It inspects closed metadata only; it does not read the dataset.
+
+The scope continues to identify its complete published selection and full
+selected-ID digest. `--limit 1` is a bounded execution selection: after
+execution preflight verifies that complete identity, it takes the deterministic
+source-order prefix and binds a separate bounded digest and selected count.
+This does not create another paper scope or change
+`paper_full_executable=false`. The plan and any eventual one-query evidence are
+not full paper reproduction or published-score verification.
+
+Provider-backed execution is **External-limited**. It requires a new operator
+approval naming the exact profile, scope, limit, private output root outside
+Git, and all five finite positive caps. Only after that approval should the
+operator substitute the approved root and USD values into this separate
+command:
+
+```bash
+uv run asterion-dci paper reproduce \
+  --profile paper-reference/pi \
+  --scope bright.robotics.main.full \
+  --limit 1 \
+  --output-root "$OPERATOR_SELECTED_PRIVATE_ROOT" \
+  --execute \
+  --max-agent-operations 1 \
+  --max-judge-operations 1 \
+  --max-cost-usd "$APPROVED_TOTAL_USD_CAP" \
+  --max-agent-cost-per-operation-usd "$APPROVED_AGENT_USD_CAP" \
+  --max-judge-cost-per-operation-usd "$APPROVED_JUDGE_USD_CAP"
+```
+
+Those variables document the invocation shape; they are not authorization.
+Credentials, configuration, cached work, prior evidence, and successful
+preflight also grant no authority. Execution verifies the complete and bounded
+selection identities and the exact root/caps before the first Agent operation.
+Authority is in-process and one-use; drift, failure, or cancellation prevents
+later work or replay.
+
+After each successful scope, the closed benchmark batch remains unchanged.
+Asterion writes its mode `0600` RunManifest to a separate mode `0700` private
+manifest directory whose device/inode descriptor was bound when authority was
+issued. Public CLI output is body-free: it reports safe authorization and
+operation counts plus `manifest_scope`, an opaque relative
+`manifest_artifact`, and `manifest_identity_sha256`, never the manifest root,
+private paths, query IDs, prompts, answers, corpus text, provider payloads, raw
+output, or credentials. Run `paper compare` explicitly on the private manifest
+and classify a bounded result as **External-limited**.
 
 ## Artifacts and pass criteria
 
