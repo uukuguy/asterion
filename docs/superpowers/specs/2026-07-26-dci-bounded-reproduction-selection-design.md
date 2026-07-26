@@ -242,10 +242,11 @@ tokens, or private paths.
 - Existing benchmark `--limit` behavior remains available outside reproduction.
 - `paper_full_executable` continues to derive from complete method and target
   closure; bounded execution does not affect it.
-- The closed reproduction-result schema is updated atomically with Python
-  validation and valid/invalid fixtures to carry only body-free manifest
-  identity and relative artifact names. Runtime, package, and assembly
-  protocols remain unchanged.
+- The closed reproduction-result schema continues to describe only RunManifest
+  and comparison evidence. The in-process paper execution coordinator returns a
+  strictly validated Python result containing body-free manifest identities and
+  relative artifact names; it is not promoted into a new wire contract.
+- Runtime, package, and assembly protocols remain unchanged.
 
 ## Verification
 
