@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import stat
+import subprocess
+import sys
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from types import MappingProxyType
 from typing import Literal, Mapping, TextIO
@@ -16,6 +23,7 @@ SuiteName = Literal["github", "paper-main", "all"]
 
 PROJECT = Path(__file__).resolve().parents[1]
 _SECRET_NAME = re.compile(r"(?:KEY|TOKEN|SECRET|PASSWORD)", re.IGNORECASE)
+CommandExecutor = Callable[..., int]
 
 
 class OrchestratorError(RuntimeError):
@@ -234,3 +242,412 @@ def render_plan(plan: RunPlan, stream: TextIO) -> None:
             f"[{index}/{len(plan.tasks)}] {task.task_id} {status}{suffix}",
             file=stream,
         )
+
+
+def build_task_command(
+    plan: RunPlan, task: BenchmarkTask, task_root: Path
+) -> tuple[str, ...]:
+    common = (
+        "--limit",
+        str(plan.options.limit),
+        "--max-concurrency",
+        str(plan.options.max_concurrency),
+        "--resume-policy",
+        "compatible",
+        "--output-root",
+        str(task_root),
+    )
+    if task.launcher is not None:
+        launcher = PROJECT / task.launcher
+        if not launcher.is_file():
+            raise OrchestratorError("DCI benchmark task binding is unavailable")
+        return (str(launcher), *common)
+    if task.dataset is None or task.corpus is None:
+        raise OrchestratorError("DCI benchmark task binding is unavailable")
+    return (
+        "uv",
+        "run",
+        "--project",
+        str(PROJECT),
+        "asterion-dci",
+        "benchmark",
+        "--profile",
+        task.profile,
+        "--dataset",
+        str(plan.resource_root / task.dataset),
+        "--corpus",
+        str(plan.resource_root / task.corpus),
+        *common,
+    )
+
+
+def stream_command(
+    command: tuple[str, ...],
+    *,
+    cwd: Path,
+    environment: Mapping[str, str],
+    on_line: Callable[[str], None],
+) -> int:
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            env=dict(environment),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+    except OSError:
+        raise OrchestratorError(
+            "DCI benchmark child process failed to start"
+        ) from None
+    assert process.stdout is not None
+    try:
+        for line in process.stdout:
+            on_line(line)
+        return process.wait()
+    except KeyboardInterrupt:
+        process.terminate()
+        process.wait()
+        raise
+
+
+def _redactor(plan: RunPlan) -> Callable[[str], str]:
+    values = {
+        value
+        for name, value in plan.environment.items()
+        if value and (_SECRET_NAME.search(name) or name.endswith("_ROOT"))
+    }
+    values.update(plan.private_values)
+    values.update((str(plan.resource_root), str(plan.output_base)))
+    ordered = sorted(
+        (value for value in values if len(value) >= 4),
+        key=len,
+        reverse=True,
+    )
+
+    def redact(line: str) -> str:
+        for value in ordered:
+            line = line.replace(value, "<redacted>")
+        return line
+
+    return redact
+
+
+def _prepare_private_directory(path: Path) -> tuple[int, int]:
+    try:
+        if path.is_symlink():
+            raise OrchestratorError("DCI benchmark output root is unsafe")
+        if path.exists():
+            metadata = path.stat()
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or stat.S_IMODE(metadata.st_mode) != 0o700
+            ):
+                raise OrchestratorError("DCI benchmark output root is unsafe")
+        else:
+            path.mkdir(parents=True, mode=0o700)
+            path.chmod(0o700)
+            metadata = path.stat()
+        descriptor = os.open(
+            path,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        try:
+            opened = os.fstat(descriptor)
+            if (
+                not stat.S_ISDIR(opened.st_mode)
+                or stat.S_IMODE(opened.st_mode) != 0o700
+                or (opened.st_dev, opened.st_ino)
+                != (metadata.st_dev, metadata.st_ino)
+            ):
+                raise OrchestratorError("DCI benchmark output root is unsafe")
+            return opened.st_dev, opened.st_ino
+        finally:
+            os.close(descriptor)
+    except OrchestratorError:
+        raise
+    except OSError:
+        raise OrchestratorError("DCI benchmark output root is unsafe") from None
+
+
+def _assert_identity(path: Path, identity: tuple[int, int]) -> None:
+    try:
+        metadata = path.lstat()
+    except OSError:
+        raise OrchestratorError("DCI benchmark output root changed") from None
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+        or (metadata.st_dev, metadata.st_ino) != identity
+    ):
+        raise OrchestratorError("DCI benchmark output root changed")
+
+
+def _write_summary(
+    root: Path, identity: tuple[int, int], payload: object
+) -> None:
+    directory_flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    try:
+        directory = os.open(root, directory_flags)
+    except OSError:
+        raise OrchestratorError("DCI benchmark output root changed") from None
+    temporary = ".summary.json.tmp"
+    descriptor = -1
+    try:
+        opened = os.fstat(directory)
+        if (
+            not stat.S_ISDIR(opened.st_mode)
+            or stat.S_IMODE(opened.st_mode) != 0o700
+            or (opened.st_dev, opened.st_ino) != identity
+        ):
+            raise OrchestratorError("DCI benchmark output root changed")
+        try:
+            descriptor = os.open(
+                temporary,
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+                dir_fd=directory,
+            )
+        except OSError:
+            raise OrchestratorError("DCI benchmark summary is unsafe") from None
+        os.fchmod(descriptor, 0o600)
+        handle = os.fdopen(descriptor, "w", encoding="utf-8")
+        descriptor = -1
+        try:
+            with handle:
+                json.dump(payload, handle, sort_keys=True)
+                handle.write("\n")
+            os.replace(
+                temporary,
+                "summary.json",
+                src_dir_fd=directory,
+                dst_dir_fd=directory,
+            )
+        except (OSError, TypeError, ValueError):
+            try:
+                os.unlink(temporary, dir_fd=directory)
+            except OSError:
+                pass
+            raise OrchestratorError("DCI benchmark summary is unsafe") from None
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        os.close(directory)
+
+
+def _open_private_log(path: Path):
+    flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_APPEND
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except OSError:
+        raise OrchestratorError("DCI benchmark task log is unsafe") from None
+    metadata = os.fstat(descriptor)
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+        os.close(descriptor)
+        raise OrchestratorError("DCI benchmark task log is unsafe")
+    os.fchmod(descriptor, 0o600)
+    return os.fdopen(descriptor, "a", encoding="utf-8")
+
+
+def _progress(
+    stream: TextIO,
+    index: int,
+    total: int,
+    task_id: str,
+    status_text: str,
+) -> str:
+    timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    line = f"{timestamp} [{index}/{total}] {task_id} {status_text}"
+    print(line, file=stream, flush=True)
+    return line
+
+
+def _initial_rows(
+    tasks: tuple[BenchmarkTask, ...],
+) -> tuple[list[dict[str, object]], tuple[str, ...]]:
+    slugs = tuple(
+        re.sub(r"[^a-z0-9._-]", "-", task.task_id.lower()) for task in tasks
+    )
+    if len(slugs) != len(set(slugs)):
+        raise OrchestratorError("DCI benchmark task binding is ambiguous")
+    rows = [
+        {
+            "task_id": task.task_id,
+            "selection_variant": task.selection_variant,
+            "status": "NOT_RUN",
+            "exit_code": None,
+            "elapsed_seconds": None,
+            "output": None,
+            "log": None,
+            "skip_reason": task.skip_reason,
+        }
+        for task in tasks
+    ]
+    return rows, slugs
+
+
+def _summary_payload(
+    plan: RunPlan, rows: list[dict[str, object]], *, passed: bool
+) -> dict[str, object]:
+    return {
+        "schema": "asterion.dci.benchmark-orchestrator-summary/v1",
+        "suite": plan.options.suite,
+        "run_label": plan.run_label,
+        "limit": plan.options.limit,
+        "max_concurrency": plan.options.max_concurrency,
+        "status": "PASS" if passed else "FAIL",
+        "tasks": rows,
+    }
+
+
+def _validate_task_bindings(tasks: tuple[BenchmarkTask, ...]) -> None:
+    for task in tasks:
+        if task.skip_reason is not None:
+            continue
+        if task.launcher is not None:
+            if not (PROJECT / task.launcher).is_file():
+                raise OrchestratorError(
+                    "DCI benchmark task binding is unavailable"
+                )
+            continue
+        if task.dataset is None or task.corpus is None:
+            raise OrchestratorError("DCI benchmark task binding is unavailable")
+
+
+def execute_plan(
+    plan: RunPlan,
+    *,
+    stream: TextIO,
+    executor: CommandExecutor = stream_command,
+    clock: Callable[[], float] = time.monotonic,
+) -> int:
+    _validate_task_bindings(plan.tasks)
+    redact = _redactor(plan)
+
+    def emit_check(line: str) -> None:
+        print(redact(line), end="", file=stream, flush=True)
+
+    check_command = (
+        sys.executable,
+        str(PROJECT / "tools/setup_resources.py"),
+        "--profile",
+        "benchmark",
+        "--check",
+    )
+    check_exit = executor(
+        check_command,
+        cwd=PROJECT,
+        environment=plan.environment,
+        on_line=emit_check,
+    )
+    if check_exit != 0:
+        return check_exit
+
+    rows, slugs = _initial_rows(plan.tasks)
+    run_identity = _prepare_private_directory(plan.output_base)
+    total = len(plan.tasks)
+    result = 0
+
+    for index, (task, slug, row) in enumerate(
+        zip(plan.tasks, slugs, rows), start=1
+    ):
+        _assert_identity(plan.output_base, run_identity)
+        if task.skip_reason is not None:
+            row["status"] = "SKIP"
+            _progress(
+                stream,
+                index,
+                total,
+                task.task_id,
+                f"SKIP reason={task.skip_reason}",
+            )
+            continue
+
+        container = plan.output_base / slug
+        _prepare_private_directory(container)
+        batch_root = container / "batch"
+        row["output"] = f"{slug}/batch"
+        row["log"] = f"{slug}/runner.log"
+        started = clock()
+        note = "" if not task.note else f" note={task.note}"
+        start_line = _progress(
+            stream, index, total, task.task_id, f"START{note}"
+        )
+        try:
+            with _open_private_log(container / "runner.log") as log:
+                log.write(start_line + "\n")
+                log.flush()
+
+                def emit_child(line: str) -> None:
+                    safe_line = redact(line)
+                    print(safe_line, end="", file=stream, flush=True)
+                    log.write(safe_line)
+                    log.flush()
+
+                exit_code = executor(
+                    build_task_command(plan, task, batch_root),
+                    cwd=PROJECT,
+                    environment=plan.environment,
+                    on_line=emit_child,
+                )
+        except KeyboardInterrupt:
+            elapsed = round(clock() - started, 3)
+            row.update(
+                status="FAILED", exit_code=130, elapsed_seconds=elapsed
+            )
+            result = 130
+            _progress(
+                stream,
+                index,
+                total,
+                task.task_id,
+                f"FAILED exit=130 elapsed={elapsed:.3f}s",
+            )
+            break
+
+        elapsed = round(clock() - started, 3)
+        row.update(exit_code=exit_code, elapsed_seconds=elapsed)
+        if exit_code == 0:
+            row["status"] = "DONE"
+            _progress(
+                stream,
+                index,
+                total,
+                task.task_id,
+                f"DONE elapsed={elapsed:.3f}s",
+            )
+            continue
+        row["status"] = "FAILED"
+        result = exit_code
+        _progress(
+            stream,
+            index,
+            total,
+            task.task_id,
+            f"FAILED exit={exit_code} elapsed={elapsed:.3f}s",
+        )
+        break
+
+    _assert_identity(plan.output_base, run_identity)
+    _write_summary(
+        plan.output_base,
+        run_identity,
+        _summary_payload(plan, rows, passed=result == 0),
+    )
+    return result
