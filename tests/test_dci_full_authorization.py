@@ -1519,8 +1519,8 @@ class ReproductionCliTests(unittest.TestCase):
                     stdout=stdout,
                     stderr=stderr,
                 )
-        self.assertEqual(code, 0, stderr.getvalue())
-        self.assertFalse(output_root.exists())
+            self.assertEqual(code, 0, stderr.getvalue())
+            self.assertFalse(output_root.exists())
         self.assertIn("Selected queries: 1", stdout.getvalue())
         self.assertIn("Maximum agent operations: 1", stdout.getvalue())
         self.assertIn("Maximum Judge operations: 0", stdout.getvalue())
