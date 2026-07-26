@@ -905,6 +905,41 @@ class AuthorizedBenchmarkTests(unittest.TestCase):
                     )
             read.assert_not_called()
 
+            authority = authorize(root / "parent-root")
+            request = self.request(root, authority)
+            with patch("asterion.dci.benchmark._read_input_snapshot") as read:
+                with self.assertRaisesRegex(
+                    DciBenchmarkError,
+                    "^DCI benchmark authorization root changed$",
+                ):
+                    run_benchmark(
+                        replace(request, output_root=root / "parent-root"),
+                        paths=Mock(),
+                    )
+            read.assert_not_called()
+
+            authority = authorize(
+                root / "other-child",
+                scopes=(
+                    self.scope_id,
+                    "bright.earth-science.main.full",
+                ),
+            )
+            request = self.request(root, authority)
+            other = authorized_scope_output_root(
+                authority, "bright.earth-science.main.full"
+            )
+            with patch("asterion.dci.benchmark._read_input_snapshot") as read:
+                with self.assertRaisesRegex(
+                    DciBenchmarkError,
+                    "^DCI benchmark authorization root changed$",
+                ):
+                    run_benchmark(
+                        replace(request, output_root=other),
+                        paths=Mock(),
+                    )
+            read.assert_not_called()
+
     def test_scope_is_consumed_only_after_selected_rows_match(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
@@ -1071,41 +1106,6 @@ class AuthorizedBenchmarkTests(unittest.TestCase):
                         authority, self.scope_id, "agent"
                     )
 
-            authority = authorize(root / "parent-root")
-            request = self.request(root, authority)
-            with patch("asterion.dci.benchmark._read_input_snapshot") as read:
-                with self.assertRaisesRegex(
-                    DciBenchmarkError,
-                    "^DCI benchmark authorization root changed$",
-                ):
-                    run_benchmark(
-                        replace(request, output_root=root / "parent-root"),
-                        paths=Mock(),
-                    )
-            read.assert_not_called()
-
-            authority = authorize(
-                root / "other-child",
-                scopes=(
-                    self.scope_id,
-                    "bright.earth-science.main.full",
-                ),
-            )
-            request = self.request(root, authority)
-            other = authorized_scope_output_root(
-                authority, "bright.earth-science.main.full"
-            )
-            with patch("asterion.dci.benchmark._read_input_snapshot") as read:
-                with self.assertRaisesRegex(
-                    DciBenchmarkError,
-                    "^DCI benchmark authorization root changed$",
-                ):
-                    run_benchmark(
-                        replace(request, output_root=other),
-                        paths=Mock(),
-                    )
-            read.assert_not_called()
-
 
 class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
     scope_id = "bright.biology.main.full"
@@ -1209,7 +1209,25 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
             "cost_estimate_usd": {"total_cost": cost},
         }
 
-    def test_agent_and_judge_caps_stop_before_external_operation(self) -> None:
+    def test_two_row_agent_plan_above_cap_fails_before_output_or_agent(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            output_root = root / "agent-cap"
+            with patch("asterion.dci.benchmark._run_pi_async") as agent:
+                with self.assertRaisesRegex(
+                    ExperimentAuthorizationError,
+                    "^full execution bounded operation plan is invalid$",
+                ):
+                    authorize(
+                        output_root,
+                        max_agents=1,
+                        max_judges=2,
+                        selected_query_ids=query_ids(2),
+                    )
+            agent.assert_not_called()
+            self.assertFalse(output_root.exists())
+
+    def test_exact_agent_plan_runs_and_judge_cap_stops_second_judge(self) -> None:
         async def agent(*_args: object, **_kwargs: object) -> None:
             return None
 
