@@ -121,3 +121,22 @@
 - 17:13 Corrected execution docs to permit sorted available paper-full scope subsets [99ff926]
 - 17:18 Verified 450 tests and promotion with zero provider operations and no full dataset
 - 17:18 Closed Task 10 after CLEAN independent documentation and claim review
+- 17:19 Checkpointed provider-free closure so Task 11 cannot resume without fresh operator authority [f9c6491]
+
+## 2026-07-26
+
+- 07:54 Designed bounded selection so one-query execution stays identity-bound and default-off [cd59d21]
+- 08:01 Kept RunManifest schema separate from internal execution results to preserve contract ownership [2f91b86]
+- 08:06 Aligned bounded digests with canonical sorted evidence identities after deterministic prefix selection [30963c7]
+- 08:12 Isolated RunManifest files from batch roots to preserve closed artifact inventories [2a72b25]
+- 08:48 Planned five reviewed TDD tasks for bounded authority, execution, evidence, manifests, and gates [0dd6310]
+- 08:52 Ignored project-local worktrees so bounded reproduction implementation stays isolated [3198818]
+- 09:16 Bound selections and manifest storage to immutable DCI authority; closed independent review [7bb00aa]
+- 09:32 Added default-off bounded planning and exact CLI authorization propagation; closed independent review [56d1ddc]
+- 09:51 Revalidated bounded identity before Agent work and preserved external-limited evidence; closed review [95260ea]
+- 10:15 Persisted descriptor-bound body-free RunManifest evidence with fail-closed cleanup; closed review [d0e530d]
+- 10:34 Published bounded one-query workflow and passed provider-free gates; closed claim review [a9b85b4]
+- 11:49 Required exact QA/IR Judge plans at the authority boundary; closed review [83d4037]
+- 11:49 Made bounded comparisons not-applicable and added real coordinator manifest integration; closed review [56cc46e]
+- 11:49 Bound dataset bytes/descriptors and hardened mutation, symlink, and redaction boundaries; closed review [da5dc3c]
+- 11:58 Verified 493 tests, cross-language checks, provider-free promotion, and final CLEAN security review [da5dc3c]
