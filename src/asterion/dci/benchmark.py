@@ -255,6 +255,20 @@ def execute_authorized_reproduction(
             )
             expected_roots[scope_id] = authorized_root
 
+        try:
+            manifest_root, manifest_device, manifest_inode = (
+                _authorized_manifest_output_identity(authority)
+            )
+        except (
+            ExperimentAuthorizationError,
+            OSError,
+            RuntimeError,
+            ValueError,
+        ) as error:
+            raise DciBenchmarkError(
+                "DCI benchmark manifest evidence failed"
+            ) from error
+
         benchmark_totals: dict[str, int] = {}
         for index, item in enumerate(execution_items):
             result = run_benchmark(item.request, paths=item.paths)
@@ -264,9 +278,6 @@ def execute_authorized_reproduction(
                 raise DciBenchmarkError("DCI benchmark authorization root changed")
             try:
                 manifest = compile_run_manifest(result.output_root, profile)
-                manifest_root, manifest_device, manifest_inode = (
-                    _authorized_manifest_output_identity(authority)
-                )
                 manifest_artifact = write_run_manifest(
                     manifest_root,
                     (manifest_device, manifest_inode),

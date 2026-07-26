@@ -17,6 +17,7 @@ from unittest.mock import patch
 from asterion.dci import reproduction as reproduction_module
 from asterion.dci.artifacts import DciConversationFeatures
 from asterion.dci.benchmark import BenchmarkRequest, run_benchmark
+from asterion.dci.cli import main as dci_main
 from asterion.dci.config import DciPaths, DciRuntimeOptions, resolve_dci_paths
 from asterion.dci.experiment_profiles import resolve_experiment_profile
 from asterion.dci.judge import JudgeConfig
@@ -26,6 +27,7 @@ from asterion.dci.reproduction import (
     RunManifest,
     compare_reproduction,
     compile_run_manifest,
+    load_comparison_report,
     load_run_manifest,
     validate_run_manifest,
 )
@@ -775,6 +777,7 @@ class TestDciRunManifestCompiler(unittest.TestCase):
             )
             comparison = compare_reproduction(baseline, manifest, profile)
             self.assertEqual(comparison.candidate_product, "asterion-dci")
+            self.assertIs(comparison.accepted, True)
 
     def test_compile_run_manifest_supports_ir_metric_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -947,7 +950,7 @@ class TestDciRunManifestCompiler(unittest.TestCase):
                 "execution_class": "paper-bounded",
                 "id": "limit-1",
                 "paper_scope": "browsecomp-plus.main.all830",
-                "selected_rows": 4,
+                "selected_rows": 1,
                 "full_dataset": False,
                 "comparable": False,
                 "authorization_profile": None,
@@ -958,7 +961,12 @@ class TestDciRunManifestCompiler(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             profile = resolve_experiment_profile("paper-reference/pi")
             manifest = compile_run_manifest(
-                self._batch(Path(temporary), mutations=(bounded,)), profile
+                self._batch(
+                    Path(temporary),
+                    query_ids=("q001",),
+                    mutations=(bounded,),
+                ),
+                profile,
             )
             validate_run_manifest(manifest)
             self.assertEqual(manifest.selection_id, "limit-1")
@@ -972,6 +980,120 @@ class TestDciRunManifestCompiler(unittest.TestCase):
             )
             comparison = compare_reproduction(baseline, manifest, profile)
             self.assertEqual(comparison.selection_id, "limit-1")
+            self.assertEqual(comparison.comparison_kind, "source-parity")
+            self.assertTrue(comparison.metrics)
+            self.assertTrue(all(metric.accepted for metric in comparison.metrics.values()))
+            self.assertIsNone(comparison.accepted)
+            reparsed = reproduction_module.ComparisonReport.from_mapping(
+                comparison.to_dict()
+            )
+            self.assertIsNone(reparsed.accepted)
+
+    def test_only_canonical_bounded_selection_is_external_limited(self) -> None:
+        profile = resolve_experiment_profile("paper-reference/pi")
+        with tempfile.TemporaryDirectory() as temporary:
+            manifest = compile_run_manifest(self._batch(Path(temporary)), profile)
+
+        for selection_id in (
+            "limit-01",
+            "limit-1-extra",
+            "limited-1",
+        ):
+            with self.subTest(selection_id=selection_id):
+                candidate = RunManifest.from_mapping(
+                    self._manifest_dict_without_identity(
+                        manifest,
+                        selection_id=selection_id,
+                    )
+                )
+                baseline = RunManifest.from_mapping(
+                    self._manifest_dict_without_identity(
+                        candidate,
+                        product="original-dci",
+                        implementation_sha256="0" * 64,
+                        product_effective_config_sha256="1" * 64,
+                    )
+                )
+                comparison = compare_reproduction(baseline, candidate, profile)
+                self.assertIsInstance(comparison.accepted, bool)
+
+    def test_paper_compare_prints_not_applicable_for_bounded_selection(self) -> None:
+        query_id = "q001"
+
+        def bounded(root: Path, _state: dict[str, Any]) -> None:
+            config = json.loads((root / "config.json").read_text(encoding="utf-8"))
+            config["selection"] = {
+                **config["selection"],
+                "execution_class": "paper-bounded-authorized",
+                "id": "limit-1",
+                "paper_scope": "browsecomp-plus.main.all830",
+                "selected_rows": 1,
+                "full_dataset": False,
+                "comparable": False,
+                "authorization_profile": "paper-reference/pi",
+            }
+            config["paper_full_authorization"] = {
+                "schema": "asterion.dci.paper-full-authorization/v1",
+                "profile_id": "paper-reference/pi",
+                "profile_identity_sha256": resolve_experiment_profile(
+                    "paper-reference/pi"
+                ).identity_sha256,
+            }
+            _write_json(root / "config.json", config)
+            _refresh_batch_hashes(root)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            profile = resolve_experiment_profile("paper-reference/pi")
+            batch_root = root / "batch"
+            batch_root.mkdir(mode=0o700)
+            candidate = compile_run_manifest(
+                self._batch(
+                    batch_root,
+                    query_ids=(query_id,),
+                    mutations=(bounded,),
+                ),
+                profile,
+            )
+            baseline = RunManifest.from_mapping(
+                self._manifest_dict_without_identity(
+                    candidate,
+                    product="original-dci",
+                    implementation_sha256="0" * 64,
+                    product_effective_config_sha256="1" * 64,
+                )
+            )
+            baseline_path = root / "baseline.json"
+            candidate_path = root / "candidate.json"
+            report_path = root / "comparison.json"
+            _write_json(baseline_path, baseline.to_dict())
+            _write_json(candidate_path, candidate.to_dict())
+            stdout = __import__("io").StringIO()
+            stderr = __import__("io").StringIO()
+
+            code = dci_main(
+                [
+                    "paper",
+                    "compare",
+                    "--profile",
+                    profile.profile_id,
+                    "--baseline",
+                    str(baseline_path),
+                    "--candidate",
+                    str(candidate_path),
+                    "--output",
+                    str(report_path),
+                ],
+                stdout=stdout,
+                stderr=stderr,
+            )
+
+            report = load_comparison_report(report_path)
+
+        self.assertEqual(code, 0, stderr.getvalue())
+        self.assertIn("Acceptance: not-applicable\n", stdout.getvalue())
+        self.assertNotIn("Acceptance: pass\n", stdout.getvalue())
+        self.assertIsNone(report.accepted)
 
     def test_compile_authorized_bounded_selection(self) -> None:
         scope_id = "browsecomp-plus.main.all830"

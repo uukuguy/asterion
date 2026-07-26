@@ -97,6 +97,10 @@ def _is_published_target_scope(selection_id: str) -> bool:
     return resolve_paper_experiment_scope(selection_id).experiment == "main-results"
 
 
+def _is_bounded_selection_id(selection_id: str) -> bool:
+    return re.fullmatch(r"limit-([1-9][0-9]*)", selection_id) is not None
+
+
 def _validate_published_target_selection(
     profile: ExperimentProfile,
     dataset_id: str,
@@ -1585,7 +1589,24 @@ def _batch_dataset_id(config: Mapping[str, Any]) -> str:
     dataset = config.get("dataset")
     if not isinstance(dataset, Mapping):
         raise ValueError("DCI reproduction dataset identity is invalid")
-    return _require_public_id(dataset.get("dataset_id"), "dataset ID")
+    dataset_id = _require_public_id(dataset.get("dataset_id"), "dataset ID")
+    selection = config.get("selection")
+    if (
+        isinstance(selection, Mapping)
+        and selection.get("execution_class") == "paper-bounded-authorized"
+    ):
+        try:
+            scoped_dataset_id = resolve_paper_experiment_scope(
+                selection.get("paper_scope")
+            ).dataset_id
+        except ValueError as error:
+            raise ValueError(
+                "DCI reproduction dataset identity is invalid"
+            ) from error
+        if dataset_id not in {scoped_dataset_id, "dataset.local"}:
+            raise ValueError("DCI reproduction dataset identity is invalid")
+        return scoped_dataset_id
+    return dataset_id
 
 
 def _batch_selection(
@@ -2556,6 +2577,11 @@ class ComparisonReport:
         ):
             raise ValueError("DCI reproduction comparison query evidence is invalid")
         if self.comparison_kind == "source-parity":
+            expected_acceptance = (
+                None
+                if _is_bounded_selection_id(self.selection_id)
+                else all(metric.accepted for metric in self.metrics.values())
+            )
             if (
                 self.baseline_product != "original-dci"
                 or self.baseline_implementation_sha256 is None
@@ -2568,8 +2594,7 @@ class ComparisonReport:
                 or type(self.baseline) is not ComparisonTotals
                 or not self.pairs
                 or not self.metrics
-                or type(self.accepted) is not bool
-                or self.accepted is not all(metric.accepted for metric in self.metrics.values())
+                or self.accepted is not expected_acceptance
             ):
                 raise ValueError("DCI source-parity comparison is invalid")
             for value, label in (
@@ -2588,7 +2613,11 @@ class ComparisonReport:
             if (
                 dict(self.metrics) != expected_metrics
                 or self.accepted
-                is not all(metric.accepted for metric in expected_metrics.values())
+                is not (
+                    None
+                    if _is_bounded_selection_id(self.selection_id)
+                    else all(metric.accepted for metric in expected_metrics.values())
+                )
             ):
                 raise ValueError("DCI reproduction comparison metrics are inconsistent")
         else:
@@ -3348,7 +3377,11 @@ def compare_reproduction_runs(
         for query_id in pair_ids
     )
     metrics = _recompute_metrics(pairs, expected_metric_names, profile)
-    accepted = all(metric.accepted for metric in metrics.values())
+    accepted = (
+        None
+        if _is_bounded_selection_id(candidate.selection_id)
+        else all(metric.accepted for metric in metrics.values())
+    )
     baseline_totals = ComparisonTotals.from_manifest(baseline)
     candidate_totals = ComparisonTotals.from_manifest(candidate)
     values = dict(
