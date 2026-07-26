@@ -172,9 +172,12 @@ class InstalledAcceptanceTests(unittest.TestCase):
                 path.relative_to(PROJECT).as_posix()
                 for path in (PROJECT / "scripts").rglob("*.sh")
                 if path.name != "setup_pi.sh"
+                and path.relative_to(PROJECT).as_posix()
+                != "scripts/run_dci_benchmarks.sh"
             )
         )
         self.assertEqual(len(launcher_paths), 14)
+        self.assertTrue((PROJECT / "scripts/run_dci_benchmarks.sh").is_file())
         for launcher_path in launcher_paths:
             self.assertIn(
                 "# Provenance: ",

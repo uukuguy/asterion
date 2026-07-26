@@ -146,6 +146,32 @@ uv run asterion-dci paper --help
 | 导出与分析 | `asterion-dci export ...` | 临时文件安全、authoritative reanalysis |
 | 通用安装应用 | `asterion run --provider dci-agent-lite ...` | 精确 application/runtime 选择与 body-free projection |
 
+### 顺序运行 DCI benchmark 清单
+
+先预览全部 15 个任务变体；该命令不调用 Agent 或 Judge，也不创建任务输出：
+
+```bash
+scripts/run_dci_benchmarks.sh
+```
+
+显式执行一查询、单并发 smoke suite：
+
+```bash
+scripts/run_dci_benchmarks.sh \
+  --suite all \
+  --limit 1 \
+  --max-concurrency 1 \
+  --execute
+```
+
+可选 suite 为 `github`、`paper-main` 和 `all`。脚本读取仓库 `.env`
+中已配置的数据、语料、Pi、输出与 Judge 设置，不下载资源。直接 benchmark
+没有 USD ledger；`--limit`、单任务并发和任务间顺序执行是本入口的运行边界。
+每个任务输出到独立私有目录，失败时停止后续任务，使用相同
+`--output-root` 重跑会采用 `--resume-policy compatible`。
+
+该入口生成 Asterion benchmark 证据，不自动构成论文分数复现。
+
 ## 费用与完整数据集边界
 
 | 级别/命令 | Agent | Judge | 完整数据集 |

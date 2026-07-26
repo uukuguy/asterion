@@ -226,6 +226,42 @@ class BenchmarkCliTests(unittest.TestCase):
         self.assertNotIn("--usd", result.stdout.lower())
 
 
+class BenchmarkEntrypointTests(unittest.TestCase):
+    def test_shell_entrypoint_has_valid_syntax_and_exact_python_target(self) -> None:
+        project = Path(__file__).resolve().parents[1]
+        script = project / "scripts/run_dci_benchmarks.sh"
+        syntax = subprocess.run(
+            ["bash", "-n", str(script)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(syntax.returncode, 0, syntax.stderr)
+        text = script.read_text(encoding="utf-8")
+        self.assertIn('uv run --project "$PROJECT_ROOT"', text)
+        self.assertIn(
+            'python "$PROJECT_ROOT/tools/run_dci_benchmarks.py" "$@"', text
+        )
+        self.assertNotIn("source ", text)
+        self.assertNotIn('. "$', text)
+
+    def test_cli_help_has_no_monetary_inputs(self) -> None:
+        project = Path(__file__).resolve().parents[1]
+        completed = subprocess.run(
+            ["uv", "run", "python", "tools/run_dci_benchmarks.py", "--help"],
+            cwd=project,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("--execute", completed.stdout)
+        self.assertIn("--limit", completed.stdout)
+        self.assertNotIn("cost", completed.stdout.lower())
+        self.assertNotIn("usd", completed.stdout.lower())
+        self.assertNotIn("price", completed.stdout.lower())
+
+
 class FakeExecutor:
     def __init__(self, outcomes: list[int | BaseException] | None = None) -> None:
         self.commands: list[tuple[str, ...]] = []

@@ -19,9 +19,11 @@ REQUIRED_ASSETS = (
     "Makefile",
     "README.md",
     "pi-revision.txt",
+    "scripts/run_dci_benchmarks.sh",
     "scripts/setup_pi.sh",
     "tools/check_docs.py",
     "tools/check_promotion.py",
+    "tools/run_dci_benchmarks.py",
     "tools/setup_resources.py",
     "uv.lock",
 )
