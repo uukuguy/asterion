@@ -4,12 +4,12 @@
 
 - Project: Asterion
 - Current branch: `main`
-- Theme-level focus: DCI capability parity with fail-closed bounded reproduction
+- Theme-level focus: verified framework/DCI readiness with fail-closed bounded reproduction
 - Project route: direct
 - Canonical worklist: approved implementation plans under
   `docs/superpowers/plans/`
-- Active work package: Task 11 external-limited execution, blocked on fresh
-  operator authorization and external resources
+- Active work package: none; optional Task 11 external-limited execution remains
+  gated on fresh exact operator authorization
 
 ## Current Architecture
 
@@ -22,6 +22,9 @@
 - TypeScript validates shared contracts and Node integration; Rust owns
   controlled process execution.
 - DCI remains a bundled product above domain-neutral framework modules.
+- Installed provider resources stay package-rooted; explicit DCI operator
+  configuration is rooted at the selected environment file for preflight and
+  basic execution.
 - `src/asterion/dci/experiment_profiles.py` owns one-use execution authority,
   exact scope/selection plans, budgets, private output identities, and immutable
   dataset bindings.
@@ -38,8 +41,9 @@
 
 ## Open Problems (theme-level)
 
-- Provider-backed bounded reproduction still depends on operator credentials,
-  external datasets/corpora, runtime readiness, and a fresh exact finite budget.
+- Provider-backed bounded reproduction still requires fresh exact finite
+  authorization, an operator-selected private output root, and any
+  scope-specific external datasets.
 - `paper_full_executable` remains false; one-query evidence cannot establish
   full-paper or published-score reproduction.
 - Existing DCI Pyright debt remains outside the repository's enforced
@@ -51,6 +55,7 @@
 
 - `AGENTS.md`
 - `CLAUDE.md`
+- `MEMORY.md` — indexed collaboration preferences and corrected feedback
 
 ### State / handoff
 
@@ -58,6 +63,7 @@
 - `docs/status/CURRENT-STATE.md` — this structural snapshot
 - `docs/status/JOURNAL.md` — append-only event history
 - `docs/status/INDEX.md` — status-file catalog
+- `docs/status/DECISIONS.md` — active architecture decisions and rationale
 
 ### Architecture and design
 
@@ -73,6 +79,7 @@
 - `src/asterion/runner/application.py` — resolved application execution
 - `src/asterion/dci/experiment_profiles.py` — DCI profiles and authority
 - `src/asterion/dci/cli.py` — DCI plan/preflight/execute orchestration
+- `src/asterion/dci/verification.py` — product readiness and bounded verification
 - `src/asterion/dci/benchmark.py` — bounded benchmark execution
 - `src/asterion/dci/reproduction.py` — evidence compilation and comparison
 - `schemas/` — canonical cross-language protocol schemas
@@ -81,8 +88,9 @@
 
 1. Read this file for the structural baseline.
 2. Read `RESUME-NEXT-SESSION.md` for the next concrete action.
-3. Run `git status --short` and `git log --oneline -5`.
-4. Treat external execution as unauthorized unless the operator supplies a new
+3. Read `MEMORY.md` for collaboration rules and corrected feedback.
+4. Run `git status --short` and `git log --oneline -5`.
+5. Treat external execution as unauthorized unless the operator supplies a new
    exact scope, limit, private output root, and five finite positive caps.
-5. Keep any bounded result `External-limited`; never promote it to full-paper
+6. Keep any bounded result `External-limited`; never promote it to full-paper
    or published-score reproduction.

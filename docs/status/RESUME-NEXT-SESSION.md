@@ -1,82 +1,56 @@
 # Next-Session Handoff
 
-> Updated: 2026-07-26 13:27 end of session.
+> Updated: 2026-07-26 14:53 end of session.
 
 ## TL;DR
 
-- Bounded DCI reproduction is implemented, independently reviewed CLEAN, and
-  merged locally into `main` as `d0e8f0b`.
-- Merged-state verification passed: 493 Python tests, TypeScript, Rust, builds,
-  and 19 promotion commands; provider operations remained 0 and no full dataset
-  ran.
-- External execution remains unauthorized. The next session must obtain a fresh
-  exact authorization before any Agent/Judge work.
+- Asterion 框架及 DCI 能力包在当前声明边界内已实现、验证并可正常运行。
+- `make doctor` 假阴性已修复；现在 8/8 PASS，且 preflight/basic 使用同一 operator 配置根。
+- 当前无活动工作包。完整论文复现仍未闭合，任何 External-limited 执行仍需新的精确授权。
 
 ## Where things stand
 
-- Branch: `main`, 40 commits ahead of `origin/main`; nothing was pushed.
-- The feature worktree and local feature branch were removed.
-- `paper reproduce --limit N` is plan-only by default.
-- Bounded evidence is `External-limited`, non-full, non-comparable, and always
-  reports acceptance as not applicable.
-- Dataset execution is bound to raw bytes, benchmark identity, device, and
-  inode.
-- Final code and security reviews report zero Critical, Important, or Minor
-  findings.
-- Status files contain the live handoff/state updates.
+- `main` 包含 doctor 修复提交 `2358d49`；未获授权 push。
+- `make doctor`：8/8 PASS，provider operations 0，full dataset no。
+- `make check`：495 Python、29 TypeScript、19 Rust 测试及 lint、文档、构建全部 PASS。
+- `make promotion-check`：19/19 PASS。
+- 用户已确认 `make dci-basic-example` 和
+  `make dci-runtime-context-example` 可正常执行。
+- `paper_full_executable=false`；不能把有限执行表述为完整论文或已发表分数复现。
+- `MEMORY.md` 已按 verified-active、current-judgment、
+  superseded 分类；技术决策单独索引在 `docs/status/DECISIONS.md`。
 
 ## What this session delivered
 
-- Exact bounded selection, operation planning, one-use authority, and private
-  output identity.
-- Exact QA/IR/mixed Judge accounting.
-- Pre-Agent dataset-content and descriptor revalidation.
-- Descriptor-safe RunManifest persistence outside closed batch roots.
-- Real coordinator → batch → compiler → writer → reload integration coverage.
-- Body-free I/O failure handling and mutation/symlink/forgery defenses.
-- Public one-query workflow and `External-limited` documentation.
-- Local merge and complete worktree/branch cleanup.
+- `2358d49`：让 `make doctor` 显式选择仓库 `.env`。
+- 相对 Pi、Agent、corpus 和 output 路径以显式 `.env` 所在目录为 operator root。
+- preflight 与 basic 复用同一 operator root，避免诊断 PASS 后执行走错路径。
+- 新增 doctor 命令、相对 operator 路径及 basic 路径一致性回归测试。
+- 纠正“Pi、.env、basic resources 未配置”的错误结论。
+- 建立可自动加载、带分类索引的 `MEMORY.md`。
+- 建立并索引 operator-root 架构决策。
 
 ## Next steps
 
-1. Obtain fresh authorization for:
-   - profile: `paper-reference/pi`
-   - scope: `bright.robotics.main.full`
-   - limit: `1`
-   - operator-selected private output root
-   - `max-agent-operations=1`
-   - `max-judge-operations=1`
-   - positive finite total, per-Agent, and per-Judge USD caps
-2. Rerun preflight after authorization.
-3. Execute once, compile/load the RunManifest, and compare it as
-   `External-limited`.
-4. Optionally push the local `main` history when desired.
+1. 新会话运行 `project-state resume`，恢复本文件、结构快照、日志、决策和 MEMORY。
+2. 等待用户选择下一个工作目标。
+3. 只有用户提供新的精确 scope、limit、private output root 和五项有限预算后，才执行 External-limited reproduction。
 
 ## Don't go down these paths again
 
-- Do not reuse earlier authorization, configuration, caches, or evidence.
-- Do not treat one-query evidence as full-paper or published-score
-  reproduction.
-- Do not allow bounded comparisons to produce PASS.
-- Do not bind only query IDs; retain raw dataset content and descriptor
-  identity.
-- Do not write RunManifest evidence inside closed batch roots.
-- Do not bypass exact Judge-plan accounting.
+- 不要因单个 preflight 结果否定已经成功运行的真实示例；先追踪配置和路径边界。
+- 不要把 installed package resource root 当作 operator configuration root。
+- 不要把 `paper verify` PASS 或单查询证据表述为完整论文复现。
+- 不要复用旧授权、缓存或证据作为新的执行权限。
 
 ## Ready-to-paste commands
 
 ```bash
 git status --short --branch
 git log --oneline -10
-
-uv run asterion-dci paper describe
-uv run asterion-dci paper verify
-uv run asterion-dci paper reproduce \
-  --profile paper-reference/pi \
-  --scope bright.robotics.main.full \
-  --limit 1 \
-  --output-root "$(mktemp -d)/not-created"
-
+make doctor
 make check
 make promotion-check
+uv run asterion-dci paper describe
+uv run asterion-dci paper verify
 ```
