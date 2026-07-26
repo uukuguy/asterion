@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import os
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 import unittest
@@ -142,6 +144,75 @@ class BenchmarkPlanTests(unittest.TestCase):
                     OrchestratorError, "^DCI benchmark limit is invalid$"
                 ):
                     RunOptions(limit=value).validate()
+
+    def test_private_values_have_a_total_deterministic_order(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            env_file = root / "operator.env"
+            env_file.write_text(
+                "ALPHA_KEY=bbbb\nBETA_TOKEN=aaaa\n", encoding="utf-8"
+            )
+            plan = build_plan(
+                RunOptions(env_file=env_file),
+                process_environment={},
+                invocation_cwd=root,
+                run_label="fixture-run",
+            )
+
+            self.assertEqual(plan.private_values, ("aaaa", "bbbb"))
+
+    def test_invalid_max_concurrency_fails_closed(self) -> None:
+        for value in (0, -1):
+            with self.subTest(value=value), self.assertRaisesRegex(
+                OrchestratorError, "^DCI benchmark concurrency is invalid$"
+            ):
+                RunOptions(max_concurrency=value).validate()
+
+
+class BenchmarkCliTests(unittest.TestCase):
+    def test_cli_defaults_to_a_bounded_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            env_file = Path(temporary) / "operator.env"
+            env_file.write_text("", encoding="utf-8")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "tools/run_dci_benchmarks.py",
+                    "--env-file",
+                    str(env_file),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 0)
+            self.assertIn(
+                "suite=all tasks=15 limit=1 concurrency=1 mode=PLAN",
+                result.stdout,
+            )
+
+    def test_cli_help_exposes_no_monetary_inputs(self) -> None:
+        result = subprocess.run(
+            [sys.executable, "tools/run_dci_benchmarks.py", "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0)
+        for option in (
+            "--suite",
+            "--limit",
+            "--max-concurrency",
+            "--output-root",
+            "--env-file",
+            "--execute",
+        ):
+            with self.subTest(option=option):
+                self.assertIn(option, result.stdout)
+        self.assertNotIn("--cost", result.stdout)
+        self.assertNotIn("--usd", result.stdout.lower())
 
 
 if __name__ == "__main__":

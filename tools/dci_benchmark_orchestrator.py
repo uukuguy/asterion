@@ -205,7 +205,7 @@ def build_plan(
         options=options,
         tasks=select_tasks(options.suite),
         environment=MappingProxyType(environment),
-        private_values=tuple(sorted(private_values, key=len, reverse=True)),
+        private_values=tuple(sorted(private_values, key=lambda value: (-len(value), value))),
         resource_root=resource_root,
         output_base=output_base,
         run_label=run_label,
