@@ -939,10 +939,11 @@ class AuthorizedBenchmarkTests(unittest.TestCase):
                     "^DCI benchmark authorization scope changed$",
                 ):
                     run_benchmark(request, paths=Mock())
-            self.assertEqual(
-                authorized_scope_output_root(authority, self.scope_id),
-                request.output_root,
-            )
+            with self.assertRaisesRegex(
+                ExperimentAuthorizationError,
+                "^full execution authorization is inactive$",
+            ):
+                authorized_scope_output_root(authority, self.scope_id)
 
             authority = authorize(root / "changed-scope")
             request = self.request(root, authority)
@@ -959,6 +960,116 @@ class AuthorizedBenchmarkTests(unittest.TestCase):
                         paths=Mock(),
                     )
             read.assert_not_called()
+
+    def test_bounded_selection_drift_fails_before_agent(self) -> None:
+        drift_cases = {
+            "request limit removed": {
+                "limit": None,
+                "authority_digest": canonical_sha256(("q-001",)),
+                "authority_count": 1,
+                "rows": ("q-001", "q-002"),
+            },
+            "request limit changed": {
+                "limit": 2,
+                "authority_digest": canonical_sha256(("q-001",)),
+                "authority_count": 1,
+                "rows": ("q-001", "q-002"),
+            },
+            "bounded digest forged": {
+                "limit": 1,
+                "authority_digest": "f" * 64,
+                "authority_count": 1,
+                "rows": ("q-001", "q-002"),
+            },
+            "bounded count forged": {
+                "limit": 1,
+                "authority_digest": canonical_sha256(("q-001",)),
+                "authority_count": 2,
+                "rows": ("q-001", "q-002"),
+            },
+            "dataset order changed after preflight": {
+                "limit": 1,
+                "authority_digest": canonical_sha256(("q-001",)),
+                "authority_count": 1,
+                "rows": ("q-002", "q-001"),
+            },
+        }
+        for label, case in drift_cases.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                private_root = root / "private-output-must-not-leak"
+                authority = authorize_full_execution(
+                    profile=resolve_experiment_profile("paper-reference/pi"),
+                    scope_ids=(self.scope_id,),
+                    bounded_selected_ids_sha256=(
+                        cast(str, case["authority_digest"]),
+                    ),
+                    selected_query_counts=(cast(int, case["authority_count"]),),
+                    planned_agent_operations=cast(int, case["authority_count"]),
+                    planned_judge_operations=0,
+                    output_root=private_root,
+                    max_agent_operations=2,
+                    max_judge_operations=1,
+                    max_cost_usd=10,
+                    max_agent_cost_per_operation_usd=2,
+                    max_judge_cost_per_operation_usd=1,
+                    invocation_authorized=True,
+                )
+                dataset = root / "dataset-private-path.jsonl"
+                dataset.write_text(
+                    "".join(
+                        json.dumps(
+                            {
+                                "query_id": query_id,
+                                "query": f"SECRET question for {query_id}",
+                                "answer": f"SECRET answer for {query_id}",
+                            }
+                        )
+                        + "\n"
+                        for query_id in cast(tuple[str, ...], case["rows"])
+                    ),
+                    encoding="utf-8",
+                )
+                request = replace(
+                    self.request(root, authority),
+                    dataset=dataset,
+                    profile="paper-reference/pi",
+                    limit=cast(int | None, case["limit"]),
+                    analysis=False,
+                    figures=False,
+                )
+                with patch(
+                    "asterion.dci.benchmark._paper_scope_for_rows",
+                    return_value=self.scope_id,
+                ), patch(
+                    "asterion.dci.benchmark._run_pi_async"
+                ) as agent, patch(
+                    "asterion.dci.benchmark.reserve_full_execution_operation"
+                ) as reserve:
+                    with self.assertRaisesRegex(
+                        DciBenchmarkError,
+                        "^DCI benchmark authorization selection changed$",
+                    ) as raised:
+                        run_benchmark(request, paths=resolve_dci_paths(root))
+                agent.assert_not_called()
+                reserve.assert_not_called()
+                rendered = str(raised.exception)
+                for forbidden in (
+                    "q-001",
+                    "q-002",
+                    "SECRET",
+                    str(root),
+                    str(dataset),
+                    str(private_root),
+                ):
+                    self.assertNotIn(forbidden, rendered)
+                with self.assertRaisesRegex(
+                    ExperimentAuthorizationError,
+                    "^full execution authorization is inactive$",
+                ):
+                    reserve_full_execution_operation(
+                        authority, self.scope_id, "agent"
+                    )
 
             authority = authorize(root / "parent-root")
             request = self.request(root, authority)
@@ -1109,9 +1220,9 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
             root = Path(temporary).resolve()
             authority = authorize(
                 root / "agent-cap",
-                max_agents=1,
+                max_agents=2,
                 max_judges=2,
-                selected_query_ids=query_ids(1),
+                selected_query_ids=query_ids(2),
             )
             request = self.request(root, authority)
             with self.patches(agent=agent, judge=judge, agent_cost=lambda *_: 0.0):
@@ -1122,10 +1233,9 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
                     "asterion.dci.benchmark.evaluate_run_directory_async",
                     side_effect=judge,
                 ) as evaluate:
-                    with self.assertRaises(DciBenchmarkError):
-                        run_benchmark(request, paths=resolve_dci_paths(root))
-            self.assertEqual(run.call_count, 1)
-            self.assertEqual(evaluate.call_count, 1)
+                    run_benchmark(request, paths=resolve_dci_paths(root))
+            self.assertEqual(run.call_count, 2)
+            self.assertEqual(evaluate.call_count, 2)
 
             authority = authorize(
                 root / "judge-cap",
@@ -1163,7 +1273,7 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
                 max_cost=2.5,
                 max_agent_cost=2.0,
                 max_judge_cost=1.0,
-                selected_query_ids=query_ids(1),
+                selected_query_ids=query_ids(2),
             )
             request = self.request(root, authority)
             with self.patches(agent=agent, judge=judge, agent_cost=lambda *_: 1.5):
@@ -1211,7 +1321,7 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
                 max_agents=2,
                 max_judges=2,
                 max_agent_cost=0.5,
-                selected_query_ids=query_ids(1),
+                selected_query_ids=query_ids(2),
             )
             request = self.request(root, authority)
             with self.patches(agent=agent, judge=judge, agent_cost=lambda *_: 0.6):
@@ -1344,7 +1454,7 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
                     root / "cancel",
                     max_agents=2,
                     max_judges=2,
-                    selected_query_ids=query_ids(1),
+                    selected_query_ids=query_ids(2),
                 )
                 request = self.request(root, authority, max_concurrency=1)
                 with self.patches(

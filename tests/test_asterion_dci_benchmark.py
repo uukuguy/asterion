@@ -124,6 +124,137 @@ def _recorded_run(_paths: object, request: object, **kwargs: object) -> DciRunRe
 
 
 class AsterionDciBenchmarkTests(unittest.TestCase):
+    def test_authorized_limit_one_emits_external_limited_selection(self) -> None:
+        scope_id = "bright.robotics.main.full"
+        query_id = "q-001"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            authority = authorize_full_execution(
+                profile=resolve_experiment_profile("paper-reference/pi"),
+                scope_ids=(scope_id,),
+                bounded_selected_ids_sha256=(canonical_sha256((query_id,)),),
+                selected_query_counts=(1,),
+                planned_agent_operations=1,
+                planned_judge_operations=0,
+                output_root=root / "private",
+                max_agent_operations=1,
+                max_judge_operations=1,
+                max_cost_usd=1,
+                max_agent_cost_per_operation_usd=1,
+                max_judge_cost_per_operation_usd=1,
+                invocation_authorized=True,
+            )
+            dataset = root / "dataset.jsonl"
+            dataset.write_text(
+                json.dumps(
+                    {
+                        "query_id": query_id,
+                        "query": "private question",
+                        "answer": "private answer",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            request = BenchmarkRequest(
+                dataset=dataset,
+                output_root=authorized_scope_output_root(authority, scope_id),
+                cwd=root,
+                judge_config=JudgeConfig(),
+                runtime_options=DciRuntimeOptions(provider=None, model=None),
+                limit=1,
+                mode="qa",
+                profile="paper-reference/pi",
+                analysis=False,
+                figures=False,
+                full_execution_authorization=authority,
+                experiment_scope_id=scope_id,
+            )
+            with patch(
+                "asterion.dci.benchmark._paper_scope_for_rows",
+                return_value=scope_id,
+            ):
+                _rows, _output, config, _items, _snapshots = _prepare(request)
+
+        expected = {
+            "schema": "asterion.dci.selection/v1",
+            "execution_class": "paper-bounded-authorized",
+            "id": "limit-1",
+            "paper_scope": scope_id,
+            "selected_rows": 1,
+            "full_dataset": False,
+            "comparable": False,
+            "authorization_profile": "paper-reference/pi",
+            "selected_ids_sha256": canonical_sha256((query_id,)),
+        }
+        self.assertEqual(config["selection"], expected)
+        _validate_config_document(
+            config,
+            expected_execution_class="paper-bounded-authorized",
+        )
+
+    def test_authorized_bounded_selection_is_body_free(self) -> None:
+        scope_id = "bright.biology.main.full"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            authority = authorize_full_execution(
+                profile=resolve_experiment_profile("paper-reference/pi"),
+                scope_ids=(scope_id,),
+                bounded_selected_ids_sha256=(canonical_sha256(("q-001",)),),
+                selected_query_counts=(1,),
+                planned_agent_operations=1,
+                planned_judge_operations=0,
+                output_root=root / "private-output-must-not-leak",
+                max_agent_operations=1,
+                max_judge_operations=1,
+                max_cost_usd=1,
+                max_agent_cost_per_operation_usd=1,
+                max_judge_cost_per_operation_usd=1,
+                invocation_authorized=True,
+            )
+            dataset = root / "private-dataset.jsonl"
+            dataset.write_text(
+                json.dumps(
+                    {
+                        "query_id": "q-002",
+                        "query": "SECRET question body",
+                        "answer": "SECRET answer body",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            request = BenchmarkRequest(
+                dataset=dataset,
+                output_root=authorized_scope_output_root(authority, scope_id),
+                cwd=root,
+                judge_config=JudgeConfig(),
+                runtime_options=DciRuntimeOptions(provider=None, model=None),
+                limit=1,
+                mode="qa",
+                profile="paper-reference/pi",
+                analysis=False,
+                figures=False,
+                full_execution_authorization=authority,
+                experiment_scope_id=scope_id,
+            )
+            with patch(
+                "asterion.dci.benchmark._paper_scope_for_rows",
+                return_value=scope_id,
+            ), patch(
+                "asterion.dci.benchmark._run_pi_async"
+            ) as agent:
+                with self.assertRaisesRegex(
+                    DciBenchmarkError,
+                    "^DCI benchmark authorization selection changed$",
+                ) as raised:
+                    run_benchmark(request, paths=resolve_dci_paths(root))
+            agent.assert_not_called()
+            rendered = str(raised.exception)
+            self.assertNotIn("q-002", rendered)
+            self.assertNotIn("SECRET", rendered)
+            self.assertNotIn(str(root), rendered)
+
     def test_resolution_requires_complete_configuration_before_agent_execution(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory).resolve()

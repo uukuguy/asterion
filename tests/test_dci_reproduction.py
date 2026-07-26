@@ -184,12 +184,12 @@ class TestDciRunManifestCompiler(unittest.TestCase):
         root: Path,
         *,
         mode: str = "qa",
+        query_ids: tuple[str, ...] = ("q001", "q002", "q003", "q004"),
         mutations: tuple[Callable[[Path, dict[str, Any]], None], ...] = (),
     ) -> Path:
         profile = resolve_experiment_profile(
             "paper-reference/pi" if mode == "qa" else "asterion-safe/pi"
         )
-        query_ids = ("q001", "q002", "q003", "q004")
         dataset_id = "browsecomp-plus" if mode == "qa" else "bright.biology"
         metric_identity = (
             None
@@ -353,15 +353,29 @@ class TestDciRunManifestCompiler(unittest.TestCase):
         (root / "results.jsonl").chmod(0o600)
         summary = {
             "schema": "asterion.dci.batch-summary/v1",
-            "counts": {"total": 4, "completed": 3, "failed": 1, "excluded": 1},
+            "counts": {
+                "total": len(rows),
+                "completed": sum(row["status"] == "completed" for row in rows),
+                "failed": sum(row["status"] == "failed" for row in rows),
+                "excluded": sum(
+                    row["exclusion_reason"] is not None for row in rows
+                ),
+            },
             "totals": {
-                "agent_operations": 4,
-                "judge_operations": 3 if mode == "qa" else 0,
-                "input_tokens": 100,
-                "cached_input_tokens": 10,
-                "output_tokens": 32,
-                "total_tokens": 142,
-                "cost_usd": 1.1,
+                "agent_operations": sum(row["agent_operations"] for row in rows),
+                "judge_operations": sum(row["judge_operations"] for row in rows),
+                "input_tokens": sum(row["tokens"]["input"] for row in rows),
+                "cached_input_tokens": sum(
+                    row["tokens"]["cached_input"] for row in rows
+                ),
+                "output_tokens": sum(row["tokens"]["output"] for row in rows),
+                "total_tokens": sum(
+                    row["tokens"]["input"]
+                    + row["tokens"]["cached_input"]
+                    + row["tokens"]["output"]
+                    for row in rows
+                ),
+                "cost_usd": sum(row["cost_usd"] for row in rows),
             },
             "provenance": {
                 "implementation_sha256": config["implementation_sha256"],
@@ -654,6 +668,83 @@ class TestDciRunManifestCompiler(unittest.TestCase):
             )
             comparison = compare_reproduction(baseline, manifest, profile)
             self.assertEqual(comparison.selection_id, "limit-1")
+
+    def test_compile_authorized_bounded_selection(self) -> None:
+        scope_id = "browsecomp-plus.main.all830"
+        query_id = "q001"
+
+        def bounded(
+            root: Path,
+            _state: dict[str, Any],
+            **selection_overrides: object,
+        ) -> None:
+            config = json.loads((root / "config.json").read_text(encoding="utf-8"))
+            config["selection"] = {
+                **config["selection"],
+                "execution_class": "paper-bounded-authorized",
+                "id": "limit-1",
+                "paper_scope": scope_id,
+                "selected_rows": 1,
+                "full_dataset": False,
+                "comparable": False,
+                "authorization_profile": "paper-reference/pi",
+                **selection_overrides,
+            }
+            config["paper_full_authorization"] = {
+                "schema": "asterion.dci.paper-full-authorization/v1",
+                "profile_id": "paper-reference/pi",
+                "profile_identity_sha256": resolve_experiment_profile(
+                    "paper-reference/pi"
+                ).identity_sha256,
+            }
+            _write_json(root / "config.json", config)
+            _refresh_batch_hashes(root)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            profile = resolve_experiment_profile("paper-reference/pi")
+            manifest = compile_run_manifest(
+                self._batch(
+                    Path(temporary),
+                    query_ids=(query_id,),
+                    mutations=(bounded,),
+                ),
+                profile,
+            )
+            validate_run_manifest(manifest)
+            self.assertEqual(manifest.selection_id, "limit-1")
+            self.assertEqual(
+                manifest.selection_sha256,
+                canonical_sha256((query_id,)),
+            )
+            self.assertEqual(manifest.aggregates.query_count, 1)
+
+        forged_cases = {
+            "limit ID": {"id": "limit-2"},
+            "paper scope": {"paper_scope": "bright.biology.main.full"},
+            "selected count": {"selected_rows": 2},
+            "authorization profile": {
+                "authorization_profile": "asterion-safe/pi"
+            },
+            "selected digest": {"selected_ids_sha256": "f" * 64},
+        }
+        profile = resolve_experiment_profile("paper-reference/pi")
+        for label, overrides in forged_cases.items():
+            def forged(
+                root: Path,
+                state: dict[str, Any],
+                *,
+                values: dict[str, object] = overrides,
+            ) -> None:
+                bounded(root, state, **values)
+
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary:
+                batch = self._batch(
+                    Path(temporary),
+                    query_ids=(query_id,),
+                    mutations=(forged,),
+                )
+                with self.assertRaises(ValueError):
+                    compile_run_manifest(batch, profile)
 
     def test_compile_run_manifest_preserves_corpus_content_identity(self) -> None:
         def add_corpus_evidence(root: Path, _state: dict[str, Any]) -> None:

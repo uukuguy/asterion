@@ -1605,6 +1605,32 @@ def _batch_selection(
         selection_id = _require_public_id(paper_scope, "selection ID")
     else:
         selection_id = _require_public_id(selection.get("id"), "selection ID")
+    if execution_class == "paper-bounded-authorized":
+        limit_match = re.fullmatch(r"limit-([1-9][0-9]*)", selection_id)
+        authorization_profile = selection.get("authorization_profile")
+        authorization = config.get("paper_full_authorization")
+        bounded_scope = _require_public_id(paper_scope, "paper scope")
+        try:
+            scope = resolve_paper_experiment_scope(bounded_scope)
+        except ValueError as error:
+            raise ValueError(
+                "DCI reproduction selection identity is invalid"
+            ) from error
+        if (
+            limit_match is None
+            or int(limit_match.group(1)) != len(query_ids)
+            or selection.get("selected_rows") != int(limit_match.group(1))
+            or selection.get("full_dataset") is not False
+            or selection.get("comparable") is not False
+            or authorization_profile != profile.profile_id
+            or bounded_scope not in profile.scope_ids
+            or scope.dataset_id != dataset_id
+            or not isinstance(authorization, Mapping)
+            or authorization.get("profile_id") != profile.profile_id
+            or authorization.get("profile_identity_sha256")
+            != profile.identity_sha256
+        ):
+            raise ValueError("DCI reproduction selection identity is invalid")
     selection_sha256 = _require_sha256(
         selection.get("selected_ids_sha256"), "selected ID digest"
     )
