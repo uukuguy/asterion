@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import os
+import stat
 import tempfile
 import threading
 import unittest
@@ -13,8 +14,10 @@ from types import MappingProxyType
 from typing import Any, Callable, cast
 from unittest.mock import patch
 
+from asterion.dci import reproduction as reproduction_module
 from asterion.dci.artifacts import DciConversationFeatures
 from asterion.dci.benchmark import BenchmarkRequest, run_benchmark
+from asterion.dci.cli import main as dci_main
 from asterion.dci.config import DciPaths, DciRuntimeOptions, resolve_dci_paths
 from asterion.dci.experiment_profiles import resolve_experiment_profile
 from asterion.dci.judge import JudgeConfig
@@ -24,6 +27,8 @@ from asterion.dci.reproduction import (
     RunManifest,
     compare_reproduction,
     compile_run_manifest,
+    load_comparison_report,
+    load_run_manifest,
     validate_run_manifest,
 )
 from asterion.dci.run import (
@@ -184,12 +189,12 @@ class TestDciRunManifestCompiler(unittest.TestCase):
         root: Path,
         *,
         mode: str = "qa",
+        query_ids: tuple[str, ...] = ("q001", "q002", "q003", "q004"),
         mutations: tuple[Callable[[Path, dict[str, Any]], None], ...] = (),
     ) -> Path:
         profile = resolve_experiment_profile(
             "paper-reference/pi" if mode == "qa" else "asterion-safe/pi"
         )
-        query_ids = ("q001", "q002", "q003", "q004")
         dataset_id = "browsecomp-plus" if mode == "qa" else "bright.biology"
         metric_identity = (
             None
@@ -353,15 +358,29 @@ class TestDciRunManifestCompiler(unittest.TestCase):
         (root / "results.jsonl").chmod(0o600)
         summary = {
             "schema": "asterion.dci.batch-summary/v1",
-            "counts": {"total": 4, "completed": 3, "failed": 1, "excluded": 1},
+            "counts": {
+                "total": len(rows),
+                "completed": sum(row["status"] == "completed" for row in rows),
+                "failed": sum(row["status"] == "failed" for row in rows),
+                "excluded": sum(
+                    row["exclusion_reason"] is not None for row in rows
+                ),
+            },
             "totals": {
-                "agent_operations": 4,
-                "judge_operations": 3 if mode == "qa" else 0,
-                "input_tokens": 100,
-                "cached_input_tokens": 10,
-                "output_tokens": 32,
-                "total_tokens": 142,
-                "cost_usd": 1.1,
+                "agent_operations": sum(row["agent_operations"] for row in rows),
+                "judge_operations": sum(row["judge_operations"] for row in rows),
+                "input_tokens": sum(row["tokens"]["input"] for row in rows),
+                "cached_input_tokens": sum(
+                    row["tokens"]["cached_input"] for row in rows
+                ),
+                "output_tokens": sum(row["tokens"]["output"] for row in rows),
+                "total_tokens": sum(
+                    row["tokens"]["input"]
+                    + row["tokens"]["cached_input"]
+                    + row["tokens"]["output"]
+                    for row in rows
+                ),
+                "cost_usd": sum(row["cost_usd"] for row in rows),
             },
             "provenance": {
                 "implementation_sha256": config["implementation_sha256"],
@@ -397,6 +416,307 @@ class TestDciRunManifestCompiler(unittest.TestCase):
         payload.pop("identity_sha256")
         payload["identity_sha256"] = canonical_sha256(payload)
         return payload
+
+    def test_write_run_manifest_is_private_and_descriptor_bound(self) -> None:
+        scope_id = "bright.biology.main.full"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            batch = root / "batch"
+            batch.mkdir(mode=0o700)
+            self._batch(batch)
+            manifest_root = root / "manifests"
+            manifest_root.mkdir(mode=0o700)
+            manifest = compile_run_manifest(
+                batch, resolve_experiment_profile("paper-reference/pi")
+            )
+            expected_identity = (
+                manifest_root.stat().st_dev,
+                manifest_root.stat().st_ino,
+            )
+            batch_inventory = tuple(
+                sorted(path.relative_to(batch).as_posix() for path in batch.rglob("*"))
+            )
+
+            artifact = reproduction_module.write_run_manifest(
+                manifest_root,
+                expected_identity,
+                scope_id,
+                manifest,
+            )
+
+            self.assertEqual(
+                artifact,
+                hashlib.sha256(scope_id.encode("utf-8")).hexdigest() + ".json",
+            )
+            written = manifest_root / artifact
+            self.assertEqual(stat.S_IMODE(written.stat().st_mode), 0o600)
+            self.assertEqual(load_run_manifest(written), manifest)
+            self.assertEqual(
+                tuple(
+                    sorted(
+                        path.relative_to(batch).as_posix()
+                        for path in batch.rglob("*")
+                    )
+                ),
+                batch_inventory,
+            )
+
+            invalid_manifests = (
+                {**manifest.to_dict(), "profile_sha256": "0" * 64},
+                {**manifest.to_dict(), "prompt": "/private/sentinel/body"},
+            )
+            for invalid in invalid_manifests:
+                with self.subTest(kind="invalid manifest"):
+                    with self.assertRaises(ValueError):
+                        reproduction_module.write_run_manifest(
+                            manifest_root,
+                            expected_identity,
+                            "bright.earth-science.main.full",
+                            invalid,
+                        )
+            with self.assertRaises(ValueError):
+                reproduction_module.write_run_manifest(
+                    manifest_root,
+                    expected_identity,
+                    "../private/sentinel",
+                    manifest,
+                )
+            self.assertEqual(
+                tuple(
+                    sorted(
+                        path.relative_to(batch).as_posix()
+                        for path in batch.rglob("*")
+                    )
+                ),
+                batch_inventory,
+            )
+
+    def test_write_run_manifest_rejects_replacement_and_overwrite(self) -> None:
+        scope_id = "bright.biology.main.full"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            batch = root / "batch"
+            batch.mkdir(mode=0o700)
+            self._batch(batch)
+            manifest = compile_run_manifest(
+                batch, resolve_experiment_profile("paper-reference/pi")
+            )
+            batch_inventory = tuple(
+                sorted(path.relative_to(batch).as_posix() for path in batch.rglob("*"))
+            )
+
+            replaced = root / "replaced-manifests"
+            replaced.mkdir(mode=0o700)
+            replaced_identity = (replaced.stat().st_dev, replaced.stat().st_ino)
+            replaced.rename(root / "original-manifests")
+            replaced.mkdir(mode=0o700)
+            with self.assertRaises(ValueError):
+                reproduction_module.write_run_manifest(
+                    replaced,
+                    replaced_identity,
+                    scope_id,
+                    manifest,
+                )
+
+            target = root / "target-manifests"
+            target.mkdir(mode=0o700)
+            symlink = root / "symlink-manifests"
+            symlink.symlink_to(target, target_is_directory=True)
+            target_identity = (target.stat().st_dev, target.stat().st_ino)
+            with self.assertRaises(ValueError):
+                reproduction_module.write_run_manifest(
+                    symlink,
+                    target_identity,
+                    scope_id,
+                    manifest,
+                )
+
+            artifact = hashlib.sha256(scope_id.encode("utf-8")).hexdigest() + ".json"
+            existing = target / artifact
+            existing.write_text("do not overwrite\n", encoding="utf-8")
+            existing.chmod(0o600)
+            with self.assertRaises(ValueError):
+                reproduction_module.write_run_manifest(
+                    target,
+                    target_identity,
+                    scope_id,
+                    manifest,
+                )
+            self.assertEqual(existing.read_text(encoding="utf-8"), "do not overwrite\n")
+            self.assertEqual(
+                tuple(
+                    sorted(
+                        path.relative_to(batch).as_posix()
+                        for path in batch.rglob("*")
+                    )
+                ),
+                batch_inventory,
+            )
+
+    def test_write_run_manifest_close_failure_attempts_cleanup_and_allows_retry(
+        self,
+    ) -> None:
+        scope_id = "bright.biology.main.full"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            batch = root / "batch"
+            batch.mkdir(mode=0o700)
+            self._batch(batch)
+            manifest_root = root / "manifests"
+            manifest_root.mkdir(mode=0o700)
+            identity = (manifest_root.stat().st_dev, manifest_root.stat().st_ino)
+            manifest = compile_run_manifest(
+                batch, resolve_experiment_profile("paper-reference/pi")
+            )
+            artifact = hashlib.sha256(scope_id.encode()).hexdigest() + ".json"
+            real_open = os.open
+            real_close = os.close
+            descriptors: dict[str, int] = {}
+            close_calls: list[int] = []
+            artifact_close_failed = False
+
+            def open_spy(
+                path: os.PathLike[str] | str,
+                flags: int,
+                mode: int = 0o777,
+                *,
+                dir_fd: int | None = None,
+            ) -> int:
+                descriptor = (
+                    real_open(path, flags, mode)
+                    if dir_fd is None
+                    else real_open(path, flags, mode, dir_fd=dir_fd)
+                )
+                if path == manifest_root:
+                    descriptors["root"] = descriptor
+                elif path == artifact and dir_fd == descriptors.get("root"):
+                    descriptors["artifact"] = descriptor
+                return descriptor
+
+            def close_spy(descriptor: int) -> None:
+                nonlocal artifact_close_failed
+                close_calls.append(descriptor)
+                if (
+                    descriptor == descriptors.get("artifact")
+                    and not artifact_close_failed
+                ):
+                    artifact_close_failed = True
+                    real_close(descriptor)
+                    raise OSError("/private/sentinel artifact close")
+                real_close(descriptor)
+
+            with (
+                patch("asterion.dci.reproduction.os.open", side_effect=open_spy),
+                patch("asterion.dci.reproduction.os.close", side_effect=close_spy),
+                self.assertRaisesRegex(
+                    ValueError, "^DCI reproduction manifest write failed$"
+                ) as raised,
+            ):
+                reproduction_module.write_run_manifest(
+                    manifest_root,
+                    identity,
+                    scope_id,
+                    manifest,
+                )
+
+            self.assertNotIn("/private/sentinel", str(raised.exception))
+            self.assertIn(descriptors["root"], close_calls)
+            self.assertFalse((manifest_root / artifact).exists())
+            self.assertEqual(
+                reproduction_module.write_run_manifest(
+                    manifest_root,
+                    identity,
+                    scope_id,
+                    manifest,
+                ),
+                artifact,
+            )
+
+    def test_write_run_manifest_cleanup_faults_do_not_mask_primary_failure(
+        self,
+    ) -> None:
+        scope_id = "bright.biology.main.full"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            batch = root / "batch"
+            batch.mkdir(mode=0o700)
+            self._batch(batch)
+            manifest_root = root / "manifests"
+            manifest_root.mkdir(mode=0o700)
+            identity = (manifest_root.stat().st_dev, manifest_root.stat().st_ino)
+            manifest = compile_run_manifest(
+                batch, resolve_experiment_profile("paper-reference/pi")
+            )
+            artifact = hashlib.sha256(scope_id.encode()).hexdigest() + ".json"
+            real_open = os.open
+            real_close = os.close
+            real_fsync = os.fsync
+            descriptors: dict[str, int] = {}
+            close_calls: list[int] = []
+            unlink_calls: list[tuple[str, int | None]] = []
+            fsync_failed = False
+
+            def open_spy(
+                path: os.PathLike[str] | str,
+                flags: int,
+                mode: int = 0o777,
+                *,
+                dir_fd: int | None = None,
+            ) -> int:
+                descriptor = (
+                    real_open(path, flags, mode)
+                    if dir_fd is None
+                    else real_open(path, flags, mode, dir_fd=dir_fd)
+                )
+                if path == manifest_root:
+                    descriptors["root"] = descriptor
+                elif path == artifact and dir_fd == descriptors.get("root"):
+                    descriptors["artifact"] = descriptor
+                return descriptor
+
+            def fsync_spy(descriptor: int) -> None:
+                nonlocal fsync_failed
+                if descriptor == descriptors.get("artifact") and not fsync_failed:
+                    fsync_failed = True
+                    raise OSError("SECRET primary write body")
+                real_fsync(descriptor)
+
+            def close_spy(descriptor: int) -> None:
+                close_calls.append(descriptor)
+                real_close(descriptor)
+                if descriptor == descriptors.get("artifact"):
+                    raise OSError("SECRET artifact close body")
+
+            def unlink_spy(
+                path: os.PathLike[str] | str, *, dir_fd: int | None = None
+            ) -> None:
+                unlink_calls.append((os.fspath(path), dir_fd))
+                raise OSError("/private/sentinel unlink")
+
+            with (
+                patch("asterion.dci.reproduction.os.open", side_effect=open_spy),
+                patch("asterion.dci.reproduction.os.fsync", side_effect=fsync_spy),
+                patch("asterion.dci.reproduction.os.close", side_effect=close_spy),
+                patch("asterion.dci.reproduction.os.unlink", side_effect=unlink_spy),
+                self.assertRaisesRegex(
+                    ValueError, "^DCI reproduction manifest write failed$"
+                ) as raised,
+            ):
+                reproduction_module.write_run_manifest(
+                    manifest_root,
+                    identity,
+                    scope_id,
+                    manifest,
+                )
+
+            public_error = str(raised.exception)
+            for sentinel in ("SECRET", "/private/sentinel"):
+                self.assertNotIn(sentinel, public_error)
+            self.assertEqual(unlink_calls, [(artifact, descriptors["root"])])
+            self.assertIn(descriptors["root"], close_calls)
+            failed_artifact = manifest_root / artifact
+            self.assertTrue(failed_artifact.exists())
+            failed_artifact.unlink()
 
     def test_compile_run_manifest_validates_locked_batch_and_compares_body_free(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -457,6 +777,7 @@ class TestDciRunManifestCompiler(unittest.TestCase):
             )
             comparison = compare_reproduction(baseline, manifest, profile)
             self.assertEqual(comparison.candidate_product, "asterion-dci")
+            self.assertIs(comparison.accepted, True)
 
     def test_compile_run_manifest_supports_ir_metric_rows(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -629,7 +950,7 @@ class TestDciRunManifestCompiler(unittest.TestCase):
                 "execution_class": "paper-bounded",
                 "id": "limit-1",
                 "paper_scope": "browsecomp-plus.main.all830",
-                "selected_rows": 4,
+                "selected_rows": 1,
                 "full_dataset": False,
                 "comparable": False,
                 "authorization_profile": None,
@@ -640,7 +961,12 @@ class TestDciRunManifestCompiler(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             profile = resolve_experiment_profile("paper-reference/pi")
             manifest = compile_run_manifest(
-                self._batch(Path(temporary), mutations=(bounded,)), profile
+                self._batch(
+                    Path(temporary),
+                    query_ids=("q001",),
+                    mutations=(bounded,),
+                ),
+                profile,
             )
             validate_run_manifest(manifest)
             self.assertEqual(manifest.selection_id, "limit-1")
@@ -654,6 +980,197 @@ class TestDciRunManifestCompiler(unittest.TestCase):
             )
             comparison = compare_reproduction(baseline, manifest, profile)
             self.assertEqual(comparison.selection_id, "limit-1")
+            self.assertEqual(comparison.comparison_kind, "source-parity")
+            self.assertTrue(comparison.metrics)
+            self.assertTrue(all(metric.accepted for metric in comparison.metrics.values()))
+            self.assertIsNone(comparison.accepted)
+            reparsed = reproduction_module.ComparisonReport.from_mapping(
+                comparison.to_dict()
+            )
+            self.assertIsNone(reparsed.accepted)
+
+    def test_only_canonical_bounded_selection_is_external_limited(self) -> None:
+        profile = resolve_experiment_profile("paper-reference/pi")
+        with tempfile.TemporaryDirectory() as temporary:
+            manifest = compile_run_manifest(self._batch(Path(temporary)), profile)
+
+        for selection_id in (
+            "limit-01",
+            "limit-1-extra",
+            "limited-1",
+        ):
+            with self.subTest(selection_id=selection_id):
+                candidate = RunManifest.from_mapping(
+                    self._manifest_dict_without_identity(
+                        manifest,
+                        selection_id=selection_id,
+                    )
+                )
+                baseline = RunManifest.from_mapping(
+                    self._manifest_dict_without_identity(
+                        candidate,
+                        product="original-dci",
+                        implementation_sha256="0" * 64,
+                        product_effective_config_sha256="1" * 64,
+                    )
+                )
+                comparison = compare_reproduction(baseline, candidate, profile)
+                self.assertIsInstance(comparison.accepted, bool)
+
+    def test_paper_compare_prints_not_applicable_for_bounded_selection(self) -> None:
+        query_id = "q001"
+
+        def bounded(root: Path, _state: dict[str, Any]) -> None:
+            config = json.loads((root / "config.json").read_text(encoding="utf-8"))
+            config["selection"] = {
+                **config["selection"],
+                "execution_class": "paper-bounded-authorized",
+                "id": "limit-1",
+                "paper_scope": "browsecomp-plus.main.all830",
+                "selected_rows": 1,
+                "full_dataset": False,
+                "comparable": False,
+                "authorization_profile": "paper-reference/pi",
+            }
+            config["paper_full_authorization"] = {
+                "schema": "asterion.dci.paper-full-authorization/v1",
+                "profile_id": "paper-reference/pi",
+                "profile_identity_sha256": resolve_experiment_profile(
+                    "paper-reference/pi"
+                ).identity_sha256,
+            }
+            _write_json(root / "config.json", config)
+            _refresh_batch_hashes(root)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            profile = resolve_experiment_profile("paper-reference/pi")
+            batch_root = root / "batch"
+            batch_root.mkdir(mode=0o700)
+            candidate = compile_run_manifest(
+                self._batch(
+                    batch_root,
+                    query_ids=(query_id,),
+                    mutations=(bounded,),
+                ),
+                profile,
+            )
+            baseline = RunManifest.from_mapping(
+                self._manifest_dict_without_identity(
+                    candidate,
+                    product="original-dci",
+                    implementation_sha256="0" * 64,
+                    product_effective_config_sha256="1" * 64,
+                )
+            )
+            baseline_path = root / "baseline.json"
+            candidate_path = root / "candidate.json"
+            report_path = root / "comparison.json"
+            _write_json(baseline_path, baseline.to_dict())
+            _write_json(candidate_path, candidate.to_dict())
+            stdout = __import__("io").StringIO()
+            stderr = __import__("io").StringIO()
+
+            code = dci_main(
+                [
+                    "paper",
+                    "compare",
+                    "--profile",
+                    profile.profile_id,
+                    "--baseline",
+                    str(baseline_path),
+                    "--candidate",
+                    str(candidate_path),
+                    "--output",
+                    str(report_path),
+                ],
+                stdout=stdout,
+                stderr=stderr,
+            )
+
+            report = load_comparison_report(report_path)
+
+        self.assertEqual(code, 0, stderr.getvalue())
+        self.assertIn("Acceptance: not-applicable\n", stdout.getvalue())
+        self.assertNotIn("Acceptance: pass\n", stdout.getvalue())
+        self.assertIsNone(report.accepted)
+
+    def test_compile_authorized_bounded_selection(self) -> None:
+        scope_id = "browsecomp-plus.main.all830"
+        query_id = "q001"
+
+        def bounded(
+            root: Path,
+            _state: dict[str, Any],
+            **selection_overrides: object,
+        ) -> None:
+            config = json.loads((root / "config.json").read_text(encoding="utf-8"))
+            config["selection"] = {
+                **config["selection"],
+                "execution_class": "paper-bounded-authorized",
+                "id": "limit-1",
+                "paper_scope": scope_id,
+                "selected_rows": 1,
+                "full_dataset": False,
+                "comparable": False,
+                "authorization_profile": "paper-reference/pi",
+                **selection_overrides,
+            }
+            config["paper_full_authorization"] = {
+                "schema": "asterion.dci.paper-full-authorization/v1",
+                "profile_id": "paper-reference/pi",
+                "profile_identity_sha256": resolve_experiment_profile(
+                    "paper-reference/pi"
+                ).identity_sha256,
+            }
+            _write_json(root / "config.json", config)
+            _refresh_batch_hashes(root)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            profile = resolve_experiment_profile("paper-reference/pi")
+            manifest = compile_run_manifest(
+                self._batch(
+                    Path(temporary),
+                    query_ids=(query_id,),
+                    mutations=(bounded,),
+                ),
+                profile,
+            )
+            validate_run_manifest(manifest)
+            self.assertEqual(manifest.selection_id, "limit-1")
+            self.assertEqual(
+                manifest.selection_sha256,
+                canonical_sha256((query_id,)),
+            )
+            self.assertEqual(manifest.aggregates.query_count, 1)
+
+        forged_cases = {
+            "limit ID": {"id": "limit-2"},
+            "paper scope": {"paper_scope": "bright.biology.main.full"},
+            "selected count": {"selected_rows": 2},
+            "authorization profile": {
+                "authorization_profile": "asterion-safe/pi"
+            },
+            "selected digest": {"selected_ids_sha256": "f" * 64},
+        }
+        profile = resolve_experiment_profile("paper-reference/pi")
+        for label, overrides in forged_cases.items():
+            def forged(
+                root: Path,
+                state: dict[str, Any],
+                *,
+                values: dict[str, object] = overrides,
+            ) -> None:
+                bounded(root, state, **values)
+
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary:
+                batch = self._batch(
+                    Path(temporary),
+                    query_ids=(query_id,),
+                    mutations=(forged,),
+                )
+                with self.assertRaises(ValueError):
+                    compile_run_manifest(batch, profile)
 
     def test_compile_run_manifest_preserves_corpus_content_identity(self) -> None:
         def add_corpus_evidence(root: Path, _state: dict[str, Any]) -> None:

@@ -61,6 +61,7 @@ from asterion.dci.experiment_profiles import (
     ExperimentProfile,
     FullExecutionAuthorization,
     FullExecutionReservation,
+    _authorized_manifest_output_identity,
     authorized_scope_output_root,
     cancel_full_execution_authorization,
     consumed_full_execution_authorization_snapshot,
@@ -70,6 +71,7 @@ from asterion.dci.experiment_profiles import (
     reserve_full_execution_operation,
     resolve_experiment_profile,
 )
+from asterion.dci.reproduction import compile_run_manifest, write_run_manifest
 from asterion.dci.judge import (
     ASTERION_SAFE_JUDGE_CONTRACT,
     JudgeConfig,
@@ -77,10 +79,14 @@ from asterion.dci.judge import (
     judge_request_fingerprint,
 )
 from asterion.dci.paper_benchmarks import (
+    DatasetInputBinding,
+    _dataset_input_binding_identity,
+    _dataset_input_binding_matches,
     canonical_sha256,
     paper_scope_for_profile,
     paper_scope_for_selected_ids,
     published_scope_selected_ids,
+    read_paper_benchmark_dataset,
     require_af320_executable_scope,
     resolve_paper_benchmark,
     resolve_paper_experiment_scope,
@@ -177,6 +183,7 @@ class BenchmarkRequest:
     full_execution_authorization: FullExecutionAuthorization | None = None
     experiment_scope_id: str | None = None
     paper_ir_duplicate_handling: str | None = None
+    dataset_input_binding: DatasetInputBinding | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -253,13 +260,48 @@ def execute_authorized_reproduction(
             )
             expected_roots[scope_id] = authorized_root
 
+        try:
+            manifest_root, manifest_device, manifest_inode = (
+                _authorized_manifest_output_identity(authority)
+            )
+        except (
+            ExperimentAuthorizationError,
+            OSError,
+            RuntimeError,
+            ValueError,
+        ) as error:
+            raise DciBenchmarkError(
+                "DCI benchmark manifest evidence failed"
+            ) from error
+
         benchmark_totals: dict[str, int] = {}
-        for item in execution_items:
+        for index, item in enumerate(execution_items):
             result = run_benchmark(item.request, paths=item.paths)
             if Path(os.path.abspath(os.path.normpath(result.output_root))) != (
                 expected_roots[item.scope_id]
             ):
                 raise DciBenchmarkError("DCI benchmark authorization root changed")
+            try:
+                manifest = compile_run_manifest(result.output_root, profile)
+                manifest_artifact = write_run_manifest(
+                    manifest_root,
+                    (manifest_device, manifest_inode),
+                    item.scope_id,
+                    manifest,
+                )
+            except (
+                ExperimentAuthorizationError,
+                OSError,
+                RuntimeError,
+                ValueError,
+            ) as error:
+                raise DciBenchmarkError(
+                    "DCI benchmark manifest evidence failed"
+                ) from error
+            output_identities[index]["manifest_artifact"] = manifest_artifact
+            output_identities[index]["manifest_identity_sha256"] = (
+                manifest.identity_sha256
+            )
             for key, value in result.counts.items():
                 if type(value) is int:
                     benchmark_totals[key] = benchmark_totals.get(key, 0) + value
@@ -339,8 +381,12 @@ async def run_benchmark_async(
 ) -> BenchmarkResult:
     """Run one bounded batch while retaining its writer lock until all work drains."""
 
-    authorized_identity = _authorize_paper_execution_before_inputs(request)
-    rows, output_root, config, row_documents, snapshots = _prepare(request)
+    try:
+        authorized_identity = _authorize_paper_execution_before_inputs(request)
+        rows, output_root, config, row_documents, snapshots = _prepare(request)
+    except BaseException:
+        _cancel_request_authorization(request)
+        raise
     try:
         authorized_identity = _consume_paper_execution_after_inputs(
             request,
@@ -494,6 +540,10 @@ def run_benchmark(request: BenchmarkRequest, *, paths: DciPaths) -> BenchmarkRes
     try:
         asyncio.get_running_loop()
     except RuntimeError:
+        has_running_loop = False
+    else:
+        has_running_loop = True
+    if not has_running_loop:
         return asyncio.run(run_benchmark_async(request, paths=paths))
     raise DciBenchmarkError("DCI benchmark sync API cannot run inside an event loop")
 
@@ -540,14 +590,32 @@ def _authorize_paper_execution_before_inputs(
 
     from asterion.dci.experiment_profiles import (
         ExperimentAuthorizationError,
+        _authorized_scope_dataset_input_binding,
         _authorized_scope_output_identity,
         authorized_scope_output_root,
     )
 
     try:
+        authorized_binding = _authorized_scope_dataset_input_binding(
+            authorization, scope_id
+        )
+        authorized_binding_identity = _dataset_input_binding_identity(
+            authorized_binding
+        )
+        if not _dataset_input_binding_matches(
+            request.dataset_input_binding,
+            authorized_binding_identity,
+        ):
+            raise DciBenchmarkError(
+                "DCI benchmark authorization dataset changed"
+            )
         authorized_root = authorized_scope_output_root(authorization, scope_id)
     except ExperimentAuthorizationError as error:
         raise DciBenchmarkError("DCI benchmark authorization scope changed") from error
+    except ValueError:
+        raise DciBenchmarkError(
+            "DCI benchmark authorization dataset changed"
+        ) from None
     requested_root = Path(
         os.path.abspath(os.path.normpath(request.output_root))
     )
@@ -575,7 +643,11 @@ def _consume_paper_execution_after_inputs(
     )
 
     try:
-        require_af320_executable_scope(scope_id, authorization)
+        require_af320_executable_scope(
+            scope_id,
+            authorization,
+            request.dataset_input_binding,
+        )
         consumed_identity = _consumed_authorized_output_identity(
             authorization, scope_id
         )
@@ -905,22 +977,53 @@ def _prepare(
         and not bounded_paper_selection
     ):
         raise DciBenchmarkError("DCI benchmark requires full execution authorization")
-    try:
+    opened_dataset_binding: DatasetInputBinding | None = None
+    authorized_dataset_benchmark = None
+    if (
+        request.full_execution_authorization is not None
+        and request.experiment_scope_id is not None
+    ):
+        dataset_result: tuple[bytes, DatasetInputBinding] | None = None
+        try:
+            authorized_dataset_benchmark = resolve_paper_benchmark(
+                resolve_paper_experiment_scope(
+                    request.experiment_scope_id
+                ).dataset_id
+            )
+            dataset_raw, opened_dataset_binding = (
+                read_paper_benchmark_dataset(
+                    request.dataset,
+                    authorized_dataset_benchmark,
+                )
+            )
+            dataset_result = (dataset_raw, opened_dataset_binding)
+        except (OSError, ValueError):
+            pass
+        if dataset_result is None:
+            raise DciBenchmarkError(
+                "DCI benchmark dataset is unavailable"
+            ) from None
+        dataset_raw, opened_dataset_binding = dataset_result
+    else:
         dataset_raw = _read_input_snapshot(request.dataset)
+    try:
         beir_scope = {
             "beir.arguana": "beir.arguana.main.random50",
             "beir.scifact": "beir.scifact.main.random50",
         }.get(request.profile)
-        bright_benchmark = None
+        paper_dataset_benchmark = None
         if paper_scope is not None:
             candidate = resolve_paper_benchmark(
                 resolve_paper_experiment_scope(paper_scope).dataset_id
             )
-            if candidate.dataset_id.startswith("bright."):
-                bright_benchmark = candidate
-        if bright_benchmark is not None:
+            paper_dataset_benchmark = candidate
+        if (
+            paper_dataset_benchmark is not None
+            and paper_dataset_benchmark.dataset_id.startswith("bright.")
+        ):
             rows = load_bright_benchmark_rows_bytes(
-                dataset_raw, expected_count=bright_benchmark.source_count
+                dataset_raw,
+                expected_count=paper_dataset_benchmark.source_count,
             )
         elif beir_scope is None:
             try:
@@ -944,6 +1047,7 @@ def _prepare(
     if request.limit is not None:
         rows = rows[: request.limit]
     selected_scope = _paper_scope_for_rows(rows)
+    authorized_scope = paper_scope or source_scope or selected_scope
     bounded_paper_selection = (
         request.full_execution_authorization is None
         and type(request.limit) is int
@@ -951,6 +1055,71 @@ def _prepare(
         and request.experiment_scope_id is None
         and (paper_scope is not None or source_scope is not None)
     )
+    if (
+        request.full_execution_authorization is not None
+        and request.experiment_scope_id != authorized_scope
+    ):
+        raise DciBenchmarkError("DCI benchmark authorization scope changed")
+    if request.full_execution_authorization is not None:
+        if authorized_scope is None:
+            raise DciBenchmarkError("DCI benchmark authorization scope changed")
+        from asterion.dci.experiment_profiles import (
+            _authorized_scope_dataset_input_binding,
+            _authorized_scope_selection_identity,
+        )
+
+        try:
+            authorized_dataset_binding = (
+                _authorized_scope_dataset_input_binding(
+                    request.full_execution_authorization,
+                    authorized_scope,
+                )
+            )
+            authorized_selection_sha256, authorized_selection_count = (
+                _authorized_scope_selection_identity(
+                    request.full_execution_authorization,
+                    authorized_scope,
+                )
+            )
+        except (ExperimentAuthorizationError, RuntimeError, TypeError, ValueError) as error:
+            raise DciBenchmarkError(
+                "DCI benchmark authorization selection changed"
+            ) from error
+        try:
+            authorized_dataset_identity = _dataset_input_binding_identity(
+                authorized_dataset_binding
+            )
+        except ValueError:
+            raise DciBenchmarkError(
+                "DCI benchmark authorization dataset changed"
+            ) from None
+        if (
+            not _dataset_input_binding_matches(
+                request.dataset_input_binding,
+                authorized_dataset_identity,
+            )
+            or not _dataset_input_binding_matches(
+                opened_dataset_binding,
+                authorized_dataset_identity,
+            )
+        ):
+            raise DciBenchmarkError(
+                "DCI benchmark authorization dataset changed"
+            )
+        bounded_selected_ids_sha256 = canonical_sha256(
+            tuple(sorted(row.query_id for row in rows))
+        )
+        if (
+            bounded_selected_ids_sha256 != authorized_selection_sha256
+            or len(rows) != authorized_selection_count
+            or (
+                request.limit is not None
+                and authorized_selection_count != request.limit
+            )
+        ):
+            raise DciBenchmarkError(
+                "DCI benchmark authorization selection changed"
+            )
     if any((row.is_ir if request.mode == "qa" else not row.is_ir) for row in rows):
         raise DciBenchmarkError("DCI benchmark dataset does not match its mode")
     _resolution_paths, resolution_config, resolution_snapshots = (
@@ -958,18 +1127,12 @@ def _prepare(
     )
     output_root = Path(os.path.abspath(os.path.normpath(request.output_root)))
     _reject_symlink_components(output_root)
-    authorized_scope = paper_scope or source_scope or selected_scope
     if (
         authorized_scope is not None
         and not bounded_paper_selection
         and request.full_execution_authorization is None
     ):
         raise DciBenchmarkError("DCI benchmark requires full execution authorization")
-    if (
-        request.full_execution_authorization is not None
-        and request.experiment_scope_id != authorized_scope
-    ):
-        raise DciBenchmarkError("DCI benchmark authorization scope changed")
     if (
         paper_scope is not None
         and not bounded_paper_selection
@@ -1086,7 +1249,26 @@ def _prepare(
         **config["dataset"],  # type: ignore[arg-type]
         "dataset_id": dataset_id,
     }
-    if bounded_paper_selection:
+    authorized_bounded = (
+        authorized_scope is not None
+        and request.full_execution_authorization is not None
+        and request.limit is not None
+    )
+    if authorized_bounded:
+        authorization = request.full_execution_authorization
+        if authorization is None:
+            raise DciBenchmarkError("DCI benchmark authorization scope changed")
+        selection = {
+            "schema": "asterion.dci.selection/v1",
+            "execution_class": "paper-bounded-authorized",
+            "id": f"limit-{request.limit}",
+            "paper_scope": authorized_scope,
+            "selected_rows": len(rows),
+            "full_dataset": False,
+            "comparable": False,
+            "authorization_profile": authorization.profile_id,
+        }
+    elif bounded_paper_selection:
         selection = {
             "schema": "asterion.dci.selection/v1",
             "execution_class": "paper-bounded",
@@ -1928,6 +2110,7 @@ def _validate_config_document(
 ) -> None:
     if expected_execution_class not in {
         "paper-bounded",
+        "paper-bounded-authorized",
         "paper-full-authorized",
         "non-paper",
     }:
@@ -2013,7 +2196,10 @@ def _validate_config_document(
         or float(paper_authorization["estimated_budget_usd"]) < 0
     ):
         raise DciBenchmarkError("DCI benchmark configuration evidence is invalid")
-    if (expected_execution_class == "paper-full-authorized") != (
+    if (
+        expected_execution_class
+        in {"paper-bounded-authorized", "paper-full-authorized"}
+    ) != (
         paper_authorization is not None
     ):
         raise DciBenchmarkError("DCI benchmark configuration evidence is invalid")
@@ -2071,6 +2257,31 @@ def _validate_config_document(
                 and selection.get("full_dataset") is False
                 and selection.get("comparable") is False
                 and selection.get("authorization_profile") is None
+            )
+        elif execution_class == "paper-bounded-authorized":
+            authorization_profile = selection.get("authorization_profile")
+            selection_id = selection.get("id")
+            limit_match = (
+                re.fullmatch(r"limit-([1-9][0-9]*)", selection_id)
+                if isinstance(selection_id, str)
+                else None
+            )
+            try:
+                authorized_scopes = resolve_experiment_profile(
+                    authorization_profile
+                ).scope_ids
+            except ValueError:
+                authorized_scopes = ()
+            valid_selection = (
+                limit_match is not None
+                and selection.get("paper_scope") in authorized_scopes
+                and selection.get("selected_rows") == int(limit_match.group(1))
+                and selection.get("full_dataset") is False
+                and selection.get("comparable") is False
+                and type(authorization_profile) is str
+                and isinstance(paper_authorization, dict)
+                and paper_authorization.get("profile_id")
+                == authorization_profile
             )
         elif execution_class == "paper-full-authorized":
             authorization_profile = selection.get("authorization_profile")

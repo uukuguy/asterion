@@ -97,6 +97,10 @@ def _is_published_target_scope(selection_id: str) -> bool:
     return resolve_paper_experiment_scope(selection_id).experiment == "main-results"
 
 
+def _is_bounded_selection_id(selection_id: str) -> bool:
+    return re.fullmatch(r"limit-([1-9][0-9]*)", selection_id) is not None
+
+
 def _validate_published_target_selection(
     profile: ExperimentProfile,
     dataset_id: str,
@@ -1585,7 +1589,24 @@ def _batch_dataset_id(config: Mapping[str, Any]) -> str:
     dataset = config.get("dataset")
     if not isinstance(dataset, Mapping):
         raise ValueError("DCI reproduction dataset identity is invalid")
-    return _require_public_id(dataset.get("dataset_id"), "dataset ID")
+    dataset_id = _require_public_id(dataset.get("dataset_id"), "dataset ID")
+    selection = config.get("selection")
+    if (
+        isinstance(selection, Mapping)
+        and selection.get("execution_class") == "paper-bounded-authorized"
+    ):
+        try:
+            scoped_dataset_id = resolve_paper_experiment_scope(
+                selection.get("paper_scope")
+            ).dataset_id
+        except ValueError as error:
+            raise ValueError(
+                "DCI reproduction dataset identity is invalid"
+            ) from error
+        if dataset_id not in {scoped_dataset_id, "dataset.local"}:
+            raise ValueError("DCI reproduction dataset identity is invalid")
+        return scoped_dataset_id
+    return dataset_id
 
 
 def _batch_selection(
@@ -1605,6 +1626,32 @@ def _batch_selection(
         selection_id = _require_public_id(paper_scope, "selection ID")
     else:
         selection_id = _require_public_id(selection.get("id"), "selection ID")
+    if execution_class == "paper-bounded-authorized":
+        limit_match = re.fullmatch(r"limit-([1-9][0-9]*)", selection_id)
+        authorization_profile = selection.get("authorization_profile")
+        authorization = config.get("paper_full_authorization")
+        bounded_scope = _require_public_id(paper_scope, "paper scope")
+        try:
+            scope = resolve_paper_experiment_scope(bounded_scope)
+        except ValueError as error:
+            raise ValueError(
+                "DCI reproduction selection identity is invalid"
+            ) from error
+        if (
+            limit_match is None
+            or int(limit_match.group(1)) != len(query_ids)
+            or selection.get("selected_rows") != int(limit_match.group(1))
+            or selection.get("full_dataset") is not False
+            or selection.get("comparable") is not False
+            or authorization_profile != profile.profile_id
+            or bounded_scope not in profile.scope_ids
+            or scope.dataset_id != dataset_id
+            or not isinstance(authorization, Mapping)
+            or authorization.get("profile_id") != profile.profile_id
+            or authorization.get("profile_identity_sha256")
+            != profile.identity_sha256
+        ):
+            raise ValueError("DCI reproduction selection identity is invalid")
     selection_sha256 = _require_sha256(
         selection.get("selected_ids_sha256"), "selected ID digest"
     )
@@ -1892,6 +1939,147 @@ def compile_run_manifest(
     return RunManifest.from_mapping(
         {**unsigned, "identity_sha256": canonical_sha256(unsigned)}
     )
+
+
+def _cleanup_run_manifest_write(
+    *,
+    artifact_descriptor: int,
+    root_descriptor: int,
+    artifact_name: str,
+    created: bool,
+    verified: bool,
+) -> Exception | None:
+    cleanup_error: Exception | None = None
+
+    def remember(error: Exception) -> None:
+        nonlocal cleanup_error
+        if cleanup_error is None:
+            cleanup_error = error
+
+    try:
+        if artifact_descriptor >= 0:
+            try:
+                os.close(artifact_descriptor)
+            except Exception as error:
+                remember(error)
+    finally:
+        try:
+            if created and not verified and root_descriptor >= 0:
+                try:
+                    os.unlink(artifact_name, dir_fd=root_descriptor)
+                except Exception as error:
+                    remember(error)
+        finally:
+            if root_descriptor >= 0:
+                try:
+                    os.close(root_descriptor)
+                except Exception as error:
+                    remember(error)
+    return cleanup_error
+
+
+def write_run_manifest(
+    manifest_root: Path,
+    expected_identity: tuple[int, int],
+    scope_id: str,
+    manifest: RunManifest | Mapping[str, object],
+) -> str:
+    """Persist one validated manifest beneath its descriptor-bound private root."""
+
+    validated = validate_run_manifest(manifest)
+    try:
+        canonical_scope = resolve_paper_experiment_scope(scope_id).scope_id
+    except ValueError:
+        raise ValueError("DCI reproduction manifest scope is invalid") from None
+    if canonical_scope != scope_id:
+        raise ValueError("DCI reproduction manifest scope is invalid")
+    if (
+        type(expected_identity) is not tuple
+        or len(expected_identity) != 2
+        or any(type(value) is not int or value < 0 for value in expected_identity)
+    ):
+        raise ValueError("DCI reproduction manifest root identity is invalid")
+
+    artifact_name = hashlib.sha256(scope_id.encode("utf-8")).hexdigest() + ".json"
+    payload = (
+        json.dumps(
+            validated.to_dict(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("ascii")
+        + b"\n"
+    )
+    root_descriptor = -1
+    artifact_descriptor = -1
+    created = False
+    verified = False
+    result: str | None = None
+    failure: BaseException | None = None
+    try:
+        root_flags = (
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        root_descriptor = os.open(manifest_root, root_flags)
+        root_metadata = os.fstat(root_descriptor)
+        if (
+            not stat.S_ISDIR(root_metadata.st_mode)
+            or stat.S_IMODE(root_metadata.st_mode) != 0o700
+            or (root_metadata.st_dev, root_metadata.st_ino) != expected_identity
+        ):
+            raise ValueError("DCI reproduction manifest root identity changed")
+
+        flags = (
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        artifact_descriptor = os.open(
+            artifact_name,
+            flags,
+            0o600,
+            dir_fd=root_descriptor,
+        )
+        created = True
+        os.fchmod(artifact_descriptor, 0o600)
+        with os.fdopen(artifact_descriptor, "wb", closefd=False) as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.close(artifact_descriptor)
+        artifact_descriptor = -1
+        os.fsync(root_descriptor)
+
+        written = RunManifest.from_mapping(
+            _read_private_json_at(root_descriptor, artifact_name)
+        )
+        if written != validated:
+            raise ValueError("DCI reproduction manifest verification failed")
+        verified = True
+        result = artifact_name
+    except ValueError as error:
+        failure = error
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        failure = ValueError("DCI reproduction manifest write failed")
+    except BaseException as error:
+        failure = error
+    finally:
+        cleanup_error = _cleanup_run_manifest_write(
+            artifact_descriptor=artifact_descriptor,
+            root_descriptor=root_descriptor,
+            artifact_name=artifact_name,
+            created=created,
+            verified=verified,
+        )
+
+    if failure is not None:
+        raise failure
+    if cleanup_error is not None or result is None:
+        raise ValueError("DCI reproduction manifest write failed") from None
+    return result
 
 
 def load_run_manifest(path: Path) -> RunManifest:
@@ -2389,6 +2577,11 @@ class ComparisonReport:
         ):
             raise ValueError("DCI reproduction comparison query evidence is invalid")
         if self.comparison_kind == "source-parity":
+            expected_acceptance = (
+                None
+                if _is_bounded_selection_id(self.selection_id)
+                else all(metric.accepted for metric in self.metrics.values())
+            )
             if (
                 self.baseline_product != "original-dci"
                 or self.baseline_implementation_sha256 is None
@@ -2401,8 +2594,7 @@ class ComparisonReport:
                 or type(self.baseline) is not ComparisonTotals
                 or not self.pairs
                 or not self.metrics
-                or type(self.accepted) is not bool
-                or self.accepted is not all(metric.accepted for metric in self.metrics.values())
+                or self.accepted is not expected_acceptance
             ):
                 raise ValueError("DCI source-parity comparison is invalid")
             for value, label in (
@@ -2421,7 +2613,11 @@ class ComparisonReport:
             if (
                 dict(self.metrics) != expected_metrics
                 or self.accepted
-                is not all(metric.accepted for metric in expected_metrics.values())
+                is not (
+                    None
+                    if _is_bounded_selection_id(self.selection_id)
+                    else all(metric.accepted for metric in expected_metrics.values())
+                )
             ):
                 raise ValueError("DCI reproduction comparison metrics are inconsistent")
         else:
@@ -3181,7 +3377,11 @@ def compare_reproduction_runs(
         for query_id in pair_ids
     )
     metrics = _recompute_metrics(pairs, expected_metric_names, profile)
-    accepted = all(metric.accepted for metric in metrics.values())
+    accepted = (
+        None
+        if _is_bounded_selection_id(candidate.selection_id)
+        else all(metric.accepted for metric in metrics.values())
+    )
     baseline_totals = ComparisonTotals.from_manifest(baseline)
     candidate_totals = ComparisonTotals.from_manifest(candidate)
     values = dict(

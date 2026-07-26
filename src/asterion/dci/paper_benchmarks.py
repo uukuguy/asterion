@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib import resources
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
 
@@ -173,6 +176,77 @@ def canonical_sha256(value: object) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class DatasetInputBinding:
+    raw_content_sha256: str
+    paper_benchmark_identity_sha256: str
+    device: int
+    inode: int
+
+    def __post_init__(self) -> None:
+        _dataset_input_binding_identity(self)
+
+
+_DatasetInputBindingIdentity = tuple[str, str, int, int]
+
+
+def _dataset_input_binding_identity(
+    binding: object,
+) -> _DatasetInputBindingIdentity:
+    if type(binding) is not DatasetInputBinding:
+        raise ValueError("DCI dataset input binding is invalid")
+    raw_content_sha256 = binding.raw_content_sha256
+    paper_benchmark_identity_sha256 = (
+        binding.paper_benchmark_identity_sha256
+    )
+    device = binding.device
+    inode = binding.inode
+    if (
+        type(raw_content_sha256) is not str
+        or _SHA256.fullmatch(raw_content_sha256) is None
+        or type(paper_benchmark_identity_sha256) is not str
+        or _SHA256.fullmatch(paper_benchmark_identity_sha256) is None
+        or type(device) is not int
+        or device < 0
+        or type(inode) is not int
+        or inode < 1
+    ):
+        raise ValueError("DCI dataset input binding is invalid")
+    return (
+        raw_content_sha256,
+        paper_benchmark_identity_sha256,
+        device,
+        inode,
+    )
+
+
+def _dataset_input_binding_matches(
+    binding: object,
+    expected: _DatasetInputBindingIdentity,
+) -> bool:
+    try:
+        actual = _dataset_input_binding_identity(binding)
+    except ValueError:
+        return False
+    return (
+        actual[0] == expected[0]
+        and actual[1] == expected[1]
+        and actual[2] == expected[2]
+        and actual[3] == expected[3]
+    )
+
+
+def _copy_dataset_input_binding(
+    identity: _DatasetInputBindingIdentity,
+) -> DatasetInputBinding:
+    return DatasetInputBinding(
+        raw_content_sha256=identity[0],
+        paper_benchmark_identity_sha256=identity[1],
+        device=identity[2],
+        inode=identity[3],
+    )
+
+
+@dataclass(frozen=True, slots=True)
 class PaperBenchmark:
     dataset_id: str
     family: str
@@ -196,6 +270,96 @@ class PaperBenchmark:
     selection_seed_status: str
     execution_class: str
     identity_sha256: str
+
+
+def _open_paper_dataset_descriptor(path: Path) -> int:
+    if (
+        not isinstance(path, Path)
+        or not path.is_absolute()
+        or path.anchor != os.path.sep
+        or len(path.parts) < 2
+        or any(part in ("", ".", "..") for part in path.parts[1:])
+    ):
+        raise ValueError("DCI paper benchmark dataset binding is invalid")
+    directory_flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+    )
+    directory_descriptor = os.open(path.anchor, directory_flags)
+    try:
+        root_metadata = os.fstat(directory_descriptor)
+        if not stat.S_ISDIR(root_metadata.st_mode):
+            raise ValueError(
+                "DCI paper benchmark dataset binding is invalid"
+            )
+        for component in path.parts[1:-1]:
+            next_descriptor = os.open(
+                component,
+                directory_flags,
+                dir_fd=directory_descriptor,
+            )
+            try:
+                metadata = os.fstat(next_descriptor)
+                if not stat.S_ISDIR(metadata.st_mode):
+                    raise ValueError(
+                        "DCI paper benchmark dataset binding is invalid"
+                    )
+            except BaseException:
+                os.close(next_descriptor)
+                raise
+            previous_descriptor = directory_descriptor
+            directory_descriptor = next_descriptor
+            os.close(previous_descriptor)
+        dataset_descriptor = os.open(
+            path.parts[-1],
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+            dir_fd=directory_descriptor,
+        )
+        parent_descriptor = directory_descriptor
+        directory_descriptor = -1
+        try:
+            os.close(parent_descriptor)
+        except BaseException:
+            os.close(dataset_descriptor)
+            raise
+        return dataset_descriptor
+    finally:
+        if directory_descriptor >= 0:
+            os.close(directory_descriptor)
+
+
+def _read_paper_dataset_descriptor(descriptor: int) -> bytes:
+    chunks: list[bytes] = []
+    while True:
+        chunk = os.read(descriptor, 1024 * 1024)
+        if not chunk:
+            return b"".join(chunks)
+        chunks.append(chunk)
+
+
+def read_paper_benchmark_dataset(
+    path: Path,
+    benchmark: PaperBenchmark,
+) -> tuple[bytes, DatasetInputBinding]:
+    """Read one exact regular dataset descriptor and bind its raw bytes."""
+
+    if type(benchmark) is not PaperBenchmark:
+        raise ValueError("DCI paper benchmark dataset binding is invalid")
+    descriptor = _open_paper_dataset_descriptor(path)
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("DCI paper benchmark dataset binding is invalid")
+        raw = _read_paper_dataset_descriptor(descriptor)
+    finally:
+        os.close(descriptor)
+    return raw, DatasetInputBinding(
+        raw_content_sha256=hashlib.sha256(raw).hexdigest(),
+        paper_benchmark_identity_sha256=benchmark.identity_sha256,
+        device=metadata.st_dev,
+        inode=metadata.st_ino,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -797,7 +961,11 @@ def published_scope_selected_ids(scope_id: object) -> tuple[str, ...]:
     return selected
 
 
-def require_af320_executable_scope(scope_id: object, authorization: object = None) -> None:
+def require_af320_executable_scope(
+    scope_id: object,
+    authorization: object = None,
+    dataset_input_binding: DatasetInputBinding | None = None,
+) -> None:
     """Require an invocation-authorized AF-340 private output identity."""
 
     scope = resolve_paper_experiment_scope(scope_id)
@@ -807,7 +975,11 @@ def require_af320_executable_scope(scope_id: object, authorization: object = Non
         )
     from asterion.dci.experiment_profiles import consume_full_execution_authorization
 
-    consume_full_execution_authorization(authorization, scope.scope_id)
+    consume_full_execution_authorization(
+        authorization,
+        scope.scope_id,
+        dataset_input_binding,
+    )
 
 
 def paper_benchmark_inventory_sha256() -> str:

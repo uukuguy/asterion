@@ -761,7 +761,14 @@ Document:
 ```bash
 uv run asterion-dci paper describe
 uv run asterion-dci paper verify
-uv run asterion-dci paper reproduce --dry-run --profile paper-reference/pi
+plan_parent=$(mktemp -d)
+plan_root="$plan_parent/not-created"
+uv run asterion-dci paper reproduce \
+  --profile paper-reference/pi \
+  --scope bright.robotics.main.full \
+  --limit 1 \
+  --output-root "$plan_root"
+test ! -e "$plan_root"
 make test
 make lint
 make docs-check
@@ -770,8 +777,9 @@ make promotion-check
 ```
 
 Expected: all commands pass, Agent operations are zero, Judge operations are
-zero, and no full dataset runs. Dry-run operation estimates are not reported as
-executed operations.
+zero, the plan reports one selected query and no authority, the output root
+remains absent, and no full dataset runs. Planned operation maxima are not
+reported as executed operations.
 
 - [ ] **Step 3: Commit**
 
@@ -782,46 +790,89 @@ git add README.md docs/README.md docs/guides \
 git commit -m "docs: publish DCI provenance and reproduction boundaries"
 ```
 
-### Task 11: Operator-authorized bounded smoke test
+### Task 11: Operator-authorized bounded one-query execution
 
 **Files:**
 - Modify only if evidence exposes a defect in the responsible earlier task.
 - Generate outside Git: operator-selected output root.
 
 **Interfaces:**
-- Consumes: explicit user authorization, valid credentials/resources, one small scope, and finite positive limits.
-- Produces: external-limited execution evidence; never changes provider-free acceptance status.
+- Consumes: explicit user authorization naming the exact profile, scope, limit,
+  private output root, and all five finite positive limits, plus valid external
+  credentials/resources.
+- Produces: **External-limited** bounded evidence; never changes provider-free
+  acceptance status or `paper_full_executable=false`.
 
-- [ ] **Step 1: Preflight without requests**
+- [ ] **Step 1: Render the default provider-free plan**
 
 ```bash
+plan_parent=$(mktemp -d)
+plan_root="$plan_parent/not-created"
 uv run asterion-dci paper reproduce \
-  --profile asterion-safe/pi \
-  --scope browsecomp-plus.appendix-a1.random50 \
+  --profile paper-reference/pi \
+  --scope bright.robotics.main.full \
   --limit 1 \
-  --max-agent-operations 1 \
-  --max-judge-operations 1 \
-  --max-cost-usd 1 \
-  --output-root /operator/selected/private/root \
-  --dry-run
+  --output-root "$plan_root"
+test ! -e "$plan_root"
 ```
 
-Expected: zero Agent/Judge operations and a plan for one query.
+Expected: one selected query, maximum one Agent operation, maximum zero Judge
+operations, zero performed operations, no authority, no dataset read, and no
+output root. The full `bright.robotics.main.full` selection identity remains
+unchanged; the limit describes a deterministic source-order prefix with its own
+bounded digest/count. It does not create a new scope.
 
 - [ ] **Step 2: Obtain explicit operator authorization**
 
 Do not infer authorization from `.env`, credentials, prior evidence, or this
-plan. The operator must explicitly approve the provider-backed invocation and
-its stated maximum cost.
+plan. The operator must explicitly approve:
+
+- profile `paper-reference/pi`;
+- scope `bright.robotics.main.full`;
+- limit `1`;
+- one operator-selected private output root outside Git;
+- `--max-agent-operations 1`;
+- `--max-judge-operations 1`;
+- positive finite total, per-Agent-operation, and per-Judge-operation USD caps.
 
 - [ ] **Step 3: Execute once**
 
-Run the same command with `--execute` and the explicit authorization flag
-defined in Task 8. Expected: at most one Agent and one Judge operation, enforced
-cost cap, one RunManifest, and no public secret/body leakage.
+Only after that exact approval, substitute the approved private root and cost
+caps:
+
+```bash
+uv run asterion-dci paper reproduce \
+  --profile paper-reference/pi \
+  --scope bright.robotics.main.full \
+  --limit 1 \
+  --output-root "$OPERATOR_SELECTED_PRIVATE_ROOT" \
+  --execute \
+  --max-agent-operations 1 \
+  --max-judge-operations 1 \
+  --max-cost-usd "$APPROVED_TOTAL_USD_CAP" \
+  --max-agent-cost-per-operation-usd "$APPROVED_AGENT_USD_CAP" \
+  --max-judge-cost-per-operation-usd "$APPROVED_JUDGE_USD_CAP"
+```
+
+The variables above are placeholders for values in the new approval; they are
+not pre-authorized defaults. Execution preflight must verify the complete scope
+selection before applying the limit, bind the exact bounded digest/count and
+private root to one-use in-process authority, then allow at most one Agent
+operation. The positive Judge cap remains required although this IR scope plans
+zero Judge operations. Any selection/root/budget drift, failure, or cancellation
+must stop before later work and prevent replay.
 
 - [ ] **Step 4: Verify and classify evidence**
 
-Run `paper compare` on the produced RunManifest. Label the result
-`External-limited`; do not label a one-query smoke test as paper reproduction or
-published-score verification.
+The successful benchmark batch keeps its closed artifact inventory. Its
+RunManifest is a mode `0600` opaque child of a separate mode `0700`,
+descriptor-bound private manifest directory, not a file inside the batch root.
+CLI output contains safe authorization and operation counts plus
+`manifest_scope`, relative `manifest_artifact`, and
+`manifest_identity_sha256`; it must not contain private roots, query IDs,
+prompts, answers, corpus bodies, provider payloads, raw output, credentials, or
+issuance tokens.
+
+Run `paper compare` explicitly on the private RunManifest. Label the result
+**External-limited**; a one-query result is neither full paper reproduction nor
+published-score verification and cannot change provider-free acceptance.

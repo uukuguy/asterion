@@ -139,30 +139,63 @@ uv run asterion-dci paper describe
 该命令描述实验矩阵、ablation、授权边界与预期产物；它不运行论文实验，也不声称复现完整数据集分数。
 
 论文复现入口默认只渲染 body-free plan，不需要预算配置，不创建输出目录，也不执行
-Agent/Judge：
+Agent/Judge。下面的默认 one-query 命令使用一个新建临时父目录下尚不存在的 plan path：
 
 ```bash
-# Provider-free plan; no budget configuration required.
+plan_parent=$(mktemp -d)
+plan_root="$plan_parent/not-created"
 uv run asterion-dci paper reproduce \
   --profile paper-reference/pi \
-  --output-root ./evidence/reproduction
+  --scope bright.robotics.main.full \
+  --limit 1 \
+  --output-root "$plan_root"
+test ! -e "$plan_root"
 ```
 
-执行必须显式 opt in，且每个 bound 都是必填项；`--scope` 必须逐个重复传入，整体
-按字典序排序，且每个 scope 都必须属于所选 profile、来源为 `paper-reference`、执行类为
-`paper-full`、launcher 可用、存在 batch profile，并且 `selection_count == source_count`。
-满足这些条件的有界 scope 子集可以执行，但不能表述为 whole-profile 或 published-score
-复现。当前 profile 的完整 method/target closure 仍含有 unavailable/partial scope，所以
-`paper_full_executable=false` 仍是当前真值。
+plan 会报告 `Selected queries: 1`、`Maximum agent operations: 1`、
+`Maximum Judge operations: 0`、performed operations 为零并且
+`Full authorization issued: no`。`bright.robotics.main.full` 仍标识完整的论文选择及其
+完整 digest；`--limit 1` 只按已验证 dataset 的 source order 取得确定性前缀，并绑定
+独立的 bounded selection digest 与 `selected_query_count`，不会创建新的论文 scope，
+也不会覆盖完整选择身份。这个结果不是 full paper reproduction，也不是已发表分数验证。
 
-执行 synopsis：`uv run asterion-dci paper reproduce --profile PROFILE --scope
-AVAILABLE_FULL_SCOPE ... --output-root OUTPUT_ROOT --execute --max-agent-operations
-N --max-judge-operations N --max-cost-usd USD --max-agent-cost-per-operation-usd
-USD --max-judge-cost-per-operation-usd USD`。所有 `AVAILABLE_FULL_SCOPE` 必须显式、
-排序且可用；所有 `N` 和 `USD` 都必须是正数。
+执行是另一个显式步骤。operator 必须先批准精确的 profile、scope、limit、Git 外私有
+output root，以及五个有限正数上限；下面只展示参数形状，变量不是预先授权的值：
+
+```bash
+uv run asterion-dci paper reproduce \
+  --profile paper-reference/pi \
+  --scope bright.robotics.main.full \
+  --limit 1 \
+  --output-root "$OPERATOR_SELECTED_PRIVATE_ROOT" \
+  --execute \
+  --max-agent-operations 1 \
+  --max-judge-operations 1 \
+  --max-cost-usd "$APPROVED_TOTAL_USD_CAP" \
+  --max-agent-cost-per-operation-usd "$APPROVED_AGENT_USD_CAP" \
+  --max-judge-cost-per-operation-usd "$APPROVED_JUDGE_USD_CAP"
+```
+
+执行时 `--scope` 必须逐个重复传入、整体按字典序排序；每个 scope 都必须属于所选
+profile、来源为 `paper-reference`、执行类为 `paper-full`、launcher 可用、存在 batch
+profile，并且完整 selection 与 source identity 一致。`--execute` 不替代 operator
+approval，预算值、凭据、环境、cache、旧证据也都不会单独授予 authority。即使所选 IR
+计划预期 Judge operation 为零，接口仍要求正数的 Judge operation cap。
 
 预算值只限制已显式授权的同进程执行；它们本身从不授予 authority。执行前会先解析精确
-dataset、corpus、runtime 和 Judge 输入，preflight 失败不会创建输出目录或签发完整执行授权。
+dataset、corpus、runtime 和 Judge 输入，并验证完整 selected-ID identity，再计算 bounded
+digest；任何 drift 都必须在首次 Agent reservation 前失败。authority 是同进程、
+one-use capability，成功后不能 replay；失败或取消会阻止后续 operation。preflight 失败不会
+创建输出目录或签发完整执行授权。
+
+成功的 scope 保持 benchmark batch 的封闭 artifact inventory。RunManifest 不写入 batch
+root，而是写入 operator 私有父 root 下独立、mode `0700`、以 descriptor device/inode
+绑定的 manifest directory；opaque manifest 文件为 mode `0600`。CLI 输出安全的
+authorization/operation 计数，以及 `manifest_scope`、相对 `manifest_artifact` 和
+`manifest_identity_sha256`；它不输出 manifest 目录、私有路径、query ID、prompt、
+answer、corpus text、provider payload、raw output 或凭据。后续 `paper compare`
+对这个 one-query 证据只能归类为 **External-limited**。
+
 目前 `paper_full_executable` 必须从完整 method/target closure 推导，而不是从清单数量推导：
 13 个 dataset identity 和 16 个 paper scope 已打包，但 Bamboogle 论文完整 125 条没有 batch
 profile，BrowseComp+ 的 analysis、appendix-a1、context-ablation scopes 的 launcher origin 为

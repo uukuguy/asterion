@@ -464,6 +464,58 @@ class StandaloneRepositoryTests(unittest.TestCase):
             with self.subTest(setting=setting):
                 self.assertIn(setting, text)
 
+    def test_docs_publish_bounded_reproduction_boundary(self) -> None:
+        public_documents = (
+            PROJECT / "README.md",
+            PROJECT / "docs/guides/asterion-dci-complete-reference.md",
+            PROJECT / "docs/verification/asterion-dci-validation-guide.md",
+        )
+        required_fragments = (
+            "paper reproduce",
+            "--scope bright.robotics.main.full",
+            "--limit 1",
+            "--execute",
+            "--max-agent-operations 1",
+            "--max-judge-operations 1",
+            "External-limited",
+        )
+        for document in public_documents:
+            text = document.read_text(encoding="utf-8")
+            with self.subTest(document=document.relative_to(PROJECT)):
+                for fragment in required_fragments:
+                    self.assertIn(fragment, text)
+
+        corrected_documents = (
+            *public_documents,
+            PROJECT
+            / "docs/superpowers/plans/2026-07-24-dci-provenance-reproduction.md",
+        )
+        forbidden_fragments = (
+            "--dry-run",
+            "--authorize-full",
+            "asterion-safe/pi",
+            "browsecomp-plus.appendix-a1.random50",
+        )
+        overstated_output_claims = (
+            "prints only the scope",
+            "CLI 只输出",
+            "reports only `manifest_scope`",
+            "CLI output contains only",
+        )
+        for document in corrected_documents:
+            text = document.read_text(encoding="utf-8")
+            with self.subTest(document=document.relative_to(PROJECT)):
+                for fragment in forbidden_fragments:
+                    self.assertNotIn(fragment, text)
+                for claim in overstated_output_claims:
+                    self.assertNotIn(claim, text)
+                self.assertNotRegex(
+                    text,
+                    r"(?i)one-query (?:result|run|evidence) "
+                    r"(?:is|constitutes|qualifies as) (?:a )?"
+                    r"(?:full paper|published-score) reproduction",
+                )
+
     def test_docs_reject_mixed_root_commands_paths_and_current_counts(self) -> None:
         documents = (PROJECT / "README.md", *sorted((PROJECT / "docs").rglob("*.md")))
         forbidden = (
