@@ -194,11 +194,17 @@ five-positive-limit interface.
 
 ## Evidence and comparison
 
-After one scope completes, `compile_run_manifest(scope_output_root, profile)`
-compiles the locked batch. A new descriptor-safe writer persists
-`run-manifest.json` as mode `0600` below the existing mode `0700` scope root.
-The file contains no prompts, answers, corpus text, provider payloads, raw
-output, credentials, or private paths.
+At authorization issuance, the private parent output root receives a distinct
+mode `0700` manifest directory whose descriptor identity is retained beside the
+scope output identities. After one scope completes,
+`compile_run_manifest(scope_output_root, profile)` compiles the locked batch. A
+new descriptor-safe writer persists an opaque scope-named manifest as mode
+`0600` in that separate manifest directory.
+
+RunManifest is never written into a benchmark batch root because doing so would
+violate the batch's closed artifact inventory. The manifest file contains no
+prompts, answers, corpus text, provider payloads, raw output, credentials, or
+private paths.
 
 The reproduction result exposes only body-free manifest identity and a relative
 artifact name for each scope. It does not expose the private output root.
