@@ -1,179 +1,82 @@
-# Live Session Checkpoint
+# Next-Session Handoff
 
-> Updated: 2026-07-26 11:58. **Session remains active — not a final handoff.**
+> Updated: 2026-07-26 13:27 end of session.
 
 ## TL;DR
 
-- Protocol/composition Tasks 1–8 and Application Authority Tasks 1–8 are
-  complete, independently reviewed, and provider-free verified.
-- DCI provenance/reproduction Tasks 1–10 are complete, independently reviewed,
-  and provider-free verified.
-- Task 11 execution remains external-blocked. Its bounded-selection design and
-  five-task TDD implementation are complete and independently reviewed CLEAN
-  through `da5dc3c`; no provider-backed execution has been authorized.
-- Bounded authority now binds exact selected-query digests/counts, planned
-  Agent/Judge operations, scope output identities, and a separate private
-  RunManifest directory.
-- `paper reproduce --limit N` remains optional and default-off. Plan mode is
-  metadata-only; explicit execution propagates one exact per-scope prefix into
-  preflight, operation caps, authority, and benchmark requests.
-- Benchmark preparation revalidates bounded identity before authorization
-  consumption or Agent work. Successful bounded evidence is
-  `paper-bounded-authorized`, non-full, non-comparable, and preserved by the
-  RunManifest compiler.
-- Authorized execution additionally binds exact raw dataset bytes, benchmark
-  descriptor identity, and descriptor device/inode. Private authority snapshots
-  use independent primitive values and reject mutation, hostile equality,
-  ancestor symlinks, replacement, and redaction bypasses.
-- Bounded `limit-N` comparisons retain metrics but always report acceptance as
-  not applicable. They remain `External-limited` and cannot become a normal
-  source-parity PASS.
-- QA, IR, and mixed scopes require exact planned Judge counts at authorization.
-- RunManifest evidence is compiled and descriptor-safely written to a separate
-  private directory before the next scope starts; closed batch inventories do
-  not change.
-- Task 8's supplemental design is committed as `87e1460`: default plan mode
-  remains zero-operation and configuration-free; only explicit `--execute`
-  requires complete operation and cost limits.
-- Its three-layer TDD implementation plan is committed as `8662ad9`.
-- Authority-ledger Task 1 is implemented across `9314c27`, `df8c35e`,
-  `fcdfb61`, `fec9f3d`, and `641c331`; independent review is CLEAN.
-- Task 8.2 is implemented across `3804a06..982c179`: exact scope-child roots
-  are verified before input reads and consumed after selected-row validation;
-  Agent/Judge operations are budgeted and reconciled from strict cost evidence.
-- Task 8.2 review found two Important gaps, fixed in `730c9f3`; the final
-  stale-docstring Minor is fixed in `982c179`. Independent review is CLEAN.
-- Task 8.3 is complete across `ac88413..dd27856`: default plan mode is
-  configuration-free and zero-operation; explicit execution requires sorted,
-  available `paper-full` scopes and five positive limits, preflights before
-  authority, dispatches scope-child requests sequentially, and always consumes
-  or cancels live authority.
-- Independent Task 8.3 review is CLEAN after closing partial-scope,
-  post-authorization cancellation, duplicate count, and type-narrowing gaps.
-- Task 8.4 passes all provider-free gates and an independent nine-property
-  security review with zero Critical, Important, or Minor findings.
-- Provenance Task 8 is complete across `9314c27..dd27856`.
-- Provenance Task 9 is complete across `477aa93..d270f17`: locked benchmark
-  evidence compiles into a closed, body-free RunManifest whose source,
-  corpus, prompt, Judge, context, metric, implementation, selection, and
-  artifact identities remain explicit and comparison-safe.
-- Independent Task 9 review is CLEAN after closing forged-batch provenance,
-  artifact inventory, failed-Judge accounting, corpus round-trip, bounded
-  selection, and type-narrowing gaps.
-- Task 10 is complete across `36e7c3c..99ff926`: public docs now distinguish
-  local corpus from on-device-only processing, source families, inventory from
-  executable closure, bounded verification from reproduction, and plan-only
-  from explicitly budgeted execution.
-- Independent Task 10 review is CLEAN after correcting whole-profile wording:
-  sorted available `paper-full` scope subsets may execute, but they are not
-  whole-profile or published-score reproduction.
-- No provider-backed benchmark, Agent/Judge operation, full-dataset run, or
-  published-score reproduction has been performed.
+- Bounded DCI reproduction is implemented, independently reviewed CLEAN, and
+  merged locally into `main` as `d0e8f0b`.
+- Merged-state verification passed: 493 Python tests, TypeScript, Rust, builds,
+  and 19 promotion commands; provider operations remained 0 and no full dataset
+  ran.
+- External execution remains unauthorized. The next session must obtain a fresh
+  exact authorization before any Agent/Judge work.
 
-## Durable implementation state
+## Where things stand
 
-- Paper-reference, pinned-upstream, and Asterion-safe experiment families have
-  distinct prompt, Judge, ranking-metric, runtime, context, and implementation
-  identities.
-- Paper IR duplicate handling and paper trajectory localization parameters
-  require explicit operator assumptions and never claim paper comparability.
-- Trajectory alignment parses corpus-verified tool output before exact command
-  argument fallback, including piped bash, `path:line:text`, `path:line`, and
-  path-only output.
-- Resolution configuration is closed, fingerprinted, and labels segment and
-  overlap values as `asterion-defined`; forged rehashed configuration is
-  rejected.
-- Integer JSON overlap values are accepted according to the schema and
-  normalized to floats; booleans, zero, non-finite values, partial triples,
-  and non-Path registries fail before Agent execution.
-- The Pi context extension implements golden-tested L0–L4 behavior: exact
-  caps, strict pressure boundaries, structure-preserving placeholders,
-  post-compaction pressure gating, and three-failure suppression.
-- Effective benchmark context evidence binds exact paper, pinned-upstream, or
-  Asterion-safe contracts to the immutable numeric profile and verified
-  extension version/SHA without mixing source claims.
-- Benchmark inventory now separates 13 paper dataset identities from 14
-  standalone launchers: 11 upstream datasets plus 2 Asterion-added BEIR
-  datasets.
-- Bamboogle paper-full 125 and pinned-upstream sample-50 are incompatible
-  scopes. Generic resolution sees 17 scopes, while paper profiles and
-  authorization remain restricted to the original 16.
-- RunManifest compilation uses descriptor-bound locked readers, exact closed
-  artifact digests, canonical corpus contracts/content identities, and
-  profile-bound external truth so fully rehashed forged batches fail closed.
-- The target matrix covers Lite and CC, read+bash and read+grep, L0–L4, and
-  100k/200k/400k corpus classes; unreported combinations remain explicitly
-  method-incomplete rather than being promoted to executable paper claims.
+- Branch: `main`, 40 commits ahead of `origin/main`; nothing was pushed.
+- The feature worktree and local feature branch were removed.
+- `paper reproduce --limit N` is plan-only by default.
+- Bounded evidence is `External-limited`, non-full, non-comparable, and always
+  reports acceptance as not applicable.
+- Dataset execution is bound to raw bytes, benchmark identity, device, and
+  inode.
+- Final code and security reviews report zero Critical, Important, or Minor
+  findings.
+- Status files contain the live handoff/state updates.
 
-## Verification boundary
+## What this session delivered
 
-- Task 7 focused suites pass 30 verification/resource tests.
-- `make test` passes 393 Python tests.
-- `make check` passes Python, Ruff/compileall, docs, TypeScript, Rust
-  test/fmt/clippy, and wheel/sdist build gates.
-- `make promotion-check` passes 19 commands with
-  `provider_operations=0` and `full_dataset=no`.
-- Independent Task 7 review is CLEAN after confirming the 17-row resource
-  hash is an integrity binding, not an authorization expansion.
-- Task 8.1 passes 23 authorization tests, 72 relevant regression tests, Ruff,
-  diff checks, and independent dynamic identity/race/FD review.
-- Task 8.2 passes 65 focused tests and 424 provider-free repository tests;
-  Ruff and diff checks pass, and independent review is CLEAN.
-- Task 8.3 passes 93 focused tests and 437 provider-free repository tests;
-  Ruff, docs, diff, TypeScript, Rust, and build gates pass via `make check`.
-- Task 8.4 promotion passes 19 commands with `provider_operations=0` and
-  `full_dataset=no`; the final Task 8 security review is CLEAN.
-- Task 9 passes 12 RunManifest tests and 50 benchmark/metric regression tests.
-  Pyright reports zero errors for the compiler and its focused tests.
-- Task 9 promotion passes 19 commands with `provider_operations=0` and
-  `full_dataset=no`; independent provenance and comparison review is CLEAN.
-- Final `make check` passes 450 Python tests plus Python, documentation,
-  TypeScript, Rust, and distribution gates.
-- Final promotion passes 19 commands with `provider_operations=0` and
-  `full_dataset=no`; plan-only reproduction creates no authority or output root.
-- Bounded Task 1 passes 84 focused tests after authority/fixture review fixes.
-- Bounded Task 2 passes 65 focused tests after CLI orchestration review fixes.
-- Bounded Task 3 passes 116 focused tests after drift/evidence review fixes.
-- Bounded Tasks 4–5 and all final remediation reviews are CLEAN for spec,
-  security, claims, code quality, and test completeness.
-- Fresh final `make test` passes 493 Python tests; `make check` passes Python,
-  Ruff, docs, TypeScript, Rust, and wheel/sdist build gates.
-- Fresh promotion passes 19 commands with `provider_operations=0` and
-  `full_dataset=no`; the `--limit 1` plan creates no authority or output root.
-- Final cross-task review reports zero Critical, Important, or Minor findings.
+- Exact bounded selection, operation planning, one-use authority, and private
+  output identity.
+- Exact QA/IR/mixed Judge accounting.
+- Pre-Agent dataset-content and descriptor revalidation.
+- Descriptor-safe RunManifest persistence outside closed batch roots.
+- Real coordinator → batch → compiler → writer → reload integration coverage.
+- Body-free I/O failure handling and mutation/symlink/forgery defenses.
+- Public one-query workflow and `External-limited` documentation.
+- Local merge and complete worktree/branch cleanup.
 
-## Immediate next actions
+## Next steps
 
-1. Integrate or preserve `feature/dci-bounded-reproduction` according to the
-   selected Git completion option.
-2. Request a new exact authorization for profile `paper-reference/pi`, scope
-   `bright.robotics.main.full`, limit `1`, a private output root, and five
-   positive operation/cost caps.
-3. Only after that fresh approval, rerun preflight once and classify the result
-   `External-limited`; never promote it to full or published-score reproduction.
+1. Obtain fresh authorization for:
+   - profile: `paper-reference/pi`
+   - scope: `bright.robotics.main.full`
+   - limit: `1`
+   - operator-selected private output root
+   - `max-agent-operations=1`
+   - `max-judge-operations=1`
+   - positive finite total, per-Agent, and per-Judge USD caps
+2. Rerun preflight after authorization.
+3. Execute once, compile/load the RunManifest, and compare it as
+   `External-limited`.
+4. Optionally push the local `main` history when desired.
 
-## Do not regress these boundaries
+## Don't go down these paths again
 
-- Do not treat packaged, bound, composed, executable, and verified as
-  synonyms.
-- Do not label Asterion-safe prompt, Judge, ranking, or localization choices
-  as paper-reported semantics.
-- Do not let manifests, `.env`, credentials, prior evidence, or caches grant
-  execution authority.
-- Do not infer full-reproduction authorization from this checkpoint.
-- Do not expose prompts, answers, corpus bodies, provider payloads,
-  credentials, raw output, or private paths on public surfaces.
+- Do not reuse earlier authorization, configuration, caches, or evidence.
+- Do not treat one-query evidence as full-paper or published-score
+  reproduction.
+- Do not allow bounded comparisons to produce PASS.
+- Do not bind only query IDs; retain raw dataset content and descriptor
+  identity.
+- Do not write RunManifest evidence inside closed batch roots.
+- Do not bypass exact Judge-plan accounting.
 
 ## Ready-to-paste commands
 
 ```bash
-git status --short
+git status --short --branch
 git log --oneline -10
-cat docs/superpowers/specs/2026-07-26-dci-bounded-reproduction-selection-design.md
+
 uv run asterion-dci paper describe
 uv run asterion-dci paper verify
-uv run asterion-dci paper reproduce --profile paper-reference/pi --output-root "$(mktemp -d)/absent"
-uv run asterion-dci paper reproduce --profile paper-reference/pi --scope bright.robotics.main.full --limit 1 --output-root "$(mktemp -d)/absent"
-make docs-check
+uv run asterion-dci paper reproduce \
+  --profile paper-reference/pi \
+  --scope bright.robotics.main.full \
+  --limit 1 \
+  --output-root "$(mktemp -d)/not-created"
+
+make check
 make promotion-check
 ```
