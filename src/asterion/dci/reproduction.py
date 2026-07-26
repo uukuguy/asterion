@@ -1920,6 +1920,43 @@ def compile_run_manifest(
     )
 
 
+def _cleanup_run_manifest_write(
+    *,
+    artifact_descriptor: int,
+    root_descriptor: int,
+    artifact_name: str,
+    created: bool,
+    verified: bool,
+) -> Exception | None:
+    cleanup_error: Exception | None = None
+
+    def remember(error: Exception) -> None:
+        nonlocal cleanup_error
+        if cleanup_error is None:
+            cleanup_error = error
+
+    try:
+        if artifact_descriptor >= 0:
+            try:
+                os.close(artifact_descriptor)
+            except Exception as error:
+                remember(error)
+    finally:
+        try:
+            if created and not verified and root_descriptor >= 0:
+                try:
+                    os.unlink(artifact_name, dir_fd=root_descriptor)
+                except Exception as error:
+                    remember(error)
+        finally:
+            if root_descriptor >= 0:
+                try:
+                    os.close(root_descriptor)
+                except Exception as error:
+                    remember(error)
+    return cleanup_error
+
+
 def write_run_manifest(
     manifest_root: Path,
     expected_identity: tuple[int, int],
@@ -1956,6 +1993,8 @@ def write_run_manifest(
     artifact_descriptor = -1
     created = False
     verified = False
+    result: str | None = None
+    failure: BaseException | None = None
     try:
         root_flags = (
             os.O_RDONLY
@@ -1999,22 +2038,27 @@ def write_run_manifest(
         if written != validated:
             raise ValueError("DCI reproduction manifest verification failed")
         verified = True
-        return artifact_name
-    except ValueError:
-        raise
+        result = artifact_name
+    except ValueError as error:
+        failure = error
     except (OSError, UnicodeError, json.JSONDecodeError):
-        raise ValueError("DCI reproduction manifest write failed") from None
+        failure = ValueError("DCI reproduction manifest write failed")
+    except BaseException as error:
+        failure = error
     finally:
-        if artifact_descriptor >= 0:
-            os.close(artifact_descriptor)
-        if created and root_descriptor >= 0:
-            try:
-                if not verified:
-                    os.unlink(artifact_name, dir_fd=root_descriptor)
-            except OSError:
-                pass
-        if root_descriptor >= 0:
-            os.close(root_descriptor)
+        cleanup_error = _cleanup_run_manifest_write(
+            artifact_descriptor=artifact_descriptor,
+            root_descriptor=root_descriptor,
+            artifact_name=artifact_name,
+            created=created,
+            verified=verified,
+        )
+
+    if failure is not None:
+        raise failure
+    if cleanup_error is not None or result is None:
+        raise ValueError("DCI reproduction manifest write failed") from None
+    return result
 
 
 def load_run_manifest(path: Path) -> RunManifest:

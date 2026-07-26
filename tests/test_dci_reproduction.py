@@ -551,6 +551,171 @@ class TestDciRunManifestCompiler(unittest.TestCase):
                 batch_inventory,
             )
 
+    def test_write_run_manifest_close_failure_attempts_cleanup_and_allows_retry(
+        self,
+    ) -> None:
+        scope_id = "bright.biology.main.full"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            batch = root / "batch"
+            batch.mkdir(mode=0o700)
+            self._batch(batch)
+            manifest_root = root / "manifests"
+            manifest_root.mkdir(mode=0o700)
+            identity = (manifest_root.stat().st_dev, manifest_root.stat().st_ino)
+            manifest = compile_run_manifest(
+                batch, resolve_experiment_profile("paper-reference/pi")
+            )
+            artifact = hashlib.sha256(scope_id.encode()).hexdigest() + ".json"
+            real_open = os.open
+            real_close = os.close
+            descriptors: dict[str, int] = {}
+            close_calls: list[int] = []
+            artifact_close_failed = False
+
+            def open_spy(
+                path: os.PathLike[str] | str,
+                flags: int,
+                mode: int = 0o777,
+                *,
+                dir_fd: int | None = None,
+            ) -> int:
+                descriptor = (
+                    real_open(path, flags, mode)
+                    if dir_fd is None
+                    else real_open(path, flags, mode, dir_fd=dir_fd)
+                )
+                if path == manifest_root:
+                    descriptors["root"] = descriptor
+                elif path == artifact and dir_fd == descriptors.get("root"):
+                    descriptors["artifact"] = descriptor
+                return descriptor
+
+            def close_spy(descriptor: int) -> None:
+                nonlocal artifact_close_failed
+                close_calls.append(descriptor)
+                if (
+                    descriptor == descriptors.get("artifact")
+                    and not artifact_close_failed
+                ):
+                    artifact_close_failed = True
+                    real_close(descriptor)
+                    raise OSError("/private/sentinel artifact close")
+                real_close(descriptor)
+
+            with (
+                patch("asterion.dci.reproduction.os.open", side_effect=open_spy),
+                patch("asterion.dci.reproduction.os.close", side_effect=close_spy),
+                self.assertRaisesRegex(
+                    ValueError, "^DCI reproduction manifest write failed$"
+                ) as raised,
+            ):
+                reproduction_module.write_run_manifest(
+                    manifest_root,
+                    identity,
+                    scope_id,
+                    manifest,
+                )
+
+            self.assertNotIn("/private/sentinel", str(raised.exception))
+            self.assertIn(descriptors["root"], close_calls)
+            self.assertFalse((manifest_root / artifact).exists())
+            self.assertEqual(
+                reproduction_module.write_run_manifest(
+                    manifest_root,
+                    identity,
+                    scope_id,
+                    manifest,
+                ),
+                artifact,
+            )
+
+    def test_write_run_manifest_cleanup_faults_do_not_mask_primary_failure(
+        self,
+    ) -> None:
+        scope_id = "bright.biology.main.full"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            batch = root / "batch"
+            batch.mkdir(mode=0o700)
+            self._batch(batch)
+            manifest_root = root / "manifests"
+            manifest_root.mkdir(mode=0o700)
+            identity = (manifest_root.stat().st_dev, manifest_root.stat().st_ino)
+            manifest = compile_run_manifest(
+                batch, resolve_experiment_profile("paper-reference/pi")
+            )
+            artifact = hashlib.sha256(scope_id.encode()).hexdigest() + ".json"
+            real_open = os.open
+            real_close = os.close
+            real_fsync = os.fsync
+            descriptors: dict[str, int] = {}
+            close_calls: list[int] = []
+            unlink_calls: list[tuple[str, int | None]] = []
+            fsync_failed = False
+
+            def open_spy(
+                path: os.PathLike[str] | str,
+                flags: int,
+                mode: int = 0o777,
+                *,
+                dir_fd: int | None = None,
+            ) -> int:
+                descriptor = (
+                    real_open(path, flags, mode)
+                    if dir_fd is None
+                    else real_open(path, flags, mode, dir_fd=dir_fd)
+                )
+                if path == manifest_root:
+                    descriptors["root"] = descriptor
+                elif path == artifact and dir_fd == descriptors.get("root"):
+                    descriptors["artifact"] = descriptor
+                return descriptor
+
+            def fsync_spy(descriptor: int) -> None:
+                nonlocal fsync_failed
+                if descriptor == descriptors.get("artifact") and not fsync_failed:
+                    fsync_failed = True
+                    raise OSError("SECRET primary write body")
+                real_fsync(descriptor)
+
+            def close_spy(descriptor: int) -> None:
+                close_calls.append(descriptor)
+                real_close(descriptor)
+                if descriptor == descriptors.get("artifact"):
+                    raise OSError("SECRET artifact close body")
+
+            def unlink_spy(
+                path: os.PathLike[str] | str, *, dir_fd: int | None = None
+            ) -> None:
+                unlink_calls.append((os.fspath(path), dir_fd))
+                raise OSError("/private/sentinel unlink")
+
+            with (
+                patch("asterion.dci.reproduction.os.open", side_effect=open_spy),
+                patch("asterion.dci.reproduction.os.fsync", side_effect=fsync_spy),
+                patch("asterion.dci.reproduction.os.close", side_effect=close_spy),
+                patch("asterion.dci.reproduction.os.unlink", side_effect=unlink_spy),
+                self.assertRaisesRegex(
+                    ValueError, "^DCI reproduction manifest write failed$"
+                ) as raised,
+            ):
+                reproduction_module.write_run_manifest(
+                    manifest_root,
+                    identity,
+                    scope_id,
+                    manifest,
+                )
+
+            public_error = str(raised.exception)
+            for sentinel in ("SECRET", "/private/sentinel"):
+                self.assertNotIn(sentinel, public_error)
+            self.assertEqual(unlink_calls, [(artifact, descriptors["root"])])
+            self.assertIn(descriptors["root"], close_calls)
+            failed_artifact = manifest_root / artifact
+            self.assertTrue(failed_artifact.exists())
+            failed_artifact.unlink()
+
     def test_compile_run_manifest_validates_locked_batch_and_compares_body_free(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
