@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import signal
 import stat
 import subprocess
@@ -387,10 +388,75 @@ class _DirectoryBinding:
         self.descriptor = -1
 
 
+@dataclass(slots=True)
+class _LogBinding:
+    parent: _DirectoryBinding
+    name: str
+    descriptor: int
+    identity: tuple[int, int]
+    handle: TextIO
+
+    def close(self) -> None:
+        if self.descriptor < 0:
+            return
+        try:
+            self.handle.close()
+        except OSError:
+            pass
+        self.descriptor = -1
+
+
 def _valid_private_directory(metadata: os.stat_result) -> bool:
     return (
         stat.S_ISDIR(metadata.st_mode)
         and stat.S_IMODE(metadata.st_mode) == 0o700
+    )
+
+
+def _valid_private_file(metadata: os.stat_result) -> bool:
+    return (
+        stat.S_ISREG(metadata.st_mode)
+        and stat.S_IMODE(metadata.st_mode) == 0o600
+        and metadata.st_nlink == 1
+    )
+
+
+def _assert_private_file(
+    parent: _DirectoryBinding,
+    name: str,
+    descriptor: int,
+    identity: tuple[int, int],
+    *,
+    message: str,
+) -> None:
+    try:
+        _assert_identity(parent)
+        opened = os.fstat(descriptor)
+        named = os.stat(
+            name,
+            dir_fd=parent.descriptor,
+            follow_symlinks=False,
+        )
+    except OrchestratorError:
+        raise
+    except OSError:
+        raise OrchestratorError(message) from None
+    if (
+        not _valid_private_file(opened)
+        or not _valid_private_file(named)
+        or (opened.st_dev, opened.st_ino) != identity
+        or (named.st_dev, named.st_ino) != identity
+    ):
+        raise OrchestratorError(message)
+
+
+def _assert_log_identity(binding: _LogBinding) -> None:
+    _assert_private_file(
+        binding.parent,
+        binding.name,
+        binding.descriptor,
+        binding.identity,
+        message="DCI benchmark task log changed",
     )
 
 
@@ -532,17 +598,46 @@ def _prepare_private_child(
         raise OrchestratorError("DCI benchmark task root is unsafe") from None
 
 
+def _summary_temporary_name() -> str:
+    return f".summary.{secrets.token_hex(16)}.tmp"
+
+
+def _unlink_bound_file(
+    parent: _DirectoryBinding,
+    name: str,
+    identity: tuple[int, int] | None,
+) -> None:
+    if identity is None:
+        return
+    try:
+        named = os.stat(
+            name,
+            dir_fd=parent.descriptor,
+            follow_symlinks=False,
+        )
+        if (named.st_dev, named.st_ino) != identity:
+            return
+        os.unlink(name, dir_fd=parent.descriptor)
+    except OSError:
+        pass
+
+
 def _write_summary(
     root: _DirectoryBinding,
     payload: object,
     *,
     required_directories: tuple[_DirectoryBinding, ...] = (),
+    required_logs: tuple[_LogBinding, ...] = (),
 ) -> None:
     _assert_identity(root)
     for binding in required_directories:
         _assert_identity(binding)
-    temporary = ".summary.json.tmp"
+    for binding in required_logs:
+        _assert_log_identity(binding)
+    temporary = _summary_temporary_name()
     descriptor = -1
+    temporary_identity: tuple[int, int] | None = None
+    promoted = False
     try:
         try:
             descriptor = os.open(
@@ -556,37 +651,59 @@ def _write_summary(
             )
             os.fchmod(descriptor, 0o600)
             opened = os.fstat(descriptor)
-            if (
-                not stat.S_ISREG(opened.st_mode)
-                or stat.S_IMODE(opened.st_mode) != 0o600
-                or opened.st_nlink != 1
-            ):
+            temporary_identity = (opened.st_dev, opened.st_ino)
+            if not _valid_private_file(opened):
                 raise OrchestratorError("DCI benchmark summary is unsafe")
-            handle = os.fdopen(descriptor, "w", encoding="utf-8")
-            descriptor = -1
+            handle = os.fdopen(
+                descriptor,
+                "w",
+                encoding="utf-8",
+                closefd=False,
+            )
             with handle:
                 json.dump(payload, handle, sort_keys=True)
                 handle.write("\n")
+                handle.flush()
+                os.fsync(descriptor)
             _assert_identity(root)
             for binding in required_directories:
                 _assert_identity(binding)
+            for binding in required_logs:
+                _assert_log_identity(binding)
+            _assert_private_file(
+                root,
+                temporary,
+                descriptor,
+                temporary_identity,
+                message="DCI benchmark summary is unsafe",
+            )
             os.replace(
                 temporary,
                 "summary.json",
                 src_dir_fd=root.descriptor,
                 dst_dir_fd=root.descriptor,
             )
+            promoted = True
+            _assert_private_file(
+                root,
+                "summary.json",
+                descriptor,
+                temporary_identity,
+                message="DCI benchmark summary is unsafe",
+            )
         except OrchestratorError:
-            try:
-                os.unlink(temporary, dir_fd=root.descriptor)
-            except OSError:
-                pass
+            _unlink_bound_file(
+                root,
+                "summary.json" if promoted else temporary,
+                temporary_identity,
+            )
             raise
         except (OSError, TypeError, ValueError):
-            try:
-                os.unlink(temporary, dir_fd=root.descriptor)
-            except OSError:
-                pass
+            _unlink_bound_file(
+                root,
+                "summary.json" if promoted else temporary,
+                temporary_identity,
+            )
             raise OrchestratorError("DCI benchmark summary is unsafe") from None
     finally:
         if descriptor >= 0:
@@ -596,7 +713,7 @@ def _write_summary(
                 pass
 
 
-def _open_private_log(task_root: _DirectoryBinding):
+def _open_private_log(task_root: _DirectoryBinding) -> _LogBinding:
     flags = (
         os.O_WRONLY
         | os.O_CREAT
@@ -612,26 +729,26 @@ def _open_private_log(task_root: _DirectoryBinding):
             0o600,
             dir_fd=task_root.descriptor,
         )
-        metadata = os.fstat(descriptor)
-        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
-            raise OrchestratorError("DCI benchmark task log is unsafe")
         os.fchmod(descriptor, 0o600)
-        linked = os.stat(
-            "runner.log",
-            dir_fd=task_root.descriptor,
-            follow_symlinks=False,
-        )
-        if (
-            not stat.S_ISREG(linked.st_mode)
-            or linked.st_nlink != 1
-            or (linked.st_dev, linked.st_ino)
-            != (metadata.st_dev, metadata.st_ino)
-        ):
+        opened = os.fstat(descriptor)
+        if not _valid_private_file(opened):
             raise OrchestratorError("DCI benchmark task log is unsafe")
-        _assert_identity(task_root)
+        identity = (opened.st_dev, opened.st_ino)
+        _assert_private_file(
+            task_root,
+            "runner.log",
+            descriptor,
+            identity,
+            message="DCI benchmark task log is unsafe",
+        )
         handle = os.fdopen(descriptor, "a", encoding="utf-8")
-        descriptor = -1
-        return handle
+        return _LogBinding(
+            parent=task_root,
+            name="runner.log",
+            descriptor=descriptor,
+            identity=identity,
+            handle=handle,
+        )
     except OrchestratorError:
         if descriptor >= 0:
             try:
@@ -657,7 +774,10 @@ def _progress(
 ) -> str:
     timestamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
     line = f"{timestamp} [{index}/{total}] {task_id} {status_text}"
-    print(line, file=stream, flush=True)
+    try:
+        print(line, file=stream, flush=True)
+    except (OSError, ValueError):
+        pass
     return line
 
 
@@ -759,6 +879,7 @@ def execute_plan(
     task_bindings: list[
         tuple[_DirectoryBinding, _DirectoryBinding]
     ] = []
+    log_bindings: list[_LogBinding] = []
     try:
         for index, (task, slug, row) in enumerate(
             zip(plan.tasks, slugs, rows), start=1
@@ -787,23 +908,27 @@ def execute_plan(
             start_line = _progress(
                 stream, index, total, task.task_id, f"START{note}"
             )
+            log_binding: _LogBinding | None = None
             try:
-                with _open_private_log(task_root) as log:
-                    log.write(start_line + "\n")
-                    log.flush()
+                log_binding = _open_private_log(task_root)
+                log_bindings.append(log_binding)
+                log_binding.handle.write(start_line + "\n")
+                log_binding.handle.flush()
 
-                    def record_child(line: str) -> None:
-                        log.write(redact(line))
-                        log.flush()
+                def record_child(line: str) -> None:
+                    assert log_binding is not None
+                    log_binding.handle.write(redact(line))
+                    log_binding.handle.flush()
 
-                    _assert_identity(task_root)
-                    _assert_identity(batch_root)
-                    exit_code = executor(
-                        build_task_command(plan, task, batch_root.path),
-                        cwd=PROJECT,
-                        environment=plan.environment,
-                        on_line=record_child,
-                    )
+                _assert_identity(task_root)
+                _assert_identity(batch_root)
+                _assert_log_identity(log_binding)
+                exit_code = executor(
+                    build_task_command(plan, task, batch_root.path),
+                    cwd=PROJECT,
+                    environment=plan.environment,
+                    on_line=record_child,
+                )
             except KeyboardInterrupt:
                 exit_code = 130
             except Exception:
@@ -812,6 +937,8 @@ def execute_plan(
             _assert_identity(run_root)
             _assert_identity(task_root)
             _assert_identity(batch_root)
+            if log_binding is not None:
+                _assert_log_identity(log_binding)
             elapsed = round(clock() - started, 3)
             row.update(exit_code=exit_code, elapsed_seconds=elapsed)
             if exit_code == 0:
@@ -847,8 +974,11 @@ def execute_plan(
                 for task_binding in task_bindings
                 for binding in task_binding
             ),
+            required_logs=tuple(log_bindings),
         )
         return result
     finally:
+        for binding in reversed(log_bindings):
+            binding.close()
         for binding in reversed(bound_directories):
             binding.close()

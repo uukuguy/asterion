@@ -280,6 +280,14 @@ class _StubbornFakeProcess:
         return -9
 
 
+class _RaisingStream:
+    def write(self, value: str) -> int:
+        raise BrokenPipeError("private-stream-path")
+
+    def flush(self) -> None:
+        raise BrokenPipeError("private-stream-path")
+
+
 class StreamCommandTests(unittest.TestCase):
     def test_callback_failures_stop_with_bounded_wait_kill_and_reap(self) -> None:
         for exception, expected_signal in (
@@ -733,21 +741,35 @@ class BenchmarkExecutionTests(unittest.TestCase):
             root = Path(temporary)
             plan = self._plan(root)
             plan = replace(plan, tasks=(plan.tasks[0],))
+            real_open = os.open
             real_fstat = os.fstat
-            regular_descriptors = 0
+            summary_descriptor = None
+
+            def capture_summary_descriptor(
+                path, flags, mode=0o777, *, dir_fd=None
+            ):
+                nonlocal summary_descriptor
+                descriptor = real_open(path, flags, mode, dir_fd=dir_fd)
+                if (
+                    os.fspath(path).startswith(".summary.")
+                    and os.fspath(path).endswith(".tmp")
+                ):
+                    summary_descriptor = descriptor
+                return descriptor
 
             def replace_summary_metadata(descriptor):
-                nonlocal regular_descriptors
                 metadata = real_fstat(descriptor)
-                if stat.S_ISREG(metadata.st_mode):
-                    regular_descriptors += 1
-                    if regular_descriptors == 2:
-                        values = list(metadata)
-                        values[0] = stat.S_IFDIR | 0o700
-                        return os.stat_result(values)
+                if descriptor == summary_descriptor:
+                    values = list(metadata)
+                    values[0] = stat.S_IFDIR | 0o700
+                    return os.stat_result(values)
                 return metadata
 
             with (
+                patch(
+                    "tools.dci_benchmark_orchestrator.os.open",
+                    side_effect=capture_summary_descriptor,
+                ),
                 patch(
                     "tools.dci_benchmark_orchestrator.os.fstat",
                     side_effect=replace_summary_metadata,
@@ -764,7 +786,165 @@ class BenchmarkExecutionTests(unittest.TestCase):
                 )
 
             self.assertFalse(
-                (plan.output_base / ".summary.json.tmp").exists()
+                any(
+                    child.name.startswith(".summary.")
+                    for child in plan.output_base.iterdir()
+                )
+            )
+
+    def test_summary_temp_swap_is_never_promoted(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plan = self._plan(root)
+            plan = replace(plan, tasks=(plan.tasks[0],))
+            temporary_name = ".summary.swap-test.tmp"
+            real_fsync = os.fsync
+            swapped = False
+
+            def swap_temp_after_fsync(descriptor):
+                nonlocal swapped
+                real_fsync(descriptor)
+                if not swapped:
+                    swapped = True
+                    temporary_path = plan.output_base / temporary_name
+                    temporary_path.rename(
+                        plan.output_base / ".summary.original-moved"
+                    )
+                    temporary_path.write_text(
+                        '{"unsafe": "provider-body"}\n',
+                        encoding="utf-8",
+                    )
+                    temporary_path.chmod(0o600)
+
+            with (
+                patch(
+                    "tools.dci_benchmark_orchestrator."
+                    "_summary_temporary_name",
+                    return_value=temporary_name,
+                    create=True,
+                ),
+                patch(
+                    "tools.dci_benchmark_orchestrator.os.fsync",
+                    side_effect=swap_temp_after_fsync,
+                ),
+                self.assertRaisesRegex(
+                    OrchestratorError,
+                    "^DCI benchmark summary is unsafe$",
+                ),
+            ):
+                execute_plan(
+                    plan,
+                    stream=io.StringIO(),
+                    executor=FakeExecutor([0, 0]),
+                )
+
+            self.assertTrue(swapped)
+            self.assertFalse((plan.output_base / "summary.json").exists())
+            replacement = plan.output_base / temporary_name
+            self.assertEqual(
+                replacement.read_text(encoding="utf-8"),
+                '{"unsafe": "provider-body"}\n',
+            )
+
+    def test_unsafe_promoted_summary_is_removed_when_still_bound(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plan = self._plan(root)
+            plan = replace(plan, tasks=(plan.tasks[0],))
+            real_replace = os.replace
+
+            def weaken_promoted_summary(
+                source,
+                destination,
+                *,
+                src_dir_fd=None,
+                dst_dir_fd=None,
+            ):
+                real_replace(
+                    source,
+                    destination,
+                    src_dir_fd=src_dir_fd,
+                    dst_dir_fd=dst_dir_fd,
+                )
+                (plan.output_base / "summary.json").chmod(0o644)
+
+            with (
+                patch(
+                    "tools.dci_benchmark_orchestrator.os.replace",
+                    side_effect=weaken_promoted_summary,
+                ),
+                self.assertRaisesRegex(
+                    OrchestratorError,
+                    "^DCI benchmark summary is unsafe$",
+                ),
+            ):
+                execute_plan(
+                    plan,
+                    stream=io.StringIO(),
+                    executor=FakeExecutor([0, 0]),
+                )
+
+            self.assertFalse((plan.output_base / "summary.json").exists())
+
+    def test_runner_log_replacement_fails_without_summary_publication(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plan = self._plan(root)
+            plan = replace(plan, tasks=(plan.tasks[0],))
+            calls = 0
+
+            def replacing_executor(command, *, cwd, environment, on_line):
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    task_root = plan.output_base / "bcplus.level3"
+                    runner_log = task_root / "runner.log"
+                    runner_log.rename(task_root / "original-runner.log")
+                    runner_log.write_text(
+                        "unsafe provider-body\n",
+                        encoding="utf-8",
+                    )
+                    runner_log.chmod(0o600)
+                return 0
+
+            with self.assertRaisesRegex(
+                OrchestratorError,
+                "^DCI benchmark task log changed$",
+            ):
+                execute_plan(
+                    plan,
+                    stream=io.StringIO(),
+                    executor=replacing_executor,
+                )
+
+            self.assertEqual(calls, 2)
+            self.assertFalse((plan.output_base / "summary.json").exists())
+
+    def test_public_stream_failure_cannot_hide_completed_task(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            plan = self._plan(root)
+            plan = replace(plan, tasks=(plan.tasks[0],))
+            executor = FakeExecutor([0, 0])
+
+            self.assertEqual(
+                execute_plan(
+                    plan,
+                    stream=_RaisingStream(),
+                    executor=executor,
+                ),
+                0,
+            )
+
+            self.assertEqual(len(executor.commands), 2)
+            summary = json.loads((plan.output_base / "summary.json").read_text())
+            self.assertEqual(summary["status"], "PASS")
+            self.assertEqual(summary["tasks"][0]["status"], "DONE")
+            self.assertNotIn(
+                "private-stream-path",
+                json.dumps(summary, sort_keys=True),
             )
 
     def test_existing_non_private_or_symlink_run_root_fails(self) -> None:
