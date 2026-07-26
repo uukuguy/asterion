@@ -189,6 +189,33 @@ class BasicResourceSetupTests(unittest.TestCase):
         ):
             _network_source(BASIC_RESOURCES[1], staging)
 
+    def test_network_source_canonicalizes_framework_owned_staging_alias(self) -> None:
+        from asterion.dci.resource_setup import BASIC_RESOURCES, _network_source
+
+        actual = self.root / "actual-staging"
+        actual.mkdir()
+        alias = self.root / "staging-alias"
+        try:
+            os.symlink(actual, alias)
+        except OSError as error:
+            self.skipTest(f"symlinks unavailable: {error}")
+
+        def fake_download(**kwargs):
+            local_dir = Path(kwargs["local_dir"])
+            wiki = local_dir / "wiki"
+            wiki.mkdir()
+            (wiki / "wiki_dump.jsonl").write_text('{"title":"fixture"}\n')
+
+        fake_huggingface_hub = types.ModuleType("huggingface_hub")
+        fake_huggingface_hub.snapshot_download = fake_download
+        with patch.dict(
+            sys.modules,
+            {"huggingface_hub": fake_huggingface_hub},
+        ):
+            source = _network_source(BASIC_RESOURCES[1], alias)
+
+        self.assertEqual(source, (actual / "wiki").resolve())
+
     def test_cli_check_is_body_free_and_reports_zero_operations(self) -> None:
         completed = subprocess.run(
             [

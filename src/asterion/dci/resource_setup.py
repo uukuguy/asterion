@@ -199,6 +199,10 @@ def _local_source(source_root: Path, spec: ResourceSpec) -> Path:
 
 def _network_source(spec: ResourceSpec, staging_root: Path) -> Path:
     try:
+        staging_root = staging_root.resolve(strict=True)
+    except OSError as error:
+        raise ResourceSetupError("resource download staging is unavailable") from error
+    try:
         from huggingface_hub import snapshot_download
     except ImportError as error:
         raise ResourceSetupError(

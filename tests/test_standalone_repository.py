@@ -129,6 +129,7 @@ class StandaloneRepositoryTests(unittest.TestCase):
             "corpora",
             "data",
             "datasets",
+            "paper-full",
             "outputs",
             "runs",
             "logs",

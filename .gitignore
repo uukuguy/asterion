@@ -31,6 +31,7 @@ packages/rust/**/target/
 /corpora/
 /data/
 /datasets/
+/paper-full/
 /outputs/
 /runs/
 /logs/
