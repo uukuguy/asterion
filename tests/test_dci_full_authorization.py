@@ -13,8 +13,10 @@ import unittest
 import asyncio
 from dataclasses import replace
 from pathlib import Path
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
+from asterion.dci import experiment_profiles as profiles
 from asterion.dci.benchmark import (
     BenchmarkRequest,
     DciBenchmarkError,
@@ -39,7 +41,15 @@ from asterion.dci.experiment_profiles import (
     resolve_experiment_profile,
 )
 from asterion.dci.judge import JudgeConfig
+from asterion.dci.paper_benchmarks import (
+    canonical_sha256,
+    resolve_paper_experiment_scope,
+)
 from asterion.dci.verification import paper_reproduce_main
+
+
+def receipt_ledger(receipt: dict[str, object]) -> dict[str, object]:
+    return cast(dict[str, object], receipt["ledger"])
 
 
 def authorize(
@@ -51,10 +61,30 @@ def authorize(
     max_cost: float = 10.0,
     max_agent_cost: float = 2.0,
     max_judge_cost: float = 1.0,
+    selected_query_ids_by_scope: dict[str, tuple[str, ...]] | None = None,
 ) -> FullExecutionAuthorization:
+    query_ids_by_scope = {
+        scope: (
+            selected_query_ids_by_scope.get(scope, ("q-001",))
+            if selected_query_ids_by_scope is not None
+            else ("q-001",)
+        )
+        for scope in scopes
+    }
     return authorize_full_execution(
         profile=resolve_experiment_profile("paper-reference/pi"),
         scope_ids=scopes,
+        bounded_selected_ids_sha256=tuple(
+            canonical_sha256(query_ids_by_scope[scope])
+            for scope in scopes
+        ),
+        selected_query_counts=tuple(
+            len(query_ids_by_scope[scope]) for scope in scopes
+        ),
+        planned_agent_operations=sum(
+            len(query_ids_by_scope[scope]) for scope in scopes
+        ),
+        planned_judge_operations=0,
         output_root=output_root,
         max_agent_operations=max_agents,
         max_judge_operations=max_judges,
@@ -66,6 +96,95 @@ def authorize(
 
 
 class FullExecutionAuthorizationTests(unittest.TestCase):
+    def test_bounded_selection_and_manifest_root_are_identity_bound(self) -> None:
+        scope_id = "bright.biology.main.full"
+        bounded_digest = canonical_sha256(("q-001",))
+        with tempfile.TemporaryDirectory() as temporary:
+            authority = authorize_full_execution(
+                profile=resolve_experiment_profile("paper-reference/pi"),
+                scope_ids=(scope_id,),
+                bounded_selected_ids_sha256=(bounded_digest,),
+                selected_query_counts=(1,),
+                planned_agent_operations=1,
+                planned_judge_operations=0,
+                output_root=Path(temporary) / "private",
+                invocation_authorized=True,
+                max_agent_operations=1,
+                max_judge_operations=1,
+                max_cost_usd=1,
+                max_agent_cost_per_operation_usd=1,
+                max_judge_cost_per_operation_usd=1,
+            )
+            self.assertEqual(
+                profiles._authorized_scope_selection_identity(
+                    authority, scope_id
+                ),
+                (bounded_digest, 1),
+            )
+            manifest_root, device, inode = (
+                profiles._authorized_manifest_output_identity(authority)
+            )
+            self.assertEqual(
+                (manifest_root.stat().st_dev, manifest_root.stat().st_ino),
+                (device, inode),
+            )
+            self.assertEqual(stat.S_IMODE(manifest_root.stat().st_mode), 0o700)
+            self.assertNotIn(str(manifest_root), repr(authority))
+
+    def test_rejects_invalid_bounded_selection_plans(self) -> None:
+        invalid_cases = {
+            "missing bounded digest": {
+                "bounded_selected_ids_sha256": (),
+                "selected_query_counts": (1,),
+            },
+            "invalid bounded digest": {
+                "bounded_selected_ids_sha256": ("not-a-digest",),
+                "selected_query_counts": (1,),
+            },
+            "zero selected count": {
+                "bounded_selected_ids_sha256": (canonical_sha256(("q-001",)),),
+                "selected_query_counts": (0,),
+            },
+            "count exceeds scope": {
+                "bounded_selected_ids_sha256": (canonical_sha256(("q-001",)),),
+                "selected_query_counts": (104,),
+            },
+            "agent plan exceeds cap": {
+                "bounded_selected_ids_sha256": (canonical_sha256(("q-001",)),),
+                "selected_query_counts": (1,),
+                "planned_agent_operations": 2,
+                "max_agent_operations": 1,
+            },
+            "judge plan exceeds cap": {
+                "bounded_selected_ids_sha256": (canonical_sha256(("q-001",)),),
+                "selected_query_counts": (1,),
+                "planned_judge_operations": 2,
+                "max_judge_operations": 1,
+            },
+        }
+        defaults = {
+            "bounded_selected_ids_sha256": (canonical_sha256(("q-001",)),),
+            "selected_query_counts": (1,),
+            "planned_agent_operations": 1,
+            "planned_judge_operations": 0,
+            "max_agent_operations": 1,
+            "max_judge_operations": 1,
+        }
+        for label, overrides in invalid_cases.items():
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary:
+                values = defaults | overrides
+                with self.assertRaises(ExperimentAuthorizationError):
+                    authorize_full_execution(
+                        profile=resolve_experiment_profile("paper-reference/pi"),
+                        scope_ids=("bright.biology.main.full",),
+                        output_root=Path(temporary) / "private",
+                        invocation_authorized=True,
+                        max_cost_usd=1,
+                        max_agent_cost_per_operation_usd=1,
+                        max_judge_cost_per_operation_usd=1,
+                        **values,
+                    )
+
     def test_requires_exact_positive_limits(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             parent = Path(temporary) / "private-parent"
@@ -93,7 +212,7 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
 
     def test_new_authority_rejects_legacy_parameter_mixing(self) -> None:
         profile = resolve_experiment_profile("paper-reference/pi")
-        legacy_values = (
+        legacy_values: tuple[dict[str, Any], ...] = (
             {"profile_id": "paper-reference/pi"},
             {"estimated_budget_usd": 1.0},
             {"preflight_profile_sha256": profile.identity_sha256},
@@ -152,6 +271,9 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
             scope = "bright.biology.main.full"
             parent = Path(temporary) / "private-parent"
             authority = authorize(parent)
+            manifest = profiles._authorized_manifest_output_identity(
+                authority
+            )[0]
             consume_full_execution_authorization(authority, scope)
             with self.assertRaises(ExperimentAuthorizationError):
                 consume_full_execution_authorization(authority, scope)
@@ -161,16 +283,26 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
             parent.mkdir(mode=0o700)
             with self.assertRaises(ExperimentAuthorizationError):
                 authorized_scope_output_root(authority, scope)
+            with self.assertRaises(ExperimentAuthorizationError):
+                profiles._authorized_manifest_output_identity(authority)
+            self.assertFalse(manifest.exists())
 
         with tempfile.TemporaryDirectory() as temporary:
             scope = "bright.biology.main.full"
             parent = Path(temporary) / "private-parent"
             authority = authorize(parent)
             child = authorized_scope_output_root(authority, scope)
+            manifest = profiles._authorized_manifest_output_identity(
+                authority
+            )[0]
             os.rename(child, parent / "old-child")
             child.mkdir(mode=0o700)
             with self.assertRaises(ExperimentAuthorizationError):
                 authorized_scope_output_root(authority, scope)
+            os.rename(manifest, parent / "old-manifest")
+            manifest.mkdir(mode=0o700)
+            with self.assertRaises(ExperimentAuthorizationError):
+                profiles._authorized_manifest_output_identity(authority)
 
     def test_output_root_rejects_existing_and_intermediate_symlink_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -203,6 +335,33 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
             self.assertFalse(output_root.exists())
             self.assertNotIn("credential-path-sentinel", str(raised.exception))
 
+    def test_output_root_is_cleaned_when_manifest_creation_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output_root = Path(temporary) / "private"
+            manifest_child_name = hashlib.sha256(
+                b"dci.reproduction-manifests/v1"
+            ).hexdigest()
+            real_mkdir = os.mkdir
+
+            def fail_manifest_creation(
+                path: str,
+                mode: int = 0o777,
+                *,
+                dir_fd: int | None = None,
+            ) -> None:
+                if path == manifest_child_name:
+                    raise OSError("credential-path-sentinel")
+                real_mkdir(path, mode=mode, dir_fd=dir_fd)
+
+            with patch(
+                "asterion.dci.experiment_profiles.os.mkdir",
+                side_effect=fail_manifest_creation,
+            ):
+                with self.assertRaises(ExperimentAuthorizationError) as raised:
+                    authorize(output_root)
+            self.assertFalse(output_root.exists())
+            self.assertNotIn("credential-path-sentinel", str(raised.exception))
+
     def test_failed_creation_never_cleans_through_a_replaced_root_path(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
@@ -210,20 +369,20 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
             moved_root = base / "moved-private"
             replacement_target = base / "replacement-target"
             replacement_target.mkdir()
-            child_name = hashlib.sha256(
-                b"bright.biology.main.full"
+            manifest_child_name = hashlib.sha256(
+                b"dci.reproduction-manifests/v1"
             ).hexdigest()
-            replacement_child = replacement_target / child_name
-            replacement_child.mkdir()
+            replacement_manifest = replacement_target / manifest_child_name
+            replacement_manifest.mkdir()
             real_mkdir = os.mkdir
 
-            def replace_root_before_child_creation(
+            def replace_root_before_manifest_creation(
                 path: str,
                 mode: int = 0o777,
                 *,
                 dir_fd: int | None = None,
             ) -> None:
-                if path == child_name:
+                if path == manifest_child_name:
                     os.rename(output_root, moved_root)
                     output_root.symlink_to(
                         replacement_target,
@@ -234,11 +393,11 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
 
             with patch(
                 "asterion.dci.experiment_profiles.os.mkdir",
-                side_effect=replace_root_before_child_creation,
+                side_effect=replace_root_before_manifest_creation,
             ):
                 with self.assertRaises(ExperimentAuthorizationError) as raised:
                     authorize(output_root)
-            self.assertTrue(replacement_child.is_dir())
+            self.assertTrue(replacement_manifest.is_dir())
             self.assertTrue(output_root.is_symlink())
             self.assertTrue(moved_root.is_dir())
             self.assertNotIn("credential-path-sentinel", str(raised.exception))
@@ -249,6 +408,16 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
             private_path = Path(temporary) / sentinel
             authority = authorize(private_path)
             issuance_token = authority._issuance_token
+            object.__setattr__(
+                authority,
+                "bounded_selected_ids_sha256",
+                (sentinel,),
+            )
+            with self.assertRaises(ExperimentAuthorizationError) as raised:
+                profiles._authorized_scope_selection_identity(
+                    authority, "bright.biology.main.full"
+                )
+            self.assertNotIn(sentinel, str(raised.exception))
             object.__setattr__(authority, "profile_sha256", sentinel)
             with self.assertRaises(ExperimentAuthorizationError) as raised:
                 authorized_scope_output_root(
@@ -374,8 +543,9 @@ class FullExecutionBudgetTests(unittest.TestCase):
                     raise
             fail_full_execution_operation(authority, reservation)
             receipt = consumed_full_execution_authorization_snapshot(authority)
-            self.assertEqual(receipt["ledger"]["completed_agent_operations"], 1)
-            self.assertEqual(receipt["ledger"]["actual_cost_usd"], 2.0)
+            ledger = receipt_ledger(receipt)
+            self.assertEqual(ledger["completed_agent_operations"], 1)
+            self.assertEqual(ledger["actual_cost_usd"], 2.0)
 
     def test_reservations_are_bound_to_their_original_scope_and_authority(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -462,8 +632,9 @@ class FullExecutionBudgetTests(unittest.TestCase):
             reconcile_full_execution_operation(authority, agent, 0.1)
             reconcile_full_execution_operation(authority, judge, 0.2)
             receipt = consumed_full_execution_authorization_snapshot(authority)
-            self.assertEqual(receipt["ledger"]["reserved_cost_usd"], 0.0)
-            self.assertEqual(receipt["ledger"]["actual_cost_usd"], 0.3)
+            ledger = receipt_ledger(receipt)
+            self.assertEqual(ledger["reserved_cost_usd"], 0.0)
+            self.assertEqual(ledger["actual_cost_usd"], 0.3)
 
     def test_unrepresentable_numeric_limits_use_the_safe_public_error(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -527,6 +698,30 @@ class FullExecutionBudgetTests(unittest.TestCase):
             receipt = consumed_full_execution_authorization_snapshot(authority)
             self.assertEqual(
                 {
+                    "bounded_selected_ids_sha256": receipt[
+                        "bounded_selected_ids_sha256"
+                    ],
+                    "selected_query_counts": receipt[
+                        "selected_query_counts"
+                    ],
+                    "planned_agent_operations": receipt[
+                        "planned_agent_operations"
+                    ],
+                    "planned_judge_operations": receipt[
+                        "planned_judge_operations"
+                    ],
+                },
+                {
+                    "bounded_selected_ids_sha256": [
+                        canonical_sha256(("q-001",))
+                    ],
+                    "selected_query_counts": [1],
+                    "planned_agent_operations": 1,
+                    "planned_judge_operations": 0,
+                },
+            )
+            self.assertEqual(
+                {
                     "max_agent_operations": receipt["max_agent_operations"],
                     "max_judge_operations": receipt["max_judge_operations"],
                     "max_cost_usd": receipt["max_cost_usd"],
@@ -546,7 +741,7 @@ class FullExecutionBudgetTests(unittest.TestCase):
                 },
             )
             self.assertEqual(
-                receipt["ledger"],
+                receipt_ledger(receipt),
                 {
                     "reserved_agent_operations": 0,
                     "reserved_judge_operations": 0,
@@ -573,6 +768,9 @@ class FullExecutionBudgetTests(unittest.TestCase):
             authority = authorize(Path(temporary) / "private")
             child = authorized_scope_output_root(authority, self.scope_id)
             child_stat = child.stat()
+            manifest = profiles._authorized_manifest_output_identity(
+                authority
+            )
             self.consume(authority)
             self.assertEqual(
                 _consumed_authorized_output_identity(
@@ -585,9 +783,15 @@ class FullExecutionBudgetTests(unittest.TestCase):
                 cancel_full_execution_authorization(authority)
             with self.assertRaises(ExperimentAuthorizationError):
                 _consumed_authorized_output_identity(authority, self.scope_id)
+            original_receipt = json.loads(json.dumps(receipt))
+            receipt["selected_query_counts"] = [2]
             self.assertEqual(
                 consumed_full_execution_authorization_snapshot(authority),
-                receipt,
+                original_receipt,
+            )
+            self.assertEqual(
+                (manifest[0].stat().st_dev, manifest[0].stat().st_ino),
+                manifest[1:],
             )
 
         with tempfile.TemporaryDirectory() as temporary:
@@ -597,6 +801,8 @@ class FullExecutionBudgetTests(unittest.TestCase):
             cancel_full_execution_authorization(authority)
             with self.assertRaises(ExperimentAuthorizationError):
                 _consumed_authorized_output_identity(authority, self.scope_id)
+            with self.assertRaises(ExperimentAuthorizationError):
+                profiles._authorized_manifest_output_identity(authority)
 
     def test_reservation_constructor_is_private(self) -> None:
         with self.assertRaisesRegex(
@@ -934,7 +1140,8 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
             self.assertEqual(result.counts["total"], 1)
             self.assertEqual(result.counts["failed"], 0)
             receipt = consumed_full_execution_authorization_snapshot(authority)
-            self.assertEqual(receipt["ledger"]["actual_cost_usd"], 0.6)
+            ledger = receipt_ledger(receipt)
+            self.assertEqual(ledger["actual_cost_usd"], 0.6)
 
             authority = authorize(
                 root / "excess",
@@ -1040,13 +1247,14 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
                     run_benchmark(request, paths=resolve_dci_paths(root))
             evaluate.assert_not_called()
             receipt = consumed_full_execution_authorization_snapshot(authority)
+            ledger = receipt_ledger(receipt)
             self.assertEqual(
-                receipt["ledger"]["completed_agent_operations"], 1
+                ledger["completed_agent_operations"], 1
             )
             self.assertEqual(
-                receipt["ledger"]["completed_judge_operations"], 0
+                ledger["completed_judge_operations"], 0
             )
-            self.assertEqual(receipt["ledger"]["actual_cost_usd"], 0.25)
+            self.assertEqual(ledger["actual_cost_usd"], 0.25)
 
     def test_external_cancellation_blocks_waiting_rows(self) -> None:
         async def scenario() -> None:
@@ -1107,6 +1315,13 @@ class ReproductionCliTests(unittest.TestCase):
         *,
         scopes: tuple[str, ...] = ("bright.biology.main.full",),
     ) -> list[str]:
+        try:
+            max_agent_operations = sum(
+                resolve_paper_experiment_scope(scope).selection_count
+                for scope in scopes
+            )
+        except ValueError:
+            max_agent_operations = 103 * len(scopes)
         argv = [
             "paper",
             "reproduce",
@@ -1116,7 +1331,7 @@ class ReproductionCliTests(unittest.TestCase):
             str(output_root),
             "--execute",
             "--max-agent-operations",
-            "103",
+            str(max_agent_operations),
             "--max-judge-operations",
             "1",
             "--max-cost-usd",
@@ -1392,20 +1607,24 @@ class ReproductionCliTests(unittest.TestCase):
 
     def test_execute_authorizes_and_dispatches_exact_same_process_plan(self) -> None:
         original_authorize = authorize_full_execution
-        captured: dict[str, object] = {}
+        captured: dict[str, Any] = {}
 
-        def authorize_spy(*args: object, **kwargs: object) -> FullExecutionAuthorization:
-            captured.setdefault("order", []).append("authorize")
+        def authorize_spy(
+            *args: Any, **kwargs: Any
+        ) -> FullExecutionAuthorization:
+            cast(list[str], captured.setdefault("order", [])).append(
+                "authorize"
+            )
             authority = original_authorize(*args, **kwargs)
             captured["authorize_args"] = args
             captured["authorize_kwargs"] = kwargs
             captured["authority"] = authority
             return authority
 
-        def execute_spy(*args: object, **kwargs: object) -> dict[str, object]:
+        def execute_spy(*args: Any, **kwargs: Any) -> dict[str, object]:
             captured["execute_args"] = args
             captured["execute_kwargs"] = kwargs
-            authority = kwargs["authority"]
+            authority = cast(FullExecutionAuthorization, kwargs["authority"])
             items = tuple(kwargs["execution_items"])
             captured["dataset_files"] = tuple(
                 item.request.dataset.is_file() for item in items
@@ -1435,6 +1654,12 @@ class ReproductionCliTests(unittest.TestCase):
                 },
             }
 
+        def selected_ids_spy(_request: object, _scope: object) -> tuple[str, ...]:
+            cast(list[str], captured.setdefault("order", [])).append(
+                "selected-ids"
+            )
+            return ("q1",)
+
         scopes = (
             "bright.biology.main.full",
             "bright.earth-science.main.full",
@@ -1449,10 +1674,7 @@ class ReproductionCliTests(unittest.TestCase):
                 return_value=self._fixture_batch_profiles(root),
             ), patch(
                 "asterion.dci.cli._preflight_scope_selected_ids",
-                side_effect=lambda _request, _scope: captured.setdefault(
-                    "order", []
-                ).append("selected-ids")
-                or ("q1",),
+                side_effect=selected_ids_spy,
             ), patch(
                 "asterion.dci.cli.validate_dci_run_request"
             ) as validate_run, patch(
@@ -1478,17 +1700,17 @@ class ReproductionCliTests(unittest.TestCase):
             captured["order"],
             ["selected-ids", "selected-ids", "authorize"],
         )
-        authorize_kwargs = captured["authorize_kwargs"]
+        authorize_kwargs = cast(dict[str, Any], captured["authorize_kwargs"])
         self.assertEqual(authorize_kwargs["profile"].profile_id, "paper-reference/pi")
         self.assertEqual(authorize_kwargs["scope_ids"], scopes)
         self.assertEqual(authorize_kwargs["output_root"], output_root)
-        self.assertEqual(authorize_kwargs["max_agent_operations"], 103)
+        self.assertEqual(authorize_kwargs["max_agent_operations"], 219)
         self.assertEqual(authorize_kwargs["max_judge_operations"], 1)
         self.assertEqual(authorize_kwargs["max_cost_usd"], 25.0)
         self.assertEqual(authorize_kwargs["max_agent_cost_per_operation_usd"], 0.2)
         self.assertEqual(authorize_kwargs["max_judge_cost_per_operation_usd"], 0.05)
-        authority = captured["authority"]
-        execute_kwargs = captured["execute_kwargs"]
+        authority = cast(FullExecutionAuthorization, captured["authority"])
+        execute_kwargs = cast(dict[str, Any], captured["execute_kwargs"])
         self.assertIs(execute_kwargs["authority"], authority)
         self.assertIs(execute_kwargs["profile"], authorize_kwargs["profile"])
         self.assertEqual(execute_kwargs["scope_ids"], scopes)
@@ -1505,8 +1727,8 @@ class ReproductionCliTests(unittest.TestCase):
         self.assertTrue(
             all(item.request.paper_ir_duplicate_handling == "deduplicated" for item in items)
         )
-        self.assertTrue(all(captured["dataset_files"]))
-        self.assertTrue(all(captured["corpus_dirs"]))
+        self.assertTrue(all(cast(tuple[bool, ...], captured["dataset_files"])))
+        self.assertTrue(all(cast(tuple[bool, ...], captured["corpus_dirs"])))
         combined = stdout.getvalue() + stderr.getvalue()
         self.assertIn("Execution requested: yes", stdout.getvalue())
         self.assertIn("Agent operations performed: 7", stdout.getvalue())
@@ -1557,7 +1779,9 @@ class ReproductionCliTests(unittest.TestCase):
         original_authorize = authorize_full_execution
         scope_id = "bright.biology.main.full"
 
-        def authorize_spy(*args: object, **kwargs: object) -> FullExecutionAuthorization:
+        def authorize_spy(
+            *args: Any, **kwargs: Any
+        ) -> FullExecutionAuthorization:
             authority = original_authorize(*args, **kwargs)
             captured["authority"] = authority
             return authority
