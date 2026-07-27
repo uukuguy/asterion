@@ -187,3 +187,4 @@
 - 13:09 Resolved exact capability source locks to prevent fallback selection [6b64356]
 - 13:27 Loaded built-in capability packages through validated portable sources to eliminate privileged composition paths [7d3f95c]
 - 14:07 Narrowed complete artifact mappings to satisfy static diagnostics without suppressing Pyright [c59128e]
+- 14:21 Added metadata-only installed capability discovery and identity-bound selected loading [489b970]
