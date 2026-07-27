@@ -611,6 +611,67 @@ class StandaloneRepositoryTests(unittest.TestCase):
                     )
                     self.assertNotEqual(run().returncode, 0)
 
+    def test_docs_checker_rejects_retired_protocols_only_in_active_docs(self) -> None:
+        checker = PROJECT / "tools/check_docs.py"
+        retired = tuple(
+            f"dci.{name}/v1" for name in ("agent-runtime", "package", "assembly")
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            (root / "tools").mkdir()
+            shutil.copy2(checker, root / "tools/check_docs.py")
+            historical = root / "docs/superpowers/plans/historical.md"
+            historical.parent.mkdir(parents=True)
+            historical.write_text("\n".join(retired), encoding="utf-8")
+
+            def run() -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    ["python3", "tools/check_docs.py"],
+                    cwd=root,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+
+            (root / "README.md").write_text("# Active\n", encoding="utf-8")
+            self.assertEqual(run().returncode, 0)
+
+            for value in retired:
+                with self.subTest(value=value):
+                    (root / "README.md").write_text(value, encoding="utf-8")
+                    completed = run()
+                    self.assertNotEqual(completed.returncode, 0)
+                    self.assertIn("retired protocol identifier", completed.stderr)
+
+    def test_typescript_readme_documents_the_complete_protocol_family(self) -> None:
+        text = (
+            PROJECT / "packages/typescript/asterion-runtime/README.md"
+        ).read_text(encoding="utf-8")
+        for protocol in (
+            "asterion.agent-runtime/v1",
+            "asterion.capability/v1",
+            "asterion.capability-package/v1",
+            "asterion.application-assembly/v1",
+            "asterion.benchmark-suite/v1",
+            "asterion.capability-source/v1",
+            "asterion.capability-lock/v1",
+        ):
+            with self.subTest(protocol=protocol):
+                self.assertIn(protocol, text)
+        for schema in (
+            "runtime-manifest.schema.json",
+            "run-request.schema.json",
+            "event.schema.json",
+            "capability-manifest.schema.json",
+            "capability-package.schema.json",
+            "application-assembly.schema.json",
+            "benchmark-suite.schema.json",
+            "capability-source.schema.json",
+            "capability-lock.schema.json",
+        ):
+            with self.subTest(schema=schema):
+                self.assertIn(schema, text)
+
     def test_docs_checker_validates_asterion_import_snippets(self) -> None:
         checker = PROJECT / "tools/check_docs.py"
         self.assertTrue(checker.is_file(), "standalone docs checker is missing")

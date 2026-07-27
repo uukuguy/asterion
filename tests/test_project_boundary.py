@@ -7,6 +7,69 @@ from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parents[1]
 SOURCE = PROJECT / "src/asterion"
+FORBIDDEN_PROTOCOL_IDENTIFIERS = tuple(
+    f"dci.{name}/v1" for name in ("agent-runtime", "package", "assembly")
+)
+IDENTITY_SUFFIXES = frozenset(
+    {
+        ".ini",
+        ".json",
+        ".jsonl",
+        ".md",
+        ".mjs",
+        ".py",
+        ".rs",
+        ".sh",
+        ".template",
+        ".toml",
+        ".ts",
+        ".txt",
+        ".yaml",
+        ".yml",
+    }
+)
+IDENTITY_NAMES = frozenset({".gitignore", "Makefile"})
+GENERATED_DIRECTORIES = frozenset(
+    {
+        ".git",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+        ".venv",
+        "__pycache__",
+        "build",
+        "dist",
+        "node_modules",
+        "target",
+    }
+)
+
+
+def identity_files() -> tuple[Path, ...]:
+    files: list[Path] = []
+    for path in PROJECT.rglob("*"):
+        relative = path.relative_to(PROJECT)
+        if any(part in GENERATED_DIRECTORIES for part in relative.parts):
+            continue
+        if relative.parts[:3] in {
+            ("docs", "superpowers", "plans"),
+            ("docs", "superpowers", "specs"),
+        }:
+            continue
+        if relative == Path("docs/status/JOURNAL.md"):
+            continue
+        if relative.parts[:2] == (".superpowers", "sdd"):
+            continue
+        if (
+            path.is_file()
+            and (
+                path.suffix in IDENTITY_SUFFIXES
+                or path.name in IDENTITY_NAMES
+            )
+        ):
+            files.append(path)
+    return tuple(sorted(files))
 
 
 class AsterionProjectBoundaryTests(unittest.TestCase):
@@ -40,6 +103,13 @@ class AsterionProjectBoundaryTests(unittest.TestCase):
         text = (PROJECT / "pyproject.toml").read_text(encoding="utf-8")
         self.assertNotIn("../", text)
         self.assertNotRegex(text, r"(?m)^\s*members\s*=")
+
+    def test_active_identity_files_do_not_use_retired_protocols(self) -> None:
+        for path in identity_files():
+            text = path.read_text(encoding="utf-8")
+            for value in FORBIDDEN_PROTOCOL_IDENTIFIERS:
+                with self.subTest(path=path.relative_to(PROJECT), value=value):
+                    self.assertNotIn(value, text)
 
 
 if __name__ == "__main__":

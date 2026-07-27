@@ -31,6 +31,9 @@ FORBIDDEN_LITERALS = (
     "make -C ..",
     "from dci.framework.",
 )
+RETIRED_PROTOCOL_IDENTIFIERS = tuple(
+    f"dci.{name}/v1" for name in ("agent-runtime", "package", "assembly")
+)
 
 
 @dataclass(frozen=True)
@@ -58,6 +61,17 @@ def _link_target(raw: str) -> str:
     return value.split(maxsplit=1)[0]
 
 
+def _is_historical_protocol_document(path: Path) -> bool:
+    return (
+        path.parts[:3]
+        in {
+            ("docs", "superpowers", "plans"),
+            ("docs", "superpowers", "specs"),
+        }
+        or path == Path("docs/status/JOURNAL.md")
+    )
+
+
 def check_docs(root: Path) -> tuple[int, int, tuple[str, ...]]:
     project_root = root.resolve()
     documents = _documents(project_root)
@@ -73,6 +87,10 @@ def check_docs(root: Path) -> tuple[int, int, tuple[str, ...]]:
         for literal in FORBIDDEN_LITERALS:
             if literal in text:
                 errors.append(f"{relative}: forbidden standalone reference")
+        if not _is_historical_protocol_document(relative):
+            for identifier in RETIRED_PROTOCOL_IDENTIFIERS:
+                if identifier in text:
+                    errors.append(f"{relative}: retired protocol identifier")
         for line_number, line in enumerate(text.splitlines(), start=1):
             if (
                 "tools/verify_asterion_dci_product.py" in line

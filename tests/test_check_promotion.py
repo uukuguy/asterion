@@ -173,6 +173,7 @@ class PromotionCheckTests(unittest.TestCase):
             "--project " + "asterion",
             "../src/" + "dci",
             "../tools/" + "verify_asterion_dci_product.py",
+            *(f"dci.{name}/v1" for name in ("agent-runtime", "package", "assembly")),
         )
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary = Path(temporary_directory)
@@ -195,6 +196,29 @@ class PromotionCheckTests(unittest.TestCase):
                             quick=True,
                             runner=lambda command, cwd: completed(command),
                         )
+
+    def test_copy_audit_allows_retired_protocols_only_in_historical_records(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            source = make_source(Path(temporary_directory))
+            retired = "dci." + "assembly/v1"
+            for relative in (
+                "docs/superpowers/plans/historical.md",
+                "docs/superpowers/specs/historical.md",
+                "docs/status/JOURNAL.md",
+            ):
+                path = source / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(retired, encoding="utf-8")
+
+            run_promotion(
+                source_root=source,
+                quick=True,
+                runner=lambda command, cwd: completed(
+                    command, acceptance_stdout(command)
+                ),
+            )
 
     def test_default_plan_runs_every_provider_free_gate_from_the_copy(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -247,6 +271,31 @@ class PromotionCheckTests(unittest.TestCase):
         self.assertIn("PYTHONHOME", wheel_smoke[2])
         self.assertIn("PYTHONPATH", wheel_smoke[2])
         self.assertIn("'-I', '-S'", wheel_smoke[2])
+        protocol_smoke = next(
+            command
+            for command in commands
+            if len(command) == 3
+            and command[1] == "-c"
+            and "CAPABILITY_LOCK_PROTOCOL_VERSION" in command[2]
+        )
+        for protocol in (
+            "asterion.agent-runtime/v1",
+            "asterion.capability/v1",
+            "asterion.capability-package/v1",
+            "asterion.application-assembly/v1",
+            "asterion.benchmark-suite/v1",
+            "asterion.capability-source/v1",
+            "asterion.capability-lock/v1",
+        ):
+            with self.subTest(protocol=protocol):
+                self.assertIn(protocol, protocol_smoke[2])
+        for resource in (
+            "capability-package.json",
+            "controlled-code-validation.json",
+            "dci-complete-application-pi.json",
+        ):
+            with self.subTest(resource=resource):
+                self.assertIn(resource, protocol_smoke[2])
         for suffix in (
             ("list",),
             ("describe", "--provider", "dci-agent-lite", "--json"),

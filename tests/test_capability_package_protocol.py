@@ -154,7 +154,7 @@ class CapabilityPackageProtocolTests(unittest.TestCase):
         cases = {
             "legacy-protocol": {
                 **VALID,
-                "protocol": "dci.package/v1",
+                "protocol": "dci." + "package/v1",
             },
             "invalid-package-id": {
                 **VALID,

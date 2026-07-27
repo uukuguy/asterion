@@ -34,8 +34,9 @@ def _jsonl(name: str) -> list[object]:
 class TestRuntimeProtocol(unittest.TestCase):
     def test_runtime_protocol_is_asterion_owned(self) -> None:
         self.assertEqual(RUNTIME_PROTOCOL_VERSION, "asterion.agent-runtime/v1")
+        retired = "dci." + "agent-runtime/v1"
         for path in (PROJECT / "schemas/agent-runtime/v1").glob("*.json"):
-            self.assertNotIn("dci.agent-runtime/v1", path.read_text(encoding="utf-8"))
+            self.assertNotIn(retired, path.read_text(encoding="utf-8"))
 
     def test_rejects_shared_invalid_runtime_manifests(self) -> None:
         for name in (

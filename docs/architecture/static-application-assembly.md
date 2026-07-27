@@ -2,11 +2,12 @@
 
 ## Static planning, not execution
 
-`dci.assembly/v1` binds one runtime identity, exact `package_id@version`
-references, and explicit host edges into an immutable `AssemblyPlan`. Resolution
-validates those identities and asks the existing package composer to prove the
-declared graph. It does not start a runtime, invoke a tool, execute a workflow,
-launch the Rust sidecar, or mutate any input manifest.
+`asterion.application-assembly/v1` binds one runtime identity, exact
+capability-package and capability references, and explicit host edges into an
+immutable `AssemblyPlan`. Resolution validates those identities and asks the
+existing capability composer to prove the declared graph. It does not start a
+runtime, invoke a tool, execute a workflow, launch the Rust sidecar, or mutate
+any input manifest.
 
 ## Reachability classes
 

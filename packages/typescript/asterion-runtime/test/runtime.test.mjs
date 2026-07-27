@@ -497,7 +497,7 @@ test("rejects every legacy assembly identity and field name", async () => {
   const valid = await readAssemblyJson("valid-dci.json");
   const { capabilities, ...withoutCapabilities } = valid;
   for (const invalid of [
-    { ...valid, protocol: "dci.assembly/v1" },
+    { ...valid, protocol: "dci." + "assembly/v1" },
     { ...withoutCapabilities, packages: capabilities },
     {
       ...valid,

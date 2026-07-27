@@ -94,6 +94,77 @@ with tempfile.TemporaryDirectory() as temporary:
     assert not marker.exists()
 """
 
+WHEEL_PROTOCOL_SMOKE = r"""
+import json
+from importlib.resources import files
+
+from asterion.assembly.protocol import APPLICATION_ASSEMBLY_PROTOCOL_VERSION
+from asterion.capabilities.protocol import CAPABILITY_PROTOCOL_VERSION
+from asterion.capability_packages.protocol import (
+    BENCHMARK_SUITE_PROTOCOL_VERSION,
+    CAPABILITY_LOCK_PROTOCOL_VERSION,
+    CAPABILITY_PACKAGE_PROTOCOL_VERSION,
+    CAPABILITY_SOURCE_PROTOCOL_VERSION,
+)
+from asterion.runtime.protocol import RUNTIME_PROTOCOL_VERSION
+
+assert RUNTIME_PROTOCOL_VERSION == "asterion.agent-runtime/v1"
+assert CAPABILITY_PROTOCOL_VERSION == "asterion.capability/v1"
+assert CAPABILITY_PACKAGE_PROTOCOL_VERSION == "asterion.capability-package/v1"
+assert APPLICATION_ASSEMBLY_PROTOCOL_VERSION == "asterion.application-assembly/v1"
+assert BENCHMARK_SUITE_PROTOCOL_VERSION == "asterion.benchmark-suite/v1"
+assert CAPABILITY_SOURCE_PROTOCOL_VERSION == "asterion.capability-source/v1"
+assert CAPABILITY_LOCK_PROTOCOL_VERSION == "asterion.capability-lock/v1"
+
+root = files("asterion")
+resources = (
+    (
+        "capabilities/controlled_code/capability-package.json",
+        CAPABILITY_PACKAGE_PROTOCOL_VERSION,
+    ),
+    (
+        "capabilities/dci_research/capability-package.json",
+        CAPABILITY_PACKAGE_PROTOCOL_VERSION,
+    ),
+    (
+        "applications/controlled_code/assemblies/controlled-code-validation.json",
+        APPLICATION_ASSEMBLY_PROTOCOL_VERSION,
+    ),
+    (
+        "applications/dci_agent_lite/assemblies/dci-complete-application-claude.json",
+        APPLICATION_ASSEMBLY_PROTOCOL_VERSION,
+    ),
+    (
+        "applications/dci_agent_lite/assemblies/dci-complete-application-pi.json",
+        APPLICATION_ASSEMBLY_PROTOCOL_VERSION,
+    ),
+    (
+        "applications/dci_agent_lite/assemblies/dci-local-research.json",
+        APPLICATION_ASSEMBLY_PROTOCOL_VERSION,
+    ),
+    (
+        "applications/dci_agent_lite/assemblies/dci-research-capability-claude.json",
+        APPLICATION_ASSEMBLY_PROTOCOL_VERSION,
+    ),
+    (
+        "applications/dci_agent_lite/assemblies/dci-research-capability.json",
+        APPLICATION_ASSEMBLY_PROTOCOL_VERSION,
+    ),
+)
+for relative, expected_protocol in resources:
+    value = json.loads(root.joinpath(relative).read_text(encoding="utf-8"))
+    assert value["protocol"] == expected_protocol
+
+for relative in (
+    "capabilities/controlled_code/manifests",
+    "capabilities/dci_research/manifests",
+):
+    for resource in root.joinpath(relative).iterdir():
+        if resource.name.endswith(".json"):
+            value = json.loads(resource.read_text(encoding="utf-8"))
+            assert value["protocol"] == CAPABILITY_PROTOCOL_VERSION
+"""
+
 ROOT_EXCLUDED_NAMES = frozenset(
     {
         "build",
@@ -167,6 +238,9 @@ FORBIDDEN = (
     "../src/" + "dci",
     "../tools/" + "verify_asterion_dci_product.py",
 )
+RETIRED_PROTOCOL_IDENTIFIERS = tuple(
+    f"dci.{name}/v1" for name in ("agent-runtime", "package", "assembly")
+)
 DCI_PARENT_PATTERN = re.compile(r"\.\./src/dci(?=$|[/\s`'\"\)])")
 LOCAL_SDD_ARTIFACTS = (".superpowers", "sdd")
 
@@ -239,6 +313,17 @@ def _contains_forbidden(text: str, forbidden: str) -> bool:
     return forbidden in text
 
 
+def _is_historical_protocol_record(relative: Path) -> bool:
+    return (
+        relative.parts[:3]
+        in {
+            ("docs", "superpowers", "plans"),
+            ("docs", "superpowers", "specs"),
+        }
+        or relative == Path("docs/status/JOURNAL.md")
+    )
+
+
 def _audit_copy(copy_root: Path) -> None:
     missing = [name for name in REQUIRED_ASSETS if not (copy_root / name).is_file()]
     if missing:
@@ -257,6 +342,12 @@ def _audit_copy(copy_root: Path) -> None:
             raise PromotionError("project-owned text file is not UTF-8") from error
         if any(_contains_forbidden(text, forbidden) for forbidden in FORBIDDEN):
             raise PromotionError("promotion copy contains a nonportable reference")
+        relative = path.relative_to(copy_root)
+        if (
+            not _is_historical_protocol_record(relative)
+            and any(value in text for value in RETIRED_PROTOCOL_IDENTIFIERS)
+        ):
+            raise PromotionError("promotion copy contains a retired protocol identifier")
 
 
 def _bounded_tail(completed: subprocess.CompletedProcess[str]) -> str:
@@ -391,6 +482,7 @@ def _run_full(copy_root: Path, venv_root: Path, runner: Runner) -> int:
     installed_commands = (
         ("uv", "venv", str(venv_root)),
         ("uv", "pip", "install", "--python", str(python), str(wheels[0])),
+        (str(python), "-c", WHEEL_PROTOCOL_SMOKE),
         (str(python), "-c", WHEEL_CWD_SHIM_SMOKE),
         (str(asterion), "list"),
         (str(asterion), "describe", "--provider", "dci-agent-lite", "--json"),

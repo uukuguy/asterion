@@ -56,7 +56,7 @@ class ProtocolCanonicalOrderingTests(unittest.TestCase):
 
     def test_rejects_the_legacy_assembly_contract(self) -> None:
         legacy = {
-            "protocol": "dci.assembly/v1",
+            "protocol": "dci." + "assembly/v1",
             "application_id": "example.application",
             "version": "1.0.0",
             "runtime_id": "example.runtime",

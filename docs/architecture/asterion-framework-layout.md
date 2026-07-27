@@ -46,11 +46,12 @@ explicit compatibility path and must itself declare the selected runtime.
 
 ## Wire compatibility
 
-Filesystem and import ownership changed before protocol identity. AF-095 retains
-`dci.agent-runtime/v1`, `dci.package/v1`, `dci.assembly/v1`, and
-`dci.executor/v1` exactly. Any future `asterion.*` wire namespace requires a
-separate versioned compatibility decision; directory extraction does not create
-silent aliases.
+Generic framework contracts are Asterion-owned:
+`asterion.agent-runtime/v1`, `asterion.capability/v1`,
+`asterion.capability-package/v1`, and
+`asterion.application-assembly/v1`. The controlled executor remains the
+separate `dci.executor/v1` service protocol. The generic contract rename is a
+hard boundary: no compatibility aliases accept the retired identities.
 
 ## Boundaries
 

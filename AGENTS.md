@@ -15,11 +15,11 @@ CLI/host → selected provider → assembly → catalog/composer
          → exact implementations → runner → runtime/host services
 ```
 
-Framework modules (`runtime/`, `packages/`, `assembly/`, `runner/`, `services/`) must remain domain-neutral. Products may depend on them; they must not import DCI implementations, tests, or adjacent source trees. Runtime adapters only translate native commands/events into the public protocol.
+Framework modules (`runtime/`, `capabilities/`, `capability_packages/`, `assembly/`, `runner/`, `services/`) must remain domain-neutral. Products may depend on them; they must not import DCI implementations, tests, or adjacent source trees. Runtime adapters only translate native commands/events into the public protocol.
 
 ## Protocol and Composition Invariants
 
-`dci.agent-runtime/v1`, `dci.package/v1`, and `dci.assembly/v1` are closed contracts. Schemas under `schemas/`, Python validators, and TypeScript validation must agree. IDs are canonical, versions exact, and arrays sorted and unique.
+`asterion.agent-runtime/v1`, `asterion.capability/v1`, `asterion.capability-package/v1`, `asterion.application-assembly/v1`, `asterion.benchmark-suite/v1`, `asterion.capability-source/v1`, and `asterion.capability-lock/v1` are closed contracts. Schemas under `schemas/`, Python validators, and TypeScript validation must agree. IDs are canonical, versions exact, and arrays sorted and unique.
 
 Manifests describe compatibility, not authority. Never place prompts, credentials, commands, executable paths, environment values, provider configuration, or mutable state in them. Catalogs use explicit local roots, direct JSON children, and exact `package_id@version`; do not add source scanning, ranges, registries, hidden precedence, or symlink traversal.
 
@@ -52,7 +52,7 @@ Trust-boundary failures must fail closed. Public surfaces must not expose prompt
 Use `unittest` (`test_<surface>.py`, `Test...`, `test_<behavior>`) and `subTest` matrices. Cover success, failure, immutability, identity, determinism, cancellation, and redaction.
 
 ```bash
-uv run python -m unittest -v tests.test_package_execution
+uv run python -m unittest -v tests.test_capability_execution
 make test
 make lint
 make docs-check

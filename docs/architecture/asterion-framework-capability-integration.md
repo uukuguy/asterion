@@ -110,18 +110,21 @@ Capability 是“声明 + 实现”，不是一个任意 Python 目录。实现�
 
 ## Application、Assembly 与 Provider
 
-Application 是一组已固定版本 package、一个 runtime 身份以及 host 边界的静态装配。`dci.assembly/v1` 只引用 package 身份，不嵌入 Python 对象。例如：
+Application 是一组已固定版本 capability package 与 capability、一个 runtime 身份以及 host 边界的静态装配。`asterion.application-assembly/v1` 只引用精确身份，不嵌入 Python 对象。例如：
 
 ```json
 {
-  "protocol": "dci.assembly/v1",
+  "protocol": "asterion.application-assembly/v1",
   "application_id": "example.research-app",
   "version": "1.0.0",
   "runtime_id": "pi.reference",
-  "packages": [
-    {"package_id": "example.observability", "version": "1.0.0"},
-    {"package_id": "example.policy", "version": "1.0.0"},
-    {"package_id": "example.research", "version": "1.0.0"}
+  "capability_packages": [
+    {"package_id": "example-suite", "version": "1.0.0"}
+  ],
+  "capabilities": [
+    {"capability_id": "example.observability", "version": "1.0.0"},
+    {"capability_id": "example.policy", "version": "1.0.0"},
+    {"capability_id": "example.research", "version": "1.0.0"}
   ],
   "host_capabilities": [],
   "host_policies": [],

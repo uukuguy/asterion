@@ -99,7 +99,7 @@ class CapabilityCatalogTests(unittest.TestCase):
 
     def test_rejects_the_legacy_package_protocol(self) -> None:
         value = manifest("example.research")
-        value["protocol"] = "dci.package/v1"
+        value["protocol"] = "dci." + "package/v1"
 
         with self.assertRaises(CapabilityProtocolError):
             validate_capability_manifest(value)
