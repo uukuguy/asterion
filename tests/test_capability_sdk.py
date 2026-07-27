@@ -57,6 +57,34 @@ PACKAGE_OWNED_PREFIXES = {
 }
 
 
+def _asterion_import_violations(
+    source: str,
+    *,
+    allowed: tuple[str, ...],
+) -> tuple[str, ...]:
+    tree = ast.parse(source)
+    violations = []
+    for node in ast.walk(tree):
+        modules = ()
+        if isinstance(node, ast.Import):
+            modules = tuple(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            modules = tuple(
+                node.module if alias.name == "*" else f"{node.module}.{alias.name}"
+                for alias in node.names
+            )
+        violations.extend(
+            module
+            for module in modules
+            if (module == "asterion" or module.startswith("asterion."))
+            and not any(
+                module == prefix or module.startswith(prefix + ".")
+                for prefix in allowed
+            )
+        )
+    return tuple(violations)
+
+
 class CapabilitySdkTests(unittest.TestCase):
     def test_public_surface_is_exact_and_reexports_stable_values(self) -> None:
         self.assertEqual(set(capability_sdk.__all__), PUBLIC_NAMES)
@@ -146,25 +174,39 @@ class CapabilitySdkTests(unittest.TestCase):
                 "asterion.capability_sdk",
                 *PACKAGE_OWNED_PREFIXES[package],
             )
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            violations = []
-            for node in ast.walk(tree):
-                modules = ()
-                if isinstance(node, ast.Import):
-                    modules = tuple(alias.name for alias in node.names)
-                elif isinstance(node, ast.ImportFrom) and node.module is not None:
-                    modules = (node.module,)
-                violations.extend(
-                    module
-                    for module in modules
-                    if module.startswith("asterion.")
-                    and not any(
-                        module == prefix or module.startswith(prefix + ".")
-                        for prefix in allowed
-                    )
-                )
+            violations = _asterion_import_violations(
+                path.read_text(encoding="utf-8"),
+                allowed=allowed,
+            )
             with self.subTest(path=path.relative_to(PROJECT)):
-                self.assertEqual(violations, [])
+                self.assertEqual(violations, ())
+
+    def test_import_guard_rejects_parent_bare_and_private_star_imports(
+        self,
+    ) -> None:
+        allowed = ("asterion.capability_sdk",)
+        private_sources = (
+            "from asterion import runtime\n",
+            "from asterion.capabilities import execution\n",
+            "import asterion\n",
+            "from asterion import *\n",
+            "from asterion.runtime import *\n",
+        )
+        for source in private_sources:
+            with self.subTest(source=source):
+                self.assertTrue(_asterion_import_violations(source, allowed=allowed))
+
+        safe_sources = (
+            "from asterion import capability_sdk\n",
+            "from asterion.capability_sdk import CapabilityRef\n",
+            "from asterion.capability_sdk import *\n",
+        )
+        for source in safe_sources:
+            with self.subTest(source=source):
+                self.assertEqual(
+                    _asterion_import_violations(source, allowed=allowed),
+                    (),
+                )
 
 
 if __name__ == "__main__":
