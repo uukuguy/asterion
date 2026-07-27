@@ -77,3 +77,7 @@ class InstalledCapabilityPackage:
     benchmark_suite_paths: tuple[Path, ...]
     implementations: tuple[CapabilityImplementationBinding, ...]
     benchmark_bindings: tuple[BenchmarkTaskBinding, ...]
+
+    def __post_init__(self) -> None:
+        if self.source_kind not in SOURCE_KINDS:
+            raise ValueError("capability package source kind is invalid")

@@ -153,6 +153,26 @@ class CapabilityPackageModelTests(unittest.TestCase):
         with self.assertRaises(FrozenInstanceError):
             installed.catalog_roots = ()  # type: ignore[misc]
 
+    def test_installed_package_rejects_unknown_source_kind(self) -> None:
+        unknown_source_kind = "SECRET-UNKNOWN-SOURCE-KIND"
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "^capability package source kind is invalid$",
+        ) as caught:
+            InstalledCapabilityPackage(
+                package_ref=self.package_ref,
+                payload_sha256="a" * 64,
+                source_id="example.source",
+                source_kind=unknown_source_kind,
+                catalog_roots=(),
+                benchmark_suite_paths=(),
+                implementations=(),
+                benchmark_bindings=(),
+            )
+
+        self.assertNotIn(unknown_source_kind, str(caught.exception))
+
     def test_opaque_benchmark_implementation_is_redacted_from_repr(self) -> None:
         class SecretImplementation:
             def __repr__(self) -> str:
