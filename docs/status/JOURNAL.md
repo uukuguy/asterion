@@ -185,3 +185,5 @@
 - 12:22 Defined source-neutral capability package values and metadata-first source protocol to separate discovery from provider loading [a91d39f]
 - 12:39 Validated descriptor-relative portable payload closure and stable content identity to bind source-neutral packages [b96f5ea]
 - 13:09 Resolved exact capability source locks to prevent fallback selection [6b64356]
+- 13:27 Loaded built-in capability packages through validated portable sources to eliminate privileged composition paths [7d3f95c]
+- 14:07 Narrowed complete artifact mappings to satisfy static diagnostics without suppressing Pyright [c59128e]
