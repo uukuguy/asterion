@@ -192,3 +192,4 @@
 - 15:15 Blocked local factory relative-import escapes to preserve exact source closure [4580e44]
 - 15:36 Published stable capability SDK and provider-free conformance checks [3ab2f19]
 - 15:52 Enforced public capability SDK boundary and cleared static diagnostics [9117f6d]
+- 16:01 Closed AST import-guard bypasses for capability SDK boundary enforcement [c02dc4b]
