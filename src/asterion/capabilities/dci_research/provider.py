@@ -2,48 +2,31 @@
 
 from __future__ import annotations
 
-import hashlib
-from importlib import resources
 from pathlib import Path
 
 from asterion.capabilities.dci_research.complete import complete_dci_bindings
 from asterion.capability_packages.model import InstalledCapabilityPackage
+from asterion.capability_packages.payload import open_portable_payload
 from asterion.capability_packages.protocol import CapabilityPackageRef
 
 
 PACKAGE_REF = CapabilityPackageRef("dci", "1.0.0")
-SOURCE_ID = "local-directory:dci@1.0.0"
+SOURCE_ID = "dci.local"
 
 
 def create_provider() -> InstalledCapabilityPackage:
     """Return the installed DCI package for an explicitly injected local source."""
 
-    root = (
-        Path(str(resources.files("asterion"))).resolve() / "capabilities/dci_research"
-    )
+    root = Path(__file__).resolve().parent
+    payload_root = root / "payload"
+    payload = open_portable_payload(payload_root)
     return InstalledCapabilityPackage(
         package_ref=PACKAGE_REF,
-        payload_sha256=_content_sha256(root),
+        payload_sha256=payload.payload_sha256,
         source_id=SOURCE_ID,
         source_kind="local-directory",
-        catalog_roots=((root / "manifests").resolve(strict=True),),
+        catalog_roots=((payload_root / "capabilities").resolve(strict=True),),
         benchmark_suite_paths=(),
         implementations=complete_dci_bindings(),
         benchmark_bindings=(),
     )
-
-
-def _content_sha256(root: Path) -> str:
-    digest = hashlib.sha256()
-    paths = (
-        root / "capability-package.json",
-        *sorted((root / "manifests").glob("*.json")),
-    )
-    for path in paths:
-        relative = path.relative_to(root).as_posix().encode("utf-8")
-        content = path.read_bytes()
-        digest.update(len(relative).to_bytes(8, "big"))
-        digest.update(relative)
-        digest.update(len(content).to_bytes(8, "big"))
-        digest.update(content)
-    return digest.hexdigest()

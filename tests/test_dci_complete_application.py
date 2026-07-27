@@ -31,13 +31,12 @@ from asterion.capabilities.execution import (
     InProcessArtifactPayload,
     project_public_value,
 )
-from asterion.capability_packages.model import (
-    CapabilityPackageCandidate,
-    PortableCapabilityPayload,
-)
 from asterion.capability_packages.protocol import (
     CapabilityPackageRef,
-    validate_capability_package_manifest,
+    validate_capability_source_declaration,
+)
+from asterion.capability_packages.sources.local import (
+    LocalDirectoryCapabilityPackageSource,
 )
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
 from asterion.dci.services import (
@@ -147,43 +146,28 @@ DCI_PACKAGED_RESOURCE_CLOSURE = {
 }
 
 
-class _DciLocalSource:
-    def __init__(self) -> None:
-        self.installed = create_dci_package()
-        self.candidate = CapabilityPackageCandidate(
-            package_ref=self.installed.package_ref,
-            source_id=self.installed.source_id,
-            source_kind=self.installed.source_kind,
-            payload_sha256=self.installed.payload_sha256,
-            metadata={},
+def _dci_local_source() -> LocalDirectoryCapabilityPackageSource:
+    return LocalDirectoryCapabilityPackageSource(
+        validate_capability_source_declaration(
+            {
+                "protocol": "asterion.capability-source/v1",
+                "source_id": "dci.local",
+                "kind": "local-directory",
+                "package": {
+                    "package_id": "dci",
+                    "version": "1.0.0",
+                },
+                "payload_sha256": None,
+                "locator": {
+                    "root": str(MANIFESTS.parent.resolve(strict=True)),
+                },
+                "provider_factory": {
+                    "module": "provider",
+                    "name": "create_provider",
+                },
+            },
         )
-        self.payload = PortableCapabilityPayload(
-            manifest=validate_capability_package_manifest(
-                json.loads((MANIFESTS.parent / "capability-package.json").read_text())
-            ),
-            payload_sha256=self.installed.payload_sha256,
-            resource_root=MANIFESTS.parent,
-        )
-
-    def discover_metadata(self):
-        return (self.candidate,)
-
-    def open_payload(self, candidate):
-        self._require_candidate(candidate)
-        return self.payload
-
-    def validate_source_identity(self, candidate, payload):
-        self._require_candidate(candidate)
-        if payload is not self.payload:
-            raise AssertionError("unexpected DCI payload")
-
-    def load_provider(self, candidate):
-        self._require_candidate(candidate)
-        return self.installed
-
-    def _require_candidate(self, candidate):
-        if candidate is not self.candidate:
-            raise AssertionError("unexpected DCI candidate")
+    )
 
 
 class _CorpusService:
@@ -798,7 +782,7 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
                         ),
                     ],
                     entry_points=(provider_entry,),
-                    capability_package_sources=(_DciLocalSource(),),
+                    capability_package_sources=(_dci_local_source(),),
                     host_service_entry_points=host_entries,
                     runtime_factories=registry,
                     stdout=stdout,

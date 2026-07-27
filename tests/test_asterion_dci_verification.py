@@ -700,16 +700,24 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
             package_root = Path(temp_dir) / "asterion"
             shutil.copytree(SOURCE, package_root)
             next(
-                (package_root / "capabilities/dci_research/manifests").glob("*.json")
+                (package_root / "capabilities/dci_research/payload/capabilities").glob(
+                    "*.json"
+                )
             ).unlink()
             verifier = DciProductVerifier(
                 repo_root=Path(temp_dir), backend=ExplodingBackend()
             )
             resource_files = resources.files
-            with patch(
-                "importlib.resources.files",
-                side_effect=lambda anchor: (
-                    package_root if anchor == "asterion" else resource_files(anchor)
+            with (
+                patch(
+                    "importlib.resources.files",
+                    side_effect=lambda anchor: (
+                        package_root if anchor == "asterion" else resource_files(anchor)
+                    ),
+                ),
+                patch(
+                    "asterion.capabilities.dci_research.provider.__file__",
+                    str(package_root / "capabilities/dci_research/provider.py"),
                 ),
             ):
                 result = verifier(acceptance_request())
@@ -718,11 +726,8 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
         self.assertEqual(result.provider_backed_operation_count, 0)
         self.assertFalse(result.full_dataset_ran)
         checks = {check.check_id: check for check in result.checks}
-        self.assertNotIn("installed-closure", checks)
-        self.assertEqual(checks["packaged-assemblies"].status, "PASS")
-        self.assertEqual(checks["capability-manifests"].status, "FAIL")
-        self.assertEqual(checks["composed-assemblies"].status, "FAIL")
-        self.assertEqual(checks["executable-assemblies"].status, "FAIL")
+        self.assertEqual(tuple(checks), ("installed-closure",))
+        self.assertEqual(checks["installed-closure"].status, "FAIL")
 
     def test_acceptance_reports_independent_damage_layers(self) -> None:
         verifier = DciProductVerifier(repo_root=PROJECT, backend=ExplodingBackend())
