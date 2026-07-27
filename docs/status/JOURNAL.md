@@ -178,3 +178,4 @@
 - 08:47 Renamed the runtime wire protocol to Asterion-owned identity across schemas, validators, fixtures, and TypeScript [8980952]
 - 09:12 Replaced generic package core with Asterion capability protocol for canonical identity and immutable bindings [03e4723]
 - 09:34 Hardened capability snapshots and cross-language ordering so protocol validation remains immutable and exact [f123571]
+- 09:45 Defined portable capability-package descriptors and immutable validation to establish source-neutral package identity [53ea017]
