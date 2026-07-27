@@ -167,3 +167,7 @@
 - 20:39 Fast-forwarded main and removed the owned benchmark worktree and merged feature branch [76a83d5]
 - 20:40 Recorded the closed benchmark state and operator execution commands in the live recovery checkpoint
 - 20:40 Saved recovery checkpoint after DCI benchmark integration and worktree cleanup [18814cf]
+
+## 2026-07-27
+
+- 08:08 Designed source-neutral Asterion capability packages so built-in and third-party forms share one protocol [e667e31]
