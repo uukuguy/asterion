@@ -10,7 +10,7 @@ from asterion.applications.provider import (
     InstalledApplication,
     InstalledApplicationProvider,
 )
-from asterion.capabilities.controlled_code import controlled_code_bindings
+from asterion.capability_packages.protocol import CapabilityPackageRef
 
 
 def create_provider() -> InstalledApplicationProvider:
@@ -29,8 +29,7 @@ def create_provider() -> InstalledApplicationProvider:
                     root
                     / "applications/controlled_code/assemblies/controlled-code-validation.json",
                 ),
-                catalog_roots=(root / "capabilities/controlled_code/manifests",),
-                implementations=controlled_code_bindings(),
+                capability_packages=(CapabilityPackageRef("controlled-code", "1.0.0"),),
                 runtime_ids=("pi.reference",),
             ),
         ),

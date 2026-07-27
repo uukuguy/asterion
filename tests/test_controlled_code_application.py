@@ -19,7 +19,7 @@ from asterion.services.controlled_executor import (
 
 PROJECT = Path(__file__).resolve().parents[1]
 SOURCE = PROJECT / "src/asterion"
-MANIFESTS = SOURCE / "capabilities/controlled_code/manifests"
+MANIFESTS = SOURCE / "capabilities/controlled_code/payload/capabilities"
 ASSEMBLY = (
     SOURCE
     / "applications/controlled_code/assemblies/controlled-code-validation.json"

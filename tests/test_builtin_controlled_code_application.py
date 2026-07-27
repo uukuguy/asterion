@@ -8,7 +8,7 @@ from asterion.applications.discovery import (
     list_application_providers,
     load_application_provider,
 )
-from asterion.capabilities.catalog import CapabilityRef
+from asterion.capability_packages.protocol import CapabilityPackageRef
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -24,23 +24,26 @@ class BuiltinControlledCodeApplicationTests(unittest.TestCase):
             ["controlled-code", "dci-agent-lite"],
         )
 
-    def test_controlled_code_provider_binds_exact_application_and_packages(self) -> None:
+    def test_controlled_code_provider_binds_exact_application_and_packages(
+        self,
+    ) -> None:
         provider = load_application_provider("controlled-code")
         self.assertEqual(provider.resource_root, SOURCE.resolve())
         self.assertEqual(len(provider.applications), 1)
         application = provider.applications[0]
-        self.assertEqual((application.application_id, application.version), ("code.quality", "1.0.0"))
+        self.assertEqual(
+            (application.application_id, application.version), ("code.quality", "1.0.0")
+        )
         self.assertEqual(application.runtime_ids, ("pi.reference",))
         self.assertEqual(
-            {binding.capability_ref for binding in application.implementations},
-            {
-                CapabilityRef("evaluation.code-quality", "1.0.0"),
-                CapabilityRef("observability.execution-audit", "1.0.0"),
-                CapabilityRef("workflow.code-quality", "1.0.0"),
-            },
+            application.capability_packages,
+            (CapabilityPackageRef("controlled-code", "1.0.0"),),
         )
-        self.assertTrue(application.assembly_paths[0].is_relative_to(provider.resource_root))
-        self.assertTrue(application.catalog_roots[0].is_relative_to(provider.resource_root))
+        self.assertTrue(
+            application.assembly_paths[0].is_relative_to(provider.resource_root)
+        )
+        self.assertFalse(hasattr(application, "catalog_roots"))
+        self.assertFalse(hasattr(application, "implementations"))
 
 
 if __name__ == "__main__":

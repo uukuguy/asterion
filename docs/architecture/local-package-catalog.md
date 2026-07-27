@@ -33,7 +33,9 @@ from asterion.capabilities.composition import compose_capabilities
 catalog = discover_capabilities(
     [
         Path("src/asterion/capabilities/dci_research/manifests"),
-        Path("src/asterion/capabilities/controlled_code/manifests"),
+        Path(
+            "src/asterion/capabilities/controlled_code/payload/capabilities"
+        ),
     ]
 )
 refs = (

@@ -262,7 +262,7 @@ class CapabilityPackageProtocolTests(unittest.TestCase):
     def test_builtin_descriptors_declare_exact_current_closures(self) -> None:
         cases = (
             (
-                "controlled_code/capability-package.json",
+                "controlled_code/payload/capability-package.json",
                 CapabilityPackageRef("controlled-code", "1.0.0"),
                 (
                     CapabilityRef("evaluation.code-quality", "1.0.0"),

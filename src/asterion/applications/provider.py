@@ -15,7 +15,6 @@ from asterion.assembly.protocol import (
 )
 from asterion.capabilities.catalog import (
     CapabilityCatalogError,
-    CapabilityRef,
     discover_capabilities,
 )
 from asterion.capabilities.execution import (
@@ -23,6 +22,8 @@ from asterion.capabilities.execution import (
     CapabilityImplementationBinding,
     validate_implementation_bindings,
 )
+from asterion.capability_packages.model import InstalledCapabilityPackage
+from asterion.capability_packages.protocol import CapabilityPackageRef
 from asterion.applications.product import (
     InstalledCapabilityProduct,
     validate_capability_product,
@@ -46,6 +47,7 @@ class InstalledAssembly:
     runtime_id: str
     path: Path
     plan: AssemblyPlan
+    implementations: tuple[CapabilityImplementationBinding, ...]
 
 
 @dataclass(frozen=True)
@@ -53,8 +55,7 @@ class InstalledApplication:
     application_id: str
     version: str
     assembly_paths: tuple[Path, ...]
-    catalog_roots: tuple[Path, ...]
-    implementations: tuple[CapabilityImplementationBinding, ...]
+    capability_packages: tuple[CapabilityPackageRef, ...]
     runtime_ids: tuple[str, ...]
     assemblies: tuple[InstalledAssembly, ...] = ()
 
@@ -129,18 +130,21 @@ def validate_installed_provider_metadata(
 def resolve_installed_provider(
     provider: InstalledApplicationProvider,
     *,
+    installed_packages: tuple[InstalledCapabilityPackage, ...],
     runtime_factories: RuntimeFactoryRegistry,
 ) -> InstalledApplicationProvider:
     """Resolve every installed application into an exact executable closure."""
 
     composed = compose_installed_provider(
-        provider, runtime_factories=runtime_factories
+        provider,
+        installed_packages=installed_packages,
+        runtime_factories=runtime_factories,
     )
     try:
         for application in composed.applications:
             for assembly in application.assemblies:
                 validate_implementation_bindings(
-                    assembly.plan, application.implementations
+                    assembly.plan, assembly.implementations
                 )
     except (CapabilityExecutionError, TypeError, ValueError):
         raise ApplicationProviderError(
@@ -152,19 +156,32 @@ def resolve_installed_provider(
 def compose_installed_provider(
     provider: InstalledApplicationProvider,
     *,
+    installed_packages: tuple[InstalledCapabilityPackage, ...],
     runtime_factories: RuntimeFactoryRegistry,
 ) -> InstalledApplicationProvider:
     """Compose exact installed plans without asserting executable bindings."""
 
-    if not isinstance(provider, InstalledApplicationProvider) or not isinstance(
-        runtime_factories, RuntimeFactoryRegistry
+    if (
+        not isinstance(provider, InstalledApplicationProvider)
+        or not isinstance(installed_packages, tuple)
+        or any(
+            not isinstance(package, InstalledCapabilityPackage)
+            for package in installed_packages
+        )
+        or len({package.package_ref for package in installed_packages})
+        != len(installed_packages)
+        or not isinstance(runtime_factories, RuntimeFactoryRegistry)
     ):
         raise ApplicationProviderError("installed application provider is invalid")
     metadata = validate_installed_provider_metadata(
         provider, selected_id=provider.provider_id
     )
     applications = tuple(
-        _compose_application(application, runtime_factories=runtime_factories)
+        _compose_application(
+            application,
+            installed_packages=installed_packages,
+            runtime_factories=runtime_factories,
+        )
         for application in metadata.applications
     )
     return InstalledApplicationProvider(
@@ -185,13 +202,17 @@ def _validate_application_metadata(
     ):
         raise ApplicationProviderError("installed application assemblies are invalid")
     if (
-        not isinstance(application.catalog_roots, tuple)
-        or not application.catalog_roots
+        not isinstance(application.capability_packages, tuple)
+        or not application.capability_packages
+        or any(
+            not isinstance(package_ref, CapabilityPackageRef)
+            for package_ref in application.capability_packages
+        )
+        or tuple(sorted(set(application.capability_packages)))
+        != application.capability_packages
     ):
-        raise ApplicationProviderError("installed application catalogs are invalid")
-    if not isinstance(application.implementations, tuple):
         raise ApplicationProviderError(
-            "installed application implementations are invalid"
+            "installed application capability packages are invalid"
         )
     if (
         not isinstance(application.runtime_ids, tuple)
@@ -205,21 +226,6 @@ def _validate_application_metadata(
         _resource_beneath(path, root=root, kind="file")
         for path in application.assembly_paths
     )
-    catalogs = tuple(
-        _resource_beneath(path, root=root, kind="directory")
-        for path in application.catalog_roots
-    )
-    refs: set[CapabilityRef] = set()
-    implementations: list[CapabilityImplementationBinding] = []
-    for binding in application.implementations:
-        if (
-            not isinstance(binding, CapabilityImplementationBinding)
-            or not isinstance(binding.capability_ref, CapabilityRef)
-            or binding.capability_ref in refs
-        ):
-            raise ApplicationProviderError("installed application binding is invalid")
-        refs.add(binding.capability_ref)
-        implementations.append(binding)
 
     assembly_runtime_ids: list[str] = []
     for assembly_path in assemblies:
@@ -227,19 +233,18 @@ def _validate_application_metadata(
         runtime_id = assembly["runtime_id"]
         assert isinstance(runtime_id, str)
         assembly_runtime_ids.append(runtime_id)
-        raw_capabilities = assembly["capabilities"]
-        assert isinstance(raw_capabilities, list)
-        for item in raw_capabilities:
-            assert isinstance(item, dict)
-            assert isinstance(item["capability_id"], str)
-            assert isinstance(item["version"], str)
-        capability_refs = {
-            CapabilityRef(item["capability_id"], item["version"])
-            for item in raw_capabilities
-        }
-        if not refs.issubset(capability_refs):
+        raw_packages = assembly["capability_packages"]
+        assert isinstance(raw_packages, list)
+        package_refs = tuple(
+            CapabilityPackageRef(item["package_id"], item["version"])
+            for item in raw_packages
+            if isinstance(item, dict)
+            and isinstance(item["package_id"], str)
+            and isinstance(item["version"], str)
+        )
+        if package_refs != application.capability_packages:
             raise ApplicationProviderError(
-                "installed application binding is unavailable"
+                "installed application capability packages are unavailable"
             )
     if tuple(sorted(assembly_runtime_ids)) != application.runtime_ids:
         raise ApplicationProviderError(
@@ -250,8 +255,7 @@ def _validate_application_metadata(
         application_id=application.application_id,
         version=application.version,
         assembly_paths=assemblies,
-        catalog_roots=catalogs,
-        implementations=tuple(implementations),
+        capability_packages=application.capability_packages,
         runtime_ids=application.runtime_ids,
         assemblies=(),
     )
@@ -260,15 +264,27 @@ def _validate_application_metadata(
 def _compose_application(
     application: InstalledApplication,
     *,
+    installed_packages: tuple[InstalledCapabilityPackage, ...],
     runtime_factories: RuntimeFactoryRegistry,
 ) -> InstalledApplication:
     try:
-        catalog = discover_capabilities(application.catalog_roots)
+        selected_packages = _select_installed_packages(
+            application.capability_packages,
+            installed_packages,
+        )
+        catalog = discover_capabilities(
+            tuple(
+                root for package in selected_packages for root in package.catalog_roots
+            )
+        )
+        implementations = tuple(
+            binding
+            for package in selected_packages
+            for binding in package.implementations
+        )
         assemblies: list[InstalledAssembly] = []
         for assembly_path in application.assembly_paths:
-            assembly = _read_assembly_snapshot(
-                assembly_path, application=application
-            )
+            assembly = _read_assembly_snapshot(assembly_path, application=application)
             runtime_id = assembly["runtime_id"]
             assert isinstance(runtime_id, str)
             runtime_binding = runtime_factories.select(runtime_id)
@@ -282,6 +298,7 @@ def _compose_application(
                     runtime_id=runtime_id,
                     path=assembly_path,
                     plan=plan,
+                    implementations=implementations,
                 )
             )
     except (
@@ -306,11 +323,29 @@ def _compose_application(
         application_id=application.application_id,
         version=application.version,
         assembly_paths=application.assembly_paths,
-        catalog_roots=application.catalog_roots,
-        implementations=application.implementations,
+        capability_packages=application.capability_packages,
         runtime_ids=application.runtime_ids,
         assemblies=values,
     )
+
+
+def _select_installed_packages(
+    package_refs: tuple[CapabilityPackageRef, ...],
+    installed_packages: tuple[InstalledCapabilityPackage, ...],
+) -> tuple[InstalledCapabilityPackage, ...]:
+    selected: list[InstalledCapabilityPackage] = []
+    for package_ref in package_refs:
+        matches = tuple(
+            package
+            for package in installed_packages
+            if package.package_ref == package_ref
+        )
+        if len(matches) != 1:
+            raise ApplicationProviderError(
+                "installed application capability package is unavailable"
+            )
+        selected.append(matches[0])
+    return tuple(selected)
 
 
 def _read_assembly_snapshot(

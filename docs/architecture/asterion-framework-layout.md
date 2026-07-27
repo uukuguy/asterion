@@ -16,7 +16,7 @@ src/asterion/                         sole product distribution
 parent workspace src/dci/             mixed-repository, unpackaged benchmark baseline
 src/asterion/capabilities/dci_research/  bundled DCI capability and manifests
 src/asterion/applications/dci_agent_lite/ bundled provider and assemblies
-src/asterion/capabilities/controlled_code/ controlled-code declarative packages
+src/asterion/capabilities/controlled_code/payload/ controlled-code portable payload
 packages/typescript/asterion-runtime/ TypeScript validation and host types
 packages/rust/controlled-executor/    explicit controlled-execution service
 ```

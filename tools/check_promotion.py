@@ -119,7 +119,7 @@ assert CAPABILITY_LOCK_PROTOCOL_VERSION == "asterion.capability-lock/v1"
 root = files("asterion")
 resources = (
     (
-        "capabilities/controlled_code/capability-package.json",
+        "capabilities/controlled_code/payload/capability-package.json",
         CAPABILITY_PACKAGE_PROTOCOL_VERSION,
     ),
     (
@@ -156,7 +156,7 @@ for relative, expected_protocol in resources:
     assert value["protocol"] == expected_protocol
 
 for relative in (
-    "capabilities/controlled_code/manifests",
+    "capabilities/controlled_code/payload/capabilities",
     "capabilities/dci_research/manifests",
 ):
     for resource in root.joinpath(relative).iterdir():
