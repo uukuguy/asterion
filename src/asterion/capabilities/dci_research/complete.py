@@ -8,6 +8,7 @@ import os
 import stat
 from collections.abc import Mapping
 from pathlib import Path
+from typing import cast
 
 from asterion.capabilities.catalog import CapabilityRef
 from asterion.capabilities.execution import (
@@ -72,11 +73,16 @@ def _artifact(invocation: CapabilityInvocation, media_type: str) -> dict[str, ob
         for item in invocation.upstream_artifacts
         if item.get("media_type") == media_type
     ]
-    if len(matches) != 1 or not isinstance(matches[0].get("value"), Mapping):
+    if len(matches) != 1:
         raise CapabilityExecutionError(
             "complete application upstream evidence is invalid"
         )
-    value = dict(matches[0]["value"])
+    artifact_value = matches[0].get("value")
+    if not isinstance(artifact_value, Mapping):
+        raise CapabilityExecutionError(
+            "complete application upstream evidence is invalid"
+        )
+    value = dict(cast(Mapping[str, object], artifact_value))
     if (
         value.get("schema") != IMPLEMENTATION_PROTOCOL
         or value.get("implementation_sha256") != complete_application_identity()
