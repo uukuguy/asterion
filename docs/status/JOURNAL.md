@@ -194,3 +194,4 @@
 - 15:52 Enforced public capability SDK boundary and cleared static diagnostics [9117f6d]
 - 16:01 Closed AST import-guard bypasses for capability SDK boundary enforcement [c02dc4b]
 - 16:22 Added provider-free capability package author commands and promotion gate [bea8f4a]
+- 16:40 Defined immutable, redacted generic benchmark runtime values [0364229]
