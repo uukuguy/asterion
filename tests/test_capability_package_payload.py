@@ -8,7 +8,9 @@ import tempfile
 import unittest
 from collections.abc import Callable
 from pathlib import Path
+from unittest.mock import patch
 
+import asterion.capability_packages.payload as payload_module
 from asterion.capabilities.catalog import CapabilityRef
 from asterion.capability_packages.payload import (
     CapabilityPackagePayloadError,
@@ -250,6 +252,104 @@ class CapabilityPackagePayloadTests(unittest.TestCase):
                     open_portable_payload(root)
 
                 self.assertNotIn(sentinel, str(caught.exception))
+
+    def test_rejects_members_added_after_initial_directory_enumeration(
+        self,
+    ) -> None:
+        cases = (
+            ("root", Path("."), "late-member"),
+            ("capabilities", Path("capabilities"), "late-member.json"),
+            ("resources", Path("resources"), "late-member.txt"),
+            ("conformance", Path("conformance"), "late-member.json"),
+        )
+        original_listdir = os.listdir
+
+        for index, (label, relative_directory, member_name) in enumerate(
+            cases
+        ):
+            with self.subTest(directory=label):
+                root = self._copy_payload(f"late-member-{index}")
+                directory = root / relative_directory
+                directory_details = directory.stat()
+                directory_identity = (
+                    directory_details.st_dev,
+                    directory_details.st_ino,
+                )
+                injected = False
+                sentinel = f"SENTINEL-late-{label}"
+
+                def inject_after_list(
+                    directory_fd: int,
+                ) -> list[str]:
+                    nonlocal injected
+                    members = original_listdir(directory_fd)
+                    opened = os.fstat(directory_fd)
+                    if (
+                        not injected
+                        and (opened.st_dev, opened.st_ino)
+                        == directory_identity
+                    ):
+                        (directory / member_name).write_text(
+                            sentinel,
+                            encoding="utf-8",
+                        )
+                        injected = True
+                    return members
+
+                with (
+                    patch.object(
+                        payload_module.os,
+                        "listdir",
+                        side_effect=inject_after_list,
+                    ),
+                    self.assertRaises(
+                        CapabilityPackagePayloadError
+                    ) as caught,
+                ):
+                    open_portable_payload(root)
+
+                self.assertTrue(injected)
+                self.assertNotIn(sentinel, str(caught.exception))
+
+    def test_rejects_directory_fingerprint_change_after_enumeration(
+        self,
+    ) -> None:
+        root = self._copy_payload("directory-fingerprint-race")
+        target = root / "resources"
+        target_details = target.stat()
+        target_identity = (target_details.st_dev, target_details.st_ino)
+        original_listdir = os.listdir
+        injected = False
+
+        def change_timestamp_after_list(directory_fd: int) -> list[str]:
+            nonlocal injected
+            members = original_listdir(directory_fd)
+            opened = os.fstat(directory_fd)
+            if (
+                not injected
+                and (opened.st_dev, opened.st_ino) == target_identity
+            ):
+                os.utime(
+                    target,
+                    ns=(
+                        target_details.st_atime_ns,
+                        target_details.st_mtime_ns + 1_000_000_000,
+                    ),
+                )
+                injected = True
+            return members
+
+        with (
+            patch.object(
+                payload_module.os,
+                "listdir",
+                side_effect=change_timestamp_after_list,
+            ),
+            self.assertRaises(CapabilityPackagePayloadError),
+        ):
+            open_portable_payload(root)
+
+        self.assertTrue(injected)
 
 
 if __name__ == "__main__":

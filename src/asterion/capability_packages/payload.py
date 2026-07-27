@@ -10,6 +10,7 @@ import stat
 import sys
 from collections import Counter
 from contextlib import ExitStack
+from dataclasses import dataclass
 from pathlib import Path
 
 from asterion.capabilities.catalog import CapabilityRef
@@ -57,6 +58,13 @@ _SECURE_PAYLOAD_READS_AVAILABLE = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class _PinnedDirectory:
+    fd: int
+    fingerprint: tuple[int, int, int, int]
+    members: tuple[str, ...]
+
+
 def open_portable_payload(root: Path) -> PortableCapabilityPayload:
     """Validate and open one exact portable payload closure."""
 
@@ -90,7 +98,9 @@ def _validated_payload(
 
     with ExitStack() as descriptors:
         root_fd = _open_root(Path(root), descriptors)
-        root_members = _list_direct_names(root_fd)
+        root_directory = _pin_directory(root_fd)
+        pinned_directories = [root_directory]
+        root_members = root_directory.members
         if (
             set(root_members) - _KNOWN_ROOT_MEMBERS
             or _DESCRIPTOR not in root_members
@@ -119,6 +129,7 @@ def _validated_payload(
             _CAPABILITIES,
             required=True,
             descriptors=descriptors,
+            pinned_directories=pinned_directories,
         )
         capability_refs: list[CapabilityRef] = []
         for relative_name, raw in capability_documents:
@@ -148,6 +159,7 @@ def _validated_payload(
             _BENCHMARK_SUITES,
             required=bool(manifest.benchmark_suites),
             descriptors=descriptors,
+            pinned_directories=pinned_directories,
         )
         suite_refs = []
         for relative_name, raw in suite_documents:
@@ -175,6 +187,7 @@ def _validated_payload(
             _RESOURCES,
             required=bool(manifest.resources),
             descriptors=descriptors,
+            pinned_directories=pinned_directories,
         )
         declared_resource_digests = Counter(
             resource.sha256 for resource in manifest.resources
@@ -201,6 +214,7 @@ def _validated_payload(
             _CONFORMANCE,
             required=True,
             descriptors=descriptors,
+            pinned_directories=pinned_directories,
         )
         if not conformance_documents:
             _invalid()
@@ -208,7 +222,10 @@ def _validated_payload(
             _canonical_json_value(raw)
             content_by_name[relative_name] = raw
 
-        return manifest, _digest_content_map(content_by_name)
+        payload_sha256 = _digest_content_map(content_by_name)
+        for directory in reversed(pinned_directories):
+            _verify_pinned_directory(directory)
+        return manifest, payload_sha256
 
 
 def _open_root(root: Path, descriptors: ExitStack) -> int:
@@ -268,6 +285,7 @@ def _read_json_directory(
     *,
     required: bool,
     descriptors: ExitStack,
+    pinned_directories: list[_PinnedDirectory],
 ) -> tuple[tuple[str, bytes], ...]:
     documents = _read_directory(
         root_fd,
@@ -275,6 +293,7 @@ def _read_json_directory(
         directory_name,
         required=required,
         descriptors=descriptors,
+        pinned_directories=pinned_directories,
     )
     if any(Path(relative_name).suffix != ".json" for relative_name, _ in documents):
         _invalid()
@@ -288,6 +307,7 @@ def _read_directory(
     *,
     required: bool,
     descriptors: ExitStack,
+    pinned_directories: list[_PinnedDirectory],
 ) -> tuple[tuple[str, bytes], ...]:
     present = directory_name in root_members
     if present != required:
@@ -307,13 +327,54 @@ def _read_directory(
         flags=flags,
         descriptors=descriptors,
     )
-    children = _list_direct_names(directory_fd)
+    directory = _pin_directory(directory_fd)
+    pinned_directories.append(directory)
     return tuple(
         (
             f"{directory_name}/{child}",
             _read_regular(directory_fd, child),
         )
-        for child in children
+        for child in directory.members
+    )
+
+
+def _pin_directory(directory_fd: int) -> _PinnedDirectory:
+    before = _directory_fingerprint(directory_fd)
+    members = _list_direct_names(directory_fd)
+    after = _directory_fingerprint(directory_fd)
+    if before != after:
+        _invalid()
+    return _PinnedDirectory(directory_fd, after, members)
+
+
+def _verify_pinned_directory(directory: _PinnedDirectory) -> None:
+    before = _directory_fingerprint(directory.fd)
+    members = _list_direct_names(directory.fd)
+    after = _directory_fingerprint(directory.fd)
+    if (
+        before != directory.fingerprint
+        or members != directory.members
+        or after != directory.fingerprint
+    ):
+        _invalid()
+
+
+def _directory_fingerprint(
+    directory_fd: int,
+) -> tuple[int, int, int, int]:
+    try:
+        details = os.fstat(directory_fd)
+    except OSError as error:
+        raise CapabilityPackagePayloadError(
+            "portable capability payload is invalid"
+        ) from error
+    if not stat.S_ISDIR(details.st_mode):
+        _invalid()
+    return (
+        details.st_dev,
+        details.st_ino,
+        details.st_mtime_ns,
+        details.st_ctime_ns,
     )
 
 
