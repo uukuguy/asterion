@@ -258,6 +258,38 @@ class LocalDirectoryCapabilityPackageSourceTests(unittest.TestCase):
                 )
                 self.assert_no_temporary_modules()
 
+    def test_relative_import_cannot_follow_symlink_outside_root(self) -> None:
+        outside = self.root.parent / "SENTINEL_PRIVATE_HELPER.py"
+        outside.write_text(
+            "VALUE = 'SENTINEL_OUTSIDE_VALUE'\n",
+            encoding="utf-8",
+        )
+        helper = self.root / "example/helper.py"
+        helper.symlink_to(outside)
+        provider = self.root / "example/provider.py"
+        provider.write_text(
+            provider.read_text(encoding="utf-8").replace(
+                "from __future__ import annotations\n",
+                "from __future__ import annotations\n\nfrom .helper import VALUE\n",
+                1,
+            ),
+            encoding="utf-8",
+        )
+        source = LocalDirectoryCapabilityPackageSource(_declaration(self.root))
+
+        try:
+            with self.assertRaises(LocalDirectoryCapabilitySourceError) as caught:
+                source.load_provider(source.discover_metadata()[0])
+        finally:
+            self.assert_no_temporary_modules()
+
+        self.assert_private_values_redacted(
+            caught.exception,
+            outside,
+            helper,
+            "SENTINEL_OUTSIDE_VALUE",
+        )
+
     def test_missing_factory_fails_closed_and_cleans_import_state(self) -> None:
         source = LocalDirectoryCapabilityPackageSource(
             _declaration(self.root, name="SENTINEL_MISSING_FACTORY")

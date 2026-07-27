@@ -242,7 +242,6 @@ class LocalDirectoryCapabilityPackageSource:
                     _install_scoped_packages(
                         prefix,
                         module_parts[:-1],
-                        root=self._root,
                     )
                     loader = _PinnedSourceLoader(
                         source=source,
@@ -466,16 +465,13 @@ def _regular_fingerprint(
 def _install_scoped_packages(
     prefix: str,
     package_parts: list[str],
-    *,
-    root: Path,
 ) -> None:
     parts = [prefix, *package_parts]
     for index in range(1, len(parts) + 1):
         name = ".".join(parts[:index])
         package = ModuleType(name)
         package.__package__ = name
-        package_path = root.joinpath(*package_parts[: index - 1])
-        package.__path__ = [str(package_path)]  # type: ignore[attr-defined]
+        package.__path__ = []  # type: ignore[attr-defined]
         package.__spec__ = importlib.machinery.ModuleSpec(
             name,
             loader=None,
