@@ -1,5 +1,12 @@
 """Portable capability-package protocol values."""
 
+from asterion.capability_packages.model import (
+    SOURCE_KINDS,
+    BenchmarkTaskBinding,
+    CapabilityPackageCandidate,
+    InstalledCapabilityPackage,
+    PortableCapabilityPayload,
+)
 from asterion.capability_packages.protocol import (
     BENCHMARK_SUITE_PROTOCOL_VERSION,
     CAPABILITY_LOCK_PROTOCOL_VERSION,
@@ -22,23 +29,30 @@ from asterion.capability_packages.protocol import (
     validate_capability_source_declaration,
     validate_capability_source_lock,
 )
+from asterion.capability_packages.sources import CapabilityPackageSource
 
 __all__ = (
     "BENCHMARK_SUITE_PROTOCOL_VERSION",
     "CAPABILITY_LOCK_PROTOCOL_VERSION",
     "CAPABILITY_PACKAGE_PROTOCOL_VERSION",
     "CAPABILITY_SOURCE_PROTOCOL_VERSION",
+    "SOURCE_KINDS",
     "BenchmarkSuiteManifest",
     "BenchmarkSuiteProtocolError",
     "BenchmarkSuiteRef",
+    "BenchmarkTaskBinding",
     "BenchmarkTaskManifest",
+    "CapabilityPackageCandidate",
     "CapabilityPackageManifest",
     "CapabilityPackageProtocolError",
     "CapabilityPackageRef",
+    "CapabilityPackageSource",
     "CapabilitySourceDeclaration",
     "CapabilitySourceLock",
     "CapabilitySourceLockEntry",
     "CapabilitySourceProtocolError",
+    "InstalledCapabilityPackage",
+    "PortableCapabilityPayload",
     "ResourceIdentity",
     "validate_benchmark_suite_manifest",
     "validate_capability_package_manifest",
