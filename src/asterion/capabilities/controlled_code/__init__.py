@@ -1,6 +1,6 @@
-"""Controlled-code executable capability implementations."""
+"""Controlled-code executable capability bindings."""
 
-from asterion.capabilities.controlled_code.implementation import (
+from asterion.capabilities.controlled_code.bindings import (
     controlled_code_bindings,
 )
 

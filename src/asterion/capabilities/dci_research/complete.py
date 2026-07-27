@@ -10,25 +10,26 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
-from asterion.capabilities.execution import (
-    CapabilityImplementationBinding,
-    InProcessArtifactPayload,
-    project_public_value,
-)
 from asterion.capabilities.dci_research.implementation import (
     DciLocalResearchImplementation,
+)
+from asterion.capabilities.dci_research.private_values import (
+    create_private_artifact,
+    private_artifact_value,
+    safe_public_projection,
+)
+from asterion.capabilities.dci_research.runtime_adapter import (
+    DciRuntimeAdapterError,
+    run_declared_runtime,
 )
 from asterion.capability_sdk import (
     CapabilityExecutionError,
     CapabilityExecutionResult,
     CapabilityInvocation,
-    CapabilityRef,
 )
 from asterion.dci.analysis import aggregate_results
 from asterion.dci.provenance import dci_complete_implementation_identity
 from asterion.dci.services import AnswerJudgeService, LocalCorpusService
-from asterion.runtime.host import RunRequest
-from asterion.runtime.protocol import ProtocolError, validate_event_stream
 
 
 INPUT_PROTOCOL = "asterion.dci.complete-input/v1"
@@ -133,36 +134,35 @@ class DciCompleteResearchImplementation:
                 isinstance(capability, str) for capability in required
             ):
                 raise TypeError
-            request = RunRequest(
-                run_id=invocation.run_id,
+            events = await run_declared_runtime(
+                invocation,
                 input_text=question,
                 requested_capabilities=required,
             )
-            events = [
-                event.to_mapping()
-                async for event in invocation.runtime.run(
-                    request, signal=invocation.signal
-                )
-            ]
-            validate_event_stream(events)
-        except (ProtocolError, RuntimeError, TypeError, ValueError):
+        except (DciRuntimeAdapterError, RuntimeError, TypeError, ValueError):
             raise CapabilityExecutionError(
                 "complete research execution failed"
             ) from None
-        answer_artifacts = [
-            event["payload"]["artifact"]
-            for event in events
-            if event.get("type") == "artifact.created"
-            and isinstance(event.get("payload"), Mapping)
-            and isinstance(event["payload"].get("artifact"), Mapping)
-            and event["payload"]["artifact"].get("kind") == "answer"
-        ]
+        answer_artifacts: list[Mapping[str, object]] = []
+        for event in events:
+            payload = event.get("payload")
+            if event.get("type") != "artifact.created" or not isinstance(
+                payload, Mapping
+            ):
+                continue
+            artifact = payload.get("artifact")
+            if isinstance(artifact, Mapping) and artifact.get("kind") == "answer":
+                answer_artifacts.append(cast(Mapping[str, object], artifact))
         if len(answer_artifacts) != 1:
             raise CapabilityExecutionError("complete research evidence is unavailable")
         answer_artifact = answer_artifacts[0]
         answer = answer_artifact.get("uri")
         answer_artifact_id = answer_artifact.get("artifact_id")
-        if answer != "final.txt" or not isinstance(answer_artifact_id, str):
+        if (
+            not isinstance(answer, str)
+            or answer != "final.txt"
+            or not isinstance(answer_artifact_id, str)
+        ):
             raise CapabilityExecutionError("complete research evidence is unavailable")
         completed_run_dir = getattr(invocation.runtime, "completed_run_dir", None)
         output_dir = (
@@ -189,7 +189,7 @@ class DciCompleteResearchImplementation:
             ) from None
         if not predicted_answer:
             raise CapabilityExecutionError("complete research evidence is unavailable")
-        stage_data = InProcessArtifactPayload(
+        stage_data = create_private_artifact(
             private_value={
                 "question": question,
                 "gold_answer": gold,
@@ -259,7 +259,7 @@ class DciCompleteEvaluationImplementation:
         private = _research_private_value(research)
         judge = _require_answer_judge(invocation)
         try:
-            identity = project_public_value(judge.public_identity)
+            identity = safe_public_projection(judge.public_identity)
             identity_sha256 = hashlib.sha256(
                 json.dumps(
                     identity,
@@ -299,10 +299,7 @@ def _research_private_value(
     research: Mapping[str, object],
 ) -> Mapping[str, object]:
     try:
-        stage_data = research["stage_data"]
-        if not isinstance(stage_data, InProcessArtifactPayload):
-            raise TypeError
-        private = stage_data.private_value
+        private = private_artifact_value(research["stage_data"])
         if set(private) != {
             "question",
             "gold_answer",
@@ -389,31 +386,6 @@ class DciCompleteExportImplementation:
             media_type="application/vnd.dci.export+json",
             value={"analysis_sha256": digest, "total": counts["total"]},
         )
-
-
-def complete_dci_bindings() -> tuple[CapabilityImplementationBinding, ...]:
-    return (
-        CapabilityImplementationBinding(
-            CapabilityRef("dci.research", "1.0.0"),
-            DciResearchImplementation(),
-        ),
-        CapabilityImplementationBinding(
-            CapabilityRef("dci.evaluation", "1.0.0"),
-            DciCompleteEvaluationImplementation(),
-        ),
-        CapabilityImplementationBinding(
-            CapabilityRef("dci.benchmark", "1.0.0"),
-            DciCompleteBenchmarkImplementation(),
-        ),
-        CapabilityImplementationBinding(
-            CapabilityRef("dci.analysis", "1.0.0"),
-            DciCompleteAnalysisImplementation(),
-        ),
-        CapabilityImplementationBinding(
-            CapabilityRef("dci.export", "1.0.0"),
-            DciCompleteExportImplementation(),
-        ),
-    )
 
 
 def _text_sha256(value: str) -> str:

@@ -3,29 +3,26 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import cast
 
-from asterion.capabilities.execution import CapabilityImplementationBinding
+from asterion.capabilities.controlled_code.executor_adapter import (
+    execute_controlled,
+)
 from asterion.capability_sdk import (
     CapabilityExecutionError,
     CapabilityExecutionResult,
     CapabilityInvocation,
-    CapabilityRef,
 )
-from asterion.services.controlled_executor import ControlledExecutionRequest
 
 
 REPORT_MEDIA_TYPE = "application/vnd.dci.code-quality+json"
 
 
 class CodeQualityWorkflowImplementation:
-    async def execute(self, invocation: CapabilityInvocation) -> CapabilityExecutionResult:
-        service = invocation.host_services.get("executor.controlled")
-        execute = getattr(service, "execute", None)
-        if not callable(execute):
-            raise CapabilityExecutionError("controlled executor service is invalid")
-        result = await execute(
-            ControlledExecutionRequest(invocation.input_text), signal=invocation.signal
-        )
+    async def execute(
+        self, invocation: CapabilityInvocation
+    ) -> CapabilityExecutionResult:
+        result = await execute_controlled(invocation)
         report = {
             "status": result.status,
             "exit_code": result.exit_code,
@@ -54,7 +51,9 @@ class CodeQualityWorkflowImplementation:
 
 
 class CodeQualityEvaluationImplementation:
-    async def execute(self, invocation: CapabilityInvocation) -> CapabilityExecutionResult:
+    async def execute(
+        self, invocation: CapabilityInvocation
+    ) -> CapabilityExecutionResult:
         report = _report(invocation)
         passed = report.get("status") == "succeeded" and report.get("exit_code") == 0
         return CapabilityExecutionResult(
@@ -70,7 +69,9 @@ class CodeQualityEvaluationImplementation:
 
 
 class ExecutionAuditImplementation:
-    async def execute(self, invocation: CapabilityInvocation) -> CapabilityExecutionResult:
+    async def execute(
+        self, invocation: CapabilityInvocation
+    ) -> CapabilityExecutionResult:
         report = _report(invocation)
         return CapabilityExecutionResult(
             events=(
@@ -101,34 +102,14 @@ class ExecutionAuditImplementation:
         )
 
 
-def controlled_code_bindings():
-    """Return exact executable bindings for the controlled-code graph."""
-
-    return (
-        CapabilityImplementationBinding(
-            capability_ref=CapabilityRef("workflow.code-quality", "1.0.0"),
-            implementation=CodeQualityWorkflowImplementation(),
-        ),
-        CapabilityImplementationBinding(
-            capability_ref=CapabilityRef("evaluation.code-quality", "1.0.0"),
-            implementation=CodeQualityEvaluationImplementation(),
-        ),
-        CapabilityImplementationBinding(
-            capability_ref=CapabilityRef(
-                "observability.execution-audit", "1.0.0"
-            ),
-            implementation=ExecutionAuditImplementation(),
-        ),
-    )
-
-
 def _report(invocation: CapabilityInvocation) -> Mapping[str, object]:
-    matches = tuple(
-        artifact["value"]
-        for artifact in invocation.upstream_artifacts
-        if artifact.get("media_type") == REPORT_MEDIA_TYPE
-        and isinstance(artifact.get("value"), Mapping)
-    )
+    matches: list[Mapping[str, object]] = []
+    for artifact in invocation.upstream_artifacts:
+        value = artifact.get("value")
+        if artifact.get("media_type") == REPORT_MEDIA_TYPE and isinstance(
+            value, Mapping
+        ):
+            matches.append(cast(Mapping[str, object], value))
     if len(matches) != 1:
         raise CapabilityExecutionError("controlled-code report is unavailable")
     return matches[0]

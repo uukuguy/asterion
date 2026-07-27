@@ -48,6 +48,13 @@ PRIVATE_VALUE_MODULES = {
     "asterion.capability_packages.protocol",
     "asterion.runtime.host",
 }
+PACKAGE_OWNED_PREFIXES = {
+    "controlled_code": ("asterion.capabilities.controlled_code",),
+    "dci_research": (
+        "asterion.capabilities.dci_research",
+        "asterion.dci",
+    ),
+}
 
 
 class CapabilitySdkTests(unittest.TestCase):
@@ -120,12 +127,44 @@ class CapabilitySdkTests(unittest.TestCase):
                     and node.module in PRIVATE_VALUE_MODULES
                 ):
                     private_public_names.extend(
-                        alias.name
-                        for alias in node.names
-                        if alias.name in PUBLIC_NAMES
+                        alias.name for alias in node.names if alias.name in PUBLIC_NAMES
                     )
             with self.subTest(path=path.relative_to(PROJECT)):
                 self.assertEqual(private_public_names, [])
+
+    def test_builtin_implementations_import_only_sdk_and_package_owned_code(
+        self,
+    ) -> None:
+        implementation_files = tuple(
+            path
+            for path in sorted(CAPABILITIES.rglob("*.py"))
+            if path.name in {"complete.py", "implementation.py"}
+        )
+        for path in implementation_files:
+            package = path.parent.name
+            allowed = (
+                "asterion.capability_sdk",
+                *PACKAGE_OWNED_PREFIXES[package],
+            )
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            violations = []
+            for node in ast.walk(tree):
+                modules = ()
+                if isinstance(node, ast.Import):
+                    modules = tuple(alias.name for alias in node.names)
+                elif isinstance(node, ast.ImportFrom) and node.module is not None:
+                    modules = (node.module,)
+                violations.extend(
+                    module
+                    for module in modules
+                    if module.startswith("asterion.")
+                    and not any(
+                        module == prefix or module.startswith(prefix + ".")
+                        for prefix in allowed
+                    )
+                )
+            with self.subTest(path=path.relative_to(PROJECT)):
+                self.assertEqual(violations, [])
 
 
 if __name__ == "__main__":

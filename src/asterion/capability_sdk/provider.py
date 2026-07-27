@@ -20,4 +20,3 @@ class CapabilityPackageProvider(_Protocol):
 
 class HostServices(_Mapping[str, object]):
     """Read-only package view of operator-injected host services."""
-

@@ -6,13 +6,15 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from asterion.dci.services import LocalCorpusService
+from asterion.capabilities.dci_research.runtime_adapter import (
+    DciRuntimeAdapterError,
+    run_declared_runtime,
+)
 from asterion.capability_sdk import (
     CapabilityExecutionError,
     CapabilityExecutionResult,
     CapabilityInvocation,
 )
-from asterion.runtime.host import RunRequest
-from asterion.runtime.protocol import ProtocolError, validate_event_stream
 
 
 class DciLocalResearchImplementation:
@@ -27,22 +29,17 @@ class DciLocalResearchImplementation:
             isinstance(capability, str) for capability in required
         ):
             raise CapabilityExecutionError("research capability declaration is invalid")
-        request = RunRequest(
-            run_id=invocation.run_id,
-            input_text=invocation.input_text,
-            requested_capabilities=required,
-        )
         try:
-            events = [
-                event.to_mapping()
-                async for event in invocation.runtime.run(
-                    request, signal=invocation.signal
-                )
-            ]
-            validate_event_stream(events)
+            events = await run_declared_runtime(
+                invocation,
+                input_text=invocation.input_text,
+                requested_capabilities=required,
+            )
             answer_uri = _answer_artifact_uri(events)
-        except (ProtocolError, TypeError, ValueError, RuntimeError):
-            raise CapabilityExecutionError("research runtime execution failed") from None
+        except (DciRuntimeAdapterError, TypeError, ValueError, RuntimeError):
+            raise CapabilityExecutionError(
+                "research runtime execution failed"
+            ) from None
         return CapabilityExecutionResult(
             events=(
                 {"type": "research.completed", "payload": {"status": "completed"}},

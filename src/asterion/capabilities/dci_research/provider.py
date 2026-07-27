@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from asterion.capabilities.dci_research.complete import complete_dci_bindings
+from asterion.capabilities.dci_research.bindings import complete_dci_bindings
 from asterion.capability_packages.model import InstalledCapabilityPackage
 from asterion.capability_packages.payload import open_portable_payload
 from asterion.capability_packages.protocol import CapabilityPackageRef
