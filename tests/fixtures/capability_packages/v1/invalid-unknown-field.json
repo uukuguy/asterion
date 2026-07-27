@@ -1,0 +1,11 @@
+{
+  "protocol": "asterion.capability-package/v1",
+  "package_id": "example.package",
+  "version": "1.0.0",
+  "capabilities": [
+    {"capability_id": "example.research", "version": "1.0.0"}
+  ],
+  "benchmark_suites": [],
+  "resources": [],
+  "unknown": true
+}
