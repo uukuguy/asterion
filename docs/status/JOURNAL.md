@@ -171,3 +171,4 @@
 ## 2026-07-27
 
 - 08:08 Designed source-neutral Asterion capability packages so built-in and third-party forms share one protocol [e667e31]
+- 08:09 Checkpointed capability-package design review so implementation remains gated on written-spec approval [b13acfa]
