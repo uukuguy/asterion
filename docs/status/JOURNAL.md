@@ -180,3 +180,4 @@
 - 09:34 Hardened capability snapshots and cross-language ordering so protocol validation remains immutable and exact [f123571]
 - 09:45 Defined portable capability-package descriptors and immutable validation to establish source-neutral package identity [53ea017]
 - 10:05 Established application assembly protocol with exact package/capability refs to separate package closure from composition [4b5f6f3]
+- 10:23 Added declarative suite and operator source/lock protocols to separate portable metadata from private authority [d8f4944]
