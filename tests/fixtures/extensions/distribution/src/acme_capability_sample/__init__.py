@@ -1,0 +1,1 @@
+"""Fixture capability-package distribution."""
