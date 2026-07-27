@@ -178,11 +178,14 @@ def _record(
     entry_point: object,
 ) -> _DistributionRecord | None:
     package_ref = _package_ref(getattr(entry_point, "name", None))
+    if package_ref is None:
+        raise DistributionCapabilitySourceError(
+            "installed capability distribution entry point is invalid"
+        )
     distribution_name = getattr(distribution, "name", None)
     distribution_version = getattr(distribution, "version", None)
     if (
-        package_ref is None
-        or not isinstance(distribution_name, str)
+        not isinstance(distribution_name, str)
         or not distribution_name
         or not isinstance(distribution_version, str)
         or not distribution_version

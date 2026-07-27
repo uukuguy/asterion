@@ -5,12 +5,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from importlib import import_module
 from importlib import metadata
 from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
 import asterion.capability_packages.sources.distribution as distribution_module
+from asterion.capability_packages.model import CapabilityPackageCandidate
 from asterion.capability_packages.protocol import CapabilityPackageRef
 from asterion.capability_packages.sources.distribution import (
     DistributionCapabilityPackageSource,
@@ -45,6 +47,34 @@ class _DuplicateDistribution:
             _DuplicateEntryPoint("acme.sample@1.0.0"),
             _DuplicateEntryPoint("acme.sample@1.0.0"),
         )
+
+    def locate_file(self, path):
+        return self._installed.locate_file(path)
+
+
+class _MalformedEntryPoint:
+    group = "asterion.capability_packages"
+
+    def __init__(self) -> None:
+        self.name = "acme.sample"
+        self.loads = 0
+
+    def load(self):
+        self.loads += 1
+        return import_module(PROVIDER_MODULE).create_package
+
+
+class _MalformedDistribution:
+    def __init__(
+        self,
+        installed: metadata.Distribution,
+        entry_point: _MalformedEntryPoint,
+    ) -> None:
+        self.name = installed.name
+        self.version = installed.version
+        self.files = installed.files
+        self.entry_points = (entry_point,)
+        self._installed = installed
 
     def locate_file(self, path):
         return self._installed.locate_file(path)
@@ -234,6 +264,50 @@ class DistributionCapabilityPackageSourceTests(unittest.TestCase):
             source.load_provider(candidate)
 
         self.assertEqual(tuple(entry.loads for entry in duplicate.entry_points), (0, 0))
+
+    def test_malformed_entry_point_name_fails_before_any_provider_import(
+        self,
+    ) -> None:
+        entry_point = _MalformedEntryPoint()
+        source = DistributionCapabilityPackageSource(
+            (
+                cast(
+                    metadata.Distribution,
+                    _MalformedDistribution(self._distribution, entry_point),
+                ),
+            )
+        )
+        candidate = CapabilityPackageCandidate(
+            package_ref=PACKAGE_REF,
+            source_id=(
+                "python-distribution:acme-capability-sample@1.0.0:acme.sample@1.0.0"
+            ),
+            source_kind="python-distribution",
+            payload_sha256=None,
+            metadata={
+                "distribution_name": "acme-capability-sample",
+                "distribution_version": "1.0.0",
+            },
+        )
+
+        with patch.dict(
+            os.environ,
+            {"ASTERION_TEST_FORBID_PROVIDER_IMPORT": "1"},
+            clear=False,
+        ):
+            for operation in (
+                source.discover_metadata,
+                lambda: source.open_payload(candidate),
+                lambda: source.load_provider(candidate),
+            ):
+                with (
+                    self.subTest(operation=operation),
+                    self.assertRaises(DistributionCapabilitySourceError),
+                ):
+                    operation()
+
+        self.assertEqual(entry_point.loads, 0)
+        self.assertNotIn(PROVIDER_MODULE, sys.modules)
 
 
 class _target_on_path:
