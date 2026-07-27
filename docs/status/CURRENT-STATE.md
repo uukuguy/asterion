@@ -4,12 +4,12 @@
 
 - Project: Asterion
 - Current branch: `main`
-- Theme-level focus: verified framework/DCI readiness with fail-closed bounded reproduction
+- Theme-level focus: approved source-neutral capability-package architecture
 - Project route: direct
 - Canonical worklist: approved implementation plans under
   `docs/superpowers/plans/`
-- Active work package: none; optional Task 11 external-limited execution remains
-  gated on fresh exact operator authorization
+- Active work package: implementation not started; execution mode selection is
+  the next boundary
 
 ## Current Architecture
 
@@ -22,6 +22,11 @@
 - TypeScript validates shared contracts and Node integration; Rust owns
   controlled process execution.
 - DCI remains a bundled product above domain-neutral framework modules.
+- The approved target hard-renames generic `dci.*` protocols to Asterion-owned
+  contracts, treats built-in as one source form, and moves generic benchmark
+  orchestration into Asterion.
+- The approved migration proves DCI as an installed extension before exposing
+  the identical portable payload through the built-in adapter.
 - Installed provider resources stay package-rooted; explicit DCI operator
   configuration is rooted at the selected environment file for preflight and
   basic execution.
@@ -41,6 +46,9 @@
 
 ## Open Problems (theme-level)
 
+- Plans 1-4 are approved but unimplemented; current source still contains the
+  old generic protocol names, top-level `asterion.dci`, and root benchmark
+  launchers.
 - Provider-backed bounded reproduction still requires fresh exact finite
   authorization, an operator-selected private output root, and any
   scope-specific external datasets.
@@ -68,8 +76,12 @@
 ### Architecture and design
 
 - `docs/architecture/dci-capability-audit.md` — DCI capability mapping
-- `docs/superpowers/specs/2026-07-26-dci-bounded-reproduction-selection-design.md`
-- `docs/superpowers/plans/2026-07-26-dci-bounded-reproduction-selection.md`
+- `docs/superpowers/specs/2026-07-27-asterion-capability-package-protocol-design.md`
+- `docs/superpowers/plans/2026-07-27-asterion-capability-package-rollout.md`
+- `docs/superpowers/plans/2026-07-27-asterion-capability-protocol-foundation.md`
+- `docs/superpowers/plans/2026-07-27-asterion-capability-package-sources.md`
+- `docs/superpowers/plans/2026-07-27-asterion-generic-benchmark-subsystem.md`
+- `docs/superpowers/plans/2026-07-27-dci-capability-package-migration.md`
 
 ### Implementation entry points
 
@@ -90,7 +102,9 @@
 2. Read `RESUME-NEXT-SESSION.md` for the next concrete action.
 3. Read `MEMORY.md` for collaboration rules and corrected feedback.
 4. Run `git status --short` and `git log --oneline -5`.
-5. Treat external execution as unauthorized unless the operator supplies a new
+5. Select an execution mode, then start Plan 1 Task 1; do not skip directly to
+   DCI migration.
+6. Treat external execution as unauthorized unless the operator supplies a new
    exact scope, limit, private output root, and five finite positive caps.
-6. Keep any bounded result `External-limited`; never promote it to full-paper
+7. Keep any bounded result `External-limited`; never promote it to full-paper
    or published-score reproduction.
