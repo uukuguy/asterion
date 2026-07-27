@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import unittest
 from collections.abc import Iterable
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 from unittest.mock import Mock
@@ -177,7 +178,11 @@ class BenchmarkResolutionTests(unittest.TestCase):
         return InstalledCapabilityPackage(
             package_ref=package_ref,
             payload_sha256="a" * 64,
-            source_id=f"{package_ref.package_id}.source",
+            source_id=(
+                "example.source"
+                if package_ref == _OWNER
+                else f"{package_ref.package_id}.source"
+            ),
             source_kind="builtin",
             catalog_roots=(
                 self.owner_catalog if catalog_root is None else catalog_root,
@@ -426,6 +431,43 @@ class BenchmarkResolutionTests(unittest.TestCase):
 
         with self.assertRaises(BenchmarkResolutionError):
             resolve_benchmark_execution(plan, (package,))
+
+        self.activations.assert_not_called()
+
+    def test_execution_rejects_installed_identity_not_matching_plan_lock_before_binding_attachment(
+        self,
+    ) -> None:
+        plan = self._plan()
+        package = self._package(
+            (
+                self._binding("example.binding-a"),
+                self._binding("example.binding-b"),
+            )
+        )
+        cases = {
+            "payload digest mismatch": replace(
+                package,
+                payload_sha256="b" * 64,
+            ),
+            "source identity mismatch": replace(
+                package,
+                source_id="example.changed-source",
+            ),
+        }
+
+        for name, changed in cases.items():
+            with (
+                self.subTest(name=name),
+                patch(
+                    "asterion.benchmarks.resolution.ResolvedBenchmarkTask",
+                    side_effect=AssertionError(
+                        "binding attached before package identity rejection"
+                    ),
+                ) as binding_spy,
+                self.assertRaises(BenchmarkResolutionError),
+            ):
+                resolve_benchmark_execution(plan, (changed,))
+            binding_spy.assert_not_called()
 
         self.activations.assert_not_called()
 

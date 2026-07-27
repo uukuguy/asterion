@@ -161,10 +161,20 @@ def _resolve_benchmark_execution(
     values = _sequence_snapshot(packages)
     package_by_ref: dict[CapabilityPackageRef, InstalledCapabilityPackage] = {}
     root_owners: dict[Path, CapabilityPackageRef] = {}
+    locked_identity_by_ref: dict[CapabilityPackageRef, tuple[str, str]] = {}
     binding_by_key: dict[
         tuple[CapabilityPackageRef, str],
         BenchmarkTaskBinding,
     ] = {}
+
+    for lock in plan.package_locks:
+        for entry in lock.entries:
+            if entry.package_ref in locked_identity_by_ref:
+                _fail_execution()
+            locked_identity_by_ref[entry.package_ref] = (
+                entry.payload_sha256,
+                entry.source_id,
+            )
 
     for package in values:
         if (
@@ -185,6 +195,17 @@ def _resolve_benchmark_execution(
                 _fail_execution()
             root_owners[root] = package.package_ref
 
+    owner_ref = plan.suite.owner_package
+    owner = package_by_ref.get(owner_ref)
+    owner_lock = locked_identity_by_ref.get(owner_ref)
+    if (
+        owner is None
+        or owner_lock is None
+        or (owner.payload_sha256, owner.source_id) != owner_lock
+    ):
+        _fail_execution()
+
+    for package in values:
         for binding in package.benchmark_bindings:
             if (
                 not isinstance(binding, BenchmarkTaskBinding)
@@ -198,10 +219,6 @@ def _resolve_benchmark_execution(
                 _fail_execution()
             binding_by_key[key] = binding
 
-    owner_ref = plan.suite.owner_package
-    owner = package_by_ref.get(owner_ref)
-    if owner is None:
-        _fail_execution()
     owner_roots = frozenset(owner.catalog_roots)
     if any(
         not isinstance(planned.capability.source, Path)
