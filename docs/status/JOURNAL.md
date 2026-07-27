@@ -183,3 +183,4 @@
 - 10:23 Added declarative suite and operator source/lock protocols to separate portable metadata from private authority [d8f4944]
 - 10:37 Enforced repository-wide Asterion protocol ownership and installed-wheel resource coherence [087e151]
 - 12:22 Defined source-neutral capability package values and metadata-first source protocol to separate discovery from provider loading [a91d39f]
+- 12:39 Validated descriptor-relative portable payload closure and stable content identity to bind source-neutral packages [b96f5ea]
