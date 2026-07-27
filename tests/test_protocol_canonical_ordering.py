@@ -5,9 +5,9 @@ import unittest
 from pathlib import Path
 
 from asterion.assembly.protocol import AssemblyError, validate_assembly_manifest
-from asterion.packages.protocol import (
-    PackageProtocolError,
-    validate_package_manifest,
+from asterion.capabilities.protocol import (
+    CapabilityProtocolError,
+    validate_capability_manifest,
 )
 
 
@@ -21,19 +21,19 @@ def fixture(protocol: str, name: str) -> dict[str, object]:
 
 
 class ProtocolCanonicalOrderingTests(unittest.TestCase):
-    def test_accepts_shared_valid_package_ordering_fixture(self) -> None:
-        validate_package_manifest(
-            fixture("packages", "valid-unicode-scalar-order.json")
+    def test_accepts_shared_valid_capability_ordering_fixture(self) -> None:
+        validate_capability_manifest(
+            fixture("capabilities", "valid-unicode-scalar-order.json")
         )
 
-    def test_rejects_shared_invalid_package_ordering_fixtures(self) -> None:
+    def test_rejects_shared_invalid_capability_ordering_fixtures(self) -> None:
         for name in (
             "invalid-unicode-scalar-order.json",
             "invalid-surrogate-edge.json",
             "invalid-line-terminator-surrogate-edge.json",
         ):
-            with self.subTest(name=name), self.assertRaises(PackageProtocolError):
-                validate_package_manifest(fixture("packages", name))
+            with self.subTest(name=name), self.assertRaises(CapabilityProtocolError):
+                validate_capability_manifest(fixture("capabilities", name))
 
     def test_accepts_shared_valid_assembly_ordering_fixture(self) -> None:
         validate_assembly_manifest(fixture("assembly", "valid-canonical-order.json"))

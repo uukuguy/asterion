@@ -18,7 +18,7 @@ from asterion.dci.services import (
     create_answer_judge_service_factory,
     create_local_corpus_service_factory,
 )
-from asterion.packages.execution import project_public_value
+from asterion.capabilities.execution import project_public_value
 from asterion.services.registry import (
     HostServiceFactoryContext,
     HostServiceRegistryError,

@@ -797,13 +797,15 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
         with self.subTest(layer="executable"):
             installed = create_dci_provider()
             application = installed.applications[0]
-            ref, _implementation = application.implementations[0]
+            binding = application.implementations[0]
             damaged = replace(
                 installed,
                 applications=(
                     replace(
                         application,
-                        implementations=((ref, object()),),
+                        implementations=(
+                            replace(binding, implementation=object()),
+                        ),
                     ),
                     installed.applications[1],
                 ),

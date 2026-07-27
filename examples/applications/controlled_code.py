@@ -6,7 +6,7 @@ import json
 
 from asterion.applications.controlled_code import create_provider
 from asterion.assembly.protocol import resolve_assembly
-from asterion.packages.catalog import discover_packages
+from asterion.capabilities.catalog import discover_capabilities
 from asterion.runner.composed import run_composed_application
 from asterion.runtime.host import AgentRuntimeClient, CancellationSignal
 from asterion.services.controlled_executor import ControlledExecutorService
@@ -27,7 +27,7 @@ async def run_controlled_code_application(
     assembly = json.loads(application.assembly_paths[0].read_text())
     plan = resolve_assembly(
         assembly,
-        catalog=discover_packages(application.catalog_roots),
+        catalog=discover_capabilities(application.catalog_roots),
         runtime_manifest=runtime.manifest.to_mapping(),
     )
     return await run_composed_application(

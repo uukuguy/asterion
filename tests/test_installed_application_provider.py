@@ -16,15 +16,19 @@ from asterion.applications.provider import (
     validate_installed_provider,
 )
 from asterion.applications.product import InstalledCapabilityProduct
-from asterion.packages.catalog import PackageRef, discover_packages
-from asterion.packages.execution import PackageExecutionResult, PackageInvocation
+from asterion.capabilities.catalog import CapabilityRef, discover_capabilities
+from asterion.capabilities.execution import (
+    CapabilityExecutionResult,
+    CapabilityImplementationBinding,
+    CapabilityInvocation,
+)
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
 
 
 class FixtureImplementation:
-    async def execute(self, invocation: PackageInvocation) -> PackageExecutionResult:
+    async def execute(self, invocation: CapabilityInvocation) -> CapabilityExecutionResult:
         del invocation
-        return PackageExecutionResult(events=(), artifacts=())
+        return CapabilityExecutionResult(events=(), artifacts=())
 
 
 class NonCallableImplementation:
@@ -80,8 +84,8 @@ def provider(root: Path) -> InstalledApplicationProvider:
     (catalog / "research.json").write_text(
         json.dumps(
             {
-                "protocol": "dci.package/v1",
-                "package_id": "example.research",
+                "protocol": "asterion.capability/v1",
+                "capability_id": "example.research",
                 "version": "1.0.0",
                 "kind": "capability",
                 "provides_capabilities": [],
@@ -105,9 +109,11 @@ def provider(root: Path) -> InstalledApplicationProvider:
                 assembly_paths=(write_assembly(root),),
                 catalog_roots=(catalog,),
                 implementations=(
-                    (
-                        PackageRef("example.research", "1.0.0"),
-                        FixtureImplementation(),
+                    CapabilityImplementationBinding(
+                        capability_ref=CapabilityRef(
+                            "example.research", "1.0.0"
+                        ),
+                        implementation=FixtureImplementation(),
                     ),
                 ),
                 runtime_ids=("pi.reference",),
@@ -186,8 +192,8 @@ class InstalledApplicationProviderTests(unittest.TestCase):
             (uncomposable_catalog / "research.json").write_text(
                 json.dumps(
                     {
-                        "protocol": "dci.package/v1",
-                        "package_id": "example.research",
+                        "protocol": "asterion.capability/v1",
+                        "capability_id": "example.research",
                         "version": "1.0.0",
                         "kind": "capability",
                         "provides_capabilities": [],
@@ -260,9 +266,11 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                         catalog_roots=(catalog,),
                         implementations=(
                             *application.implementations,
-                            (
-                                PackageRef("example.unknown", "1.0.0"),
-                                FixtureImplementation(),
+                            CapabilityImplementationBinding(
+                                capability_ref=CapabilityRef(
+                                    "example.unknown", "1.0.0"
+                                ),
+                                implementation=FixtureImplementation(),
                             ),
                         ),
                         runtime_ids=application.runtime_ids,
@@ -275,9 +283,11 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                         assembly_paths=application.assembly_paths,
                         catalog_roots=(catalog,),
                         implementations=(
-                            (
-                                PackageRef("example.research", "1.0.0"),
-                                NonCallableImplementation(),
+                            CapabilityImplementationBinding(
+                                capability_ref=CapabilityRef(
+                                    "example.research", "1.0.0"
+                                ),
+                                implementation=NonCallableImplementation(),
                             ),
                         ),
                         runtime_ids=application.runtime_ids,
@@ -317,7 +327,7 @@ class InstalledApplicationProviderTests(unittest.TestCase):
             assembly_path = metadata.applications[0].assembly_paths[0]
 
             def mutate_during_discovery(roots):
-                catalog = discover_packages(roots)
+                catalog = discover_capabilities(roots)
                 assembly = json.loads(assembly_path.read_text())
                 assembly["application_id"] = sentinel
                 assembly_path.write_text(json.dumps(assembly))
@@ -325,7 +335,7 @@ class InstalledApplicationProviderTests(unittest.TestCase):
 
             with (
                 patch(
-                    "asterion.applications.provider.discover_packages",
+                    "asterion.applications.provider.discover_capabilities",
                     side_effect=mutate_during_discovery,
                 ),
                 self.assertRaises(ApplicationProviderError) as raised,
@@ -394,8 +404,8 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                 provider(Path(temp_dir)), selected_id="example-app"
             )
             with patch(
-                "asterion.applications.provider.discover_packages",
-                wraps=discover_packages,
+                "asterion.applications.provider.discover_capabilities",
+                wraps=discover_capabilities,
             ) as discovery:
                 value = resolve_installed_provider(
                     metadata,

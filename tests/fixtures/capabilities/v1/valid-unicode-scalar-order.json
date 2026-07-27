@@ -1,9 +1,9 @@
 {
-  "protocol": "dci.package/v1",
-  "package_id": "example.unicode-order",
+  "protocol": "asterion.capability/v1",
+  "capability_id": "example.unicode-order",
   "version": "1.0.0",
   "kind": "capability",
-  "provides_capabilities": ["\uD800\uDC00", "\uE000"],
+  "provides_capabilities": ["\uE000", "\uD800\uDC00"],
   "requires_capabilities": [],
   "requires_policies": [],
   "emits_events": [],

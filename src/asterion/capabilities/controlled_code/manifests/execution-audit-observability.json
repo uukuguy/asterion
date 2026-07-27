@@ -1,6 +1,6 @@
 {
-  "protocol": "dci.package/v1",
-  "package_id": "observability.execution-audit",
+  "protocol": "asterion.capability/v1",
+  "capability_id": "observability.execution-audit",
   "version": "1.0.0",
   "kind": "observability",
   "provides_capabilities": [],

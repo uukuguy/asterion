@@ -2,7 +2,7 @@
 
 ## Static composition, not execution
 
-`dci.package/v1` describes portable package dependencies and outputs. The Python
+`asterion.capability/v1` describes portable package dependencies and outputs. The Python
 reference composer validates a set of manifests, resolves their dependency DAG,
 and returns a deterministic summary. It does not execute a workflow, select a
 runtime, invoke tools, schedule work, or persist state.
@@ -22,16 +22,16 @@ are likewise sorted, unique, exact selections.
 Canonical string order is lexicographic Unicode scalar-value order: compare the
 first differing scalar value numerically, and place a shorter prefix before the
 longer string. A string containing a surrogate code point is invalid. Assembly
-package references are compared field-wise by `package_id` and then `version`
+package references are compared field-wise by `capability_id` and then `version`
 using that order; validators never compare an interpolated
-`package_id@version` string. Canonical ordering is part of the v1 contract, not
+`capability_id@version` string. Canonical ordering is part of the v1 contract, not
 a convenience that a resolver may normalize after acceptance. For example, a
 research capability can declare:
 
 ```json
 {
-  "protocol": "dci.package/v1",
-  "package_id": "dci.research",
+  "protocol": "asterion.capability/v1",
+  "capability_id": "dci.research",
   "version": "1.0.0",
   "kind": "capability",
   "provides_capabilities": ["research.local-corpus"],
@@ -45,8 +45,8 @@ research capability can declare:
 ```
 
 The canonical definition is
-`schemas/packages/v1/package-manifest.schema.json`; shared positive and negative
-fixtures live in `tests/fixtures/packages/v1/` and
+`schemas/capabilities/v1/capability-manifest.schema.json`; shared positive and negative
+fixtures live in `tests/fixtures/capabilities/v1/` and
 `tests/fixtures/assembly/v1/`. They include prefix package IDs, BMP/non-BMP
 scalar ordering, and lone-surrogate rejection. The reference manifests under
 `src/asterion/capabilities/dci_research/manifests/` form the policy → research
@@ -66,15 +66,15 @@ Load manifests as JSON mappings and pass only portable host edges to the pure
 resolver:
 
 ```python
-from asterion.packages.composition import compose_packages
+from asterion.capabilities.composition import compose_capabilities
 
-composition = compose_packages(
+composition = compose_capabilities(
     manifests,
     host_capabilities={"filesystem.read", "shell"},
     host_events={"artifact.created", "run.completed", "run.started", "tool.result"},
     host_artifacts={"text/plain"},
 )
-print(composition.package_ids)
+print(composition.capability_ids)
 ```
 
 The resolver rejects duplicate IDs, missing capability/policy/event/artifact
@@ -83,7 +83,7 @@ capability, policy, event, and artifact edge: two packages providing the same
 edge, or a package provider overlapping the corresponding host edge, is
 ambiguous and fails closed. Runtime capabilities are composed as host
 capabilities, so runtime/package overlap fails closed too. Input order does not
-change the resulting `composition.package_ids` or normalized edge summary.
+change the resulting `composition.capability_ids` or normalized edge summary.
 
 Catalog discovery takes a deep immutable snapshot of each direct JSON-child
 manifest under its explicit local root. A later `select()` returns a fresh,
@@ -116,8 +116,8 @@ Run these checks from the standalone repository root:
 
 ```bash
 uv run python -m unittest -v \
-  tests.test_package_composition \
-  tests.test_package_catalog \
-  tests.test_package_execution
+  tests.test_capability_composition \
+  tests.test_capability_catalog \
+  tests.test_capability_execution
 npm --prefix packages/typescript/asterion-runtime test
 ```

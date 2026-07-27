@@ -7,8 +7,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
-from asterion.packages.catalog import PackageRef
-from asterion.packages.execution import PackageExecutionError, PackageInvocation
+from asterion.capabilities.catalog import CapabilityRef
+from asterion.capabilities.execution import CapabilityExecutionError, CapabilityInvocation
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 from asterion.runtime.working_directory import ProcessWorkingDirectory
 from asterion.capabilities.dci_research import DciLocalResearchImplementation
@@ -88,8 +88,8 @@ def invocation(
     signal: object | None = None,
     host_services: dict[str, object] | None = None,
 ):
-    return PackageInvocation(
-        package_ref=PackageRef("dci.research", "1.0.0"),
+    return CapabilityInvocation(
+        capability_ref=CapabilityRef("dci.research", "1.0.0"),
         manifest=json.loads(MANIFEST_PATH.read_text()),
         run_id="research-run",
         input_text="SECRET-APPLICATION-INPUT",
@@ -138,7 +138,7 @@ class DciResearchCapabilityTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         runtime = FixtureRuntime()
 
-        with self.assertRaises(PackageExecutionError) as raised:
+        with self.assertRaises(CapabilityExecutionError) as raised:
             await DciLocalResearchImplementation().execute(
                 invocation(runtime, host_services={})
             )
@@ -157,7 +157,7 @@ class DciResearchCapabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results[0], results[1])
 
     async def test_runtime_failures_are_redacted(self) -> None:
-        with self.assertRaises(PackageExecutionError) as raised:
+        with self.assertRaises(CapabilityExecutionError) as raised:
             await DciLocalResearchImplementation().execute(invocation(FailingRuntime()))
         message = str(raised.exception)
         self.assertNotIn("SECRET-APPLICATION-INPUT", message)

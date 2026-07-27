@@ -3,7 +3,7 @@
 ## Explicit local roots
 
 The catalog turns operator-selected directories into a deterministic set of
-validated `dci.package/v1` manifests. Roots are explicit configuration owned by
+validated `asterion.capability/v1` manifests. Roots are explicit configuration owned by
 the local caller; they are not accepted from an agent request, model response,
 package manifest, or provider payload.
 
@@ -14,12 +14,12 @@ Discovery follows these rules:
   enumeration order do not change the catalog.
 - Every JSON document must be an object conforming to the canonical package
   validator.
-- Duplicate canonical roots and duplicate `package_id@version` identities are
+- Duplicate canonical roots and duplicate `capability_id@version` identities are
   rejected rather than resolved by hidden precedence.
 
-## Exact package_id@version selection
+## Exact capability_id@version selection
 
-Selection requires exact `PackageRef` values. There is no highest-version rule,
+Selection requires exact `CapabilityRef` values. There is no highest-version rule,
 range syntax, prerelease policy, dependency solver, lockfile, or implicit
 upgrade. Requested refs are deduplicated, validated against the catalog, sorted,
 and returned as deep-fresh manifest mappings.
@@ -27,23 +27,23 @@ and returned as deep-fresh manifest mappings.
 ```python
 from pathlib import Path
 
-from asterion.packages.catalog import PackageRef, discover_packages
-from asterion.packages.composition import compose_packages
+from asterion.capabilities.catalog import CapabilityRef, discover_capabilities
+from asterion.capabilities.composition import compose_capabilities
 
-catalog = discover_packages(
+catalog = discover_capabilities(
     [
         Path("src/asterion/capabilities/dci_research/manifests"),
         Path("src/asterion/capabilities/controlled_code/manifests"),
     ]
 )
 refs = (
-    PackageRef("policy.local-corpus", "1.0.0"),
-    PackageRef("dci.research", "1.0.0"),
-    PackageRef("dci.evaluation", "1.0.0"),
-    PackageRef("protocol.observability", "1.0.0"),
+    CapabilityRef("policy.local-corpus", "1.0.0"),
+    CapabilityRef("dci.research", "1.0.0"),
+    CapabilityRef("dci.evaluation", "1.0.0"),
+    CapabilityRef("protocol.observability", "1.0.0"),
 )
 manifests = catalog.select(refs)
-composition = compose_packages(
+composition = compose_capabilities(
     manifests,
     host_capabilities={"filesystem.read", "shell"},
     host_events={
@@ -54,7 +54,7 @@ composition = compose_packages(
     },
     host_artifacts={"text/plain"},
 )
-print(composition.package_ids)
+print(composition.capability_ids)
 ```
 
 Discovery and selection do not replace composition. The catalog establishes
@@ -111,6 +111,6 @@ schema.
 Run these checks from the standalone repository root:
 
 ```bash
-uv run python -m unittest -v tests.test_package_execution
+uv run python -m unittest -v tests.test_capability_execution
 make test-typescript
 ```

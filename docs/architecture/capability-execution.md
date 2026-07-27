@@ -3,7 +3,7 @@
 ## Package and application ownership
 
 An Asterion capability package is a **reusable executable unit**. It declares
-portable requirements and outputs in `dci.package/v1`, and an independently
+portable requirements and outputs in `asterion.capability/v1`, and an independently
 owned implementation supplies its behavior. An application is the executable composition boundary:
 it selects exact package versions, one runtime, host
 services, and operator input.
@@ -18,15 +18,16 @@ partial bindings fail before a runtime or implementation is invoked.
 The application host resolves an assembly and supplies bindings directly:
 
 ```python
-from asterion.packages.catalog import PackageRef
+from asterion.capabilities.catalog import CapabilityRef
+from asterion.capabilities.execution import CapabilityImplementationBinding
 from asterion.runner import run_composed_application
 from asterion.capabilities.dci_research import DciLocalResearchImplementation
 
 result = await run_composed_application(
     plan,
-    implementations=((
-        PackageRef("dci.research", "1.0.0"),
-        DciLocalResearchImplementation(),
+    implementations=(CapabilityImplementationBinding(
+        capability_ref=CapabilityRef("dci.research", "1.0.0"),
+        implementation=DciLocalResearchImplementation(),
     ),),
     runtime=runtime,
     run_id="research-1",
@@ -60,7 +61,7 @@ package only the compatible package-produced `upstream_events` and
 Package result declarations are v1 allowlists: an emitted event type or artifact
 media type must be declared, but a package may emit no values and there is no
 per-type cardinality guarantee. Artifact IDs must be non-empty and unique
-inside each `PackageExecutionResult`. Across package-produced results, the
+inside each `CapabilityExecutionResult`. Across package-produced results, the
 composed runner maintains one ID set and rejects a duplicate before returning
 the aggregate `ApplicationRunResult`. Host artifacts are separate application
 inputs: their IDs must be unique among host inputs, but they neither enter nor

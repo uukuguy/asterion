@@ -158,8 +158,8 @@ Expected: the current link-only checker accepts the nonexistent documented API.
 Parse Python fenced blocks with `ast`, import each `asterion.*` module, and verify every explicitly imported symbol exists. Update examples to:
 
 ```python
-from asterion.packages.catalog import PackageRef, discover_packages
-from asterion.packages.composition import compose_packages
+from asterion.capabilities.catalog import CapabilityRef, discover_capabilities
+from asterion.capabilities.composition import compose_capabilities
 ```
 
 Replace the controlled-code JSON and graph with the exact checked-in declarations: no host events/artifacts, `executor.controlled` remains the injected host capability, `filesystem.read` remains the runtime capability, `input_text` is passed directly to each package invocation, and evaluation/observability consume the workflow-produced report and completion event.

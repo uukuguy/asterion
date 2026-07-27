@@ -6,10 +6,10 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from asterion.dci.services import LocalCorpusService
-from asterion.packages.execution import (
-    PackageExecutionError,
-    PackageExecutionResult,
-    PackageInvocation,
+from asterion.capabilities.execution import (
+    CapabilityExecutionError,
+    CapabilityExecutionResult,
+    CapabilityInvocation,
 )
 from asterion.runtime.host import RunRequest
 from asterion.runtime.protocol import ProtocolError, validate_event_stream
@@ -19,14 +19,14 @@ class DciLocalResearchImplementation:
     """Delegate local-corpus research to an explicitly supplied runtime."""
 
     async def execute(
-        self, invocation: PackageInvocation
-    ) -> PackageExecutionResult:
+        self, invocation: CapabilityInvocation
+    ) -> CapabilityExecutionResult:
         _require_local_corpus(invocation)
         required = invocation.manifest["requires_capabilities"]
         if not isinstance(required, tuple) or not all(
             isinstance(capability, str) for capability in required
         ):
-            raise PackageExecutionError("research package declaration is invalid")
+            raise CapabilityExecutionError("research capability declaration is invalid")
         request = RunRequest(
             run_id=invocation.run_id,
             input_text=invocation.input_text,
@@ -42,8 +42,8 @@ class DciLocalResearchImplementation:
             validate_event_stream(events)
             answer_uri = _answer_artifact_uri(events)
         except (ProtocolError, TypeError, ValueError, RuntimeError):
-            raise PackageExecutionError("research runtime execution failed") from None
-        return PackageExecutionResult(
+            raise CapabilityExecutionError("research runtime execution failed") from None
+        return CapabilityExecutionResult(
             events=(
                 {"type": "research.completed", "payload": {"status": "completed"}},
             ),
@@ -57,16 +57,16 @@ class DciLocalResearchImplementation:
         )
 
 
-def _require_local_corpus(invocation: PackageInvocation) -> Path:
+def _require_local_corpus(invocation: CapabilityInvocation) -> Path:
     try:
         service = invocation.host_services.get("corpus.local-root")
         if not isinstance(service, LocalCorpusService):
             raise TypeError
         root = service.root
     except Exception:
-        raise PackageExecutionError("local corpus service is unavailable") from None
+        raise CapabilityExecutionError("local corpus service is unavailable") from None
     if not isinstance(root, Path):
-        raise PackageExecutionError("local corpus service is unavailable")
+        raise CapabilityExecutionError("local corpus service is unavailable")
     return root
 
 
@@ -83,4 +83,4 @@ def _answer_artifact_uri(events: Sequence[Mapping[str, object]]) -> str:
         uri = artifact.get("uri")
         if isinstance(uri, str) and uri:
             return uri
-    raise PackageExecutionError("research runtime answer artifact is unavailable")
+    raise CapabilityExecutionError("research runtime answer artifact is unavailable")

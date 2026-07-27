@@ -3,24 +3,26 @@ from __future__ import annotations
 import json
 import unittest
 from collections.abc import AsyncIterator
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 from types import MappingProxyType
 
 from asterion.assembly.protocol import resolve_assembly
-from asterion.packages.catalog import (
+from asterion.capabilities.catalog import (
     CatalogEntry,
-    PackageCatalog,
-    PackageRef,
-    discover_packages,
+    CapabilityCatalog,
+    CapabilityRef,
+    discover_capabilities,
 )
-from asterion.packages.execution import (
+from asterion.capabilities.execution import (
+    CapabilityImplementationBinding,
     InProcessArtifactPayload,
-    PackageExecutionError,
-    PackageExecutionResult,
-    PackageInvocation,
+    CapabilityExecutionError,
+    CapabilityExecutionResult,
+    CapabilityInvocation,
     project_public_value,
     validate_implementation_bindings,
-    validate_package_result,
+    validate_capability_result,
 )
 from asterion.runner.application import ApplicationRunError
 from asterion.runner.composed import run_composed_application
@@ -55,10 +57,10 @@ class FixtureRuntime:
 
 class RecordingImplementation:
     async def execute(
-        self, invocation: PackageInvocation
-    ) -> PackageExecutionResult:
+        self, invocation: CapabilityInvocation
+    ) -> CapabilityExecutionResult:
         del invocation
-        return PackageExecutionResult(events=(), artifacts=())
+        return CapabilityExecutionResult(events=(), artifacts=())
 
 
 class NonCallableImplementation:
@@ -66,13 +68,13 @@ class NonCallableImplementation:
 
 
 class ResultImplementation:
-    def __init__(self, result: PackageExecutionResult) -> None:
+    def __init__(self, result: CapabilityExecutionResult) -> None:
         self.result = result
-        self.invocations: list[PackageInvocation] = []
+        self.invocations: list[CapabilityInvocation] = []
 
     async def execute(
-        self, invocation: PackageInvocation
-    ) -> PackageExecutionResult:
+        self, invocation: CapabilityInvocation
+    ) -> CapabilityExecutionResult:
         self.invocations.append(invocation)
         return self.result
 
@@ -80,7 +82,7 @@ class ResultImplementation:
 class MutatingImplementation(ResultImplementation):
     def __init__(
         self,
-        result: PackageExecutionResult,
+        result: CapabilityExecutionResult,
         *,
         event: dict[str, object],
         artifact: dict[str, object],
@@ -90,8 +92,8 @@ class MutatingImplementation(ResultImplementation):
         self.artifact = artifact
 
     async def execute(
-        self, invocation: PackageInvocation
-    ) -> PackageExecutionResult:
+        self, invocation: CapabilityInvocation
+    ) -> CapabilityExecutionResult:
         self.invocations.append(invocation)
         self.event["type"] = "host.changed"
         event_payload = self.event["payload"]
@@ -107,15 +109,15 @@ class MutatingImplementation(ResultImplementation):
 def resolve_plan():
     return resolve_assembly(
         json.loads(ASSEMBLY.read_text()),
-        catalog=discover_packages((MANIFEST_ROOT,)),
+        catalog=discover_capabilities((MANIFEST_ROOT,)),
         runtime_manifest=FixtureRuntime.manifest.to_mapping(),
     )
 
 
 def evidence_plan():
     producer = {
-        "protocol": "dci.package/v1",
-        "package_id": "evidence.producer",
+        "protocol": "asterion.capability/v1",
+        "capability_id": "evidence.producer",
         "version": "1.0.0",
         "kind": "capability",
         "provides_capabilities": [],
@@ -127,8 +129,8 @@ def evidence_plan():
         "consumes_artifacts": [],
     }
     consumer = {
-        "protocol": "dci.package/v1",
-        "package_id": "evidence.consumer",
+        "protocol": "asterion.capability/v1",
+        "capability_id": "evidence.consumer",
         "version": "1.0.0",
         "kind": "evaluation",
         "provides_capabilities": [],
@@ -142,11 +144,11 @@ def evidence_plan():
             "application/vnd.producer+json",
         ],
     }
-    catalog = PackageCatalog(
+    catalog = CapabilityCatalog(
         entries=tuple(
             CatalogEntry(
-                ref=PackageRef(str(manifest["package_id"]), "1.0.0"),
-                source=PROJECT / f'{manifest["package_id"]}.json',
+                ref=CapabilityRef(str(manifest["capability_id"]), "1.0.0"),
+                source=PROJECT / f'{manifest["capability_id"]}.json',
                 manifest=manifest,
             )
             for manifest in (consumer, producer)
@@ -174,7 +176,7 @@ def evidence_plan():
 
 
 def producer_result():
-    return PackageExecutionResult(
+    return CapabilityExecutionResult(
         events=({
             "type": "producer.completed",
             "payload": {"nested": {"status": "complete"}},
@@ -275,14 +277,14 @@ class InProcessArtifactPayloadTests(unittest.TestCase):
             payload.public_projection["status"] = "changed"
 
     def test_public_projection_rejects_opaque_values_fail_closed(self) -> None:
-        with self.assertRaises(PackageExecutionError) as raised:
+        with self.assertRaises(CapabilityExecutionError) as raised:
             project_public_value({"value": object()})
 
         self.assertEqual(
             str(raised.exception), "artifact public projection is invalid"
         )
 
-        with self.assertRaises(PackageExecutionError) as private:
+        with self.assertRaises(CapabilityExecutionError) as private:
             InProcessArtifactPayload(
                 private_value={"mutable": object()},
                 public_projection={},
@@ -292,16 +294,28 @@ class InProcessArtifactPayloadTests(unittest.TestCase):
         )
 
 
-class PackageImplementationBindingTests(unittest.TestCase):
+class CapabilityImplementationBindingTests(unittest.TestCase):
+    def test_binding_is_an_immutable_slotted_value(self) -> None:
+        binding = CapabilityImplementationBinding(
+            capability_ref=CapabilityRef("dci.research", "1.0.0"),
+            implementation=RecordingImplementation(),
+        )
+
+        self.assertFalse(hasattr(binding, "__dict__"))
+        with self.assertRaises(FrozenInstanceError):
+            binding.capability_ref = CapabilityRef("other", "1.0.0")  # type: ignore[misc]
+
     def test_non_callable_implementation_is_rejected_without_content(self) -> None:
         valid = RecordingImplementation()
         for implementation in (object(), NonCallableImplementation()):
             bindings = tuple(
-                (
-                    PackageRef(package_id, "1.0.0"),
-                    implementation if package_id == "dci.research" else valid,
+                CapabilityImplementationBinding(
+                    capability_ref=CapabilityRef(capability_id, "1.0.0"),
+                    implementation=(
+                        implementation if capability_id == "dci.research" else valid
+                    ),
                 )
-                for package_id in (
+                for capability_id in (
                     "dci.evaluation",
                     "dci.research",
                     "protocol.observability",
@@ -310,7 +324,7 @@ class PackageImplementationBindingTests(unittest.TestCase):
 
             with (
                 self.subTest(implementation=type(implementation).__name__),
-                self.assertRaises(PackageExecutionError) as raised,
+                self.assertRaises(CapabilityExecutionError) as raised,
             ):
                 validate_implementation_bindings(resolve_plan(), bindings)
 
@@ -318,59 +332,77 @@ class PackageImplementationBindingTests(unittest.TestCase):
                 "SECRET-NON-CALLABLE-IMPLEMENTATION", str(raised.exception)
             )
 
-    def test_exact_bindings_require_every_executable_package(self) -> None:
+    def test_exact_bindings_require_every_executable_capability(self) -> None:
         implementation = RecordingImplementation()
 
-        with self.assertRaises(PackageExecutionError):
+        with self.assertRaises(CapabilityExecutionError):
             validate_implementation_bindings(
                 resolve_plan(),
-                ((PackageRef("dci.research", "1.0.0"), implementation),),
+                (
+                    CapabilityImplementationBinding(
+                        CapabilityRef("dci.research", "1.0.0"),
+                        implementation,
+                    ),
+                ),
             )
 
     def test_duplicate_exact_bindings_fail_before_mapping_conversion(self) -> None:
         implementation = RecordingImplementation()
-        binding = (PackageRef("dci.research", "1.0.0"), implementation)
+        binding = CapabilityImplementationBinding(
+            CapabilityRef("dci.research", "1.0.0"),
+            implementation,
+        )
 
-        with self.assertRaises(PackageExecutionError):
+        with self.assertRaises(CapabilityExecutionError):
             validate_implementation_bindings(resolve_plan(), (binding, binding))
 
     def test_complete_exact_bindings_are_immutable_and_policy_is_declarative(self) -> None:
         implementation = RecordingImplementation()
         bindings = tuple(
-            (PackageRef(package_id, "1.0.0"), implementation)
-            for package_id in ("dci.evaluation", "dci.research", "protocol.observability")
+            CapabilityImplementationBinding(
+                CapabilityRef(capability_id, "1.0.0"),
+                implementation,
+            )
+            for capability_id in (
+                "dci.evaluation",
+                "dci.research",
+                "protocol.observability",
+            )
         )
 
         resolved = validate_implementation_bindings(resolve_plan(), bindings)
 
         self.assertIsInstance(resolved, MappingProxyType)
-        self.assertNotIn(PackageRef("policy.local-corpus", "1.0.0"), resolved)
+        self.assertNotIn(CapabilityRef("policy.local-corpus", "1.0.0"), resolved)
         with self.assertRaises(TypeError):
-            resolved[PackageRef("other", "1.0.0")] = implementation  # type: ignore[reportIndexIssue]
+            resolved[CapabilityRef("other", "1.0.0")] = implementation  # type: ignore[reportIndexIssue]
 
     def test_unknown_exact_binding_is_rejected(self) -> None:
         implementation = RecordingImplementation()
         bindings = tuple(
-            (PackageRef(package_id, "1.0.0"), implementation)
-            for package_id in (
+            CapabilityImplementationBinding(
+                CapabilityRef(capability_id, "1.0.0"),
+                implementation,
+            )
+            for capability_id in (
                 "dci.evaluation",
                 "dci.research",
                 "protocol.observability",
-                "unknown.package",
+                "unknown.capability",
             )
         )
 
-        with self.assertRaises(PackageExecutionError):
+        with self.assertRaises(CapabilityExecutionError):
             validate_implementation_bindings(resolve_plan(), bindings)
 
 
-class PackageExecutionValueTests(unittest.TestCase):
+class CapabilityExecutionValueTests(unittest.TestCase):
     def test_invocation_and_result_are_deeply_immutable(self) -> None:
         manifest = resolve_plan().package_manifests[1]
-        invocation = PackageInvocation(
-            package_ref=PackageRef("dci.research", "1.0.0"),
+        invocation = CapabilityInvocation(
+            capability_ref=CapabilityRef("dci.research", "1.0.0"),
             manifest=manifest,
-            run_id="package-run-1",
+            run_id="capability-run-1",
             input_text="Read the corpus",
             upstream_events=({
                 "type": "research.completed",
@@ -389,7 +421,7 @@ class PackageExecutionValueTests(unittest.TestCase):
             runtime=FixtureRuntime(),
             host_services={"service.example": object()},
         )
-        result = PackageExecutionResult(
+        result = CapabilityExecutionResult(
             events=({"type": "research.completed", "payload": {"ok": True}},),
             artifacts=({
                 "artifact_id": "research-result",
@@ -413,18 +445,18 @@ class PackageExecutionValueTests(unittest.TestCase):
             result.artifacts[0]["value"]["answer_artifact_uri"] = "changed"  # type: ignore[reportIndexIssue]
 
 
-class PackageResultValidationTests(unittest.TestCase):
+class CapabilityResultValidationTests(unittest.TestCase):
     def manifest(self):
         return next(
             manifest
             for manifest in resolve_plan().package_manifests
-            if manifest["package_id"] == "dci.research"
+            if manifest["capability_id"] == "dci.research"
         )
 
     def test_declared_events_and_artifacts_are_accepted(self) -> None:
-        validate_package_result(
+        validate_capability_result(
             self.manifest(),
-            PackageExecutionResult(
+            CapabilityExecutionResult(
                 events=({"type": "research.completed", "payload": {}},),
                 artifacts=({
                     "artifact_id": "research-result",
@@ -435,16 +467,16 @@ class PackageResultValidationTests(unittest.TestCase):
         )
 
     def test_declared_outputs_are_allowed_types_not_required_outputs(self) -> None:
-        validate_package_result(
+        validate_capability_result(
             self.manifest(),
-            PackageExecutionResult(events=(), artifacts=()),
+            CapabilityExecutionResult(events=(), artifacts=()),
         )
 
     def test_undeclared_or_malformed_outputs_are_rejected_without_content(self) -> None:
         sentinel = "SECRET-PACKAGE-OUTPUT"
         invalid = (
-            PackageExecutionResult(events=({"type": sentinel, "payload": {}},), artifacts=()),
-            PackageExecutionResult(
+            CapabilityExecutionResult(events=({"type": sentinel, "payload": {}},), artifacts=()),
+            CapabilityExecutionResult(
                 events=(),
                 artifacts=({
                     "artifact_id": "result",
@@ -452,18 +484,18 @@ class PackageResultValidationTests(unittest.TestCase):
                     "value": {},
                 },),
             ),
-            PackageExecutionResult(
+            CapabilityExecutionResult(
                 events=(),
                 artifacts=(
                     {"artifact_id": "same", "media_type": "application/vnd.dci.research+json", "value": {}},
                     {"artifact_id": "same", "media_type": "application/vnd.dci.research+json", "value": {}},
                 ),
             ),
-            PackageExecutionResult(
+            CapabilityExecutionResult(
                 events=({"type": "research.completed", "payload": sentinel},),
                 artifacts=(),
             ),
-            PackageExecutionResult(
+            CapabilityExecutionResult(
                 events=(),
                 artifacts=({
                     "artifact_id": "",
@@ -471,7 +503,7 @@ class PackageResultValidationTests(unittest.TestCase):
                     "value": {},
                 },),
             ),
-            PackageExecutionResult(
+            CapabilityExecutionResult(
                 events=(),
                 artifacts=({
                     "artifact_id": "result",
@@ -482,8 +514,8 @@ class PackageResultValidationTests(unittest.TestCase):
         )
         for result in invalid:
             with self.subTest(result=result):
-                with self.assertRaises(PackageExecutionError) as raised:
-                    validate_package_result(self.manifest(), result)
+                with self.assertRaises(CapabilityExecutionError) as raised:
+                    validate_capability_result(self.manifest(), result)
                 self.assertNotIn(sentinel, str(raised.exception))
 
 
@@ -493,14 +525,18 @@ class ComposedEvidenceTransportTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         producer = ResultImplementation(producer_result())
         consumer = ResultImplementation(
-            PackageExecutionResult(events=(), artifacts=())
+            CapabilityExecutionResult(events=(), artifacts=())
         )
 
         await run_composed_application(
             evidence_plan(),
             implementations=(
-                (PackageRef("evidence.producer", "1.0.0"), producer),
-                (PackageRef("evidence.consumer", "1.0.0"), consumer),
+                CapabilityImplementationBinding(
+                    CapabilityRef("evidence.producer", "1.0.0"), producer
+                ),
+                CapabilityImplementationBinding(
+                    CapabilityRef("evidence.consumer", "1.0.0"), consumer
+                ),
             ),
             runtime=FixtureRuntime(),
             run_id="evidence-run",
@@ -536,7 +572,7 @@ class ComposedEvidenceTransportTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(TypeError):
             invocation.host_artifacts[0]["value"]["nested"]["status"] = "changed"  # type: ignore[reportIndexIssue]
 
-    async def test_runner_snapshots_all_host_evidence_once_before_package_work(
+    async def test_runner_snapshots_all_host_evidence_once_before_capability_work(
         self,
     ) -> None:
         caller_event = {
@@ -554,14 +590,18 @@ class ComposedEvidenceTransportTests(unittest.IsolatedAsyncioTestCase):
             artifact=caller_artifact,
         )
         consumer = ResultImplementation(
-            PackageExecutionResult(events=(), artifacts=())
+            CapabilityExecutionResult(events=(), artifacts=())
         )
 
         await run_composed_application(
             evidence_plan(),
             implementations=(
-                (PackageRef("evidence.producer", "1.0.0"), producer),
-                (PackageRef("evidence.consumer", "1.0.0"), consumer),
+                CapabilityImplementationBinding(
+                    CapabilityRef("evidence.producer", "1.0.0"), producer
+                ),
+                CapabilityImplementationBinding(
+                    CapabilityRef("evidence.consumer", "1.0.0"), consumer
+                ),
             ),
             runtime=FixtureRuntime(),
             run_id="evidence-run",
@@ -620,18 +660,18 @@ class ComposedEvidenceTransportTests(unittest.IsolatedAsyncioTestCase):
             ):
                 producer = ResultImplementation(producer_result())
                 consumer = ResultImplementation(
-                    PackageExecutionResult(events=(), artifacts=())
+                    CapabilityExecutionResult(events=(), artifacts=())
                 )
                 with self.assertRaises(ApplicationRunError):
                     await run_composed_application(
                         evidence_plan(),
                         implementations=(
-                            (
-                                PackageRef("evidence.producer", "1.0.0"),
+                            CapabilityImplementationBinding(
+                                CapabilityRef("evidence.producer", "1.0.0"),
                                 producer,
                             ),
-                            (
-                                PackageRef("evidence.consumer", "1.0.0"),
+                            CapabilityImplementationBinding(
+                                CapabilityRef("evidence.consumer", "1.0.0"),
                                 consumer,
                             ),
                         ),
@@ -645,7 +685,7 @@ class ComposedEvidenceTransportTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(producer.invocations, [])
                 self.assertEqual(consumer.invocations, [])
 
-    async def test_malformed_host_evidence_fails_closed_without_package_work(
+    async def test_malformed_host_evidence_fails_closed_without_capability_work(
         self,
     ) -> None:
         sentinel = "SECRET-HOST-EVIDENCE"
@@ -700,18 +740,18 @@ class ComposedEvidenceTransportTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(name=name):
                 producer = ResultImplementation(producer_result())
                 consumer = ResultImplementation(
-                    PackageExecutionResult(events=(), artifacts=())
+                    CapabilityExecutionResult(events=(), artifacts=())
                 )
                 with self.assertRaises(ApplicationRunError) as raised:
                     await run_composed_application(
                         evidence_plan(),
                         implementations=(
-                            (
-                                PackageRef("evidence.producer", "1.0.0"),
+                            CapabilityImplementationBinding(
+                                CapabilityRef("evidence.producer", "1.0.0"),
                                 producer,
                             ),
-                            (
-                                PackageRef("evidence.consumer", "1.0.0"),
+                            CapabilityImplementationBinding(
+                                CapabilityRef("evidence.consumer", "1.0.0"),
                                 consumer,
                             ),
                         ),
@@ -726,10 +766,10 @@ class ComposedEvidenceTransportTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(producer.invocations, [])
                 self.assertEqual(consumer.invocations, [])
 
-    async def test_artifact_ids_are_unique_across_all_package_results(self) -> None:
+    async def test_artifact_ids_are_unique_across_all_capability_results(self) -> None:
         producer = ResultImplementation(producer_result())
         consumer = ResultImplementation(
-            PackageExecutionResult(
+            CapabilityExecutionResult(
                 events=(),
                 artifacts=({
                     "artifact_id": "producer-artifact",
@@ -743,8 +783,12 @@ class ComposedEvidenceTransportTests(unittest.IsolatedAsyncioTestCase):
             await run_composed_application(
                 evidence_plan(),
                 implementations=(
-                    (PackageRef("evidence.producer", "1.0.0"), producer),
-                    (PackageRef("evidence.consumer", "1.0.0"), consumer),
+                    CapabilityImplementationBinding(
+                        CapabilityRef("evidence.producer", "1.0.0"), producer
+                    ),
+                    CapabilityImplementationBinding(
+                        CapabilityRef("evidence.consumer", "1.0.0"), consumer
+                    ),
                 ),
                 runtime=FixtureRuntime(),
                 run_id="evidence-run",

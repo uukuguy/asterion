@@ -1,6 +1,6 @@
 {
-  "protocol": "dci.package/v1",
-  "package_id": "dci.benchmark",
+  "protocol": "asterion.capability/v1",
+  "capability_id": "dci.benchmark",
   "version": "1.0.0",
   "kind": "evaluation",
   "provides_capabilities": [],

@@ -24,7 +24,7 @@ from asterion.capabilities.dci_research.complete import (
     INPUT_PROTOCOL,
     complete_application_identity,
 )
-from asterion.packages.execution import InProcessArtifactPayload, project_public_value
+from asterion.capabilities.execution import InProcessArtifactPayload, project_public_value
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
 from asterion.dci.services import (
     create_answer_judge_service_factory,
@@ -43,9 +43,13 @@ from asterion.dci.dual_runtime_verification import (
     verify_restricted_claude_binding,
     write_private_report,
 )
-from asterion.packages.catalog import PackageRef
-from asterion.packages.catalog import discover_packages
-from asterion.packages.execution import PackageExecutionError, PackageInvocation
+from asterion.capabilities.catalog import CapabilityRef
+from asterion.capabilities.catalog import discover_capabilities
+from asterion.capabilities.execution import (
+    CapabilityExecutionError,
+    CapabilityImplementationBinding,
+    CapabilityInvocation,
+)
 from asterion.runner.composed import run_composed_application
 from asterion.runner.application import ApplicationRunError
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
@@ -231,7 +235,7 @@ def plan(runtime_id: str):
     )
     return resolve_assembly(
         assembly,
-        catalog=discover_packages((MANIFESTS,)),
+        catalog=discover_capabilities((MANIFESTS,)),
         runtime_manifest=RuntimeManifest(
             runtime_id=runtime_id,
             capabilities=("filesystem.read",),
@@ -354,7 +358,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
         )
         for manifest_path in sorted(MANIFESTS.glob("*.json")):
             manifest = json.loads(manifest_path.read_text())
-            self.assertEqual(manifest["protocol"], "dci.package/v1")
+            self.assertEqual(manifest["protocol"], "asterion.capability/v1")
 
     def test_transitive_identity_closure_matches_complete_assembly_packages(
         self,
@@ -395,7 +399,9 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
         }
         for resource_name in manifest_resources:
             manifest = json.loads(SOURCE.joinpath(resource_name).read_text())
-            manifest_refs.add(f"{manifest['package_id']}@{manifest['version']}")
+            manifest_refs.add(
+                f"{manifest['capability_id']}@{manifest['version']}"
+            )
 
         self.assertEqual(manifest_refs, assembly_package_ids)
         self.assertEqual(
@@ -526,11 +532,11 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
 
         self.assertEqual(pi.application_id, "dci.complete-application")
         self.assertEqual(claude.application_id, pi.application_id)
-        self.assertEqual(pi.composition.package_ids, ORDER)
-        self.assertEqual(claude.composition.package_ids, ORDER)
+        self.assertEqual(pi.composition.capability_ids, ORDER)
+        self.assertEqual(claude.composition.capability_ids, ORDER)
         self.assertEqual(
             tuple(
-                manifest["package_id"]
+                manifest["capability_id"]
                 for manifest in pi.package_manifests
                 if manifest["kind"] != "policy"
             ),
@@ -540,7 +546,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
 
     def test_every_stage_declares_one_exact_event_and_artifact_edge(self) -> None:
         manifests = {
-            manifest["package_id"]: manifest
+            manifest["capability_id"]: manifest
             for manifest in plan("pi.reference").package_manifests
         }
 
@@ -611,7 +617,10 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
         )
         self.assertEqual(application.runtime_ids, ("claude-code.reference", "pi.reference"))
         self.assertEqual(
-            tuple(binding[0].package_id for binding in application.implementations),
+            tuple(
+                binding.capability_ref.capability_id
+                for binding in application.implementations
+            ),
             STAGES,
         )
         self.assertEqual(
@@ -796,8 +805,8 @@ class _CompletedRuntime:
 class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
     async def test_research_requires_corpus_before_runtime_invocation(self) -> None:
         runtime = _CompletedRuntime("pi.reference", PROJECT / "unused-run")
-        invocation = PackageInvocation(
-            package_ref=PackageRef("dci.research", "1.0.0"),
+        invocation = CapabilityInvocation(
+            capability_ref=CapabilityRef("dci.research", "1.0.0"),
             manifest=json.loads((MANIFESTS / "dci-research.json").read_text()),
             run_id="missing-corpus",
             input_text=json.dumps(
@@ -812,7 +821,7 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
             host_services={},
         )
 
-        with self.assertRaises(PackageExecutionError) as raised:
+        with self.assertRaises(CapabilityExecutionError) as raised:
             await DciCompleteResearchImplementation().execute(invocation)
 
         self.assertEqual(runtime.calls, 0)
@@ -824,10 +833,10 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
             {"schema": "wrong", "implementation_sha256": complete_application_identity(), "is_correct": True},
             {"schema": "asterion.dci.complete-application/v1", "implementation_sha256": "0" * 64, "is_correct": True},
         ):
-            with self.subTest(value=value), self.assertRaises(PackageExecutionError):
+            with self.subTest(value=value), self.assertRaises(CapabilityExecutionError):
                 await implementation.execute(
-                    PackageInvocation(
-                        package_ref=PackageRef("dci.benchmark", "1.0.0"),
+                    CapabilityInvocation(
+                        capability_ref=CapabilityRef("dci.benchmark", "1.0.0"),
                         manifest={},
                         run_id="tampered-upstream",
                         input_text="",
@@ -851,11 +860,11 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
             await run_composed_application(
                 plan("pi.reference"),
                 implementations=(
-                    (PackageRef("dci.research", "1.0.0"), DciCompleteResearchImplementation()),
-                    (PackageRef("dci.evaluation", "1.0.0"), DciCompleteEvaluationImplementation()),
-                    (PackageRef("dci.benchmark", "1.0.0"), DciCompleteBenchmarkImplementation()),
-                    (PackageRef("dci.analysis", "1.0.0"), DciCompleteAnalysisImplementation()),
-                    (PackageRef("dci.export", "1.0.0"), DciCompleteExportImplementation()),
+                    CapabilityImplementationBinding(CapabilityRef("dci.research", "1.0.0"), DciCompleteResearchImplementation()),
+                    CapabilityImplementationBinding(CapabilityRef("dci.evaluation", "1.0.0"), DciCompleteEvaluationImplementation()),
+                    CapabilityImplementationBinding(CapabilityRef("dci.benchmark", "1.0.0"), DciCompleteBenchmarkImplementation()),
+                    CapabilityImplementationBinding(CapabilityRef("dci.analysis", "1.0.0"), DciCompleteAnalysisImplementation()),
+                    CapabilityImplementationBinding(CapabilityRef("dci.export", "1.0.0"), DciCompleteExportImplementation()),
                 ),
                 runtime=runtime,
                 run_id="missing-judge",
@@ -909,8 +918,8 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
                 },
             )
             implementation = DciCompleteEvaluationImplementation()
-            invocation = PackageInvocation(
-                package_ref=PackageRef("dci.evaluation", "1.0.0"),
+            invocation = CapabilityInvocation(
+                capability_ref=CapabilityRef("dci.evaluation", "1.0.0"),
                 manifest={},
                 run_id="cancel-evaluation",
                 input_text="",
@@ -933,7 +942,7 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(started.wait(), timeout=1)
             signal.cancelled = True
 
-            with self.assertRaises(PackageExecutionError):
+            with self.assertRaises(CapabilityExecutionError):
                 await asyncio.wait_for(task, timeout=3)
             self.assertTrue(stopped.is_set())
 
@@ -957,8 +966,8 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
                 },
             )
             result = await DciCompleteEvaluationImplementation().execute(
-                PackageInvocation(
-                    package_ref=PackageRef("dci.evaluation", "1.0.0"),
+                CapabilityInvocation(
+                    capability_ref=CapabilityRef("dci.evaluation", "1.0.0"),
                     manifest={},
                     run_id=directory.name,
                     input_text="",
@@ -1039,17 +1048,17 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
                 run_composed_application(
                     plan("pi.reference"),
                     implementations=(
-                        (
-                            PackageRef("dci.research", "1.0.0"),
+                        CapabilityImplementationBinding(
+                            CapabilityRef("dci.research", "1.0.0"),
                             DciCompleteResearchImplementation(),
                         ),
-                        (
-                            PackageRef("dci.evaluation", "1.0.0"),
+                        CapabilityImplementationBinding(
+                            CapabilityRef("dci.evaluation", "1.0.0"),
                             DciCompleteEvaluationImplementation(),
                         ),
-                        (PackageRef("dci.benchmark", "1.0.0"), later[0]),
-                        (PackageRef("dci.analysis", "1.0.0"), later[1]),
-                        (PackageRef("dci.export", "1.0.0"), later[2]),
+                        CapabilityImplementationBinding(CapabilityRef("dci.benchmark", "1.0.0"), later[0]),
+                        CapabilityImplementationBinding(CapabilityRef("dci.analysis", "1.0.0"), later[1]),
+                        CapabilityImplementationBinding(CapabilityRef("dci.export", "1.0.0"), later[2]),
                     ),
                     runtime=runtime,
                     run_id="cancelled-complete",
@@ -1082,11 +1091,11 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
             judge = _JudgeService()
 
             bindings = (
-                (PackageRef("dci.research", "1.0.0"), DciCompleteResearchImplementation()),
-                (PackageRef("dci.evaluation", "1.0.0"), DciCompleteEvaluationImplementation()),
-                (PackageRef("dci.benchmark", "1.0.0"), DciCompleteBenchmarkImplementation()),
-                (PackageRef("dci.analysis", "1.0.0"), DciCompleteAnalysisImplementation()),
-                (PackageRef("dci.export", "1.0.0"), DciCompleteExportImplementation()),
+                CapabilityImplementationBinding(CapabilityRef("dci.research", "1.0.0"), DciCompleteResearchImplementation()),
+                CapabilityImplementationBinding(CapabilityRef("dci.evaluation", "1.0.0"), DciCompleteEvaluationImplementation()),
+                CapabilityImplementationBinding(CapabilityRef("dci.benchmark", "1.0.0"), DciCompleteBenchmarkImplementation()),
+                CapabilityImplementationBinding(CapabilityRef("dci.analysis", "1.0.0"), DciCompleteAnalysisImplementation()),
+                CapabilityImplementationBinding(CapabilityRef("dci.export", "1.0.0"), DciCompleteExportImplementation()),
             )
             result = await run_composed_application(
                 plan("claude-code.reference"),
@@ -1110,11 +1119,11 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
             judge = _JudgeService()
 
             bindings = (
-                (PackageRef("dci.research", "1.0.0"), DciCompleteResearchImplementation()),
-                (PackageRef("dci.evaluation", "1.0.0"), DciCompleteEvaluationImplementation()),
-                (PackageRef("dci.benchmark", "1.0.0"), DciCompleteBenchmarkImplementation()),
-                (PackageRef("dci.analysis", "1.0.0"), DciCompleteAnalysisImplementation()),
-                (PackageRef("dci.export", "1.0.0"), DciCompleteExportImplementation()),
+                CapabilityImplementationBinding(CapabilityRef("dci.research", "1.0.0"), DciCompleteResearchImplementation()),
+                CapabilityImplementationBinding(CapabilityRef("dci.evaluation", "1.0.0"), DciCompleteEvaluationImplementation()),
+                CapabilityImplementationBinding(CapabilityRef("dci.benchmark", "1.0.0"), DciCompleteBenchmarkImplementation()),
+                CapabilityImplementationBinding(CapabilityRef("dci.analysis", "1.0.0"), DciCompleteAnalysisImplementation()),
+                CapabilityImplementationBinding(CapabilityRef("dci.export", "1.0.0"), DciCompleteExportImplementation()),
             )
             with patch(
                 "asterion.dci.application_executor.EnvironmentDciRunExecutor.run",

@@ -6,17 +6,21 @@ import hashlib
 import json
 import os
 import stat
-from pathlib import Path
 from collections.abc import Mapping
+from pathlib import Path
 
+from asterion.capabilities.catalog import CapabilityRef
+from asterion.capabilities.execution import (
+    CapabilityImplementationBinding,
+)
 from asterion.dci.analysis import aggregate_results
 from asterion.dci.provenance import dci_complete_implementation_identity
 from asterion.dci.services import AnswerJudgeService, LocalCorpusService
-from asterion.packages.execution import (
+from asterion.capabilities.execution import (
     InProcessArtifactPayload,
-    PackageExecutionError,
-    PackageExecutionResult,
-    PackageInvocation,
+    CapabilityExecutionError,
+    CapabilityExecutionResult,
+    CapabilityInvocation,
     project_public_value,
 )
 from asterion.runtime.host import RunRequest
@@ -37,13 +41,13 @@ def _envelope(value: str) -> tuple[str, str]:
     try:
         document = json.loads(value)
     except (TypeError, ValueError):
-        raise PackageExecutionError("complete application input is invalid") from None
+        raise CapabilityExecutionError("complete application input is invalid") from None
     if not isinstance(document, dict) or set(document) != {
         "protocol",
         "question",
         "gold_answer",
     }:
-        raise PackageExecutionError("complete application input is invalid")
+        raise CapabilityExecutionError("complete application input is invalid")
     question = document.get("question")
     gold = document.get("gold_answer")
     if (
@@ -53,31 +57,31 @@ def _envelope(value: str) -> tuple[str, str]:
         or not isinstance(gold, str)
         or not gold.strip()
     ):
-        raise PackageExecutionError("complete application input is invalid")
+        raise CapabilityExecutionError("complete application input is invalid")
     return question, gold
 
 
-def _artifact(invocation: PackageInvocation, media_type: str) -> dict[str, object]:
+def _artifact(invocation: CapabilityInvocation, media_type: str) -> dict[str, object]:
     matches = [
         item
         for item in invocation.upstream_artifacts
         if item.get("media_type") == media_type
     ]
     if len(matches) != 1 or not isinstance(matches[0].get("value"), Mapping):
-        raise PackageExecutionError("complete application upstream evidence is invalid")
+        raise CapabilityExecutionError("complete application upstream evidence is invalid")
     value = dict(matches[0]["value"])
     if (
         value.get("schema") != IMPLEMENTATION_PROTOCOL
         or value.get("implementation_sha256") != complete_application_identity()
     ):
-        raise PackageExecutionError("complete application upstream evidence is invalid")
+        raise CapabilityExecutionError("complete application upstream evidence is invalid")
     return value
 
 
 def _result(
     *, stage: str, media_type: str, value: Mapping[str, object]
-) -> PackageExecutionResult:
-    return PackageExecutionResult(
+) -> CapabilityExecutionResult:
+    return CapabilityExecutionResult(
         events=({"type": f"{stage}.completed", "payload": {"status": "completed"}},),
         artifacts=({
             "artifact_id": f"dci-{stage}-result",
@@ -101,7 +105,7 @@ def _plain(value: object) -> object:
 
 
 class DciCompleteResearchImplementation:
-    async def execute(self, invocation: PackageInvocation) -> PackageExecutionResult:
+    async def execute(self, invocation: CapabilityInvocation) -> CapabilityExecutionResult:
         _require_local_corpus(invocation)
         question, gold = _envelope(invocation.input_text)
         try:
@@ -123,7 +127,7 @@ class DciCompleteResearchImplementation:
             ]
             validate_event_stream(events)
         except (ProtocolError, RuntimeError, TypeError, ValueError):
-            raise PackageExecutionError("complete research execution failed") from None
+            raise CapabilityExecutionError("complete research execution failed") from None
         answer_artifacts = [
             event["payload"]["artifact"]
             for event in events
@@ -133,12 +137,12 @@ class DciCompleteResearchImplementation:
             and event["payload"]["artifact"].get("kind") == "answer"
         ]
         if len(answer_artifacts) != 1:
-            raise PackageExecutionError("complete research evidence is unavailable")
+            raise CapabilityExecutionError("complete research evidence is unavailable")
         answer_artifact = answer_artifacts[0]
         answer = answer_artifact.get("uri")
         answer_artifact_id = answer_artifact.get("artifact_id")
         if answer != "final.txt" or not isinstance(answer_artifact_id, str):
-            raise PackageExecutionError("complete research evidence is unavailable")
+            raise CapabilityExecutionError("complete research evidence is unavailable")
         completed_run_dir = getattr(invocation.runtime, "completed_run_dir", None)
         output_dir = (
             completed_run_dir(invocation.run_id)
@@ -146,7 +150,7 @@ class DciCompleteResearchImplementation:
             else None
         )
         if not isinstance(output_dir, Path):
-            raise PackageExecutionError("complete research evidence is unavailable")
+            raise CapabilityExecutionError("complete research evidence is unavailable")
         try:
             final_path = output_dir / answer
             metadata = final_path.lstat()
@@ -159,9 +163,9 @@ class DciCompleteResearchImplementation:
             raw_answer = final_path.read_bytes()
             predicted_answer = raw_answer.decode("utf-8").rstrip("\n")
         except (OSError, UnicodeError):
-            raise PackageExecutionError("complete research evidence is unavailable") from None
+            raise CapabilityExecutionError("complete research evidence is unavailable") from None
         if not predicted_answer:
-            raise PackageExecutionError("complete research evidence is unavailable")
+            raise CapabilityExecutionError("complete research evidence is unavailable")
         stage_data = InProcessArtifactPayload(
             private_value={
                 "question": question,
@@ -185,16 +189,16 @@ class DciCompleteResearchImplementation:
         )
 
 
-def _require_local_corpus(invocation: PackageInvocation) -> Path:
+def _require_local_corpus(invocation: CapabilityInvocation) -> Path:
     try:
         service = invocation.host_services.get("corpus.local-root")
         if not isinstance(service, LocalCorpusService):
             raise TypeError
         root = service.root
     except Exception:
-        raise PackageExecutionError("local corpus service is unavailable") from None
+        raise CapabilityExecutionError("local corpus service is unavailable") from None
     if not isinstance(root, Path):
-        raise PackageExecutionError("local corpus service is unavailable")
+        raise CapabilityExecutionError("local corpus service is unavailable")
     return root
 
 
@@ -209,7 +213,7 @@ def _write_private_json(path: Path, payload: Mapping[str, object]) -> None:
 
 
 class DciCompleteEvaluationImplementation:
-    async def execute(self, invocation: PackageInvocation) -> PackageExecutionResult:
+    async def execute(self, invocation: CapabilityInvocation) -> CapabilityExecutionResult:
         research = _artifact(invocation, "application/vnd.dci.research+json")
         private = _research_private_value(research)
         judge = _require_answer_judge(invocation)
@@ -234,11 +238,11 @@ class DciCompleteEvaluationImplementation:
                 raise TypeError
             _write_private_json(output_dir / "eval_result.json", verdict)
         except Exception:
-            raise PackageExecutionError("complete evaluation failed") from None
+            raise CapabilityExecutionError("complete evaluation failed") from None
         is_correct = verdict.get("is_correct")
         fingerprint = verdict.get("judge_request_fingerprint")
         if not isinstance(is_correct, bool) or not isinstance(fingerprint, str):
-            raise PackageExecutionError("complete evaluation evidence is invalid")
+            raise CapabilityExecutionError("complete evaluation evidence is invalid")
         return _result(
             stage="evaluation",
             media_type="application/vnd.dci.verdict+json",
@@ -275,12 +279,12 @@ def _research_private_value(
             raise TypeError
         return private
     except Exception:
-        raise PackageExecutionError(
+        raise CapabilityExecutionError(
             "complete evaluation evidence is unavailable"
         ) from None
 
 
-def _require_answer_judge(invocation: PackageInvocation) -> AnswerJudgeService:
+def _require_answer_judge(invocation: CapabilityInvocation) -> AnswerJudgeService:
     try:
         service = invocation.host_services.get("evaluation.answer-judge")
         if not isinstance(service, AnswerJudgeService):
@@ -289,16 +293,16 @@ def _require_answer_judge(invocation: PackageInvocation) -> AnswerJudgeService:
         if not isinstance(public_identity, Mapping):
             raise TypeError
     except Exception:
-        raise PackageExecutionError("answer judge service is unavailable") from None
+        raise CapabilityExecutionError("answer judge service is unavailable") from None
     return service
 
 
 class DciCompleteBenchmarkImplementation:
-    async def execute(self, invocation: PackageInvocation) -> PackageExecutionResult:
+    async def execute(self, invocation: CapabilityInvocation) -> CapabilityExecutionResult:
         verdict = _artifact(invocation, "application/vnd.dci.verdict+json")
         is_correct = verdict.get("is_correct")
         if not isinstance(is_correct, bool):
-            raise PackageExecutionError("complete benchmark evidence is invalid")
+            raise CapabilityExecutionError("complete benchmark evidence is invalid")
         return _result(
             stage="benchmark",
             media_type="application/vnd.dci.benchmark+json",
@@ -307,11 +311,11 @@ class DciCompleteBenchmarkImplementation:
 
 
 class DciCompleteAnalysisImplementation:
-    async def execute(self, invocation: PackageInvocation) -> PackageExecutionResult:
+    async def execute(self, invocation: CapabilityInvocation) -> CapabilityExecutionResult:
         benchmark = _artifact(invocation, "application/vnd.dci.benchmark+json")
         correct = benchmark.get("correct")
         if type(correct) is not int or correct not in {0, 1}:
-            raise PackageExecutionError("complete analysis evidence is invalid")
+            raise CapabilityExecutionError("complete analysis evidence is invalid")
         aggregate = aggregate_results(({"is_correct": bool(correct), "run_status": "completed"},))
         return _result(
             stage="analysis",
@@ -321,17 +325,17 @@ class DciCompleteAnalysisImplementation:
 
 
 class DciCompleteExportImplementation:
-    async def execute(self, invocation: PackageInvocation) -> PackageExecutionResult:
+    async def execute(self, invocation: CapabilityInvocation) -> CapabilityExecutionResult:
         analysis = _artifact(invocation, "application/vnd.dci.analysis+json")
         aggregate = analysis.get("aggregate")
         if not isinstance(aggregate, Mapping):
-            raise PackageExecutionError("complete export evidence is invalid")
+            raise CapabilityExecutionError("complete export evidence is invalid")
         digest = hashlib.sha256(
             json.dumps(_plain(aggregate), sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
         counts = aggregate.get("counts")
         if not isinstance(counts, Mapping) or type(counts.get("total")) is not int:
-            raise PackageExecutionError("complete export evidence is invalid")
+            raise CapabilityExecutionError("complete export evidence is invalid")
         return _result(
             stage="export",
             media_type="application/vnd.dci.export+json",
@@ -339,15 +343,28 @@ class DciCompleteExportImplementation:
         )
 
 
-def complete_dci_bindings() -> tuple[tuple[object, object], ...]:
-    from asterion.packages.catalog import PackageRef
-
+def complete_dci_bindings() -> tuple[CapabilityImplementationBinding, ...]:
     return (
-        (PackageRef("dci.research", "1.0.0"), DciCompleteResearchImplementation()),
-        (PackageRef("dci.evaluation", "1.0.0"), DciCompleteEvaluationImplementation()),
-        (PackageRef("dci.benchmark", "1.0.0"), DciCompleteBenchmarkImplementation()),
-        (PackageRef("dci.analysis", "1.0.0"), DciCompleteAnalysisImplementation()),
-        (PackageRef("dci.export", "1.0.0"), DciCompleteExportImplementation()),
+        CapabilityImplementationBinding(
+            CapabilityRef("dci.research", "1.0.0"),
+            DciCompleteResearchImplementation(),
+        ),
+        CapabilityImplementationBinding(
+            CapabilityRef("dci.evaluation", "1.0.0"),
+            DciCompleteEvaluationImplementation(),
+        ),
+        CapabilityImplementationBinding(
+            CapabilityRef("dci.benchmark", "1.0.0"),
+            DciCompleteBenchmarkImplementation(),
+        ),
+        CapabilityImplementationBinding(
+            CapabilityRef("dci.analysis", "1.0.0"),
+            DciCompleteAnalysisImplementation(),
+        ),
+        CapabilityImplementationBinding(
+            CapabilityRef("dci.export", "1.0.0"),
+            DciCompleteExportImplementation(),
+        ),
     )
 
 

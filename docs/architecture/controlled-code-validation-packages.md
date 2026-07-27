@@ -2,7 +2,7 @@
 
 ## Second independent graph
 
-The controlled-code reference graph challenges `dci.package/v1` with a shape
+The controlled-code reference graph challenges `asterion.capability/v1` with a shape
 that is independent of DCI research:
 
 ```text
@@ -25,7 +25,7 @@ application/vnd.dci.code-quality+json
 
 The graph exercises the `workflow` package kind and real package-produced
 capability, policy, event, and artifact edges. `input_text` is runner input
-carried directly on each `PackageInvocation`; it is not modeled as a fictional
+carried directly on each `CapabilityInvocation`; it is not modeled as a fictional
 host artifact. The graph proves the package contract can describe code-quality
 validation without adding a scheduler.
 
@@ -55,8 +55,8 @@ The workflow manifest is a closed portable declaration:
 
 ```json
 {
-  "protocol": "dci.package/v1",
-  "package_id": "workflow.code-quality",
+  "protocol": "asterion.capability/v1",
+  "capability_id": "workflow.code-quality",
   "version": "1.0.0",
   "kind": "workflow",
   "provides_capabilities": ["workflow.code-quality"],
@@ -78,15 +78,15 @@ selected runtime capability with the declared host capability:
 
 ```python
 from asterion.adapters.pi import map_pi_capabilities
-from asterion.packages.composition import compose_packages
+from asterion.capabilities.composition import compose_capabilities
 
 runtime_capabilities = set(map_pi_capabilities("read"))
 host_capabilities = runtime_capabilities | {"executor.controlled"}
-composition = compose_packages(
+composition = compose_capabilities(
     manifests,
     host_capabilities=host_capabilities,
 )
-print(composition.package_ids)
+print(composition.capability_ids)
 ```
 
 Execution receives source selection as direct input and the already-authorized

@@ -1,6 +1,6 @@
 {
-  "protocol": "dci.package/v1",
-  "package_id": "workflow.code-quality",
+  "protocol": "asterion.capability/v1",
+  "capability_id": "workflow.code-quality",
   "version": "1.0.0",
   "kind": "workflow",
   "provides_capabilities": ["workflow.code-quality"],

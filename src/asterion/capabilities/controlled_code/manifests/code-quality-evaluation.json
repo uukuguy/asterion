@@ -1,6 +1,6 @@
 {
-  "protocol": "dci.package/v1",
-  "package_id": "evaluation.code-quality",
+  "protocol": "asterion.capability/v1",
+  "capability_id": "evaluation.code-quality",
   "version": "1.0.0",
   "kind": "evaluation",
   "provides_capabilities": [],
