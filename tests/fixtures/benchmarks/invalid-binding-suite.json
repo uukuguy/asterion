@@ -1,0 +1,27 @@
+{
+  "artifact_media_types": [
+    "application/vnd.example.synthetic-result+json"
+  ],
+  "default_case_limit": 4,
+  "default_concurrency": 1,
+  "owner_package": {
+    "package_id": "example.benchmark-package",
+    "version": "1.0.0"
+  },
+  "protocol": "asterion.benchmark-suite/v1",
+  "suite_id": "example.invalid-binding-suite",
+  "tasks": [
+    {
+      "binding_id": "example.missing-binding",
+      "capability": {
+        "capability_id": "example.capability-a",
+        "version": "1.0.0"
+      },
+      "metric_contract_id": "example.metric-a/v1",
+      "note": "Synthetic task with no selected binding.",
+      "result_contract_id": "example.result-a/v1",
+      "task_id": "example.task-a"
+    }
+  ],
+  "version": "1.0.0"
+}

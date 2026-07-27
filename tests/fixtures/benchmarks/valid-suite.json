@@ -1,0 +1,38 @@
+{
+  "artifact_media_types": [
+    "application/vnd.example.synthetic-result+json"
+  ],
+  "default_case_limit": 8,
+  "default_concurrency": 1,
+  "owner_package": {
+    "package_id": "example.benchmark-package",
+    "version": "1.0.0"
+  },
+  "protocol": "asterion.benchmark-suite/v1",
+  "suite_id": "example.synthetic-suite",
+  "tasks": [
+    {
+      "binding_id": "example.binding-a",
+      "capability": {
+        "capability_id": "example.capability-a",
+        "version": "1.0.0"
+      },
+      "metric_contract_id": "example.metric-a/v1",
+      "note": "Synthetic task A.",
+      "result_contract_id": "example.result-a/v1",
+      "task_id": "example.task-a"
+    },
+    {
+      "binding_id": "example.binding-b",
+      "capability": {
+        "capability_id": "example.capability-b",
+        "version": "1.0.0"
+      },
+      "metric_contract_id": "example.metric-b/v1",
+      "note": "Synthetic task B.",
+      "result_contract_id": "example.result-b/v1",
+      "task_id": "example.task-b"
+    }
+  ],
+  "version": "1.0.0"
+}
