@@ -25,6 +25,7 @@
   "$defs": {
     "edges": {
       "type": "array",
+      "x-asterion-sorted-unique": true,
       "items": {
         "type": "string",
         "minLength": 1,

@@ -2,9 +2,9 @@ export type {
   AgentRuntimeClient,
   AssemblyManifest,
   AssemblyProtocolVersion,
-  PackageKind,
-  PackageManifest,
-  PackageProtocolVersion,
+  CapabilityKind,
+  CapabilityManifest,
+  CapabilityProtocolVersion,
   ProtocolVersion,
   RunEvent,
   RunRequest,
@@ -12,14 +12,14 @@ export type {
 } from "./types.js";
 export {
   ASSEMBLY_PROTOCOL_VERSION,
-  PACKAGE_PROTOCOL_VERSION,
+  CAPABILITY_PROTOCOL_VERSION,
   RUNTIME_PROTOCOL_VERSION,
 } from "./types.js";
 export {
   ProtocolValidationError,
   validateAssemblyManifest,
+  validateCapabilityManifest,
   validateEventStream,
-  validatePackageManifest,
   validateRunRequest,
   validateRuntimeManifest,
 } from "./validation.js";

@@ -28,6 +28,7 @@ class ProtocolCanonicalOrderingTests(unittest.TestCase):
 
     def test_rejects_shared_invalid_capability_ordering_fixtures(self) -> None:
         for name in (
+            "invalid-unsorted-edge.json",
             "invalid-unicode-scalar-order.json",
             "invalid-surrogate-edge.json",
             "invalid-line-terminator-surrogate-edge.json",

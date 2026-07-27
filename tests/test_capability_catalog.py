@@ -4,8 +4,10 @@ import json
 import os
 import tempfile
 import unittest
+from collections.abc import MutableMapping
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 import asterion.capabilities.catalog as capability_catalog
@@ -69,6 +71,24 @@ class CapabilityCatalogTests(unittest.TestCase):
         validated = validate_capability_manifest(value)
 
         self.assertEqual(validated["capability_id"], "example.research")
+
+    def test_validation_returns_a_deeply_immutable_snapshot(self) -> None:
+        value = manifest("example.research")
+
+        validated = validate_capability_manifest(value)
+        value["kind"] = "policy"
+        caller_edges = cast(list[str], value["provides_capabilities"])
+        caller_edges.append("z.changed")
+
+        self.assertEqual(validated["kind"], "capability")
+        self.assertEqual(
+            validated["provides_capabilities"],
+            ("example.research.provided",),
+        )
+        with self.assertRaises(TypeError):
+            cast(MutableMapping[str, object], validated)["kind"] = "policy"
+        with self.assertRaises(AttributeError):
+            cast(list[str], validated["provides_capabilities"]).append("z.changed")
 
     def test_rejects_the_legacy_package_identity_field(self) -> None:
         value = manifest("example.research")

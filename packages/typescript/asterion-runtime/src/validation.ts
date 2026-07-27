@@ -8,7 +8,7 @@ import {
 
 import type {
   AssemblyManifest,
-  PackageManifest,
+  CapabilityManifest,
   RunEvent,
   RunRequest,
   RuntimeManifest,
@@ -20,10 +20,22 @@ function readSchema(name: string): object {
   ) as object;
 }
 
-const ajv = new Ajv2020({ allErrors: true });
+export function addAsterionSchemaKeywords(validator: Ajv2020): Ajv2020 {
+  validator.addKeyword({
+    keyword: "x-asterion-sorted-unique",
+    type: "array",
+    schemaType: "boolean",
+    validate: (enabled: boolean, data: unknown[]) =>
+      !enabled || isSortedUniqueScalarStrings(data),
+    errors: false,
+  });
+  return validator;
+}
+
+const ajv = addAsterionSchemaKeywords(new Ajv2020({ allErrors: true }));
 const manifestValidator = ajv.compile(readSchema("runtime-manifest.schema.json"));
-const packageManifestValidator = ajv.compile(
-  readSchema("package-manifest.schema.json"),
+const capabilityManifestValidator = ajv.compile(
+  readSchema("capability-manifest.schema.json"),
 );
 const assemblyManifestValidator = ajv.compile(
   readSchema("assembly.schema.json"),
@@ -70,16 +82,19 @@ function requireSortedUnique(
   label: string,
   values: readonly string[],
 ): void {
-  if (
-    values.some(hasSurrogateCodePoint) ||
-    values.some(
+  if (!isSortedUniqueScalarStrings(values)) {
+    throw new ProtocolValidationError(label, null);
+  }
+}
+
+function isSortedUniqueScalarStrings(values: readonly unknown[]): boolean {
+  return values.every((value): value is string => typeof value === "string") &&
+    !values.some(hasSurrogateCodePoint) &&
+    !values.some(
       (value, index) =>
         index > 0 &&
         compareUnicodeScalarStrings(values[index - 1]!, value) >= 0,
-    )
-  ) {
-    throw new ProtocolValidationError(label, null);
-  }
+    );
 }
 
 function hasSurrogateCodePoint(value: string): boolean {
@@ -122,7 +137,7 @@ export function validateRuntimeManifest(value: unknown): RuntimeManifest {
   return manifest;
 }
 
-const packageEdgeFields = [
+const capabilityEdgeFields = [
   "provides_capabilities",
   "requires_capabilities",
   "requires_policies",
@@ -132,14 +147,14 @@ const packageEdgeFields = [
   "consumes_artifacts",
 ] as const;
 
-export function validatePackageManifest(value: unknown): PackageManifest {
-  const manifest = requireValid<PackageManifest>(
-    "package manifest",
-    packageManifestValidator,
+export function validateCapabilityManifest(value: unknown): CapabilityManifest {
+  const manifest = requireValid<CapabilityManifest>(
+    "capability manifest",
+    capabilityManifestValidator,
     value,
   );
-  for (const field of packageEdgeFields) {
-    requireSortedUnique(`package manifest ${field}`, manifest[field]);
+  for (const field of capabilityEdgeFields) {
+    requireSortedUnique(`capability manifest ${field}`, manifest[field]);
   }
   return manifest;
 }

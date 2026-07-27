@@ -1,0 +1,13 @@
+{
+  "protocol": "asterion.capability/v1",
+  "capability_id": "example.research",
+  "version": "1.0.0",
+  "kind": "research",
+  "provides_capabilities": ["z.last", "a.first"],
+  "requires_capabilities": [],
+  "requires_policies": [],
+  "emits_events": ["research.completed"],
+  "consumes_events": [],
+  "produces_artifacts": ["application/vnd.example.research+json"],
+  "consumes_artifacts": []
+}

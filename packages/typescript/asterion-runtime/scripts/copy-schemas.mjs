@@ -5,9 +5,9 @@ const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 const source = fileURLToPath(
   new URL("../../../../schemas/agent-runtime/v1", import.meta.url),
 );
-const packageManifestSource = fileURLToPath(
+const capabilityManifestSource = fileURLToPath(
   new URL(
-    "../../../../schemas/packages/v1/package-manifest.schema.json",
+    "../../../../schemas/capabilities/v1/capability-manifest.schema.json",
     import.meta.url,
   ),
 );
@@ -19,5 +19,8 @@ const destination = `${packageRoot}/dist/schemas`;
 rmSync(destination, { force: true, recursive: true });
 mkdirSync(destination, { recursive: true });
 cpSync(source, destination, { recursive: true });
-cpSync(packageManifestSource, `${destination}/package-manifest.schema.json`);
+cpSync(
+  capabilityManifestSource,
+  `${destination}/capability-manifest.schema.json`,
+);
 cpSync(assemblyManifestSource, `${destination}/assembly.schema.json`);

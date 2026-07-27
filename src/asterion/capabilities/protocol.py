@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from types import MappingProxyType
 
 from asterion.protocol_ordering import is_sorted_unique_scalar_strings
 
@@ -45,7 +46,7 @@ class CapabilityProtocolError(ValueError):
 
 
 def validate_capability_manifest(value: object) -> Mapping[str, object]:
-    """Validate one closed, portable capability manifest."""
+    """Validate and return one immutable capability-manifest snapshot."""
 
     if not isinstance(value, Mapping) or not all(
         isinstance(key, str) for key in value
@@ -74,4 +75,9 @@ def validate_capability_manifest(value: object) -> Mapping[str, object]:
             or not is_sorted_unique_scalar_strings(values)
         ):
             raise CapabilityProtocolError(f"{field} must be a sorted unique string array")
-    return value
+    return MappingProxyType(
+        {
+            key: tuple(item) if key in EDGE_FIELDS else item
+            for key, item in value.items()
+        }
+    )

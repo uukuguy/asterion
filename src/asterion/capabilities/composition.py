@@ -31,8 +31,8 @@ def compose_capabilities(
     """Validate and topologically order a portable capability graph."""
 
     capabilities: dict[str, Mapping[str, object]] = {}
-    for manifest in manifests:
-        validate_capability_manifest(manifest)
+    for value in manifests:
+        manifest = validate_capability_manifest(value)
         capability_id = manifest["capability_id"]
         assert isinstance(capability_id, str)
         if capability_id in capabilities:
@@ -130,9 +130,9 @@ def compose_capabilities(
     )
 
 
-def _edges(manifest: Mapping[str, object], field: str) -> list[str]:
+def _edges(manifest: Mapping[str, object], field: str) -> tuple[str, ...]:
     values = manifest[field]
-    assert isinstance(values, list) and all(isinstance(value, str) for value in values)
+    assert isinstance(values, tuple) and all(isinstance(value, str) for value in values)
     return values
 
 
