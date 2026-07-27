@@ -175,3 +175,4 @@
 - 08:28 Planned four staged delivery boundaries so capability-package implementation remains source-neutral and reviewable [e873093]
 - 08:29 Checkpointed approved execution plans so recovery starts at protocol foundation without stale design gating [ae87535]
 - 08:42 Corrected provider-free planning and launcher closure gaps before implementation began [391c35b]
+- 08:47 Renamed the runtime wire protocol to Asterion-owned identity across schemas, validators, fixtures, and TypeScript [8980952]
