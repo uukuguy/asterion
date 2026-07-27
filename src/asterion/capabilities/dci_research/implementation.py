@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from asterion.dci.services import LocalCorpusService
-from asterion.capabilities.execution import (
+from asterion.capability_sdk import (
     CapabilityExecutionError,
     CapabilityExecutionResult,
     CapabilityInvocation,

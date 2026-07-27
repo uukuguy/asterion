@@ -10,23 +10,23 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
-from asterion.capabilities.catalog import CapabilityRef
 from asterion.capabilities.execution import (
     CapabilityImplementationBinding,
+    InProcessArtifactPayload,
+    project_public_value,
 )
 from asterion.capabilities.dci_research.implementation import (
     DciLocalResearchImplementation,
 )
-from asterion.dci.analysis import aggregate_results
-from asterion.dci.provenance import dci_complete_implementation_identity
-from asterion.dci.services import AnswerJudgeService, LocalCorpusService
-from asterion.capabilities.execution import (
-    InProcessArtifactPayload,
+from asterion.capability_sdk import (
     CapabilityExecutionError,
     CapabilityExecutionResult,
     CapabilityInvocation,
-    project_public_value,
+    CapabilityRef,
 )
+from asterion.dci.analysis import aggregate_results
+from asterion.dci.provenance import dci_complete_implementation_identity
+from asterion.dci.services import AnswerJudgeService, LocalCorpusService
 from asterion.runtime.host import RunRequest
 from asterion.runtime.protocol import ProtocolError, validate_event_stream
 

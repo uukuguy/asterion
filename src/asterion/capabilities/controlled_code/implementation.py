@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from asterion.capabilities.catalog import CapabilityRef
-from asterion.capabilities.execution import (
+from asterion.capabilities.execution import CapabilityImplementationBinding
+from asterion.capability_sdk import (
     CapabilityExecutionError,
     CapabilityExecutionResult,
-    CapabilityImplementationBinding,
     CapabilityInvocation,
+    CapabilityRef,
 )
 from asterion.services.controlled_executor import ControlledExecutionRequest
 
