@@ -1,0 +1,17 @@
+{
+  "protocol": "asterion.capability-source/v1",
+  "source_id": "example.local",
+  "kind": "local-directory",
+  "package": {
+    "package_id": "example.package",
+    "version": "1.0.0"
+  },
+  "payload_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "locator": {
+    "root": "/operator/private/example-package"
+  },
+  "provider_factory": {
+    "module": "example.provider",
+    "name": "create_provider"
+  }
+}

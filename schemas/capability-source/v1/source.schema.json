@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asterion.local/schemas/capability-source/v1/source.schema.json",
+  "title": "Asterion Capability Source Declaration v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "source_id",
+    "kind",
+    "package",
+    "payload_sha256",
+    "locator",
+    "provider_factory"
+  ],
+  "properties": {
+    "protocol": {"const": "asterion.capability-source/v1"},
+    "source_id": {"$ref": "#/$defs/identifier"},
+    "kind": {
+      "enum": [
+        "archive",
+        "builtin",
+        "local-directory",
+        "python-distribution",
+        "registry"
+      ]
+    },
+    "package": {"$ref": "#/$defs/capability_package_ref"},
+    "payload_sha256": {
+      "oneOf": [
+        {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        {"type": "null"}
+      ]
+    },
+    "locator": {"$ref": "#/$defs/private_string_map"},
+    "provider_factory": {"$ref": "#/$defs/private_string_map"}
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$"
+    },
+    "capability_package_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["package_id", "version"],
+      "properties": {
+        "package_id": {"$ref": "#/$defs/identifier"},
+        "version": {"$ref": "#/$defs/version"}
+      }
+    },
+    "private_string_map": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"type": "string", "minLength": 1},
+      "additionalProperties": {"type": "string", "minLength": 1}
+    }
+  }
+}

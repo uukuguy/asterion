@@ -20,19 +20,19 @@
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "x-asterion-sorted-unique": true,
+      "x-asterion-sorted-unique": ["capability_id", "version"],
       "items": {"$ref": "#/$defs/capability_ref"}
     },
     "benchmark_suites": {
       "type": "array",
       "uniqueItems": true,
-      "x-asterion-sorted-unique": true,
+      "x-asterion-sorted-unique": ["suite_id", "version"],
       "items": {"$ref": "#/$defs/benchmark_suite_ref"}
     },
     "resources": {
       "type": "array",
       "uniqueItems": true,
-      "x-asterion-sorted-unique": true,
+      "x-asterion-sorted-unique": ["resource_id", "media_type", "sha256"],
       "items": {"$ref": "#/$defs/resource"}
     }
   },

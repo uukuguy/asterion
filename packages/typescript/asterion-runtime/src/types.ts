@@ -2,11 +2,105 @@ export const RUNTIME_PROTOCOL_VERSION = "asterion.agent-runtime/v1" as const;
 export const CAPABILITY_PROTOCOL_VERSION = "asterion.capability/v1" as const;
 export const APPLICATION_ASSEMBLY_PROTOCOL_VERSION =
   "asterion.application-assembly/v1" as const;
+export const CAPABILITY_PACKAGE_PROTOCOL_VERSION =
+  "asterion.capability-package/v1" as const;
+export const BENCHMARK_SUITE_PROTOCOL_VERSION =
+  "asterion.benchmark-suite/v1" as const;
+export const CAPABILITY_SOURCE_PROTOCOL_VERSION =
+  "asterion.capability-source/v1" as const;
+export const CAPABILITY_LOCK_PROTOCOL_VERSION =
+  "asterion.capability-lock/v1" as const;
 
 export type ProtocolVersion = typeof RUNTIME_PROTOCOL_VERSION;
 export type CapabilityProtocolVersion = typeof CAPABILITY_PROTOCOL_VERSION;
 export type AssemblyProtocolVersion =
   typeof APPLICATION_ASSEMBLY_PROTOCOL_VERSION;
+export type CapabilityPackageProtocolVersion =
+  typeof CAPABILITY_PACKAGE_PROTOCOL_VERSION;
+export type BenchmarkSuiteProtocolVersion =
+  typeof BENCHMARK_SUITE_PROTOCOL_VERSION;
+export type CapabilitySourceProtocolVersion =
+  typeof CAPABILITY_SOURCE_PROTOCOL_VERSION;
+export type CapabilityLockProtocolVersion =
+  typeof CAPABILITY_LOCK_PROTOCOL_VERSION;
+
+export interface CapabilityPackageRef {
+  readonly package_id: string;
+  readonly version: string;
+}
+
+export interface CapabilityRef {
+  readonly capability_id: string;
+  readonly version: string;
+}
+
+export interface BenchmarkSuiteRef {
+  readonly suite_id: string;
+  readonly version: string;
+}
+
+export interface ResourceIdentity {
+  readonly resource_id: string;
+  readonly media_type: string;
+  readonly sha256: string;
+}
+
+export interface CapabilityPackageManifest {
+  readonly protocol: CapabilityPackageProtocolVersion;
+  readonly package_id: string;
+  readonly version: string;
+  readonly capabilities: readonly CapabilityRef[];
+  readonly benchmark_suites: readonly BenchmarkSuiteRef[];
+  readonly resources: readonly ResourceIdentity[];
+}
+
+export interface BenchmarkTaskManifest {
+  readonly task_id: string;
+  readonly capability: CapabilityRef;
+  readonly binding_id: string;
+  readonly metric_contract_id: string;
+  readonly result_contract_id: string;
+  readonly note: string;
+}
+
+export interface BenchmarkSuiteManifest {
+  readonly protocol: BenchmarkSuiteProtocolVersion;
+  readonly suite_id: string;
+  readonly version: string;
+  readonly owner_package: CapabilityPackageRef;
+  readonly tasks: readonly BenchmarkTaskManifest[];
+  readonly artifact_media_types: readonly string[];
+  readonly default_case_limit: number;
+  readonly default_concurrency: number;
+}
+
+export type CapabilitySourceKind =
+  | "archive"
+  | "builtin"
+  | "local-directory"
+  | "python-distribution"
+  | "registry";
+
+export interface CapabilitySourceDeclaration {
+  readonly protocol: CapabilitySourceProtocolVersion;
+  readonly source_id: string;
+  readonly kind: CapabilitySourceKind;
+  readonly package: CapabilityPackageRef;
+  readonly payload_sha256: string | null;
+  readonly locator: Readonly<Record<string, string>>;
+  readonly provider_factory: Readonly<Record<string, string>>;
+}
+
+export interface CapabilitySourceLockEntry {
+  readonly package: CapabilityPackageRef;
+  readonly payload_sha256: string;
+  readonly source_id: string;
+}
+
+export interface CapabilitySourceLock {
+  readonly protocol: CapabilityLockProtocolVersion;
+  readonly entries: readonly CapabilitySourceLockEntry[];
+}
 
 export interface AssemblyManifest {
   readonly protocol: AssemblyProtocolVersion;

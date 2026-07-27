@@ -8,7 +8,11 @@ import {
 
 import type {
   AssemblyManifest,
+  BenchmarkSuiteManifest,
+  CapabilityPackageManifest,
   CapabilityManifest,
+  CapabilitySourceDeclaration,
+  CapabilitySourceLock,
   RunEvent,
   RunRequest,
   RuntimeManifest,
@@ -24,9 +28,23 @@ export function addAsterionSchemaKeywords(validator: Ajv2020): Ajv2020 {
   validator.addKeyword({
     keyword: "x-asterion-sorted-unique",
     type: "array",
-    schemaType: "boolean",
-    validate: (enabled: boolean, data: unknown[]) =>
-      !enabled || isSortedUniqueScalarStrings(data),
+    schemaType: ["boolean", "array"],
+    metaSchema: {
+      anyOf: [
+        { type: "boolean" },
+        {
+          type: "array",
+          minItems: 1,
+          uniqueItems: true,
+          items: { type: "string", minLength: 1 },
+        },
+      ],
+    },
+    validate: (ordering: boolean | string[], data: unknown[]) =>
+      ordering === false ||
+      (ordering === true
+        ? isSortedUniqueScalarStrings(data)
+        : isSortedUniqueObjectTuples(data, ordering)),
     errors: false,
   });
   return validator;
@@ -39,6 +57,18 @@ const capabilityManifestValidator = ajv.compile(
 );
 const assemblyManifestValidator = ajv.compile(
   readSchema("application-assembly.schema.json"),
+);
+const capabilityPackageManifestValidator = ajv.compile(
+  readSchema("capability-package.schema.json"),
+);
+const benchmarkSuiteManifestValidator = ajv.compile(
+  readSchema("benchmark-suite.schema.json"),
+);
+const capabilitySourceDeclarationValidator = ajv.compile(
+  readSchema("capability-source.schema.json"),
+);
+const capabilitySourceLockValidator = ajv.compile(
+  readSchema("capability-lock.schema.json"),
 );
 const requestValidator = ajv.compile(readSchema("run-request.schema.json"));
 const eventValidator = ajv.compile(readSchema("event.schema.json"));
@@ -125,6 +155,62 @@ function isSortedUniqueScalarStrings(values: readonly unknown[]): boolean {
     );
 }
 
+function isSortedUniqueObjectTuples(
+  values: readonly unknown[],
+  paths: readonly string[],
+): boolean {
+  const tuples = values.map((value) =>
+    paths.map((path) => readTupleString(value, path)),
+  );
+  if (
+    tuples.some((tuple) =>
+      tuple.some(
+        (value) => value === null || hasSurrogateCodePoint(value),
+      ),
+    )
+  ) {
+    return false;
+  }
+  return !tuples.some((tuple, index) => {
+    if (index === 0) {
+      return false;
+    }
+    return compareStringTuples(
+      tuples[index - 1] as readonly string[],
+      tuple as readonly string[],
+    ) >= 0;
+  });
+}
+
+function readTupleString(value: unknown, path: string): string | null {
+  let selected: unknown = value;
+  for (const field of path.split(".")) {
+    if (
+      selected === null ||
+      typeof selected !== "object" ||
+      Array.isArray(selected) ||
+      !Object.hasOwn(selected, field)
+    ) {
+      return null;
+    }
+    selected = (selected as Record<string, unknown>)[field];
+  }
+  return typeof selected === "string" ? selected : null;
+}
+
+function compareStringTuples(
+  left: readonly string[],
+  right: readonly string[],
+): number {
+  for (const [index, leftValue] of left.entries()) {
+    const order = compareUnicodeScalarStrings(leftValue, right[index]!);
+    if (order !== 0) {
+      return order;
+    }
+  }
+  return 0;
+}
+
 function hasSurrogateCodePoint(value: string): boolean {
   for (const character of value) {
     const codePoint = character.codePointAt(0)!;
@@ -185,6 +271,44 @@ export function validateCapabilityManifest(value: unknown): CapabilityManifest {
     requireSortedUnique(`capability manifest ${field}`, manifest[field]);
   }
   return manifest;
+}
+
+export function validateCapabilityPackageManifest(
+  value: unknown,
+): CapabilityPackageManifest {
+  return requireValid<CapabilityPackageManifest>(
+    "capability package manifest",
+    capabilityPackageManifestValidator,
+    value,
+  );
+}
+
+export function validateBenchmarkSuiteManifest(
+  value: unknown,
+): BenchmarkSuiteManifest {
+  return requireValid<BenchmarkSuiteManifest>(
+    "benchmark suite manifest",
+    benchmarkSuiteManifestValidator,
+    value,
+  );
+}
+
+export function validateCapabilitySourceDeclaration(
+  value: unknown,
+): CapabilitySourceDeclaration {
+  if (!capabilitySourceDeclarationValidator(value)) {
+    throw new ProtocolValidationError("capability source declaration", null);
+  }
+  return immutableSnapshot(value as CapabilitySourceDeclaration);
+}
+
+export function validateCapabilitySourceLock(
+  value: unknown,
+): CapabilitySourceLock {
+  if (!capabilitySourceLockValidator(value)) {
+    throw new ProtocolValidationError("capability source lock", null);
+  }
+  return immutableSnapshot(value as CapabilitySourceLock);
 }
 
 const assemblyEdgeFields = [

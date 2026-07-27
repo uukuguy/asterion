@@ -1,7 +1,11 @@
 import type {
   AgentRuntimeClient,
   AssemblyManifest,
+  BenchmarkSuiteManifest,
+  CapabilityPackageManifest,
   CapabilityManifest,
+  CapabilitySourceDeclaration,
+  CapabilitySourceLock,
   RunEvent,
   RunRequest,
   RuntimeManifest,
@@ -32,6 +36,60 @@ export const fixtureCapability: CapabilityManifest = {
   consumes_events: ["run.started"],
   produces_artifacts: ["application/vnd.dci.research+json"],
   consumes_artifacts: ["text/plain"],
+};
+
+export const fixtureCapabilityPackage: CapabilityPackageManifest = {
+  protocol: "asterion.capability-package/v1",
+  package_id: "example.package",
+  version: "1.0.0",
+  capabilities: [{ capability_id: "example.research", version: "1.0.0" }],
+  benchmark_suites: [{ suite_id: "example.suite", version: "1.0.0" }],
+  resources: [],
+};
+
+export const fixtureBenchmarkSuite: BenchmarkSuiteManifest = {
+  protocol: "asterion.benchmark-suite/v1",
+  suite_id: "example.suite",
+  version: "1.0.0",
+  owner_package: { package_id: "example.package", version: "1.0.0" },
+  tasks: [
+    {
+      task_id: "example.task",
+      capability: { capability_id: "example.research", version: "1.0.0" },
+      binding_id: "example.task",
+      metric_contract_id: "example.metric/v1",
+      result_contract_id: "example.result/v1",
+      note: "",
+    },
+  ],
+  artifact_media_types: ["application/json"],
+  default_case_limit: 10,
+  default_concurrency: 1,
+};
+
+export const fixtureCapabilitySource: CapabilitySourceDeclaration = {
+  protocol: "asterion.capability-source/v1",
+  source_id: "example.local",
+  kind: "local-directory",
+  package: { package_id: "example.package", version: "1.0.0" },
+  payload_sha256: null,
+  locator: { root: "/operator/private/example-package" },
+  provider_factory: {
+    module: "example.provider",
+    name: "create_provider",
+  },
+};
+
+export const fixtureCapabilityLock: CapabilitySourceLock = {
+  protocol: "asterion.capability-lock/v1",
+  entries: [
+    {
+      package: { package_id: "example.package", version: "1.0.0" },
+      payload_sha256:
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      source_id: "example.local",
+    },
+  ],
 };
 
 export class FixtureClient implements AgentRuntimeClient {

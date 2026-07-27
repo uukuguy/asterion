@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asterion.local/schemas/capability-source/v1/lock.schema.json",
+  "title": "Asterion Capability Source Lock v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "entries"],
+  "properties": {
+    "protocol": {"const": "asterion.capability-lock/v1"},
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "x-asterion-sorted-unique": [
+        "package.package_id",
+        "package.version",
+        "payload_sha256",
+        "source_id"
+      ],
+      "items": {"$ref": "#/$defs/lock_entry"}
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$"
+    },
+    "capability_package_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["package_id", "version"],
+      "properties": {
+        "package_id": {"$ref": "#/$defs/identifier"},
+        "version": {"$ref": "#/$defs/version"}
+      }
+    },
+    "lock_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["package", "payload_sha256", "source_id"],
+      "properties": {
+        "package": {"$ref": "#/$defs/capability_package_ref"},
+        "payload_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "source_id": {"$ref": "#/$defs/identifier"}
+      }
+    }
+  }
+}

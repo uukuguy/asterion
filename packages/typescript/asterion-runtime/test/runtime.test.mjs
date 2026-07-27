@@ -5,11 +5,19 @@ import test from "node:test";
 import Ajv2020 from "ajv/dist/2020.js";
 
 import {
+  BENCHMARK_SUITE_PROTOCOL_VERSION,
   CAPABILITY_PROTOCOL_VERSION,
+  CAPABILITY_LOCK_PROTOCOL_VERSION,
+  CAPABILITY_PACKAGE_PROTOCOL_VERSION,
+  CAPABILITY_SOURCE_PROTOCOL_VERSION,
   RUNTIME_PROTOCOL_VERSION,
   ProtocolValidationError,
   validateAssemblyManifest,
+  validateBenchmarkSuiteManifest,
+  validateCapabilityPackageManifest,
   validateCapabilityManifest,
+  validateCapabilitySourceDeclaration,
+  validateCapabilitySourceLock,
   validateEventStream,
   validateRunRequest,
   validateRuntimeManifest,
@@ -19,6 +27,18 @@ import { addAsterionSchemaKeywords } from "../dist/src/validation.js";
 const fixtures = new URL("../../../../tests/fixtures/agent_runtime/v1/", import.meta.url);
 const capabilityFixtures = new URL(
   "../../../../tests/fixtures/capabilities/v1/",
+  import.meta.url,
+);
+const capabilityPackageFixtures = new URL(
+  "../../../../tests/fixtures/capability_packages/v1/",
+  import.meta.url,
+);
+const benchmarkSuiteFixtures = new URL(
+  "../../../../tests/fixtures/benchmark_suite/v1/",
+  import.meta.url,
+);
+const capabilitySourceFixtures = new URL(
+  "../../../../tests/fixtures/capability_source/v1/",
   import.meta.url,
 );
 const referenceManifestRoots = [
@@ -62,6 +82,24 @@ async function readCapabilityJson(name) {
   return JSON.parse(await readFile(new URL(name, capabilityFixtures), "utf8"));
 }
 
+async function readCapabilityPackageJson(name) {
+  return JSON.parse(
+    await readFile(new URL(name, capabilityPackageFixtures), "utf8"),
+  );
+}
+
+async function readBenchmarkSuiteJson(name) {
+  return JSON.parse(
+    await readFile(new URL(name, benchmarkSuiteFixtures), "utf8"),
+  );
+}
+
+async function readCapabilitySourceJson(name) {
+  return JSON.parse(
+    await readFile(new URL(name, capabilitySourceFixtures), "utf8"),
+  );
+}
+
 async function readAssemblyJson(name) {
   return JSON.parse(await readFile(new URL(name, assemblyFixtures), "utf8"));
 }
@@ -79,6 +117,10 @@ test("validates the shared runtime manifest fixtures", async () => {
     "../../../../schemas/agent-runtime/v1",
     "../../../../schemas/capabilities/v1/capability-manifest.schema.json",
     "../../../../schemas/application-assembly/v1/application-assembly.schema.json",
+    "../../../../schemas/capability-packages/v1/capability-package.schema.json",
+    "../../../../schemas/benchmark-suite/v1/benchmark-suite.schema.json",
+    "../../../../schemas/capability-source/v1/source.schema.json",
+    "../../../../schemas/capability-source/v1/lock.schema.json",
   ]) {
     assert.ok(copyScript.includes(source), source);
   }
@@ -92,6 +134,119 @@ test("validates the shared runtime manifest fixtures", async () => {
   ]) {
     const invalid = await readJson(name);
     assert.throws(() => validateRuntimeManifest(invalid), ProtocolValidationError);
+  }
+});
+
+test("validates capability-package object arrays by exact tuple keys", async () => {
+  assert.equal(
+    CAPABILITY_PACKAGE_PROTOCOL_VERSION,
+    "asterion.capability-package/v1",
+  );
+  const valid = await readCapabilityPackageJson("valid-minimal.json");
+  assert.deepEqual(validateCapabilityPackageManifest(valid), valid);
+  for (const name of [
+    "invalid-unsorted-refs.json",
+    "invalid-duplicate-refs.json",
+  ]) {
+    const invalid = await readCapabilityPackageJson(name);
+    assert.throws(
+      () => validateCapabilityPackageManifest(invalid),
+      ProtocolValidationError,
+    );
+  }
+
+  for (const [field, value] of [
+    ["capabilities", [...valid.capabilities].reverse()],
+    ["benchmark_suites", [
+      { suite_id: "example.zulu", version: "1.0.0" },
+      { suite_id: "example.alpha", version: "1.0.0" },
+    ]],
+    ["resources", [
+      {
+        resource_id: "example.zulu",
+        media_type: "application/json",
+        sha256: "a".repeat(64),
+      },
+      {
+        resource_id: "example.alpha",
+        media_type: "application/json",
+        sha256: "b".repeat(64),
+      },
+    ]],
+  ]) {
+    assert.throws(
+      () => validateCapabilityPackageManifest({ ...valid, [field]: value }),
+      ProtocolValidationError,
+      field,
+    );
+  }
+});
+
+test("validates declarative benchmark-suite fixtures", async () => {
+  assert.equal(
+    BENCHMARK_SUITE_PROTOCOL_VERSION,
+    "asterion.benchmark-suite/v1",
+  );
+  const valid = await readBenchmarkSuiteJson("valid-minimal.json");
+  assert.deepEqual(validateBenchmarkSuiteManifest(valid), valid);
+  for (const name of ["invalid-command.json", "invalid-task-order.json"]) {
+    const invalid = await readBenchmarkSuiteJson(name);
+    assert.throws(
+      () => validateBenchmarkSuiteManifest(invalid),
+      ProtocolValidationError,
+    );
+  }
+  for (const forbidden of [
+    "command",
+    "dataset_path",
+    "corpus_path",
+    "provider",
+    "environment",
+  ]) {
+    const changed = structuredClone(valid);
+    changed.tasks[0][forbidden] = "SECRET-AUTHORITY-VALUE";
+    assert.throws(
+      () => validateBenchmarkSuiteManifest(changed),
+      ProtocolValidationError,
+    );
+  }
+});
+
+test("validates operator source and lock fixtures with redacted errors", async () => {
+  assert.equal(
+    CAPABILITY_SOURCE_PROTOCOL_VERSION,
+    "asterion.capability-source/v1",
+  );
+  assert.equal(
+    CAPABILITY_LOCK_PROTOCOL_VERSION,
+    "asterion.capability-lock/v1",
+  );
+  const source = await readCapabilitySourceJson("valid-source.json");
+  const lock = await readCapabilitySourceJson("valid-lock.json");
+  assert.deepEqual(validateCapabilitySourceDeclaration(source), source);
+  assert.deepEqual(validateCapabilitySourceLock(lock), lock);
+
+  for (const [validator, name] of [
+    [
+      validateCapabilitySourceDeclaration,
+      "invalid-private-public-field.json",
+    ],
+    [validateCapabilitySourceLock, "invalid-duplicate-lock.json"],
+  ]) {
+    const invalid = await readCapabilitySourceJson(name);
+    assert.throws(() => validator(invalid), ProtocolValidationError);
+  }
+
+  const sentinel = "SECRET-PRIVATE-LOCATOR";
+  const changed = structuredClone(source);
+  changed.locator.root = sentinel;
+  changed.locator.nested = { value: sentinel };
+  try {
+    validateCapabilitySourceDeclaration(changed);
+    assert.fail("invalid private source locator was accepted");
+  } catch (error) {
+    assert.ok(error instanceof ProtocolValidationError);
+    assert.doesNotMatch(error.message, new RegExp(sentinel));
   }
 });
 
