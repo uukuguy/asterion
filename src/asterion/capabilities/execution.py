@@ -174,7 +174,7 @@ def validate_implementation_bindings(
 
     expected = {
         CapabilityRef(str(manifest["capability_id"]), str(manifest["version"]))
-        for manifest in plan.package_manifests
+        for manifest in plan.capability_manifests
         if manifest["kind"] in EXECUTABLE_CAPABILITY_KINDS
     }
     if set(resolved) - expected:

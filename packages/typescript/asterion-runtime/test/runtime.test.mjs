@@ -28,7 +28,7 @@ const referenceManifestRoots = [
 const sourceDirectory = new URL("../src/", import.meta.url);
 const schemaCopyScript = new URL("../scripts/copy-schemas.mjs", import.meta.url);
 const assemblyFixtures = new URL(
-  "../../../../tests/fixtures/assembly/v1/",
+  "../../../../tests/fixtures/application_assembly/v1/",
   import.meta.url,
 );
 const referenceAssemblyRoots = [
@@ -44,6 +44,14 @@ const referenceAssemblyRoots = [
 
 test("exports the Asterion-owned runtime protocol identity", () => {
   assert.equal(RUNTIME_PROTOCOL_VERSION, "asterion.agent-runtime/v1");
+});
+
+test("exports the Asterion-owned application assembly identity", async () => {
+  const runtime = await import("../dist/src/index.js");
+  assert.equal(
+    runtime.APPLICATION_ASSEMBLY_PROTOCOL_VERSION,
+    "asterion.application-assembly/v1",
+  );
 });
 
 async function readJson(name) {
@@ -70,7 +78,7 @@ test("validates the shared runtime manifest fixtures", async () => {
   for (const source of [
     "../../../../schemas/agent-runtime/v1",
     "../../../../schemas/capabilities/v1/capability-manifest.schema.json",
-    "../../../../schemas/assembly/v1/assembly.schema.json",
+    "../../../../schemas/application-assembly/v1/application-assembly.schema.json",
   ]) {
     assert.ok(copyScript.includes(source), source);
   }
@@ -227,7 +235,8 @@ test("validates the shared assembly fixtures", async () => {
   }
   for (const name of [
     "invalid-unknown-field.json",
-    "invalid-interpolated-package-ref-order.json",
+    "invalid-interpolated-capability-package-ref-order.json",
+    "invalid-interpolated-capability-ref-order.json",
     "invalid-unicode-scalar-order.json",
     "invalid-surrogate-edge.json",
     "invalid-line-terminator-surrogate-edge.json",
@@ -257,7 +266,7 @@ test("canonical schemas reject noncanonical values directly", async () => {
     },
     {
       schema: new URL(
-        "../../../../schemas/assembly/v1/assembly.schema.json",
+        "../../../../schemas/application-assembly/v1/application-assembly.schema.json",
         import.meta.url,
       ),
       fixture: await readAssemblyJson(
@@ -302,16 +311,51 @@ test("validates every checked-in reference assembly", async () => {
 
 test("rejects non-canonical assembly arrays", async () => {
   const valid = JSON.parse(
-    await readFile(new URL("valid-dci.json", assemblyFixtures), "utf8"),
+    await readFile(
+      new URL("valid-canonical-order.json", assemblyFixtures),
+      "utf8",
+    ),
   );
   assert.throws(
-    () => validateAssemblyManifest({ ...valid, packages: [...valid.packages].reverse() }),
+    () =>
+      validateAssemblyManifest({
+        ...valid,
+        capability_packages: [...valid.capability_packages].reverse(),
+      }),
+    ProtocolValidationError,
+  );
+  assert.throws(
+    () =>
+      validateAssemblyManifest({
+        ...valid,
+        capabilities: [...valid.capabilities].reverse(),
+      }),
     ProtocolValidationError,
   );
   assert.throws(
     () => validateAssemblyManifest({ ...valid, host_events: ["z.last", "a.first"] }),
     ProtocolValidationError,
   );
+});
+
+test("rejects every legacy assembly identity and field name", async () => {
+  const valid = await readAssemblyJson("valid-dci.json");
+  const { capabilities, ...withoutCapabilities } = valid;
+  for (const invalid of [
+    { ...valid, protocol: "dci.assembly/v1" },
+    { ...withoutCapabilities, packages: capabilities },
+    {
+      ...valid,
+      capabilities: [
+        { package_id: "dci.research", version: "1.0.0" },
+      ],
+    },
+  ]) {
+    assert.throws(
+      () => validateAssemblyManifest(invalid),
+      ProtocolValidationError,
+    );
+  }
 });
 
 test("keeps assembly resolution outside the TypeScript host", async () => {

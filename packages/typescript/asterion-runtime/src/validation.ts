@@ -38,7 +38,7 @@ const capabilityManifestValidator = ajv.compile(
   readSchema("capability-manifest.schema.json"),
 );
 const assemblyManifestValidator = ajv.compile(
-  readSchema("assembly.schema.json"),
+  readSchema("application-assembly.schema.json"),
 );
 const requestValidator = ajv.compile(readSchema("run-request.schema.json"));
 const eventValidator = ajv.compile(readSchema("event.schema.json"));
@@ -83,6 +83,34 @@ function requireSortedUnique(
   values: readonly string[],
 ): void {
   if (!isSortedUniqueScalarStrings(values)) {
+    throw new ProtocolValidationError(label, null);
+  }
+}
+
+function requireCanonicalExactReferences(
+  label: string,
+  references: readonly (readonly [string, string])[],
+): void {
+  if (
+    references.some(([identity, version]) =>
+      hasSurrogateCodePoint(identity) || hasSurrogateCodePoint(version)
+    ) ||
+    references.some(([identity, version], index) => {
+      if (index === 0) {
+        return false;
+      }
+      const [previousIdentity, previousVersion] = references[index - 1]!;
+      const identityOrder = compareUnicodeScalarStrings(
+        previousIdentity,
+        identity,
+      );
+      return (
+        identityOrder > 0 ||
+        (identityOrder === 0 &&
+          compareUnicodeScalarStrings(previousVersion, version) >= 0)
+      );
+    })
+  ) {
     throw new ProtocolValidationError(label, null);
   }
 }
@@ -172,28 +200,20 @@ export function validateAssemblyManifest(value: unknown): AssemblyManifest {
     assemblyManifestValidator,
     value,
   );
-  if (
-    assembly.packages.some(({ package_id, version }) =>
-      hasSurrogateCodePoint(package_id) || hasSurrogateCodePoint(version)
-    ) ||
-    assembly.packages.some((reference, index) => {
-      if (index === 0) {
-        return false;
-      }
-      const previous = assembly.packages[index - 1]!;
-      const packageIdOrder = compareUnicodeScalarStrings(
-        previous.package_id,
-        reference.package_id,
-      );
-      return (
-        packageIdOrder > 0 ||
-        (packageIdOrder === 0 &&
-          compareUnicodeScalarStrings(previous.version, reference.version) >= 0)
-      );
-    })
-  ) {
-    throw new ProtocolValidationError("assembly manifest packages", null);
-  }
+  requireCanonicalExactReferences(
+    "assembly manifest capability_packages",
+    assembly.capability_packages.map(({ package_id, version }) => [
+      package_id,
+      version,
+    ]),
+  );
+  requireCanonicalExactReferences(
+    "assembly manifest capabilities",
+    assembly.capabilities.map(({ capability_id, version }) => [
+      capability_id,
+      version,
+    ]),
+  );
   for (const field of assemblyEdgeFields) {
     requireSortedUnique(`assembly manifest ${field}`, assembly[field]);
   }

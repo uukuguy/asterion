@@ -69,7 +69,7 @@ async def run_composed_application(
     events: list[Mapping[str, object]] = []
     artifacts: list[Mapping[str, object]] = []
     artifact_ids: set[str] = set()
-    for manifest in plan.package_manifests:
+    for manifest in plan.capability_manifests:
         if manifest["kind"] not in EXECUTABLE_CAPABILITY_KINDS:
             continue
         if signal is not None and signal.cancelled:

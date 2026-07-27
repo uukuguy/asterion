@@ -48,11 +48,16 @@ def write_assembly(
     path.write_text(
         json.dumps(
             {
-                "protocol": "dci.assembly/v1",
+                "protocol": "asterion.application-assembly/v1",
                 "application_id": application_id,
                 "version": "1.0.0",
                 "runtime_id": runtime_id,
-                "packages": [{"package_id": "example.research", "version": "1.0.0"}],
+                "capability_packages": [
+                    {"package_id": "example.package", "version": "1.0.0"}
+                ],
+                "capabilities": [
+                    {"capability_id": "example.research", "version": "1.0.0"}
+                ],
                 "host_capabilities": [],
                 "host_policies": [],
                 "host_events": ["run.started"],

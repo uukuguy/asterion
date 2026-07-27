@@ -1,18 +1,24 @@
 export const RUNTIME_PROTOCOL_VERSION = "asterion.agent-runtime/v1" as const;
 export const CAPABILITY_PROTOCOL_VERSION = "asterion.capability/v1" as const;
-export const ASSEMBLY_PROTOCOL_VERSION = "dci.assembly/v1" as const;
+export const APPLICATION_ASSEMBLY_PROTOCOL_VERSION =
+  "asterion.application-assembly/v1" as const;
 
 export type ProtocolVersion = typeof RUNTIME_PROTOCOL_VERSION;
 export type CapabilityProtocolVersion = typeof CAPABILITY_PROTOCOL_VERSION;
-export type AssemblyProtocolVersion = typeof ASSEMBLY_PROTOCOL_VERSION;
+export type AssemblyProtocolVersion =
+  typeof APPLICATION_ASSEMBLY_PROTOCOL_VERSION;
 
 export interface AssemblyManifest {
   readonly protocol: AssemblyProtocolVersion;
   readonly application_id: string;
   readonly version: string;
   readonly runtime_id: string;
-  readonly packages: readonly {
+  readonly capability_packages: readonly {
     readonly package_id: string;
+    readonly version: string;
+  }[];
+  readonly capabilities: readonly {
+    readonly capability_id: string;
     readonly version: string;
   }[];
   readonly host_capabilities: readonly string[];

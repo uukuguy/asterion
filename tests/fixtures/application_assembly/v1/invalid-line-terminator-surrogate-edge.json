@@ -1,10 +1,13 @@
 {
-  "protocol": "dci.assembly/v1",
+  "protocol": "asterion.application-assembly/v1",
   "application_id": "example.surrogate-line",
   "version": "1.0.0",
   "runtime_id": "example.runtime",
-  "packages": [
-    {"package_id": "a", "version": "1.0.0"}
+  "capability_packages": [
+    {"package_id": "example.package", "version": "1.0.0"}
+  ],
+  "capabilities": [
+    {"capability_id": "a", "version": "1.0.0"}
   ],
   "host_capabilities": [],
   "host_policies": [],

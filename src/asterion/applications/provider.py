@@ -227,11 +227,17 @@ def _validate_application_metadata(
         runtime_id = assembly["runtime_id"]
         assert isinstance(runtime_id, str)
         assembly_runtime_ids.append(runtime_id)
-        package_refs = {
-            CapabilityRef(item["package_id"], item["version"])
-            for item in assembly["packages"]
+        raw_capabilities = assembly["capabilities"]
+        assert isinstance(raw_capabilities, list)
+        for item in raw_capabilities:
+            assert isinstance(item, dict)
+            assert isinstance(item["capability_id"], str)
+            assert isinstance(item["version"], str)
+        capability_refs = {
+            CapabilityRef(item["capability_id"], item["version"])
+            for item in raw_capabilities
         }
-        if not refs.issubset(package_refs):
+        if not refs.issubset(capability_refs):
             raise ApplicationProviderError(
                 "installed application binding is unavailable"
             )

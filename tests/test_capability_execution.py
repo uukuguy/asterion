@@ -155,13 +155,16 @@ def evidence_plan():
         )
     )
     assembly = {
-        "protocol": "dci.assembly/v1",
+        "protocol": "asterion.application-assembly/v1",
         "application_id": "evidence.application",
         "version": "1.0.0",
         "runtime_id": "pi.reference",
-        "packages": [
-            {"package_id": "evidence.consumer", "version": "1.0.0"},
-            {"package_id": "evidence.producer", "version": "1.0.0"},
+        "capability_packages": [
+            {"package_id": "evidence.package", "version": "1.0.0"}
+        ],
+        "capabilities": [
+            {"capability_id": "evidence.consumer", "version": "1.0.0"},
+            {"capability_id": "evidence.producer", "version": "1.0.0"},
         ],
         "host_capabilities": [],
         "host_policies": [],
@@ -398,7 +401,7 @@ class CapabilityImplementationBindingTests(unittest.TestCase):
 
 class CapabilityExecutionValueTests(unittest.TestCase):
     def test_invocation_and_result_are_deeply_immutable(self) -> None:
-        manifest = resolve_plan().package_manifests[1]
+        manifest = resolve_plan().capability_manifests[1]
         invocation = CapabilityInvocation(
             capability_ref=CapabilityRef("dci.research", "1.0.0"),
             manifest=manifest,
@@ -449,7 +452,7 @@ class CapabilityResultValidationTests(unittest.TestCase):
     def manifest(self):
         return next(
             manifest
-            for manifest in resolve_plan().package_manifests
+            for manifest in resolve_plan().capability_manifests
             if manifest["capability_id"] == "dci.research"
         )
 

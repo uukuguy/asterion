@@ -13,11 +13,12 @@ from asterion.capabilities.composition import (
     CapabilityCompositionError,
     compose_capabilities,
 )
+from asterion.capability_packages.protocol import CapabilityPackageRef
 from asterion.protocol_ordering import is_sorted_unique_scalar_strings
 from asterion.runtime.protocol import ProtocolError, validate_runtime_manifest
 
 
-ASSEMBLY_PROTOCOL_VERSION = "dci.assembly/v1"
+APPLICATION_ASSEMBLY_PROTOCOL_VERSION = "asterion.application-assembly/v1"
 IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 SEMANTIC_VERSION = re.compile(
     r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
@@ -33,7 +34,8 @@ REQUIRED_FIELDS = {
     "application_id",
     "version",
     "runtime_id",
-    "packages",
+    "capability_packages",
+    "capabilities",
     *EDGE_FIELDS,
 }
 
@@ -47,8 +49,9 @@ class AssemblyPlan:
     application_id: str
     version: str
     runtime_id: str
-    package_refs: tuple[CapabilityRef, ...]
-    package_manifests: tuple[Mapping[str, object], ...]
+    capability_package_refs: tuple[CapabilityPackageRef, ...]
+    capability_refs: tuple[CapabilityRef, ...]
+    capability_manifests: tuple[Mapping[str, object], ...]
     composition: CapabilityComposition
     runtime_capabilities: tuple[str, ...]
     host_capabilities: tuple[str, ...]
@@ -57,7 +60,7 @@ class AssemblyPlan:
 
 
 def validate_assembly_manifest(value: Mapping[str, object]) -> None:
-    """Validate one closed canonical dci.assembly/v1 manifest."""
+    """Validate one closed canonical asterion.application-assembly/v1 manifest."""
 
     if not isinstance(value, Mapping) or not all(
         isinstance(key, str) for key in value
@@ -65,8 +68,8 @@ def validate_assembly_manifest(value: Mapping[str, object]) -> None:
         raise AssemblyError("assembly manifest must be an object")
     if value.keys() != REQUIRED_FIELDS:
         raise AssemblyError("assembly manifest fields are not recognized")
-    if value["protocol"] != ASSEMBLY_PROTOCOL_VERSION:
-        raise AssemblyError("assembly protocol is not dci.assembly/v1")
+    if value["protocol"] != APPLICATION_ASSEMBLY_PROTOCOL_VERSION:
+        raise AssemblyError("application assembly protocol is invalid")
     for field in ("application_id", "runtime_id"):
         item = value[field]
         if not isinstance(item, str) or IDENTIFIER.fullmatch(item) is None:
@@ -75,16 +78,18 @@ def validate_assembly_manifest(value: Mapping[str, object]) -> None:
     if not isinstance(version, str) or SEMANTIC_VERSION.fullmatch(version) is None:
         raise AssemblyError("assembly version is invalid")
 
-    packages = value["packages"]
-    if not isinstance(packages, list) or not packages:
-        raise AssemblyError("assembly packages must be a non-empty array")
-    refs: list[tuple[str, str]] = []
-    for package in packages:
+    capability_packages = value["capability_packages"]
+    if not isinstance(capability_packages, list) or not capability_packages:
+        raise AssemblyError(
+            "assembly capability_packages must be a non-empty array"
+        )
+    capability_package_refs: list[CapabilityPackageRef] = []
+    for package in capability_packages:
         if not isinstance(package, Mapping) or package.keys() != {
             "package_id",
             "version",
         }:
-            raise AssemblyError("assembly package ref is invalid")
+            raise AssemblyError("assembly capability package ref is invalid")
         package_id = package["package_id"]
         package_version = package["version"]
         if (
@@ -93,10 +98,39 @@ def validate_assembly_manifest(value: Mapping[str, object]) -> None:
             or not isinstance(package_version, str)
             or SEMANTIC_VERSION.fullmatch(package_version) is None
         ):
-            raise AssemblyError("assembly package ref is invalid")
-        refs.append((package_id, package_version))
-    if refs != sorted(set(refs)):
-        raise AssemblyError("assembly package refs must be sorted and unique")
+            raise AssemblyError("assembly capability package ref is invalid")
+        capability_package_refs.append(
+            CapabilityPackageRef(package_id, package_version)
+        )
+    if capability_package_refs != sorted(set(capability_package_refs)):
+        raise AssemblyError(
+            "assembly capability package refs must be sorted and unique"
+        )
+
+    capabilities = value["capabilities"]
+    if not isinstance(capabilities, list) or not capabilities:
+        raise AssemblyError("assembly capabilities must be a non-empty array")
+    capability_refs: list[CapabilityRef] = []
+    for capability in capabilities:
+        if not isinstance(capability, Mapping) or capability.keys() != {
+            "capability_id",
+            "version",
+        }:
+            raise AssemblyError("assembly capability ref is invalid")
+        capability_id = capability["capability_id"]
+        capability_version = capability["version"]
+        if (
+            not isinstance(capability_id, str)
+            or IDENTIFIER.fullmatch(capability_id) is None
+            or not isinstance(capability_version, str)
+            or SEMANTIC_VERSION.fullmatch(capability_version) is None
+        ):
+            raise AssemblyError("assembly capability ref is invalid")
+        capability_refs.append(CapabilityRef(capability_id, capability_version))
+    if capability_refs != sorted(set(capability_refs)):
+        raise AssemblyError(
+            "assembly capability refs must be sorted and unique"
+        )
 
     for field in EDGE_FIELDS:
         edges = value[field]
@@ -124,19 +158,28 @@ def resolve_assembly(
     if runtime_manifest["runtime_id"] != assembly["runtime_id"]:
         raise AssemblyError("assembly runtime identity does not match")
 
-    raw_packages = assembly["packages"]
-    assert isinstance(raw_packages, list)
-    package_refs = tuple(
-        CapabilityRef(package["package_id"], package["version"])
-        for package in raw_packages
+    raw_capability_packages = assembly["capability_packages"]
+    assert isinstance(raw_capability_packages, list)
+    capability_package_refs = tuple(
+        CapabilityPackageRef(package["package_id"], package["version"])
+        for package in raw_capability_packages
         if isinstance(package, Mapping)
         and isinstance(package["package_id"], str)
         and isinstance(package["version"], str)
     )
+    raw_capabilities = assembly["capabilities"]
+    assert isinstance(raw_capabilities, list)
+    capability_refs = tuple(
+        CapabilityRef(capability["capability_id"], capability["version"])
+        for capability in raw_capabilities
+        if isinstance(capability, Mapping)
+        and isinstance(capability["capability_id"], str)
+        and isinstance(capability["version"], str)
+    )
     try:
-        manifests = catalog.select(package_refs)
+        manifests = catalog.select(capability_refs)
     except CapabilityCatalogError as error:
-        raise AssemblyError("assembly package selection is unavailable") from error
+        raise AssemblyError("assembly capability selection is unavailable") from error
 
     runtime_capabilities = runtime_manifest["capabilities"]
     assert isinstance(runtime_capabilities, list)
@@ -150,7 +193,7 @@ def resolve_assembly(
             host_artifacts=set(_string_edges(assembly, "host_artifacts")),
         )
     except CapabilityCompositionError as error:
-        raise AssemblyError("assembly package graph cannot compose") from error
+        raise AssemblyError("assembly capability graph cannot compose") from error
 
     application_id = assembly["application_id"]
     version = assembly["version"]
@@ -165,10 +208,11 @@ def resolve_assembly(
         application_id=application_id,
         version=version,
         runtime_id=runtime_id,
-        package_refs=package_refs,
-        package_manifests=tuple(
-            _freeze_mapping(manifests_by_id[package_id])
-            for package_id in composition.capability_ids
+        capability_package_refs=capability_package_refs,
+        capability_refs=capability_refs,
+        capability_manifests=tuple(
+            _freeze_mapping(manifests_by_id[capability_id])
+            for capability_id in composition.capability_ids
         ),
         composition=composition,
         runtime_capabilities=tuple(sorted(runtime_capabilities)),

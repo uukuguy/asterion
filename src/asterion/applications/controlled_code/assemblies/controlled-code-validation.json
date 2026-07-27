@@ -1,13 +1,16 @@
 {
-  "protocol": "dci.assembly/v1",
+  "protocol": "asterion.application-assembly/v1",
   "application_id": "code.quality",
   "version": "1.0.0",
   "runtime_id": "pi.reference",
-  "packages": [
-    {"package_id": "evaluation.code-quality", "version": "1.0.0"},
-    {"package_id": "observability.execution-audit", "version": "1.0.0"},
-    {"package_id": "policy.controlled-code-check", "version": "1.0.0"},
-    {"package_id": "workflow.code-quality", "version": "1.0.0"}
+  "capability_packages": [
+    {"package_id": "controlled-code", "version": "1.0.0"}
+  ],
+  "capabilities": [
+    {"capability_id": "evaluation.code-quality", "version": "1.0.0"},
+    {"capability_id": "observability.execution-audit", "version": "1.0.0"},
+    {"capability_id": "policy.controlled-code-check", "version": "1.0.0"},
+    {"capability_id": "workflow.code-quality", "version": "1.0.0"}
   ],
   "host_capabilities": ["executor.controlled"],
   "host_policies": [],

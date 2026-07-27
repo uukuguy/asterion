@@ -351,7 +351,10 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
             ASSEMBLIES.glob("dci-complete-application-*.json")
         ):
             assembly = json.loads(assembly_path.read_text())
-            self.assertEqual(assembly["protocol"], "dci.assembly/v1")
+            self.assertEqual(
+                assembly["protocol"],
+                "asterion.application-assembly/v1",
+            )
             runtime_ids.add(assembly["runtime_id"])
         self.assertEqual(
             runtime_ids, {"claude-code.reference", "pi.reference"}
@@ -360,7 +363,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
             manifest = json.loads(manifest_path.read_text())
             self.assertEqual(manifest["protocol"], "asterion.capability/v1")
 
-    def test_transitive_identity_closure_matches_complete_assembly_packages(
+    def test_transitive_identity_closure_matches_complete_assembly_capabilities(
         self,
     ) -> None:
         self.assertEqual(
@@ -376,20 +379,31 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
                 "applications/dci_agent_lite/assemblies/dci-complete-application-pi.json",
             },
         )
-        assembly_package_ids: set[str] | None = None
+        assembly_capability_package_ids: set[str] | None = None
+        assembly_capability_ids: set[str] | None = None
         for assembly_path in sorted(
             ASSEMBLIES.glob("dci-complete-application-*.json")
         ):
             assembly = json.loads(assembly_path.read_text())
-            current = {
+            capability_packages = {
                 f"{item['package_id']}@{item['version']}"
-                for item in assembly["packages"]
+                for item in assembly["capability_packages"]
             }
-            if assembly_package_ids is None:
-                assembly_package_ids = current
+            capabilities = {
+                f"{item['capability_id']}@{item['version']}"
+                for item in assembly["capabilities"]
+            }
+            if assembly_capability_package_ids is None:
+                assembly_capability_package_ids = capability_packages
+                assembly_capability_ids = capabilities
             else:
-                self.assertEqual(current, assembly_package_ids)
-        assert assembly_package_ids is not None
+                self.assertEqual(
+                    capability_packages,
+                    assembly_capability_package_ids,
+                )
+                self.assertEqual(capabilities, assembly_capability_ids)
+        self.assertEqual(assembly_capability_package_ids, {"dci@1.0.0"})
+        assert assembly_capability_ids is not None
 
         manifest_refs = set()
         manifest_resources = {
@@ -403,7 +417,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
                 f"{manifest['capability_id']}@{manifest['version']}"
             )
 
-        self.assertEqual(manifest_refs, assembly_package_ids)
+        self.assertEqual(manifest_refs, assembly_capability_ids)
         self.assertEqual(
             tuple(sorted(DCI_COMPLETE_IMPLEMENTATION_RESOURCES)),
             DCI_COMPLETE_IMPLEMENTATION_RESOURCES,
@@ -537,17 +551,21 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
         self.assertEqual(
             tuple(
                 manifest["capability_id"]
-                for manifest in pi.package_manifests
+                for manifest in pi.capability_manifests
                 if manifest["kind"] != "policy"
             ),
             STAGES,
         )
-        self.assertEqual(pi.package_refs, claude.package_refs)
+        self.assertEqual(
+            pi.capability_package_refs,
+            claude.capability_package_refs,
+        )
+        self.assertEqual(pi.capability_refs, claude.capability_refs)
 
     def test_every_stage_declares_one_exact_event_and_artifact_edge(self) -> None:
         manifests = {
             manifest["capability_id"]: manifest
-            for manifest in plan("pi.reference").package_manifests
+            for manifest in plan("pi.reference").capability_manifests
         }
 
         for index, package_id in enumerate(STAGES):
@@ -576,7 +594,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
                 self.assertEqual(resolved.runtime_capabilities, ("filesystem.read",))
                 required = {
                     capability
-                    for manifest in resolved.package_manifests
+                    for manifest in resolved.capability_manifests
                     for capability in manifest["requires_capabilities"]
                 }
                 self.assertNotIn("shell", required)
