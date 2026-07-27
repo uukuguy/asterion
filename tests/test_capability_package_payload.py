@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import gc
 import hashlib
 import json
 import os
 import shutil
+import stat
 import tempfile
 import unittest
 from collections.abc import Callable
@@ -71,8 +73,21 @@ class CapabilityPackagePayloadTests(unittest.TestCase):
         shutil.copytree(FIXTURE, target)
         return target
 
+    def _direct_snapshot_files(self, root: Path) -> tuple[str, ...]:
+        observed: list[str] = []
+        for member in root.iterdir():
+            if member.is_file():
+                observed.append(member.name)
+                continue
+            self.assertTrue(member.is_dir())
+            for child in member.iterdir():
+                self.assertTrue(child.is_file())
+                observed.append(f"{member.name}/{child.name}")
+        return tuple(sorted(observed))
+
     def test_opens_exact_payload_and_derives_canonical_identity(self) -> None:
         payload = open_portable_payload(self.root)
+        snapshot_root = Path(payload.resource_root)
 
         self.assertEqual(
             payload.manifest.package_ref,
@@ -114,6 +129,76 @@ class CapabilityPackagePayloadTests(unittest.TestCase):
             canonical_payload_sha256(self.root, payload.manifest),
             payload.payload_sha256,
         )
+        self.assertNotEqual(snapshot_root, self.root)
+        self.assertEqual(
+            self._direct_snapshot_files(snapshot_root),
+            tuple(sorted(IDENTITY_MEMBERS)),
+        )
+        for relative_name in IDENTITY_MEMBERS:
+            with self.subTest(snapshot_member=relative_name):
+                snapshot_member = snapshot_root / relative_name
+                self.assertEqual(
+                    snapshot_member.read_bytes(),
+                    (self.root / relative_name).read_bytes(),
+                )
+                self.assertEqual(
+                    stat.S_IMODE(snapshot_member.stat().st_mode),
+                    0o600,
+                )
+        for directory_name in {
+            Path(relative_name).parts[0]
+            for relative_name in IDENTITY_MEMBERS
+            if len(Path(relative_name).parts) == 2
+        }:
+            with self.subTest(snapshot_directory=directory_name):
+                self.assertEqual(
+                    stat.S_IMODE(
+                        (snapshot_root / directory_name).stat().st_mode
+                    ),
+                    0o700,
+                )
+        self.assertEqual(
+            stat.S_IMODE(snapshot_root.stat().st_mode),
+            0o700,
+        )
+        self.assertNotIn(str(self.root), repr(payload))
+        self.assertNotIn(str(snapshot_root), repr(payload))
+
+    def test_source_mutation_cannot_change_materialized_snapshot(self) -> None:
+        payload = open_portable_payload(self.root)
+        snapshot_root = Path(payload.resource_root)
+        original_resource = (
+            snapshot_root / "resources/public-config.txt"
+        ).read_bytes()
+
+        (self.root / "resources/public-config.txt").write_text(
+            "changed after validation\n",
+            encoding="utf-8",
+        )
+        (self.root / "resources/late-member.txt").write_text(
+            "added after validation\n",
+            encoding="utf-8",
+        )
+
+        self.assertEqual(
+            (snapshot_root / "resources/public-config.txt").read_bytes(),
+            original_resource,
+        )
+        self.assertEqual(
+            self._direct_snapshot_files(snapshot_root),
+            tuple(sorted(IDENTITY_MEMBERS)),
+        )
+
+    def test_payload_owns_materialized_snapshot_lifetime(self) -> None:
+        payload = open_portable_payload(self.root)
+        snapshot_root = Path(payload.resource_root)
+        self.assertTrue(snapshot_root.is_dir())
+
+        del payload
+        gc.collect()
+
+        self.assertFalse(snapshot_root.exists())
+
 
     def test_digest_is_independent_of_location_mtime_and_source_envelope(
         self,

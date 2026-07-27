@@ -53,7 +53,13 @@ class PortableCapabilityPayload:
 
     manifest: CapabilityPackageManifest
     payload_sha256: str
-    resource_root: Traversable
+    resource_root: Traversable = field(repr=False)
+    _snapshot_owner: object | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
 
 @dataclass(frozen=True, slots=True)

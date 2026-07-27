@@ -144,6 +144,7 @@ class CapabilityPackageModelTests(unittest.TestCase):
         )
 
         self.assertFalse(hasattr(payload, "__dict__"))
+        self.assertNotIn("/portable/package", repr(payload))
         self.assertFalse(hasattr(benchmark_binding, "__dict__"))
         self.assertFalse(hasattr(installed, "__dict__"))
         with self.assertRaises(FrozenInstanceError):

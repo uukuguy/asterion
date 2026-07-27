@@ -8,6 +8,7 @@ import json
 import os
 import stat
 import sys
+import tempfile
 from collections import Counter
 from contextlib import ExitStack
 from dataclasses import dataclass
@@ -53,6 +54,7 @@ _SECURE_PAYLOAD_READS_AVAILABLE = (
     and hasattr(os, "O_NOFOLLOW")
     and os.open in os.supports_dir_fd
     and os.listdir in os.supports_fd
+    and os.mkdir in os.supports_dir_fd
     and os.stat in os.supports_dir_fd
     and os.stat in os.supports_follow_symlinks
 )
@@ -80,15 +82,48 @@ class _RegularFileSnapshot:
     content_sha256: bytes
 
 
+class _SnapshotOwner:
+    __slots__ = ("_temporary",)
+
+    def __init__(
+        self,
+        temporary: tempfile.TemporaryDirectory[str],
+    ) -> None:
+        self._temporary = temporary
+
+    @property
+    def root(self) -> Path:
+        return Path(self._temporary.name)
+
+    def cleanup(self) -> None:
+        self._temporary.cleanup()
+
+    def __del__(self) -> None:
+        try:
+            self.cleanup()
+        except Exception:
+            pass
+
+
 def open_portable_payload(root: Path) -> PortableCapabilityPayload:
     """Validate and open one exact portable payload closure."""
 
-    manifest, digest = _validated_payload(root, expected_manifest=None)
-    return PortableCapabilityPayload(
-        manifest=manifest,
-        payload_sha256=digest,
-        resource_root=Path(root),
+    manifest, digest, content_by_name = _validated_payload(
+        root,
+        expected_manifest=None,
     )
+    snapshot_root, snapshot_owner = _materialize_snapshot(content_by_name)
+    try:
+        payload = PortableCapabilityPayload(
+            manifest=manifest,
+            payload_sha256=digest,
+            resource_root=snapshot_root,
+        )
+        object.__setattr__(payload, "_snapshot_owner", snapshot_owner)
+        return payload
+    except BaseException:
+        snapshot_owner.cleanup()
+        raise
 
 
 def canonical_payload_sha256(
@@ -97,7 +132,7 @@ def canonical_payload_sha256(
 ) -> str:
     """Return the location-independent digest of one validated payload."""
 
-    _, digest = _validated_payload(root, expected_manifest=manifest)
+    _, digest, _ = _validated_payload(root, expected_manifest=manifest)
     return digest
 
 
@@ -105,7 +140,7 @@ def _validated_payload(
     root: Path,
     *,
     expected_manifest: CapabilityPackageManifest | None,
-) -> tuple[CapabilityPackageManifest, str]:
+) -> tuple[CapabilityPackageManifest, str, dict[str, bytes]]:
     if not _SECURE_PAYLOAD_READS_AVAILABLE:
         raise CapabilityPackagePayloadError(
             "secure portable payload validation is unavailable"
@@ -251,7 +286,205 @@ def _validated_payload(
             _verify_pinned_directory(directory)
         for file in pinned_files:
             _verify_pinned_file(file)
-        return manifest, payload_sha256
+        return manifest, payload_sha256, content_by_name
+
+
+def _materialize_snapshot(
+    content_by_name: dict[str, bytes],
+) -> tuple[Path, _SnapshotOwner]:
+    try:
+        owner = _SnapshotOwner(
+            tempfile.TemporaryDirectory(
+                prefix="asterion-capability-payload-"
+            )
+        )
+    except OSError as error:
+        raise CapabilityPackagePayloadError(
+            "portable capability payload is invalid"
+        ) from error
+
+    root = owner.root
+    try:
+        with ExitStack() as descriptors:
+            flags = (
+                os.O_RDONLY
+                | os.O_DIRECTORY
+                | os.O_NOFOLLOW
+                | getattr(os, "O_CLOEXEC", 0)
+            )
+            root_fd = os.open(root, flags)
+            descriptors.callback(os.close, root_fd)
+            os.fchmod(root_fd, 0o700)
+
+            layout = _snapshot_layout(content_by_name)
+            directory_fds: dict[str, int] = {}
+            for directory_name in sorted(layout):
+                os.mkdir(directory_name, 0o700, dir_fd=root_fd)
+                directory_fd = os.open(
+                    directory_name,
+                    flags,
+                    dir_fd=root_fd,
+                )
+                descriptors.callback(os.close, directory_fd)
+                os.fchmod(directory_fd, 0o700)
+                directory_fds[directory_name] = directory_fd
+
+            for relative_name in sorted(content_by_name):
+                directory_name, file_name = _snapshot_member(
+                    relative_name
+                )
+                parent_fd = (
+                    root_fd
+                    if directory_name is None
+                    else directory_fds[directory_name]
+                )
+                _write_snapshot_file(
+                    parent_fd,
+                    file_name,
+                    content_by_name[relative_name],
+                )
+
+            _verify_materialized_snapshot(
+                root_fd,
+                directory_fds,
+                layout,
+                content_by_name,
+            )
+    except CapabilityPackagePayloadError:
+        owner.cleanup()
+        raise
+    except OSError as error:
+        owner.cleanup()
+        raise CapabilityPackagePayloadError(
+            "portable capability payload is invalid"
+        ) from error
+    except BaseException:
+        owner.cleanup()
+        raise
+    return root, owner
+
+
+def _snapshot_layout(
+    content_by_name: dict[str, bytes],
+) -> dict[str, tuple[str, ...]]:
+    children: dict[str, list[str]] = {}
+    for relative_name in content_by_name:
+        directory_name, file_name = _snapshot_member(relative_name)
+        if directory_name is not None:
+            children.setdefault(directory_name, []).append(file_name)
+    return {
+        directory_name: tuple(sorted(file_names))
+        for directory_name, file_names in children.items()
+    }
+
+
+def _snapshot_member(
+    relative_name: str,
+) -> tuple[str | None, str]:
+    parts = relative_name.split("/")
+    if (
+        len(parts) not in {1, 2}
+        or any(not _safe_direct_name(part) for part in parts)
+    ):
+        _invalid()
+    if len(parts) == 1:
+        if parts[0] != _DESCRIPTOR:
+            _invalid()
+        return None, parts[0]
+    if parts[0] not in {
+        _CAPABILITIES,
+        _BENCHMARK_SUITES,
+        _RESOURCES,
+        _CONFORMANCE,
+    }:
+        _invalid()
+    return parts[0], parts[1]
+
+
+def _write_snapshot_file(
+    parent_fd: int,
+    name: str,
+    content: bytes,
+) -> None:
+    flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | os.O_NOFOLLOW
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    descriptor = -1
+    try:
+        descriptor = os.open(
+            name,
+            flags,
+            0o600,
+            dir_fd=parent_fd,
+        )
+        os.fchmod(descriptor, 0o600)
+        remaining = memoryview(content)
+        while remaining:
+            written = os.write(descriptor, remaining)
+            if written <= 0:
+                _invalid()
+            remaining = remaining[written:]
+        details = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(details.st_mode)
+            or details.st_size != len(content)
+            or stat.S_IMODE(details.st_mode) != 0o600
+        ):
+            _invalid()
+    except CapabilityPackagePayloadError:
+        raise
+    except OSError as error:
+        raise CapabilityPackagePayloadError(
+            "portable capability payload is invalid"
+        ) from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _verify_materialized_snapshot(
+    root_fd: int,
+    directory_fds: dict[str, int],
+    layout: dict[str, tuple[str, ...]],
+    content_by_name: dict[str, bytes],
+) -> None:
+    expected_root_members = tuple(
+        sorted({_DESCRIPTOR, *layout})
+    )
+    if _list_direct_names(root_fd) != expected_root_members:
+        _invalid()
+    if stat.S_IMODE(os.fstat(root_fd).st_mode) != 0o700:
+        _invalid()
+
+    for directory_name, children in layout.items():
+        directory_fd = directory_fds[directory_name]
+        if (
+            _list_direct_names(directory_fd) != children
+            or stat.S_IMODE(os.fstat(directory_fd).st_mode) != 0o700
+        ):
+            _invalid()
+
+    for relative_name, expected_content in content_by_name.items():
+        directory_name, file_name = _snapshot_member(relative_name)
+        parent_fd = (
+            root_fd
+            if directory_name is None
+            else directory_fds[directory_name]
+        )
+        snapshot = _read_regular_snapshot(parent_fd, file_name)
+        if snapshot.content != expected_content:
+            _invalid()
+        details = os.stat(
+            file_name,
+            dir_fd=parent_fd,
+            follow_symlinks=False,
+        )
+        if stat.S_IMODE(details.st_mode) != 0o600:
+            _invalid()
 
 
 def _open_root(root: Path, descriptors: ExitStack) -> int:
