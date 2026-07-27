@@ -65,6 +65,21 @@ class _PinnedDirectory:
     members: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class _PinnedFile:
+    parent_fd: int
+    name: str
+    fingerprint: tuple[int, int, int, int, int]
+    content_sha256: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class _RegularFileSnapshot:
+    content: bytes
+    fingerprint: tuple[int, int, int, int, int]
+    content_sha256: bytes
+
+
 def open_portable_payload(root: Path) -> PortableCapabilityPayload:
     """Validate and open one exact portable payload closure."""
 
@@ -100,6 +115,7 @@ def _validated_payload(
         root_fd = _open_root(Path(root), descriptors)
         root_directory = _pin_directory(root_fd)
         pinned_directories = [root_directory]
+        pinned_files: list[_PinnedFile] = []
         root_members = root_directory.members
         if (
             set(root_members) - _KNOWN_ROOT_MEMBERS
@@ -107,7 +123,11 @@ def _validated_payload(
         ):
             _invalid()
 
-        descriptor = _read_regular(root_fd, _DESCRIPTOR)
+        descriptor = _read_regular(
+            root_fd,
+            _DESCRIPTOR,
+            pinned_files=pinned_files,
+        )
         descriptor_value = _canonical_json_value(descriptor)
         try:
             manifest = validate_capability_package_manifest(
@@ -130,6 +150,7 @@ def _validated_payload(
             required=True,
             descriptors=descriptors,
             pinned_directories=pinned_directories,
+            pinned_files=pinned_files,
         )
         capability_refs: list[CapabilityRef] = []
         for relative_name, raw in capability_documents:
@@ -160,6 +181,7 @@ def _validated_payload(
             required=bool(manifest.benchmark_suites),
             descriptors=descriptors,
             pinned_directories=pinned_directories,
+            pinned_files=pinned_files,
         )
         suite_refs = []
         for relative_name, raw in suite_documents:
@@ -188,6 +210,7 @@ def _validated_payload(
             required=bool(manifest.resources),
             descriptors=descriptors,
             pinned_directories=pinned_directories,
+            pinned_files=pinned_files,
         )
         declared_resource_digests = Counter(
             resource.sha256 for resource in manifest.resources
@@ -215,6 +238,7 @@ def _validated_payload(
             required=True,
             descriptors=descriptors,
             pinned_directories=pinned_directories,
+            pinned_files=pinned_files,
         )
         if not conformance_documents:
             _invalid()
@@ -225,6 +249,8 @@ def _validated_payload(
         payload_sha256 = _digest_content_map(content_by_name)
         for directory in reversed(pinned_directories):
             _verify_pinned_directory(directory)
+        for file in pinned_files:
+            _verify_pinned_file(file)
         return manifest, payload_sha256
 
 
@@ -286,6 +312,7 @@ def _read_json_directory(
     required: bool,
     descriptors: ExitStack,
     pinned_directories: list[_PinnedDirectory],
+    pinned_files: list[_PinnedFile],
 ) -> tuple[tuple[str, bytes], ...]:
     documents = _read_directory(
         root_fd,
@@ -294,6 +321,7 @@ def _read_json_directory(
         required=required,
         descriptors=descriptors,
         pinned_directories=pinned_directories,
+        pinned_files=pinned_files,
     )
     if any(Path(relative_name).suffix != ".json" for relative_name, _ in documents):
         _invalid()
@@ -308,6 +336,7 @@ def _read_directory(
     required: bool,
     descriptors: ExitStack,
     pinned_directories: list[_PinnedDirectory],
+    pinned_files: list[_PinnedFile],
 ) -> tuple[tuple[str, bytes], ...]:
     present = directory_name in root_members
     if present != required:
@@ -332,7 +361,11 @@ def _read_directory(
     return tuple(
         (
             f"{directory_name}/{child}",
-            _read_regular(directory_fd, child),
+            _read_regular(
+                directory_fd,
+                child,
+                pinned_files=pinned_files,
+            ),
         )
         for child in directory.members
     )
@@ -400,7 +433,37 @@ def _safe_direct_name(name: str) -> bool:
     )
 
 
-def _read_regular(parent_fd: int, name: str) -> bytes:
+def _read_regular(
+    parent_fd: int,
+    name: str,
+    *,
+    pinned_files: list[_PinnedFile],
+) -> bytes:
+    snapshot = _read_regular_snapshot(parent_fd, name)
+    pinned_files.append(
+        _PinnedFile(
+            parent_fd=parent_fd,
+            name=name,
+            fingerprint=snapshot.fingerprint,
+            content_sha256=snapshot.content_sha256,
+        )
+    )
+    return snapshot.content
+
+
+def _verify_pinned_file(file: _PinnedFile) -> None:
+    snapshot = _read_regular_snapshot(file.parent_fd, file.name)
+    if (
+        snapshot.fingerprint != file.fingerprint
+        or snapshot.content_sha256 != file.content_sha256
+    ):
+        _invalid()
+
+
+def _read_regular_snapshot(
+    parent_fd: int,
+    name: str,
+) -> _RegularFileSnapshot:
     try:
         before = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
     except OSError as error:
@@ -433,14 +496,15 @@ def _read_regular(parent_fd: int, name: str) -> bytes:
                 break
             chunks.append(chunk)
         after = os.fstat(descriptor)
-        if (
-            (opened.st_dev, opened.st_ino, opened.st_size)
-            != (after.st_dev, after.st_ino, after.st_size)
-            or opened.st_mtime_ns != after.st_mtime_ns
-            or opened.st_ctime_ns != after.st_ctime_ns
-        ):
+        opened_fingerprint = _regular_file_fingerprint(opened)
+        if opened_fingerprint != _regular_file_fingerprint(after):
             _invalid()
-        return b"".join(chunks)
+        content = b"".join(chunks)
+        return _RegularFileSnapshot(
+            content=content,
+            fingerprint=opened_fingerprint,
+            content_sha256=hashlib.sha256(content).digest(),
+        )
     except CapabilityPackagePayloadError:
         raise
     except OSError as error:
@@ -452,6 +516,20 @@ def _read_regular(parent_fd: int, name: str) -> bytes:
     finally:
         if descriptor >= 0:
             os.close(descriptor)
+
+
+def _regular_file_fingerprint(
+    details: os.stat_result,
+) -> tuple[int, int, int, int, int]:
+    if not stat.S_ISREG(details.st_mode):
+        _invalid()
+    return (
+        details.st_dev,
+        details.st_ino,
+        details.st_size,
+        details.st_mtime_ns,
+        details.st_ctime_ns,
+    )
 
 
 def _canonical_json_value(raw: bytes) -> object:

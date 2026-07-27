@@ -18,6 +18,7 @@ from asterion.capability_packages.payload import (
     open_portable_payload,
 )
 from asterion.capability_packages.protocol import (
+    BenchmarkSuiteRef,
     CapabilityPackageRef,
     ResourceIdentity,
 )
@@ -27,6 +28,7 @@ FIXTURE = (
     Path(__file__).parent / "fixtures/extensions/minimal/payload"
 )
 IDENTITY_MEMBERS = (
+    "benchmark-suites/example-benchmark.json",
     "capability-package.json",
     "capabilities/example-research.json",
     "conformance/profile.json",
@@ -92,6 +94,10 @@ class CapabilityPackagePayloadTests(unittest.TestCase):
                     ),
                 ),
             ),
+        )
+        self.assertEqual(
+            payload.manifest.benchmark_suites,
+            (BenchmarkSuiteRef("example.benchmark", "1.0.0"),),
         )
         expected = hashlib.sha256()
         for relative_name in sorted(IDENTITY_MEMBERS):
@@ -258,6 +264,11 @@ class CapabilityPackagePayloadTests(unittest.TestCase):
     ) -> None:
         cases = (
             ("root", Path("."), "late-member"),
+            (
+                "benchmark-suites",
+                Path("benchmark-suites"),
+                "late-member.json",
+            ),
             ("capabilities", Path("capabilities"), "late-member.json"),
             ("resources", Path("resources"), "late-member.txt"),
             ("conformance", Path("conformance"), "late-member.json"),
@@ -350,6 +361,56 @@ class CapabilityPackagePayloadTests(unittest.TestCase):
             open_portable_payload(root)
 
         self.assertTrue(injected)
+
+    def test_rejects_regular_file_changed_after_its_initial_read(
+        self,
+    ) -> None:
+        root = self._copy_payload("post-read-file-race")
+        resource = root / "resources/public-config.txt"
+        resource_details = resource.parent.stat()
+        resource_parent_identity = (
+            resource_details.st_dev,
+            resource_details.st_ino,
+        )
+        original_read_regular = payload_module._read_regular
+        injected = False
+        sentinel = "SENTINEL-post-read-resource"
+
+        def mutate_after_read(
+            parent_fd: int,
+            name: str,
+            *,
+            pinned_files: list[object],
+        ) -> bytes:
+            nonlocal injected
+            content = original_read_regular(
+                parent_fd,
+                name,
+                pinned_files=pinned_files,
+            )
+            opened_parent = os.fstat(parent_fd)
+            if (
+                not injected
+                and name == resource.name
+                and (opened_parent.st_dev, opened_parent.st_ino)
+                == resource_parent_identity
+            ):
+                resource.write_text(sentinel, encoding="utf-8")
+                injected = True
+            return content
+
+        with (
+            patch.object(
+                payload_module,
+                "_read_regular",
+                side_effect=mutate_after_read,
+            ),
+            self.assertRaises(CapabilityPackagePayloadError) as caught,
+        ):
+            open_portable_payload(root)
+
+        self.assertTrue(injected)
+        self.assertNotIn(sentinel, str(caught.exception))
 
 
 if __name__ == "__main__":
