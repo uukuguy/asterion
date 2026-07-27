@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from collections.abc import Iterable
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -51,6 +52,17 @@ class _TaskImplementation:
 
 class _NonCallableImplementation:
     build_invocation = "not callable"
+
+
+class _WrongArityImplementation:
+    def build_invocation(self) -> BenchmarkTaskInvocation:
+        raise AssertionError("signature validation must not call implementations")
+
+
+class _WrongReturnImplementation:
+    def build_invocation(self, request: BenchmarkTaskRequest) -> object:
+        del request
+        return object()
 
 
 class BenchmarkModelTests(unittest.TestCase):
@@ -118,8 +130,8 @@ class BenchmarkModelTests(unittest.TestCase):
     def _plan(
         self,
         *,
-        tasks: object | None = None,
-        package_locks: object | None = None,
+        tasks: Iterable[PlannedBenchmarkTask] | None = None,
+        package_locks: Iterable[CapabilitySourceLock] | None = None,
     ) -> BenchmarkPlan:
         return BenchmarkPlan(
             run_id="run-001",
@@ -163,6 +175,24 @@ class BenchmarkModelTests(unittest.TestCase):
                 for lock in plan.package_locks
             ),
             ("example.package", "example.support"),
+        )
+
+    def test_plan_requires_exact_source_lock_for_suite_owner(self) -> None:
+        for name, locks in {
+            "no locks": (),
+            "unrelated lock only": (self.lock_b,),
+        }.items():
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "benchmark plan package locks are invalid",
+                ):
+                    self._plan(package_locks=locks)
+
+        plan = self._plan(package_locks=(self.lock_a,))
+        self.assertEqual(
+            plan.package_locks[0].entries[0].package_ref,
+            self.suite.owner_package,
         )
 
     def test_runtime_values_are_frozen(self) -> None:
@@ -293,6 +323,28 @@ class BenchmarkModelTests(unittest.TestCase):
                         owner_package=self.owner,
                         binding_id=self.task_a.binding_id,
                         implementation=_NonCallableImplementation(),
+                    ),
+                ),
+                ResolvedBenchmarkTask(self.planned_b, valid_binding_b),
+            ),
+            "wrong implementation arity": (
+                ResolvedBenchmarkTask(
+                    self.planned_a,
+                    BenchmarkTaskBinding(
+                        owner_package=self.owner,
+                        binding_id=self.task_a.binding_id,
+                        implementation=_WrongArityImplementation(),
+                    ),
+                ),
+                ResolvedBenchmarkTask(self.planned_b, valid_binding_b),
+            ),
+            "wrong implementation return type": (
+                ResolvedBenchmarkTask(
+                    self.planned_a,
+                    BenchmarkTaskBinding(
+                        owner_package=self.owner,
+                        binding_id=self.task_a.binding_id,
+                        implementation=_WrongReturnImplementation(),
                     ),
                 ),
                 ResolvedBenchmarkTask(self.planned_b, valid_binding_b),

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import inspect
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Protocol, TypeVar, runtime_checkable
 
 from asterion.applications.selection import ApplicationSelector
 from asterion.capabilities.catalog import CatalogEntry
@@ -14,6 +16,7 @@ from asterion.capability_packages.protocol import (
     BenchmarkSuiteManifest,
     BenchmarkSuiteRef,
     BenchmarkTaskManifest,
+    CapabilityPackageRef,
     CapabilitySourceLock,
     CapabilitySourceLockEntry,
 )
@@ -29,6 +32,7 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 # code gives them intent-specific names without creating parallel identities.
 ApplicationRef = ApplicationSelector
 ResolvedCapability = CatalogEntry
+_Value = TypeVar("_Value")
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,7 +62,7 @@ class BenchmarkTaskRequest:
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class BenchmarkTaskInvocation:
     """One immutable invocation with an explicitly private provider payload."""
 
@@ -66,6 +70,26 @@ class BenchmarkTaskInvocation:
     binding_id: str
     public_arguments: tuple[str, ...]
     private_payload: object = field(repr=False)
+
+    def __init__(
+        self,
+        task_id: str,
+        binding_id: str,
+        public_arguments: Iterable[str],
+        private_payload: object,
+    ) -> None:
+        object.__setattr__(self, "task_id", task_id)
+        object.__setattr__(self, "binding_id", binding_id)
+        object.__setattr__(
+            self,
+            "public_arguments",
+            _tuple_snapshot(
+                public_arguments,
+                error="benchmark public arguments are invalid",
+            ),
+        )
+        object.__setattr__(self, "private_payload", private_payload)
+        self.__post_init__()
 
     def __post_init__(self) -> None:
         arguments = _tuple_snapshot(
@@ -113,7 +137,7 @@ class PlannedBenchmarkTask:
             raise ValueError("planned benchmark task is invalid")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class BenchmarkPlan:
     """Provider-free exact benchmark plan safe for public rendering."""
 
@@ -123,6 +147,37 @@ class BenchmarkPlan:
     tasks: tuple[PlannedBenchmarkTask, ...]
     case_limit: int
     package_locks: tuple[CapabilitySourceLock, ...]
+
+    def __init__(
+        self,
+        run_id: str,
+        application_ref: ApplicationRef,
+        suite: BenchmarkSuiteManifest,
+        tasks: Iterable[PlannedBenchmarkTask],
+        case_limit: int,
+        package_locks: Iterable[CapabilitySourceLock],
+    ) -> None:
+        object.__setattr__(self, "run_id", run_id)
+        object.__setattr__(self, "application_ref", application_ref)
+        object.__setattr__(self, "suite", suite)
+        object.__setattr__(
+            self,
+            "tasks",
+            _tuple_snapshot(
+                tasks,
+                error="benchmark plan tasks are invalid",
+            ),
+        )
+        object.__setattr__(self, "case_limit", case_limit)
+        object.__setattr__(
+            self,
+            "package_locks",
+            _tuple_snapshot(
+                package_locks,
+                error="benchmark plan package locks are invalid",
+            ),
+        )
+        self.__post_init__()
 
     def __post_init__(self) -> None:
         tasks = _tuple_snapshot(
@@ -152,6 +207,12 @@ class BenchmarkPlan:
             or tuple(task.task for task in tasks) != self.suite.tasks
         ):
             raise ValueError("benchmark plan tasks are invalid")
+        if not any(
+            entry.package_ref == self.suite.owner_package
+            for lock in locks
+            for entry in lock.entries
+        ):
+            raise ValueError("benchmark plan package locks are invalid")
 
         object.__setattr__(self, "tasks", tasks)
         object.__setattr__(self, "package_locks", locks)
@@ -171,12 +232,28 @@ class ResolvedBenchmarkTask:
             raise ValueError("resolved benchmark task is invalid")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class ResolvedBenchmarkPlan:
     """Private execution preparation with complete exact implementations."""
 
     plan: BenchmarkPlan
     tasks: tuple[ResolvedBenchmarkTask, ...]
+
+    def __init__(
+        self,
+        plan: BenchmarkPlan,
+        tasks: Iterable[ResolvedBenchmarkTask],
+    ) -> None:
+        object.__setattr__(self, "plan", plan)
+        object.__setattr__(
+            self,
+            "tasks",
+            _tuple_snapshot(
+                tasks,
+                error="resolved benchmark plan is invalid",
+            ),
+        )
+        self.__post_init__()
 
     def __post_init__(self) -> None:
         tasks = _tuple_snapshot(
@@ -228,14 +305,14 @@ def public_plan_dict(plan: BenchmarkPlan) -> dict[str, object]:
 
 
 def _canonical_locks(
-    values: object,
+    values: Iterable[CapabilitySourceLock],
 ) -> tuple[CapabilitySourceLock, ...]:
     locks = _tuple_snapshot(
         values,
         error="benchmark plan package locks are invalid",
     )
     normalized: list[CapabilitySourceLock] = []
-    package_refs: set[object] = set()
+    package_refs: set[CapabilityPackageRef] = set()
     for lock in locks:
         if not isinstance(lock, CapabilitySourceLock):
             raise ValueError("benchmark plan package locks are invalid")
@@ -284,11 +361,15 @@ def _canonical_locks(
     )
 
 
-def _tuple_snapshot(value: object, *, error: str) -> tuple[object, ...]:
+def _tuple_snapshot(
+    value: Iterable[_Value],
+    *,
+    error: str,
+) -> tuple[_Value, ...]:
     if isinstance(value, (str, bytes)):
         raise ValueError(error)
     try:
-        return tuple(value)  # type: ignore[arg-type]
+        return tuple(value)
     except TypeError:
         raise ValueError(error) from None
 
@@ -310,9 +391,53 @@ def _safe_run_id(value: object) -> bool:
 
 def _is_task_implementation(value: object) -> bool:
     try:
-        build_invocation = getattr(value, "build_invocation")
+        implementation_type = type(value)
+        member = inspect.getattr_static(
+            implementation_type,
+            "build_invocation",
+        )
+        if isinstance(member, (staticmethod, classmethod)):
+            function = member.__func__
+            implicit_parameter_count = int(isinstance(member, classmethod))
+        elif inspect.isfunction(member):
+            function = member
+            implicit_parameter_count = 1
+        else:
+            return False
+        signature = inspect.signature(function, follow_wrapped=False)
     except Exception:
         return False
-    return isinstance(
-        value, BenchmarkTaskImplementation
-    ) and callable(build_invocation)
+
+    parameters = tuple(signature.parameters.values())
+    if len(parameters) != implicit_parameter_count + 1:
+        return False
+    for parameter in parameters:
+        if (
+            parameter.kind
+            not in {
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            }
+            or parameter.default is not inspect.Parameter.empty
+        ):
+            return False
+    request_parameter = parameters[implicit_parameter_count]
+    return _annotation_matches(
+        request_parameter.annotation,
+        BenchmarkTaskRequest,
+    ) and _annotation_matches(
+        signature.return_annotation,
+        BenchmarkTaskInvocation,
+    )
+
+
+def _annotation_matches(annotation: object, expected: type[object]) -> bool:
+    if annotation is expected:
+        return True
+    if not isinstance(annotation, str):
+        return False
+    return annotation in {
+        expected.__name__,
+        f"asterion.benchmarks.{expected.__name__}",
+        f"{expected.__module__}.{expected.__name__}",
+    }
