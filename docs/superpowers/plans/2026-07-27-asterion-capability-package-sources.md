@@ -459,6 +459,7 @@ git commit -m "feat: discover installed capability distributions"
 
 **Files:**
 - Create: `src/asterion/capability_packages/sources/local.py`
+- Create: `src/asterion/capabilities/dci_research/provider.py`
 - Create: `tests/test_local_capability_source.py`
 - Extend: `tests/fixtures/extensions/minimal/`
 - Modify: `src/asterion/applications/dci_agent_lite/provider.py`
@@ -491,6 +492,13 @@ symlinks, and import only the exact operator-supplied module/factory. Never
 insert the package parent into global `sys.path`; use a scoped import spec and
 remove temporary module entries after factory failure.
 
+Create the transitional DCI package provider at
+`asterion.capabilities.dci_research.provider:create_provider`. It constructs
+the exact local-package bindings through the internal source API only; it is
+selected solely by an explicit local source declaration and is not registered
+in the built-in adapter. Plan 4 removes it after the external distribution
+form is proven.
+
 - [ ] **Step 4: Verify**
 
 Adapt the transitional DCI application test host to inject one explicit
@@ -510,7 +518,7 @@ Expected: PASS with sentinel paths absent from exceptions.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/asterion/capability_packages/sources/local.py src/asterion/applications/dci_agent_lite/provider.py tests/test_local_capability_source.py tests/test_dci_complete_application.py tests/fixtures/extensions/minimal
+git add src/asterion/capability_packages/sources/local.py src/asterion/capabilities/dci_research/provider.py src/asterion/applications/dci_agent_lite/provider.py tests/test_local_capability_source.py tests/test_dci_complete_application.py tests/fixtures/extensions/minimal
 git commit -m "feat: load explicit local capability packages"
 ```
 

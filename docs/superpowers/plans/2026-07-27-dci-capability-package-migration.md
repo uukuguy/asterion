@@ -432,6 +432,11 @@ git commit -m "refactor: make DCI CLI an application adapter"
 - Delete: `scripts/qa/run_nq_test_sample50.sh`
 - Delete: `scripts/qa/run_triviaqa_test_sample50.sh`
 - Delete: `tests/test_dci_benchmark_orchestrator.py`
+- Modify or delete: `tests/test_standalone_launchers.py`
+- Modify: `tests/test_resource_setup.py`
+- Modify: `tests/test_standalone_repository.py`
+- Modify: DCI package-owned `resource_setup.py`, benchmark resource metadata,
+  and all active guides/verification documents that name a launcher
 - Modify: `README.md`
 - Modify: `docs/cli.md`
 - Modify: benchmark and security tests created in Plan 3
@@ -448,9 +453,11 @@ asterion-dci benchmark plan|run|resume ...
 - [ ] **Step 1: Add an obsolete-surface absence test**
 
 In `tests/test_project_boundaries.py`, assert each file above is absent and no
-documentation or Python source mentions a per-task launcher. Verify the
-generic evidence/cancellation tests contain every security behavior formerly
-covered by `tests/test_dci_benchmark_orchestrator.py`.
+active documentation, Python source, test, resource metadata, or Make target
+mentions a per-task launcher. Historical superseded plans/specifications may
+retain their record only when labelled superseded. Verify the generic
+evidence/cancellation tests contain every security behavior formerly covered
+by `tests/test_dci_benchmark_orchestrator.py`.
 
 - [ ] **Step 2: Run and observe obsolete-surface failures**
 
@@ -467,7 +474,9 @@ Expected: failure listing the old files.
 Delete the exact files. Do not leave compatibility wrappers. Document suite
 IDs, counts, plan-only default, explicit execution, resume compatibility,
 private evidence, and the fact that paths come from application/operator
-configuration rather than package manifests.
+configuration rather than package manifests. Replace launcher-oriented resource
+setup contracts with the exact logical DCI benchmark binding IDs and update or
+remove the standalone-launcher tests and references in active guides.
 
 - [ ] **Step 4: Verify**
 
@@ -479,7 +488,9 @@ uv run python -m unittest -v \
   tests.test_benchmark_evidence \
   tests.test_benchmark_execution \
   tests.test_dci_benchmark_bindings \
-  tests.test_dci_application_adapter
+  tests.test_dci_application_adapter \
+  tests.test_resource_setup \
+  tests.test_standalone_repository
 uv run python tools/check_docs.py
 ```
 
@@ -494,7 +505,7 @@ git rm scripts/beir/benchmark_arguana.sh scripts/beir/benchmark_scifact.sh
 git rm scripts/bright/run_bio.sh scripts/bright/run_earth_science.sh scripts/bright/run_economics.sh scripts/bright/run_robotics.sh
 git rm scripts/qa/run_2wikimultihopqa_dev_sample50.sh scripts/qa/run_bamboogle_test_sample50.sh scripts/qa/run_hotpotqa_dev_sample50.sh scripts/qa/run_musique_dev_sample50.sh scripts/qa/run_nq_test_sample50.sh scripts/qa/run_triviaqa_test_sample50.sh
 git rm tests/test_dci_benchmark_orchestrator.py
-git add tests/test_project_boundaries.py tests/test_benchmark_evidence.py tests/test_benchmark_execution.py README.md docs/cli.md
+git add tests/test_project_boundaries.py tests/test_benchmark_evidence.py tests/test_benchmark_execution.py tests/test_standalone_launchers.py tests/test_resource_setup.py tests/test_standalone_repository.py README.md docs src/asterion/capabilities/dci
 git commit -m "refactor: remove global DCI benchmark launchers"
 ```
 

@@ -64,25 +64,36 @@ class BenchmarkTaskImplementation(Protocol):
     ) -> BenchmarkTaskInvocation: ...
 
 @dataclass(frozen=True, slots=True)
-class ResolvedBenchmarkTask:
+class PlannedBenchmarkTask:
     ordinal: int
     task: BenchmarkTaskManifest
     capability: ResolvedCapability
+
+@dataclass(frozen=True, slots=True)
+class BenchmarkPlan:
+    run_id: str
+    application_ref: ApplicationRef
+    suite: BenchmarkSuiteManifest
+    tasks: tuple[PlannedBenchmarkTask, ...]
+    case_limit: int
+    package_locks: tuple[CapabilitySourceLock, ...]
+
+@dataclass(frozen=True, slots=True)
+class ResolvedBenchmarkTask:
+    planned: PlannedBenchmarkTask
     binding: BenchmarkTaskBinding
 
 @dataclass(frozen=True, slots=True)
 class ResolvedBenchmarkPlan:
-    run_id: str
-    application_ref: ApplicationRef
-    suite: BenchmarkSuiteManifest
+    plan: BenchmarkPlan
     tasks: tuple[ResolvedBenchmarkTask, ...]
-    case_limit: int
-    package_locks: tuple[CapabilitySourceLock, ...]
 ```
 
-- Consumes `BenchmarkTaskBinding` from the capability-package SDK and requires
-  its opaque `implementation` to satisfy `BenchmarkTaskImplementation` during
-  pre-execution resolution.
+- `BenchmarkPlan` is the provider-free, public plan-only value. It contains
+  suite metadata and exact payload/source identities but no binding object.
+  `ResolvedBenchmarkPlan` is private execution preparation: it consumes
+  `BenchmarkTaskBinding` from the selected provider and requires its opaque
+  `implementation` to satisfy `BenchmarkTaskImplementation`.
 - `private_payload` is deliberately excluded from `repr` and public
   serialization. `public_arguments` may contain only schema-approved symbolic
   options, never paths or values from operator configuration.
@@ -109,7 +120,7 @@ Validate invariants in `__post_init__` and use a public serializer that
 explicitly selects safe fields:
 
 ```python
-def public_plan_dict(plan: ResolvedBenchmarkPlan) -> dict[str, object]:
+def public_plan_dict(plan: BenchmarkPlan) -> dict[str, object]:
     return {
         "run_id": plan.run_id,
         "application": str(plan.application_ref),
@@ -144,7 +155,7 @@ git add src/asterion/benchmarks tests/test_benchmark_model.py
 git commit -m "feat: define generic benchmark runtime values"
 ```
 
-### Task 2: Resolve exact suites, capabilities, and task bindings
+### Task 2: Resolve metadata-only suites, then exact task bindings
 
 **Files:**
 - Create: `src/asterion/benchmarks/resolution.py`
@@ -158,14 +169,18 @@ git commit -m "feat: define generic benchmark runtime values"
 ```python
 def resolve_benchmark_suite(
     suite_ref: BenchmarkSuiteRef,
-    packages: Sequence[InstalledCapabilityPackage],
+    payloads: Sequence[PortableCapabilityPayload],
 ) -> BenchmarkSuiteManifest: ...
 
-def resolve_benchmark_tasks(
+def plan_benchmark_tasks(
     suite: BenchmarkSuiteManifest,
     capabilities: Sequence[ResolvedCapability],
+ ) -> tuple[PlannedBenchmarkTask, ...]: ...
+
+def resolve_benchmark_execution(
+    plan: BenchmarkPlan,
     packages: Sequence[InstalledCapabilityPackage],
-) -> tuple[ResolvedBenchmarkTask, ...]: ...
+) -> ResolvedBenchmarkPlan: ...
 ```
 
 - [ ] **Step 1: Write the pre-execution rejection matrix**
@@ -178,16 +193,14 @@ duplicate exact suite
 suite owner package mismatch
 missing capability
 capability not selected by application
-missing binding
-duplicate binding in one package
-binding supplied by the wrong package
-unknown extra binding
 task order changed by input enumeration
 valid exact suite
 ```
 
-Use spies that fail the test if any provider, process, output-directory, or
-host-service method is touched.
+Metadata planning uses spies that fail if any provider, process,
+output-directory, or host-service method is touched. A separate execution
+resolution matrix covers missing/duplicate/wrong-owner/extra bindings after
+the exact provider has been selected and loaded.
 
 - [ ] **Step 2: Run and observe the missing resolver**
 
@@ -201,7 +214,9 @@ Expected: import failure.
 
 - [ ] **Step 3: Implement exact closed-world resolution**
 
-Build maps only after rejecting duplicate keys:
+For metadata planning, resolve only the suite owner and selected capability
+refs from portable payloads. For execution resolution, build binding maps only
+after rejecting duplicate keys:
 
 ```python
 binding_key = (package.package_ref, binding.binding_id)
@@ -209,8 +224,9 @@ task_key = (suite.owner_package, task.binding_id)
 ```
 
 Require equality of the suite owner, selected capability package, task
-capability ref, and binding owner. Return tasks in the suite's canonical task
-order with ordinals beginning at `1`.
+capability ref, and binding owner. The provider-free plan returns task metadata
+in canonical suite order with ordinals beginning at `1`; execution preparation
+attaches exactly one selected binding to each planned task.
 
 - [ ] **Step 4: Verify**
 
@@ -244,16 +260,14 @@ class BenchmarkPlanRequest:
     application_ref: ApplicationRef
     suite_ref: BenchmarkSuiteRef
     case_limit: int | None
-    execute: bool
-    authorization: BenchmarkExecutionAuthorization | None
 
 def create_benchmark_plan(
     request: BenchmarkPlanRequest,
-    application: ResolvedApplication,
-    packages: Sequence[InstalledCapabilityPackage],
-) -> ResolvedBenchmarkPlan: ...
+    application: ResolvedApplicationMetadata,
+    payloads: Sequence[PortableCapabilityPayload],
+) -> BenchmarkPlan: ...
 
-def render_benchmark_plan(plan: ResolvedBenchmarkPlan) -> str: ...
+def render_benchmark_plan(plan: BenchmarkPlan) -> str: ...
 ```
 
 - [ ] **Step 1: Write planning and authority tests**
@@ -262,9 +276,6 @@ Verify:
 
 - omitted limit uses the suite's finite `default_case_limit`;
 - zero, negative, and above-suite-limit values fail;
-- plan-only needs no authorization;
-- `execute=True` without a fresh matching authorization fails;
-- authorization matches exact application, suite, case limit, and run ID;
 - task ordering and rendered text are byte-identical across source enumeration
   order and absolute package locations;
 - planning creates no output directory and calls no implementation.
@@ -282,8 +293,10 @@ Expected: import failure.
 - [ ] **Step 3: Implement pure planning**
 
 Derive a random run ID once at the host boundary, copy exact package locks into
-the plan, resolve every task, and return a frozen value. Do not parse `.env`,
-inspect dataset paths, create directories, or call provider factories here.
+the plan, resolve every metadata task, and return a frozen value. Do not parse
+`.env`, inspect dataset paths, create directories, authorize execution, or
+call provider factories here. Explicit authorization is validated by the host
+between plan rendering and execution preparation.
 
 - [ ] **Step 4: Verify**
 
@@ -552,11 +565,12 @@ parse exact public identifiers
 discover metadata
 resolve exact source locks
 open and validate selected payloads
-resolve the application and suite
+resolve the application, suite, and provider-free metadata plan
 create and print the immutable plan
 stop for plan-only
 validate explicit external authorization
 load only selected providers
+resolve exact task bindings into the private execution plan
 inject host services and executor
 run
 ```
