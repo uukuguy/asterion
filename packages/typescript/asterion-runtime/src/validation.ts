@@ -35,7 +35,7 @@ export class ProtocolValidationError extends Error {
   constructor(label: string, errors: readonly ErrorObject[] | null | undefined) {
     const first = errors?.[0];
     const location = first?.instancePath || "/";
-    const reason = first?.message || "violates Agent Runtime Protocol v1";
+    const reason = first?.message || "violates Asterion Agent Runtime Protocol v1";
     super(`${label} ${location} ${reason}`);
     this.name = "ProtocolValidationError";
   }

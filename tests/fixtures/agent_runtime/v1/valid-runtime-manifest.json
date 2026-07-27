@@ -1,5 +1,5 @@
 {
-  "protocol": "dci.agent-runtime/v1",
+  "protocol": "asterion.agent-runtime/v1",
   "runtime_id": "fixture-runtime",
   "capabilities": ["filesystem.read", "shell"]
 }

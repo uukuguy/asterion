@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["protocol", "run_id", "sequence", "type", "payload"],
   "properties": {
-    "protocol": {"const": "dci.agent-runtime/v1"},
+    "protocol": {"const": "asterion.agent-runtime/v1"},
     "run_id": {"type": "string", "minLength": 1},
     "sequence": {"type": "integer", "minimum": 1},
     "type": {

@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["protocol", "runtime_id", "capabilities"],
   "properties": {
-    "protocol": {"const": "dci.agent-runtime/v1"},
+    "protocol": {"const": "asterion.agent-runtime/v1"},
     "runtime_id": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"

@@ -1,8 +1,8 @@
-export const PROTOCOL_VERSION = "dci.agent-runtime/v1" as const;
+export const RUNTIME_PROTOCOL_VERSION = "asterion.agent-runtime/v1" as const;
 export const PACKAGE_PROTOCOL_VERSION = "dci.package/v1" as const;
 export const ASSEMBLY_PROTOCOL_VERSION = "dci.assembly/v1" as const;
 
-export type ProtocolVersion = typeof PROTOCOL_VERSION;
+export type ProtocolVersion = typeof RUNTIME_PROTOCOL_VERSION;
 export type PackageProtocolVersion = typeof PACKAGE_PROTOCOL_VERSION;
 export type AssemblyProtocolVersion = typeof ASSEMBLY_PROTOCOL_VERSION;
 

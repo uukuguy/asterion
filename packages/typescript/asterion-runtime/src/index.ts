@@ -13,7 +13,7 @@ export type {
 export {
   ASSEMBLY_PROTOCOL_VERSION,
   PACKAGE_PROTOCOL_VERSION,
-  PROTOCOL_VERSION,
+  RUNTIME_PROTOCOL_VERSION,
 } from "./types.js";
 export {
   ProtocolValidationError,
