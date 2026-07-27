@@ -45,6 +45,10 @@ from asterion.capability_packages.sources import CapabilityPackageSource
 from asterion.capability_packages.sources.builtin import (
     BuiltinCapabilityPackageSource,
 )
+from asterion.cli_capability import (
+    add_capability_parser,
+    run_capability_command,
+)
 from asterion.runner.application import ApplicationRunError
 from asterion.runner.composed import run_composed_application
 from asterion.runtime.factory import (
@@ -98,6 +102,12 @@ def main(
     parser = _parser()
     try:
         args = parser.parse_args(argv)
+        if args.command == "capability":
+            return run_capability_command(
+                args,
+                stdout=output_stream,
+                stderr=error_stream,
+            )
         if args.command == "list":
             if args.provider is not None:
                 provider = load_application_provider(
@@ -394,6 +404,7 @@ def _parser() -> argparse.ArgumentParser:
         default=os.environ.get("ASTERION_EXECUTOR_VALIDATION_CONFIG"),
     )
     run.add_argument("legacy_assembly", nargs="?")
+    add_capability_parser(subparsers)
     return parser
 
 

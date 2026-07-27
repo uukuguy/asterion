@@ -479,6 +479,9 @@ def _run_full(copy_root: Path, venv_root: Path, runner: Runner) -> int:
     if len(wheels) != 1:
         raise PromotionError("promotion build must produce exactly one wheel")
     python, asterion = _venv_paths(venv_root)
+    initialized_capability = (
+        venv_root.parent / "initialized-capability"
+    ).resolve()
     installed_commands = (
         ("uv", "venv", str(venv_root)),
         ("uv", "pip", "install", "--python", str(python), str(wheels[0])),
@@ -486,6 +489,30 @@ def _run_full(copy_root: Path, venv_root: Path, runner: Runner) -> int:
         (str(python), "-c", WHEEL_CWD_SHIM_SMOKE),
         (str(asterion), "list"),
         (str(asterion), "describe", "--provider", "dci-agent-lite", "--json"),
+        (
+            str(asterion),
+            "capability",
+            "init",
+            str(initialized_capability),
+        ),
+        (
+            str(asterion),
+            "capability",
+            "validate",
+            str(initialized_capability / "payload"),
+        ),
+        (
+            str(asterion),
+            "capability",
+            "inspect",
+            str(initialized_capability / "payload"),
+        ),
+        (
+            str(asterion),
+            "capability",
+            "test",
+            str(initialized_capability),
+        ),
     )
     for command in installed_commands:
         _run(runner, command, copy_root)

@@ -312,6 +312,28 @@ class PromotionCheckTests(unittest.TestCase):
                 any(command[0].endswith("/asterion") and command[1:] == suffix for command in commands),
                 suffix,
             )
+        capability_commands = {
+            command[2]: command
+            for command in commands
+            if command[0].endswith("/asterion")
+            and command[1:2] == ("capability",)
+            and len(command) == 4
+        }
+        self.assertEqual(
+            set(capability_commands),
+            {"init", "inspect", "test", "validate"},
+        )
+        initialized = Path(capability_commands["init"][3])
+        self.assertEqual(initialized, initialized.resolve())
+        self.assertEqual(
+            Path(capability_commands["test"][3]),
+            initialized,
+        )
+        for command in ("inspect", "validate"):
+            self.assertEqual(
+                Path(capability_commands[command][3]),
+                initialized / "payload",
+            )
         self.assertEqual(len(set(roots)), 1)
         self.assertNotEqual(roots[0], source)
         command_text = "\n".join(rendered).lower()
