@@ -189,3 +189,4 @@
 - 14:07 Narrowed complete artifact mappings to satisfy static diagnostics without suppressing Pyright [c59128e]
 - 14:21 Added metadata-only installed capability discovery and identity-bound selected loading [489b970]
 - 15:02 Added explicit local package loading with fail-closed path and import boundaries [264f54c]
+- 15:15 Blocked local factory relative-import escapes to preserve exact source closure [4580e44]
