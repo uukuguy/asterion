@@ -21,6 +21,10 @@ from asterion.applications.provider import (
     compose_installed_provider,
     validate_installed_provider,
 )
+from asterion.capabilities.builtin import create_controlled_code_package
+from asterion.capabilities.dci_research.provider import (
+    create_provider as create_dci_package,
+)
 from asterion.dci.verification import (
     DciProductVerifier,
     LocalDciVerificationBackend,
@@ -61,9 +65,7 @@ class ExplodingBackend:
 
 
 class PreflightBackend:
-    def __init__(
-        self, node_version: tuple[int, int, int] | None = (22, 19, 0)
-    ) -> None:
+    def __init__(self, node_version: tuple[int, int, int] | None = (22, 19, 0)) -> None:
         self.node = node_version
         self.calls: list[object] = []
 
@@ -120,9 +122,7 @@ class InstalledAcceptanceTests(unittest.TestCase):
             (resource_root / "paper-benchmarks.json").read_text(encoding="utf-8")
         )["datasets"]
         scopes = json.loads(
-            (resource_root / "paper-experiment-scopes.json").read_text(
-                encoding="utf-8"
-            )
+            (resource_root / "paper-experiment-scopes.json").read_text(encoding="utf-8")
         )["scopes"]
         by_dataset = {item["dataset_id"]: item for item in benchmarks}
         by_scope = {item["scope_id"]: item for item in scopes}
@@ -249,9 +249,7 @@ class InstalledAcceptanceTests(unittest.TestCase):
 
         self.assertEqual(len(all_experiment_scope_ids()), 17)
         self.assertEqual(len(paper_experiment_scope_ids()), 16)
-        self.assertNotIn(
-            "qa.bamboogle.upstream.sample50", paper_experiment_scope_ids()
-        )
+        self.assertNotIn("qa.bamboogle.upstream.sample50", paper_experiment_scope_ids())
         self.assertEqual(
             resolve_experiment_scope("qa.bamboogle.main.full").selection_count, 125
         )
@@ -286,9 +284,7 @@ class InstalledAcceptanceTests(unittest.TestCase):
             for application in provider.applications
         )
         bound_assemblies = tuple(
-            path
-            for application in applications
-            for path in application.assembly_paths
+            path for application in applications for path in application.assembly_paths
         )
         package_root = Path(str(resources.files("asterion"))).resolve()
 
@@ -300,7 +296,14 @@ class InstalledAcceptanceTests(unittest.TestCase):
             6,
         )
         self.assertEqual(
-            len(tuple((package_root / "capabilities").glob("*/manifests/*.json"))),
+            sum(
+                len(tuple(root.glob("*.json")))
+                for package in (
+                    create_controlled_code_package(),
+                    create_dci_package(),
+                )
+                for root in package.catalog_roots
+            ),
             11,
         )
 
@@ -312,7 +315,9 @@ class InstalledAcceptanceTests(unittest.TestCase):
         self.assertEqual(result.status, "PASS")
         self.assertEqual(result.provider_backed_operation_count, 0)
         self.assertFalse(result.full_dataset_ran)
-        self.assertEqual(tuple(check.check_id for check in result.checks), EXPECTED_CHECKS)
+        self.assertEqual(
+            tuple(check.check_id for check in result.checks), EXPECTED_CHECKS
+        )
         self.assertTrue(all(check.status == "PASS" for check in result.checks))
         self.assertEqual(
             {check.check_id: dict(check.counts) for check in result.checks},
@@ -332,10 +337,7 @@ class InstalledAcceptanceTests(unittest.TestCase):
         checks = {check.check_id: check for check in result.checks}
         self.assertEqual(
             checks["packaged-assemblies"].unbound_resources,
-            (
-                "applications/dci_agent_lite/assemblies/"
-                "dci-local-research.json",
-            ),
+            ("applications/dci_agent_lite/assemblies/dci-local-research.json",),
         )
         self.assertTrue(
             all(
@@ -369,7 +371,9 @@ class FirstRunPreflightTests(unittest.TestCase):
     def test_description_exposes_effective_runtime_and_path_defaults(self) -> None:
         requirements = {
             requirement.name: requirement
-            for requirement in create_dci_product(repo_root=PROJECT).description.configuration
+            for requirement in create_dci_product(
+                repo_root=PROJECT
+            ).description.configuration
         }
 
         self.assertEqual(requirements["DCI_PROVIDER"].default, "openai-codex")
@@ -663,9 +667,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
         self.assertNotIn("installed-closure", checks)
         self.assertEqual(
             tuple(
-                identity
-                for identity, check in checks.items()
-                if check.status == "FAIL"
+                identity for identity, check in checks.items() if check.status == "FAIL"
             ),
             (check_id,),
         )
@@ -687,9 +689,13 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
             )
 
         self.assertEqual(result.status, "PASS")
-        self.assertEqual(tuple(check.check_id for check in result.checks), EXPECTED_CHECKS)
+        self.assertEqual(
+            tuple(check.check_id for check in result.checks), EXPECTED_CHECKS
+        )
 
-    def test_acceptance_fails_when_packaged_manifest_closure_is_incomplete(self) -> None:
+    def test_acceptance_fails_when_packaged_manifest_closure_is_incomplete(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             package_root = Path(temp_dir) / "asterion"
             shutil.copytree(SOURCE, package_root)
@@ -703,9 +709,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
             with patch(
                 "importlib.resources.files",
                 side_effect=lambda anchor: (
-                    package_root
-                    if anchor == "asterion"
-                    else resource_files(anchor)
+                    package_root if anchor == "asterion" else resource_files(anchor)
                 ),
             ):
                 result = verifier(acceptance_request())
@@ -734,9 +738,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
             with patch(
                 "importlib.resources.files",
                 side_effect=lambda anchor: (
-                    package_root
-                    if anchor == "asterion"
-                    else resource_files(anchor)
+                    package_root if anchor == "asterion" else resource_files(anchor)
                 ),
             ):
                 result = verifier(acceptance_request())
@@ -756,9 +758,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
 
         with self.subTest(layer="bound"):
             installed = create_dci_provider()
-            damaged = replace(
-                installed, applications=(installed.applications[0],)
-            )
+            damaged = replace(installed, applications=(installed.applications[0],))
             with patch(
                 "asterion.applications.dci_agent_lite.create_provider",
                 return_value=damaged,
@@ -772,18 +772,28 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
                 executable="FAIL",
             )
 
-        def fail_dci_composition(provider, *, runtime_factories):
+        def fail_dci_composition(
+            provider,
+            *,
+            installed_packages,
+            runtime_factories,
+        ):
             if provider.provider_id == "dci-agent-lite":
                 raise ApplicationProviderError(
                     "installed application composition closure is invalid"
                 )
             return compose_installed_provider(
-                provider, runtime_factories=runtime_factories
+                provider,
+                installed_packages=installed_packages,
+                runtime_factories=runtime_factories,
             )
 
-        with self.subTest(layer="composed"), patch(
-            "asterion.applications.provider.compose_installed_provider",
-            side_effect=fail_dci_composition,
+        with (
+            self.subTest(layer="composed"),
+            patch(
+                "asterion.applications.provider.compose_installed_provider",
+                side_effect=fail_dci_composition,
+            ),
         ):
             result = verifier(acceptance_request())
             self.assert_named_layers(
@@ -795,23 +805,20 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
             )
 
         with self.subTest(layer="executable"):
-            installed = create_dci_provider()
-            application = installed.applications[0]
-            binding = application.implementations[0]
+            installed = create_dci_package()
+            binding = installed.implementations[0]
             damaged = replace(
                 installed,
-                applications=(
+                implementations=(
                     replace(
-                        application,
-                        implementations=(
-                            replace(binding, implementation=object()),
-                        ),
+                        binding,
+                        implementation=object(),
                     ),
-                    installed.applications[1],
+                    *installed.implementations[1:],
                 ),
             )
             with patch(
-                "asterion.applications.dci_agent_lite.create_provider",
+                "asterion.capabilities.dci_research.provider.create_provider",
                 return_value=damaged,
             ):
                 result = verifier(acceptance_request())
@@ -885,14 +892,13 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
                 if isinstance(outcome, Exception)
                 else {"return_value": outcome}
             )
-            with self.subTest(case=case), patch(
-                f"asterion.dci.verification.{target}", **kwargs
+            with (
+                self.subTest(case=case),
+                patch(f"asterion.dci.verification.{target}", **kwargs),
             ):
                 result = verifier(acceptance_request())
 
-            self.assert_only_named_failure(
-                result, check_id=check_id, actual=actual
-            )
+            self.assert_only_named_failure(result, check_id=check_id, actual=actual)
 
     def test_acceptance_reports_registry_construction_as_composition_damage(
         self,
@@ -901,9 +907,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
         with (
             patch(
                 "asterion.runtime.defaults.default_runtime_factory_registry",
-                side_effect=RuntimeFactoryError(
-                    "runtime factory binding is invalid"
-                ),
+                side_effect=RuntimeFactoryError("runtime factory binding is invalid"),
             ),
             patch(
                 "asterion.runtime.defaults._create_pi_runtime",
@@ -924,11 +928,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
             executable="FAIL",
         )
         self.assertEqual(
-            tuple(
-                check.check_id
-                for check in result.checks
-                if check.status == "FAIL"
-            ),
+            tuple(check.check_id for check in result.checks if check.status == "FAIL"),
             ("composed-assemblies", "executable-assemblies"),
         )
         pi_factory.assert_not_called()

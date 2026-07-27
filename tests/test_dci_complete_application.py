@@ -24,7 +24,21 @@ from asterion.capabilities.dci_research.complete import (
     INPUT_PROTOCOL,
     complete_application_identity,
 )
-from asterion.capabilities.execution import InProcessArtifactPayload, project_public_value
+from asterion.capabilities.dci_research.provider import (
+    create_provider as create_dci_package,
+)
+from asterion.capabilities.execution import (
+    InProcessArtifactPayload,
+    project_public_value,
+)
+from asterion.capability_packages.model import (
+    CapabilityPackageCandidate,
+    PortableCapabilityPayload,
+)
+from asterion.capability_packages.protocol import (
+    CapabilityPackageRef,
+    validate_capability_package_manifest,
+)
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
 from asterion.dci.services import (
     create_answer_judge_service_factory,
@@ -131,6 +145,45 @@ DCI_PACKAGED_RESOURCE_CLOSURE = {
     "dci/resources/reproduction-targets.json",
     "dci/resources/trajectory-resolution.schema.json",
 }
+
+
+class _DciLocalSource:
+    def __init__(self) -> None:
+        self.installed = create_dci_package()
+        self.candidate = CapabilityPackageCandidate(
+            package_ref=self.installed.package_ref,
+            source_id=self.installed.source_id,
+            source_kind=self.installed.source_kind,
+            payload_sha256=self.installed.payload_sha256,
+            metadata={},
+        )
+        self.payload = PortableCapabilityPayload(
+            manifest=validate_capability_package_manifest(
+                json.loads((MANIFESTS.parent / "capability-package.json").read_text())
+            ),
+            payload_sha256=self.installed.payload_sha256,
+            resource_root=MANIFESTS.parent,
+        )
+
+    def discover_metadata(self):
+        return (self.candidate,)
+
+    def open_payload(self, candidate):
+        self._require_candidate(candidate)
+        return self.payload
+
+    def validate_source_identity(self, candidate, payload):
+        self._require_candidate(candidate)
+        if payload is not self.payload:
+            raise AssertionError("unexpected DCI payload")
+
+    def load_provider(self, candidate):
+        self._require_candidate(candidate)
+        return self.installed
+
+    def _require_candidate(self, candidate):
+        if candidate is not self.candidate:
+            raise AssertionError("unexpected DCI candidate")
 
 
 class _CorpusService:
@@ -268,9 +321,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
 
         referenced = set()
         root = SOURCE / "dci/resources"
-        bounded = json.loads(
-            root.joinpath("paper-bounded-fixtures.json").read_text()
-        )
+        bounded = json.loads(root.joinpath("paper-bounded-fixtures.json").read_text())
         for artifact in bounded["artifacts"].values():
             referenced.update(
                 {
@@ -347,18 +398,14 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
             )
         )
         runtime_ids = set()
-        for assembly_path in sorted(
-            ASSEMBLIES.glob("dci-complete-application-*.json")
-        ):
+        for assembly_path in sorted(ASSEMBLIES.glob("dci-complete-application-*.json")):
             assembly = json.loads(assembly_path.read_text())
             self.assertEqual(
                 assembly["protocol"],
                 "asterion.application-assembly/v1",
             )
             runtime_ids.add(assembly["runtime_id"])
-        self.assertEqual(
-            runtime_ids, {"claude-code.reference", "pi.reference"}
-        )
+        self.assertEqual(runtime_ids, {"claude-code.reference", "pi.reference"})
         for manifest_path in sorted(MANIFESTS.glob("*.json")):
             manifest = json.loads(manifest_path.read_text())
             self.assertEqual(manifest["protocol"], "asterion.capability/v1")
@@ -370,8 +417,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
             {
                 name
                 for name in DCI_COMPLETE_IMPLEMENTATION_RESOURCES
-                if "/manifests/" not in name
-                and not name.startswith("dci/resources/")
+                if "/manifests/" not in name and not name.startswith("dci/resources/")
             },
             _dci_import_closure(DCI_EXECUTABLE_SOURCE_ROOTS)
             | {
@@ -381,9 +427,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
         )
         assembly_capability_package_ids: set[str] | None = None
         assembly_capability_ids: set[str] | None = None
-        for assembly_path in sorted(
-            ASSEMBLIES.glob("dci-complete-application-*.json")
-        ):
+        for assembly_path in sorted(ASSEMBLIES.glob("dci-complete-application-*.json")):
             assembly = json.loads(assembly_path.read_text())
             capability_packages = {
                 f"{item['package_id']}@{item['version']}"
@@ -413,9 +457,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
         }
         for resource_name in manifest_resources:
             manifest = json.loads(SOURCE.joinpath(resource_name).read_text())
-            manifest_refs.add(
-                f"{manifest['capability_id']}@{manifest['version']}"
-            )
+            manifest_refs.add(f"{manifest['capability_id']}@{manifest['version']}")
 
         self.assertEqual(manifest_refs, assembly_capability_ids)
         self.assertEqual(
@@ -474,8 +516,11 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
             (*DCI_COMPLETE_IMPLEMENTATION_RESOURCES[:-1], ["dci/judge.py"]),
         )
         for names in invalid_names:
-            with self.subTest(names=names), self.assertRaisesRegex(
-                ValueError, "^DCI implementation resource closure is invalid$"
+            with (
+                self.subTest(names=names),
+                self.assertRaisesRegex(
+                    ValueError, "^DCI implementation resource closure is invalid$"
+                ),
             ):
                 dci_complete_implementation_identity(
                     resource_reader=resources.__getitem__,
@@ -574,9 +619,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
                 self.assertEqual(manifest["emits_events"], (EVENTS[index],))
                 self.assertEqual(manifest["produces_artifacts"], (ARTIFACTS[index],))
                 if index:
-                    self.assertEqual(
-                        manifest["consumes_events"], (EVENTS[index - 1],)
-                    )
+                    self.assertEqual(manifest["consumes_events"], (EVENTS[index - 1],))
                     self.assertEqual(
                         manifest["consumes_artifacts"], (ARTIFACTS[index - 1],)
                     )
@@ -599,8 +642,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
                 }
                 self.assertNotIn("shell", required)
                 self.assertFalse(
-                    required
-                    & {"network", "web.fetch", "web.search", "agent.subagent"}
+                    required & {"network", "web.fetch", "web.search", "agent.subagent"}
                 )
 
 
@@ -633,11 +675,18 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
             for application in create_provider().applications
             if application.application_id == "dci.complete-application"
         )
-        self.assertEqual(application.runtime_ids, ("claude-code.reference", "pi.reference"))
+        self.assertEqual(
+            application.runtime_ids, ("claude-code.reference", "pi.reference")
+        )
+        self.assertEqual(
+            application.capability_packages,
+            (CapabilityPackageRef("dci", "1.0.0"),),
+        )
+        installed = create_dci_package()
         self.assertEqual(
             tuple(
                 binding.capability_ref.capability_id
-                for binding in application.implementations
+                for binding in installed.implementations
             ),
             STAGES,
         )
@@ -661,9 +710,7 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
             root = Path(directory).resolve()
             corpus = root / "SENTINEL_PRIVATE_PATH"
             corpus.mkdir()
-            runtime = _CompletedRuntime(
-                "pi.reference", root / "private-run-output"
-            )
+            runtime = _CompletedRuntime("pi.reference", root / "private-run-output")
             provider_entry = FakeEntryPoint(
                 name="dci-agent-lite", factory=create_provider
             )
@@ -701,9 +748,7 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
             async def answer_judge(**kwargs):
                 self.assertEqual(kwargs["question"], "SENTINEL_QUESTION")
                 self.assertEqual(kwargs["gold_answer"], "SENTINEL_GOLD")
-                self.assertEqual(
-                    kwargs["predicted_answer"], "PRIVATE ANSWER"
-                )
+                self.assertEqual(kwargs["predicted_answer"], "PRIVATE ANSWER")
                 self.assertEqual(kwargs["config"].api_key, "SENTINEL_KEY")
                 return {
                     "is_correct": True,
@@ -753,6 +798,7 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
                         ),
                     ],
                     entry_points=(provider_entry,),
+                    capability_package_sources=(_DciLocalSource(),),
                     host_service_entry_points=host_entries,
                     runtime_factories=registry,
                     stdout=stdout,
@@ -763,9 +809,7 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
         payload = json.loads(stdout.getvalue())
         research = payload["artifacts"][0]["value"]
         self.assertEqual(research["status"], "completed")
-        self.assertEqual(
-            research["stage_data"]["artifact_ids"], ["answer"]
-        )
+        self.assertEqual(research["stage_data"]["artifact_ids"], ["answer"])
         rendered = stdout.getvalue() + stderr.getvalue()
         for sentinel in (
             "SENTINEL_QUESTION",
@@ -811,8 +855,25 @@ class _CompletedRuntime:
         final_path = self.output_dir / "final.txt"
         final_path.write_text("PRIVATE ANSWER\n")
         final_path.chmod(0o600)
-        yield RunEvent(request.run_id, 1, "run.started", {"capabilities": list(request.requested_capabilities)})
-        yield RunEvent(request.run_id, 2, "artifact.created", {"artifact": {"artifact_id": "answer", "kind": "answer", "media_type": "text/plain", "uri": "final.txt"}})
+        yield RunEvent(
+            request.run_id,
+            1,
+            "run.started",
+            {"capabilities": list(request.requested_capabilities)},
+        )
+        yield RunEvent(
+            request.run_id,
+            2,
+            "artifact.created",
+            {
+                "artifact": {
+                    "artifact_id": "answer",
+                    "kind": "answer",
+                    "media_type": "text/plain",
+                    "uri": "final.txt",
+                }
+            },
+        )
         yield RunEvent(request.run_id, 3, "run.completed", {"status": "completed"})
 
     def completed_run_dir(self, run_id: str) -> Path:
@@ -848,8 +909,16 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
     async def test_stage_rejects_wrong_upstream_schema_or_implementation(self) -> None:
         implementation = DciCompleteBenchmarkImplementation()
         for value in (
-            {"schema": "wrong", "implementation_sha256": complete_application_identity(), "is_correct": True},
-            {"schema": "asterion.dci.complete-application/v1", "implementation_sha256": "0" * 64, "is_correct": True},
+            {
+                "schema": "wrong",
+                "implementation_sha256": complete_application_identity(),
+                "is_correct": True,
+            },
+            {
+                "schema": "asterion.dci.complete-application/v1",
+                "implementation_sha256": "0" * 64,
+                "is_correct": True,
+            },
         ):
             with self.subTest(value=value), self.assertRaises(CapabilityExecutionError):
                 await implementation.execute(
@@ -878,11 +947,26 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
             await run_composed_application(
                 plan("pi.reference"),
                 implementations=(
-                    CapabilityImplementationBinding(CapabilityRef("dci.research", "1.0.0"), DciCompleteResearchImplementation()),
-                    CapabilityImplementationBinding(CapabilityRef("dci.evaluation", "1.0.0"), DciCompleteEvaluationImplementation()),
-                    CapabilityImplementationBinding(CapabilityRef("dci.benchmark", "1.0.0"), DciCompleteBenchmarkImplementation()),
-                    CapabilityImplementationBinding(CapabilityRef("dci.analysis", "1.0.0"), DciCompleteAnalysisImplementation()),
-                    CapabilityImplementationBinding(CapabilityRef("dci.export", "1.0.0"), DciCompleteExportImplementation()),
+                    CapabilityImplementationBinding(
+                        CapabilityRef("dci.research", "1.0.0"),
+                        DciCompleteResearchImplementation(),
+                    ),
+                    CapabilityImplementationBinding(
+                        CapabilityRef("dci.evaluation", "1.0.0"),
+                        DciCompleteEvaluationImplementation(),
+                    ),
+                    CapabilityImplementationBinding(
+                        CapabilityRef("dci.benchmark", "1.0.0"),
+                        DciCompleteBenchmarkImplementation(),
+                    ),
+                    CapabilityImplementationBinding(
+                        CapabilityRef("dci.analysis", "1.0.0"),
+                        DciCompleteAnalysisImplementation(),
+                    ),
+                    CapabilityImplementationBinding(
+                        CapabilityRef("dci.export", "1.0.0"),
+                        DciCompleteExportImplementation(),
+                    ),
                 ),
                 runtime=runtime,
                 run_id="missing-judge",
@@ -1074,9 +1158,15 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
                             CapabilityRef("dci.evaluation", "1.0.0"),
                             DciCompleteEvaluationImplementation(),
                         ),
-                        CapabilityImplementationBinding(CapabilityRef("dci.benchmark", "1.0.0"), later[0]),
-                        CapabilityImplementationBinding(CapabilityRef("dci.analysis", "1.0.0"), later[1]),
-                        CapabilityImplementationBinding(CapabilityRef("dci.export", "1.0.0"), later[2]),
+                        CapabilityImplementationBinding(
+                            CapabilityRef("dci.benchmark", "1.0.0"), later[0]
+                        ),
+                        CapabilityImplementationBinding(
+                            CapabilityRef("dci.analysis", "1.0.0"), later[1]
+                        ),
+                        CapabilityImplementationBinding(
+                            CapabilityRef("dci.export", "1.0.0"), later[2]
+                        ),
                     ),
                     runtime=runtime,
                     run_id="cancelled-complete",
@@ -1101,7 +1191,9 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([implementation.calls for implementation in later], [0, 0, 0])
         self.assertNotIn("SENTINEL", str(raised.exception))
 
-    async def test_claude_run_is_judged_and_exports_without_private_bodies(self) -> None:
+    async def test_claude_run_is_judged_and_exports_without_private_bodies(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             runtime = _CompletedRuntime(
                 "claude-code.reference", Path(directory) / "claude-run"
@@ -1109,18 +1201,39 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
             judge = _JudgeService()
 
             bindings = (
-                CapabilityImplementationBinding(CapabilityRef("dci.research", "1.0.0"), DciCompleteResearchImplementation()),
-                CapabilityImplementationBinding(CapabilityRef("dci.evaluation", "1.0.0"), DciCompleteEvaluationImplementation()),
-                CapabilityImplementationBinding(CapabilityRef("dci.benchmark", "1.0.0"), DciCompleteBenchmarkImplementation()),
-                CapabilityImplementationBinding(CapabilityRef("dci.analysis", "1.0.0"), DciCompleteAnalysisImplementation()),
-                CapabilityImplementationBinding(CapabilityRef("dci.export", "1.0.0"), DciCompleteExportImplementation()),
+                CapabilityImplementationBinding(
+                    CapabilityRef("dci.research", "1.0.0"),
+                    DciCompleteResearchImplementation(),
+                ),
+                CapabilityImplementationBinding(
+                    CapabilityRef("dci.evaluation", "1.0.0"),
+                    DciCompleteEvaluationImplementation(),
+                ),
+                CapabilityImplementationBinding(
+                    CapabilityRef("dci.benchmark", "1.0.0"),
+                    DciCompleteBenchmarkImplementation(),
+                ),
+                CapabilityImplementationBinding(
+                    CapabilityRef("dci.analysis", "1.0.0"),
+                    DciCompleteAnalysisImplementation(),
+                ),
+                CapabilityImplementationBinding(
+                    CapabilityRef("dci.export", "1.0.0"),
+                    DciCompleteExportImplementation(),
+                ),
             )
             result = await run_composed_application(
                 plan("claude-code.reference"),
                 implementations=bindings,
                 runtime=runtime,
                 run_id="claude-complete",
-                input_text=json.dumps({"protocol": INPUT_PROTOCOL, "question": "PRIVATE QUESTION", "gold_answer": "PRIVATE GOLD"}),
+                input_text=json.dumps(
+                    {
+                        "protocol": INPUT_PROTOCOL,
+                        "question": "PRIVATE QUESTION",
+                        "gold_answer": "PRIVATE GOLD",
+                    }
+                ),
                 host_services=_host_services(judge),
             )
 
@@ -1131,17 +1244,34 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(tuple(event["type"] for event in result.events), EVENTS)
         self.assertNotIn("PRIVATE", repr(result))
 
-    async def test_pi_run_uses_selected_runtime_and_exports_without_bodies(self) -> None:
+    async def test_pi_run_uses_selected_runtime_and_exports_without_bodies(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             runtime = _CompletedRuntime("pi.reference", Path(directory) / "pi-run")
             judge = _JudgeService()
 
             bindings = (
-                CapabilityImplementationBinding(CapabilityRef("dci.research", "1.0.0"), DciCompleteResearchImplementation()),
-                CapabilityImplementationBinding(CapabilityRef("dci.evaluation", "1.0.0"), DciCompleteEvaluationImplementation()),
-                CapabilityImplementationBinding(CapabilityRef("dci.benchmark", "1.0.0"), DciCompleteBenchmarkImplementation()),
-                CapabilityImplementationBinding(CapabilityRef("dci.analysis", "1.0.0"), DciCompleteAnalysisImplementation()),
-                CapabilityImplementationBinding(CapabilityRef("dci.export", "1.0.0"), DciCompleteExportImplementation()),
+                CapabilityImplementationBinding(
+                    CapabilityRef("dci.research", "1.0.0"),
+                    DciCompleteResearchImplementation(),
+                ),
+                CapabilityImplementationBinding(
+                    CapabilityRef("dci.evaluation", "1.0.0"),
+                    DciCompleteEvaluationImplementation(),
+                ),
+                CapabilityImplementationBinding(
+                    CapabilityRef("dci.benchmark", "1.0.0"),
+                    DciCompleteBenchmarkImplementation(),
+                ),
+                CapabilityImplementationBinding(
+                    CapabilityRef("dci.analysis", "1.0.0"),
+                    DciCompleteAnalysisImplementation(),
+                ),
+                CapabilityImplementationBinding(
+                    CapabilityRef("dci.export", "1.0.0"),
+                    DciCompleteExportImplementation(),
+                ),
             )
             with patch(
                 "asterion.dci.application_executor.EnvironmentDciRunExecutor.run",
@@ -1169,12 +1299,11 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(judge.calls[0]["predicted_answer"], "PRIVATE ANSWER")
         self.assertEqual(tuple(event["type"] for event in result.events), EVENTS)
-        self.assertEqual(tuple(item["media_type"] for item in result.artifacts), ARTIFACTS)
         self.assertEqual(
-            {
-                item["value"].get("implementation_sha256")
-                for item in result.artifacts
-            },
+            tuple(item["media_type"] for item in result.artifacts), ARTIFACTS
+        )
+        self.assertEqual(
+            {item["value"].get("implementation_sha256") for item in result.artifacts},
             {complete_application_identity()},
         )
         self.assertEqual(result.artifacts[-1]["value"]["total"], 1)
@@ -1193,17 +1322,35 @@ class DciRestrictedPiEvidenceTests(unittest.TestCase):
         (run / "protocol").mkdir(parents=True)
         corpus.mkdir()
         documents = {
-            run / "state.json": {"status": "completed", "tools": "read,grep", "max_turns": 4},
-            run / "protocol/attempt-0001.request.json": {"requested_capabilities": ["filesystem.read", "pi.tool.grep"]},
-            run / "eval_result.json": {"is_correct": True, "judge_request_fingerprint": "a" * 64},
+            run / "state.json": {
+                "status": "completed",
+                "tools": "read,grep",
+                "max_turns": 4,
+            },
+            run / "protocol/attempt-0001.request.json": {
+                "requested_capabilities": ["filesystem.read", "pi.tool.grep"]
+            },
+            run / "eval_result.json": {
+                "is_correct": True,
+                "judge_request_fingerprint": "a" * 64,
+            },
         }
         for path, value in documents.items():
             path.write_text(json.dumps(value))
             path.chmod(0o600)
         events = (
-            {"type": "tool.call", "payload": {"name": "read", "arguments": {"path": "missing.txt"}}},
-            {"type": "tool.call", "payload": {"name": "read", "arguments": {"path": "document.txt"}}},
-            {"type": "tool.call", "payload": {"name": "grep", "arguments": {"path": "."}}},
+            {
+                "type": "tool.call",
+                "payload": {"name": "read", "arguments": {"path": "missing.txt"}},
+            },
+            {
+                "type": "tool.call",
+                "payload": {"name": "read", "arguments": {"path": "document.txt"}},
+            },
+            {
+                "type": "tool.call",
+                "payload": {"name": "grep", "arguments": {"path": "."}},
+            },
             {"type": "tool.result", "payload": {"is_error": True}},
             {"type": "tool.result", "payload": {"is_error": True}},
         )
@@ -1233,6 +1380,7 @@ class DciRestrictedPiEvidenceTests(unittest.TestCase):
             with self.assertRaises(DciDualRuntimeVerificationError):
                 audit_restricted_pi_application(run_dir=run, corpus_dir=corpus)
 
+
 class DciRestrictedClaudeEvidenceTests(unittest.TestCase):
     def _fixture(self, root: Path) -> tuple[Path, Path]:
         run = root / "run"
@@ -1240,26 +1388,84 @@ class DciRestrictedClaudeEvidenceTests(unittest.TestCase):
         run.mkdir(mode=0o700)
         corpus.mkdir()
         documents = {
-            "request.json": {"run_id": "fixture-run", "requested_capabilities": ["filesystem.read", "claude.tool.grep", "claude.tool.glob"]},
+            "request.json": {
+                "run_id": "fixture-run",
+                "requested_capabilities": [
+                    "filesystem.read",
+                    "claude.tool.grep",
+                    "claude.tool.glob",
+                ],
+            },
             "runtime-policy.json": {
                 "runtime_cwd": str(corpus.resolve()),
-                "agent_provider": "minimax", "agent_model": "fixture-model",
-                "tools": ["Read", "Grep", "Glob"], "allowed_tools": ["Read", "Grep", "Glob"],
-                "max_turns": 4, "permission_mode": "dontAsk", "strict_mcp": True,
-                "mcp_servers": {}, "safe_mode": True, "no_session_persistence": True,
-                "settings": {"sandbox": {"enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False}},
+                "agent_provider": "minimax",
+                "agent_model": "fixture-model",
+                "tools": ["Read", "Grep", "Glob"],
+                "allowed_tools": ["Read", "Grep", "Glob"],
+                "max_turns": 4,
+                "permission_mode": "dontAsk",
+                "strict_mcp": True,
+                "mcp_servers": {},
+                "safe_mode": True,
+                "no_session_persistence": True,
+                "settings": {
+                    "sandbox": {
+                        "enabled": True,
+                        "failIfUnavailable": True,
+                        "allowUnsandboxedCommands": False,
+                    }
+                },
             },
-            "eval_result.json": {"is_correct": True, "judge_request_fingerprint": "c" * 64},
+            "eval_result.json": {
+                "is_correct": True,
+                "judge_request_fingerprint": "c" * 64,
+            },
         }
         for name, value in documents.items():
             path = run / name
             path.write_text(json.dumps(value))
             path.chmod(0o600)
         raw_events = (
-            {"type": "system", "subtype": "init", "tools": ["Glob", "Grep", "Read"], "cwd": str(corpus.resolve()), "model": "fixture-model", "claude_code_version": "fixture-version"},
-            {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "call-1", "name": "Grep", "input": {"path": "."}}]}},
-            {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "call-1", "content": "cobalt lantern", "is_error": False}]}},
-            {"type": "result", "subtype": "success", "is_error": False, "result": "cobalt lantern"},
+            {
+                "type": "system",
+                "subtype": "init",
+                "tools": ["Glob", "Grep", "Read"],
+                "cwd": str(corpus.resolve()),
+                "model": "fixture-model",
+                "claude_code_version": "fixture-version",
+            },
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "call-1",
+                            "name": "Grep",
+                            "input": {"path": "."},
+                        }
+                    ]
+                },
+            },
+            {
+                "type": "user",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "call-1",
+                            "content": "cobalt lantern",
+                            "is_error": False,
+                        }
+                    ]
+                },
+            },
+            {
+                "type": "result",
+                "subtype": "success",
+                "is_error": False,
+                "result": "cobalt lantern",
+            },
         )
         events = []
         adapter = ClaudeCodeProtocolAdapter(run_id="fixture-run", emit=events.append)
@@ -1267,7 +1473,9 @@ class DciRestrictedClaudeEvidenceTests(unittest.TestCase):
             adapter.consume(raw_event)
         for name, value in {
             "events.jsonl": "".join(json.dumps(event) + "\n" for event in events),
-            "raw-events.jsonl": "".join(json.dumps(event) + "\n" for event in raw_events),
+            "raw-events.jsonl": "".join(
+                json.dumps(event) + "\n" for event in raw_events
+            ),
             "final.txt": "cobalt lantern\n",
         }.items():
             path = run / name
@@ -1320,9 +1528,7 @@ class DciRestrictedClaudeEvidenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             run, corpus = self._fixture(root)
-            report = audit_restricted_claude_application(
-                run_dir=run, corpus_dir=corpus
-            )
+            report = audit_restricted_claude_application(run_dir=run, corpus_dir=corpus)
             report_path = root / "report.json"
             report_sha256 = write_private_report(report_path, report)
             record = build_restricted_claude_record(
@@ -1344,13 +1550,12 @@ class DciRestrictedClaudeEvidenceTests(unittest.TestCase):
                     record_path=record_path,
                 )
 
-        self.assertEqual(
-            record["schema"], "asterion.dci.climb-provider-evidence/v2"
-        )
+        self.assertEqual(record["schema"], "asterion.dci.climb-provider-evidence/v2")
         self.assertEqual(record["agent_operations"], 1)
         self.assertEqual(record["agent_provider"], "minimax")
         self.assertEqual(record["agent_model"], "fixture-model")
         self.assertNotIn("cobalt lantern", repr(record))
+
 
 if __name__ == "__main__":
     unittest.main()

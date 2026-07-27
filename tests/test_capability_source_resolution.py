@@ -3,17 +3,71 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 
-from asterion.capability_packages.model import CapabilityPackageCandidate
+from asterion.capability_packages.model import (
+    CapabilityPackageCandidate,
+    InstalledCapabilityPackage,
+    PortableCapabilityPayload,
+)
 from asterion.capability_packages.protocol import (
+    CapabilityPackageManifest,
     CapabilityPackageRef,
     CapabilitySourceLock,
     CapabilitySourceLockEntry,
 )
 from asterion.capability_packages.resolution import (
     CapabilitySourceResolutionError,
+    load_installed_capability_packages,
     resolve_capability_source,
 )
+
+
+class FixtureSource:
+    def __init__(
+        self,
+        candidate: CapabilityPackageCandidate,
+        payload: PortableCapabilityPayload,
+        installed: InstalledCapabilityPackage,
+    ) -> None:
+        self.candidate = candidate
+        self.payload = payload
+        self.installed = installed
+        self.calls: list[str] = []
+
+    def discover_metadata(self) -> tuple[CapabilityPackageCandidate, ...]:
+        self.calls.append("discover")
+        return (self.candidate,)
+
+    def open_payload(
+        self,
+        candidate: CapabilityPackageCandidate,
+    ) -> PortableCapabilityPayload:
+        self.calls.append("open")
+        self.assert_candidate(candidate)
+        return self.payload
+
+    def validate_source_identity(
+        self,
+        candidate: CapabilityPackageCandidate,
+        payload: PortableCapabilityPayload,
+    ) -> None:
+        self.calls.append("validate")
+        self.assert_candidate(candidate)
+        if payload is not self.payload:
+            raise AssertionError("unexpected payload")
+
+    def load_provider(
+        self,
+        candidate: CapabilityPackageCandidate,
+    ) -> InstalledCapabilityPackage:
+        self.calls.append("load")
+        self.assert_candidate(candidate)
+        return self.installed
+
+    def assert_candidate(self, candidate: CapabilityPackageCandidate) -> None:
+        if candidate is not self.candidate:
+            raise AssertionError("unexpected candidate")
 
 
 class CapabilitySourceResolutionTests(unittest.TestCase):
@@ -176,3 +230,80 @@ class CapabilitySourceResolutionTests(unittest.TestCase):
             ),
             selected,
         )
+
+    def test_host_loads_exact_selected_package_through_source_phases(
+        self,
+    ) -> None:
+        candidate = self._candidate("selected.source")
+        manifest = CapabilityPackageManifest(
+            package_ref=self.package_ref,
+            capabilities=(),
+            benchmark_suites=(),
+            resources=(),
+        )
+        payload = PortableCapabilityPayload(
+            manifest=manifest,
+            payload_sha256=self.digest,
+            resource_root=Path("."),
+        )
+        installed = InstalledCapabilityPackage(
+            package_ref=self.package_ref,
+            payload_sha256=self.digest,
+            source_id=candidate.source_id,
+            source_kind=candidate.source_kind,
+            catalog_roots=(),
+            benchmark_suite_paths=(),
+            implementations=(),
+            benchmark_bindings=(),
+        )
+        selected = FixtureSource(candidate, payload, installed)
+        unrelated_ref = CapabilityPackageRef("unrelated.package", "1.0.0")
+        unrelated_candidate = self._candidate(
+            "unrelated.source",
+            package_ref=unrelated_ref,
+        )
+        unrelated = FixtureSource(unrelated_candidate, payload, installed)
+
+        loaded = load_installed_capability_packages(
+            (self.package_ref,),
+            (unrelated, selected),
+        )
+
+        self.assertEqual(loaded, (installed,))
+        self.assertEqual(unrelated.calls, ["discover"])
+        self.assertEqual(
+            selected.calls,
+            ["discover", "open", "validate", "load"],
+        )
+
+    def test_host_rejects_provider_identity_mismatch(self) -> None:
+        candidate = self._candidate("selected.source")
+        payload = PortableCapabilityPayload(
+            manifest=CapabilityPackageManifest(
+                package_ref=self.package_ref,
+                capabilities=(),
+                benchmark_suites=(),
+                resources=(),
+            ),
+            payload_sha256=self.digest,
+            resource_root=Path("."),
+        )
+        installed = InstalledCapabilityPackage(
+            package_ref=self.other_package_ref,
+            payload_sha256=self.digest,
+            source_id=candidate.source_id,
+            source_kind=candidate.source_kind,
+            catalog_roots=(),
+            benchmark_suite_paths=(),
+            implementations=(),
+            benchmark_bindings=(),
+        )
+
+        with self.assertRaisesRegex(
+            CapabilitySourceResolutionError,
+            "^capability package provider identity is invalid$",
+        ):
+            load_installed_capability_packages(
+                (self.package_ref,),
+                (FixtureSource(candidate, payload, installed),),
+            )

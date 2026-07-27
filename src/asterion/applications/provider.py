@@ -15,6 +15,7 @@ from asterion.assembly.protocol import (
 )
 from asterion.capabilities.catalog import (
     CapabilityCatalogError,
+    CapabilityRef,
     discover_capabilities,
 )
 from asterion.capabilities.execution import (
@@ -282,6 +283,7 @@ def _compose_application(
             for package in selected_packages
             for binding in package.implementations
         )
+        catalog_refs = {entry.ref for entry in catalog.entries}
         assemblies: list[InstalledAssembly] = []
         for assembly_path in application.assembly_paths:
             assembly = _read_assembly_snapshot(assembly_path, application=application)
@@ -293,12 +295,22 @@ def _compose_application(
                 catalog=catalog,
                 runtime_manifest=runtime_binding.manifest.to_mapping(),
             )
+            selected_implementations = tuple(
+                binding
+                for binding in implementations
+                if (
+                    not isinstance(binding, CapabilityImplementationBinding)
+                    or not isinstance(binding.capability_ref, CapabilityRef)
+                    or binding.capability_ref not in catalog_refs
+                    or binding.capability_ref in plan.capability_refs
+                )
+            )
             assemblies.append(
                 InstalledAssembly(
                     runtime_id=runtime_id,
                     path=assembly_path,
                     plan=plan,
-                    implementations=implementations,
+                    implementations=selected_implementations,
                 )
             )
     except (

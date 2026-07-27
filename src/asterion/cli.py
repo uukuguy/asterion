@@ -10,7 +10,7 @@ import sys
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from types import MappingProxyType
-from typing import Callable, TextIO
+from typing import AsyncContextManager, Callable, TextIO
 
 from asterion.applications.discovery import (
     list_application_providers,
@@ -19,6 +19,7 @@ from asterion.applications.discovery import (
 from asterion.applications.provider import (
     ApplicationProviderError,
     InstalledApplication,
+    InstalledApplicationProvider,
     InstalledAssembly,
     resolve_installed_provider,
 )
@@ -36,6 +37,13 @@ from asterion.assembly.protocol import AssemblyError
 from asterion.capabilities.execution import (
     CapabilityExecutionError,
     project_public_value,
+)
+from asterion.capability_packages.resolution import (
+    load_installed_capability_packages,
+)
+from asterion.capability_packages.sources import CapabilityPackageSource
+from asterion.capability_packages.sources.builtin import (
+    BuiltinCapabilityPackageSource,
 )
 from asterion.runner.application import ApplicationRunError
 from asterion.runner.composed import run_composed_application
@@ -62,17 +70,20 @@ def main(
     *,
     entry_points: Iterable[object] | None = None,
     host_service_entry_points: Iterable[object] | None = None,
+    capability_package_sources: Iterable[CapabilityPackageSource] | None = None,
     runtime_factories: RuntimeFactoryRegistry | None = None,
     stdin: TextIO | None = None,
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
-    managed_executor_factory: Callable[[OperatorExecutorConfig], object] | None = None,
+    managed_executor_factory: (
+        Callable[[OperatorExecutorConfig], AsyncContextManager[object]] | None
+    ) = None,
 ) -> int:
     """Run the generic installed-application CLI."""
 
-    stdin = sys.stdin if stdin is None else stdin
-    stdout = sys.stdout if stdout is None else stdout
-    stderr = sys.stderr if stderr is None else stderr
+    input_stream = sys.stdin if stdin is None else stdin
+    output_stream = sys.stdout if stdout is None else stdout
+    error_stream = sys.stderr if stderr is None else stderr
     registry = (
         default_runtime_factory_registry()
         if runtime_factories is None
@@ -109,7 +120,7 @@ def main(
                         )
                     ],
                 }
-                stdout.write(json.dumps(payload, sort_keys=True) + "\n")
+                output_stream.write(json.dumps(payload, sort_keys=True) + "\n")
                 return 0
             payload = [
                 {
@@ -119,7 +130,7 @@ def main(
                 }
                 for item in list_application_providers(entry_points=entry_points)
             ]
-            stdout.write(json.dumps(payload, sort_keys=True) + "\n")
+            output_stream.write(json.dumps(payload, sort_keys=True) + "\n")
             return 0
         if args.command == "describe":
             provider = load_application_provider(
@@ -128,7 +139,7 @@ def main(
             if provider.product is None:
                 raise ApplicationProviderError("capability description is unavailable")
             if args.json:
-                stdout.write(
+                output_stream.write(
                     json.dumps(
                         _description_payload(provider.product.description),
                         sort_keys=True,
@@ -136,7 +147,7 @@ def main(
                     + "\n"
                 )
             else:
-                _render_description(provider.product.description, stdout)
+                _render_description(provider.product.description, output_stream)
             return 0
         if args.command == "verify":
             provider = load_application_provider(
@@ -158,11 +169,11 @@ def main(
                 provider.product.verifier(request), description
             )
             if args.json:
-                stdout.write(
+                output_stream.write(
                     json.dumps(_verification_payload(result), sort_keys=True) + "\n"
                 )
             else:
-                _render_verification(result, stdout)
+                _render_verification(result, output_stream)
             return 0 if result.status == "PASS" else 1
         if (
             sum(
@@ -176,11 +187,12 @@ def main(
             _run(
                 args,
                 entry_points=entry_points,
+                capability_package_sources=capability_package_sources,
                 registry=registry,
                 host_service_registry=host_service_registry,
                 managed_executor_factory=executor_factory,
-                stdin=stdin,
-                stdout=stdout,
+                stdin=input_stream,
+                stdout=output_stream,
             )
         )
     except (
@@ -194,7 +206,7 @@ def main(
         TypeError,
         ValueError,
     ):
-        stderr.write("asterion: command failed\n")
+        error_stream.write("asterion: command failed\n")
         return 2
 
 
@@ -202,42 +214,66 @@ async def _run(
     args: argparse.Namespace,
     *,
     entry_points: Iterable[object] | None,
+    capability_package_sources: Iterable[CapabilityPackageSource] | None,
     registry: RuntimeFactoryRegistry,
     host_service_registry: HostServiceFactoryRegistry,
-    managed_executor_factory: Callable[[OperatorExecutorConfig], object],
+    managed_executor_factory: Callable[
+        [OperatorExecutorConfig], AsyncContextManager[object]
+    ],
     stdin: TextIO,
     stdout: TextIO,
 ) -> int:
-    provider = resolve_installed_provider(
-        load_application_provider(args.provider, entry_points=entry_points),
-        runtime_factories=registry,
-    )
+    metadata = load_application_provider(args.provider, entry_points=entry_points)
+    requested_assembly_path: Path | None = None
     if args.application is not None:
-        application = select_installed_application(
-            provider, parse_application_selector(args.application)
+        selected_metadata = select_installed_application(
+            metadata, parse_application_selector(args.application)
         )
     else:
         requested = Path(args.assembly or args.legacy_assembly)
         if requested.is_symlink():
             raise ApplicationProviderError("application assembly is unsafe")
-        assembly_path = requested.resolve(strict=True)
+        requested_assembly_path = requested.resolve(strict=True)
         matches = [
             candidate
-            for candidate in provider.applications
-            if assembly_path in candidate.assembly_paths
+            for candidate in metadata.applications
+            if requested_assembly_path in candidate.assembly_paths
         ]
         if len(matches) != 1:
             raise ApplicationProviderError("application assembly selection is invalid")
-        application = matches[0]
+        selected_metadata = matches[0]
     runtime_id = args.runtime
     if runtime_id is None:
-        if len(application.runtime_ids) != 1:
+        if len(selected_metadata.runtime_ids) != 1:
             raise ApplicationProviderError("application runtime selection is required")
-        runtime_id = application.runtime_ids[0]
-    if runtime_id not in application.runtime_ids:
+        runtime_id = selected_metadata.runtime_ids[0]
+    if runtime_id not in selected_metadata.runtime_ids:
         raise ApplicationProviderError("application runtime selection is invalid")
+    installed_packages = load_installed_capability_packages(
+        selected_metadata.capability_packages,
+        (
+            BuiltinCapabilityPackageSource(),
+            *(
+                ()
+                if capability_package_sources is None
+                else tuple(capability_package_sources)
+            ),
+        ),
+    )
+    provider = resolve_installed_provider(
+        InstalledApplicationProvider(
+            protocol=metadata.protocol,
+            provider_id=metadata.provider_id,
+            resource_root=metadata.resource_root,
+            applications=(selected_metadata,),
+            product=metadata.product,
+        ),
+        installed_packages=installed_packages,
+        runtime_factories=registry,
+    )
+    application = provider.applications[0]
     assembly = _select_application_assembly(application, runtime_id)
-    if args.application is None and assembly.path != assembly_path:
+    if requested_assembly_path is not None and assembly.path != requested_assembly_path:
         raise ApplicationProviderError("application assembly selection is invalid")
     assembly_path = assembly.path
     runtime_options = _runtime_options(args.runtime_option)
@@ -248,9 +284,7 @@ async def _run(
     managed_services = (
         {}
         if operator_config is None
-        else {
-            "executor.controlled": managed_executor_factory(operator_config)
-        }
+        else {"executor.controlled": managed_executor_factory(operator_config)}
     )
     async with host_service_registry.open(
         provider_id=provider.provider_id,
@@ -273,13 +307,15 @@ async def _run(
         input_text = args.input if args.input is not None else stdin.read()
         result = await run_composed_application(
             plan,
-            implementations=application.implementations,
+            implementations=assembly.implementations,
             runtime=runtime,
             run_id=args.run_id,
             input_text=input_text,
             host_services=host_services,
         )
-    stdout.write(json.dumps(project_public_value(result.__dict__), sort_keys=True) + "\n")
+    stdout.write(
+        json.dumps(project_public_value(result.__dict__), sort_keys=True) + "\n"
+    )
     return 0
 
 
@@ -457,9 +493,7 @@ def _render_verification(result: VerificationResult, stdout: TextIO) -> None:
             stdout.write("  artifacts: " + ", ".join(check.artifact_refs) + "\n")
         if check.unbound_resources:
             stdout.write(
-                "  unbound resources: "
-                + ", ".join(check.unbound_resources)
-                + "\n"
+                "  unbound resources: " + ", ".join(check.unbound_resources) + "\n"
             )
     stdout.write(f"Overall: {result.status}\n")
     stdout.write(

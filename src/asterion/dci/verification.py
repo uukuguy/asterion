@@ -98,12 +98,10 @@ _REVISION = re.compile(r"[0-9a-f]{40,64}")
 _PUBLIC_IDENTITY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]*")
 _EXPECTED_PACKAGED_ASSEMBLIES = (
     "applications/controlled_code/assemblies/controlled-code-validation.json",
-    "applications/dci_agent_lite/assemblies/"
-    "dci-complete-application-claude.json",
+    "applications/dci_agent_lite/assemblies/dci-complete-application-claude.json",
     "applications/dci_agent_lite/assemblies/dci-complete-application-pi.json",
     "applications/dci_agent_lite/assemblies/dci-local-research.json",
-    "applications/dci_agent_lite/assemblies/"
-    "dci-research-capability-claude.json",
+    "applications/dci_agent_lite/assemblies/dci-research-capability-claude.json",
     "applications/dci_agent_lite/assemblies/dci-research-capability.json",
 )
 _EXPECTED_BOUND_ASSEMBLIES = tuple(
@@ -506,7 +504,9 @@ def paper_benchmark_resource_digests() -> tuple[tuple[str, str], ...]:
         ("experiment_profiles", "experiment-profiles.json"),
         ("reproduction_result_schema", "reproduction-result.schema.json"),
     ):
-        values.append((identity, hashlib.sha256(root.joinpath(relative).read_bytes()).hexdigest()))
+        values.append(
+            (identity, hashlib.sha256(root.joinpath(relative).read_bytes()).hexdigest())
+        )
     for identity, relative in (
         ("qa_fixture", "paper-fixtures/qa.jsonl"),
         ("ir_fixture", "paper-fixtures/ir.jsonl"),
@@ -592,9 +592,7 @@ def paper_compare_main(
     try:
         args = _paper_compare_parser().parse_args(argv)
         profile = resolve_experiment_profile(args.profile)
-        baseline = (
-            None if args.baseline is None else load_run_manifest(args.baseline)
-        )
+        baseline = None if args.baseline is None else load_run_manifest(args.baseline)
         candidate = load_run_manifest(args.candidate)
         report = compare_reproduction_runs(baseline, candidate, profile)
         write_comparison_report(args.output, report)
@@ -768,12 +766,15 @@ def _paper_default_operation_runner(
         raise ValueError("DCI paper benchmark preflight failed")
     if operation_id == "qa-judge":
         qa_dir = readiness.output_root / "qa-agent"
-        accepted = evaluate_run_directory(
-            qa_dir,
-            gold_answer=_fixture_question("qa")[1],
-            judge_config=readiness.judge_config,
-            judge_contract=PAPER_JUDGE_CONTRACT,
-        ).get("is_correct") is True
+        accepted = (
+            evaluate_run_directory(
+                qa_dir,
+                gold_answer=_fixture_question("qa")[1],
+                judge_config=readiness.judge_config,
+                judge_contract=PAPER_JUDGE_CONTRACT,
+            ).get("is_correct")
+            is True
+        )
         evaluation = qa_dir / "eval_result.json"
         if not accepted or not _private_regular(evaluation):
             raise ValueError("DCI paper benchmark Judge evidence is invalid")
@@ -784,7 +785,9 @@ def _paper_default_operation_runner(
             {
                 "schema": "asterion.dci.paper-judge-evidence/v1",
                 "accepted": True,
-                "evaluation_sha256": hashlib.sha256(evaluation.read_bytes()).hexdigest(),
+                "evaluation_sha256": hashlib.sha256(
+                    evaluation.read_bytes()
+                ).hexdigest(),
             },
         )
         evidence = PaperBenchmarkOperationEvidence(
@@ -827,9 +830,7 @@ def _paper_default_operation_runner(
         readiness.paths,
         request,
         output_dir=output_dir,
-        conversation_features=DciConversationFeatures(
-            externalize_tool_results=True
-        ),
+        conversation_features=DciConversationFeatures(externalize_tool_results=True),
     )
     if result.status != "completed" or (
         operation_id == "ir-agent" and "doc.txt" not in result.final_text
@@ -861,8 +862,7 @@ def _paper_report(
         or set(dict(readiness.judge_identity))
         != set(JudgeConfig().public_dict())
         | {"judge_contract", "prompt_contract_sha256"}
-        or dict(readiness.judge_identity).get("judge_contract")
-        != PAPER_JUDGE_CONTRACT
+        or dict(readiness.judge_identity).get("judge_contract") != PAPER_JUDGE_CONTRACT
         or _SHA256.fullmatch(
             str(dict(readiness.judge_identity).get("prompt_contract_sha256"))
         )
@@ -871,7 +871,10 @@ def _paper_report(
         or _SHA256.fullmatch(readiness.pi_tracked_status_sha256) is None
         or [item.operation_id for item in operations] != list(_PAPER_OPERATION_PLAN)
         or len(dict(readiness.resource_digests)) != len(readiness.resource_digests)
-        or any(_SHA256.fullmatch(value) is None for _name, value in readiness.resource_digests)
+        or any(
+            _SHA256.fullmatch(value) is None
+            for _name, value in readiness.resource_digests
+        )
     ):
         raise ValueError("DCI paper benchmark evidence is invalid")
     for operation in operations:
@@ -930,8 +933,14 @@ def paper_benchmark_acceptance_main(
         stdout.write("Full dataset ran: no\n")
         return 0
     root = Path.cwd().resolve() if repo_root is None else Path(repo_root).resolve()
-    checker = _paper_default_readiness if readiness_checker is None else readiness_checker
-    runner = _paper_default_operation_runner if operation_runner is None else operation_runner
+    checker = (
+        _paper_default_readiness if readiness_checker is None else readiness_checker
+    )
+    runner = (
+        _paper_default_operation_runner
+        if operation_runner is None
+        else operation_runner
+    )
     try:
         readiness = checker(args, root)
     except (OSError, RuntimeError, subprocess.SubprocessError, TypeError, ValueError):
@@ -1064,7 +1073,14 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
         validate_installed_provider,
     )
     from asterion.applications.provider import ApplicationProviderError
-    from asterion.capabilities.catalog import CapabilityCatalogError, discover_capabilities
+    from asterion.capabilities.builtin import create_controlled_code_package
+    from asterion.capabilities.catalog import (
+        CapabilityCatalogError,
+        discover_capabilities,
+    )
+    from asterion.capabilities.dci_research.provider import (
+        create_provider as create_dci_package,
+    )
     from asterion.capabilities.execution import (
         CapabilityExecutionError,
         validate_implementation_bindings,
@@ -1082,9 +1098,11 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
         ),
     )
     applications = tuple(
-        application
-        for provider in providers
-        for application in provider.applications
+        application for provider in providers for application in provider.applications
+    )
+    installed_packages = (
+        create_controlled_code_package(),
+        create_dci_package(),
     )
     package_root = Path(str(resources.files("asterion"))).resolve()
 
@@ -1121,9 +1139,21 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
     else:
         for provider in providers:
             try:
+                package_refs = {
+                    package_ref
+                    for application in provider.applications
+                    for package_ref in application.capability_packages
+                }
+                selected_packages = tuple(
+                    package
+                    for package in installed_packages
+                    if package.package_ref in package_refs
+                )
                 composed_providers.append(
                     compose_installed_provider(
-                        provider, runtime_factories=runtime_factories
+                        provider,
+                        installed_packages=selected_packages,
+                        runtime_factories=runtime_factories,
                     )
                 )
             except ApplicationProviderError:
@@ -1144,7 +1174,7 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
             for assembly in application.assemblies:
                 try:
                     validate_implementation_bindings(
-                        assembly.plan, application.implementations
+                        assembly.plan, assembly.implementations
                     )
                 except (CapabilityExecutionError, TypeError, ValueError):
                     continue
@@ -1155,11 +1185,7 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
 
     catalog_roots = tuple(
         sorted(
-            {
-                root
-                for application in applications
-                for root in application.catalog_roots
-            }
+            {root for package in installed_packages for root in package.catalog_roots}
         )
     )
     try:
@@ -1170,17 +1196,13 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
         packaged_assemblies = tuple(
             sorted(
                 identity
-                for path in (package_root / "applications").glob(
-                    "*/assemblies/*.json"
-                )
+                for path in (package_root / "applications").glob("*/assemblies/*.json")
                 if (identity := package_identity(path)) is not None
             )
         )
     except OSError:
         packaged_assemblies = ()
-    unbound_resources = tuple(
-        sorted(set(packaged_assemblies) - set(bound_assemblies))
-    )
+    unbound_resources = tuple(sorted(set(packaged_assemblies) - set(bound_assemblies)))
 
     try:
         profiles = tuple(context_profile_names())
@@ -1218,8 +1240,7 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
     except (KeyError, OSError, RuntimeError, TypeError, ValueError):
         benchmark_sha256 = None
     datasets_exact = (
-        datasets_exact
-        and benchmark_sha256 == _EXPECTED_PAPER_BENCHMARK_SHA256
+        datasets_exact and benchmark_sha256 == _EXPECTED_PAPER_BENCHMARK_SHA256
     )
 
     try:
@@ -1241,9 +1262,7 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
         scopes_sha256 = paper_experiment_scopes_sha256()
     except (KeyError, OSError, RuntimeError, TypeError, ValueError):
         scopes_sha256 = None
-    scopes_exact = (
-        scopes_exact and scopes_sha256 == _EXPECTED_PAPER_SCOPES_SHA256
-    )
+    scopes_exact = scopes_exact and scopes_sha256 == _EXPECTED_PAPER_SCOPES_SHA256
 
     return tuple(
         sorted(
@@ -1274,8 +1293,7 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
                     "Resolved assembly composition closure is valid",
                     actual=len(composed_assemblies),
                     expected=5,
-                    exact=composed_assemblies
-                    == _EXPECTED_BOUND_ASSEMBLIES,
+                    exact=composed_assemblies == _EXPECTED_BOUND_ASSEMBLIES,
                 ),
                 _acceptance_check(
                     "context-profiles",
@@ -1289,16 +1307,14 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
                     "Executable binding closure is valid",
                     actual=len(executable_assemblies),
                     expected=5,
-                    exact=executable_assemblies
-                    == _EXPECTED_BOUND_ASSEMBLIES,
+                    exact=executable_assemblies == _EXPECTED_BOUND_ASSEMBLIES,
                 ),
                 _acceptance_check(
                     "packaged-assemblies",
                     "Packaged assembly inventory is valid",
                     actual=len(packaged_assemblies),
                     expected=6,
-                    exact=packaged_assemblies
-                    == _EXPECTED_PACKAGED_ASSEMBLIES,
+                    exact=packaged_assemblies == _EXPECTED_PACKAGED_ASSEMBLIES,
                     unbound_resources=unbound_resources,
                 ),
                 _acceptance_check(
@@ -1375,7 +1391,9 @@ class DciProductVerifier:
         return VerificationResult(
             product_id=DCI_PRODUCT_DESCRIPTION.product_id,
             level="acceptance",
-            status="PASS" if all(check.status == "PASS" for check in checks) else "FAIL",
+            status="PASS"
+            if all(check.status == "PASS" for check in checks)
+            else "FAIL",
             checks=checks,
             provider_backed_operation_count=0,
             full_dataset_ran=False,
@@ -1400,7 +1418,8 @@ class DciProductVerifier:
         aggregate.extend(basic.checks)
         if basic.status != "PASS":
             return _complete_result(
-                aggregate, provider_backed_operations=basic.provider_backed_operation_count
+                aggregate,
+                provider_backed_operations=basic.provider_backed_operation_count,
             )
         acceptance = self.acceptance(request.acceptance_root)
         aggregate.extend(acceptance.checks)
@@ -1440,9 +1459,7 @@ class DciProductVerifier:
         options = resolve_dci_runtime_options()
         corpus_root = _corpus_root(operator_root, request.corpus_root)
         output_root = (
-            paths.output_root
-            if request.output_root is None
-            else request.output_root
+            paths.output_root if request.output_root is None else request.output_root
         )
         private_root = output_root / f"verify-{secrets.token_hex(8)}"
         judge_config = JudgeConfig.from_env()
@@ -1490,7 +1507,10 @@ class DciProductVerifier:
         return VerificationResult(
             product_id=DCI_PRODUCT_DESCRIPTION.product_id,
             level="basic",
-            status="PASS" if len(checks) == len(BASIC_CASES) and all(check.status == "PASS" for check in checks) else "FAIL",
+            status="PASS"
+            if len(checks) == len(BASIC_CASES)
+            and all(check.status == "PASS" for check in checks)
+            else "FAIL",
             checks=tuple(checks),
             provider_backed_operation_count=external_requests,
             full_dataset_ran=False,
@@ -1534,8 +1554,7 @@ class DciProductVerifier:
             and (paths.pi.package_dir / "package.json").is_file()
         )
         built_pi_cli_ready = (
-            pi_checkout_ready
-            and (paths.pi.package_dir / "dist" / "cli.js").is_file()
+            pi_checkout_ready and (paths.pi.package_dir / "dist" / "cli.js").is_file()
         )
         resolved_corpus = _corpus_root(operator_root, corpus_root)
         resources_ready = all(
@@ -1596,7 +1615,9 @@ class DciProductVerifier:
         return VerificationResult(
             product_id=DCI_PRODUCT_DESCRIPTION.product_id,
             level="preflight",
-            status="PASS" if all(check.status == "PASS" for check in checks) else "FAIL",
+            status="PASS"
+            if all(check.status == "PASS" for check in checks)
+            else "FAIL",
             checks=checks,
             provider_backed_operation_count=0,
             full_dataset_ran=False,
@@ -1620,11 +1641,14 @@ def create_dci_product(
         verifier=verifier,
     )
 
+
 def _provider_key_name(provider: str | None) -> str | None:
     if provider is None or re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]*", provider) is None:
         return None
     aliases = {"google": "GOOGLE_API_KEY", "gemini": "GOOGLE_API_KEY"}
-    return aliases.get(provider.lower(), f"{provider.upper().replace('-', '_')}_API_KEY")
+    return aliases.get(
+        provider.lower(), f"{provider.upper().replace('-', '_')}_API_KEY"
+    )
 
 
 def _corpus_root(repo_root: Path, explicit: Path | None) -> Path:
@@ -1690,8 +1714,12 @@ def _complete_result(
     if forced_status is None:
         status = "PASS" if all(check.status == "PASS" for check in ordered) else "FAIL"
     else:
-        status = forced_status if forced_status != "PASS" else (
-            "PASS" if all(check.status == "PASS" for check in ordered) else "FAIL"
+        status = (
+            forced_status
+            if forced_status != "PASS"
+            else (
+                "PASS" if all(check.status == "PASS" for check in ordered) else "FAIL"
+            )
         )
     return VerificationResult(
         product_id=DCI_PRODUCT_DESCRIPTION.product_id,

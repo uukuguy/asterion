@@ -35,11 +35,21 @@ from asterion.capabilities.execution import (
     CapabilityExecutionResult,
     CapabilityImplementationBinding,
 )
+from asterion.capabilities.dci_research.provider import (
+    create_provider as create_dci_package,
+)
+from asterion.capability_packages.model import (
+    CapabilityPackageCandidate,
+    InstalledCapabilityPackage,
+    PortableCapabilityPayload,
+)
+from asterion.capability_packages.protocol import CapabilityPackageManifest
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 from asterion.services.controlled_executor import ControlledExecutionResult
 from tests.test_application_discovery import FakeEntryPoint
 from tests.test_installed_application_provider import (
+    installed_package,
     provider as installed_provider_fixture,
 )
 
@@ -193,8 +203,7 @@ def dci_host_entry() -> FakeEntryPoint:
 def dci_host_arguments() -> tuple[str, str]:
     return (
         "--host-option",
-        "corpus.local-root:root="
-        + str(Path(__file__).resolve().parents[1]),
+        "corpus.local-root:root=" + str(Path(__file__).resolve().parents[1]),
     )
 
 
@@ -207,6 +216,79 @@ def provider(root: Path) -> InstalledApplicationProvider:
             assembly["host_artifacts"] = []
             assembly_path.write_text(json.dumps(assembly), encoding="utf-8")
     return value
+
+
+class FixtureCapabilityPackageSource:
+    def __init__(self, installed: InstalledCapabilityPackage) -> None:
+        self.installed = installed
+        self.candidate = CapabilityPackageCandidate(
+            package_ref=installed.package_ref,
+            source_id=installed.source_id,
+            source_kind=installed.source_kind,
+            payload_sha256=installed.payload_sha256,
+            metadata={},
+        )
+        self.payload = PortableCapabilityPayload(
+            manifest=CapabilityPackageManifest(
+                package_ref=installed.package_ref,
+                capabilities=(),
+                benchmark_suites=(),
+                resources=(),
+            ),
+            payload_sha256=installed.payload_sha256,
+            resource_root=installed.catalog_roots[0].parent,
+        )
+
+    def discover_metadata(self):
+        return (self.candidate,)
+
+    def open_payload(self, candidate):
+        self._require_candidate(candidate)
+        return self.payload
+
+    def validate_source_identity(self, candidate, payload):
+        self._require_candidate(candidate)
+        if payload is not self.payload:
+            raise AssertionError("unexpected fixture payload")
+
+    def load_provider(self, candidate):
+        self._require_candidate(candidate)
+        return self.installed
+
+    def _require_candidate(self, candidate):
+        if candidate is not self.candidate:
+            raise AssertionError("unexpected fixture candidate")
+
+
+class ExplodingCapabilityPackageSource:
+    def discover_metadata(self):
+        raise AssertionError("capability package source was touched")
+
+    def open_payload(self, candidate):
+        del candidate
+        raise AssertionError("capability package source was touched")
+
+    def validate_source_identity(self, candidate, payload):
+        del candidate, payload
+        raise AssertionError("capability package source was touched")
+
+    def load_provider(self, candidate):
+        del candidate
+        raise AssertionError("capability package source was touched")
+
+
+def fixture_source(
+    root: Path,
+    *,
+    implementations: tuple[CapabilityImplementationBinding, ...] | None = None,
+) -> FixtureCapabilityPackageSource:
+    return FixtureCapabilityPackageSource(
+        installed_package(root, implementations=implementations)
+    )
+
+
+def dci_source() -> FixtureCapabilityPackageSource:
+    return FixtureCapabilityPackageSource(create_dci_package())
 
 
 class AsterionCliTests(unittest.TestCase):
@@ -252,9 +334,7 @@ class AsterionCliTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(
-            args.host_option, ["corpus.local-root:root=/private/corpus"]
-        )
+        self.assertEqual(args.host_option, ["corpus.local-root:root=/private/corpus"])
 
     def test_dci_host_service_is_resolved_before_runtime_and_adjacent_is_not_loaded(
         self,
@@ -315,10 +395,9 @@ class AsterionCliTests(unittest.TestCase):
                     "research",
                 ],
                 entry_points=(
-                    FakeEntryPoint(
-                        name="dci-agent-lite", factory=create_dci_provider
-                    ),
+                    FakeEntryPoint(name="dci-agent-lite", factory=create_dci_provider),
                 ),
+                capability_package_sources=(dci_source(),),
                 host_service_entry_points=(adjacent, selected),
                 runtime_factories=registry,
                 stdout=io.StringIO(),
@@ -395,6 +474,7 @@ class AsterionCliTests(unittest.TestCase):
                                 factory=create_dci_provider,
                             ),
                         ),
+                        capability_package_sources=(dci_source(),),
                         host_service_entry_points=host_entries,
                         runtime_factories=registry,
                         stdout=io.StringIO(),
@@ -484,6 +564,7 @@ class AsterionCliTests(unittest.TestCase):
                             "research",
                         ],
                         entry_points=(entry,),
+                        capability_package_sources=(fixture_source(root),),
                         runtime_factories=registry,
                         stdout=stdout,
                         stderr=stderr,
@@ -542,6 +623,7 @@ class AsterionCliTests(unittest.TestCase):
                         "research",
                     ],
                     entry_points=(entry,),
+                    capability_package_sources=(fixture_source(root),),
                     runtime_factories=registry,
                     stdout=io.StringIO(),
                     stderr=io.StringIO(),
@@ -644,6 +726,7 @@ class AsterionCliTests(unittest.TestCase):
                 ["describe", "--provider", "example-app", "--json"],
                 entry_points=(selected, adjacent),
                 host_service_entry_points=(host_entry,),
+                capability_package_sources=(ExplodingCapabilityPackageSource(),),
                 stdout=stdout,
                 stderr=io.StringIO(),
             )
@@ -713,6 +796,7 @@ class AsterionCliTests(unittest.TestCase):
                     "outputs",
                 ],
                 entry_points=(entry,),
+                capability_package_sources=(ExplodingCapabilityPackageSource(),),
                 stdout=stdout,
                 stderr=io.StringIO(),
             )
@@ -753,6 +837,7 @@ class AsterionCliTests(unittest.TestCase):
                 "--json",
             ],
             entry_points=(entry,),
+            capability_package_sources=(ExplodingCapabilityPackageSource(),),
             stdout=stdout,
             stderr=stderr,
         )
@@ -784,10 +869,7 @@ class AsterionCliTests(unittest.TestCase):
         )
         self.assertEqual(
             packaged["unbound_resources"],
-            [
-                "applications/dci_agent_lite/assemblies/"
-                "dci-local-research.json"
-            ],
+            ["applications/dci_agent_lite/assemblies/dci-local-research.json"],
         )
 
     def test_dci_acceptance_cli_is_independent_of_current_directory(self) -> None:
@@ -808,6 +890,7 @@ class AsterionCliTests(unittest.TestCase):
                     "--json",
                 ],
                 entry_points=(entry,),
+                capability_package_sources=(ExplodingCapabilityPackageSource(),),
                 stdout=baseline,
                 stderr=io.StringIO(),
             ),
@@ -828,6 +911,7 @@ class AsterionCliTests(unittest.TestCase):
                         "--json",
                     ],
                     entry_points=(entry,),
+                    capability_package_sources=(ExplodingCapabilityPackageSource(),),
                     stdout=isolated,
                     stderr=io.StringIO(),
                 )
@@ -854,6 +938,7 @@ class AsterionCliTests(unittest.TestCase):
             ["list"],
             entry_points=(entry,),
             host_service_entry_points=(host_entry,),
+            capability_package_sources=(ExplodingCapabilityPackageSource(),),
             runtime_factories=RuntimeFactoryRegistry(()),
             stdout=stdout,
             stderr=io.StringIO(),
@@ -874,6 +959,7 @@ class AsterionCliTests(unittest.TestCase):
             code = main(
                 ["list", "--provider", "example-app"],
                 entry_points=(entry,),
+                capability_package_sources=(ExplodingCapabilityPackageSource(),),
                 stdout=stdout,
                 stderr=io.StringIO(),
             )
@@ -932,6 +1018,7 @@ class AsterionCliTests(unittest.TestCase):
                     str(value.applications[0].assembly_paths[0]),
                 ],
                 entry_points=(entry,),
+                capability_package_sources=(fixture_source(Path(temp_dir)),),
                 runtime_factories=registry,
                 stdout=stdout,
                 stderr=io.StringIO(),
@@ -981,23 +1068,18 @@ class AsterionCliTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             value = provider(root)
-            manifest_path = root / "manifests/research.json"
+            package = installed_package(root)
+            manifest_path = package.catalog_roots[0] / "research.json"
             manifest = json.loads(manifest_path.read_text())
             manifest["produces_artifacts"] = ["application/vnd.private+json"]
             manifest_path.write_text(json.dumps(manifest))
-            application = value.applications[0]
-            value = replace(
-                value,
-                applications=(
-                    replace(
-                        application,
-                        implementations=(
-                            CapabilityImplementationBinding(
-                                capability_ref=CapabilityRef(
-                                    "example.research", "1.0.0"
-                                ),
-                                implementation=PrivateImplementation(),
-                            ),
+            source = FixtureCapabilityPackageSource(
+                replace(
+                    package,
+                    implementations=(
+                        CapabilityImplementationBinding(
+                            capability_ref=CapabilityRef("example.research", "1.0.0"),
+                            implementation=PrivateImplementation(),
                         ),
                     ),
                 ),
@@ -1025,6 +1107,7 @@ class AsterionCliTests(unittest.TestCase):
                     "fixture",
                 ],
                 entry_points=(entry,),
+                capability_package_sources=(source,),
                 runtime_factories=registry,
                 stdout=stdout,
                 stderr=stderr,
@@ -1065,6 +1148,7 @@ class AsterionCliTests(unittest.TestCase):
                     "research",
                 ],
                 entry_points=(entry,),
+                capability_package_sources=(fixture_source(Path(temp_dir)),),
                 runtime_factories=registry,
                 stdout=stdout,
                 stderr=io.StringIO(),
@@ -1104,6 +1188,7 @@ class AsterionCliTests(unittest.TestCase):
                     "research",
                 ],
                 entry_points=(entry,),
+                capability_package_sources=(fixture_source(Path(temp_dir)),),
                 runtime_factories=registry,
                 stdout=io.StringIO(),
                 stderr=io.StringIO(),
@@ -1131,8 +1216,7 @@ class AsterionCliTests(unittest.TestCase):
                         application_id=application.application_id,
                         version=application.version,
                         assembly_paths=(pi_assembly, claude_assembly),
-                        catalog_roots=application.catalog_roots,
-                        implementations=application.implementations,
+                        capability_packages=application.capability_packages,
                         runtime_ids=("claude-code.reference", "pi.reference"),
                     ),
                 ),
@@ -1169,6 +1253,7 @@ class AsterionCliTests(unittest.TestCase):
                     "SECRET-INPUT",
                 ],
                 entry_points=(entry,),
+                capability_package_sources=(fixture_source(root),),
                 runtime_factories=registry,
                 stdout=io.StringIO(),
                 stderr=io.StringIO(),
@@ -1197,8 +1282,7 @@ class AsterionCliTests(unittest.TestCase):
                         application_id=application.application_id,
                         version=application.version,
                         assembly_paths=(pi_assembly, claude_assembly),
-                        catalog_roots=application.catalog_roots,
-                        implementations=application.implementations,
+                        capability_packages=application.capability_packages,
                         runtime_ids=("claude-code.reference", "pi.reference"),
                     ),
                 ),
@@ -1275,8 +1359,7 @@ class AsterionCliTests(unittest.TestCase):
                         application_id=application.application_id,
                         version=application.version,
                         assembly_paths=(first_claude, second_claude, pi_assembly),
-                        catalog_roots=application.catalog_roots,
-                        implementations=application.implementations,
+                        capability_packages=application.capability_packages,
                         runtime_ids=("claude-code.reference", "pi.reference"),
                     ),
                 ),
@@ -1308,6 +1391,7 @@ class AsterionCliTests(unittest.TestCase):
                     "SECRET-INPUT",
                 ],
                 entry_points=(entry,),
+                capability_package_sources=(fixture_source(root),),
                 runtime_factories=registry,
                 stdout=io.StringIO(),
                 stderr=io.StringIO(),
@@ -1353,6 +1437,7 @@ class AsterionCliTests(unittest.TestCase):
             entry_points=(
                 FakeEntryPoint(name="dci-agent-lite", factory=create_dci_provider),
             ),
+            capability_package_sources=(dci_source(),),
             host_service_entry_points=(dci_host_entry(),),
             runtime_factories=registry,
             stdout=stdout,
@@ -1408,6 +1493,7 @@ class AsterionCliTests(unittest.TestCase):
             entry_points=(
                 FakeEntryPoint(name="dci-agent-lite", factory=create_dci_provider),
             ),
+            capability_package_sources=(dci_source(),),
             host_service_entry_points=(dci_host_entry(),),
             runtime_factories=registry,
             stdout=stdout,
@@ -1460,10 +1546,9 @@ class AsterionCliTests(unittest.TestCase):
                     "SECRET-INPUT",
                 ],
                 entry_points=(
-                    FakeEntryPoint(
-                        name="dci-agent-lite", factory=create_dci_provider
-                    ),
+                    FakeEntryPoint(name="dci-agent-lite", factory=create_dci_provider),
                 ),
+                capability_package_sources=(dci_source(),),
                 host_service_entry_points=(dci_host_entry(),),
                 runtime_factories=registry,
                 stdout=stdout,
@@ -1516,6 +1601,7 @@ class AsterionCliTests(unittest.TestCase):
             entry_points=(
                 FakeEntryPoint(name="dci-agent-lite", factory=create_dci_provider),
             ),
+            capability_package_sources=(dci_source(),),
             host_service_entry_points=(dci_host_entry(),),
             runtime_factories=registry,
             stdout=stdout,
@@ -1609,6 +1695,7 @@ class AsterionCliTests(unittest.TestCase):
                     "/SECRET-binary",
                 ],
                 entry_points=(entry,),
+                capability_package_sources=(fixture_source(Path(temp_dir)),),
                 runtime_factories=registry,
                 stdout=io.StringIO(),
                 stderr=io.StringIO(),
@@ -1744,24 +1831,10 @@ class AsterionCliTests(unittest.TestCase):
 
     def test_incomplete_binding_fails_before_runtime_factory(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            valid = provider(Path(temp_dir))
+            root = Path(temp_dir)
+            valid = provider(root)
             application = valid.applications[0]
-            incomplete = InstalledApplicationProvider(
-                protocol=valid.protocol,
-                provider_id=valid.provider_id,
-                resource_root=valid.resource_root,
-                applications=(
-                    InstalledApplication(
-                        application_id=application.application_id,
-                        version=application.version,
-                        assembly_paths=application.assembly_paths,
-                        catalog_roots=application.catalog_roots,
-                        implementations=(),
-                        runtime_ids=application.runtime_ids,
-                    ),
-                ),
-            )
-            entry = FakeEntryPoint(name="example-app", factory=lambda: incomplete)
+            entry = FakeEntryPoint(name="example-app", factory=lambda: valid)
             calls = []
             registry = RuntimeFactoryRegistry(
                 (
@@ -1782,6 +1855,7 @@ class AsterionCliTests(unittest.TestCase):
                     str(application.assembly_paths[0]),
                 ],
                 entry_points=(entry,),
+                capability_package_sources=(fixture_source(root, implementations=()),),
                 runtime_factories=registry,
                 stdin=io.StringIO("input"),
                 stdout=io.StringIO(),
@@ -1795,31 +1869,20 @@ class AsterionCliTests(unittest.TestCase):
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            valid = provider(Path(temp_dir))
+            root = Path(temp_dir)
+            valid = provider(root)
             application = valid.applications[0]
-            invalid = InstalledApplicationProvider(
-                protocol=valid.protocol,
-                provider_id=valid.provider_id,
-                resource_root=valid.resource_root,
-                applications=(
-                    InstalledApplication(
-                        application_id=application.application_id,
-                        version=application.version,
-                        assembly_paths=application.assembly_paths,
-                        catalog_roots=application.catalog_roots,
-                        implementations=(
-                            CapabilityImplementationBinding(
-                                capability_ref=application.implementations[
-                                    0
-                                ].capability_ref,
-                                implementation=NonCallableImplementation(),
-                            ),
-                        ),
-                        runtime_ids=application.runtime_ids,
+            binding = installed_package(root).implementations[0]
+            source = fixture_source(
+                root,
+                implementations=(
+                    CapabilityImplementationBinding(
+                        capability_ref=binding.capability_ref,
+                        implementation=NonCallableImplementation(),
                     ),
                 ),
             )
-            entry = FakeEntryPoint(name="example-app", factory=lambda: invalid)
+            entry = FakeEntryPoint(name="example-app", factory=lambda: valid)
             calls = []
             registry = RuntimeFactoryRegistry(
                 (
@@ -1842,6 +1905,7 @@ class AsterionCliTests(unittest.TestCase):
                     str(application.assembly_paths[0]),
                 ],
                 entry_points=(entry,),
+                capability_package_sources=(source,),
                 runtime_factories=registry,
                 stdin=io.StringIO("input"),
                 stdout=stdout,
