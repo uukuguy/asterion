@@ -45,6 +45,14 @@ from asterion.capability_packages.sources import CapabilityPackageSource
 from asterion.capability_packages.sources.builtin import (
     BuiltinCapabilityPackageSource,
 )
+from asterion.benchmarks.cli import (
+    add_benchmark_parser,
+    run_benchmark_command,
+)
+from asterion.benchmarks.evidence import BenchmarkEvidenceStore
+from asterion.benchmarks.execution import (
+    BenchmarkTaskExecutor,
+)
 from asterion.cli_capability import (
     add_capability_parser,
     run_capability_command,
@@ -56,6 +64,7 @@ from asterion.runtime.factory import (
     RuntimeFactoryError,
     RuntimeFactoryRegistry,
 )
+from asterion.runtime.host import CancellationSignal
 from asterion.runtime.defaults import default_runtime_factory_registry
 from asterion.services.managed_controlled_executor import (
     ManagedControlledExecutor,
@@ -82,6 +91,11 @@ def main(
     managed_executor_factory: (
         Callable[[OperatorExecutorConfig], AsyncContextManager[object]] | None
     ) = None,
+    benchmark_task_executor: BenchmarkTaskExecutor | None = None,
+    benchmark_cancellation: CancellationSignal | None = None,
+    benchmark_evidence_store_factory: (
+        Callable[[Path], BenchmarkEvidenceStore] | None
+    ) = None,
 ) -> int:
     """Run the generic installed-application CLI."""
 
@@ -107,6 +121,17 @@ def main(
                 args,
                 stdout=output_stream,
                 stderr=error_stream,
+            )
+        if args.command == "benchmark":
+            return run_benchmark_command(
+                args,
+                entry_points=entry_points,
+                capability_package_sources=capability_package_sources,
+                stdout=output_stream,
+                stderr=error_stream,
+                task_executor=benchmark_task_executor,
+                cancellation=benchmark_cancellation,
+                evidence_store_factory=benchmark_evidence_store_factory,
             )
         if args.command == "list":
             if args.provider is not None:
@@ -404,6 +429,7 @@ def _parser() -> argparse.ArgumentParser:
         default=os.environ.get("ASTERION_EXECUTOR_VALIDATION_CONFIG"),
     )
     run.add_argument("legacy_assembly", nargs="?")
+    add_benchmark_parser(subparsers)
     add_capability_parser(subparsers)
     return parser
 
