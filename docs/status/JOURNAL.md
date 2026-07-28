@@ -238,3 +238,4 @@
 - 21:15 Closed migration owners, boundaries, and docs to make DCI externalization durable [b9da51d]
 - 21:19 Corrected runtime documentation to name the sole package-owned DCI modules [49e96e0]
 - 21:20 climb confirmed Plan 4 Task 8: Task 8 approved after one Medium docs fix; 28 focused and 698 full passed; make check and promotion green [8ed7cb9..49e96e0]
+- 21:22 Checkpointed Task 8 so recovery resumes at whole-Plan-4 review [e9daf26]

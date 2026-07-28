@@ -72,6 +72,9 @@ _ACTIVE_BOUNDARY_ROOTS = (
     "docs/README.md",
     "docs/architecture.md",
     "docs/cli.md",
+    "docs/status/CURRENT-STATE.md",
+    "docs/status/DECISIONS.md",
+    "docs/status/RESUME-NEXT-SESSION.md",
     "docs/architecture",
     "docs/guides",
     "docs/operator",
@@ -531,8 +534,6 @@ class GenericBenchmarkProjectBoundaryTests(unittest.TestCase):
             "tests/test_project_boundaries.py",
             "tests/test_dci_package_ownership.py",
             "docs/superpowers/plans/2026-07-27-dci-capability-package-migration.md",
-            "docs/status/RESUME-NEXT-SESSION.md",
-            "docs/status/CURRENT-STATE.md",
             "docs/status/climb/research-tree.md",
         }
         for path in _active_boundary_files():

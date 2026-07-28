@@ -34,10 +34,12 @@
   `__init__.py` beside `capability-package.json` would either violate the
   closed-root validator or require a DCI-specific exception.
 - Consequence: External, local, and built-in forms can reuse identical payload
-  bytes while their source envelopes remain outside the digest. Transitional
-  `dci_research/manifests/` copies remain only until Task 3 migrates readers.
-- Evidence: commit `f686b75`; `tests.test_dci_capability_payload`; independent
-  Task 1 review approved.
+  bytes while their source envelopes remain outside the digest. Plan 4 moved
+  all readers to the package-owned payload and removed the transitional source
+  copies.
+- Evidence: commits `f686b75`, `7168667`, and `b9da51d`;
+  `tests.test_dci_capability_payload`, `tests.test_dci_package_ownership`, and
+  independent Task 1, Task 3, and Task 8 reviews.
 
 ## D-2026-07-28-02 — Application-owned acceptance inventory
 
