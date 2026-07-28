@@ -85,15 +85,17 @@ than authority.
 ## DCI capability and baseline isolation
 
 The DCI local-corpus implementation and the independent `asterion-dci` product
-live in the one `asterion` wheel. `asterion.dci.run.DciRunResult` is converted
-only by `asterion.dci.bridge.project_dci_run`, which exposes native artifact
-references without answer, question, command, or stderr bodies. The generic
-Asterion CLI stays framework-neutral: it imports no DCI modules, and
-provider-free commands remain provider-free. DCI-specific behavior enters only
-after installed-provider selection; executable application runs additionally
-open all declared host services before runtime construction. The `asterion-dci`
-CLI owns its product-specific arguments. Neither it nor Asterion imports or
-modifies the parent workspace's original DCI baseline under `src/dci/benchmark/`.
+live in the one `asterion` wheel. The package-owned
+`asterion.capabilities.dci.implementation.runtime.run.DciRunResult` is converted
+only by the package-owned runtime bridge's `project_dci_run`, which exposes
+native artifact references without answer, question, command, or stderr bodies.
+The generic Asterion CLI stays framework-neutral: it imports no DCI modules,
+and provider-free commands remain provider-free. DCI-specific behavior enters
+only after installed-provider selection; executable application runs
+additionally open all declared host services before runtime construction. The
+`asterion-dci` CLI owns its product-specific arguments. Neither it nor Asterion
+imports or modifies the parent workspace's original DCI baseline under
+`src/dci/benchmark/`.
 
 The DCI local-corpus implementation now lives under
 `asterion.capabilities.dci.implementation`, and the same portable payload is
