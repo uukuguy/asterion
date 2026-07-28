@@ -69,7 +69,7 @@ class BenchmarkTaskInvocation:
     task_id: str
     binding_id: str
     public_arguments: tuple[str, ...]
-    private_payload: object = field(repr=False)
+    private_payload: object = field(repr=False, compare=False)
 
     def __init__(
         self,

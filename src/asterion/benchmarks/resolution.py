@@ -237,7 +237,7 @@ def _resolve_benchmark_execution(
         (owner_ref, planned.task.binding_id)
         for planned in plan.tasks
     )
-    if set(binding_by_key) != set(task_keys):
+    if not set(task_keys).issubset(binding_by_key):
         _fail_execution()
 
     resolved = tuple(

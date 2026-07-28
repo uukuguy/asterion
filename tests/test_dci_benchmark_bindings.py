@@ -3,11 +3,28 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from importlib import resources
 from pathlib import Path
 import unittest
 
-from asterion.benchmarks import BenchmarkTaskRequest
-from asterion.capability_packages import BenchmarkSuiteRef
+from asterion.applications.selection import ApplicationSelector
+from asterion.benchmarks import (
+    BenchmarkPlan,
+    BenchmarkTaskRequest,
+    PlannedBenchmarkTask,
+    ResolvedCapability,
+)
+from asterion.benchmarks.resolution import resolve_benchmark_execution, resolve_benchmark_suite
+from asterion.capabilities.catalog import CapabilityRef
+from asterion.capability_packages import (
+    BenchmarkSuiteRef,
+    CapabilityPackageManifest,
+    CapabilityPackageRef,
+    CapabilitySourceLock,
+    CapabilitySourceLockEntry,
+    InstalledCapabilityPackage,
+    PortableCapabilityPayload,
+)
 from asterion.capabilities.dci.implementation.benchmark_bindings import (
     DciBenchmarkInvocation,
     create_benchmark_bindings,
@@ -18,6 +35,8 @@ from asterion.capabilities.dci.implementation.operator_inputs import (
 
 
 _SENTINEL = "DCI-BENCHMARK-PRIVATE-SENTINEL"
+_OWNER = CapabilityPackageRef("dci", "1.0.0")
+_CAPABILITY = CapabilityRef("dci.benchmark", "1.0.0")
 _INPUTS = DciBenchmarkOperatorInputs(
     dataset_roots={
         "bcplus": Path("/operator/datasets/bcplus"),
@@ -38,6 +57,85 @@ _INPUTS = DciBenchmarkOperatorInputs(
 
 
 class DciBenchmarkBindingTests(unittest.TestCase):
+    def _plan(self, suite_ref: BenchmarkSuiteRef) -> BenchmarkPlan:
+        payload = PortableCapabilityPayload(
+            manifest=CapabilityPackageManifest(
+                package_ref=_OWNER,
+                capabilities=(_CAPABILITY,),
+                benchmark_suites=(
+                    BenchmarkSuiteRef("dci.all", "1.0.0"),
+                    BenchmarkSuiteRef("dci.github", "1.0.0"),
+                    BenchmarkSuiteRef("dci.paper-main", "1.0.0"),
+                ),
+                resources=(),
+            ),
+            payload_sha256="d" * 64,
+            resource_root=resources.files("asterion.capabilities.dci").joinpath(
+                "payload"
+            ),
+        )
+        suite = resolve_benchmark_suite(suite_ref, (payload,))
+        catalog_root = Path("/operator/catalog/dci")
+        capability = ResolvedCapability(
+            ref=_CAPABILITY,
+            source=catalog_root / "dci-benchmark.json",
+            manifest={"capability_id": "dci.benchmark", "version": "1.0.0"},
+        )
+        return BenchmarkPlan(
+            run_id="dci-resolution-test",
+            application_ref=ApplicationSelector("dci", "1.0.0"),
+            suite=suite,
+            tasks=tuple(
+                PlannedBenchmarkTask(index, task, capability)
+                for index, task in enumerate(suite.tasks, start=1)
+            ),
+            case_limit=suite.default_case_limit,
+            package_locks=(
+                CapabilitySourceLock(
+                    entries=(
+                        CapabilitySourceLockEntry(
+                            package_ref=_OWNER,
+                            payload_sha256="d" * 64,
+                            source_id="dci.source",
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+    def _installed_package(self) -> InstalledCapabilityPackage:
+        return InstalledCapabilityPackage(
+            package_ref=_OWNER,
+            payload_sha256="d" * 64,
+            source_id="dci.source",
+            source_kind="builtin",
+            catalog_roots=(Path("/operator/catalog/dci"),),
+            benchmark_suite_paths=(),
+            implementations=(),
+            benchmark_bindings=create_benchmark_bindings(_INPUTS),
+        )
+
+    def test_one_dci_binding_union_resolves_every_portable_suite_view(self) -> None:
+        package = self._installed_package()
+        expected_counts = {
+            "dci.github": 12,
+            "dci.paper-main": 13,
+            "dci.all": 15,
+        }
+
+        for suite_id, expected_count in expected_counts.items():
+            with self.subTest(suite_id=suite_id):
+                resolved = resolve_benchmark_execution(
+                    self._plan(BenchmarkSuiteRef(suite_id, "1.0.0")),
+                    (package,),
+                )
+
+                self.assertEqual(len(resolved.tasks), expected_count)
+                self.assertEqual(
+                    tuple(task.binding.binding_id for task in resolved.tasks),
+                    tuple(task.planned.task.binding_id for task in resolved.tasks),
+                )
+
     def test_complete_binding_table_builds_exact_private_contracts(self) -> None:
         bindings = create_benchmark_bindings(_INPUTS)
         by_id = {binding.binding_id: binding for binding in bindings}
@@ -192,6 +290,33 @@ class DciBenchmarkBindingTests(unittest.TestCase):
         self.assertIsNone(invocation.private_payload.amount)
         self.assertNotIn("amount", invocation.public_arguments)
         self.assertNotIn("None", repr(invocation))
+
+    def test_private_dci_values_have_identity_only_equality(self) -> None:
+        duplicate_inputs = DciBenchmarkOperatorInputs(
+            dataset_roots=_INPUTS.dataset_roots,
+            corpus_roots=_INPUTS.corpus_roots,
+            private_environment=_INPUTS.private_environment,
+            amount=_INPUTS.amount,
+        )
+        self.assertNotEqual(_INPUTS, duplicate_inputs)
+        request = BenchmarkTaskRequest(
+            run_id="dci-binding-test",
+            suite_ref=BenchmarkSuiteRef("dci.github", "1.0.0"),
+            task_id="qa.bamboogle.github-sample50",
+            case_limit=50,
+            output_directory=Path("/operator/output"),
+        )
+        first = next(
+            binding for binding in create_benchmark_bindings(_INPUTS)
+            if binding.binding_id == request.task_id
+        ).implementation.build_invocation(request)
+        second = next(
+            binding for binding in create_benchmark_bindings(duplicate_inputs)
+            if binding.binding_id == request.task_id
+        ).implementation.build_invocation(request)
+
+        self.assertNotEqual(first.private_payload, second.private_payload)
+        self.assertEqual(first, second)
 
 
 if __name__ == "__main__":  # pragma: no cover

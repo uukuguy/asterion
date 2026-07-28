@@ -177,6 +177,22 @@ class BenchmarkModelTests(unittest.TestCase):
             ("example.package", "example.support"),
         )
 
+    def test_invocation_equality_ignores_distinct_private_payloads(self) -> None:
+        first = BenchmarkTaskInvocation(
+            task_id=self.task_a.task_id,
+            binding_id=self.task_a.binding_id,
+            public_arguments=("synthetic",),
+            private_payload={"credential": "first-private-value"},
+        )
+        second = BenchmarkTaskInvocation(
+            task_id=self.task_a.task_id,
+            binding_id=self.task_a.binding_id,
+            public_arguments=("synthetic",),
+            private_payload={"credential": "second-private-value"},
+        )
+
+        self.assertEqual(first, second)
+
     def test_plan_requires_exact_source_lock_for_suite_owner(self) -> None:
         for name, locks in {
             "no locks": (),

@@ -24,7 +24,7 @@ _OWNER = CapabilityPackageRef("dci", "1.0.0")
 _PUBLIC_ARGUMENTS = ("profile", "case-limit", "output-directory")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class DciBenchmarkInvocation:
     """Private DCI execution values assembled from one selected task."""
 

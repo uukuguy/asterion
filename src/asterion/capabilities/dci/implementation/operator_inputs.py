@@ -9,7 +9,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class DciBenchmarkOperatorInputs:
     """Immutable paths and values injected by the DCI benchmark host."""
 

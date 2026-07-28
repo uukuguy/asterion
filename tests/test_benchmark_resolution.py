@@ -342,7 +342,7 @@ class BenchmarkResolutionTests(unittest.TestCase):
         )
         self.activations.assert_not_called()
 
-    def test_execution_resolution_rejects_nonexact_binding_closure(
+    def test_execution_resolution_rejects_invalid_binding_closure(
         self,
     ) -> None:
         plan = self._plan()
@@ -376,15 +376,6 @@ class BenchmarkResolutionTests(unittest.TestCase):
                             owner=_OTHER_OWNER,
                         ),
                         binding_b,
-                    )
-                ),
-            ),
-            "unknown extra binding": (
-                self._package(
-                    (
-                        binding_a,
-                        binding_b,
-                        self._binding("example.extra-binding"),
                     )
                 ),
             ),
