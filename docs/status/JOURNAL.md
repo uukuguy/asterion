@@ -213,3 +213,4 @@
 - 12:19 Added tracked Plan 4 climb state and deterministic local-gate loop for autonomous recovery [1d07dee]
 - 12:36 Defined portable DCI payload suites to establish exact package-owned benchmark metadata [f686b75]
 - 12:42 climb confirmed Plan 4 Task 1: 19 focused and 712 full passed; independent review approved [2c1dc36..f686b75]
+- 12:56 Removed PyYAML/CRLF drift so Plan 4 climb recovery is deterministic and self-contained [44c9b30]
