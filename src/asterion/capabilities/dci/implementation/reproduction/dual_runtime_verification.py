@@ -23,7 +23,7 @@ class DciDualRuntimeVerificationError(RuntimeError):
 
 
 _AF330_SOURCE_PATHS = (
-    "asterion/src/asterion/capabilities/dci_research/complete.py",
+    "asterion/src/asterion/capabilities/dci/implementation/complete.py",
     "asterion/src/asterion/capabilities/dci/implementation/runtime/application_executor.py",
     "asterion/src/asterion/capabilities/dci/implementation/runtime/bridge.py",
     "asterion/src/asterion/capabilities/dci/implementation/reproduction/dual_runtime_verification.py",

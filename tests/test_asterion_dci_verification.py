@@ -59,21 +59,18 @@ def _dci_product_verifier(
     return DciProductVerifier(
         repo_root=repo_root,
         backend=backend,
-        dci_application_provider_factory=_create_dci_application_provider,
-        dci_capability_package_factory=_create_dci_capability_package,
+        application_acceptance_inventory_factory=(
+            _create_application_acceptance_inventory
+        ),
     )
 
 
-def _create_dci_application_provider() -> object:
-    from asterion.applications.dci_agent_lite import create_provider
+def _create_application_acceptance_inventory() -> object:
+    from asterion.applications.dci_agent_lite.provider import (
+        create_application_acceptance_inventory,
+    )
 
-    return create_provider()
-
-
-def _create_dci_capability_package() -> object:
-    from asterion.capabilities.dci_research.provider import create_provider
-
-    return create_provider()
+    return create_application_acceptance_inventory()
 
 
 class ExplodingBackend:
@@ -725,7 +722,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
             package_root = Path(temp_dir) / "asterion"
             shutil.copytree(SOURCE, package_root)
             next(
-                (package_root / "capabilities/dci_research/payload/capabilities").glob(
+                (package_root / "capabilities/dci/payload/capabilities").glob(
                     "*.json"
                 )
             ).unlink()

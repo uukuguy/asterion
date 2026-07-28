@@ -122,6 +122,33 @@ class DciPackageOwnershipTests(unittest.TestCase):
                     violations.append((str(path.relative_to(PROJECT)), imported))
         self.assertEqual(violations, [])
 
+    def test_package_verification_has_no_application_inventory_knowledge(
+        self,
+    ) -> None:
+        source = (
+            PACKAGE / "implementation/reproduction/verification.py"
+        ).read_text(encoding="utf-8")
+        for forbidden in (
+            "applications/dci_agent_lite",
+            "_EXPECTED_BOUND_ASSEMBLIES",
+            "_EXPECTED_PACKAGED_ASSEMBLIES",
+            'package_root / "applications"',
+            'glob("*/assemblies/*.json")',
+        ):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, source)
+
+    def test_package_sources_do_not_name_removed_legacy_implementations(
+        self,
+    ) -> None:
+        violations = [
+            str(path.relative_to(PROJECT))
+            for path in sorted(PACKAGE.rglob("*.py"))
+            if "capabilities/dci_research/complete.py"
+            in path.read_text(encoding="utf-8")
+        ]
+        self.assertEqual(violations, [])
+
     def test_generic_framework_modules_never_import_dci_package(self) -> None:
         violations: list[tuple[str, str]] = []
         allowed_roots = (

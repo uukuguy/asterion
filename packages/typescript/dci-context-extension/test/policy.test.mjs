@@ -5,7 +5,7 @@ import test from "node:test";
 import { loadExtension, textMessage } from "./helpers.mjs";
 
 const contractUrl = new URL(
-  "../../../../src/asterion/dci/resources/context-profiles.json",
+  "../../../../src/asterion/capabilities/dci/resources/context-profiles.json",
   import.meta.url,
 );
 

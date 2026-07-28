@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import tempfile
+import tomllib
 import unittest
 import zipfile
 from pathlib import Path
@@ -20,6 +21,14 @@ BENCHMARK_SCHEMA = (
 BENCHMARK_SCHEMA_SOURCE = (
     PROJECT / "schemas/benchmark-suite/v1/benchmark-suite.schema.json"
 )
+DCI_RUNTIME_RESOURCES = {
+    "asterion/capabilities/dci/resources/pi/context-extension-manifest.json":
+        PROJECT
+        / "src/asterion/capabilities/dci/resources/pi/context-extension-manifest.json",
+    "asterion/capabilities/dci/resources/pi/dci-context-extension.ts":
+        PROJECT
+        / "src/asterion/capabilities/dci/resources/pi/dci-context-extension.ts",
+}
 
 
 class AsterionDistributionTests(unittest.TestCase):
@@ -59,6 +68,23 @@ class AsterionDistributionTests(unittest.TestCase):
         self.assertEqual(
             schema["properties"]["protocol"]["const"],
             "asterion.benchmark-suite/v1",
+        )
+
+    def test_wheel_contains_exact_dci_runtime_resources(self) -> None:
+        with zipfile.ZipFile(self._wheel) as wheel:
+            members = frozenset(wheel.namelist())
+            for member, source in DCI_RUNTIME_RESOURCES.items():
+                with self.subTest(member=member):
+                    self.assertIn(member, members)
+                    self.assertEqual(wheel.read(member), source.read_bytes())
+
+    def test_wheel_artifact_rule_tracks_the_package_owned_runtime_source(
+        self,
+    ) -> None:
+        project = tomllib.loads((PROJECT / "pyproject.toml").read_text())
+        self.assertEqual(
+            project["tool"]["hatch"]["build"]["targets"]["wheel"]["artifacts"],
+            ["src/asterion/capabilities/dci/resources/pi/*.ts"],
         )
 
 

@@ -276,9 +276,10 @@ class CapabilityPackageProtocolTests(unittest.TestCase):
                     ),
                     CapabilityRef("workflow.code-quality", "1.0.0"),
                 ),
+                (),
             ),
             (
-                "dci_research/capability-package.json",
+                "dci/payload/capability-package.json",
                 CapabilityPackageRef("dci", "1.0.0"),
                 (
                     CapabilityRef("dci.analysis", "1.0.0"),
@@ -289,10 +290,15 @@ class CapabilityPackageProtocolTests(unittest.TestCase):
                     CapabilityRef("policy.local-corpus", "1.0.0"),
                     CapabilityRef("protocol.observability", "1.0.0"),
                 ),
+                (
+                    BenchmarkSuiteRef("dci.all", "1.0.0"),
+                    BenchmarkSuiteRef("dci.github", "1.0.0"),
+                    BenchmarkSuiteRef("dci.paper-main", "1.0.0"),
+                ),
             ),
         )
 
-        for relative_path, package_ref, capabilities in cases:
+        for relative_path, package_ref, capabilities, benchmark_suites in cases:
             with self.subTest(package=package_ref.selector):
                 value = json.loads(
                     (SOURCE / "capabilities" / relative_path).read_text(
@@ -302,7 +308,9 @@ class CapabilityPackageProtocolTests(unittest.TestCase):
                 manifest = validate_capability_package_manifest(value)
                 self.assertEqual(manifest.package_ref, package_ref)
                 self.assertEqual(manifest.capabilities, capabilities)
-                self.assertEqual(manifest.benchmark_suites, ())
+                self.assertEqual(
+                    manifest.benchmark_suites, benchmark_suites
+                )
                 self.assertEqual(manifest.resources, ())
 
 

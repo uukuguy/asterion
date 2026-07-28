@@ -104,19 +104,6 @@ _PAPER_OPERATION_PLAN = ("qa-agent", "qa-judge", "ir-agent")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _REVISION = re.compile(r"[0-9a-f]{40,64}")
 _PUBLIC_IDENTITY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]*")
-_EXPECTED_PACKAGED_ASSEMBLIES = (
-    "applications/controlled_code/assemblies/controlled-code-validation.json",
-    "applications/dci_agent_lite/assemblies/dci-complete-application-claude.json",
-    "applications/dci_agent_lite/assemblies/dci-complete-application-pi.json",
-    "applications/dci_agent_lite/assemblies/dci-local-research.json",
-    "applications/dci_agent_lite/assemblies/dci-research-capability-claude.json",
-    "applications/dci_agent_lite/assemblies/dci-research-capability.json",
-)
-_EXPECTED_BOUND_ASSEMBLIES = tuple(
-    identity
-    for identity in _EXPECTED_PACKAGED_ASSEMBLIES
-    if not identity.endswith("/dci-local-research.json")
-)
 _EXPECTED_CONTEXT_PROFILES = ("level0", "level1", "level2", "level3", "level4")
 _EXPECTED_PAPER_BENCHMARK_IDS = (
     "beir.arguana",
@@ -167,6 +154,19 @@ class BasicVerificationCase:
     expected_answer: str | None
     max_turns: int | None
     thinking_level: str
+
+
+@dataclass(frozen=True)
+class DciApplicationAcceptanceInventory:
+    """Application-owned inputs for provider-free installed acceptance."""
+
+    provider_factories: tuple[Callable[[], object], ...]
+    package_factories: tuple[Callable[[], object], ...]
+    expected_provider_ids: tuple[str, ...]
+    expected_bound_assemblies: tuple[str, ...]
+    packaged_assemblies: tuple[str, ...]
+    expected_packaged_assemblies: tuple[str, ...]
+    assembly_identity: Callable[[Path], str | None]
 
 
 BASIC_CASES = (
@@ -1070,20 +1070,17 @@ def _acceptance_check(
 
 
 def _installed_acceptance_checks(
-    create_dci_provider: Callable[[], object],
-    create_dci_package: Callable[[], object],
+    create_application_inventory: Callable[
+        [], DciApplicationAcceptanceInventory
+    ],
 ) -> tuple[VerificationCheckResult, ...]:
     """Validate the exact installed provider and packaged-resource closure."""
 
-    from asterion.applications.controlled_code import (
-        create_provider as create_controlled_provider,
-    )
     from asterion.applications.provider import (
         compose_installed_provider,
         validate_installed_provider,
     )
     from asterion.applications.provider import ApplicationProviderError
-    from asterion.capabilities.builtin import create_controlled_code_package
     from asterion.capabilities.catalog import (
         CapabilityCatalogError,
         discover_capabilities,
@@ -1096,45 +1093,37 @@ def _installed_acceptance_checks(
     from asterion.runtime.factory import RuntimeFactoryError
     from asterion.runtime.protocol import ProtocolError
 
-    providers = (
-        validate_installed_provider(
-            create_controlled_provider(), selected_id="controlled-code"
-        ),
-        validate_installed_provider(
-            create_dci_provider(), selected_id="dci-agent-lite"
-        ),
+    inventory = create_application_inventory()
+    if (
+        not isinstance(inventory, DciApplicationAcceptanceInventory)
+        or not inventory.provider_factories
+        or len(inventory.provider_factories)
+        != len(inventory.expected_provider_ids)
+        or not inventory.package_factories
+        or not callable(inventory.assembly_identity)
+    ):
+        raise ValueError("application acceptance inventory is invalid")
+    providers = tuple(
+        validate_installed_provider(factory(), selected_id=provider_id)
+        for factory, provider_id in zip(
+            inventory.provider_factories,
+            inventory.expected_provider_ids,
+            strict=True,
+        )
     )
     applications = tuple(
         application for provider in providers for application in provider.applications
     )
-    installed_packages = (
-        create_controlled_code_package(),
-        create_dci_package(),
+    installed_packages = tuple(
+        factory() for factory in inventory.package_factories
     )
-    package_root = Path(str(resources.files("asterion"))).resolve()
-
-    def package_identity(path: Path) -> str | None:
-        if path.is_symlink():
-            return None
-        try:
-            relative = path.resolve(strict=True).relative_to(package_root)
-        except (OSError, ValueError):
-            return None
-        identity = relative.as_posix()
-        if (
-            relative.is_absolute()
-            or ".." in relative.parts
-            or not identity.startswith("applications/")
-        ):
-            return None
-        return identity
 
     bound_assemblies = tuple(
         sorted(
             identity
             for application in applications
             for path in application.assembly_paths
-            if (identity := package_identity(path)) is not None
+            if (identity := inventory.assembly_identity(path)) is not None
         )
     )
 
@@ -1171,7 +1160,7 @@ def _installed_acceptance_checks(
             for provider in composed_providers
             for application in provider.applications
             for assembly in application.assemblies
-            if (identity := package_identity(assembly.path)) is not None
+            if (identity := inventory.assembly_identity(assembly.path)) is not None
         )
     )
 
@@ -1185,7 +1174,7 @@ def _installed_acceptance_checks(
                     )
                 except (CapabilityExecutionError, TypeError, ValueError):
                     continue
-                identity = package_identity(assembly.path)
+                identity = inventory.assembly_identity(assembly.path)
                 if identity is not None:
                     executable_identities.append(identity)
     executable_assemblies = tuple(sorted(executable_identities))
@@ -1199,16 +1188,7 @@ def _installed_acceptance_checks(
         manifests = discover_capabilities(catalog_roots).entries
     except (OSError, TypeError, ValueError, CapabilityCatalogError):
         manifests = ()
-    try:
-        packaged_assemblies = tuple(
-            sorted(
-                identity
-                for path in (package_root / "applications").glob("*/assemblies/*.json")
-                if (identity := package_identity(path)) is not None
-            )
-        )
-    except OSError:
-        packaged_assemblies = ()
+    packaged_assemblies = inventory.packaged_assemblies
     unbound_resources = tuple(sorted(set(packaged_assemblies) - set(bound_assemblies)))
 
     try:
@@ -1278,16 +1258,17 @@ def _installed_acceptance_checks(
                     "application-providers",
                     "Installed provider closure is valid",
                     actual=len(providers),
-                    expected=2,
+                    expected=len(inventory.expected_provider_ids),
                     exact=tuple(provider.provider_id for provider in providers)
-                    == ("controlled-code", "dci-agent-lite"),
+                    == inventory.expected_provider_ids,
                 ),
                 _acceptance_check(
                     "bound-assemblies",
                     "Provider-bound assembly closure is valid",
                     actual=len(bound_assemblies),
-                    expected=5,
-                    exact=bound_assemblies == _EXPECTED_BOUND_ASSEMBLIES,
+                    expected=len(inventory.expected_bound_assemblies),
+                    exact=bound_assemblies
+                    == inventory.expected_bound_assemblies,
                 ),
                 _acceptance_check(
                     "capability-manifests",
@@ -1299,8 +1280,9 @@ def _installed_acceptance_checks(
                     "composed-assemblies",
                     "Resolved assembly composition closure is valid",
                     actual=len(composed_assemblies),
-                    expected=5,
-                    exact=composed_assemblies == _EXPECTED_BOUND_ASSEMBLIES,
+                    expected=len(inventory.expected_bound_assemblies),
+                    exact=composed_assemblies
+                    == inventory.expected_bound_assemblies,
                 ),
                 _acceptance_check(
                     "context-profiles",
@@ -1313,15 +1295,17 @@ def _installed_acceptance_checks(
                     "executable-assemblies",
                     "Executable binding closure is valid",
                     actual=len(executable_assemblies),
-                    expected=5,
-                    exact=executable_assemblies == _EXPECTED_BOUND_ASSEMBLIES,
+                    expected=len(inventory.expected_bound_assemblies),
+                    exact=executable_assemblies
+                    == inventory.expected_bound_assemblies,
                 ),
                 _acceptance_check(
                     "packaged-assemblies",
                     "Packaged assembly inventory is valid",
                     actual=len(packaged_assemblies),
-                    expected=6,
-                    exact=packaged_assemblies == _EXPECTED_PACKAGED_ASSEMBLIES,
+                    expected=len(inventory.expected_packaged_assemblies),
+                    exact=packaged_assemblies
+                    == inventory.expected_packaged_assemblies,
                     unbound_resources=unbound_resources,
                 ),
                 _acceptance_check(
@@ -1354,8 +1338,9 @@ def _installed_acceptance_checks(
 class DciProductVerifier:
     repo_root: Path
     backend: DciVerificationBackend
-    dci_application_provider_factory: Callable[[], object] | None = None
-    dci_capability_package_factory: Callable[[], object] | None = None
+    application_acceptance_inventory_factory: (
+        Callable[[], DciApplicationAcceptanceInventory] | None
+    ) = None
 
     def __call__(self, request: VerificationRequest) -> VerificationResult:
         if request.level == "preflight":
@@ -1388,14 +1373,10 @@ class DciProductVerifier:
 
         del acceptance_root
         try:
-            if (
-                self.dci_application_provider_factory is None
-                or self.dci_capability_package_factory is None
-            ):
+            if self.application_acceptance_inventory_factory is None:
                 raise ValueError
             checks = _installed_acceptance_checks(
-                self.dci_application_provider_factory,
-                self.dci_capability_package_factory,
+                self.application_acceptance_inventory_factory,
             )
         except (OSError, RuntimeError, TypeError, ValueError):
             checks = (
@@ -1645,8 +1626,9 @@ def create_dci_product(
     *,
     repo_root: Path | None = None,
     backend: DciVerificationBackend | None = None,
-    dci_application_provider_factory: Callable[[], object] | None = None,
-    dci_capability_package_factory: Callable[[], object] | None = None,
+    application_acceptance_inventory_factory: (
+        Callable[[], DciApplicationAcceptanceInventory] | None
+    ) = None,
 ) -> InstalledCapabilityProduct:
     """Build the installed DCI product contract without performing verification."""
 
@@ -1654,8 +1636,9 @@ def create_dci_product(
     verifier = DciProductVerifier(
         repo_root=root,
         backend=LocalDciVerificationBackend() if backend is None else backend,
-        dci_application_provider_factory=dci_application_provider_factory,
-        dci_capability_package_factory=dci_capability_package_factory,
+        application_acceptance_inventory_factory=(
+            application_acceptance_inventory_factory
+        ),
     )
     return InstalledCapabilityProduct(
         description=DCI_PRODUCT_DESCRIPTION,

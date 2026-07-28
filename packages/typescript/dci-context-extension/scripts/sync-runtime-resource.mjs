@@ -12,13 +12,13 @@ if (process.argv.length > (checkOnly ? 3 : 2)) {
 const source = fileURLToPath(new URL("../src/dci-context-extension.ts", import.meta.url));
 const destination = fileURLToPath(
   new URL(
-    "../../../../src/asterion/dci/resources/pi/dci-context-extension.ts",
+    "../../../../src/asterion/capabilities/dci/resources/pi/dci-context-extension.ts",
     import.meta.url,
   ),
 );
 const manifestPath = fileURLToPath(
   new URL(
-    "../../../../src/asterion/dci/resources/pi/context-extension-manifest.json",
+    "../../../../src/asterion/capabilities/dci/resources/pi/context-extension-manifest.json",
     import.meta.url,
   ),
 );

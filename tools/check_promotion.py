@@ -123,7 +123,7 @@ resources = (
         CAPABILITY_PACKAGE_PROTOCOL_VERSION,
     ),
     (
-        "capabilities/dci_research/capability-package.json",
+        "capabilities/dci/payload/capability-package.json",
         CAPABILITY_PACKAGE_PROTOCOL_VERSION,
     ),
     (
@@ -157,7 +157,7 @@ for relative, expected_protocol in resources:
 
 for relative in (
     "capabilities/controlled_code/payload/capabilities",
-    "capabilities/dci_research/manifests",
+    "capabilities/dci/payload/capabilities",
 ):
     for resource in root.joinpath(relative).iterdir():
         if resource.name.endswith(".json"):

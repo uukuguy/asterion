@@ -8,6 +8,7 @@ import tempfile
 import unittest
 from collections.abc import AsyncIterator
 from contextlib import contextmanager
+from importlib import metadata
 from pathlib import Path
 from unittest.mock import patch
 
@@ -33,10 +34,10 @@ from asterion.capabilities.execution import (
 )
 from asterion.capability_packages.protocol import (
     CapabilityPackageRef,
-    validate_capability_source_declaration,
 )
-from asterion.capability_packages.sources.local import (
-    LocalDirectoryCapabilityPackageSource,
+from asterion.capability_packages.payload import open_portable_payload
+from asterion.capability_packages.model import (
+    CapabilityPackageCandidate,
 )
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
 from asterion.capabilities.dci.implementation.services import (
@@ -150,28 +151,43 @@ DCI_PACKAGED_RESOURCE_CLOSURE = {
 }
 
 
-def _dci_local_source() -> LocalDirectoryCapabilityPackageSource:
-    return LocalDirectoryCapabilityPackageSource(
-        validate_capability_source_declaration(
-            {
-                "protocol": "asterion.capability-source/v1",
-                "source_id": "dci.local",
-                "kind": "local-directory",
-                "package": {
-                    "package_id": "dci",
-                    "version": "1.0.0",
-                },
-                "payload_sha256": None,
-                "locator": {
-                    "root": str(LOCAL_SOURCE.resolve(strict=True)),
-                },
-                "provider_factory": {
-                    "module": "provider",
-                    "name": "create_provider",
-                },
-            },
+class _DciPackageSource:
+    def __init__(self) -> None:
+        self.installed = create_dci_package()
+        self.payload = open_portable_payload(
+            SOURCE / "capabilities/dci/payload"
         )
-    )
+        self.candidate = CapabilityPackageCandidate(
+            package_ref=self.installed.package_ref,
+            source_id=self.installed.source_id,
+            source_kind=self.installed.source_kind,
+            payload_sha256=None,
+            metadata={},
+        )
+
+    def discover_metadata(self):
+        return (self.candidate,)
+
+    def open_payload(self, candidate):
+        self._require_candidate(candidate)
+        return self.payload
+
+    def validate_source_identity(self, candidate, payload):
+        self._require_candidate(candidate)
+        if payload is not self.payload:
+            raise AssertionError("unexpected DCI payload")
+
+    def load_provider(self, candidate):
+        self._require_candidate(candidate)
+        return self.installed
+
+    def _require_candidate(self, candidate):
+        if candidate is not self.candidate:
+            raise AssertionError("unexpected DCI candidate")
+
+
+def _dci_local_source() -> _DciPackageSource:
+    return _DciPackageSource()
 
 
 class _CorpusService:
@@ -637,6 +653,49 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
 
 
 class DciCompleteApplicationBindingTests(unittest.TestCase):
+    def test_distribution_host_service_entry_points_load_moved_factories(
+        self,
+    ) -> None:
+        entries = {
+            entry.name: entry
+            for entry in metadata.entry_points(group="asterion.host_services")
+        }
+        self.assertEqual(
+            set(entries),
+            {"corpus.local-root", "evaluation.answer-judge"},
+        )
+        loaded = {name: entry.load() for name, entry in entries.items()}
+        self.assertIs(
+            loaded["corpus.local-root"],
+            create_local_corpus_service_factory,
+        )
+        self.assertIs(
+            loaded["evaluation.answer-judge"],
+            create_answer_judge_service_factory,
+        )
+        self.assertTrue(
+            all(
+                factory.__module__
+                == "asterion.capabilities.dci.implementation.services"
+                for factory in loaded.values()
+            )
+        )
+
+    def test_transitional_provider_uses_authoritative_payload_and_suites(
+        self,
+    ) -> None:
+        payload_root = SOURCE / "capabilities/dci/payload"
+        authoritative = open_portable_payload(payload_root)
+        installed = create_dci_package()
+
+        self.assertEqual(installed.payload_sha256, authoritative.payload_sha256)
+        self.assertEqual(installed.catalog_roots, (payload_root / "capabilities",))
+        self.assertEqual(
+            tuple(path.name for path in installed.benchmark_suite_paths),
+            ("all.json", "github.json", "paper-main.json"),
+        )
+        self.assertFalse((LOCAL_SOURCE / "payload").exists())
+
     def test_provider_creation_is_metadata_only(self) -> None:
         provider_source = (
             SOURCE / "applications/dci_agent_lite/provider.py"

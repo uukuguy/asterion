@@ -42,7 +42,7 @@ const capabilitySourceFixtures = new URL(
   import.meta.url,
 );
 const referenceManifestRoots = [
-  new URL("../../../../src/asterion/capabilities/dci_research/manifests/", import.meta.url),
+  new URL("../../../../src/asterion/capabilities/dci/payload/capabilities/", import.meta.url),
   new URL("../../../../src/asterion/capabilities/controlled_code/payload/capabilities/", import.meta.url),
 ];
 const sourceDirectory = new URL("../src/", import.meta.url);

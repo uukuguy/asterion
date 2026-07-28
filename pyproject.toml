@@ -26,12 +26,12 @@ controlled-code = "asterion.applications.controlled_code:create_provider"
 dci-agent-lite = "asterion.applications.dci_agent_lite:create_provider"
 
 [project.entry-points."asterion.host_services"]
-"corpus.local-root" = "asterion.dci.services:create_local_corpus_service_factory"
-"evaluation.answer-judge" = "asterion.dci.services:create_answer_judge_service_factory"
+"corpus.local-root" = "asterion.capabilities.dci.implementation.services:create_local_corpus_service_factory"
+"evaluation.answer-judge" = "asterion.capabilities.dci.implementation.services:create_answer_judge_service_factory"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/asterion"]
-artifacts = ["src/asterion/dci/resources/pi/*.ts"]
+artifacts = ["src/asterion/capabilities/dci/resources/pi/*.ts"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "schemas/benchmark-suite/v1/benchmark-suite.schema.json" = "asterion/schemas/benchmark-suite/v1/benchmark-suite.schema.json"

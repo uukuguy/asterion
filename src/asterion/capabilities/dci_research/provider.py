@@ -18,7 +18,7 @@ def create_provider() -> InstalledCapabilityPackage:
     """Return the installed DCI package for an explicitly injected local source."""
 
     root = Path(__file__).resolve().parent
-    payload_root = root / "payload"
+    payload_root = root.parent / "dci/payload"
     payload = open_portable_payload(payload_root)
     return InstalledCapabilityPackage(
         package_ref=PACKAGE_REF,
@@ -26,7 +26,10 @@ def create_provider() -> InstalledCapabilityPackage:
         source_id=SOURCE_ID,
         source_kind="local-directory",
         catalog_roots=((payload_root / "capabilities").resolve(strict=True),),
-        benchmark_suite_paths=(),
+        benchmark_suite_paths=tuple(
+            payload_root / "benchmark-suites" / name
+            for name in ("all.json", "github.json", "paper-main.json")
+        ),
         implementations=complete_dci_bindings(),
         benchmark_bindings=(),
     )

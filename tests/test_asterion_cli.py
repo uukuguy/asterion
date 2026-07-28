@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from asterion.cli import _parser, main
 from asterion.applications.dci_agent_lite.provider import (
+    create_application_acceptance_inventory,
     create_provider as create_dci_provider,
 )
 from asterion.applications.provider import (
@@ -816,8 +817,9 @@ class AsterionCliTests(unittest.TestCase):
             value,
             product=create_dci_product(
                 repo_root=root,
-                dci_application_provider_factory=lambda: create_dci_provider(),
-                dci_capability_package_factory=lambda: create_dci_package(),
+                application_acceptance_inventory_factory=(
+                    create_application_acceptance_inventory
+                ),
             ),
         )
 
