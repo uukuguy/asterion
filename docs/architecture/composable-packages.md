@@ -49,8 +49,8 @@ The canonical definition is
 fixtures live in `tests/fixtures/capabilities/v1/` and
 `tests/fixtures/assembly/v1/`. They include prefix package IDs, BMP/non-BMP
 scalar ordering, and lone-surrogate rejection. The reference manifests under
-`src/asterion/capabilities/dci_research/manifests/` form the policy → research
-→ evaluation → observability DCI graph.
+`src/asterion/capabilities/dci/payload/capabilities/` form the policy →
+research → evaluation → observability DCI graph.
 
 Manifests are compatibility allowlists, not output guarantees or execution
 authority. `emits_events` and `produces_artifacts` permit an implementation to
