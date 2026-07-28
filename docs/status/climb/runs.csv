@@ -6,3 +6,4 @@ plan4-climb-h004,4,2026-07-28-plan4,H-004,plan4-task-4,,,,4,,,LOCAL,"Task 4 appr
 plan4-climb-h005,5,2026-07-28-plan4,H-005,plan4-task-5,,,,5,,,LOCAL,Task 5 approved after one Important docs-history fix; 93 focused and 682 full passed; obsolete launchers absent and generic security coverage retained,confirmed,2.0,
 plan4-climb-h006,6,2026-07-28-plan4,H-006,plan4-task-6,,,,6,,,LOCAL,Task 6 approved after 2 High and 2 Medium fixes; 34 focused and 691 full passed; make check and promotion green,confirmed,3.0,
 plan4-climb-h007,7,2026-07-28-plan4,H-007,plan4-task-7,,,,7,,,LOCAL,Task 7 approved after two High evidence fixes; 102 focused and 693 full passed; wheel-only equivalence and promotion green,confirmed,2.5,
+plan4-climb-h008,8,2026-07-28-plan4,H-008,plan4-task-8,,,,8,,,LOCAL,Task 8 approved after one Medium docs fix; 28 focused and 698 full passed; make check and promotion green,confirmed,3.0,

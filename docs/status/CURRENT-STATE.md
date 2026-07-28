@@ -8,7 +8,7 @@
 - Project route: direct
 - Canonical worklist: approved implementation plans under
   `docs/superpowers/plans/`
-- Active work package: Plan 4 Task 8 — migration and repository closure
+- Active work package: Plan 4 whole-branch review and final verification
 
 ## Current Architecture
 
@@ -34,8 +34,8 @@
   `src/asterion/capabilities/dci/`; the legacy `asterion.dci` namespace is
   absent.
 - Installed host-service entry points, TypeScript resource synchronization,
-  wheel contents, and the transitional provider shell all resolve the
-  authoritative package-owned implementation and payload.
+  and wheel contents all resolve the authoritative package-owned
+  implementation and payload. The transitional provider shell is absent.
 - Application assembly inventory and acceptance identities are application
   owned and injected into package verification as immutable values.
 - `asterion-dci` is a thin `dci_agent_lite` adapter over generic application
@@ -72,9 +72,9 @@
 
 ## Open Problems (theme-level)
 
-- Plan 4 Task 8 remains: delete the transitional source shell, establish
-  permanent structural/privacy assertions, update operator and architecture
-  documentation, and run the complete closure gate.
+- All eight Plan 4 tasks are implemented and independently approved. The
+  required whole-Plan-4 review and final fresh verification remain before
+  branch handoff.
 - Provider-backed bounded reproduction still requires fresh exact finite
   authorization, an operator-selected private output root, and any
   scope-specific external datasets.
@@ -132,7 +132,8 @@
 2. Read `RESUME-NEXT-SESSION.md` for the next concrete action.
 3. Read `MEMORY.md` for collaboration rules and corrected feedback.
 4. Run `git status --short` and `git log --oneline -5`.
-5. Continue Plan 4 Task 8 in the isolated capability-package worktree.
+5. Continue the whole-Plan-4 review and final verification in the isolated
+   capability-package worktree.
 6. Treat external execution as unauthorized unless the operator supplies a new
    exact scope, limit, private output root, and five finite positive caps.
 7. Keep any bounded result `External-limited`; never promote it to full-paper

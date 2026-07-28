@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-28 21:14. **Session remains active - Task 8 review and Plan 4 final review are next.**
+> Updated: 2026-07-28 21:20. **Session remains active - Plan 4 whole-branch review is next.**
 
 ## TL;DR
 
@@ -11,6 +11,9 @@
 - Task 8 implementation and closure gates are complete: 28 focused and 698
   full Python tests passed, along with lint, docs, TypeScript, Rust, wheel
   build, and all 24 promotion commands.
+- Task 8 independent review is approved after correcting one Medium stale-doc
+  finding in `49e96e0`.
+- climb H-008 is confirmed; the Plan 4 target is 8/8.
 - Promotion used zero provider operations and no full dataset.
 - The transitional source shell is deleted. The sole DCI source envelope lives
   under `src/asterion/capabilities/dci/`.
@@ -44,12 +47,12 @@
 
 ## Next steps
 
-1. Commit the Task 8 implementation as
-   `docs: close DCI capability package migration`.
-2. Run a fresh independent Task 8 review; fix and re-review every important
-   finding.
-3. Record climb hypothesis H-008, update durable state, and checkpoint Task 8.
-4. Run the required independent whole-Plan-4 review and final fresh gates.
+1. Run the required fresh independent whole-Plan-4 review over
+   `2c1dc36..49e96e0`.
+2. Fix and re-review every important finding.
+3. Run fresh focused, Python, cross-language, documentation, packaging,
+   promotion, and physical-absence gates.
+4. Record the final verified recovery boundary without merging or pushing.
 
 ## Boundaries and ruled-out paths
 

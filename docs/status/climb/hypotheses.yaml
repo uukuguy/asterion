@@ -154,9 +154,19 @@
       "expected_lift": "+1 completed task",
       "cost_h": 3.0,
       "ranking": 0.65,
-      "status": "in-flight",
+      "status": "confirmed",
       "created_at": "2026-07-28T12:00:00",
-      "results": []
+      "results": [
+        {
+          "session": "2026-07-28-plan4",
+          "cycle": 8,
+          "run": "plan4-climb-h008",
+          "local": 8,
+          "verdict": "confirmed",
+          "decision_reason": "Task 8 approved after one Medium docs fix; 28 focused and 698 full passed; make check and promotion green",
+          "commit_range": "8ed7cb9..49e96e0"
+        }
+      ]
     }
   ]
 }

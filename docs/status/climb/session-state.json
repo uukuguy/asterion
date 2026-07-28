@@ -1,16 +1,12 @@
 {
   "session": "2026-07-28-plan4",
-  "phase": "Plan 4 Task 8 implementation",
-  "last_cycle": 7,
-  "next_hypothesis": "H-008",
-  "in_flight": {
-    "kind": "subagent-driven-development",
-    "task": "Plan 4 Task 8",
-    "external_execution": false
-  },
-  "next_action": "Dispatch Plan 4 Task 8 implementer with TDD brief.",
+  "phase": "Plan 4 closure",
+  "last_cycle": 8,
+  "next_hypothesis": null,
+  "in_flight": null,
+  "next_action": "Run the complete Plan 4 closure gate and final review.",
   "sota": {
-    "local": 7
+    "local": 8
   },
   "falsified_routes": []
 }
