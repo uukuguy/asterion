@@ -206,3 +206,4 @@
 ## 2026-07-28
 
 - 09:28 Closed generic benchmark AST and wheel boundaries to keep orchestration domain-neutral and distributable [0940b08]
+- 09:43 Made process-tree readiness atomic to eliminate cancellation-test races [5ade7a6]
