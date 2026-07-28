@@ -8,10 +8,13 @@ from pathlib import Path
 import asterion.capability_sdk as capability_sdk
 from asterion.capabilities.catalog import CapabilityRef
 from asterion.capabilities.execution import (
+    CapabilityImplementationBinding,
     CapabilityExecutionError,
     CapabilityExecutionResult,
     CapabilityInvocation,
 )
+from asterion.benchmarks.model import BenchmarkTaskInvocation, BenchmarkTaskRequest
+from asterion.capability_packages.payload import open_portable_payload
 from asterion.capability_packages.model import (
     BenchmarkTaskBinding,
     InstalledCapabilityPackage,
@@ -28,12 +31,16 @@ PUBLIC_NAMES = {
     "CapabilityExecutionError",
     "CapabilityExecutionResult",
     "CapabilityInvocation",
+    "CapabilityImplementationBinding",
     "CapabilityPackageProvider",
     "CapabilityPackageRef",
     "CapabilityRef",
     "HostServices",
     "InstalledCapabilityPackage",
     "run_capability_conformance",
+    "open_portable_payload",
+    "BenchmarkTaskInvocation",
+    "BenchmarkTaskRequest",
 }
 PRIVATE_IMPLEMENTATION_PREFIXES = (
     "asterion.applications",
@@ -102,11 +109,18 @@ class CapabilitySdkTests(unittest.TestCase):
             CapabilityExecutionError,
         )
         self.assertIs(
+            capability_sdk.CapabilityImplementationBinding,
+            CapabilityImplementationBinding,
+        )
+        self.assertIs(
             capability_sdk.InstalledCapabilityPackage,
             InstalledCapabilityPackage,
         )
         self.assertIs(capability_sdk.BenchmarkTaskBinding, BenchmarkTaskBinding)
+        self.assertIs(capability_sdk.BenchmarkTaskInvocation, BenchmarkTaskInvocation)
+        self.assertIs(capability_sdk.BenchmarkTaskRequest, BenchmarkTaskRequest)
         self.assertIs(capability_sdk.CancellationSignal, CancellationSignal)
+        self.assertIs(capability_sdk.open_portable_payload, open_portable_payload)
 
     def test_provider_protocol_describes_the_selected_factory_boundary(self) -> None:
         def provider() -> InstalledCapabilityPackage:
