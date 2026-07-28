@@ -8,7 +8,7 @@
 - Project route: direct
 - Canonical worklist: approved implementation plans under
   `docs/superpowers/plans/`
-- Active work package: Plan 4 Task 6 — installed third-party DCI proof
+- Active work package: Plan 4 Task 7 — equivalent built-in DCI source form
 
 ## Current Architecture
 
@@ -47,6 +47,9 @@
   active usage routes through generic suite planning/execution/resume.
 - The approved migration proves DCI as an installed extension before exposing
   the identical portable payload through the built-in adapter.
+- The installed external DCI fixture now proves clean-environment metadata
+  discovery, exact source locking, selected-only provider import, conformance,
+  and synthetic execution against the authoritative portable payload.
 - Installed provider resources stay package-rooted; explicit DCI operator
   configuration is rooted at the selected environment file for preflight and
   basic execution.
@@ -66,10 +69,10 @@
 
 ## Open Problems (theme-level)
 
-- Plan 4 Tasks 6-8 remain; the current built-in/transitional provider form must
-  still be proven byte-identical to an installed third-party DCI distribution.
-- Task 6 must build and install an external DCI fixture without repository
-  source access, then prove metadata-only discovery and selected loading.
+- Plan 4 Tasks 7-8 remain; the current built-in/transitional provider form must
+  now be materialized and proven byte-identical to the approved external form.
+- Task 7 must expose the built-in through the generic source adapter and prove
+  built-in, installed-distribution, and explicit-local form equivalence.
 - Provider-backed bounded reproduction still requires fresh exact finite
   authorization, an operator-selected private output root, and any
   scope-specific external datasets.
@@ -127,7 +130,7 @@
 2. Read `RESUME-NEXT-SESSION.md` for the next concrete action.
 3. Read `MEMORY.md` for collaboration rules and corrected feedback.
 4. Run `git status --short` and `git log --oneline -5`.
-5. Continue Plan 4 Task 6 in the isolated capability-package worktree.
+5. Continue Plan 4 Task 7 in the isolated capability-package worktree.
 6. Treat external execution as unauthorized unless the operator supplies a new
    exact scope, limit, private output root, and five finite positive caps.
 7. Keep any bounded result `External-limited`; never promote it to full-paper

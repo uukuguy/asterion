@@ -1,18 +1,17 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-28 18:05. **Session remains active — not a final handoff.**
+> Updated: 2026-07-28 19:20. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
 - Plans 1–3 remain complete and verified.
-- Plan 4 Tasks 1–5 are complete and independently approved.
-- Task 5 removed every global/per-task DCI benchmark launcher in commits
-  `7454b87` and `a80f384`; active usage and resource metadata now use exact
-  suites and logical bindings.
-- Final Task 5 verification passed 93 focused and 682 full Python tests,
+- Plan 4 Tasks 1–6 are complete and independently approved.
+- Task 6 proved DCI as a clean-environment installed extension in `19e3135`
+  and closed exact-lock, source-ID, snapshot-copy, and SDK gaps in `cb813ea`.
+- Final Task 6 verification passed 34 focused and 691 full Python tests,
   cross-language checks, docs, packaging, and promotion with zero provider
   operations.
-- climb is at 5/8; H-006 / Plan 4 Task 6 is the immediate next action.
+- climb is at 6/8; H-007 / Plan 4 Task 7 is the immediate next action.
 
 ## Where things stand
 
@@ -30,16 +29,19 @@
 - Old orchestrator/launcher files and active references are absent; historical
   retained references carry precise superseded notices, with current Plan 4
   narrowly exempt for its deletion contract.
+- The external DCI wheel carries the authoritative payload bytes, imports only
+  the public capability SDK, remains unimported during metadata/payload
+  discovery, and loads only through its exact identifier-shaped source lock.
 - climb state is tracked under `docs/status/climb/`; the adapter uses only
   provider-free local test gates and has no external push.
 
 ## Next steps
 
-1. Execute Plan 4 Task 6 from `.superpowers/sdd/task-6-brief.md`.
-2. Start with the missing external DCI distribution fixture and test.
-3. Build/install the fixture in an isolated target, remove repository source
-   visibility, and prove metadata-only list plus exact selected payload/provider
-   loading without adjacent imports or private-value exposure.
+1. Execute Plan 4 Task 7 from `.superpowers/sdd/task-7-brief.md`.
+2. Start with the missing built-in DCI provider and form-equivalence test.
+3. Prove built-in, installed-distribution, and explicit-local forms have
+   identical payload, manifest, binding, conformance, plan, and public-result
+   identities; unlocked multi-source resolution must remain ambiguous.
 4. Run focused and full provider-free verification, independent task review,
    then advance H-006 through `tools/climb/cycle.sh`.
 
@@ -47,7 +49,7 @@
 
 - Do not place Python source files inside a portable payload root.
 - Do not add a validator exception for DCI.
-- Do not import the repository DCI provider from the external fixture.
+- Do not special-case DCI in generic source resolution or execution.
 - Do not let metadata-only discovery import the selected provider or adjacent
   packages.
 - Installed payload bytes, suites, identities, and implementation bindings
@@ -61,5 +63,5 @@
 ```bash
 cd .worktrees/capability-package-architecture
 git status --short
-uv run python -m unittest -v tests.test_dci_external_distribution
+uv run python -m unittest -v tests.test_dci_source_form_equivalence
 ```

@@ -4,3 +4,4 @@ plan4-climb-h002,2,2026-07-28-plan4,H-002,plan4-task-2,,,,2,,,LOCAL,22 focused a
 plan4-climb-h003,3,2026-07-28-plan4,H-003,plan4-task-3,,,,3,,,LOCAL,"Task 3 approved after five Important and one Minor fixes; 731 Python tests, TypeScript 16/16 plus resource check, docs-check, promotion-check PASS",confirmed,4.0,
 plan4-climb-h004,4,2026-07-28-plan4,H-004,plan4-task-4,,,,4,,,LOCAL,"Task 4 approved after three High and one Medium fixes; 123 focused and 719 full passed; make check, promotion, docs, build green",confirmed,3.0,
 plan4-climb-h005,5,2026-07-28-plan4,H-005,plan4-task-5,,,,5,,,LOCAL,Task 5 approved after one Important docs-history fix; 93 focused and 682 full passed; obsolete launchers absent and generic security coverage retained,confirmed,2.0,
+plan4-climb-h006,6,2026-07-28-plan4,H-006,plan4-task-6,,,,6,,,LOCAL,Task 6 approved after 2 High and 2 Medium fixes; 34 focused and 691 full passed; make check and promotion green,confirmed,3.0,

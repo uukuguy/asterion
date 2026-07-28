@@ -226,3 +226,7 @@
 - 17:51 Removed global DCI launchers to enforce generic benchmark authority [7454b87]
 - 18:05 Marked retired DCI launcher docs superseded while preserving active Plan 4 contract [a80f384]
 - 18:07 climb confirmed Plan 4 Task 5: Task 5 approved after one Important docs-history fix; 93 focused and 682 full passed; obsolete launchers absent and generic security coverage retained [9cd4f83..a80f384]
+- 18:08 Checkpointed Task 5 recovery state so autonomous work resumes at external distribution proof [3d3fea8]
+- 18:30 Proved DCI external distribution packaging to validate third-party capability loading [19e3135]
+- 19:18 Closed external source-lock and snapshot-copy gaps to preserve exact fail-closed package identity [cb813ea]
+- 19:19 climb confirmed Plan 4 Task 6: Task 6 approved after 2 High and 2 Medium fixes; 34 focused and 691 full passed; make check and promotion green [3d3fea8..cb813ea]

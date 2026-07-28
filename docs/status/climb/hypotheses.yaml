@@ -112,9 +112,19 @@
       "expected_lift": "+1 completed task",
       "cost_h": 3.0,
       "ranking": 0.75,
-      "status": "in-flight",
+      "status": "confirmed",
       "created_at": "2026-07-28T12:00:00",
-      "results": []
+      "results": [
+        {
+          "session": "2026-07-28-plan4",
+          "cycle": 6,
+          "run": "plan4-climb-h006",
+          "local": 6,
+          "verdict": "confirmed",
+          "decision_reason": "Task 6 approved after 2 High and 2 Medium fixes; 34 focused and 691 full passed; make check and promotion green",
+          "commit_range": "3d3fea8..cb813ea"
+        }
+      ]
     },
     {
       "id": "H-007",
@@ -123,7 +133,7 @@
       "expected_lift": "+1 completed task",
       "cost_h": 2.5,
       "ranking": 0.7,
-      "status": "pending",
+      "status": "in-flight",
       "created_at": "2026-07-28T12:00:00",
       "results": []
     },
