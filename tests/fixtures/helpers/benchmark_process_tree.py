@@ -23,10 +23,12 @@ def main() -> int:
             ),
         )
     )
-    pid_file.write_text(
+    pending_pid_file = pid_file.with_name(f".{pid_file.name}.pending")
+    pending_pid_file.write_text(
         f"{os.getpid()}\n{grandchild.pid}\n",
         encoding="utf-8",
     )
+    os.replace(pending_pid_file, pid_file)
     while True:
         time.sleep(1)
 
