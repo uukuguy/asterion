@@ -1,0 +1,11 @@
+score_name: completed_plan4_tasks
+score_direction: max
+subscores: []
+push_mode: manual-csv
+state_dir: docs/status/climb
+artifact_dir: runs/climb
+run_tag_marker: -climb-plan4-
+paradigm_field: plan_task
+
+# This adapter uses provider-free test gates as ground truth. There is no
+# external leaderboard and push.sh never submits or publishes anything.

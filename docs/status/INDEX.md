@@ -19,6 +19,15 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `CURRENT-STATE.md` | 🟢 active | Structural snapshot. |
 | `DECISIONS.md` | 🟢 active | Indexed active architecture decisions and rationale. |
 | `INDEX.md` (this file) | 🟢 active | Discovery hub. |
+| `climb/research-tree.md` | 🟢 active | Generated Plan 4 task/hypothesis and in-flight summary. |
+| `climb/session-state.json` | 🟢 active | Dynamic Plan 4 climb recovery state. |
+| `climb/config.yaml` | 📦 storage | Provider-free Plan 4 climb adapter. |
+| `climb/session-target.md` | 📦 storage | Machine-readable eight-task completion target. |
+| `climb/hypotheses.yaml` | 📦 storage | Plan 4 task pool and append-only results. |
+| `climb/runs.csv` | 📦 storage | Completed task-cycle ledger. |
+| `climb/calibration.json` | 📦 storage | Explicitly empty online-calibration state. |
+| `climb/pending-lb.json` | 📦 storage | Explicitly empty external-score queue. |
+| `climb/adjudicator-log.md` | 📦 storage | Review/quorum decision history. |
 
 ## Decision history (kept for traceability — verdicts may be outdated)
 

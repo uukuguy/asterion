@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# climb/lwm 确定性状态同步 — git post-commit 兜底验证.
+#
+# 设计: docs/research/2026-05-30-deterministic-state-sync-design.md
+# 主路径是 cycle.sh _sync_state (climb 自动 loop). 本 hook 兜底**手动 commit /
+# 绕过 cycle.sh** 的场景. post-commit 不能阻止 commit, 只能自动补救 / 警告.
+#
+# 分层强度 (能自动生成的强制, 需人写的警告):
+#   (B) research-tree (自动生成物) → 自动 regen + amend (强制, 滞后归零)
+#   (C) DECISIONS (滞后最严重, 无自愈) → 决策关键词检测 → 警告 (内容需 AI 写)
+#   (C) RESUME (已有 staleness auto-handoff 自愈) → 仅 JOURNAL-RESUME gap 大时轻提醒
+#
+# 安装: cp tools/climb/hooks/post-commit .git/hooks/post-commit && chmod +x ...
+# (git hook 不随 clone, 见 CLAUDE.md fresh-clone setup 段)
+# silent skip 非 climb 项目 (docs/status/climb/ 不存在).
+
+set -u
+cd "$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+
+# silent skip: 非 climb 项目
+[ -d docs/status/climb ] || exit 0
+# 防 amend 递归 (--no-verify 仍会触发 post-commit? 否. 但加 guard 保险)
+[ -n "${CLIMB_HOOK_RUNNING:-}" ] && exit 0
+export CLIMB_HOOK_RUNNING=1
+
+MSG=$(git log -1 --format=%B 2>/dev/null)
+CHANGED=$(git diff-tree --no-commit-id --name-only -r HEAD 2>/dev/null)
+
+# ── (B) climb 状态变了但 research-tree 没同步 → 自动 regen + amend ──
+if echo "$CHANGED" | grep -qE 'docs/status/climb/(hypotheses|runs|calibration|pending-lb)'; then
+  if ! echo "$CHANGED" | grep -q 'docs/status/climb/research-tree.md'; then
+    if [ -f tools/climb/regen-tree.py ]; then
+      python3 tools/climb/regen-tree.py >/dev/null 2>&1
+      if ! git diff --quiet docs/status/climb/research-tree.md 2>/dev/null; then
+        git add docs/status/climb/research-tree.md
+        git commit --amend --no-edit --no-verify >/dev/null 2>&1
+        echo "[post-commit] ✓ auto-regen research-tree.md + amended into commit" >&2
+      fi
+    fi
+  fi
+fi
+
+# ── (C) commit msg 含架构决策关键词但没改 DECISIONS → 警告 ──
+# DECISIONS 滞后最严重 (10天), 无 resume 读 / 无自愈. 内容须 AI 写, 警告是合理上限.
+if echo "$MSG" | grep -qiE '范式|paradigm|锁定|证伪|falsif|路线|decision|invariant|SOTA|breakthrough|突破'; then
+  if ! echo "$CHANGED" | grep -q 'docs/status/DECISIONS.md'; then
+    echo "[post-commit] ⚠️  commit 提及架构决策 (范式/锁定/证伪/路线/SOTA) 但未改 DECISIONS.md" >&2
+    echo "[post-commit]     → 评估是否是新决策, 是则记账本 (DECISIONS 无自愈, 靠此提醒)" >&2
+  fi
+fi
+
+# ── (C) JOURNAL 比 RESUME 新很多 → 轻提醒 handoff (RESUME 有 staleness 自愈, 不强求) ──
+if [ -f docs/status/JOURNAL.md ] && [ -f docs/status/RESUME-NEXT-SESSION.md ]; then
+  jm=$(stat -f %m docs/status/JOURNAL.md 2>/dev/null || stat -c %Y docs/status/JOURNAL.md 2>/dev/null || echo 0)
+  rm=$(stat -f %m docs/status/RESUME-NEXT-SESSION.md 2>/dev/null || stat -c %Y docs/status/RESUME-NEXT-SESSION.md 2>/dev/null || echo 0)
+  # JOURNAL 比 RESUME 新 > 6h (21600s)
+  if [ "$jm" -gt "$((rm + 21600))" ]; then
+    echo "[post-commit] ℹ️  JOURNAL 比 RESUME 新 >6h — resume 时会 staleness auto-handoff, 或现在主动 handoff" >&2
+  fi
+fi
+
+exit 0

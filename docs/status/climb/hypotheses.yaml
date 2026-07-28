@@ -1,0 +1,75 @@
+# Plan 4 task pool. Results are append-only; task status advances only through
+# tools/climb/cycle.sh after focused verification and independent review.
+hypotheses:
+  - id: H-001
+    description: Establish the complete portable DCI payload
+    parent_paradigm: plan4-task-1
+    expected_lift: "+1 completed task"
+    cost_h: 1.5
+    ranking: 1.00
+    status: in-flight
+    created_at: 2026-07-28T12:00:00
+    results: []
+  - id: H-002
+    description: Replace shell launchers with exact DCI task bindings
+    parent_paradigm: plan4-task-2
+    expected_lift: "+1 completed task"
+    cost_h: 2.0
+    ranking: 0.95
+    status: pending
+    created_at: 2026-07-28T12:00:00
+    results: []
+  - id: H-003
+    description: Move all DCI implementation and resources under the package
+    parent_paradigm: plan4-task-3
+    expected_lift: "+1 completed task"
+    cost_h: 4.0
+    ranking: 0.90
+    status: pending
+    created_at: 2026-07-28T12:00:00
+    results: []
+  - id: H-004
+    description: Reduce the DCI CLI to an application adapter
+    parent_paradigm: plan4-task-4
+    expected_lift: "+1 completed task"
+    cost_h: 3.0
+    ranking: 0.85
+    status: pending
+    created_at: 2026-07-28T12:00:00
+    results: []
+  - id: H-005
+    description: Remove global DCI benchmark orchestration and launchers
+    parent_paradigm: plan4-task-5
+    expected_lift: "+1 completed task"
+    cost_h: 2.0
+    ranking: 0.80
+    status: pending
+    created_at: 2026-07-28T12:00:00
+    results: []
+  - id: H-006
+    description: Prove DCI first as an installed third-party distribution
+    parent_paradigm: plan4-task-6
+    expected_lift: "+1 completed task"
+    cost_h: 3.0
+    ranking: 0.75
+    status: pending
+    created_at: 2026-07-28T12:00:00
+    results: []
+  - id: H-007
+    description: Materialize the identical payload as a built-in source form
+    parent_paradigm: plan4-task-7
+    expected_lift: "+1 completed task"
+    cost_h: 2.5
+    ranking: 0.70
+    status: pending
+    created_at: 2026-07-28T12:00:00
+    results: []
+  - id: H-008
+    description: Close migration and repository boundaries
+    parent_paradigm: plan4-task-8
+    expected_lift: "+1 completed task"
+    cost_h: 3.0
+    ranking: 0.65
+    status: pending
+    created_at: 2026-07-28T12:00:00
+    results: []
