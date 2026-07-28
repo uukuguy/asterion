@@ -17,7 +17,10 @@ from asterion.capability_packages.protocol import CapabilityPackageRef
 
 PACKAGE_REF = CapabilityPackageRef("acme.sample", "1.0.0")
 PAYLOAD_ROOT = "asterion_capability_packages/acme.sample@1.0.0"
-SOURCE_ID = "python-distribution:acme-capability-sample@1.0.0:acme.sample@1.0.0"
+SOURCE_ID = (
+    "python-distribution.acme-capability-sample.1-0-0.acme.sample.1.0.0."
+    "sha-cff21202bedd"
+)
 
 
 def create_package() -> InstalledCapabilityPackage:
@@ -47,5 +50,5 @@ def create_package() -> InstalledCapabilityPackage:
     if mismatch == "source":
         return replace(installed, source_kind="builtin")
     if mismatch == "source-id":
-        return replace(installed, source_id="python-distribution:other")
+        return replace(installed, source_id="python-distribution.other")
     return installed

@@ -26,7 +26,9 @@ from asterion.capability_sdk import (
 
 PACKAGE_REF = CapabilityPackageRef("dci", "1.0.0")
 PAYLOAD_ROOT = "asterion_capability_packages/dci@1.0.0"
-SOURCE_ID = "python-distribution:asterion-dci-extension@1.0.0:dci@1.0.0"
+SOURCE_ID = (
+    "python-distribution.asterion-dci-extension.1-0-0.dci.1.0.0.sha-67d0e96707b8"
+)
 
 
 if os.environ.get("ASTERION_DCI_EXTENSION_IMPORT_COUNT_FILE"):
@@ -102,7 +104,9 @@ def create_provider() -> InstalledCapabilityPackage:
             "research",
             "workflow",
         }:
-            ref = CapabilityRef(str(manifest["capability_id"]), str(manifest["version"]))
+            ref = CapabilityRef(
+                str(manifest["capability_id"]), str(manifest["version"])
+            )
             implementations.append(
                 CapabilityImplementationBinding(
                     ref,
@@ -114,12 +118,10 @@ def create_provider() -> InstalledCapabilityPackage:
     for path in suite_paths:
         suite = json.loads(path.read_text(encoding="utf-8"))
         for task in suite["tasks"]:
-            benchmark_bindings[str(task["binding_id"])] = (
-                BenchmarkTaskBinding(
-                    owner_package=PACKAGE_REF,
-                    binding_id=str(task["binding_id"]),
-                    implementation=_SyntheticBenchmarkTask(str(task["binding_id"])),
-                )
+            benchmark_bindings[str(task["binding_id"])] = BenchmarkTaskBinding(
+                owner_package=PACKAGE_REF,
+                binding_id=str(task["binding_id"]),
+                implementation=_SyntheticBenchmarkTask(str(task["binding_id"])),
             )
     return InstalledCapabilityPackage(
         package_ref=PACKAGE_REF,

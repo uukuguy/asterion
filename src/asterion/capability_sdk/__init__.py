@@ -13,6 +13,7 @@ from asterion.capability_packages.model import (
 )
 from asterion.capability_packages.payload import open_portable_payload
 from asterion.capability_packages.protocol import CapabilityPackageRef
+from asterion.capability_sdk.author import copy_portable_payload
 from asterion.capability_sdk.conformance import run_capability_conformance
 from asterion.capability_sdk.provider import (
     CapabilityPackageProvider,
@@ -37,5 +38,6 @@ __all__ = [
     "CancellationSignal",
     "HostServices",
     "open_portable_payload",
+    "copy_portable_payload",
     "run_capability_conformance",
 ]

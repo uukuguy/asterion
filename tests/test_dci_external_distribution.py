@@ -244,7 +244,7 @@ class DciExternalDistributionTests(unittest.TestCase):
             assert len(dci) == 1, dci
             candidate = dci[0]
             assert candidate.source_kind == "python-distribution"
-            assert candidate.source_id == "python-distribution:asterion-dci-extension@1.0.0:dci@1.0.0"
+            assert candidate.source_id == "python-distribution.asterion-dci-extension.1-0-0.dci.1.0.0.sha-67d0e96707b8"
             assert PROVIDER_MODULE not in sys.modules
             assert _provider_import_count() == 0
 
@@ -258,7 +258,52 @@ class DciExternalDistributionTests(unittest.TestCase):
             assert PROVIDER_MODULE not in sys.modules
             assert _provider_import_count() == 0
 
-            installed = load_installed_capability_packages((PACKAGE_REF,), (source,))[0]
+            lock = CapabilitySourceLock(
+                entries=(
+                    CapabilitySourceLockEntry(
+                        package_ref=PACKAGE_REF,
+                        payload_sha256=payload.payload_sha256,
+                        source_id=candidate.source_id,
+                    ),
+                )
+            )
+            for bad_lock in (
+                CapabilitySourceLock(
+                    entries=(
+                        CapabilitySourceLockEntry(
+                            package_ref=PACKAGE_REF,
+                            payload_sha256=payload.payload_sha256,
+                            source_id="dci.other-distribution",
+                        ),
+                    )
+                ),
+                CapabilitySourceLock(
+                    entries=(
+                        CapabilitySourceLockEntry(
+                            package_ref=PACKAGE_REF,
+                            payload_sha256="0" * 64,
+                            source_id=candidate.source_id,
+                        ),
+                    )
+                ),
+                CapabilitySourceLock(
+                    entries=(
+                        CapabilitySourceLockEntry(
+                            package_ref=CapabilityPackageRef("other.package", "1.0.0"),
+                            payload_sha256=payload.payload_sha256,
+                            source_id=candidate.source_id,
+                        ),
+                    )
+                ),
+            ):
+                try:
+                    load_installed_capability_packages((PACKAGE_REF,), (source,), bad_lock)
+                except CapabilitySourceResolutionError:
+                    assert _provider_import_count() == 0
+                else:
+                    raise AssertionError("invalid source lock was not rejected")
+
+            installed = load_installed_capability_packages((PACKAGE_REF,), (source,), lock)[0]
             assert installed.package_ref == PACKAGE_REF
             assert installed.payload_sha256 == payload.payload_sha256
             assert installed.source_id == candidate.source_id
@@ -308,15 +353,6 @@ class DciExternalDistributionTests(unittest.TestCase):
                     ),
                 )
                 for index, task in enumerate(github_suite.tasks, start=1)
-            )
-            lock = CapabilitySourceLock(
-                entries=(
-                    CapabilitySourceLockEntry(
-                        package_ref=installed.package_ref,
-                        payload_sha256=installed.payload_sha256,
-                        source_id="dci.distribution",
-                    ),
-                )
             )
             plan = BenchmarkPlan(
                 run_id="synthetic-benchmark",
@@ -387,14 +423,16 @@ class DciExternalDistributionTests(unittest.TestCase):
             """
         )
         details = json.loads(output)
-        self.assertEqual(details["candidate"].split(":", 1)[0], "python-distribution")
+        self.assertTrue(details["candidate"].startswith("python-distribution."))
         self.assertEqual(details["imports"], 1)
         self.assertEqual(details["suite_count"], 3)
         self.assertEqual(details["implementation_count"], 6)
         self.assertEqual(details["benchmark_binding_count"], 15)
 
     def test_fixture_declares_only_capability_package_entry_point(self) -> None:
-        pyproject = tomllib.loads((FIXTURE / "pyproject.toml").read_text(encoding="utf-8"))
+        pyproject = tomllib.loads(
+            (FIXTURE / "pyproject.toml").read_text(encoding="utf-8")
+        )
 
         self.assertEqual(
             pyproject["project"]["entry-points"],
@@ -409,9 +447,9 @@ class DciExternalDistributionTests(unittest.TestCase):
         self.assertNotIn("scripts", pyproject["project"])
 
     def test_fixture_provider_imports_only_public_asterion_sdk(self) -> None:
-        source = (
-            FIXTURE / "src/asterion_dci_extension/provider.py"
-        ).read_text(encoding="utf-8")
+        source = (FIXTURE / "src/asterion_dci_extension/provider.py").read_text(
+            encoding="utf-8"
+        )
         tree = ast.parse(source)
         violations = []
         for node in ast.walk(tree):
@@ -423,10 +461,7 @@ class DciExternalDistributionTests(unittest.TestCase):
             violations.extend(
                 module
                 for module in modules
-                if (
-                    module == "asterion"
-                    or module.startswith("asterion.")
-                )
+                if (module == "asterion" or module.startswith("asterion."))
                 and module != "asterion.capability_sdk"
             )
 

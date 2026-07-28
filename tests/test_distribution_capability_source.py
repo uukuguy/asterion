@@ -14,6 +14,7 @@ from unittest.mock import patch
 import asterion.capability_packages.sources.distribution as distribution_module
 from asterion.capability_packages.model import CapabilityPackageCandidate
 from asterion.capability_packages.protocol import CapabilityPackageRef
+from asterion.capability_packages.protocol import IDENTIFIER
 from asterion.capability_packages.sources.distribution import (
     DistributionCapabilityPackageSource,
     DistributionCapabilitySourceError,
@@ -92,9 +93,12 @@ class _MetadataDistribution:
         self,
         installed: metadata.Distribution,
         entry_point: _MetadataEntryPoint,
+        *,
+        name: str | None = None,
+        version: str | None = None,
     ) -> None:
-        self.name = installed.name
-        self.version = installed.version
+        self.name = name or installed.name
+        self.version = version or installed.version
         self.files = installed.files
         self.entry_points = (entry_point,)
         self._installed = installed
@@ -176,6 +180,11 @@ class DistributionCapabilityPackageSourceTests(unittest.TestCase):
         self.assertEqual(candidate.source_kind, "python-distribution")
         self.assertIsNone(candidate.payload_sha256)
         self.assertEqual(
+            candidate.source_id,
+            "python-distribution.acme-capability-sample.1-0-0.acme.sample.1.0.0.sha-cff21202bedd",
+        )
+        self.assertIsNotNone(IDENTIFIER.fullmatch(candidate.source_id))
+        self.assertEqual(
             dict(candidate.metadata),
             {
                 "distribution_name": "acme-capability-sample",
@@ -206,6 +215,31 @@ class DistributionCapabilityPackageSourceTests(unittest.TestCase):
         self.assertEqual(
             tuple(candidate.package_ref for candidate in candidates),
             (PACKAGE_REF,),
+        )
+
+    def test_distribution_source_ids_are_collision_resistant_identifiers(
+        self,
+    ) -> None:
+        first = _MetadataDistribution(
+            self._distribution,
+            _MetadataEntryPoint("acme.sample@1.0.0"),
+            name="Acme Capability Sample",
+        )
+        second = _MetadataDistribution(
+            self._distribution,
+            _MetadataEntryPoint("acme.sample@1.0.0"),
+            name="acme-capability-sample",
+        )
+
+        candidates = DistributionCapabilityPackageSource(
+            (cast(metadata.Distribution, first), cast(metadata.Distribution, second))
+        ).discover_metadata()
+
+        self.assertEqual(len(candidates), 2)
+        source_ids = tuple(candidate.source_id for candidate in candidates)
+        self.assertEqual(len(set(source_ids)), 2)
+        self.assertTrue(
+            all(IDENTIFIER.fullmatch(source_id) is not None for source_id in source_ids)
         )
 
     def test_opening_selected_payload_does_not_import_provider(self) -> None:
@@ -280,7 +314,7 @@ class DistributionCapabilityPackageSourceTests(unittest.TestCase):
         candidate = CapabilityPackageCandidate(
             package_ref=PACKAGE_REF,
             source_id=(
-                "python-distribution:acme-capability-sample@1.0.0:acme.sample@1.0.0"
+                "python-distribution.acme-capability-sample.1-0-0.acme.sample.1.0.0.sha-cff21202bedd"
             ),
             source_kind="python-distribution",
             payload_sha256=None,

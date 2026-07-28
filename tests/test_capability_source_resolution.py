@@ -276,6 +276,116 @@ class CapabilitySourceResolutionTests(unittest.TestCase):
             ["discover", "open", "validate", "load"],
         )
 
+    def test_host_loads_exact_locked_package_without_loading_rejected_sources(
+        self,
+    ) -> None:
+        rejected_candidate = self._candidate("rejected.source")
+        selected_candidate = self._candidate("selected.source")
+        manifest = CapabilityPackageManifest(
+            package_ref=self.package_ref,
+            capabilities=(),
+            benchmark_suites=(),
+            resources=(),
+        )
+        payload = PortableCapabilityPayload(
+            manifest=manifest,
+            payload_sha256=self.digest,
+            resource_root=Path("."),
+        )
+        selected_installed = InstalledCapabilityPackage(
+            package_ref=self.package_ref,
+            payload_sha256=self.digest,
+            source_id=selected_candidate.source_id,
+            source_kind=selected_candidate.source_kind,
+            catalog_roots=(),
+            benchmark_suite_paths=(),
+            implementations=(),
+            benchmark_bindings=(),
+        )
+        rejected = FixtureSource(
+            rejected_candidate,
+            payload,
+            selected_installed,
+        )
+        selected = FixtureSource(
+            selected_candidate,
+            payload,
+            selected_installed,
+        )
+
+        loaded = load_installed_capability_packages(
+            (self.package_ref,),
+            (rejected, selected),
+            self._lock("selected.source"),
+        )
+
+        self.assertEqual(loaded, (selected_installed,))
+        self.assertEqual(rejected.calls, ["discover"])
+        self.assertEqual(
+            selected.calls,
+            ["discover", "open", "validate", "load"],
+        )
+
+    def test_locked_host_rejects_wrong_source_digest_package_or_missing_entry_before_load(
+        self,
+    ) -> None:
+        candidate = self._candidate("selected.source")
+        manifest = CapabilityPackageManifest(
+            package_ref=self.package_ref,
+            capabilities=(),
+            benchmark_suites=(),
+            resources=(),
+        )
+        payload = PortableCapabilityPayload(
+            manifest=manifest,
+            payload_sha256=self.digest,
+            resource_root=Path("."),
+        )
+        installed = InstalledCapabilityPackage(
+            package_ref=self.package_ref,
+            payload_sha256=self.digest,
+            source_id=candidate.source_id,
+            source_kind=candidate.source_kind,
+            catalog_roots=(),
+            benchmark_suite_paths=(),
+            implementations=(),
+            benchmark_bindings=(),
+        )
+        cases = {
+            "wrong source": self._lock("other.source"),
+            "wrong digest": self._lock("selected.source", "b" * 64),
+            "wrong package": CapabilitySourceLock(
+                entries=(
+                    CapabilitySourceLockEntry(
+                        package_ref=self.other_package_ref,
+                        payload_sha256=self.digest,
+                        source_id="selected.source",
+                    ),
+                )
+            ),
+            "missing entry": CapabilitySourceLock(
+                entries=(
+                    CapabilitySourceLockEntry(
+                        package_ref=self.other_package_ref,
+                        payload_sha256=self.digest,
+                        source_id="other.source",
+                    ),
+                )
+            ),
+        }
+        for label, lock in cases.items():
+            with self.subTest(label=label):
+                source = FixtureSource(candidate, payload, installed)
+
+                with self.assertRaises(CapabilitySourceResolutionError):
+                    load_installed_capability_packages(
+                        (self.package_ref,),
+                        (source,),
+                        lock,
+                    )
+
+                self.assertEqual(source.calls, ["discover"])
+
     def test_host_rejects_provider_identity_mismatch(self) -> None:
         candidate = self._candidate("selected.source")
         payload = PortableCapabilityPayload(

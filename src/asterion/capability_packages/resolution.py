@@ -24,6 +24,7 @@ class CapabilitySourceResolutionError(ValueError):
 def load_installed_capability_packages(
     package_refs: Sequence[CapabilityPackageRef],
     sources: Iterable[CapabilityPackageSource],
+    lock: CapabilitySourceLock | None = None,
 ) -> tuple[InstalledCapabilityPackage, ...]:
     """Resolve exact refs and load only their selected source providers."""
 
@@ -52,11 +53,7 @@ def load_installed_capability_packages(
     installed_packages: list[InstalledCapabilityPackage] = []
     all_candidates = tuple(candidate for _, candidate in discovered)
     for package_ref in refs:
-        candidate = resolve_capability_source(
-            package_ref,
-            all_candidates,
-            None,
-        )
+        candidate = resolve_capability_source(package_ref, all_candidates, lock)
         selected_sources = tuple(
             source
             for source, discovered_candidate in discovered
@@ -72,8 +69,14 @@ def load_installed_capability_packages(
             not isinstance(payload, PortableCapabilityPayload)
             or payload.manifest.package_ref != package_ref
             or (
-                candidate.payload_sha256 is not None
+                lock is None
+                and candidate.payload_sha256 is not None
                 and candidate.payload_sha256 != payload.payload_sha256
+            )
+            or (
+                lock is not None
+                and _lock_entry_for_package(lock, package_ref).payload_sha256
+                != payload.payload_sha256
             )
         ):
             raise CapabilitySourceResolutionError(
@@ -117,7 +120,10 @@ def resolve_capability_source(
         candidate
         for candidate in matches
         if candidate.source_id == lock_entry.source_id
-        and candidate.payload_sha256 == lock_entry.payload_sha256
+        and (
+            candidate.payload_sha256 is None
+            or candidate.payload_sha256 == lock_entry.payload_sha256
+        )
     )
     if len(locked_matches) != 1:
         raise CapabilitySourceResolutionError(

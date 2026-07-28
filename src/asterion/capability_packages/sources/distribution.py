@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+import hashlib
 from importlib import metadata
 from pathlib import Path
+import re
 
 from asterion.capability_packages.model import (
     CapabilityPackageCandidate,
@@ -22,6 +24,7 @@ from asterion.capability_packages.protocol import (
 
 ENTRY_POINT_GROUP = "asterion.capability_packages"
 PAYLOAD_DATA_ROOT = "asterion_capability_packages"
+_SOURCE_COMPONENT = re.compile(r"[^a-z0-9]+")
 
 
 class DistributionCapabilitySourceError(ValueError):
@@ -248,10 +251,37 @@ def _source_id(
     distribution_name: str,
     distribution_version: str,
 ) -> str:
-    return (
-        "python-distribution:"
-        f"{distribution_name}@{distribution_version}:{package_ref.selector}"
+    digest = hashlib.sha256(
+        "\0".join(
+            (
+                distribution_name,
+                distribution_version,
+                package_ref.selector,
+            )
+        ).encode("utf-8")
+    ).hexdigest()[:12]
+    source_id = ".".join(
+        (
+            "python-distribution",
+            _source_component(distribution_name),
+            _source_component(distribution_version),
+            package_ref.package_id,
+            package_ref.version,
+            f"sha-{digest}",
+        )
     )
+    if IDENTIFIER.fullmatch(source_id) is None:
+        raise DistributionCapabilitySourceError(
+            "installed capability distribution source id is invalid"
+        )
+    return source_id
+
+
+def _source_component(value: str) -> str:
+    normalized = _SOURCE_COMPONENT.sub("-", value.lower()).strip("-")
+    if not normalized or not normalized[0].isalnum():
+        return "unknown"
+    return normalized
 
 
 def _provider_resources_match(

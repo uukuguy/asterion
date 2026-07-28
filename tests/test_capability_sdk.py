@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import ast
+import shutil
+import tempfile
 import unittest
 from collections.abc import Mapping
 from pathlib import Path
 
 import asterion.capability_sdk as capability_sdk
+import asterion.capability_sdk.author as author_module
 from asterion.capabilities.catalog import CapabilityRef
 from asterion.capabilities.execution import (
     CapabilityImplementationBinding,
@@ -39,6 +42,7 @@ PUBLIC_NAMES = {
     "InstalledCapabilityPackage",
     "run_capability_conformance",
     "open_portable_payload",
+    "copy_portable_payload",
     "BenchmarkTaskInvocation",
     "BenchmarkTaskRequest",
 }
@@ -121,6 +125,105 @@ class CapabilitySdkTests(unittest.TestCase):
         self.assertIs(capability_sdk.BenchmarkTaskRequest, BenchmarkTaskRequest)
         self.assertIs(capability_sdk.CancellationSignal, CancellationSignal)
         self.assertIs(capability_sdk.open_portable_payload, open_portable_payload)
+        self.assertIs(
+            capability_sdk.copy_portable_payload,
+            author_module.copy_portable_payload,
+        )
+
+    def test_copy_portable_payload_uses_validated_snapshot_not_mutable_source(
+        self,
+    ) -> None:
+        fixture = PROJECT / "tests/fixtures/extensions/minimal/payload"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            source = root / "source"
+            target = root / "target"
+            shutil.copytree(fixture, source)
+            private = source / "SENTINEL_PRIVATE_AUTHORITY.txt"
+            private.write_text("SECRET-AUTHORITY-BYTES", encoding="utf-8")
+            snapshot = open_portable_payload(fixture)
+
+            original_open = author_module.open_portable_payload
+            try:
+                author_module.open_portable_payload = lambda value: snapshot  # type: ignore[assignment]
+                digest = capability_sdk.copy_portable_payload(source, target)
+            finally:
+                author_module.open_portable_payload = original_open
+
+            self.assertEqual(digest, snapshot.payload_sha256)
+            self.assertFalse((target / private.name).exists())
+            copied = open_portable_payload(target)
+            self.assertEqual(copied.payload_sha256, snapshot.payload_sha256)
+            for path in sorted(Path(str(snapshot.resource_root)).rglob("*")):
+                if path.is_file():
+                    relative = path.relative_to(Path(str(snapshot.resource_root)))
+                    self.assertEqual(
+                        (target / relative).read_bytes(),
+                        path.read_bytes(),
+                    )
+
+    def test_copy_portable_payload_rejects_existing_symlink_and_invalid_sources(
+        self,
+    ) -> None:
+        fixture = PROJECT / "tests/fixtures/extensions/minimal/payload"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            target = root / "target"
+            target.mkdir()
+            with self.assertRaisesRegex(
+                ValueError,
+                "^portable payload copy target is invalid$",
+            ):
+                capability_sdk.copy_portable_payload(fixture, target)
+
+            link = root / "target-link"
+            link.symlink_to(target, target_is_directory=True)
+            with self.assertRaisesRegex(
+                ValueError,
+                "^portable payload copy target is invalid$",
+            ):
+                capability_sdk.copy_portable_payload(fixture, link)
+
+            source_link = root / "source-link"
+            source_link.symlink_to(fixture, target_is_directory=True)
+            symlink_target = root / "symlink-source-target"
+            with self.assertRaises(ValueError):
+                capability_sdk.copy_portable_payload(source_link, symlink_target)
+            self.assertFalse(symlink_target.exists())
+
+            invalid = root / "invalid-source"
+            shutil.copytree(fixture, invalid)
+            (invalid / "SENTINEL_PRIVATE_AUTHORITY.txt").write_text(
+                "SECRET-AUTHORITY-BYTES",
+                encoding="utf-8",
+            )
+            failed_target = root / "failed-target"
+            with self.assertRaises(ValueError):
+                capability_sdk.copy_portable_payload(invalid, failed_target)
+            self.assertFalse(failed_target.exists())
+
+    def test_copy_portable_payload_does_not_remove_raced_target(self) -> None:
+        fixture = PROJECT / "tests/fixtures/extensions/minimal/payload"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            target = root / "target"
+            sentinel = target / "SENTINEL_EXISTING_TARGET.txt"
+            snapshot = open_portable_payload(fixture)
+
+            def race_target_into_place(value: Path):
+                target.mkdir()
+                sentinel.write_text("do-not-remove", encoding="utf-8")
+                return snapshot
+
+            original_open = author_module.open_portable_payload
+            try:
+                author_module.open_portable_payload = race_target_into_place  # type: ignore[assignment]
+                with self.assertRaises(FileExistsError):
+                    capability_sdk.copy_portable_payload(fixture, target)
+            finally:
+                author_module.open_portable_payload = original_open
+
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "do-not-remove")
 
     def test_provider_protocol_describes_the_selected_factory_boundary(self) -> None:
         def provider() -> InstalledCapabilityPackage:
