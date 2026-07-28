@@ -6,8 +6,8 @@ import urllib.error
 import unittest
 from unittest.mock import patch
 
-from asterion.dci.evaluation import _valid_verdict
-from asterion.dci.judge import (
+from asterion.capabilities.dci.implementation.evaluation.evaluation import _valid_verdict
+from asterion.capabilities.dci.implementation.evaluation.judge import (
     ASTERION_SAFE_JUDGE_CONTRACT,
     PAPER_JUDGE_CONTRACT,
     UPSTREAM_JUDGE_CONTRACT,
@@ -197,7 +197,7 @@ class DciJudgeContractTests(unittest.TestCase):
             base_url="https://api.openai.com/v1", api="responses", model="gpt-5.4-nano"
         )
         with patch(
-            "asterion.dci.judge._open_judge_request",
+            "asterion.capabilities.dci.implementation.evaluation.judge._open_judge_request",
             side_effect=urllib.error.URLError("private failure"),
         ) as open_request:
             with self.assertRaisesRegex(DciJudgeError, "transport failed"):

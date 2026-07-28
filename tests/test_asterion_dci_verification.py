@@ -25,13 +25,13 @@ from asterion.capabilities.builtin import create_controlled_code_package
 from asterion.capabilities.dci_research.provider import (
     create_provider as create_dci_package,
 )
-from asterion.dci.verification import (
+from asterion.capabilities.dci.implementation.reproduction.verification import (
     DciProductVerifier,
     LocalDciVerificationBackend,
     create_dci_product,
 )
-from asterion.dci.config import resolve_dci_paths
-from asterion.dci.run import DciRunResult
+from asterion.capabilities.dci.implementation.config import resolve_dci_paths
+from asterion.capabilities.dci.implementation.runtime.run import DciRunResult
 from asterion.runtime.factory import RuntimeFactoryError
 
 
@@ -49,6 +49,31 @@ EXPECTED_CHECKS = (
     "paper-scopes",
     "provider-requests",
 )
+
+
+def _dci_product_verifier(
+    *,
+    repo_root: Path,
+    backend: object,
+) -> DciProductVerifier:
+    return DciProductVerifier(
+        repo_root=repo_root,
+        backend=backend,
+        dci_application_provider_factory=_create_dci_application_provider,
+        dci_capability_package_factory=_create_dci_capability_package,
+    )
+
+
+def _create_dci_application_provider() -> object:
+    from asterion.applications.dci_agent_lite import create_provider
+
+    return create_provider()
+
+
+def _create_dci_capability_package() -> object:
+    from asterion.capabilities.dci_research.provider import create_provider
+
+    return create_provider()
 
 
 class ExplodingBackend:
@@ -117,7 +142,7 @@ class InstalledAcceptanceTests(unittest.TestCase):
     def test_paper_inventory_separates_dataset_and_launcher_provenance(self) -> None:
         """Paper-full Bamboogle must remain distinct from upstream sample-50."""
 
-        resource_root = PROJECT / "src/asterion/dci/resources"
+        resource_root = PROJECT / "src/asterion/capabilities/dci/resources"
         benchmarks = json.loads(
             (resource_root / "paper-benchmarks.json").read_text(encoding="utf-8")
         )["datasets"]
@@ -240,7 +265,7 @@ class InstalledAcceptanceTests(unittest.TestCase):
                 )
                 self.assertEqual(item["execution_class"], "upstream-reference")
 
-        from asterion.dci.paper_benchmarks import (
+        from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import (
             all_experiment_scope_ids,
             paper_experiment_scope_ids,
             resolve_experiment_scope,
@@ -308,7 +333,7 @@ class InstalledAcceptanceTests(unittest.TestCase):
         )
 
     def test_acceptance_is_package_owned_exact_and_provider_free(self) -> None:
-        verifier = DciProductVerifier(repo_root=PROJECT, backend=ExplodingBackend())
+        verifier = _dci_product_verifier(repo_root=PROJECT, backend=ExplodingBackend())
 
         result = verifier(acceptance_request())
 
@@ -350,7 +375,7 @@ class InstalledAcceptanceTests(unittest.TestCase):
     def test_acceptance_resolves_manifests_without_constructing_runtime_clients(
         self,
     ) -> None:
-        verifier = DciProductVerifier(repo_root=PROJECT, backend=ExplodingBackend())
+        verifier = _dci_product_verifier(repo_root=PROJECT, backend=ExplodingBackend())
         with (
             patch(
                 "asterion.runtime.defaults._create_pi_runtime",
@@ -392,7 +417,7 @@ class FirstRunPreflightTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             backend = PreflightBackend(node_version=(22, 18, 0))
-            verifier = DciProductVerifier(repo_root=root, backend=backend)
+            verifier = _dci_product_verifier(repo_root=root, backend=backend)
             with patch.dict(
                 os.environ,
                 {"DCI_PI_AGENT_DIR": "./missing-agent"},
@@ -443,7 +468,7 @@ class FirstRunPreflightTests(unittest.TestCase):
                 with (
                     tempfile.TemporaryDirectory() as temp_dir,
                     patch(
-                        "asterion.dci.verification.subprocess.run",
+                        "asterion.capabilities.dci.implementation.reproduction.verification.subprocess.run",
                         return_value=completed,
                     ),
                     patch.dict(
@@ -453,7 +478,7 @@ class FirstRunPreflightTests(unittest.TestCase):
                     ),
                 ):
                     root = Path(temp_dir)
-                    result = DciProductVerifier(
+                    result = _dci_product_verifier(
                         repo_root=root,
                         backend=LocalDciVerificationBackend(),
                     ).preflight(
@@ -489,7 +514,7 @@ class FirstRunPreflightTests(unittest.TestCase):
                 "JUDGE_KEY=SECRET-JUDGE\n"
             )
             backend = PreflightBackend()
-            verifier = DciProductVerifier(repo_root=root, backend=backend)
+            verifier = _dci_product_verifier(repo_root=root, backend=backend)
             with patch.dict(os.environ, {}, clear=True):
                 result = verifier.preflight(
                     env_file=env_file, corpus_root=root / "corpus"
@@ -527,7 +552,7 @@ class FirstRunPreflightTests(unittest.TestCase):
                 "JUDGE_KEY=SECRET-JUDGE\n"
             )
             backend = PreflightBackend()
-            verifier = DciProductVerifier(repo_root=SOURCE, backend=backend)
+            verifier = _dci_product_verifier(repo_root=SOURCE, backend=backend)
             with patch.dict(os.environ, {}, clear=True):
                 result = verifier.preflight(env_file=env_file, corpus_root=None)
 
@@ -561,7 +586,7 @@ class FirstRunPreflightTests(unittest.TestCase):
                 "JUDGE_KEY=SECRET-JUDGE\n"
             )
             backend = RecordingBasicBackend()
-            verifier = DciProductVerifier(repo_root=SOURCE, backend=backend)
+            verifier = _dci_product_verifier(repo_root=SOURCE, backend=backend)
             request = VerificationRequest(
                 level="basic",
                 env_file=env_file,
@@ -604,7 +629,7 @@ class FirstRunPreflightTests(unittest.TestCase):
                 "JUDGE_KEY=SECRET-JUDGE\n"
             )
             with patch.dict(os.environ, {}, clear=True):
-                result = DciProductVerifier(
+                result = _dci_product_verifier(
                     repo_root=root, backend=PreflightBackend()
                 ).preflight(env_file=env_file, corpus_root=root / "corpus")
 
@@ -628,7 +653,7 @@ class FirstRunPreflightTests(unittest.TestCase):
                 {"DCI_PI_AGENT_DIR": "./missing-agent"},
                 clear=True,
             ):
-                result = DciProductVerifier(
+                result = _dci_product_verifier(
                     repo_root=root, backend=PreflightBackend()
                 ).preflight(env_file=env_file, corpus_root=root / "corpus")
 
@@ -682,7 +707,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
         self.assertEqual(result.provider_backed_operation_count, 0)
 
     def test_acceptance_ignores_source_evidence_path(self) -> None:
-        verifier = DciProductVerifier(repo_root=PROJECT, backend=ExplodingBackend())
+        verifier = _dci_product_verifier(repo_root=PROJECT, backend=ExplodingBackend())
         with tempfile.TemporaryDirectory() as temp_dir:
             result = verifier(
                 acceptance_request(acceptance_root=Path(temp_dir) / "untrusted")
@@ -704,7 +729,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
                     "*.json"
                 )
             ).unlink()
-            verifier = DciProductVerifier(
+            verifier = _dci_product_verifier(
                 repo_root=Path(temp_dir), backend=ExplodingBackend()
             )
             resource_files = resources.files
@@ -730,7 +755,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
         self.assertEqual(checks["installed-closure"].status, "FAIL")
 
     def test_acceptance_reports_independent_damage_layers(self) -> None:
-        verifier = DciProductVerifier(repo_root=PROJECT, backend=ExplodingBackend())
+        verifier = _dci_product_verifier(repo_root=PROJECT, backend=ExplodingBackend())
 
         with self.subTest(layer="packaged"), tempfile.TemporaryDirectory() as temp_dir:
             package_root = Path(temp_dir) / "asterion"
@@ -838,7 +863,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
     def test_acceptance_reports_profile_and_paper_damage_independently(
         self,
     ) -> None:
-        verifier = DciProductVerifier(repo_root=PROJECT, backend=ExplodingBackend())
+        verifier = _dci_product_verifier(repo_root=PROJECT, backend=ExplodingBackend())
 
         cases = (
             (
@@ -899,7 +924,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
             )
             with (
                 self.subTest(case=case),
-                patch(f"asterion.dci.verification.{target}", **kwargs),
+                patch(f"asterion.capabilities.dci.implementation.reproduction.verification.{target}", **kwargs),
             ):
                 result = verifier(acceptance_request())
 
@@ -908,7 +933,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
     def test_acceptance_reports_registry_construction_as_composition_damage(
         self,
     ) -> None:
-        verifier = DciProductVerifier(repo_root=PROJECT, backend=ExplodingBackend())
+        verifier = _dci_product_verifier(repo_root=PROJECT, backend=ExplodingBackend())
         with (
             patch(
                 "asterion.runtime.defaults.default_runtime_factory_registry",

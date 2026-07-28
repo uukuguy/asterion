@@ -1,6 +1,6 @@
 """Framework binding assembly for transitional DCI implementations."""
 
-from asterion.capabilities.dci_research.complete import (
+from asterion.capabilities.dci.implementation.complete import (
     DciCompleteAnalysisImplementation,
     DciCompleteBenchmarkImplementation,
     DciCompleteEvaluationImplementation,

@@ -12,7 +12,7 @@ from types import MappingProxyType
 from typing import cast
 from unittest.mock import Mock, patch
 
-from asterion.dci.benchmark import (
+from asterion.capabilities.dci.implementation.evaluation.benchmark import (
     BenchmarkResult,
     BenchmarkRequest,
     DciBenchmarkError,
@@ -22,10 +22,10 @@ from asterion.dci.benchmark import (
     run_benchmark,
     validate_benchmark_metric_selection,
 )
-from asterion.dci.artifacts import DciConversationFeatures
+from asterion.capabilities.dci.implementation.evaluation.artifacts import DciConversationFeatures
 from asterion.dci.cli import main as dci_main
-from asterion.dci.config import DciRuntimeOptions, resolve_dci_paths
-from asterion.dci.experiment_profiles import (
+from asterion.capabilities.dci.implementation.config import DciRuntimeOptions, resolve_dci_paths
+from asterion.capabilities.dci.implementation.research.experiment_profiles import (
     ExperimentAuthorizationError,
     ExperimentProfile,
     FullExecutionAuthorization,
@@ -39,32 +39,32 @@ from asterion.dci.experiment_profiles import (
     reserve_full_execution_operation,
     resolve_experiment_profile,
 )
-from asterion.dci.judge import (
+from asterion.capabilities.dci.implementation.evaluation.judge import (
     UPSTREAM_JUDGE_CONTRACT,
     JudgeConfig,
     judge_prompt_contract_sha256,
     judge_request_shape_sha256,
 )
-from asterion.dci.paper_benchmarks import (
+from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import (
     DatasetInputBinding,
     canonical_sha256,
     published_scope_selected_ids,
     resolve_paper_benchmark,
     resolve_paper_experiment_scope,
 )
-from asterion.dci.pi_rpc import FINAL_ANSWER_RECOVERY_PROMPT
-from asterion.dci.prompts import (
+from asterion.capabilities.dci.implementation.runtime.pi_rpc import FINAL_ANSWER_RECOVERY_PROMPT
+from asterion.capabilities.dci.implementation.research.prompts import (
     PROMPT_CONTRACTS,
     PromptContractError,
     prompt_contract_sha256,
     resolve_prompt_contract,
 )
-from asterion.dci.provenance import (
+from asterion.capabilities.dci.implementation.reproduction.provenance import (
     DCI_COMPLETE_IMPLEMENTATION_RESOURCES,
     dci_complete_implementation_identity,
 )
-from asterion.dci.reproduction import load_run_manifest, validate_run_manifest
-from asterion.dci.run import DciRunResult, run_pi_research as _real_run_pi_research
+from asterion.capabilities.dci.implementation.reproduction.reproduction import load_run_manifest, validate_run_manifest
+from asterion.capabilities.dci.implementation.runtime.run import DciRunResult, run_pi_research as _real_run_pi_research
 from asterion.runtime.host import RunEvent
 
 
@@ -209,7 +209,7 @@ class _CostedFixtureClient(_FixtureClient):
 
 
 def _recorded_run(_paths: object, request: object, **kwargs: object) -> DciRunResult:
-    with patch("asterion.dci.run.PiRpcClient", _FixtureClient):
+    with patch("asterion.capabilities.dci.implementation.runtime.run.PiRpcClient", _FixtureClient):
         return _real_run_pi_research(
             resolve_dci_paths(Path(request.cwd)), request, **kwargs
         )
@@ -266,7 +266,7 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 experiment_scope_id=scope_id,
             )
             with patch(
-                "asterion.dci.benchmark._paper_scope_for_rows",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark._paper_scope_for_rows",
                 return_value=scope_id,
             ):
                 _rows, _output, config, _items, _snapshots = _prepare(request)
@@ -337,10 +337,10 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 experiment_scope_id=scope_id,
             )
             with patch(
-                "asterion.dci.benchmark._paper_scope_for_rows",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark._paper_scope_for_rows",
                 return_value=scope_id,
             ), patch(
-                "asterion.dci.benchmark._run_pi_async"
+                "asterion.capabilities.dci.implementation.evaluation.benchmark._run_pi_async"
             ) as agent:
                 with self.assertRaisesRegex(
                     DciBenchmarkError,
@@ -368,7 +368,7 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                     externalize_tool_results=True
                 ),
             )
-            with patch("asterion.dci.benchmark.run_pi_research") as run:
+            with patch("asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research") as run:
                 with self.assertRaisesRegex(DciBenchmarkError, "resolution configuration"):
                     run_benchmark(request, paths=Mock())
 
@@ -447,16 +447,16 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 limit=1,
             )
             with patch(
-                "asterion.dci.benchmark.paper_scope_for_profile",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.paper_scope_for_profile",
                 return_value="fixture-scope",
             ), patch(
-                "asterion.dci.benchmark._paper_scope_for_rows",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark._paper_scope_for_rows",
                 return_value="fixture-scope",
             ), patch(
-                "asterion.dci.benchmark.resolve_paper_experiment_scope",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.resolve_paper_experiment_scope",
                 return_value=Mock(dataset_id="fixture-dataset"),
             ), patch(
-                "asterion.dci.benchmark.resolve_paper_benchmark",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.resolve_paper_benchmark",
                 return_value=Mock(dataset_id="fixture-dataset"),
             ):
                 _rows, _output, config, _items, _snapshots = _prepare(request)
@@ -647,7 +647,7 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         self.assertEqual(captured[0].resolution_read_minimum_evidence_overlap, 0.5)
 
     def setUp(self) -> None:
-        from asterion.dci import experiment_profiles
+        from asterion.capabilities.dci.implementation.research import experiment_profiles
 
         experiment_profiles._profiles.cache_clear()
         self.addCleanup(experiment_profiles._profiles.cache_clear)
@@ -823,8 +823,8 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 limit=1,
             )
             with patch(
-                "asterion.dci.benchmark.paper_scope_for_profile", return_value=None
-            ), patch("asterion.dci.benchmark.run_pi_research") as run:
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.paper_scope_for_profile", return_value=None
+            ), patch("asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research") as run:
                 with self.assertRaisesRegex(DciBenchmarkError, "metric contract") as raised:
                     run_benchmark(request, paths=Mock())
 
@@ -919,9 +919,9 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                     return _recorded_run(paths, native_request, **kwargs)
 
                 with patch(
-                    "asterion.dci.benchmark.run_pi_research", side_effect=recorded
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research", side_effect=recorded
                 ), patch(
-                    "asterion.dci.evaluation.judge_answer_sync",
+                    "asterion.capabilities.dci.implementation.evaluation.evaluation.judge_answer_sync",
                     return_value=_verdict(request.judge_config),
                 ):
                     run_benchmark(request, paths=Mock())
@@ -992,9 +992,9 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
     def test_profile_resources_use_resolved_non_recursive_implementation_binding(
         self,
     ) -> None:
-        from asterion.dci import experiment_profiles
+        from asterion.capabilities.dci.implementation.research import experiment_profiles
 
-        package = resources.files("asterion.dci.resources")
+        package = resources.files("asterion.capabilities.dci.resources")
         schema = json.loads(
             package.joinpath("experiment-profile.schema.json").read_text()
         )
@@ -1065,20 +1065,20 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         self,
     ) -> None:
         resources_by_name = {
-            name: resources.files("asterion").joinpath(name).read_bytes()
+            name: resources.files("asterion.capabilities.dci").joinpath(name).read_bytes()
             for name in DCI_COMPLETE_IMPLEMENTATION_RESOURCES
         }
         baseline_implementation = dci_complete_implementation_identity(
             resource_reader=resources_by_name.__getitem__
         )
-        profile_resource = "dci/resources/experiment-profiles.json"
+        profile_resource = "resources/experiment-profiles.json"
         resources_by_name[profile_resource] += b"\n"
         changed_implementation = dci_complete_implementation_identity(
             resource_reader=resources_by_name.__getitem__
         )
         self.assertNotEqual(baseline_implementation, changed_implementation)
 
-        from asterion.dci import experiment_profiles
+        from asterion.capabilities.dci.implementation.research import experiment_profiles
 
         with patch.object(
             experiment_profiles,
@@ -1205,7 +1205,7 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 self.assertIn(f"Profile: {canonical}", stdout.getvalue())
                 self.assertNotIn("current-default", stdout.getvalue())
 
-        from asterion.dci.verification import paper_product_contract
+        from asterion.capabilities.dci.implementation.reproduction.verification import paper_product_contract
 
         canonical_evidence = json.dumps(
             paper_product_contract(), sort_keys=True
@@ -1216,7 +1216,9 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
     def test_authorized_reproduction_coordinator_dispatches_exact_child_roots(
         self,
     ) -> None:
-        from asterion.dci import benchmark as benchmark_module
+        from asterion.capabilities.dci.implementation.evaluation import (
+            benchmark as benchmark_module,
+        )
 
         scopes = (
             "bright.biology.main.full",
@@ -1288,15 +1290,15 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
 
             with (
                 patch(
-                    "asterion.dci.benchmark.run_benchmark",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark.run_benchmark",
                     side_effect=run_spy,
                 ),
                 patch(
-                    "asterion.dci.benchmark.compile_run_manifest",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark.compile_run_manifest",
                     return_value=Mock(identity_sha256="a" * 64),
                 ),
                 patch(
-                    "asterion.dci.benchmark.write_run_manifest",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark.write_run_manifest",
                     side_effect=lambda _root, _identity, scope, _manifest: (
                         hashlib.sha256(scope.encode()).hexdigest() + ".json"
                     ),
@@ -1325,7 +1327,9 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
     def test_authorized_reproduction_compiles_each_manifest_before_next_scope(
         self,
     ) -> None:
-        from asterion.dci import benchmark as benchmark_module
+        from asterion.capabilities.dci.implementation.evaluation import (
+            benchmark as benchmark_module,
+        )
 
         scopes = (
             "bright.biology.main.full",
@@ -1424,15 +1428,15 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
 
             with (
                 patch(
-                    "asterion.dci.benchmark.run_benchmark",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark.run_benchmark",
                     side_effect=run_spy,
                 ),
                 patch(
-                    "asterion.dci.benchmark.compile_run_manifest",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark.compile_run_manifest",
                     side_effect=compile_spy,
                 ),
                 patch(
-                    "asterion.dci.benchmark.write_run_manifest",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark.write_run_manifest",
                     side_effect=write_spy,
                 ),
             ):
@@ -1478,7 +1482,9 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
     def test_authorized_reproduction_persists_real_compiled_manifest_from_local_fixture(
         self,
     ) -> None:
-        from asterion.dci import benchmark as benchmark_module
+        from asterion.capabilities.dci.implementation.evaluation import (
+            benchmark as benchmark_module,
+        )
 
         scope_id = "qa.nq.main.random50"
         source_ids = published_scope_selected_ids(scope_id)
@@ -1565,10 +1571,10 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 return _CostedFixtureClient()
 
             with patch(
-                "asterion.dci.run.PiRpcClient",
+                "asterion.capabilities.dci.implementation.runtime.run.PiRpcClient",
                 side_effect=fixture_provider,
             ), patch(
-                "asterion.dci.evaluation.judge_answer_sync",
+                "asterion.capabilities.dci.implementation.evaluation.evaluation.judge_answer_sync",
                 return_value=_verdict(request.judge_config),
             ) as judge:
                 result = benchmark_module.execute_authorized_reproduction(
@@ -1604,7 +1610,9 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
     def test_authorized_reproduction_manifest_root_replacement_fails_closed(
         self,
     ) -> None:
-        from asterion.dci import benchmark as benchmark_module
+        from asterion.capabilities.dci.implementation.evaluation import (
+            benchmark as benchmark_module,
+        )
 
         scope_id = "bright.biology.main.full"
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -1676,15 +1684,15 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
 
             with (
                 patch(
-                    "asterion.dci.benchmark.run_benchmark",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark.run_benchmark",
                     side_effect=replace_manifest_root,
                 ),
                 patch(
-                    "asterion.dci.benchmark.compile_run_manifest",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark.compile_run_manifest",
                     return_value=Mock(identity_sha256="a" * 64),
                 ),
                 patch(
-                    "asterion.dci.benchmark.write_run_manifest",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark.write_run_manifest",
                     side_effect=reject_replacement,
                 ) as writer,
                 self.assertRaisesRegex(
@@ -1708,7 +1716,9 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 reserve_full_execution_operation(authority, scope_id, "agent")
 
     def test_manifest_failure_cancels_authority_and_stops(self) -> None:
-        from asterion.dci import benchmark as benchmark_module
+        from asterion.capabilities.dci.implementation.evaluation import (
+            benchmark as benchmark_module,
+        )
 
         scopes = (
             "bright.biology.main.full",
@@ -1802,15 +1812,15 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 )
                 with (
                     patch(
-                        "asterion.dci.benchmark.run_benchmark",
+                        "asterion.capabilities.dci.implementation.evaluation.benchmark.run_benchmark",
                         side_effect=run_spy,
                     ),
                     patch(
-                        "asterion.dci.benchmark.compile_run_manifest",
+                        "asterion.capabilities.dci.implementation.evaluation.benchmark.compile_run_manifest",
                         side_effect=compile_side_effect,
                     ),
                     patch(
-                        "asterion.dci.benchmark.write_run_manifest",
+                        "asterion.capabilities.dci.implementation.evaluation.benchmark.write_run_manifest",
                         side_effect=write_side_effect,
                     ),
                     self.assertRaises(DciBenchmarkError) as raised,
@@ -1838,7 +1848,9 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
     def test_authorized_reproduction_coordinator_rejects_mismatch_before_run(
         self,
     ) -> None:
-        from asterion.dci import benchmark as benchmark_module
+        from asterion.capabilities.dci.implementation.evaluation import (
+            benchmark as benchmark_module,
+        )
 
         scopes = ("bright.biology.main.full",)
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -1872,7 +1884,7 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 ),
                 paths=resolve_dci_paths(root),
             )
-            with patch("asterion.dci.benchmark.run_benchmark") as run:
+            with patch("asterion.capabilities.dci.implementation.evaluation.benchmark.run_benchmark") as run:
                 with self.assertRaisesRegex(
                     DciBenchmarkError,
                     "authorization root changed",
@@ -1889,7 +1901,9 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
     def test_authorized_reproduction_coordinator_cancels_on_initial_mismatch(
         self,
     ) -> None:
-        from asterion.dci import benchmark as benchmark_module
+        from asterion.capabilities.dci.implementation.evaluation import (
+            benchmark as benchmark_module,
+        )
 
         scopes = ("bright.biology.main.full",)
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -1941,13 +1955,13 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 reserve_full_execution_operation(authority, scopes[0], "agent")
 
     def test_context_source_identity_requires_exact_family_and_contract(self) -> None:
-        from asterion.dci.context_profiles import (
+        from asterion.capabilities.dci.implementation.research.context_profiles import (
             context_contract_for_source,
             context_policy_identity,
             context_source_identity,
             resolve_context_profile,
         )
-        from asterion.dci.context_extension import resolve_context_extension
+        from asterion.capabilities.dci.implementation.research.context_extension import resolve_context_extension
 
         commit = "271f37e71f053bf0c99c05ce6d2fb53b841d922e"
         profile = resolve_context_profile("level3")
@@ -2088,8 +2102,8 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
     def test_experiment_context_contracts_match_profile_and_source_family(
         self,
     ) -> None:
-        from asterion.dci.context_extension import resolve_context_extension
-        from asterion.dci.context_profiles import (
+        from asterion.capabilities.dci.implementation.research.context_extension import resolve_context_extension
+        from asterion.capabilities.dci.implementation.research.context_profiles import (
             context_source_identity,
             resolve_context_profile,
         )
@@ -2124,7 +2138,7 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                     )
 
     def test_paper_product_contract_marks_resolution_parameters_as_asterion_defined(self) -> None:
-        from asterion.dci.verification import paper_product_contract
+        from asterion.capabilities.dci.implementation.reproduction.verification import paper_product_contract
 
         configuration = paper_product_contract()["analysis_configuration"]
 
@@ -2135,9 +2149,9 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         )
 
     def _assert_invalid_profile_mutation(self, profile_id, mutate) -> None:
-        from asterion.dci import experiment_profiles
+        from asterion.capabilities.dci.implementation.research import experiment_profiles
 
-        package = resources.files("asterion.dci.resources")
+        package = resources.files("asterion.capabilities.dci.resources")
         payload = json.loads(
             package.joinpath("experiment-profiles.json").read_text()
         )
@@ -2165,9 +2179,9 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
             root = Path(temporary_directory).resolve()
             request = _request(root)
             with patch(
-                "asterion.dci.benchmark.run_pi_research", side_effect=_recorded_run
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research", side_effect=_recorded_run
             ), patch(
-                "asterion.dci.evaluation.judge_answer_sync",
+                "asterion.capabilities.dci.implementation.evaluation.evaluation.judge_answer_sync",
                 return_value=_verdict(request.judge_config),
             ):
                 run_benchmark(request, paths=Mock())
@@ -2207,27 +2221,27 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
             first_identity = dci_complete_implementation_identity(
                 resource_reader=resources.__getitem__
             )
-            resources["dci/artifacts.py"] += b"\x00"
+            resources["implementation/evaluation/artifacts.py"] += b"\x00"
             second_identity = dci_complete_implementation_identity(
                 resource_reader=resources.__getitem__
             )
             self.assertNotEqual(first_identity, second_identity)
             with patch(
-                "asterion.dci.benchmark.dci_complete_implementation_identity",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.dci_complete_implementation_identity",
                 return_value=first_identity,
             ), patch(
-                "asterion.dci.benchmark.run_pi_research", side_effect=_recorded_run
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research", side_effect=_recorded_run
             ), patch(
-                "asterion.dci.evaluation.judge_answer_sync",
+                "asterion.capabilities.dci.implementation.evaluation.evaluation.judge_answer_sync",
                 return_value=_verdict(request.judge_config),
             ):
                 run_benchmark(request, paths=Mock())
 
             with patch(
-                "asterion.dci.benchmark.dci_complete_implementation_identity",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.dci_complete_implementation_identity",
                 return_value=second_identity,
-            ), patch("asterion.dci.benchmark.run_pi_research") as run, patch(
-                "asterion.dci.benchmark.evaluate_run_directory_async"
+            ), patch("asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research") as run, patch(
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.evaluate_run_directory_async"
             ) as evaluate:
                 with self.assertRaisesRegex(
                     DciBenchmarkError, "configuration is incompatible"
@@ -2242,10 +2256,10 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
             config.pop("implementation_sha256")
             config_path.write_text(json.dumps(config))
             with patch(
-                "asterion.dci.benchmark.dci_complete_implementation_identity",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.dci_complete_implementation_identity",
                 return_value=first_identity,
-            ), patch("asterion.dci.benchmark.run_pi_research") as run, patch(
-                "asterion.dci.benchmark.evaluate_run_directory_async"
+            ), patch("asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research") as run, patch(
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.evaluate_run_directory_async"
             ) as evaluate:
                 with self.assertRaisesRegex(
                     DciBenchmarkError, "configuration evidence is invalid"
@@ -2261,10 +2275,10 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
             item.pop("implementation_sha256")
             item_path.write_text(json.dumps(item))
             with patch(
-                "asterion.dci.benchmark.dci_complete_implementation_identity",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.dci_complete_implementation_identity",
                 return_value=first_identity,
-            ), patch("asterion.dci.benchmark.run_pi_research") as run, patch(
-                "asterion.dci.benchmark.evaluate_run_directory_async"
+            ), patch("asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research") as run, patch(
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.evaluate_run_directory_async"
             ) as evaluate:
                 with self.assertRaisesRegex(
                     DciBenchmarkError, "item evidence is invalid"
@@ -2279,10 +2293,10 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
             result.pop("implementation_sha256")
             result_path.write_text(json.dumps(result))
             with patch(
-                "asterion.dci.benchmark.dci_complete_implementation_identity",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.dci_complete_implementation_identity",
                 return_value=first_identity,
-            ), patch("asterion.dci.benchmark.run_pi_research") as run, patch(
-                "asterion.dci.benchmark.evaluate_run_directory_async"
+            ), patch("asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research") as run, patch(
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.evaluate_run_directory_async"
             ) as evaluate:
                 with self.assertRaisesRegex(
                     DciBenchmarkError, "result evidence is invalid"
@@ -2295,8 +2309,8 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory).resolve()
             request = _request(root)
-            with patch("asterion.dci.run.PiRpcClient", _FixtureClient), patch(
-                "asterion.dci.evaluation.judge_answer_sync",
+            with patch("asterion.capabilities.dci.implementation.runtime.run.PiRpcClient", _FixtureClient), patch(
+                "asterion.capabilities.dci.implementation.evaluation.evaluation.judge_answer_sync",
                 return_value=_verdict(request.judge_config),
             ):
                 run_benchmark(request, paths=resolve_dci_paths(root))
@@ -2337,9 +2351,9 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 runtime_options=DciRuntimeOptions(provider="openai", model="gpt-test"),
             )
             with patch(
-                "asterion.dci.benchmark.run_pi_research", side_effect=_recorded_run
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research", side_effect=_recorded_run
             ) as run, patch(
-                "asterion.dci.evaluation.judge_answer_sync",
+                "asterion.capabilities.dci.implementation.evaluation.evaluation.judge_answer_sync",
                 return_value=_verdict(request.judge_config),
             ):
                     run_benchmark(request, paths=Mock())
@@ -2373,9 +2387,9 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 limit=1,
             )
             with patch(
-                "asterion.dci.benchmark.run_pi_research", side_effect=_recorded_run
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research", side_effect=_recorded_run
             ) as run, patch(
-                "asterion.dci.evaluation.judge_answer_sync",
+                "asterion.capabilities.dci.implementation.evaluation.evaluation.judge_answer_sync",
                 return_value=_verdict(request.judge_config),
             ):
                     result = run_benchmark(request, paths=Mock())
@@ -2398,9 +2412,9 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
             root = Path(temporary_directory).resolve()
             request = _request(root)
             with patch(
-                "asterion.dci.benchmark.run_pi_research", side_effect=_recorded_run
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research", side_effect=_recorded_run
             ) as run, patch(
-                "asterion.dci.evaluation.judge_answer_sync",
+                "asterion.capabilities.dci.implementation.evaluation.evaluation.judge_answer_sync",
                 return_value=_verdict(request.judge_config),
             ):
                     result = run_benchmark(request, paths=Mock())
@@ -2413,13 +2427,13 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory).resolve()
             request = _request(root)
-            with patch("asterion.dci.run.PiRpcClient", _FixtureClient), patch(
-                "asterion.dci.evaluation.judge_answer_sync",
+            with patch("asterion.capabilities.dci.implementation.runtime.run.PiRpcClient", _FixtureClient), patch(
+                "asterion.capabilities.dci.implementation.evaluation.evaluation.judge_answer_sync",
                 return_value=_verdict(request.judge_config),
             ):
                 run_benchmark(request, paths=resolve_dci_paths(root))
-            with patch("asterion.dci.benchmark.run_pi_research") as run:
-                with patch("asterion.dci.benchmark.evaluate_run_directory_async") as evaluate:
+            with patch("asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research") as run:
+                with patch("asterion.capabilities.dci.implementation.evaluation.benchmark.evaluate_run_directory_async") as evaluate:
                     result = run_benchmark(request, paths=resolve_dci_paths(root))
             evidence = json.loads(
                 (result.output_root / "q-1" / "reproduction-evidence.json").read_text(
@@ -2446,9 +2460,9 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
             root = Path(temporary_directory).resolve()
             request = _request(root)
             with patch(
-                "asterion.dci.benchmark.run_pi_research", side_effect=_recorded_run
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research", side_effect=_recorded_run
             ), patch(
-                "asterion.dci.benchmark.evaluate_run_directory_async",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.evaluate_run_directory_async",
                 side_effect=RuntimeError("judge transport failed"),
             ) as evaluate:
                 result = run_benchmark(request, paths=resolve_dci_paths(root))
@@ -2471,8 +2485,8 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory).resolve()
             request = _request(root)
-            with patch("asterion.dci.run.PiRpcClient", _FixtureClient), patch(
-                "asterion.dci.evaluation.judge_answer_sync",
+            with patch("asterion.capabilities.dci.implementation.runtime.run.PiRpcClient", _FixtureClient), patch(
+                "asterion.capabilities.dci.implementation.evaluation.evaluation.judge_answer_sync",
                 return_value=_verdict(request.judge_config),
             ):
                 run_benchmark(request, paths=resolve_dci_paths(root))
@@ -2480,8 +2494,8 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 request,
                 judge_config=JudgeConfig(base_url="https://other.example.test/v1"),
             )
-            with patch("asterion.dci.benchmark.run_pi_research") as run, patch(
-                "asterion.dci.evaluation.judge_answer_sync",
+            with patch("asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research") as run, patch(
+                "asterion.capabilities.dci.implementation.evaluation.evaluation.judge_answer_sync",
                 return_value=_verdict(changed.judge_config, correct=False),
             ) as evaluate:
                 run_benchmark(changed, paths=resolve_dci_paths(root))
@@ -2493,7 +2507,7 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory).resolve()
             request = _request(root, query_id="../escape")
-            with patch("asterion.dci.benchmark.run_pi_research") as run:
+            with patch("asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research") as run:
                 with self.assertRaisesRegex(DciBenchmarkError, "dataset is invalid"):
                     run_benchmark(request, paths=Mock())
 
@@ -2518,7 +2532,7 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
             output_root.mkdir(mode=0o700)
 
             with (
-                patch("asterion.dci.benchmark.run_pi_research") as run,
+                patch("asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research") as run,
                 self.assertRaisesRegex(
                     DciBenchmarkError,
                     "output root identity changed",

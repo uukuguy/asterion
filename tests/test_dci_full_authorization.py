@@ -19,17 +19,19 @@ from typing import Any, cast
 from unittest.mock import Mock, patch
 
 from asterion.dci import cli as cli_module
-from asterion.dci import experiment_profiles as profiles
-from asterion.dci import paper_benchmarks
-from asterion.dci.benchmark import (
+from asterion.capabilities.dci.implementation.research import (
+    experiment_profiles as profiles,
+)
+from asterion.capabilities.dci.implementation.reproduction import paper_benchmarks
+from asterion.capabilities.dci.implementation.evaluation.benchmark import (
     BenchmarkRequest,
     DciBenchmarkError,
     run_benchmark,
     run_benchmark_async,
 )
 from asterion.dci.cli import main as dci_main
-from asterion.dci.config import DciRuntimeOptions, resolve_dci_paths
-from asterion.dci.experiment_profiles import (
+from asterion.capabilities.dci.implementation.config import DciRuntimeOptions, resolve_dci_paths
+from asterion.capabilities.dci.implementation.research.experiment_profiles import (
     ExperimentAuthorizationError,
     FullExecutionAuthorization,
     FullExecutionReservation,
@@ -44,14 +46,14 @@ from asterion.dci.experiment_profiles import (
     reserve_full_execution_operation,
     resolve_experiment_profile,
 )
-from asterion.dci.judge import JudgeConfig
-from asterion.dci.paper_benchmarks import (
+from asterion.capabilities.dci.implementation.evaluation.judge import JudgeConfig
+from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import (
     DatasetInputBinding,
     canonical_sha256,
     resolve_paper_benchmark,
     resolve_paper_experiment_scope,
 )
-from asterion.dci.verification import paper_reproduce_main
+from asterion.capabilities.dci.implementation.reproduction.verification import paper_reproduce_main
 
 
 class AlwaysEqualStr(str):
@@ -988,7 +990,7 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             output_root = Path(temporary) / "private"
             with patch(
-                "asterion.dci.experiment_profiles.os.fchmod",
+                "asterion.capabilities.dci.implementation.research.experiment_profiles.os.fchmod",
                 side_effect=OSError("credential-path-sentinel"),
             ):
                 with self.assertRaises(ExperimentAuthorizationError) as raised:
@@ -1015,7 +1017,7 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
                 real_mkdir(path, mode=mode, dir_fd=dir_fd)
 
             with patch(
-                "asterion.dci.experiment_profiles.os.mkdir",
+                "asterion.capabilities.dci.implementation.research.experiment_profiles.os.mkdir",
                 side_effect=fail_manifest_creation,
             ):
                 with self.assertRaises(ExperimentAuthorizationError) as raised:
@@ -1053,7 +1055,7 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
                 real_mkdir(path, mode=mode, dir_fd=dir_fd)
 
             with patch(
-                "asterion.dci.experiment_profiles.os.mkdir",
+                "asterion.capabilities.dci.implementation.research.experiment_profiles.os.mkdir",
                 side_effect=replace_root_before_manifest_creation,
             ):
                 with self.assertRaises(ExperimentAuthorizationError) as raised:
@@ -1733,12 +1735,12 @@ class AuthorizedBenchmarkTests(unittest.TestCase):
                     )
                 )
                 with patch(
-                    "asterion.dci.benchmark._paper_scope_for_rows",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark._paper_scope_for_rows",
                     return_value=scope_id,
                 ), patch(
-                    "asterion.dci.benchmark._run_pi_async"
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark._run_pi_async"
                 ) as agent, patch(
-                    "asterion.dci.benchmark.reserve_full_execution_operation"
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark.reserve_full_execution_operation"
                 ) as reserve:
                     with self.assertRaisesRegex(
                         DciBenchmarkError,
@@ -1776,12 +1778,12 @@ class AuthorizedBenchmarkTests(unittest.TestCase):
             os.replace(replacement, dataset)
             self.assertNotEqual(dataset.stat().st_ino, original_inode)
             with patch(
-                "asterion.dci.benchmark._paper_scope_for_rows",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark._paper_scope_for_rows",
                 return_value=self.scope_id,
             ), patch(
-                "asterion.dci.benchmark._run_pi_async"
+                "asterion.capabilities.dci.implementation.evaluation.benchmark._run_pi_async"
             ) as agent, patch(
-                "asterion.dci.benchmark.reserve_full_execution_operation"
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.reserve_full_execution_operation"
             ) as reserve:
                 with self.assertRaisesRegex(
                     DciBenchmarkError,
@@ -1830,12 +1832,12 @@ class AuthorizedBenchmarkTests(unittest.TestCase):
                     else replace(cast(DatasetInputBinding, binding), inode=999999)
                 )
                 with patch(
-                    "asterion.dci.benchmark.read_paper_benchmark_dataset",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark.read_paper_benchmark_dataset",
                     create=True,
                 ) as read_dataset, patch(
-                    "asterion.dci.benchmark._run_pi_async"
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark._run_pi_async"
                 ) as agent, patch(
-                    "asterion.dci.benchmark.reserve_full_execution_operation"
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark.reserve_full_execution_operation"
                 ) as reserve:
                     with self.assertRaisesRegex(
                         DciBenchmarkError,
@@ -1883,14 +1885,14 @@ class AuthorizedBenchmarkTests(unittest.TestCase):
                 AlwaysEqualStr("0" * 64),
             )
             with patch(
-                "asterion.dci.benchmark._paper_scope_for_rows",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark._paper_scope_for_rows",
                 return_value=self.scope_id,
             ), patch(
-                "asterion.dci.benchmark.require_af320_executable_scope"
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.require_af320_executable_scope"
             ) as consume, patch(
-                "asterion.dci.benchmark.reserve_full_execution_operation"
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.reserve_full_execution_operation"
             ) as reserve, patch(
-                "asterion.dci.benchmark._run_pi_async"
+                "asterion.capabilities.dci.implementation.evaluation.benchmark._run_pi_async"
             ) as agent:
                 with self.assertRaisesRegex(
                     DciBenchmarkError,
@@ -1938,17 +1940,17 @@ class AuthorizedBenchmarkTests(unittest.TestCase):
                     mode="qa",
                 )
                 target = (
-                    "asterion.dci.paper_benchmarks._open_paper_dataset_descriptor"
+                    "asterion.capabilities.dci.implementation.reproduction.paper_benchmarks._open_paper_dataset_descriptor"
                     if failure == "open"
-                    else "asterion.dci.paper_benchmarks._read_paper_dataset_descriptor"
+                    else "asterion.capabilities.dci.implementation.reproduction.paper_benchmarks._read_paper_dataset_descriptor"
                 )
                 with patch(
                     target,
                     side_effect=OSError("SENTINEL private dataset race"),
                 ), patch(
-                    "asterion.dci.benchmark._run_pi_async"
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark._run_pi_async"
                 ) as agent, patch(
-                    "asterion.dci.benchmark.reserve_full_execution_operation"
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark.reserve_full_execution_operation"
                 ) as reserve:
                     with self.assertRaisesRegex(
                         DciBenchmarkError,
@@ -1978,7 +1980,7 @@ class AuthorizedBenchmarkTests(unittest.TestCase):
 
             authority = authorize(root / "missing-authority")
             request = self.request(root, authority)
-            with patch("asterion.dci.benchmark._read_input_snapshot") as read:
+            with patch("asterion.capabilities.dci.implementation.evaluation.benchmark._read_input_snapshot") as read:
                 with self.assertRaisesRegex(
                     DciBenchmarkError,
                     "^DCI benchmark requires full execution authorization$",
@@ -1991,7 +1993,7 @@ class AuthorizedBenchmarkTests(unittest.TestCase):
 
             authority = authorize(root / "parent-root")
             request = self.request(root, authority)
-            with patch("asterion.dci.benchmark._read_input_snapshot") as read:
+            with patch("asterion.capabilities.dci.implementation.evaluation.benchmark._read_input_snapshot") as read:
                 with self.assertRaisesRegex(
                     DciBenchmarkError,
                     "^DCI benchmark authorization root changed$",
@@ -2013,7 +2015,7 @@ class AuthorizedBenchmarkTests(unittest.TestCase):
             other = authorized_scope_output_root(
                 authority, "bright.earth-science.main.full"
             )
-            with patch("asterion.dci.benchmark._read_input_snapshot") as read:
+            with patch("asterion.capabilities.dci.implementation.evaluation.benchmark._read_input_snapshot") as read:
                 with self.assertRaisesRegex(
                     DciBenchmarkError,
                     "^DCI benchmark authorization root changed$",
@@ -2050,7 +2052,7 @@ class AuthorizedBenchmarkTests(unittest.TestCase):
                 profile="paper-reference/pi",
             )
             with patch(
-                "asterion.dci.benchmark._paper_scope_for_rows",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark._paper_scope_for_rows",
                 return_value="bright.earth-science.main.full",
             ):
                 with self.assertRaisesRegex(
@@ -2066,7 +2068,7 @@ class AuthorizedBenchmarkTests(unittest.TestCase):
 
             authority = authorize(root / "changed-scope")
             request = self.request(root, authority)
-            with patch("asterion.dci.benchmark._read_input_snapshot") as read:
+            with patch("asterion.capabilities.dci.implementation.evaluation.benchmark._read_input_snapshot") as read:
                 with self.assertRaisesRegex(
                     DciBenchmarkError,
                     "^DCI benchmark authorization scope changed$",
@@ -2164,12 +2166,12 @@ class AuthorizedBenchmarkTests(unittest.TestCase):
                     figures=False,
                 )
                 with patch(
-                    "asterion.dci.benchmark._paper_scope_for_rows",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark._paper_scope_for_rows",
                     return_value=self.scope_id,
                 ), patch(
-                    "asterion.dci.benchmark._run_pi_async"
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark._run_pi_async"
                 ) as agent, patch(
-                    "asterion.dci.benchmark.reserve_full_execution_operation"
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark.reserve_full_execution_operation"
                 ) as reserve:
                     with self.assertRaisesRegex(
                         DciBenchmarkError,
@@ -2255,39 +2257,39 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
         stack = ExitStack()
         stack.enter_context(
             patch(
-                "asterion.dci.benchmark._paper_scope_for_rows",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark._paper_scope_for_rows",
                 return_value=self.scope_id,
             )
         )
         stack.enter_context(
-            patch("asterion.dci.benchmark._run_pi_async", side_effect=agent)
+            patch("asterion.capabilities.dci.implementation.evaluation.benchmark._run_pi_async", side_effect=agent)
         )
         stack.enter_context(
             patch(
-                "asterion.dci.benchmark._validated_agent_cost",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark._validated_agent_cost",
                 side_effect=agent_cost,
             )
         )
         stack.enter_context(
             patch(
-                "asterion.dci.benchmark._reusable_judge_verdict",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark._reusable_judge_verdict",
                 return_value=None,
             )
         )
         stack.enter_context(
             patch(
-                "asterion.dci.benchmark.evaluate_run_directory_async",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.evaluate_run_directory_async",
                 side_effect=judge,
             )
         )
         stack.enter_context(
             patch(
-                "asterion.dci.benchmark._native_evidence_fingerprint",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark._native_evidence_fingerprint",
                 return_value="0" * 64,
             )
         )
         stack.enter_context(
-            patch("asterion.dci.benchmark._publish_aggregates")
+            patch("asterion.capabilities.dci.implementation.evaluation.benchmark._publish_aggregates")
         )
         return stack
 
@@ -2303,7 +2305,7 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             output_root = root / "agent-cap"
-            with patch("asterion.dci.benchmark._run_pi_async") as agent:
+            with patch("asterion.capabilities.dci.implementation.evaluation.benchmark._run_pi_async") as agent:
                 with self.assertRaisesRegex(
                     ExperimentAuthorizationError,
                     "^full execution bounded operation plan is invalid$",
@@ -2335,10 +2337,10 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
             request = self.request(root, authority)
             with self.patches(agent=agent, judge=judge, agent_cost=lambda *_: 0.0):
                 with patch(
-                    "asterion.dci.benchmark._run_pi_async",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark._run_pi_async",
                     side_effect=agent,
                 ) as run, patch(
-                    "asterion.dci.benchmark.evaluate_run_directory_async",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark.evaluate_run_directory_async",
                     side_effect=judge,
                 ) as evaluate:
                     run_benchmark(request, paths=resolve_dci_paths(root))
@@ -2354,10 +2356,10 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
             request = self.request(root, authority)
             with self.patches(agent=agent, judge=judge, agent_cost=lambda *_: 0.0):
                 with patch(
-                    "asterion.dci.benchmark._run_pi_async",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark._run_pi_async",
                     side_effect=agent,
                 ) as run, patch(
-                    "asterion.dci.benchmark.evaluate_run_directory_async",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark.evaluate_run_directory_async",
                     side_effect=judge,
                 ) as evaluate:
                     with self.assertRaises(DciBenchmarkError):
@@ -2386,10 +2388,10 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
             request = self.request(root, authority)
             with self.patches(agent=agent, judge=judge, agent_cost=lambda *_: 1.5):
                 with patch(
-                    "asterion.dci.benchmark._run_pi_async",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark._run_pi_async",
                     side_effect=agent,
                 ) as run, patch(
-                    "asterion.dci.benchmark.evaluate_run_directory_async",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark.evaluate_run_directory_async",
                     side_effect=judge,
                 ) as evaluate:
                     with self.assertRaisesRegex(
@@ -2434,10 +2436,10 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
             request = self.request(root, authority)
             with self.patches(agent=agent, judge=judge, agent_cost=lambda *_: 0.6):
                 with patch(
-                    "asterion.dci.benchmark._run_pi_async",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark._run_pi_async",
                     side_effect=agent,
                 ) as run, patch(
-                    "asterion.dci.benchmark.evaluate_run_directory_async",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark.evaluate_run_directory_async",
                     side_effect=judge,
                 ) as evaluate:
                     with self.assertRaises(DciBenchmarkError):
@@ -2446,7 +2448,7 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
             evaluate.assert_not_called()
 
     def test_missing_or_malformed_agent_cost_evidence_fails_closed(self) -> None:
-        from asterion.dci.benchmark import _validated_agent_cost_from_state
+        from asterion.capabilities.dci.implementation.evaluation.benchmark import _validated_agent_cost_from_state
 
         messages = [
             {
@@ -2521,10 +2523,10 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
             request = self.request(root, authority, rows=1)
             with self.patches(agent=agent, judge=judge, agent_cost=lambda *_: 0.25):
                 with patch(
-                    "asterion.dci.benchmark._reusable_judge_verdict",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark._reusable_judge_verdict",
                     return_value=self.verdict(),
                 ), patch(
-                    "asterion.dci.benchmark.evaluate_run_directory_async",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark.evaluate_run_directory_async",
                     side_effect=judge,
                 ) as evaluate:
                     run_benchmark(request, paths=resolve_dci_paths(root))
@@ -2639,7 +2641,7 @@ class ReproductionCliTests(unittest.TestCase):
         return argv
 
     def _fixture_batch_profiles(self, root: Path) -> dict[str, dict[str, object]]:
-        from asterion.dci.paper_benchmarks import resolve_paper_benchmark
+        from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import resolve_paper_benchmark
 
         profiles: dict[str, dict[str, object]] = {}
         for name in (
@@ -2688,9 +2690,9 @@ class ReproductionCliTests(unittest.TestCase):
             root = Path(temporary).resolve()
             output_root = root / "reproduction"
             with patch(
-                "asterion.dci.experiment_profiles.authorize_full_execution"
+                "asterion.capabilities.dci.implementation.research.experiment_profiles.authorize_full_execution"
             ) as authorize, patch(
-                "asterion.dci.benchmark.execute_authorized_reproduction",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.execute_authorized_reproduction",
                 create=True,
             ) as execute:
                 code = dci_main(
@@ -2730,9 +2732,9 @@ class ReproductionCliTests(unittest.TestCase):
             ) as load_env, patch(
                 "asterion.dci.cli._preflight_scope_selected_ids"
             ) as read_selected_ids, patch(
-                "asterion.dci.paper_benchmarks.read_paper_benchmark_dataset"
+                "asterion.capabilities.dci.implementation.reproduction.paper_benchmarks.read_paper_benchmark_dataset"
             ) as read_dataset, patch(
-                "asterion.dci.experiment_profiles.authorize_full_execution"
+                "asterion.capabilities.dci.implementation.research.experiment_profiles.authorize_full_execution"
             ) as authorize:
                 code = dci_main(
                     [
@@ -2768,11 +2770,11 @@ class ReproductionCliTests(unittest.TestCase):
         cases = (
             (
                 "open",
-                "asterion.dci.paper_benchmarks._open_paper_dataset_descriptor",
+                "asterion.capabilities.dci.implementation.reproduction.paper_benchmarks._open_paper_dataset_descriptor",
             ),
             (
                 "read",
-                "asterion.dci.paper_benchmarks._read_paper_dataset_descriptor",
+                "asterion.capabilities.dci.implementation.reproduction.paper_benchmarks._read_paper_dataset_descriptor",
             ),
             ("corpus", "asterion.dci.cli.os.scandir"),
         )
@@ -2796,7 +2798,7 @@ class ReproductionCliTests(unittest.TestCase):
                     ), patch(
                         "asterion.dci.cli.validate_benchmark_metric_selection"
                     ), patch(
-                        "asterion.dci.experiment_profiles.authorize_full_execution"
+                        "asterion.capabilities.dci.implementation.research.experiment_profiles.authorize_full_execution"
                     ) as authorize:
                         code = dci_main(
                             self._execute_argv(
@@ -2846,7 +2848,7 @@ class ReproductionCliTests(unittest.TestCase):
             cases = (
                 (
                     "open",
-                    "asterion.dci.paper_benchmarks."
+                    "asterion.capabilities.dci.implementation.reproduction.paper_benchmarks."
                     "_open_paper_dataset_descriptor",
                     lambda: cli_module._preflight_scope_selected_ids(
                         request,
@@ -2855,7 +2857,7 @@ class ReproductionCliTests(unittest.TestCase):
                 ),
                 (
                     "read",
-                    "asterion.dci.paper_benchmarks."
+                    "asterion.capabilities.dci.implementation.reproduction.paper_benchmarks."
                     "_read_paper_dataset_descriptor",
                     lambda: cli_module._preflight_scope_selected_ids(
                         request,
@@ -2915,7 +2917,7 @@ class ReproductionCliTests(unittest.TestCase):
                     ) as load_env, patch(
                         "asterion.dci.cli._preflight_scope_selected_ids"
                     ) as read_selected_ids, patch(
-                        "asterion.dci.experiment_profiles.authorize_full_execution"
+                        "asterion.capabilities.dci.implementation.research.experiment_profiles.authorize_full_execution"
                     ) as authorize:
                         code = dci_main(
                             [
@@ -2963,9 +2965,9 @@ class ReproductionCliTests(unittest.TestCase):
                     stdout = io.StringIO()
                     stderr = io.StringIO()
                     with patch(
-                        "asterion.dci.experiment_profiles.authorize_full_execution"
+                        "asterion.capabilities.dci.implementation.research.experiment_profiles.authorize_full_execution"
                     ) as authorize, patch(
-                        "asterion.dci.benchmark.execute_authorized_reproduction",
+                        "asterion.capabilities.dci.implementation.evaluation.benchmark.execute_authorized_reproduction",
                         create=True,
                     ) as execute:
                         code = dci_main(
@@ -2989,9 +2991,9 @@ class ReproductionCliTests(unittest.TestCase):
             stdout = io.StringIO()
             stderr = io.StringIO()
             with patch(
-                "asterion.dci.paper_benchmarks.resolve_experiment_scope"
+                "asterion.capabilities.dci.implementation.reproduction.paper_benchmarks.resolve_experiment_scope"
             ) as resolve_scope, patch(
-                "asterion.dci.experiment_profiles.authorize_full_execution"
+                "asterion.capabilities.dci.implementation.research.experiment_profiles.authorize_full_execution"
             ) as authorize:
                 code = dci_main(
                     argv,
@@ -3019,9 +3021,9 @@ class ReproductionCliTests(unittest.TestCase):
                     stdout = io.StringIO()
                     stderr = io.StringIO()
                     with patch(
-                        "asterion.dci.experiment_profiles.authorize_full_execution"
+                        "asterion.capabilities.dci.implementation.research.experiment_profiles.authorize_full_execution"
                     ) as authorize, patch(
-                        "asterion.dci.benchmark.execute_authorized_reproduction",
+                        "asterion.capabilities.dci.implementation.evaluation.benchmark.execute_authorized_reproduction",
                         create=True,
                     ) as execute:
                         code = dci_main(
@@ -3042,7 +3044,7 @@ class ReproductionCliTests(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
-            from asterion.dci.paper_benchmarks import resolve_paper_benchmark
+            from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import resolve_paper_benchmark
 
             for scope_id, batch_profile in cases:
                 with self.subTest(scope=scope_id):
@@ -3082,9 +3084,9 @@ class ReproductionCliTests(unittest.TestCase):
                     ), patch(
                         "asterion.dci.cli.validate_benchmark_metric_selection"
                     ), patch(
-                        "asterion.dci.experiment_profiles.authorize_full_execution"
+                        "asterion.capabilities.dci.implementation.research.experiment_profiles.authorize_full_execution"
                     ) as authorize, patch(
-                        "asterion.dci.benchmark.execute_authorized_reproduction",
+                        "asterion.capabilities.dci.implementation.evaluation.benchmark.execute_authorized_reproduction",
                         create=True,
                     ) as execute:
                         code = dci_main(
@@ -3117,12 +3119,12 @@ class ReproductionCliTests(unittest.TestCase):
             stdout = io.StringIO()
             stderr = io.StringIO()
             with patch(
-                "asterion.dci.experiment_profiles.resolve_experiment_profile",
+                "asterion.capabilities.dci.implementation.research.experiment_profiles.resolve_experiment_profile",
                 return_value=narrowed_profile,
             ), patch(
-                "asterion.dci.experiment_profiles.authorize_full_execution"
+                "asterion.capabilities.dci.implementation.research.experiment_profiles.authorize_full_execution"
             ) as authorize, patch(
-                "asterion.dci.benchmark.execute_authorized_reproduction",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.execute_authorized_reproduction",
                 create=True,
             ) as execute:
                 code = dci_main(
@@ -3154,7 +3156,7 @@ class ReproductionCliTests(unittest.TestCase):
                     ) as load_env, patch(
                         "asterion.dci.cli._preflight_scope_selected_ids"
                     ) as read_selected_ids, patch(
-                        "asterion.dci.experiment_profiles.authorize_full_execution"
+                        "asterion.capabilities.dci.implementation.research.experiment_profiles.authorize_full_execution"
                     ) as authorize:
                         code = dci_main(
                             self._execute_argv(
@@ -3244,10 +3246,10 @@ class ReproductionCliTests(unittest.TestCase):
             ), patch(
                 "asterion.dci.cli.validate_dci_run_request"
             ) as validate_run, patch(
-                "asterion.dci.experiment_profiles.authorize_full_execution",
+                "asterion.capabilities.dci.implementation.research.experiment_profiles.authorize_full_execution",
                 side_effect=authorize_spy,
             ) as authorize, patch(
-                "asterion.dci.benchmark.execute_authorized_reproduction",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.execute_authorized_reproduction",
                 side_effect=execute_spy,
                 create=True,
             ) as execute:
@@ -3379,10 +3381,10 @@ class ReproductionCliTests(unittest.TestCase):
             ), patch(
                 "asterion.dci.cli.validate_dci_run_request"
             ), patch(
-                "asterion.dci.experiment_profiles.authorize_full_execution",
+                "asterion.capabilities.dci.implementation.research.experiment_profiles.authorize_full_execution",
                 side_effect=authorize_spy,
             ), patch(
-                "asterion.dci.benchmark.execute_authorized_reproduction",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.execute_authorized_reproduction",
                 side_effect=execute_spy,
                 create=True,
             ):
@@ -3432,7 +3434,7 @@ class ReproductionCliTests(unittest.TestCase):
             ), patch(
                 "asterion.dci.cli.validate_dci_run_request"
             ), patch(
-                "asterion.dci.benchmark.execute_authorized_reproduction",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.execute_authorized_reproduction",
                 return_value={
                     "schema": "dci.paper-reproduction-result/v1",
                     "operation_counts": {"agent": 3, "judge": 1, "total": 4},
@@ -3575,10 +3577,10 @@ class ReproductionCliTests(unittest.TestCase):
             ), patch(
                 "asterion.dci.cli.validate_dci_run_request"
             ), patch(
-                "asterion.dci.experiment_profiles.authorize_full_execution",
+                "asterion.capabilities.dci.implementation.research.experiment_profiles.authorize_full_execution",
                 side_effect=authorize_spy,
             ), patch(
-                "asterion.dci.experiment_profiles.authorized_scope_output_root",
+                "asterion.capabilities.dci.implementation.research.experiment_profiles.authorized_scope_output_root",
                 side_effect=ExperimentAuthorizationError("safe failure"),
             ):
                 code = dci_main(
@@ -3608,9 +3610,9 @@ class LegacyFullAuthorizationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             output_root = Path(temporary) / "private"
             with patch(
-                "asterion.dci.experiment_profiles.authorize_full_execution"
+                "asterion.capabilities.dci.implementation.research.experiment_profiles.authorize_full_execution"
             ) as authorize, patch(
-                "asterion.dci.benchmark.execute_authorized_reproduction",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.execute_authorized_reproduction",
                 create=True,
             ) as execute:
                 result = paper_reproduce_main(
@@ -3635,7 +3637,7 @@ class LegacyFullAuthorizationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             output_root = Path(temporary) / "private"
             with patch(
-                "asterion.dci.experiment_profiles.authorize_full_execution"
+                "asterion.capabilities.dci.implementation.research.experiment_profiles.authorize_full_execution"
             ) as authorize:
                 result = paper_reproduce_main(
                     [

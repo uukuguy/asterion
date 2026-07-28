@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from asterion.dci.bridge import project_dci_run
-from asterion.dci.run import DciRunResult
+from asterion.capabilities.dci.implementation.runtime.bridge import project_dci_run
+from asterion.capabilities.dci.implementation.runtime.run import DciRunResult
 from asterion.runtime.host import RunEvent
 
 

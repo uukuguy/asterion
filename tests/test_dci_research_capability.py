@@ -17,7 +17,7 @@ from asterion.capabilities.dci_research import DciLocalResearchImplementation
 PROJECT = Path(__file__).resolve().parents[1]
 SOURCE = PROJECT / "src/asterion"
 MANIFEST_PATH = (
-    SOURCE / "capabilities/dci_research/manifests/dci-research.json"
+    SOURCE / "capabilities/dci/payload/capabilities/dci-research.json"
 )
 
 
@@ -168,7 +168,7 @@ class DciResearchCapabilityTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch(
-                "asterion.dci.application_executor.EnvironmentDciRunExecutor.run",
+                "asterion.capabilities.dci.implementation.runtime.application_executor.EnvironmentDciRunExecutor.run",
                 side_effect=AssertionError("native bypass"),
             ),
             patch.object(Path, "cwd", side_effect=AssertionError("cwd access")),
@@ -195,7 +195,7 @@ class DciResearchCapabilityBoundaryTests(unittest.TestCase):
             if root.exists()
             for path in root.rglob("*.py")
         )
-        self.assertNotIn("from asterion.dci.benchmark import", source)
+        self.assertNotIn("from asterion.capabilities.dci.implementation.evaluation.benchmark import", source)
 
 
 if __name__ == "__main__":

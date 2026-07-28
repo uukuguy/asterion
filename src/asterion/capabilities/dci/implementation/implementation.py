@@ -1,0 +1,83 @@
+"""Runtime-neutral DCI local-corpus research implementation."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+
+from asterion.capabilities.dci.implementation.services import LocalCorpusService
+from asterion.capabilities.dci.implementation.runtime_adapter import (
+    DciRuntimeAdapterError,
+    run_declared_runtime,
+)
+from asterion.capability_sdk import (
+    CapabilityExecutionError,
+    CapabilityExecutionResult,
+    CapabilityInvocation,
+)
+
+
+class DciLocalResearchImplementation:
+    """Delegate local-corpus research to an explicitly supplied runtime."""
+
+    async def execute(
+        self, invocation: CapabilityInvocation
+    ) -> CapabilityExecutionResult:
+        _require_local_corpus(invocation)
+        required = invocation.manifest["requires_capabilities"]
+        if not isinstance(required, tuple) or not all(
+            isinstance(capability, str) for capability in required
+        ):
+            raise CapabilityExecutionError("research capability declaration is invalid")
+        try:
+            events = await run_declared_runtime(
+                invocation,
+                input_text=invocation.input_text,
+                requested_capabilities=required,
+            )
+            answer_uri = _answer_artifact_uri(events)
+        except (DciRuntimeAdapterError, TypeError, ValueError, RuntimeError):
+            raise CapabilityExecutionError(
+                "research runtime execution failed"
+            ) from None
+        return CapabilityExecutionResult(
+            events=(
+                {"type": "research.completed", "payload": {"status": "completed"}},
+            ),
+            artifacts=(
+                {
+                    "artifact_id": "dci-research-result",
+                    "media_type": "application/vnd.dci.research+json",
+                    "value": {"answer_artifact_uri": answer_uri},
+                },
+            ),
+        )
+
+
+def _require_local_corpus(invocation: CapabilityInvocation) -> Path:
+    try:
+        service = invocation.host_services.get("corpus.local-root")
+        if not isinstance(service, LocalCorpusService):
+            raise TypeError
+        root = service.root
+    except Exception:
+        raise CapabilityExecutionError("local corpus service is unavailable") from None
+    if not isinstance(root, Path):
+        raise CapabilityExecutionError("local corpus service is unavailable")
+    return root
+
+
+def _answer_artifact_uri(events: Sequence[Mapping[str, object]]) -> str:
+    for event in events:
+        if event.get("type") != "artifact.created":
+            continue
+        payload = event.get("payload")
+        if not isinstance(payload, Mapping):
+            continue
+        artifact = payload.get("artifact")
+        if not isinstance(artifact, Mapping) or artifact.get("kind") != "answer":
+            continue
+        uri = artifact.get("uri")
+        if isinstance(uri, str) and uri:
+            return uri
+    raise CapabilityExecutionError("research runtime answer artifact is unavailable")

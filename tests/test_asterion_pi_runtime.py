@@ -13,7 +13,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from asterion.adapters.pi import map_pi_capabilities
-from asterion.dci.services import create_local_corpus_service_factory
+from asterion.capabilities.dci.implementation.services import create_local_corpus_service_factory
 from asterion.runtime.host import RunRequest
 from asterion.runtime.protocol import ProtocolError, validate_event_stream
 from asterion.runtime.working_directory import ProcessWorkingDirectory

@@ -50,6 +50,7 @@ PRIVATE_VALUE_MODULES = {
 }
 PACKAGE_OWNED_PREFIXES = {
     "controlled_code": ("asterion.capabilities.controlled_code",),
+    "implementation": ("asterion.capabilities.dci",),
     "dci_research": (
         "asterion.capabilities.dci_research",
         "asterion.dci",

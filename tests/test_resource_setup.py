@@ -29,7 +29,7 @@ class BasicResourceSetupTests(unittest.TestCase):
         (bcplus / "fixture.parquet").write_bytes(b"fixture parquet")
 
     def test_basic_profile_materializes_both_required_corpora(self) -> None:
-        from asterion.dci.resource_setup import prepare_resources
+        from asterion.capabilities.dci.implementation.resource_setup import prepare_resources
 
         def fake_export(source: Path, destination: Path) -> int:
             self.assertEqual(source, self.source / "browsecomp_plus")
@@ -37,7 +37,7 @@ class BasicResourceSetupTests(unittest.TestCase):
             (destination / "fixture.txt").write_text("fixture\n")
             return 1
 
-        with patch("asterion.dci.resource_setup.export_bcplus", fake_export):
+        with patch("asterion.capabilities.dci.implementation.resource_setup.export_bcplus", fake_export):
             result = prepare_resources(
                 profile="basic",
                 resource_root=self.resources,
@@ -54,7 +54,7 @@ class BasicResourceSetupTests(unittest.TestCase):
         )
 
     def test_check_only_reports_missing_without_creating_anything(self) -> None:
-        from asterion.dci.resource_setup import prepare_resources
+        from asterion.capabilities.dci.implementation.resource_setup import prepare_resources
 
         result = prepare_resources(
             profile="basic",
@@ -68,7 +68,7 @@ class BasicResourceSetupTests(unittest.TestCase):
         self.assertFalse(self.resources.exists())
 
     def test_complete_destinations_are_idempotent_and_not_overwritten(self) -> None:
-        from asterion.dci.resource_setup import prepare_resources
+        from asterion.capabilities.dci.implementation.resource_setup import prepare_resources
 
         wiki = self.resources / "corpus/wiki_corpus"
         bcplus = self.resources / "corpus/bc_plus_docs"
@@ -77,7 +77,7 @@ class BasicResourceSetupTests(unittest.TestCase):
         (wiki / "keep.txt").write_text("wiki\n")
         (bcplus / "keep.txt").write_text("bc+\n")
 
-        with patch("asterion.dci.resource_setup.export_bcplus") as export:
+        with patch("asterion.capabilities.dci.implementation.resource_setup.export_bcplus") as export:
             result = prepare_resources(
                 profile="basic",
                 resource_root=self.resources,
@@ -92,7 +92,7 @@ class BasicResourceSetupTests(unittest.TestCase):
         export.assert_not_called()
 
     def test_symlinked_resource_root_is_rejected(self) -> None:
-        from asterion.dci.resource_setup import ResourceSetupError, prepare_resources
+        from asterion.capabilities.dci.implementation.resource_setup import ResourceSetupError, prepare_resources
 
         actual = self.root / "actual"
         actual.mkdir()
@@ -109,7 +109,7 @@ class BasicResourceSetupTests(unittest.TestCase):
             )
 
     def test_symlinked_destination_is_rejected(self) -> None:
-        from asterion.dci.resource_setup import ResourceSetupError, prepare_resources
+        from asterion.capabilities.dci.implementation.resource_setup import ResourceSetupError, prepare_resources
 
         corpus = self.resources / "corpus"
         corpus.mkdir(parents=True)
@@ -129,7 +129,7 @@ class BasicResourceSetupTests(unittest.TestCase):
         self.assertEqual(tuple(outside.iterdir()), ())
 
     def test_symlink_inside_local_source_is_rejected_without_copying_target(self) -> None:
-        from asterion.dci.resource_setup import ResourceSetupError, prepare_resources
+        from asterion.capabilities.dci.implementation.resource_setup import ResourceSetupError, prepare_resources
 
         outside = self.root / "outside-secret.txt"
         outside.write_text("SECRET-OUTSIDE\n")
@@ -154,7 +154,7 @@ class BasicResourceSetupTests(unittest.TestCase):
         self.assertFalse(copied.exists())
 
     def test_unknown_profile_fails_without_creating_root(self) -> None:
-        from asterion.dci.resource_setup import ResourceSetupError, prepare_resources
+        from asterion.capabilities.dci.implementation.resource_setup import ResourceSetupError, prepare_resources
 
         with self.assertRaisesRegex(ResourceSetupError, "profile"):
             prepare_resources(
@@ -165,7 +165,7 @@ class BasicResourceSetupTests(unittest.TestCase):
         self.assertFalse(self.resources.exists())
 
     def test_network_source_symlink_is_rejected(self) -> None:
-        from asterion.dci.resource_setup import (
+        from asterion.capabilities.dci.implementation.resource_setup import (
             BASIC_RESOURCES,
             ResourceSetupError,
             _network_source,
@@ -190,7 +190,7 @@ class BasicResourceSetupTests(unittest.TestCase):
             _network_source(BASIC_RESOURCES[1], staging)
 
     def test_network_source_canonicalizes_framework_owned_staging_alias(self) -> None:
-        from asterion.dci.resource_setup import BASIC_RESOURCES, _network_source
+        from asterion.capabilities.dci.implementation.resource_setup import BASIC_RESOURCES, _network_source
 
         actual = self.root / "actual-staging"
         actual.mkdir()
@@ -256,11 +256,11 @@ class BenchmarkResourceSetupTests(unittest.TestCase):
     def test_benchmark_profile_covers_packaged_dataset_and_corpus_inventory(self) -> None:
         from importlib import resources
 
-        from asterion.dci.resource_setup import resource_specs
+        from asterion.capabilities.dci.implementation.resource_setup import resource_specs
 
         inventory = json.loads(
-            resources.files("asterion.dci")
-            .joinpath("resources/paper-benchmarks.json")
+            resources.files("asterion.capabilities.dci.resources")
+            .joinpath("paper-benchmarks.json")
             .read_text(encoding="utf-8")
         )
         expected = {
@@ -278,7 +278,7 @@ class BenchmarkResourceSetupTests(unittest.TestCase):
     def test_benchmark_profile_also_covers_every_checked_in_launcher_path(self) -> None:
         import re
 
-        from asterion.dci.resource_setup import resource_specs
+        from asterion.capabilities.dci.implementation.resource_setup import resource_specs
 
         launcher_paths = {
             match
@@ -296,7 +296,7 @@ class BenchmarkResourceSetupTests(unittest.TestCase):
         )
 
     def test_benchmark_check_reports_exact_paths_and_upstreams(self) -> None:
-        from asterion.dci.resource_setup import prepare_resources
+        from asterion.capabilities.dci.implementation.resource_setup import prepare_resources
 
         result = prepare_resources(
             profile="benchmark",
@@ -312,7 +312,7 @@ class BenchmarkResourceSetupTests(unittest.TestCase):
         self.assertIn("manual/external", rendered)
 
     def test_benchmark_local_fixture_can_materialize_one_inventory_path(self) -> None:
-        from asterion.dci.resource_setup import prepare_resources
+        from asterion.capabilities.dci.implementation.resource_setup import prepare_resources
 
         source = self.root / "source"
         fixture = source / "data/dci-bench/data/hotpotqa/test.jsonl"
@@ -363,7 +363,7 @@ class BenchmarkResourceSetupTests(unittest.TestCase):
         self.assertIn("Agent operations=0", completed.stdout)
 
     def test_manual_benchmark_requirements_never_attempt_a_network_fetch(self) -> None:
-        from asterion.dci.resource_setup import (
+        from asterion.capabilities.dci.implementation.resource_setup import (
             ResourceSetupError,
             prepare_resources,
         )
@@ -374,7 +374,7 @@ class BenchmarkResourceSetupTests(unittest.TestCase):
                 self.fail(f"manual resource attempted network: {spec.resource_id}")
             raise ResourceSetupError("fixture offline")
 
-        with patch("asterion.dci.resource_setup._network_source", offline):
+        with patch("asterion.capabilities.dci.implementation.resource_setup._network_source", offline):
             result = prepare_resources(
                 profile="benchmark",
                 resource_root=self.root / "resources",

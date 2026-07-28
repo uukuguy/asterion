@@ -19,7 +19,7 @@ from asterion.runtimes.claude_code import (
     _run_owned_process,
     run_claude_code,
 )
-from asterion.dci.services import create_local_corpus_service_factory
+from asterion.capabilities.dci.implementation.services import create_local_corpus_service_factory
 from asterion.services.registry import HostServiceFactoryContext
 
 

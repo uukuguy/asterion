@@ -396,7 +396,7 @@ def _paper_scope_operation_counts(
     scope_ids: tuple[str, ...],
     limit: int | None,
 ) -> tuple[int, int]:
-    from asterion.dci.paper_benchmarks import (
+    from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import (
         resolve_paper_benchmark,
         resolve_paper_experiment_scope,
     )

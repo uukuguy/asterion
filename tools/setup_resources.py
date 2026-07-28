@@ -9,7 +9,10 @@ import os
 from dataclasses import asdict
 from pathlib import Path
 
-from asterion.dci.resource_setup import ResourceSetupError, prepare_resources
+from asterion.capabilities.dci.implementation.resource_setup import (
+    ResourceSetupError,
+    prepare_resources,
+)
 
 
 PROJECT = Path(__file__).resolve().parents[1]

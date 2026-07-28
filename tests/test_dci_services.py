@@ -9,8 +9,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import asterion.dci.services as dci_services
-from asterion.dci.services import (
+import asterion.capabilities.dci.implementation.services as dci_services
+from asterion.capabilities.dci.implementation.services import (
     AnswerJudgeService,
     AnswerJudgeServiceError,
     LocalCorpusService,

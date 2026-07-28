@@ -10,8 +10,13 @@ from asterion.applications.provider import (
     InstalledApplication,
     InstalledApplicationProvider,
 )
-from asterion.dci.verification import create_dci_product
+from asterion.capabilities.dci.implementation.reproduction.verification import (
+    create_dci_product,
+)
 from asterion.capability_packages.protocol import CapabilityPackageRef
+from asterion.capabilities.dci_research.provider import (
+    create_provider as create_dci_package,
+)
 
 
 def create_provider() -> InstalledApplicationProvider:
@@ -47,5 +52,9 @@ def create_provider() -> InstalledApplicationProvider:
                 runtime_ids=("claude-code.reference", "pi.reference"),
             ),
         ),
-        product=create_dci_product(repo_root=root),
+        product=create_dci_product(
+            repo_root=root,
+            dci_application_provider_factory=create_provider,
+            dci_capability_package_factory=create_dci_package,
+        ),
     )

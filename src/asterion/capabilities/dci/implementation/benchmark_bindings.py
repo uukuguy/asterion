@@ -8,11 +8,11 @@ from decimal import Decimal
 from pathlib import Path
 
 from asterion.benchmarks import BenchmarkTaskInvocation, BenchmarkTaskRequest
-from asterion.capability_packages import BenchmarkTaskBinding, CapabilityPackageRef
+from asterion.capability_sdk import BenchmarkTaskBinding, CapabilityPackageRef
 from asterion.capabilities.dci.implementation.operator_inputs import (
     DciBenchmarkOperatorInputs,
 )
-from asterion.dci.paper_benchmarks import (
+from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import (
     PaperBenchmark,
     PaperExperimentScope,
     resolve_experiment_scope,

@@ -27,8 +27,8 @@ from asterion.applications.product import (
     VerificationProfile,
     VerificationResult,
 )
-from asterion.dci.verification import create_dci_product
-from asterion.dci.services import create_local_corpus_service_factory
+from asterion.capabilities.dci.implementation.reproduction.verification import create_dci_product
+from asterion.capabilities.dci.implementation.services import create_local_corpus_service_factory
 from asterion.capabilities.catalog import CapabilityRef
 from asterion.capabilities.execution import (
     InProcessArtifactPayload,
@@ -814,7 +814,11 @@ class AsterionCliTests(unittest.TestCase):
         value = create_dci_provider()
         return replace(
             value,
-            product=create_dci_product(repo_root=root),
+            product=create_dci_product(
+                repo_root=root,
+                dci_application_provider_factory=lambda: create_dci_provider(),
+                dci_capability_package_factory=lambda: create_dci_package(),
+            ),
         )
 
     def test_dci_acceptance_cli_reports_installed_package_closure(self) -> None:

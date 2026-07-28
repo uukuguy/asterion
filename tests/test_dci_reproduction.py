@@ -14,16 +14,34 @@ from types import MappingProxyType
 from typing import Any, Callable, cast
 from unittest.mock import patch
 
-from asterion.dci import reproduction as reproduction_module
-from asterion.dci.artifacts import DciConversationFeatures
-from asterion.dci.benchmark import BenchmarkRequest, run_benchmark
+from asterion.capabilities.dci.implementation.reproduction import (
+    reproduction as reproduction_module,
+)
+from asterion.capabilities.dci.implementation.evaluation.artifacts import (
+    DciConversationFeatures,
+)
+from asterion.capabilities.dci.implementation.evaluation.benchmark import (
+    BenchmarkRequest,
+    run_benchmark,
+)
 from asterion.dci.cli import main as dci_main
-from asterion.dci.config import DciPaths, DciRuntimeOptions, resolve_dci_paths
-from asterion.dci.experiment_profiles import resolve_experiment_profile
-from asterion.dci.judge import JudgeConfig
-from asterion.dci.paper_benchmarks import canonical_sha256
-from asterion.dci.prompts import prompt_contract_sha256, resolve_prompt_contract
-from asterion.dci.reproduction import (
+from asterion.capabilities.dci.implementation.config import (
+    DciPaths,
+    DciRuntimeOptions,
+    resolve_dci_paths,
+)
+from asterion.capabilities.dci.implementation.research.experiment_profiles import (
+    resolve_experiment_profile,
+)
+from asterion.capabilities.dci.implementation.evaluation.judge import JudgeConfig
+from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import (
+    canonical_sha256,
+)
+from asterion.capabilities.dci.implementation.research.prompts import (
+    prompt_contract_sha256,
+    resolve_prompt_contract,
+)
+from asterion.capabilities.dci.implementation.reproduction.reproduction import (
     RunManifest,
     compare_reproduction,
     compile_run_manifest,
@@ -31,7 +49,7 @@ from asterion.dci.reproduction import (
     load_run_manifest,
     validate_run_manifest,
 )
-from asterion.dci.run import (
+from asterion.capabilities.dci.implementation.runtime.run import (
     DciRunRequest,
     DciRunResult,
     run_pi_research as _real_run_pi_research,
@@ -77,7 +95,10 @@ def _recorded_run(
     _system_prompt_override: Path | None = None,
     _append_system_prompt_override: Path | None = None,
 ) -> DciRunResult:
-    with patch("asterion.dci.run.PiRpcClient", _FixtureClient):
+    with patch(
+        "asterion.capabilities.dci.implementation.runtime.run.PiRpcClient",
+        _FixtureClient,
+    ):
         return _real_run_pi_research(
             paths,
             request,
@@ -606,8 +627,14 @@ class TestDciRunManifestCompiler(unittest.TestCase):
                 real_close(descriptor)
 
             with (
-                patch("asterion.dci.reproduction.os.open", side_effect=open_spy),
-                patch("asterion.dci.reproduction.os.close", side_effect=close_spy),
+                patch(
+                    "asterion.capabilities.dci.implementation.reproduction.reproduction.os.open",
+                    side_effect=open_spy,
+                ),
+                patch(
+                    "asterion.capabilities.dci.implementation.reproduction.reproduction.os.close",
+                    side_effect=close_spy,
+                ),
                 self.assertRaisesRegex(
                     ValueError, "^DCI reproduction manifest write failed$"
                 ) as raised,
@@ -694,10 +721,22 @@ class TestDciRunManifestCompiler(unittest.TestCase):
                 raise OSError("/private/sentinel unlink")
 
             with (
-                patch("asterion.dci.reproduction.os.open", side_effect=open_spy),
-                patch("asterion.dci.reproduction.os.fsync", side_effect=fsync_spy),
-                patch("asterion.dci.reproduction.os.close", side_effect=close_spy),
-                patch("asterion.dci.reproduction.os.unlink", side_effect=unlink_spy),
+                patch(
+                    "asterion.capabilities.dci.implementation.reproduction.reproduction.os.open",
+                    side_effect=open_spy,
+                ),
+                patch(
+                    "asterion.capabilities.dci.implementation.reproduction.reproduction.os.fsync",
+                    side_effect=fsync_spy,
+                ),
+                patch(
+                    "asterion.capabilities.dci.implementation.reproduction.reproduction.os.close",
+                    side_effect=close_spy,
+                ),
+                patch(
+                    "asterion.capabilities.dci.implementation.reproduction.reproduction.os.unlink",
+                    side_effect=unlink_spy,
+                ),
                 self.assertRaisesRegex(
                     ValueError, "^DCI reproduction manifest write failed$"
                 ) as raised,
@@ -1263,9 +1302,10 @@ class TestDciRunManifestCompiler(unittest.TestCase):
                 profile="asterion-safe/pi",
             )
             with patch(
-                "asterion.dci.benchmark.run_pi_research", side_effect=_recorded_run
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research",
+                side_effect=_recorded_run,
             ), patch(
-                "asterion.dci.evaluation.judge_answer_sync",
+                "asterion.capabilities.dci.implementation.evaluation.evaluation.judge_answer_sync",
                 return_value=_verdict(request.judge_config),
             ):
                 run_benchmark(request, paths=resolve_dci_paths(root))
@@ -1338,7 +1378,7 @@ class TestDciRunManifestCompiler(unittest.TestCase):
 
     def test_reproduction_targets_cover_main_ablation_context_and_scaling_matrix(self) -> None:
         payload = json.loads(
-            resources.files("asterion.dci.resources")
+            resources.files("asterion.capabilities.dci.resources")
             .joinpath("reproduction-targets.json")
             .read_text(encoding="utf-8")
         )

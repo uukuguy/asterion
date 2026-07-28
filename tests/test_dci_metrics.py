@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from asterion.dci.benchmark import (
+from asterion.capabilities.dci.implementation.evaluation.benchmark import (
     BenchmarkRequest,
     DciBenchmarkError,
     _metric_contract_for_request,
@@ -17,11 +17,19 @@ from asterion.dci.benchmark import (
     _validate_config_document,
     run_benchmark,
 )
-from asterion.dci.config import DciRuntimeOptions, resolve_dci_paths
-from asterion.dci.judge import JudgeConfig
-from asterion.dci.prompts import prompt_contract_sha256, resolve_prompt_contract
-from asterion.dci.experiment_profiles import resolve_experiment_profile
-from asterion.dci.metrics import (
+from asterion.capabilities.dci.implementation.config import (
+    DciRuntimeOptions,
+    resolve_dci_paths,
+)
+from asterion.capabilities.dci.implementation.evaluation.judge import JudgeConfig
+from asterion.capabilities.dci.implementation.research.prompts import (
+    prompt_contract_sha256,
+    resolve_prompt_contract,
+)
+from asterion.capabilities.dci.implementation.research.experiment_profiles import (
+    resolve_experiment_profile,
+)
+from asterion.capabilities.dci.implementation.evaluation.metrics import (
     MetricError,
     compute_ir_ndcg,
     ndcg_at_k_deduplicated,
@@ -374,8 +382,12 @@ class DciMetricContractTests(unittest.TestCase):
                 analysis=False,
                 figures=False,
             )
-            with patch("asterion.dci.run.PiRpcClient", _MetricFixtureClient), patch(
-                "asterion.dci.benchmark.compute_ir_ndcg", return_value=1.0
+            with patch(
+                "asterion.capabilities.dci.implementation.runtime.run.PiRpcClient",
+                _MetricFixtureClient,
+            ), patch(
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.compute_ir_ndcg",
+                return_value=1.0,
             ) as score:
                 run_benchmark(request, paths=resolve_dci_paths(root))
 
@@ -427,15 +439,18 @@ class DciMetricContractTests(unittest.TestCase):
                     paper_ir_duplicate_handling=handling,
                 )
                 with patch(
-                    "asterion.dci.benchmark.paper_scope_for_profile",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark.paper_scope_for_profile",
                     return_value=None,
                 ), patch(
-                    "asterion.dci.benchmark._prompt_contract_for_request",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark._prompt_contract_for_request",
                     return_value=(safe_prompt, prompt_identity),
                 ), patch(
-                    "asterion.dci.benchmark._has_selected_prompt_contract",
+                    "asterion.capabilities.dci.implementation.evaluation.benchmark._has_selected_prompt_contract",
                     return_value=True,
-                ), patch("asterion.dci.run.PiRpcClient", _MetricFixtureClient):
+                ), patch(
+                    "asterion.capabilities.dci.implementation.runtime.run.PiRpcClient",
+                    _MetricFixtureClient,
+                ):
                     run_benchmark(request, paths=resolve_dci_paths(root))
 
                 summary = json.loads((request.output_root / "summary.json").read_text())
