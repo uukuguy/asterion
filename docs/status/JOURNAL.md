@@ -222,3 +222,7 @@
 - 15:21 Checkpointed Task 3 recovery state so autonomous work resumes at the thin DCI adapter [a59b06f]
 - 15:45 Reduced DCI CLI to thin application adapter with generic benchmark delegation [890138d]
 - 17:17 climb confirmed Plan 4 Task 4: Task 4 approved after three High and one Medium fixes; 123 focused and 719 full passed; make check, promotion, docs, build green [a59b06f..af26301]
+- 17:18 Checkpointed Task 4 recovery state so autonomous work resumes at launcher removal [9cd4f83]
+- 17:51 Removed global DCI launchers to enforce generic benchmark authority [7454b87]
+- 18:05 Marked retired DCI launcher docs superseded while preserving active Plan 4 contract [a80f384]
+- 18:07 climb confirmed Plan 4 Task 5: Task 5 approved after one Important docs-history fix; 93 focused and 682 full passed; obsolete launchers absent and generic security coverage retained [9cd4f83..a80f384]

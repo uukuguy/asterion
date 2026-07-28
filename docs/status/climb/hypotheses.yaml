@@ -91,9 +91,19 @@
       "expected_lift": "+1 completed task",
       "cost_h": 2.0,
       "ranking": 0.8,
-      "status": "in-flight",
+      "status": "confirmed",
       "created_at": "2026-07-28T12:00:00",
-      "results": []
+      "results": [
+        {
+          "session": "2026-07-28-plan4",
+          "cycle": 5,
+          "run": "plan4-climb-h005",
+          "local": 5,
+          "verdict": "confirmed",
+          "decision_reason": "Task 5 approved after one Important docs-history fix; 93 focused and 682 full passed; obsolete launchers absent and generic security coverage retained",
+          "commit_range": "9cd4f83..a80f384"
+        }
+      ]
     },
     {
       "id": "H-006",
@@ -102,7 +112,7 @@
       "expected_lift": "+1 completed task",
       "cost_h": 3.0,
       "ranking": 0.75,
-      "status": "pending",
+      "status": "in-flight",
       "created_at": "2026-07-28T12:00:00",
       "results": []
     },
