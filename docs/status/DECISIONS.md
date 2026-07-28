@@ -6,6 +6,7 @@
 |---|---|---|
 | D-2026-07-26-01 | 🟢 active | Anchor explicit operator configuration to the environment-file directory |
 | D-2026-07-28-01 | 🟢 active | Keep Python source envelopes outside closed portable payload roots |
+| D-2026-07-28-02 | 🟢 active | Keep application acceptance inventory outside package implementation |
 
 ## D-2026-07-26-01 — Operator configuration root
 
@@ -36,3 +37,20 @@
   `dci_research/manifests/` copies remain only until Task 3 migrates readers.
 - Evidence: commit `f686b75`; `tests.test_dci_capability_payload`; independent
   Task 1 review approved.
+
+## D-2026-07-28-02 — Application-owned acceptance inventory
+
+- Status: 🟢 active
+- Decision: Application assembly identities, provider/package factories, and
+  assembly discovery remain in `dci_agent_lite`; package verification accepts
+  one injected immutable application inventory and contains no application
+  path or identity knowledge.
+- Rationale: The DCI package owns portable compatibility, implementation, and
+  resources, while an application owns exact composition and provider
+  exposure. Package-side assembly scanning reverses that dependency.
+- Consequence: Installed acceptance can still validate the complete bundled
+  product, but the same DCI package remains usable from an external provider
+  without importing or naming the first-party application.
+- Evidence: commits `d89c51f` and `fce7ba5`;
+  `tests.test_dci_package_ownership`,
+  `tests.test_dci_complete_application`, and final Task 3 review approved.

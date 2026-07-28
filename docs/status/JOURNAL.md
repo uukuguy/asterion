@@ -215,3 +215,7 @@
 - 12:42 climb confirmed Plan 4 Task 1: 19 focused and 712 full passed; independent review approved [2c1dc36..f686b75]
 - 12:56 Removed PyYAML/CRLF drift so Plan 4 climb recovery is deterministic and self-contained [44c9b30]
 - 13:21 climb confirmed Plan 4 Task 2: 22 focused and 720 full passed; two Important review findings fixed and re-review approved [8855622..5c327c3]
+- 14:08 Moved DCI implementation and resources under its capability package to enforce single ownership [7168667]
+- 14:40 Closed DCI package move regressions to restore authoritative resources, installed entry points, and application-owned acceptance inventory [d89c51f]
+- 15:13 Corrected architecture docs to name the authoritative DCI package payload after re-review [fce7ba5]
+- 15:20 climb confirmed Plan 4 Task 3: Task 3 approved after five Important and one Minor fixes; 731 Python tests, TypeScript 16/16 plus resource check, docs-check, promotion-check PASS [cbc8c0c..fce7ba5]

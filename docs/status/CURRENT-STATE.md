@@ -3,12 +3,12 @@
 ## Project Snapshot
 
 - Project: Asterion
-- Current branch: `main`
+- Current branch: `feature/capability-package-architecture`
 - Theme-level focus: external-first DCI capability-package migration
 - Project route: direct
 - Canonical worklist: approved implementation plans under
   `docs/superpowers/plans/`
-- Active work package: Plan 4 Task 2 — exact DCI benchmark task bindings
+- Active work package: Plan 4 Task 4 — thin DCI application adapter
 
 ## Current Architecture
 
@@ -20,7 +20,8 @@
   host-service protocols.
 - TypeScript validates shared contracts and Node integration; Rust owns
   controlled process execution.
-- DCI remains a bundled product above domain-neutral framework modules.
+- DCI remains a bundled product above domain-neutral framework modules, with
+  one package-owned implementation and resource tree.
 - Generic protocols are Asterion-owned; built-in is one source form; generic
   benchmark planning, execution, evidence, cancellation, and resume are
   implemented under `src/asterion/benchmarks/`.
@@ -29,31 +30,40 @@
 - The DCI Python/source envelope owns a closed portable `dci@1.0.0` payload
   below `src/asterion/capabilities/dci/payload/`, with exact 12/13/15-task
   GitHub, paper-main, and union suites.
+- All DCI domain implementation and 38 packaged resources now live below
+  `src/asterion/capabilities/dci/`; the legacy `asterion.dci` namespace has
+  only its transitional `__init__.py` and `cli.py`.
+- Installed host-service entry points, TypeScript resource synchronization,
+  wheel contents, and the transitional provider shell all resolve the
+  authoritative package-owned implementation and payload.
+- Application assembly inventory and acceptance identities are application
+  owned and injected into package verification as immutable values.
 - The approved migration proves DCI as an installed extension before exposing
   the identical portable payload through the built-in adapter.
 - Installed provider resources stay package-rooted; explicit DCI operator
   configuration is rooted at the selected environment file for preflight and
   basic execution.
-- `src/asterion/dci/experiment_profiles.py` owns one-use execution authority,
-  exact scope/selection plans, budgets, private output identities, and immutable
+- DCI package implementation owns one-use execution authority, exact
+  scope/selection plans, budgets, private output identities, and immutable
   dataset bindings.
 - `src/asterion/dci/cli.py` keeps reproduction plan-only by default; explicit
   execution requires exact scope, limit, private output root, and five positive
   operation/cost caps.
-- `src/asterion/dci/benchmark.py` revalidates complete scope, bounded selection,
+- Package-owned benchmark code revalidates complete scope, bounded selection,
   raw dataset content, benchmark identity, and descriptor identity before
   authority consumption or Agent/Judge work.
-- `src/asterion/dci/reproduction.py` compiles locked body-free RunManifest
+- Package-owned reproduction code compiles locked body-free RunManifest
   evidence and writes it descriptor-safely outside closed batch roots.
 - Canonical `limit-N` evidence is non-full, non-comparable,
   `External-limited`, and cannot produce an acceptance PASS.
 
 ## Open Problems (theme-level)
 
-- Plan 4 Tasks 2-8 remain; current source still contains top-level
-  `asterion.dci`, transitional `dci_research`, and root benchmark launchers.
-- Transitional `dci_research/manifests/` copies remain until Task 3 migrates
-  their provider, identity, and test consumers to the portable DCI payload.
+- Plan 4 Tasks 4-8 remain; current source still contains the transitional
+  `asterion.dci` CLI/top-level adapter, the `dci_research` provider shell, and
+  root benchmark launchers.
+- Task 4 must replace the transitional DCI CLI with an application adapter and
+  remove the final legacy `asterion.dci` files.
 - Provider-backed bounded reproduction still requires fresh exact finite
   authorization, an operator-selected private output root, and any
   scope-specific external datasets.
@@ -95,11 +105,11 @@
 - `src/asterion/runtime/protocol.py` — public runtime protocol
 - `src/asterion/packages/composition.py` — deterministic package composition
 - `src/asterion/runner/application.py` — resolved application execution
-- `src/asterion/dci/experiment_profiles.py` — DCI profiles and authority
-- `src/asterion/dci/cli.py` — DCI plan/preflight/execute orchestration
-- `src/asterion/dci/verification.py` — product readiness and bounded verification
-- `src/asterion/dci/benchmark.py` — bounded benchmark execution
-- `src/asterion/dci/reproduction.py` — evidence compilation and comparison
+- `src/asterion/dci/cli.py` — transitional DCI CLI removed by Task 4
+- `src/asterion/applications/dci_agent_lite/provider.py` — DCI application
+  ownership, exact assemblies, and injected acceptance inventory
+- `src/asterion/capabilities/dci/implementation/` — DCI domain implementation
+- `src/asterion/capabilities/dci/resources/` — authoritative packaged resources
 - `src/asterion/capabilities/dci/payload/` — exact portable DCI package closure
 - `schemas/` — canonical cross-language protocol schemas
 
@@ -109,7 +119,7 @@
 2. Read `RESUME-NEXT-SESSION.md` for the next concrete action.
 3. Read `MEMORY.md` for collaboration rules and corrected feedback.
 4. Run `git status --short` and `git log --oneline -5`.
-5. Continue Plan 4 Task 2 in the isolated capability-package worktree.
+5. Continue Plan 4 Task 4 in the isolated capability-package worktree.
 6. Treat external execution as unauthorized unless the operator supplies a new
    exact scope, limit, private output root, and five finite positive caps.
 7. Keep any bounded result `External-limited`; never promote it to full-paper
