@@ -199,4 +199,5 @@
 - 17:16 Added closed-world benchmark suite and exact binding resolution [78ad75b]
 - 17:28 Bound benchmark execution resolution to exact source-lock identities [0d8d442]
 - 09:02 Added descriptor-bound private benchmark evidence with strict resume identity [295e820]
+- 09:15 Added sequential benchmark execution with bounded process-tree cancellation [c02c3b4]
 - 08:05 Created deterministic, bounded and provider-free benchmark plans [ef9df27]
