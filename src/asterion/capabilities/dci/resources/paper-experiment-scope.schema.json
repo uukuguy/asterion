@@ -12,14 +12,14 @@
     "scope": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["scope_id", "dataset_id", "experiment", "source_family", "source_reference", "launcher_origin", "selection_mode", "selection_kind", "selection_count", "selection_seed", "selection_seed_status", "selection_algorithm", "selected_ids_sha256", "execution_class"],
+      "required": ["scope_id", "dataset_id", "experiment", "source_family", "source_reference", "binding_origin", "selection_mode", "selection_kind", "selection_count", "selection_seed", "selection_seed_status", "selection_algorithm", "selected_ids_sha256", "execution_class"],
       "properties": {
         "scope_id": {"type": "string", "minLength": 1},
         "dataset_id": {"type": "string", "minLength": 1},
         "experiment": {"type": "string", "minLength": 1},
         "source_family": {"enum": ["paper-reference", "upstream-github"]},
         "source_reference": {"type": "string", "minLength": 1},
-        "launcher_origin": {"enum": ["upstream-github", "asterion-added", "unavailable"]},
+        "binding_origin": {"enum": ["upstream-github", "asterion-added", "unavailable"]},
         "selection_mode": {"enum": ["all", "deterministic-sample", "random-sample", "fixed-selected-ids"]},
         "selection_kind": {"enum": ["full", "random-sample", "fixed-selected-ids"]},
         "selection_count": {"type": "integer", "minimum": 1},

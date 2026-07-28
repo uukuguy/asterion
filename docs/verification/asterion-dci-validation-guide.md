@@ -185,11 +185,36 @@ uv run asterion run \
   --input "Research the local corpus."
 ```
 
-## Benchmark and launcher verification
+## Benchmark Verification
 
-All fourteen launchers compute their own project root. Data and corpus defaults
-come from `ASTERION_DCI_RESOURCE_ROOT`, falling back to the project root. Use an
-explicit small limit for a bounded probe:
+Generic benchmark planning is provider-free and plan-only by default. It
+resolves exact application, suite, source-lock, and payload identities without
+loading task implementations or creating evidence:
+
+```bash
+uv run asterion benchmark plan \
+  --application dci@1.0.0 \
+  --suite dci.github@1.0.0
+```
+
+The DCI product wrapper exposes the same plan/run/resume boundary for operator
+configuration:
+
+```bash
+uv run asterion-dci benchmark plan --suite dci.github@1.0.0
+uv run asterion-dci benchmark run --suite dci.github@1.0.0 --execute
+uv run asterion-dci benchmark resume --suite dci.github@1.0.0 --run-id RUN --execute
+```
+
+The packaged suite IDs are `dci.github@1.0.0` with 12 tasks,
+`dci.paper-main@1.0.0` with 13 tasks, and `dci.all@1.0.0` with 15 tasks. Runs
+require explicit authorization in the current invocation through `--execute`.
+Evidence is private under the selected evidence root, and resume accepts only
+identity-compatible evidence for the same application, suite, source locks,
+payload locks, ordered tasks, and case limit. Dataset and corpus paths come
+from application/operator configuration, not package manifests.
+
+Before any real probe, validate external resource readiness without a provider:
 
 ```bash
 make check-resources-benchmark
@@ -197,27 +222,10 @@ make check-resources-benchmark
 make setup-resources-benchmark
 ```
 
-```bash
-ASTERION_DCI_RESOURCE_ROOT=/absolute/path/to/resources \
-  bash scripts/qa/run_hotpotqa_dev_sample50.sh --limit 1
-ASTERION_DCI_RESOURCE_ROOT=/absolute/path/to/resources \
-  bash scripts/bright/run_bio.sh --limit 1
-ASTERION_DCI_RESOURCE_ROOT=/absolute/path/to/resources \
-  bash scripts/beir/benchmark_arguana.sh --limit 1
-ASTERION_DCI_RESOURCE_ROOT=/absolute/path/to/resources \
-  bash scripts/bcplus_eval/run_bcplus_eval_openai.sh level3 high --limit 1
-```
-
-Before any real probe, validate syntax and path resolution without a provider:
-
-```bash
-find scripts -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
-uv run python -m unittest -v tests.test_standalone_launchers
-```
-
-The profile registry covers BC+, six QA datasets, four BRIGHT datasets, and two
-BEIR datasets. `benchmark` supports finite limits, concurrency, exact reuse,
-Judge cache identity, QA/IR modes, analysis, figures, and body-free exports.
+The logical binding registry covers BC+, six QA datasets, four BRIGHT datasets,
+and two BEIR datasets. `benchmark` supports finite limits, concurrency, exact
+reuse, Judge cache identity, QA/IR modes, analysis, figures, and body-free
+exports.
 Full-dataset execution is **Not rerun** and requires separate authorization.
 
 Paper reproduction has its own provider-free plan gate:
@@ -308,8 +316,9 @@ Pass criteria:
 The parent DCI-Agent-Lite workspace retains the original DCI baseline and its
 cross-product verifier. `tools/verify_asterion_dci_product.py` is **mixed-repository only**
 and is intentionally absent here. Its historical
-mixed-repository result covered `538/538` delegated selectors, `12/12` launcher
-pairs, product rows, extra batch selectors, and retained bounded evidence.
+mixed-repository result covered `538/538` delegated selectors, `12/12`
+historical shell-entry pairs, product rows, extra batch selectors, and retained
+bounded evidence.
 
 That history supports migration confidence but is not a current standalone
 acceptance criterion. A promoted repository should run package-owned acceptance
@@ -320,7 +329,7 @@ workspace.
 
 - If acceptance searches outside this root, treat it as a packaging defect; do
   not point it at a parent verifier.
-- If a launcher cannot find data, set `ASTERION_DCI_RESOURCE_ROOT`; do not copy
+- If a benchmark cannot find data, set `ASTERION_DCI_RESOURCE_ROOT`; do not copy
   corpora or datasets into the wheel.
 - If Pi is missing or at the wrong revision, repair `DCI_PI_DIR`; do not edit or
   vendor the external checkout as part of Asterion verification.

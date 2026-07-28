@@ -2,7 +2,7 @@
 
 Asterion is a composable, multi-runtime agent application framework. This
 repository contains the Python framework, built-in controlled-code and DCI
-application providers, schemas, examples, launchers, TypeScript runtime
+application providers, schemas, examples, TypeScript runtime
 components, and a Rust controlled executor.
 
 ## Installation
@@ -71,9 +71,9 @@ again.
 `ASTERION_DCI_RESOURCE_ROOT` is the parent of external `corpus/` and `data/`
 trees. `make setup-resources-basic` prepares only `corpus/wiki_corpus` and
 `corpus/bc_plus_docs`. `make setup-resources-benchmark` handles available
-declared sources and reports every unavailable/gated launcher path with its
-expected upstream; it never substitutes another corpus. Use the corresponding
-`check-resources-*` targets for read-only checks.
+package-declared dataset/corpus sources and reports every unavailable or gated
+resource path with its expected upstream; it never substitutes another corpus.
+Use the corresponding `check-resources-*` targets for read-only checks.
 
 Local corpus access means Asterion points Pi or Claude Code at operator-owned
 files instead of a hosted retrieval service. It does not mean every relevant

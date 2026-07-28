@@ -33,6 +33,21 @@ _EXPECTED_DATASET_IDS = (
     "qa.nq",
     "qa.triviaqa",
 )
+_EXPECTED_BENCHMARK_BINDING_IDS = {
+    "beir.arguana": "beir.arguana",
+    "beir.scifact": "beir.scifact",
+    "bright.biology": "bright.biology",
+    "bright.earth-science": "bright.earth-science",
+    "bright.economics": "bright.economics",
+    "bright.robotics": "bright.robotics",
+    "browsecomp-plus": "bcplus.main",
+    "qa.2wikimultihopqa": "qa.2wikimultihopqa",
+    "qa.bamboogle": "qa.bamboogle.paper-full125",
+    "qa.hotpotqa": "qa.hotpotqa",
+    "qa.musique": "qa.musique",
+    "qa.nq": "qa.nq",
+    "qa.triviaqa": "qa.triviaqa",
+}
 _EXPECTED_SCOPE_IDS = (
     "beir.arguana.main.random50",
     "beir.scifact.main.random50",
@@ -90,10 +105,10 @@ _DATASET_FIELDS = frozenset(
         "judge_contract",
         "bounded_fixture",
         "batch_profile",
-        "launcher",
+        "benchmark_binding_id",
         "source_family",
         "source_reference",
-        "launcher_origin",
+        "binding_origin",
         "selection_kind",
         "selection_count",
         "selection_seed_status",
@@ -107,7 +122,7 @@ _SCOPE_FIELDS = frozenset(
         "experiment",
         "source_family",
         "source_reference",
-        "launcher_origin",
+        "binding_origin",
         "selection_mode",
         "selection_kind",
         "selection_count",
@@ -132,10 +147,10 @@ _DATASET_PROPERTY_SCHEMAS = {
     "judge_contract": {"type": ["string", "null"]},
     "bounded_fixture": {"type": "string", "minLength": 1},
     "batch_profile": {"type": ["string", "null"], "minLength": 1},
-    "launcher": {"type": ["string", "null"], "minLength": 1},
+    "benchmark_binding_id": {"type": "string", "minLength": 1},
     "source_family": {"const": "paper-reference"},
     "source_reference": {"const": _PAPER_SOURCE_REFERENCE},
-    "launcher_origin": {"enum": ["upstream-github", "asterion-added"]},
+    "binding_origin": {"enum": ["upstream-github", "asterion-added"]},
     "selection_kind": {"const": "full"},
     "selection_count": {"type": "integer", "minimum": 1},
     "selection_seed_status": {"const": "reported"},
@@ -147,7 +162,7 @@ _SCOPE_PROPERTY_SCHEMAS = {
     "experiment": {"type": "string", "minLength": 1},
     "source_family": {"enum": ["paper-reference", "upstream-github"]},
     "source_reference": {"type": "string", "minLength": 1},
-    "launcher_origin": {
+    "binding_origin": {
         "enum": ["upstream-github", "asterion-added", "unavailable"]
     },
     "selection_mode": {
@@ -261,10 +276,10 @@ class PaperBenchmark:
     judge_contract: str | None
     bounded_fixture: str
     batch_profile: str | None
-    launcher: str | None
+    benchmark_binding_id: str
     source_family: str
     source_reference: str
-    launcher_origin: str
+    binding_origin: str
     selection_kind: str
     selection_count: int
     selection_seed_status: str
@@ -369,7 +384,7 @@ class PaperExperimentScope:
     experiment: str
     source_family: str
     source_reference: str
-    launcher_origin: str
+    binding_origin: str
     selection_mode: str
     selection_kind: str
     selection_count: int
@@ -596,14 +611,6 @@ def _is_safe_relative_path(value: str) -> bool:
     return bool(value) and not path.is_absolute() and ".." not in path.parts
 
 
-def _is_launcher_path(value: object) -> bool:
-    return (
-        type(value) is str
-        and value.startswith("scripts/")
-        and _is_safe_relative_path(value)
-    )
-
-
 def _require_string(value: object) -> str:
     if type(value) is not str or not value:
         raise RuntimeError("DCI paper benchmark contract is invalid")
@@ -637,6 +644,7 @@ def _benchmarks() -> Mapping[str, PaperBenchmark]:
         mode = item["mode"]
         profile = profiles.get(item["batch_profile"])
         fixture = fixtures.get(item["bounded_fixture"])
+        binding_id = item["benchmark_binding_id"]
         qa_contract = (
             mode == "qa"
             and family in {"agentic-search", "knowledge-qa"}
@@ -656,12 +664,12 @@ def _benchmarks() -> Mapping[str, PaperBenchmark]:
             and profile.get("dataset") == item["dataset_path"]
             and profile.get("corpus") == item["corpus_path"]
             and profile.get("mode") == mode
-            and _is_launcher_path(item["launcher"])
+            and binding_id == _EXPECTED_BENCHMARK_BINDING_IDS.get(dataset_id)
         )
         intentionally_unbound = (
             dataset_id == "qa.bamboogle"
             and item["batch_profile"] is None
-            and item["launcher"] == "scripts/qa/run_bamboogle_test_sample50.sh"
+            and binding_id == "qa.bamboogle.paper-full125"
             and item["dataset_path"] == "paper-full/data/bamboogle/test-125.jsonl"
         )
         expected_origin = (
@@ -672,7 +680,7 @@ def _benchmarks() -> Mapping[str, PaperBenchmark]:
         source_contract = (
             item["source_family"] == "paper-reference"
             and item["source_reference"] == _PAPER_SOURCE_REFERENCE
-            and item["launcher_origin"] == expected_origin
+            and item["binding_origin"] == expected_origin
             and item["selection_kind"] == "full"
             and item["selection_count"] == source_count
             and item["selection_seed_status"] == "reported"
@@ -695,7 +703,6 @@ def _benchmarks() -> Mapping[str, PaperBenchmark]:
             "source_count",
             "judge_contract",
             "batch_profile",
-            "launcher",
             "selection_count",
         }:
             _require_string(item[field])
@@ -761,7 +768,7 @@ def _scopes() -> Mapping[str, PaperExperimentScope]:
             scope_id == "qa.bamboogle.upstream.sample50"
             and item["source_family"] == "upstream-github"
             and item["source_reference"] == _UPSTREAM_BAMBOOGLE_SOURCE_REFERENCE
-            and item["launcher_origin"] == "upstream-github"
+            and item["binding_origin"] == "upstream-github"
             and mode == "fixed-selected-ids"
             and item["selection_kind"] == "fixed-selected-ids"
             and seed is None
@@ -786,7 +793,7 @@ def _scopes() -> Mapping[str, PaperExperimentScope]:
         paper_source_contract = (
             item["source_family"] == "paper-reference"
             and item["source_reference"] == _PAPER_SOURCE_REFERENCE
-            and item["launcher_origin"] == expected_origin
+            and item["binding_origin"] == expected_origin
             and item["execution_class"] == "paper-full"
         )
         if (

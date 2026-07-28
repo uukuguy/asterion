@@ -177,7 +177,7 @@ uv run asterion-dci paper reproduce \
 ```
 
 执行时 `--scope` 必须逐个重复传入、整体按字典序排序；每个 scope 都必须属于所选
-profile、来源为 `paper-reference`、执行类为 `paper-full`、launcher 可用、存在 batch
+profile、来源为 `paper-reference`、执行类为 `paper-full`、binding 可用、存在 batch
 profile，并且完整 selection 与 source identity 一致。`--execute` 不替代 operator
 approval，预算值、凭据、环境、cache、旧证据也都不会单独授予 authority。即使所选 IR
 计划预期 Judge operation 为零，接口仍要求正数的 Judge operation cap。
@@ -198,7 +198,7 @@ answer、corpus text、provider payload、raw output 或凭据。后续 `paper c
 
 目前 `paper_full_executable` 必须从完整 method/target closure 推导，而不是从清单数量推导：
 13 个 dataset identity 和 16 个 paper scope 已打包，但 Bamboogle 论文完整 125 条没有 batch
-profile，BrowseComp+ 的 analysis、appendix-a1、context-ablation scopes 的 launcher origin 为
+profile，BrowseComp+ 的 analysis、appendix-a1、context-ablation scopes 的 binding origin 为
 `unavailable`，因此完整 profile 仍不是 full executable。
 
 ## Benchmark DCI-Agent-Lite
@@ -215,49 +215,54 @@ uv run asterion-dci benchmark \
 
 Dataset row identity、运行配置、corpus、runtime/Judge request shape 和 implementation digest 共同决定是否可以 reuse。临时文件不是成功输出，缺失/失败行不会被汇总为通过。
 
-历史迁移曾在父工作区执行 original/Asterion 对照。Historical mixed-repository 的 `538/538` selector 和 `12/12` launcher pair 是 **mixed-repository only** 证据，不是当前 standalone acceptance。
+历史迁移曾在父工作区执行 original/Asterion 对照。Historical mixed-repository 的 `538/538` selector 和 `12/12` shell-entry pair 是 **mixed-repository only** 证据，不是当前 standalone acceptance。
 
-## 数据集、Profile 与 Launcher
+## 数据集、Suite 与 Binding
 
-安装资源包含 14 个 profile：
+安装资源包含 13 个 paper dataset identity、16 个 paper scope，以及 3 个可运行的 benchmark suite：
 
-- BC+：`bcplus.level3`、`bcplus.openai`
-- QA：`qa.2wikimultihopqa`、`qa.bamboogle`、`qa.hotpotqa`、`qa.musique`、`qa.nq`、`qa.triviaqa`
-- BRIGHT：`bright.biology`、`bright.earth-science`、`bright.economics`、`bright.robotics`
-- BEIR：`beir.arguana`、`beir.scifact`
+- `dci.github@1.0.0`：12 个任务，默认 case limit 为 50。
+- `dci.paper-main@1.0.0`：13 个任务，默认 case limit 为 125。
+- `dci.all@1.0.0`：15 个任务，默认 case limit 为 125。
 
-14 个 standalone launcher 位于：
+通用 framework 入口先生成 plan，不执行 provider 或 Judge：
 
-```text
-scripts/bcplus_eval/run_L3.sh
-scripts/bcplus_eval/run_bcplus_eval_openai.sh
-scripts/qa/run_2wikimultihopqa_dev_sample50.sh
-scripts/qa/run_bamboogle_test_sample50.sh
-scripts/qa/run_hotpotqa_dev_sample50.sh
-scripts/qa/run_musique_dev_sample50.sh
-scripts/qa/run_nq_test_sample50.sh
-scripts/qa/run_triviaqa_test_sample50.sh
-scripts/bright/run_bio.sh
-scripts/bright/run_earth_science.sh
-scripts/bright/run_economics.sh
-scripts/bright/run_robotics.sh
-scripts/beir/benchmark_arguana.sh
-scripts/beir/benchmark_scifact.sh
+```bash
+uv run asterion benchmark plan \
+  --application dci@1.0.0 \
+  --suite dci.all@1.0.0
 ```
 
-这些 launcher 覆盖的来源必须与论文数据集 identity 分开读取：锁定的上游 GitHub
-commit 有 12 个 launcher、11 个唯一数据集；Asterion 在此基础上新增 ArguAna 和
-SciFact 两个 BEIR launcher，因此本仓库有 13 个数据集 identity 和 14 个 standalone
-launcher。所有 13 个数据集 row 仍是论文 `arxiv:2605.05242v1` 的完整数据集
-identity；launcher 只记录可追溯的执行入口，不能授权不同的选择范围。涉及论文未报告的
-selection seeds、重复处理、segment 大小或 evidence overlap 的位置必须保留
-`paper-unreported` 或 `asterion-defined` 标签，不能静默提升为论文事实。
+显式执行必须在当前命令传入 `--execute`：
 
-尤其是 Bamboogle 的论文完整 scope 是 125 条、`paper-reference`、`paper-full`，而
-锁定上游 launcher 的固定 50-ID scope 是 `upstream-github`、`upstream-reference`。
-二者是不兼容的 scope：sample-50 launcher 不绑定、也不授权论文完整的 125 条数据集。
+```bash
+uv run asterion benchmark run \
+  --application dci@1.0.0 \
+  --suite dci.github@1.0.0 \
+  --case-limit 1 \
+  --execute
+uv run asterion-dci benchmark plan --suite dci.paper-main@1.0.0
+uv run asterion-dci benchmark run --suite dci.github@1.0.0 --execute
+uv run asterion-dci benchmark resume --suite dci.github@1.0.0 --run-id RUN --execute
+```
 
-它们都从自身位置解析项目根，通过 `uv run --project "$PROJECT_ROOT"` 运行。数据/corpus 默认位于项目根，也可显式放在 `ASTERION_DCI_RESOURCE_ROOT`。实际运行前必须使用有限 `--limit`。
+DCI binding IDs are exact logical implementation contracts, not executable
+paths: `bcplus.level3`, `bcplus.main`, `beir.arguana`, `beir.scifact`,
+`bright.biology`, `bright.earth-science`, `bright.economics`,
+`bright.robotics`, `qa.2wikimultihopqa`, `qa.bamboogle.github-sample50`,
+`qa.bamboogle.paper-full125`, `qa.hotpotqa`, `qa.musique`, `qa.nq`, and
+`qa.triviaqa`. Dataset and corpus paths are supplied by application/operator
+configuration under the selected resource root; package manifests only declare
+compatibility. Evidence is private under the selected evidence root, and resume
+accepts only identity-compatible evidence for the same application, suite,
+source locks, payload locks, ordered tasks, and case limit.
+
+Benchmark provenance must still be read separately from paper dataset
+identity. All 13 dataset rows remain complete paper dataset identities for
+`arxiv:2605.05242v1`; binding IDs only name Asterion execution contracts and
+do not authorize a different selection range. Bamboogle’s paper-full scope is
+125 rows, `paper-reference`, and `paper-full`; the upstream fixed 50-ID scope is
+`upstream-github` and `upstream-reference`. They are incompatible scopes.
 
 ## 指标、分析、图表与导出
 

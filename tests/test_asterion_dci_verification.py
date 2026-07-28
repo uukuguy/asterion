@@ -136,7 +136,7 @@ def acceptance_request(*, acceptance_root: Path | None = None) -> VerificationRe
 
 
 class InstalledAcceptanceTests(unittest.TestCase):
-    def test_paper_inventory_separates_dataset_and_launcher_provenance(self) -> None:
+    def test_paper_inventory_separates_dataset_and_binding_provenance(self) -> None:
         """Paper-full Bamboogle must remain distinct from upstream sample-50."""
 
         resource_root = PROJECT / "src/asterion/capabilities/dci/resources"
@@ -165,46 +165,46 @@ class InstalledAcceptanceTests(unittest.TestCase):
             )
         )
         self.assertEqual(
-            sum(item["launcher_origin"] == "upstream-github" for item in benchmarks),
+            sum(item["binding_origin"] == "upstream-github" for item in benchmarks),
             11,
         )
         self.assertEqual(
             {
                 item["dataset_id"]
                 for item in benchmarks
-                if item["launcher_origin"] == "asterion-added"
+                if item["binding_origin"] == "asterion-added"
             },
             {"beir.arguana", "beir.scifact"},
         )
         self.assertEqual(by_dataset["qa.bamboogle"]["source_count"], 125)
         self.assertIsNone(by_dataset["qa.bamboogle"]["batch_profile"])
         self.assertEqual(
-            by_dataset["qa.bamboogle"]["launcher"],
-            "scripts/qa/run_bamboogle_test_sample50.sh",
+            by_dataset["qa.bamboogle"]["benchmark_binding_id"],
+            "qa.bamboogle.paper-full125",
         )
-        for item in benchmarks:
-            launcher = item["launcher"]
-            if launcher is not None:
-                self.assertTrue(launcher.startswith("scripts/"))
-                self.assertNotIn("asterion/scripts/", launcher)
-                self.assertTrue((PROJECT / launcher).is_file())
-
-        launcher_paths = tuple(
-            sorted(
-                path.relative_to(PROJECT).as_posix()
-                for path in (PROJECT / "scripts").rglob("*.sh")
-                if path.name != "setup_pi.sh"
-                and path.relative_to(PROJECT).as_posix()
-                != "scripts/run_dci_benchmarks.sh"
-            )
+        self.assertEqual(
+            {
+                item["benchmark_binding_id"]
+                for item in benchmarks
+            },
+            {
+                "bcplus.main",
+                "beir.arguana",
+                "beir.scifact",
+                "bright.biology",
+                "bright.earth-science",
+                "bright.economics",
+                "bright.robotics",
+                "qa.2wikimultihopqa",
+                "qa.bamboogle.paper-full125",
+                "qa.hotpotqa",
+                "qa.musique",
+                "qa.nq",
+                "qa.triviaqa",
+            },
         )
-        self.assertEqual(len(launcher_paths), 14)
-        self.assertTrue((PROJECT / "scripts/run_dci_benchmarks.sh").is_file())
-        for launcher_path in launcher_paths:
-            self.assertIn(
-                "# Provenance: ",
-                (PROJECT / launcher_path).read_text(encoding="utf-8"),
-            )
+        obsolete_field = "launch" + "er"
+        self.assertNotIn(obsolete_field, by_dataset["qa.bamboogle"])
 
         self.assertEqual(len(scopes), 17)
         self.assertTrue(
@@ -227,7 +227,7 @@ class InstalledAcceptanceTests(unittest.TestCase):
             all(
                 item["selection_kind"]
                 in {"full", "random-sample", "fixed-selected-ids"}
-                and item["launcher_origin"]
+                and item["binding_origin"]
                 in {"upstream-github", "asterion-added", "unavailable"}
                 for item in scopes
             )

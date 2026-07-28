@@ -8,6 +8,63 @@ from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parents[1]
 BENCHMARK_SOURCE = PROJECT / "src/asterion/benchmarks"
+_OBSOLETE_DCI_BENCHMARK_SURFACES = (
+    "tools/dci_benchmark_orchestrator.py",
+    "tools/run_dci_benchmarks.py",
+    "scripts/run_dci_benchmarks.sh",
+    "scripts/bcplus_eval/run_L3.sh",
+    "scripts/bcplus_eval/run_bcplus_eval_openai.sh",
+    "scripts/beir/benchmark_arguana.sh",
+    "scripts/beir/benchmark_scifact.sh",
+    "scripts/bright/run_bio.sh",
+    "scripts/bright/run_earth_science.sh",
+    "scripts/bright/run_economics.sh",
+    "scripts/bright/run_robotics.sh",
+    "scripts/qa/run_2wikimultihopqa_dev_sample50.sh",
+    "scripts/qa/run_bamboogle_test_sample50.sh",
+    "scripts/qa/run_hotpotqa_dev_sample50.sh",
+    "scripts/qa/run_musique_dev_sample50.sh",
+    "scripts/qa/run_nq_test_sample50.sh",
+    "scripts/qa/run_triviaqa_test_sample50.sh",
+    "tests/test_dci_benchmark_orchestrator.py",
+)
+_OBSOLETE_DCI_BENCHMARK_TOKENS = (
+    "tools/dci_benchmark_orchestrator.py",
+    "tools/run_dci_benchmarks.py",
+    "scripts/run_dci_benchmarks.sh",
+    "dci_benchmark_orchestrator",
+    "run_dci_benchmarks.py",
+    "run_dci_benchmarks.sh",
+    "scripts/bcplus_eval/run_L3.sh",
+    "scripts/bcplus_eval/run_bcplus_eval_openai.sh",
+    "scripts/beir/benchmark_arguana.sh",
+    "scripts/beir/benchmark_scifact.sh",
+    "scripts/bright/run_bio.sh",
+    "scripts/bright/run_earth_science.sh",
+    "scripts/bright/run_economics.sh",
+    "scripts/bright/run_robotics.sh",
+    "scripts/qa/run_2wikimultihopqa_dev_sample50.sh",
+    "scripts/qa/run_bamboogle_test_sample50.sh",
+    "scripts/qa/run_hotpotqa_dev_sample50.sh",
+    "scripts/qa/run_musique_dev_sample50.sh",
+    "scripts/qa/run_nq_test_sample50.sh",
+    "scripts/qa/run_triviaqa_test_sample50.sh",
+    '"launcher"',
+    "launcher_origin",
+)
+_ACTIVE_BOUNDARY_ROOTS = (
+    "README.md",
+    "Makefile",
+    "docs/README.md",
+    "docs/architecture.md",
+    "docs/cli.md",
+    "docs/architecture",
+    "docs/guides",
+    "docs/operator",
+    "docs/verification",
+    "src",
+    "tests",
+)
 
 _FORBIDDEN_IMPORT_PREFIXES = (
     "asterion.dci",
@@ -137,7 +194,129 @@ def _names_below(node: ast.AST) -> frozenset[str]:
     return frozenset(names)
 
 
+def _active_boundary_files() -> tuple[Path, ...]:
+    files: set[Path] = set()
+    for root_name in _ACTIVE_BOUNDARY_ROOTS:
+        root = PROJECT / root_name
+        if not root.exists():
+            continue
+        if root.is_file():
+            files.add(root)
+            continue
+        for path in root.rglob("*"):
+            if path.is_file() and path.suffix in {
+                ".json",
+                ".md",
+                ".py",
+                ".sh",
+                ".toml",
+                ".yaml",
+                ".yml",
+            }:
+                files.add(path)
+    return tuple(sorted(files))
+
+
 class GenericBenchmarkProjectBoundaryTests(unittest.TestCase):
+    def test_obsolete_global_dci_benchmark_surfaces_are_absent(self) -> None:
+        existing = tuple(
+            relative
+            for relative in _OBSOLETE_DCI_BENCHMARK_SURFACES
+            if (PROJECT / relative).exists()
+        )
+        self.assertEqual(existing, ())
+
+    def test_active_tree_has_no_per_task_benchmark_launcher_references(self) -> None:
+        violations: list[tuple[str, str]] = []
+        for path in _active_boundary_files():
+            relative = path.relative_to(PROJECT).as_posix()
+            if relative == "tests/test_project_boundaries.py":
+                continue
+            text = path.read_text(encoding="utf-8")
+            for token in _OBSOLETE_DCI_BENCHMARK_TOKENS:
+                if token in text:
+                    violations.append((relative, token))
+        self.assertEqual(violations, [])
+
+    def test_deleted_orchestrator_security_behaviors_are_mapped_to_generic_tests(
+        self,
+    ) -> None:
+        import tests.test_benchmark_evidence as evidence_tests
+        import tests.test_benchmark_execution as execution_tests
+
+        coverage = {
+            "private directories and evidence file modes": (
+                evidence_tests.BenchmarkEvidenceTests,
+                "test_every_created_directory_and_file_is_private_under_permissive_umask",
+            ),
+            "preexisting symlinked run directory rejection": (
+                evidence_tests.BenchmarkEvidenceTests,
+                "test_preexisting_symlinked_run_directory_is_rejected",
+            ),
+            "symlink replacement between validation and write": (
+                evidence_tests.BenchmarkEvidenceTests,
+                "test_symlink_replacement_between_validation_and_write_is_rejected",
+            ),
+            "nonregular or multiply linked evidence member rejection": (
+                evidence_tests.BenchmarkEvidenceTests,
+                "test_nonregular_or_multiply_linked_evidence_member_is_rejected",
+            ),
+            "atomic descriptor-bound evidence replacement": (
+                evidence_tests.BenchmarkEvidenceTests,
+                "test_atomic_fsync_replace_stays_inside_the_opened_run_descriptor",
+            ),
+            "body-free public serialization": (
+                evidence_tests.BenchmarkEvidenceTests,
+                "test_only_allowlisted_descriptors_statuses_and_digests_are_serialized",
+            ),
+            "resume accepts only exact complete identity": (
+                evidence_tests.BenchmarkEvidenceTests,
+                "test_resume_accepts_only_the_exact_complete_plan_identity",
+            ),
+            "corrupt or extended resume evidence rejection": (
+                evidence_tests.BenchmarkEvidenceTests,
+                "test_resume_rejects_missing_incomplete_corrupt_or_extended_evidence",
+            ),
+            "noncontiguous and mismatched lifecycle rejection": (
+                evidence_tests.BenchmarkEvidenceTests,
+                "test_lifecycle_rejects_noncontiguous_or_mismatched_updates",
+            ),
+            "sequential stop after first task failure": (
+                execution_tests.BenchmarkExecutionTests,
+                "test_first_failure_stops_later_tasks",
+            ),
+            "pre-task cancellation starts no child work": (
+                execution_tests.BenchmarkExecutionTests,
+                "test_pre_task_cancellation_starts_nothing",
+            ),
+            "mid-task cancellation stops later tasks": (
+                execution_tests.BenchmarkExecutionTests,
+                "test_mid_task_cancellation_reaches_executor_and_stops_later_tasks",
+            ),
+            "executor exceptions are redacted": (
+                execution_tests.BenchmarkExecutionTests,
+                "test_executor_exception_becomes_one_redacted_failed_result",
+            ),
+            "process execution uses clean bounded environment": (
+                execution_tests.AuthorizedProcessTaskExecutorTests,
+                "test_direct_process_uses_clean_environment_and_bounded_output",
+            ),
+            "deadline kills process group": (
+                execution_tests.AuthorizedProcessTaskExecutorTests,
+                "test_deadline_stops_the_process_group_and_returns_failed",
+            ),
+            "cancellation terminates and reaps process tree": (
+                execution_tests.AuthorizedProcessTaskExecutorTests,
+                "test_cancellation_terminates_and_reaps_the_real_process_tree",
+            ),
+        }
+        missing = tuple(
+            behavior
+            for behavior, (case, method_name) in coverage.items()
+            if getattr(case, method_name, None) is None
+        )
+        self.assertEqual(missing, ())
+
     def test_generic_modules_do_not_import_dci_product_code(self) -> None:
         violations: list[tuple[str, int, str]] = []
         for path, tree in _benchmark_trees():

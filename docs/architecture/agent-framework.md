@@ -63,7 +63,7 @@ credentials, requests, evidence, and cache identities remain separate.
 `DCI_PI_DIR` locates the source-pinned external Pi checkout;
 `DCI_PI_AGENT_DIR` separately locates user-managed Pi authentication. A global
 Pi executable is not an equivalent runtime identity. `ASTERION_DCI_RESOURCE_ROOT`
-locates external datasets and corpora for launchers. Project-owned setup/check
+locates external datasets and corpora for benchmark bindings. Project-owned setup/check
 commands can provision or diagnose these external paths without authorizing
 provider work or a full dataset.
 

@@ -39,7 +39,7 @@ make doctor
 
 - `DCI_PI_DIR`：由 `pi-revision.txt` 锁定的外部 Pi checkout，默认 `./pi`；全局 `pi` 命令不替代该源码运行时。
 - `DCI_PI_AGENT_DIR`：用户自己管理的 Pi agent/auth 目录，默认 `~/.pi/agent`；setup 不复制凭据。
-- `ASTERION_DCI_RESOURCE_ROOT`：启动器使用的外部 datasets/corpora 根。
+- `ASTERION_DCI_RESOURCE_ROOT`：benchmark 使用的外部 datasets/corpora 根。
 - `DCI_RUNTIME`、`DCI_PROVIDER`、`DCI_MODEL`：缺省为 `pi`、`openai-codex`、`gpt-5.6-luna`。
 - `DCI_EVAL_JUDGE_*`：独立 Judge 角色的 endpoint、API、model、密钥变量名和 request shape。
 - `.env` 和已导出环境只提供配置，不会自动授权模型请求或完整数据集。
@@ -49,7 +49,7 @@ make doctor
 “本地语料”表示 Asterion 不使用托管检索服务，也不把 corpus 打包进 wheel；它不表示所有内容都停留在本机。Agent 运行时，相关语料片段仍可能被发送给已配置的模型 provider。
 
 `make setup-resources-basic` 只准备 `wiki_corpus` 和 `bc_plus_docs`。
-`make setup-resources-benchmark` 另行检查/准备 launcher 清单；无法自动取得的
+`make setup-resources-benchmark` 另行检查/准备 benchmark 资源清单；无法自动取得的
 BEIR 或 gated 资源会报告精确路径与来源，不会换成其他数据。所有 setup/check
 命令都是 0 Agent、0 Judge，且不执行数据集。
 
@@ -151,24 +151,27 @@ uv run asterion-dci paper --help
 先预览全部 15 个任务变体；该命令不调用 Agent 或 Judge，也不创建任务输出：
 
 ```bash
-scripts/run_dci_benchmarks.sh
+uv run asterion benchmark plan \
+  --application dci@1.0.0 \
+  --suite dci.all@1.0.0
 ```
 
 显式执行一查询、单并发 smoke suite：
 
 ```bash
-scripts/run_dci_benchmarks.sh \
-  --suite all \
-  --limit 1 \
-  --max-concurrency 1 \
+uv run asterion benchmark run \
+  --application dci@1.0.0 \
+  --suite dci.github@1.0.0 \
+  --case-limit 1 \
   --execute
 ```
 
-可选 suite 为 `github`、`paper-main` 和 `all`。脚本读取仓库 `.env`
-中已配置的数据、语料、Pi、输出与 Judge 设置，不下载资源。直接 benchmark
-没有 USD ledger；`--limit`、单任务并发和任务间顺序执行是本入口的运行边界。
-每个任务输出到独立私有目录，失败时停止后续任务，使用相同
-`--output-root` 重跑会采用 `--resume-policy compatible`。
+可选 suite 为 `dci.github@1.0.0`、`dci.paper-main@1.0.0` 和
+`dci.all@1.0.0`，分别包含 12、13 和 15 个任务。`plan` 是默认安全入口；
+只有当前命令显式传入 `--execute` 才允许执行。数据、语料、Pi、输出与 Judge
+设置来自 application/operator 配置，而不是 package manifests。每个任务输出到
+私有 evidence root 下的独立目录，失败时停止后续任务；`resume` 只接受相同
+application、suite、source lock、payload lock、任务顺序和 case limit 的兼容证据。
 
 该入口生成 Asterion benchmark 证据，不自动构成论文分数复现。
 

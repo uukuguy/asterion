@@ -36,7 +36,7 @@ and cancellation signal, and runs tasks sequentially. Evidence is private and
 descriptor-bound beneath `--evidence-root`. Failure or cancellation stops
 later tasks; cancellation is recorded before the command returns nonzero.
 
-Dataset, corpus, launcher, prompt, provider, amount, cost, and `.env`
+Dataset, corpus, prompt, provider, amount, cost, and `.env`
 arguments are intentionally absent. Domain-specific resource selection,
 provider credentials, command authorization, and optional `.env` loading
 belong to the operator or application host outside `asterion.benchmarks`.

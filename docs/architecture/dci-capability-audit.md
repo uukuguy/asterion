@@ -97,22 +97,23 @@ unbound assembly instead of promoting packaged inventory to reachability.
 | QA and IR benchmark coverage | Thirteen dataset identities and sixteen experiment scopes are packaged | Implemented as contracts | Full datasets and published scores were not rerun |
 | Reported benchmark superiority | Reproduction targets and comparison schemas exist | Not verified | A contract or plan-only reproduction command is not experimental evidence |
 
-## Dataset and launcher reconciliation
+## Dataset and Binding Reconciliation
 
 The official GitHub README exposes eleven unique datasets through twelve
-launchers: one BrowseComp-Plus dataset with two configurations, six QA
-datasets, and four BRIGHT datasets. Asterion adds ArguAna and SciFact from the
-paper's BEIR evaluation, producing thirteen dataset identities and fourteen
-standalone launchers.
+upstream benchmark entry definitions: one BrowseComp-Plus dataset with two
+configurations, six QA datasets, and four BRIGHT datasets. Asterion adds
+ArguAna and SciFact from the paper's BEIR evaluation, producing thirteen
+dataset identities and fifteen logical benchmark task bindings across all
+suites.
 
-The two BEIR launchers are Asterion additions based on the paper and must be
-labelled as such. They are not GitHub launcher parity.
+The two BEIR bindings are Asterion additions based on the paper and must be
+labelled as such. They are not GitHub parity.
 
 The README describes the six QA datasets as fifty examples each. The paper
 appendix instead uses the full Bamboogle test set of 125 examples and random
 fifty-example selections for the other QA datasets. Asterion correctly models
 the paper-full Bamboogle scope separately and does not bind the upstream
-sample-fifty launcher to that scope.
+sample-fifty binding to that scope.
 
 ## Package graph audit
 
@@ -292,7 +293,7 @@ profile execution is not closed:
 
 - Bamboogle's paper-full target is 125 examples and has no batch profile.
 - BrowseComp+ `analysis.n100`, `appendix-a1.random50`, and
-  `context-ablation.random100` have `launcher_origin=unavailable`.
+  `context-ablation.random100` have `binding_origin=unavailable`.
 - Paper-unreported method details remain labelled, including selection seeds,
   duplicate handling, segment size, and evidence-overlap assumptions.
 

@@ -275,23 +275,61 @@ class BenchmarkResourceSetupTests(unittest.TestCase):
             )
         )
 
-    def test_benchmark_profile_also_covers_every_checked_in_launcher_path(self) -> None:
-        import re
-
+    def test_benchmark_profile_uses_exact_logical_binding_inventory(self) -> None:
         from asterion.capabilities.dci.implementation.resource_setup import resource_specs
 
-        launcher_paths = {
-            match
-            for launcher in (PROJECT / "scripts").rglob("*.sh")
-            for match in re.findall(
-                r'\$RESOURCE_ROOT/([^";]+)',
-                launcher.read_text(encoding="utf-8"),
-            )
+        inventory = json.loads(
+            (
+                PROJECT
+                / "src/asterion/capabilities/dci/resources/paper-benchmarks.json"
+            ).read_text(encoding="utf-8")
+        )
+        binding_ids = {
+            row["benchmark_binding_id"] for row in inventory["datasets"]
         }
+        specs = resource_specs("benchmark")
 
+        self.assertEqual(len(binding_ids), 13)
+        self.assertEqual(
+            binding_ids,
+            {
+                "bcplus.main",
+                "beir.arguana",
+                "beir.scifact",
+                "bright.biology",
+                "bright.earth-science",
+                "bright.economics",
+                "bright.robotics",
+                "qa.2wikimultihopqa",
+                "qa.bamboogle.paper-full125",
+                "qa.hotpotqa",
+                "qa.musique",
+                "qa.nq",
+                "qa.triviaqa",
+            },
+        )
+        self.assertEqual(
+            {row["dataset_id"] for row in inventory["datasets"]},
+            {
+                "beir.arguana",
+                "beir.scifact",
+                "bright.biology",
+                "bright.earth-science",
+                "bright.economics",
+                "bright.robotics",
+                "browsecomp-plus",
+                "qa.2wikimultihopqa",
+                "qa.bamboogle",
+                "qa.hotpotqa",
+                "qa.musique",
+                "qa.nq",
+                "qa.triviaqa",
+            },
+        )
         self.assertTrue(
-            launcher_paths.issubset(
-                {spec.destination for spec in resource_specs("benchmark")}
+            all(
+                spec.resource_id.startswith(("dataset.", "corpus."))
+                for spec in specs
             )
         )
 
@@ -338,7 +376,7 @@ class BenchmarkResourceSetupTests(unittest.TestCase):
             result.prepared,
         )
 
-    def test_benchmark_cli_check_lists_repairs_without_running_launchers(self) -> None:
+    def test_benchmark_cli_check_lists_repairs_without_running_benchmarks(self) -> None:
         completed = subprocess.run(
             [
                 "uv",

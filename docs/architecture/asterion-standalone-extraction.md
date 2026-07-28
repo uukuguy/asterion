@@ -20,7 +20,7 @@ DCI-Agent-Lite 仓库根；**standalone repository root after promotion** 是把
 - Rust 包：`packages/rust/controlled-executor`，当前 crate 名为 `dci-controlled-executor`；拆分前同样单独决定发布名。
 - 跨语言协议 fixtures：`tests/fixtures`。
 - Python 单元、集成、distribution 与文档契约测试：`tests/test_asterion_*` 以及它们实际导入的公共 fixtures/helpers。
-- Asterion benchmark launchers：`scripts`；它们是 DCI 产品资源的项目入口，不是框架核心。
+- Asterion benchmark bindings：它们是 DCI 产品资源的逻辑执行入口，不是框架核心。
 - Asterion 产品文档：当前 `docs` 下的 architecture、guides、verification 和 operator 子目录。
 - 构建和常用入口：根 `Makefile` 中的 `asterion-*` targets，以及 `.env.template` 中 Asterion/DCI 需要的非秘密配置说明。
 
@@ -85,7 +85,7 @@ standalone-repository-root/
 | `asterion/packages/rust/controlled-executor` | `packages/rust/controlled-executor` | 排除 `target` | `cargo test`、协议 fixture |
 | `asterion/tests/fixtures` | `tests/fixtures` | 复制实际使用闭包 | 跨语言正反例一致 |
 | `asterion/tests/` | `tests/` | 原样提升项目测试 | provider-free 全通过 |
-| `asterion/scripts` | `scripts` | 随 DCI 产品迁移 | 14 standalone launcher |
+| `asterion/scripts` | `scripts` | 仅保留非 benchmark 运维脚本 | benchmark 通过 package binding 暴露 |
 | `asterion/docs` | `docs/` | 原样提升并重写 mixed-root 链接 | 本地链接检查 |
 | 根 `Makefile` | 根 `Makefile` | 只保留 Asterion targets | 命令与帮助一致 |
 | `.env.template` | `.env.template` | 只保留说明和值为空的配置 | 不含 secret |
@@ -154,7 +154,7 @@ Python 迁移完成的定义是 isolated wheel 可用，而不是源目录内 `u
 迁移步骤：
 
 1. 复制 DCI 代码和内置 resources，确认 wheel 文件清单包含 JSON、prompt 和其它运行资源。
-2. 复制 14 个 Asterion launcher，并确认它们调用 `asterion-dci`，不回退到旧 `src/dci`。
+2. 确认 Asterion benchmark suite 通过 package binding 调用 `asterion-dci`，不回退到旧 `src/dci`。
 3. 迁移 `.env.template` 的 `DCI_PI_DIR`、provider/model、语料、输出和 Judge 配置说明，不复制值。
 4. 检查缺省 Pi 路径规则：优先 `./pi`，`./pi-mono` 仅为兼容 fallback。
 5. 运行 provider discovery、product describe 和 provider-free acceptance；有凭据时再运行 bounded Pi examples，且在输出前显示 operation count。
@@ -217,7 +217,7 @@ DCI 未来是否从核心 wheel 拆成独立 plugin，不由目录美观决定�
 - 源提交与迁移映射可追溯，许可和第三方依赖清单完整。
 - Python 全量测试、compile、Ruff、build、sdist/wheel 内容检查通过。
 - isolated wheel 的 `asterion list/describe/verify/run` provider-free 路径通过。
-- DCI 产品 CLI help、单元测试和 14 个 standalone launcher 通过；historical mixed-repository 基线中的 12/12 launcher pair 和 538/538 delegated selector 不是当前 standalone 验收。
+- DCI 产品 CLI help、单元测试和 package benchmark bindings 通过；historical mixed-repository 基线中的 12/12 shell-entry pair 和 538/538 delegated selector 不是当前 standalone 验收。
 - TypeScript build/test 和 Rust build/test 通过，无缓存或本机路径进入包。
 - 受控 executor 的策略、取消、deadline 和进程清理测试通过。
 - 完整文档可从 `docs/README.md` 找到，所有本地链接有效。
