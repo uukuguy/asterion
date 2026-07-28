@@ -189,6 +189,12 @@ def _resolve_benchmark_execution(
         if package.package_ref in package_by_ref:
             _fail_execution()
         package_by_ref[package.package_ref] = package
+        locked_identity = locked_identity_by_ref.get(package.package_ref)
+        if (
+            locked_identity is None
+            or (package.payload_sha256, package.source_id) != locked_identity
+        ):
+            _fail_execution()
 
         for root in package.catalog_roots:
             if root in root_owners:

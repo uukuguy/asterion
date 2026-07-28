@@ -7,7 +7,7 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, TypeVar, runtime_checkable
+from typing import Protocol, TypeGuard, TypeVar, runtime_checkable
 
 from asterion.applications.selection import ApplicationSelector
 from asterion.capabilities.catalog import CatalogEntry
@@ -389,7 +389,9 @@ def _safe_run_id(value: object) -> bool:
     )
 
 
-def _is_task_implementation(value: object) -> bool:
+def _is_task_implementation(
+    value: object,
+) -> TypeGuard[BenchmarkTaskImplementation]:
     try:
         implementation_type = type(value)
         member = inspect.getattr_static(

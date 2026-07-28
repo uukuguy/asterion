@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Protocol, TypeGuard, runtime_checkable
 
 from asterion.benchmarks.evidence import (
     BenchmarkEvidenceStore,
@@ -17,6 +17,7 @@ from asterion.benchmarks.model import (
     BenchmarkTaskRequest,
     ResolvedBenchmarkPlan,
     ResolvedBenchmarkTask,
+    _is_task_implementation,
 )
 from asterion.runtime.host import CancellationSignal
 
@@ -149,8 +150,11 @@ def _build_invocation(
         case_limit=plan.plan.case_limit,
         output_directory=Path(plan.plan.run_id) / task_id,
     )
+    implementation = task.binding.implementation
+    if not _is_task_implementation(implementation):
+        raise BenchmarkExecutionError("benchmark task implementation is invalid")
     try:
-        invocation = task.binding.implementation.build_invocation(request)
+        invocation = implementation.build_invocation(request)
     except Exception:
         raise BenchmarkExecutionError("benchmark task invocation failed") from None
     if (
@@ -205,8 +209,11 @@ def _validate_completed_prefix(
         raise BenchmarkExecutionError("benchmark resume evidence is invalid")
 
 
-def _is_cancellation_signal(value: object) -> bool:
+def _is_cancellation_signal(
+    value: object,
+) -> TypeGuard[CancellationSignal]:
     try:
-        return isinstance(value.cancelled, bool)
+        cancelled = getattr(value, "cancelled")
     except Exception:
         return False
+    return isinstance(cancelled, bool)

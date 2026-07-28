@@ -471,6 +471,35 @@ class BenchmarkResolutionTests(unittest.TestCase):
 
         self.activations.assert_not_called()
 
+    def test_execution_rejects_unlocked_installed_package_without_bindings(
+        self,
+    ) -> None:
+        plan = self._plan()
+        owner = self._package(
+            (
+                self._binding("example.binding-a"),
+                self._binding("example.binding-b"),
+            )
+        )
+        unlocked = self._package(
+            (),
+            package_ref=_OTHER_OWNER,
+            catalog_root=self.other_catalog,
+        )
+
+        with (
+            patch(
+                "asterion.benchmarks.resolution.ResolvedBenchmarkTask",
+                side_effect=AssertionError(
+                    "binding attached before unlocked package rejection"
+                ),
+            ) as binding_spy,
+            self.assertRaises(BenchmarkResolutionError),
+        ):
+            resolve_benchmark_execution(plan, (owner, unlocked))
+        binding_spy.assert_not_called()
+        self.activations.assert_not_called()
+
     def test_invalid_binding_fixture_fails_before_implementation_activation(
         self,
     ) -> None:

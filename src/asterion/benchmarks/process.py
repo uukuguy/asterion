@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
+from typing import Protocol, TypeGuard
 
 from asterion.benchmarks.evidence import (
     BenchmarkProgressEvent,
@@ -28,6 +29,10 @@ _KILL_SIGNAL = getattr(signal, "SIGKILL", signal.SIGTERM)
 
 class BenchmarkProcessError(RuntimeError):
     """Stable command-, output-, environment-, and path-free failure."""
+
+
+class _ReadableBytes(Protocol):
+    def read(self, size: int = -1, /) -> bytes: ...
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -347,7 +352,7 @@ def _reader_thread(
     stream: object,
     capture: _BoundedCapture,
 ) -> threading.Thread:
-    if stream is None or not hasattr(stream, "read"):
+    if not _is_readable_stream(stream):
         raise BenchmarkProcessError(
             "authorized benchmark process stream is unavailable"
         )
@@ -465,12 +470,13 @@ def _task_result(
 
 
 def _positive_finite(value: object) -> bool:
-    return (
-        type(value) in {int, float}
-        and not isinstance(value, bool)
-        and math.isfinite(value)
-        and value > 0
-    )
+    if type(value) is int:
+        numeric = value
+    elif type(value) is float:
+        numeric = value
+    else:
+        return False
+    return math.isfinite(numeric) and numeric > 0
 
 
 def _digest(value: object) -> bool:
@@ -481,8 +487,19 @@ def _digest(value: object) -> bool:
     )
 
 
-def _is_cancellation_signal(value: object) -> bool:
+def _is_readable_stream(value: object) -> TypeGuard[_ReadableBytes]:
     try:
-        return isinstance(value.cancelled, bool)
+        reader = getattr(value, "read")
     except Exception:
         return False
+    return callable(reader)
+
+
+def _is_cancellation_signal(
+    value: object,
+) -> TypeGuard[CancellationSignal]:
+    try:
+        cancelled = getattr(value, "cancelled")
+    except Exception:
+        return False
+    return isinstance(cancelled, bool)

@@ -6,6 +6,7 @@ import json
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from typing import TypeVar
 from uuid import uuid4
 
 from asterion.benchmarks.model import (
@@ -33,6 +34,7 @@ _VERSION = re.compile(
     r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
 )
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_Value = TypeVar("_Value")
 
 
 class BenchmarkPlanningError(ValueError):
@@ -259,9 +261,9 @@ def _lock_entries(
 
 
 def _snapshot(
-    values: Iterable[object],
+    values: Iterable[_Value],
     error: str,
-) -> tuple[object, ...]:
+) -> tuple[_Value, ...]:
     if isinstance(values, (str, bytes)):
         raise BenchmarkPlanningError(error)
     try:
