@@ -28,9 +28,19 @@
       "expected_lift": "+1 completed task",
       "cost_h": 2.0,
       "ranking": 0.95,
-      "status": "in-flight",
+      "status": "confirmed",
       "created_at": "2026-07-28T12:00:00",
-      "results": []
+      "results": [
+        {
+          "session": "2026-07-28-plan4",
+          "cycle": 2,
+          "run": "plan4-climb-h002",
+          "local": 2,
+          "verdict": "confirmed",
+          "decision_reason": "22 focused and 720 full passed; two Important review findings fixed and re-review approved",
+          "commit_range": "8855622..5c327c3"
+        }
+      ]
     },
     {
       "id": "H-003",
@@ -39,7 +49,7 @@
       "expected_lift": "+1 completed task",
       "cost_h": 4.0,
       "ranking": 0.9,
-      "status": "pending",
+      "status": "in-flight",
       "created_at": "2026-07-28T12:00:00",
       "results": []
     },
