@@ -201,3 +201,4 @@
 - 09:02 Added descriptor-bound private benchmark evidence with strict resume identity [295e820]
 - 09:15 Added sequential benchmark execution with bounded process-tree cancellation [c02c3b4]
 - 08:05 Created deterministic, bounded and provider-free benchmark plans [ef9df27]
+- 09:11 Added generic benchmark CLI with authorization-before-provider-load and cancellation evidence [a6e5493]
