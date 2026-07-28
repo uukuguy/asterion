@@ -19,7 +19,7 @@ dev = ["ruff>=0.12.0"]
 
 [project.scripts]
 asterion = "asterion.cli:main"
-asterion-dci = "asterion.dci.cli:main"
+asterion-dci = "asterion.applications.dci_agent_lite.cli:main"
 
 [project.entry-points."asterion.applications"]
 controlled-code = "asterion.applications.controlled_code:create_provider"

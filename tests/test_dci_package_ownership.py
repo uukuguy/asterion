@@ -94,7 +94,7 @@ class DciPackageOwnershipTests(unittest.TestCase):
                 path.name
                 for path in LEGACY_DCI.glob("*.py")
             },
-            {"__init__.py", "cli.py"},
+            set(),
         )
         legacy_package = SOURCE / "capabilities/dci_research"
         self.assertFalse((legacy_package / "manifests").exists())

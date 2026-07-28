@@ -24,7 +24,6 @@ from asterion.capabilities.dci.implementation.evaluation.benchmark import (
     BenchmarkRequest,
     run_benchmark,
 )
-from asterion.dci.cli import main as dci_main
 from asterion.capabilities.dci.implementation.config import (
     DciPaths,
     DciRuntimeOptions,
@@ -48,6 +47,9 @@ from asterion.capabilities.dci.implementation.reproduction.reproduction import (
     load_comparison_report,
     load_run_manifest,
     validate_run_manifest,
+)
+from asterion.capabilities.dci.implementation.reproduction.verification import (
+    paper_compare_main,
 )
 from asterion.capabilities.dci.implementation.runtime.run import (
     DciRunRequest,
@@ -1110,10 +1112,8 @@ class TestDciRunManifestCompiler(unittest.TestCase):
             stdout = __import__("io").StringIO()
             stderr = __import__("io").StringIO()
 
-            code = dci_main(
+            code = paper_compare_main(
                 [
-                    "paper",
-                    "compare",
                     "--profile",
                     profile.profile_id,
                     "--baseline",
@@ -1130,8 +1130,8 @@ class TestDciRunManifestCompiler(unittest.TestCase):
             report = load_comparison_report(report_path)
 
         self.assertEqual(code, 0, stderr.getvalue())
-        self.assertIn("Acceptance: not-applicable\n", stdout.getvalue())
-        self.assertNotIn("Acceptance: pass\n", stdout.getvalue())
+        self.assertIn("acceptance=not-applicable\n", stdout.getvalue())
+        self.assertNotIn("acceptance=pass\n", stdout.getvalue())
         self.assertIsNone(report.accepted)
 
     def test_compile_authorized_bounded_selection(self) -> None:
