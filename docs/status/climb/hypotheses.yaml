@@ -133,9 +133,19 @@
       "expected_lift": "+1 completed task",
       "cost_h": 2.5,
       "ranking": 0.7,
-      "status": "in-flight",
+      "status": "confirmed",
       "created_at": "2026-07-28T12:00:00",
-      "results": []
+      "results": [
+        {
+          "session": "2026-07-28-plan4",
+          "cycle": 7,
+          "run": "plan4-climb-h007",
+          "local": 7,
+          "verdict": "confirmed",
+          "decision_reason": "Task 7 approved after two High evidence fixes; 102 focused and 693 full passed; wheel-only equivalence and promotion green",
+          "commit_range": "bacb5b7..2d78d98"
+        }
+      ]
     },
     {
       "id": "H-008",
@@ -144,7 +154,7 @@
       "expected_lift": "+1 completed task",
       "cost_h": 3.0,
       "ranking": 0.65,
-      "status": "pending",
+      "status": "in-flight",
       "created_at": "2026-07-28T12:00:00",
       "results": []
     }

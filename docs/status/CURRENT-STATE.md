@@ -8,7 +8,7 @@
 - Project route: direct
 - Canonical worklist: approved implementation plans under
   `docs/superpowers/plans/`
-- Active work package: Plan 4 Task 7 — equivalent built-in DCI source form
+- Active work package: Plan 4 Task 8 — migration and repository closure
 
 ## Current Architecture
 
@@ -50,6 +50,9 @@
 - The installed external DCI fixture now proves clean-environment metadata
   discovery, exact source locking, selected-only provider import, conformance,
   and synthetic execution against the authoritative portable payload.
+- Built-in, installed-distribution, and explicit-local DCI forms now share
+  exact payload, manifest, binding, conformance, synthetic plan, and public
+  result identities; unlocked multi-source visibility fails ambiguous.
 - Installed provider resources stay package-rooted; explicit DCI operator
   configuration is rooted at the selected environment file for preflight and
   basic execution.
@@ -69,10 +72,9 @@
 
 ## Open Problems (theme-level)
 
-- Plan 4 Tasks 7-8 remain; the current built-in/transitional provider form must
-  now be materialized and proven byte-identical to the approved external form.
-- Task 7 must expose the built-in through the generic source adapter and prove
-  built-in, installed-distribution, and explicit-local form equivalence.
+- Plan 4 Task 8 remains: delete the transitional source shell, establish
+  permanent structural/privacy assertions, update operator and architecture
+  documentation, and run the complete closure gate.
 - Provider-backed bounded reproduction still requires fresh exact finite
   authorization, an operator-selected private output root, and any
   scope-specific external datasets.
@@ -130,7 +132,7 @@
 2. Read `RESUME-NEXT-SESSION.md` for the next concrete action.
 3. Read `MEMORY.md` for collaboration rules and corrected feedback.
 4. Run `git status --short` and `git log --oneline -5`.
-5. Continue Plan 4 Task 7 in the isolated capability-package worktree.
+5. Continue Plan 4 Task 8 in the isolated capability-package worktree.
 6. Treat external execution as unauthorized unless the operator supplies a new
    exact scope, limit, private output root, and five finite positive caps.
 7. Keep any bounded result `External-limited`; never promote it to full-paper

@@ -1,17 +1,17 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-28 19:20. **Session remains active — not a final handoff.**
+> Updated: 2026-07-28 20:09. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
 - Plans 1–3 remain complete and verified.
-- Plan 4 Tasks 1–6 are complete and independently approved.
-- Task 6 proved DCI as a clean-environment installed extension in `19e3135`
-  and closed exact-lock, source-ID, snapshot-copy, and SDK gaps in `cb813ea`.
-- Final Task 6 verification passed 34 focused and 691 full Python tests,
+- Plan 4 Tasks 1–7 are complete and independently approved.
+- Task 7 materialized the equivalent built-in source in `a9d2ff1` and made its
+  evidence clean-wheel authentic in `2d78d98`.
+- Final Task 7 verification passed 102 focused and 693 full Python tests,
   cross-language checks, docs, packaging, and promotion with zero provider
   operations.
-- climb is at 6/8; H-007 / Plan 4 Task 7 is the immediate next action.
+- climb is at 7/8; H-008 / Plan 4 Task 8 is the immediate next action.
 
 ## Where things stand
 
@@ -32,16 +32,19 @@
 - The external DCI wheel carries the authoritative payload bytes, imports only
   the public capability SDK, remains unimported during metadata/payload
   discovery, and loads only through its exact identifier-shaped source lock.
+- Built-in, installed-distribution, and explicit-local forms produce identical
+  public fingerprints under exact locks; all three visible without a lock fail
+  closed as ambiguous.
 - climb state is tracked under `docs/status/climb/`; the adapter uses only
   provider-free local test gates and has no external push.
 
 ## Next steps
 
-1. Execute Plan 4 Task 7 from `.superpowers/sdd/task-7-brief.md`.
-2. Start with the missing built-in DCI provider and form-equivalence test.
-3. Prove built-in, installed-distribution, and explicit-local forms have
-   identical payload, manifest, binding, conformance, plan, and public-result
-   identities; unlocked multi-source resolution must remain ambiguous.
+1. Execute Plan 4 Task 8 from `.superpowers/sdd/task-8-brief.md`.
+2. Add final structural/privacy assertions, then remove the transitional
+   `dci_research` shell and any remaining obsolete identifiers or paths.
+3. Update architecture, security, CLI, and operator documentation for the
+   external-first package/source model and explicit execution authority.
 4. Run focused and full provider-free verification, independent task review,
    then advance H-006 through `tools/climb/cycle.sh`.
 
@@ -63,5 +66,5 @@
 ```bash
 cd .worktrees/capability-package-architecture
 git status --short
-uv run python -m unittest -v tests.test_dci_source_form_equivalence
+uv run python -m unittest -v tests.test_project_boundaries tests.test_distribution tests.test_dci_package_ownership tests.test_dci_source_form_equivalence
 ```
