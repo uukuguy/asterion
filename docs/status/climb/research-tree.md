@@ -7,12 +7,12 @@
 
 ## In-flight / session state (dynamic — resume reads this, then verifies liveness)
 
-- **phase**: Plan 4 closure
+- **phase**: Plan 4 complete
 - **last_cycle**: 8
 - **next_hypothesis**: None
 - **in-flight**: none
 
-**Next action on resume**: Run the complete Plan 4 closure gate and final review.
+**Next action on resume**: Await operator direction for branch integration.
 
 ## Paradigm calibration matrix
 

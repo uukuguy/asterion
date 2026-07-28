@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-28 21:20. **Session remains active - Plan 4 whole-branch review is next.**
+> Updated: 2026-07-28 21:33. **Final handoff - Plan 4 is complete and verified.**
 
 ## TL;DR
 
@@ -14,6 +14,10 @@
 - Task 8 independent review is approved after correcting one Medium stale-doc
   finding in `49e96e0`.
 - climb H-008 is confirmed; the Plan 4 target is 8/8.
+- The independent whole-Plan-4 review is approved after correcting one Medium
+  stale active-decision finding in `7ee708b`.
+- Final fresh verification passed 28 focused and 698 full Python tests, lint,
+  docs, TypeScript, Rust, source/wheel builds, and all 24 promotion commands.
 - Promotion used zero provider operations and no full dataset.
 - The transitional source shell is deleted. The sole DCI source envelope lives
   under `src/asterion/capabilities/dci/`.
@@ -47,12 +51,11 @@
 
 ## Next steps
 
-1. Run the required fresh independent whole-Plan-4 review over
-   `2c1dc36..49e96e0`.
-2. Fix and re-review every important finding.
-3. Run fresh focused, Python, cross-language, documentation, packaging,
-   promotion, and physical-absence gates.
-4. Record the final verified recovery boundary without merging or pushing.
+1. No Plan 4 implementation or review work remains.
+2. Decide whether to integrate, open a PR, or retain
+   `feature/capability-package-architecture` for further work.
+3. Before integration, inspect `git status --short` and the final checkpoint
+   commit; do not rerun provider-backed benchmarks without new authorization.
 
 ## Boundaries and ruled-out paths
 

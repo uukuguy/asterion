@@ -239,3 +239,5 @@
 - 21:19 Corrected runtime documentation to name the sole package-owned DCI modules [49e96e0]
 - 21:20 climb confirmed Plan 4 Task 8: Task 8 approved after one Medium docs fix; 28 focused and 698 full passed; make check and promotion green [8ed7cb9..49e96e0]
 - 21:22 Checkpointed Task 8 so recovery resumes at whole-Plan-4 review [e9daf26]
+- 21:29 Retired stale decision guidance and guarded active status docs against migration drift [7ee708b]
+- 21:33 Verified Plan 4 complete: final review approved and all local closure gates passed

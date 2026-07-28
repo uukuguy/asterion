@@ -1,10 +1,10 @@
 {
   "session": "2026-07-28-plan4",
-  "phase": "Plan 4 closure",
+  "phase": "Plan 4 complete",
   "last_cycle": 8,
   "next_hypothesis": null,
   "in_flight": null,
-  "next_action": "Run the complete Plan 4 closure gate and final review.",
+  "next_action": "Await operator direction for branch integration.",
   "sota": {
     "local": 8
   },

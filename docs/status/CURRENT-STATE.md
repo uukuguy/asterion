@@ -8,7 +8,7 @@
 - Project route: direct
 - Canonical worklist: approved implementation plans under
   `docs/superpowers/plans/`
-- Active work package: Plan 4 whole-branch review and final verification
+- Active work package: Plan 4 complete; awaiting branch integration direction
 
 ## Current Architecture
 
@@ -72,9 +72,10 @@
 
 ## Open Problems (theme-level)
 
-- All eight Plan 4 tasks are implemented and independently approved. The
-  required whole-Plan-4 review and final fresh verification remain before
-  branch handoff.
+- All eight Plan 4 tasks are implemented, independently approved, whole-branch
+  reviewed, and verified. No Plan 4 implementation or review finding remains.
+- Branch integration, PR creation, merge, or push requires a separate operator
+  decision and was not performed by this climb session.
 - Provider-backed bounded reproduction still requires fresh exact finite
   authorization, an operator-selected private output root, and any
   scope-specific external datasets.
@@ -132,8 +133,7 @@
 2. Read `RESUME-NEXT-SESSION.md` for the next concrete action.
 3. Read `MEMORY.md` for collaboration rules and corrected feedback.
 4. Run `git status --short` and `git log --oneline -5`.
-5. Continue the whole-Plan-4 review and final verification in the isolated
-   capability-package worktree.
+5. Treat Plan 4 as complete; await operator direction for branch integration.
 6. Treat external execution as unauthorized unless the operator supplies a new
    exact scope, limit, private output root, and five finite positive caps.
 7. Keep any bounded result `External-limited`; never promote it to full-paper
