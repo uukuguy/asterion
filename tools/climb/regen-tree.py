@@ -20,11 +20,6 @@ import csv
 import json
 from pathlib import Path
 
-try:
-    import yaml
-except ImportError:
-    yaml = None
-
 ROOT = Path(__file__).resolve().parents[2]
 RUNS_CSV = ROOT / "docs/status/climb/runs.csv"
 HYPOS_YAML = ROOT / "docs/status/climb/hypotheses.yaml"
@@ -43,9 +38,9 @@ def load_runs() -> list[dict]:
 
 
 def load_hypos() -> dict:
-    if not HYPOS_YAML.exists() or yaml is None:
+    if not HYPOS_YAML.exists():
         return {"hypotheses": []}
-    return yaml.safe_load(open(HYPOS_YAML))
+    return json.loads(HYPOS_YAML.read_text())
 
 
 def load_calib() -> dict:

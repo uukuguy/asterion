@@ -4,12 +4,11 @@
 
 - Project: Asterion
 - Current branch: `main`
-- Theme-level focus: approved source-neutral capability-package architecture
+- Theme-level focus: external-first DCI capability-package migration
 - Project route: direct
 - Canonical worklist: approved implementation plans under
   `docs/superpowers/plans/`
-- Active work package: implementation not started; execution mode selection is
-  the next boundary
+- Active work package: Plan 4 Task 2 — exact DCI benchmark task bindings
 
 ## Current Architecture
 
@@ -22,9 +21,14 @@
 - TypeScript validates shared contracts and Node integration; Rust owns
   controlled process execution.
 - DCI remains a bundled product above domain-neutral framework modules.
-- The approved target hard-renames generic `dci.*` protocols to Asterion-owned
-  contracts, treats built-in as one source form, and moves generic benchmark
-  orchestration into Asterion.
+- Generic protocols are Asterion-owned; built-in is one source form; generic
+  benchmark planning, execution, evidence, cancellation, and resume are
+  implemented under `src/asterion/benchmarks/`.
+- Source-neutral built-in, distribution, and explicit-local adapters resolve
+  exact portable payloads through public capability SDK contracts.
+- The DCI Python/source envelope owns a closed portable `dci@1.0.0` payload
+  below `src/asterion/capabilities/dci/payload/`, with exact 12/13/15-task
+  GitHub, paper-main, and union suites.
 - The approved migration proves DCI as an installed extension before exposing
   the identical portable payload through the built-in adapter.
 - Installed provider resources stay package-rooted; explicit DCI operator
@@ -46,9 +50,10 @@
 
 ## Open Problems (theme-level)
 
-- Plans 1-4 are approved but unimplemented; current source still contains the
-  old generic protocol names, top-level `asterion.dci`, and root benchmark
-  launchers.
+- Plan 4 Tasks 2-8 remain; current source still contains top-level
+  `asterion.dci`, transitional `dci_research`, and root benchmark launchers.
+- Transitional `dci_research/manifests/` copies remain until Task 3 migrates
+  their provider, identity, and test consumers to the portable DCI payload.
 - Provider-backed bounded reproduction still requires fresh exact finite
   authorization, an operator-selected private output root, and any
   scope-specific external datasets.
@@ -82,6 +87,7 @@
 - `docs/superpowers/plans/2026-07-27-asterion-capability-package-sources.md`
 - `docs/superpowers/plans/2026-07-27-asterion-generic-benchmark-subsystem.md`
 - `docs/superpowers/plans/2026-07-27-dci-capability-package-migration.md`
+- `docs/status/climb/research-tree.md` — generated Plan 4 progress and recovery
 
 ### Implementation entry points
 
@@ -94,6 +100,7 @@
 - `src/asterion/dci/verification.py` — product readiness and bounded verification
 - `src/asterion/dci/benchmark.py` — bounded benchmark execution
 - `src/asterion/dci/reproduction.py` — evidence compilation and comparison
+- `src/asterion/capabilities/dci/payload/` — exact portable DCI package closure
 - `schemas/` — canonical cross-language protocol schemas
 
 ## Resume Instructions
@@ -102,8 +109,7 @@
 2. Read `RESUME-NEXT-SESSION.md` for the next concrete action.
 3. Read `MEMORY.md` for collaboration rules and corrected feedback.
 4. Run `git status --short` and `git log --oneline -5`.
-5. Select an execution mode, then start Plan 1 Task 1; do not skip directly to
-   DCI migration.
+5. Continue Plan 4 Task 2 in the isolated capability-package worktree.
 6. Treat external execution as unauthorized unless the operator supplies a new
    exact scope, limit, private output root, and five finite positive caps.
 7. Keep any bounded result `External-limited`; never promote it to full-paper

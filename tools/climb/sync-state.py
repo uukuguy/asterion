@@ -9,9 +9,6 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
-import yaml
-
-
 ROOT = Path(__file__).resolve().parents[2]
 STATE = ROOT / "docs/status/climb"
 HYPOTHESES = STATE / "hypotheses.yaml"
@@ -27,7 +24,7 @@ def main() -> None:
     parser.add_argument("--review", required=True)
     args = parser.parse_args()
 
-    data = yaml.safe_load(HYPOTHESES.read_text())
+    data = json.loads(HYPOTHESES.read_text())
     hypotheses = data["hypotheses"]
     current = next(
         (item for item in hypotheses if item["id"] == args.hypothesis_id),
@@ -61,13 +58,10 @@ def main() -> None:
     if next_item is not None:
         next_item["status"] = "in-flight"
 
-    HYPOTHESES.write_text(
-        yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
-        encoding="utf-8",
-    )
+    HYPOTHESES.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
     with RUNS.open("a", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
+        writer = csv.writer(handle, lineterminator="\n")
         writer.writerow(
             [
                 run_id,

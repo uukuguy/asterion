@@ -26,11 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 RUNS_CSV = ROOT / "docs/status/climb/runs.csv"
 CALIB_JSON = ROOT / "docs/status/climb/calibration.json"
 
-try:
-    import yaml
-    HYPOS_YAML = ROOT / "docs/status/climb/hypotheses.yaml"
-except ImportError:
-    yaml = None
+HYPOS_YAML = ROOT / "docs/status/climb/hypotheses.yaml"
 
 
 def load_calib():
@@ -43,9 +39,9 @@ def load_runs():
 
 def find_hypothesis_paradigm(hyp_id):
     """Look up paradigm from hypotheses.yaml."""
-    if yaml is None or not HYPOS_YAML.exists():
+    if not HYPOS_YAML.exists():
         return None
-    hypos = yaml.safe_load(open(HYPOS_YAML))
+    hypos = json.loads(HYPOS_YAML.read_text())
     for h in hypos.get("hypotheses", []):
         if h.get("id") == hyp_id:
             return h.get("parent_paradigm")
@@ -76,7 +72,6 @@ def main():
     # Load local eval
     eval_data = json.load(open(args.local_eval_json))
     local_total = eval_data.get("total")
-    per_task = eval_data.get("per_task", {})
     f_surv = eval_data.get("f_surv", {})
 
     # Resolve paradigm
