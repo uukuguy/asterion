@@ -1,5 +1,7 @@
 # DCI Benchmark Orchestrator Design
 
+> **Superseded by Plan 4 Task 5:** Retired global DCI launcher/orchestrator references in this historical document are replaced by the generic benchmark host and package-owned benchmark bindings.
+
 > Approved direction: provide one operator-run entry point that walks the
 > Asterion DCI benchmark inventory sequentially, with bounded defaults, clear
 > progress logs, and no monetary fields unless a future design adds them.

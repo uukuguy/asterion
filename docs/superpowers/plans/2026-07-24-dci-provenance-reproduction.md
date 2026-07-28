@@ -1,5 +1,7 @@
 # DCI Provenance and Reproduction Implementation Plan
 
+> **Superseded by Plan 4 Task 5:** Retired global DCI launcher/orchestrator references in this historical document are replaced by the generic benchmark host and package-owned benchmark bindings.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Separate paper, exact GitHub, and Asterion-safe experiment semantics and connect bounded benchmark evidence to an enforceable, reproducible comparison pipeline.

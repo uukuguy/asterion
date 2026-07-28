@@ -1,5 +1,7 @@
 # DCI Benchmark Orchestrator Implementation Plan
 
+> **Superseded by Plan 4 Task 5:** Retired global DCI launcher/orchestrator references in this historical document are replaced by the generic benchmark host and package-owned benchmark bindings.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build one operator-run script that previews or sequentially executes the 15-task Asterion DCI benchmark union with clear progress, dotenv configuration, private evidence, and no monetary inputs.

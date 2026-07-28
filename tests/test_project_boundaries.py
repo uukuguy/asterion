@@ -65,6 +65,16 @@ _ACTIVE_BOUNDARY_ROOTS = (
     "src",
     "tests",
 )
+_HISTORICAL_SUPERPOWERS_DOC_ROOTS = (
+    "docs/superpowers/plans",
+    "docs/superpowers/specs",
+)
+_ACTIVE_DCI_LAUNCHER_DELETION_CONTRACT = (
+    "docs/superpowers/plans/2026-07-27-dci-capability-package-migration.md"
+)
+_ACTIVE_DCI_LAUNCHER_DELETION_HEADING = (
+    "### Task 5: Remove global DCI benchmark orchestration and launchers"
+)
 
 _FORBIDDEN_IMPORT_PREFIXES = (
     "asterion.dci",
@@ -217,6 +227,32 @@ def _active_boundary_files() -> tuple[Path, ...]:
     return tuple(sorted(files))
 
 
+def _historical_superpowers_docs() -> tuple[Path, ...]:
+    files: set[Path] = set()
+    for root_name in _HISTORICAL_SUPERPOWERS_DOC_ROOTS:
+        root = PROJECT / root_name
+        if not root.exists():
+            continue
+        files.update(path for path in root.rglob("*.md") if path.is_file())
+    return tuple(sorted(files))
+
+
+def _top_level_notice(text: str) -> str:
+    lines = text.splitlines()
+    try:
+        body_start = next(
+            index + 1 for index, line in enumerate(lines) if line.startswith("# ")
+        )
+    except StopIteration:
+        body_start = 0
+    notice_lines: list[str] = []
+    for line in lines[body_start:]:
+        if line.startswith("## "):
+            break
+        notice_lines.append(line)
+    return "\n".join(notice_lines).lower()
+
+
 class GenericBenchmarkProjectBoundaryTests(unittest.TestCase):
     def test_obsolete_global_dci_benchmark_surfaces_are_absent(self) -> None:
         existing = tuple(
@@ -236,6 +272,39 @@ class GenericBenchmarkProjectBoundaryTests(unittest.TestCase):
             for token in _OBSOLETE_DCI_BENCHMARK_TOKENS:
                 if token in text:
                     violations.append((relative, token))
+        self.assertEqual(violations, [])
+
+    def test_historical_docs_with_retired_dci_launchers_are_superseded(self) -> None:
+        violations: list[tuple[str, str]] = []
+        for path in _historical_superpowers_docs():
+            relative = path.relative_to(PROJECT).as_posix()
+            text = path.read_text(encoding="utf-8")
+            matched_tokens = tuple(
+                token for token in _OBSOLETE_DCI_BENCHMARK_TOKENS if token in text
+            )
+            if not matched_tokens:
+                continue
+            if relative == _ACTIVE_DCI_LAUNCHER_DELETION_CONTRACT:
+                if _ACTIVE_DCI_LAUNCHER_DELETION_HEADING not in text:
+                    violations.append(
+                        (
+                            relative,
+                            "active deletion contract missing Task 5 heading",
+                        )
+                    )
+                continue
+            notice = _top_level_notice(text)
+            if (
+                "superseded" not in notice
+                or "generic benchmark host" not in notice
+                or "plan 4 task 5" not in notice
+            ):
+                violations.append(
+                    (
+                        relative,
+                        ", ".join(matched_tokens),
+                    )
+                )
         self.assertEqual(violations, [])
 
     def test_deleted_orchestrator_security_behaviors_are_mapped_to_generic_tests(
