@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import io
 import json
+import os
 import tempfile
 import unittest
 from decimal import Decimal
@@ -13,6 +14,9 @@ from unittest.mock import patch
 
 from asterion.applications.dci_agent_lite import cli, operator_config
 from asterion.applications.dci_agent_lite.provider import create_provider
+from asterion.capability_packages.sources.builtin import (
+    BuiltinCapabilityPackageSource,
+)
 from asterion.capabilities.dci.implementation.operator_inputs import (
     DciBenchmarkOperatorInputs,
 )
@@ -134,14 +138,88 @@ class DciApplicationAdapterTests(unittest.TestCase):
         self.assertEqual(inputs.amount, Decimal("12.50"))
         self.assertNotIn("12.50", repr(inputs))
 
-    def test_host_service_preflight_is_redacted(self) -> None:
+    def test_operator_config_resolves_relative_values_against_owner_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            operator_root = Path(directory, "operator").resolve()
+            env_root = Path(directory, "config").resolve()
+            operator_root.mkdir()
+            env_root.mkdir()
+            env_file = env_root / "dci.env"
+            env_file.write_text(
+                "\n".join(
+                    (
+                        "ASTERION_DCI_DATASET_QA=env-datasets/qa",
+                        "ASTERION_DCI_CORPUS_WIKI=env-corpora/wiki",
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            file_inputs = operator_config.load_operator_inputs(
+                operator_root=operator_root,
+                env_file=Path("../config/dci.env"),
+            )
+            explicit_inputs = operator_config.load_operator_inputs(
+                operator_root=operator_root,
+                dataset_roots={"bright": Path("explicit-datasets/bright")},
+                corpus_roots={"bright": Path("explicit-corpora/bright")},
+            )
+            with patch.dict(
+                os.environ,
+                {
+                    "ASTERION_DCI_DATASET_BCPLUS": "process-datasets/bcplus",
+                    "ASTERION_DCI_CORPUS_BCPLUS": "process-corpora/bcplus",
+                    "ASTERION_DCI_PRIVATE_SECRET": SENTINEL,
+                },
+                clear=True,
+            ):
+                process_inputs = operator_config.process_environment_inputs(
+                    operator_root,
+                )
+
+        self.assertEqual(
+            file_inputs.dataset_roots["qa"], env_root / "env-datasets/qa"
+        )
+        self.assertEqual(
+            file_inputs.corpus_roots["wiki"], env_root / "env-corpora/wiki"
+        )
+        self.assertEqual(
+            explicit_inputs.dataset_roots["bright"],
+            operator_root / "explicit-datasets/bright",
+        )
+        self.assertEqual(
+            explicit_inputs.corpus_roots["bright"],
+            operator_root / "explicit-corpora/bright",
+        )
+        self.assertEqual(
+            process_inputs.dataset_roots["bcplus"],
+            operator_root / "process-datasets/bcplus",
+        )
+        self.assertEqual(
+            process_inputs.corpus_roots["bcplus"],
+            operator_root / "process-corpora/bcplus",
+        )
+        self.assertNotIn(SENTINEL, repr(process_inputs))
+
+    def test_host_service_preflight_validates_required_roots_and_redacts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
+            dataset_roots = {
+                key: root / f"datasets/{key}"
+                for key in ("bcplus", "beir", "bright", "paper-full", "qa")
+            }
+            corpus_roots = {
+                key: root / f"corpora/{key}"
+                for key in ("bcplus", "beir", "bright", "wiki")
+            }
+            for path in (*dataset_roots.values(), *corpus_roots.values()):
+                path.mkdir(parents=True)
             report = operator_config.preflight_host_services(
                 operator_config.load_operator_inputs(
                     operator_root=root,
-                    dataset_roots={"qa": root / "qa"},
-                    corpus_roots={"wiki": root / "wiki"},
+                    dataset_roots=dataset_roots,
+                    corpus_roots=corpus_roots,
                     private_environment={"DCI_TOKEN": SENTINEL},
                 )
             )
@@ -151,6 +229,74 @@ class DciApplicationAdapterTests(unittest.TestCase):
         self.assertIn("dataset_roots", rendered)
         self.assertNotIn(str(root), rendered)
         self.assertNotIn(SENTINEL, rendered)
+
+    def test_host_service_preflight_fails_closed_for_missing_unsafe_or_incomplete_roots(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            present = root / "present"
+            present.mkdir()
+            file_path = root / "not-directory"
+            file_path.write_text(SENTINEL, encoding="utf-8")
+            target = root / "target"
+            target.mkdir()
+            symlink = root / "symlink"
+            symlink.symlink_to(target, target_is_directory=True)
+            cases = (
+                (
+                    "missing required keys",
+                    {"qa": present},
+                    {"wiki": present},
+                ),
+                (
+                    "missing directory",
+                    {
+                        "bcplus": root / "absent",
+                        "beir": present,
+                        "bright": present,
+                        "paper-full": present,
+                        "qa": present,
+                    },
+                    {"bcplus": present, "beir": present, "bright": present, "wiki": present},
+                ),
+                (
+                    "not directory",
+                    {
+                        "bcplus": file_path,
+                        "beir": present,
+                        "bright": present,
+                        "paper-full": present,
+                        "qa": present,
+                    },
+                    {"bcplus": present, "beir": present, "bright": present, "wiki": present},
+                ),
+                (
+                    "symlink",
+                    {
+                        "bcplus": symlink,
+                        "beir": present,
+                        "bright": present,
+                        "paper-full": present,
+                        "qa": present,
+                    },
+                    {"bcplus": present, "beir": present, "bright": present, "wiki": present},
+                ),
+            )
+
+            for label, datasets, corpora in cases:
+                with self.subTest(label=label):
+                    inputs = operator_config.load_operator_inputs(
+                        operator_root=root,
+                        dataset_roots=datasets,
+                        corpus_roots=corpora,
+                        private_environment={"DCI_TOKEN": SENTINEL},
+                    )
+                    with self.assertRaises(operator_config.DciOperatorConfigError) as raised:
+                        operator_config.preflight_host_services(inputs)
+                    rendered = str(raised.exception)
+                    self.assertNotIn(str(root), rendered)
+                    self.assertNotIn(SENTINEL, rendered)
 
     def test_benchmark_plan_delegates_to_generic_host_with_dci_defaults(self) -> None:
         captured: list[list[str]] = []
@@ -206,6 +352,25 @@ class DciApplicationAdapterTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertNotIn("--execute", captured[0])
 
+    def test_benchmark_run_uses_generic_builtin_source_registration(self) -> None:
+        captured_sources: list[object] = []
+
+        def fake_main(argv: list[str], **kwargs: object) -> int:
+            del argv
+            captured_sources.extend(kwargs["capability_package_sources"])
+            return 0
+
+        with patch("asterion.applications.dci_agent_lite.cli.asterion_main", fake_main):
+            code = cli.main(
+                ["benchmark", "run", "--suite", "github", "--execute"],
+                stdout=io.StringIO(),
+                stderr=io.StringIO(),
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(len(captured_sources), 1)
+        self.assertIsInstance(captured_sources[0], BuiltinCapabilityPackageSource)
+
     def test_list_describe_and_preflight_do_not_load_benchmark_provider(self) -> None:
         calls: list[list[str]] = []
 
@@ -231,10 +396,12 @@ class DciApplicationAdapterTests(unittest.TestCase):
             "asterion.applications.dci_agent_lite.cli.asterion_main",
             side_effect=AssertionError("provider operation"),
         ):
+            stderr = io.StringIO()
             self.assertEqual(
-                cli.main(["preflight"], stdout=io.StringIO(), stderr=io.StringIO()),
-                0,
+                cli.main(["preflight"], stdout=io.StringIO(), stderr=stderr),
+                2,
             )
+            self.assertEqual(stderr.getvalue(), "asterion-dci: command failed\n")
 
     def test_adapter_source_has_no_benchmark_orchestration_implementation(self) -> None:
         forbidden_names = {
@@ -253,6 +420,12 @@ class DciApplicationAdapterTests(unittest.TestCase):
             "check_call",
             "check_output",
         }
+        forbidden_function_names = {
+            "discover_metadata",
+            "load_provider",
+            "open_payload",
+            "validate_source_identity",
+        }
         for path in (
             APPLICATION_ROOT / "cli.py",
             APPLICATION_ROOT / "operator_config.py",
@@ -270,8 +443,14 @@ class DciApplicationAdapterTests(unittest.TestCase):
                     for node in ast.walk(tree)
                     if isinstance(node, ast.Attribute)
                 }
+                function_names = {
+                    node.name
+                    for node in ast.walk(tree)
+                    if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef))
+                }
                 self.assertFalse(names & forbidden_names)
                 self.assertFalse(attributes & forbidden_attributes)
+                self.assertFalse(function_names & forbidden_function_names)
 
 
 if __name__ == "__main__":  # pragma: no cover

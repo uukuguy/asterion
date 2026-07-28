@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -20,97 +20,56 @@ from asterion.capabilities.dci.implementation.operator_inputs import (
 from asterion.capabilities.dci_research.provider import (
     create_provider as create_dci_provider,
 )
-from asterion.capability_packages.model import (
-    CapabilityPackageCandidate,
-    InstalledCapabilityPackage,
-    PortableCapabilityPayload,
-)
-from asterion.capability_packages.payload import open_portable_payload
+from asterion.capability_packages.model import InstalledCapabilityPackage
 from asterion.capability_packages.protocol import CapabilityPackageRef
+from asterion.capability_packages.sources.builtin import (
+    BuiltinCapabilityPackageSource,
+    BuiltinCapabilityRegistration,
+)
 
 
 PACKAGE_REF = CapabilityPackageRef("dci", "1.0.0")
-SOURCE_ID = "dci.local"
-SOURCE_KIND = "local-directory"
+SOURCE_ID = "builtin:dci@1.0.0"
+SOURCE_KIND = "builtin"
 
 _DATASET_PREFIX = "ASTERION_DCI_DATASET_"
 _CORPUS_PREFIX = "ASTERION_DCI_CORPUS_"
 _AMOUNT_KEY = "ASTERION_DCI_AMOUNT"
+_REQUIRED_DATASET_ROOTS = ("bcplus", "beir", "bright", "paper-full", "qa")
+_REQUIRED_CORPUS_ROOTS = ("bcplus", "beir", "bright", "wiki")
 
 
 class DciOperatorConfigError(ValueError):
     """Raised when private DCI operator configuration is invalid."""
 
 
-@dataclass(frozen=True, slots=True)
-class DciOperatorCapabilityPackageSource:
-    """Exact local DCI package source carrying private benchmark inputs."""
+def create_capability_package_source(
+    operator_inputs: DciBenchmarkOperatorInputs,
+) -> BuiltinCapabilityPackageSource:
+    """Create the generic built-in source registration for the DCI package."""
 
-    operator_inputs: DciBenchmarkOperatorInputs
-    payload_root: Path
+    if type(operator_inputs) is not DciBenchmarkOperatorInputs:
+        raise DciOperatorConfigError("DCI operator inputs are invalid")
+    payload_root = Path(__file__).resolve().parents[2] / "capabilities/dci/payload"
 
-    @classmethod
-    def create(
-        cls,
-        operator_inputs: DciBenchmarkOperatorInputs,
-    ) -> "DciOperatorCapabilityPackageSource":
-        payload_root = (
-            Path(__file__).resolve().parents[2] / "capabilities/dci/payload"
-        )
-        return cls(operator_inputs=operator_inputs, payload_root=payload_root)
-
-    def discover_metadata(self) -> tuple[CapabilityPackageCandidate, ...]:
-        return (
-            CapabilityPackageCandidate(
-                package_ref=PACKAGE_REF,
-                source_id=SOURCE_ID,
-                source_kind=SOURCE_KIND,
-                payload_sha256=None,
-                metadata={},
-            ),
-        )
-
-    def open_payload(
-        self, candidate: CapabilityPackageCandidate
-    ) -> PortableCapabilityPayload:
-        self._require_candidate(candidate)
-        payload = open_portable_payload(self.payload_root)
-        self.validate_source_identity(candidate, payload)
-        return payload
-
-    def validate_source_identity(
-        self,
-        candidate: CapabilityPackageCandidate,
-        payload: PortableCapabilityPayload,
-    ) -> None:
-        self._require_candidate(candidate)
-        if (
-            not isinstance(payload, PortableCapabilityPayload)
-            or payload.manifest.package_ref != PACKAGE_REF
-        ):
-            raise DciOperatorConfigError("DCI package source identity is invalid")
-
-    def load_provider(
-        self,
-        candidate: CapabilityPackageCandidate,
-    ) -> InstalledCapabilityPackage:
-        self._require_candidate(candidate)
+    def provider_factory() -> InstalledCapabilityPackage:
         installed = create_dci_provider()
         return replace(
             installed,
-            benchmark_bindings=create_benchmark_bindings(self.operator_inputs),
+            source_id=SOURCE_ID,
+            source_kind=SOURCE_KIND,
+            benchmark_bindings=create_benchmark_bindings(operator_inputs),
         )
 
-    def _require_candidate(self, candidate: CapabilityPackageCandidate) -> None:
-        if (
-            not isinstance(candidate, CapabilityPackageCandidate)
-            or candidate.package_ref != PACKAGE_REF
-            or candidate.source_id != SOURCE_ID
-            or candidate.source_kind != SOURCE_KIND
-            or candidate.payload_sha256 is not None
-            or candidate.metadata
-        ):
-            raise DciOperatorConfigError("DCI package source selection is invalid")
+    return BuiltinCapabilityPackageSource(
+        (
+            BuiltinCapabilityRegistration(
+                PACKAGE_REF,
+                payload_root,
+                provider_factory,
+            ),
+        )
+    )
 
 
 def load_operator_inputs(
@@ -125,11 +84,11 @@ def load_operator_inputs(
     """Translate DCI-specific private values into benchmark operator inputs."""
 
     root = Path(operator_root).resolve()
-    loaded = _load_env(root, env_file)
-    datasets = _path_roots(loaded, prefix=_DATASET_PREFIX)
-    corpora = _path_roots(loaded, prefix=_CORPUS_PREFIX)
-    datasets.update(_explicit_paths(dataset_roots))
-    corpora.update(_explicit_paths(corpus_roots))
+    loaded, env_root = _load_env(root, env_file)
+    datasets = _path_roots(loaded, prefix=_DATASET_PREFIX, base=env_root)
+    corpora = _path_roots(loaded, prefix=_CORPUS_PREFIX, base=env_root)
+    datasets.update(_explicit_paths(dataset_roots, base=root))
+    corpora.update(_explicit_paths(corpus_roots, base=root))
     private = dict(loaded)
     private.update({} if private_environment is None else private_environment)
     private_amount = _amount(amount if amount is not None else loaded.get(_AMOUNT_KEY))
@@ -148,6 +107,14 @@ def preflight_host_services(
 
     if type(operator_inputs) is not DciBenchmarkOperatorInputs:
         raise DciOperatorConfigError("DCI operator inputs are invalid")
+    _require_complete_roots(
+        operator_inputs.dataset_roots,
+        required=_REQUIRED_DATASET_ROOTS,
+    )
+    _require_complete_roots(
+        operator_inputs.corpus_roots,
+        required=_REQUIRED_CORPUS_ROOTS,
+    )
     return {
         "schema": "asterion.dci.operator-preflight/v1",
         "status": "ready",
@@ -164,27 +131,71 @@ def render_preflight(report: Mapping[str, object]) -> str:
     return json.dumps(report, ensure_ascii=True, sort_keys=True) + "\n"
 
 
-def _load_env(root: Path, env_file: Path | None) -> dict[str, str]:
+def _load_env(root: Path, env_file: Path | None) -> tuple[dict[str, str], Path]:
     path = root / ".env" if env_file is None else Path(env_file).expanduser()
+    if not path.is_absolute():
+        path = root / path
+    path = path.resolve(strict=False)
     if not path.is_file():
-        return {}
+        return {}, path.parent
     values = dotenv_values(path)
-    return {str(key): str(value) for key, value in values.items() if value is not None}
+    return (
+        {str(key): str(value) for key, value in values.items() if value is not None},
+        path.parent,
+    )
 
 
-def _path_roots(values: Mapping[str, str], *, prefix: str) -> dict[str, Path]:
+def _path_roots(
+    values: Mapping[str, str],
+    *,
+    prefix: str,
+    base: Path,
+) -> dict[str, Path]:
     roots: dict[str, Path] = {}
     for name, value in values.items():
         if not name.startswith(prefix) or not value:
             continue
-        roots[_root_key(name.removeprefix(prefix))] = Path(value).expanduser()
+        roots[_root_key(name.removeprefix(prefix))] = _root_path(value, base=base)
     return roots
 
 
-def _explicit_paths(values: Mapping[str, Path] | None) -> dict[str, Path]:
+def _explicit_paths(
+    values: Mapping[str, Path] | None,
+    *,
+    base: Path,
+) -> dict[str, Path]:
     if values is None:
         return {}
-    return {_root_key(key): Path(value).expanduser() for key, value in values.items()}
+    return {_root_key(key): _root_path(value, base=base) for key, value in values.items()}
+
+
+def _root_path(value: Path | str, *, base: Path) -> Path:
+    path = Path(value).expanduser()
+    return path if path.is_absolute() else base / path
+
+
+def _require_complete_roots(
+    roots: Mapping[str, Path],
+    *,
+    required: tuple[str, ...],
+) -> None:
+    if any(key not in roots for key in required):
+        raise DciOperatorConfigError("DCI operator roots are incomplete")
+    for key in required:
+        if not _is_safe_directory(roots[key]):
+            raise DciOperatorConfigError("DCI operator root is unavailable")
+
+
+def _is_safe_directory(path: Path) -> bool:
+    try:
+        candidate = Path(path)
+        return (
+            not candidate.is_symlink()
+            and candidate.is_dir()
+            and os.access(candidate, os.R_OK | os.X_OK)
+        )
+    except (OSError, TypeError, ValueError):
+        return False
 
 
 def _root_key(value: str) -> str:
@@ -210,6 +221,7 @@ def _amount(value: object) -> Decimal | None:
 def process_environment_inputs(operator_root: Path) -> DciBenchmarkOperatorInputs:
     """Create inputs from inherited environment without serializing values."""
 
+    root = Path(operator_root).resolve()
     environment = {
         key: value
         for key, value in os.environ.items()
@@ -218,8 +230,8 @@ def process_environment_inputs(operator_root: Path) -> DciBenchmarkOperatorInput
         or key.startswith("ASTERION_DCI_")
         or key.startswith("DCI_")
     }
-    datasets = _path_roots(environment, prefix=_DATASET_PREFIX)
-    corpora = _path_roots(environment, prefix=_CORPUS_PREFIX)
+    datasets = _path_roots(environment, prefix=_DATASET_PREFIX, base=root)
+    corpora = _path_roots(environment, prefix=_CORPUS_PREFIX, base=root)
     return DciBenchmarkOperatorInputs(
         dataset_roots=datasets,
         corpus_roots=corpora,

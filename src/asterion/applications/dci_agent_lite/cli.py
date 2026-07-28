@@ -10,7 +10,7 @@ from typing import TextIO
 from asterion.cli import main as asterion_main
 
 from asterion.applications.dci_agent_lite.operator_config import (
-    DciOperatorCapabilityPackageSource,
+    create_capability_package_source,
     load_operator_inputs,
     preflight_host_services,
     render_preflight,
@@ -151,7 +151,7 @@ def _benchmark(
     return asterion_main(
         forwarded,
         capability_package_sources=(
-            DciOperatorCapabilityPackageSource.create(inputs),
+            create_capability_package_source(inputs),
         ),
         stdout=stdout,
         stderr=stderr,

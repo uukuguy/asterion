@@ -69,6 +69,13 @@ def _imports(path: Path) -> tuple[str, ...]:
     return tuple(imported)
 
 
+def _find_spec(name: str) -> object | None:
+    try:
+        return importlib.util.find_spec(name)
+    except ModuleNotFoundError:
+        return None
+
+
 class DciPackageOwnershipTests(unittest.TestCase):
     def test_implementation_modules_have_one_package_owned_location(self) -> None:
         for group, names in MODULE_GROUPS.items():
@@ -96,6 +103,7 @@ class DciPackageOwnershipTests(unittest.TestCase):
             },
             set(),
         )
+        self.assertFalse(LEGACY_DCI.exists())
         legacy_package = SOURCE / "capabilities/dci_research"
         self.assertFalse((legacy_package / "manifests").exists())
         for name in (
@@ -138,6 +146,16 @@ class DciPackageOwnershipTests(unittest.TestCase):
             with self.subTest(forbidden=forbidden):
                 self.assertNotIn(forbidden, source)
 
+    def test_package_verification_removes_obsolete_paper_reproduce_cli_helper(
+        self,
+    ) -> None:
+        source = (
+            PACKAGE / "implementation/reproduction/verification.py"
+        ).read_text(encoding="utf-8")
+
+        self.assertNotIn("paper_reproduce_main", source)
+        self.assertNotIn("asterion.dci.cli", source)
+
     def test_package_sources_do_not_name_removed_legacy_implementations(
         self,
     ) -> None:
@@ -175,6 +193,7 @@ class DciPackageOwnershipTests(unittest.TestCase):
             reproduction._resource_mapping("../payload/capability-package.json")
 
     def test_old_module_imports_fail(self) -> None:
+        self.assertIsNone(_find_spec("asterion.dci"))
         old_modules = tuple(
             f"asterion.dci.{name}"
             for names in MODULE_GROUPS.values()
@@ -185,7 +204,7 @@ class DciPackageOwnershipTests(unittest.TestCase):
         )
         for module in old_modules:
             with self.subTest(module=module):
-                self.assertIsNone(importlib.util.find_spec(module))
+                self.assertIsNone(_find_spec(module))
 
 
 if __name__ == "__main__":

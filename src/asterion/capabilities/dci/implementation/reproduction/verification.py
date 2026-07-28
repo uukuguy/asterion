@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib
 import json
 import os
 import re
@@ -568,25 +567,6 @@ def _paper_compare_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile", required=True)
     parser.add_argument("--output", type=Path, required=True)
     return parser
-
-
-def paper_reproduce_main(
-    argv: Sequence[str] | None = None,
-    *,
-    stdout: TextIO | None = None,
-    stderr: TextIO | None = None,
-) -> int:
-    """Delegate paper reproduction to the package-local CLI implementation."""
-
-    stdout = sys.stdout if stdout is None else stdout
-    stderr = sys.stderr if stderr is None else stderr
-    dci_main = importlib.import_module("asterion.dci.cli").main
-
-    return dci_main(
-        ["paper", "reproduce", *(list(argv or ()))],
-        stdout=stdout,
-        stderr=stderr,
-    )
 
 
 def paper_compare_main(
