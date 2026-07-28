@@ -36,7 +36,7 @@ from asterion.capabilities.execution import (
     CapabilityExecutionResult,
     CapabilityImplementationBinding,
 )
-from asterion.capabilities.dci_research.provider import (
+from asterion.capabilities.dci.provider import (
     create_provider as create_dci_package,
 )
 from asterion.capability_packages.model import (

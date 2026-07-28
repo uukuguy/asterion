@@ -14,7 +14,10 @@ asterion benchmark resume --application ID@VERSION --suite ID@VERSION --run-id I
 All three commands accept `--case-limit N`,
 `--capability-source-lock PATH`, and `--evidence-root PATH`. Source locks are
 operator-owned `asterion.capability-lock/v1` documents and the option may be
-repeated. If `--case-limit` is omitted, the suite's finite
+repeated. The built-in source form and the external installed-distribution
+proof both require exact `package_id@version` selectors; if unlocked visibility
+would introduce multiple candidates, the host fails closed instead of guessing
+precedence. If `--case-limit` is omitted, the suite's finite
 `default_case_limit` is used; a larger or nonpositive limit is rejected.
 
 `plan` is the default-safe operation. It prints the immutable public plan,
@@ -40,3 +43,11 @@ Dataset, corpus, prompt, provider, amount, cost, and `.env`
 arguments are intentionally absent. Domain-specific resource selection,
 provider credentials, command authorization, and optional `.env` loading
 belong to the operator or application host outside `asterion.benchmarks`.
+
+## DCI adapter inputs
+
+The `asterion-dci` adapter adds private operator inputs for `--env-file`,
+`--dataset-root`, and `--corpus-root`. It also accepts `--amount`, but the
+value is optional; omitting it means no amount budget is supplied. These
+inputs are application-owned and are not required for the generic benchmark
+host.

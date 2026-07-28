@@ -21,7 +21,9 @@ The application host resolves an assembly and supplies bindings directly:
 from asterion.capabilities.catalog import CapabilityRef
 from asterion.capabilities.execution import CapabilityImplementationBinding
 from asterion.runner import run_composed_application
-from asterion.capabilities.dci_research import DciLocalResearchImplementation
+from asterion.capabilities.dci.implementation.implementation import (
+    DciLocalResearchImplementation,
+)
 
 result = await run_composed_application(
     plan,
@@ -92,6 +94,14 @@ after installed-provider selection; executable application runs additionally
 open all declared host services before runtime construction. The `asterion-dci`
 CLI owns its product-specific arguments. Neither it nor Asterion imports or
 modifies the parent workspace's original DCI baseline under `src/dci/benchmark/`.
+
+The DCI local-corpus implementation now lives under
+`asterion.capabilities.dci.implementation`, and the same portable payload is
+exposed through the generic built-in source form. The external
+installed-distribution path is the clean-wheel proof that exact source locks
+select the payload without registry precedence or source scanning. Archive and
+registry source forms are deferred to the separate security design and are not
+part of this execution contract.
 
 The package-local `asterion-dci resume --output-dir RUN_DIR` command restores
 only the immutable request recorded in native `state.json`; it rejects

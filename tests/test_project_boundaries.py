@@ -1,13 +1,27 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 import re
 import unittest
 from pathlib import Path
 
 
 PROJECT = Path(__file__).resolve().parents[1]
+SOURCE = PROJECT / "src/asterion"
 BENCHMARK_SOURCE = PROJECT / "src/asterion/benchmarks"
+_LEGACY_DCI_SOURCE_ROOTS = (
+    SOURCE / "dci",
+    SOURCE / "capabilities/dci_research",
+)
+_DCI_OWNER_ROOTS = (
+    SOURCE / "capabilities/dci",
+    SOURCE / "applications/dci_agent_lite",
+)
+_OBSOLETE_DCI_PROTOCOL_IDENTIFIERS = tuple(
+    f"dci.{name}/v1"
+    for name in ("agent-runtime", "package", "assembly")
+)
 _OBSOLETE_DCI_BENCHMARK_SURFACES = (
     "tools/dci_benchmark_orchestrator.py",
     "tools/run_dci_benchmarks.py",
@@ -65,6 +79,16 @@ _ACTIVE_BOUNDARY_ROOTS = (
     "src",
     "tests",
 )
+_GENERIC_MODULE_ROOTS = (
+    SOURCE / "assembly",
+    SOURCE / "benchmarks",
+    SOURCE / "capabilities",
+    SOURCE / "capability_packages",
+    SOURCE / "packages",
+    SOURCE / "runner",
+    SOURCE / "runtime",
+    SOURCE / "services",
+)
 _HISTORICAL_SUPERPOWERS_DOC_ROOTS = (
     "docs/superpowers/plans",
     "docs/superpowers/specs",
@@ -79,6 +103,7 @@ _ACTIVE_DCI_LAUNCHER_DELETION_HEADING = (
 _FORBIDDEN_IMPORT_PREFIXES = (
     "asterion.dci",
     "asterion.capabilities.dci",
+    "asterion.capabilities.dci_research",
 )
 _DCI_LITERAL_IDENTIFIERS = frozenset(
     {
@@ -158,6 +183,24 @@ _PRIVATE_SERIALIZATION_NAMES = frozenset(
 )
 
 
+def _find_spec(name: str) -> object | None:
+    try:
+        return importlib.util.find_spec(name)
+    except ModuleNotFoundError:
+        return None
+
+
+def _python_files_below(roots: tuple[Path, ...]) -> tuple[Path, ...]:
+    files: set[Path] = set()
+    for root in roots:
+        if root.is_file() and root.suffix == ".py":
+            files.add(root)
+            continue
+        if root.exists():
+            files.update(path for path in root.rglob("*.py") if path.is_file())
+    return tuple(sorted(files))
+
+
 def _benchmark_trees() -> tuple[tuple[Path, ast.Module], ...]:
     return tuple(
         (
@@ -227,6 +270,23 @@ def _active_boundary_files() -> tuple[Path, ...]:
     return tuple(sorted(files))
 
 
+def _active_contract_files(roots: tuple[Path, ...]) -> tuple[Path, ...]:
+    files: set[Path] = set()
+    for root in roots:
+        if not root.exists():
+            continue
+        if root.is_file():
+            files.add(root)
+            continue
+        files.update(
+            path
+            for path in root.rglob("*")
+            if path.is_file()
+            and path.suffix in {".json", ".py", ".ts", ".tsx", ".toml"}
+        )
+    return tuple(sorted(files))
+
+
 def _historical_superpowers_docs() -> tuple[Path, ...]:
     files: set[Path] = set()
     for root_name in _HISTORICAL_SUPERPOWERS_DOC_ROOTS:
@@ -254,6 +314,21 @@ def _top_level_notice(text: str) -> str:
 
 
 class GenericBenchmarkProjectBoundaryTests(unittest.TestCase):
+    def test_legacy_dci_source_roots_and_modules_are_absent(self) -> None:
+        existing = tuple(
+            root.relative_to(PROJECT).as_posix()
+            for root in _LEGACY_DCI_SOURCE_ROOTS
+            if root.exists()
+        )
+        self.assertEqual(existing, ())
+        for module in (
+            "asterion.dci",
+            "asterion.capabilities.dci_research",
+            "asterion.capabilities.dci_research.provider",
+        ):
+            with self.subTest(module=module):
+                self.assertIsNone(_find_spec(module))
+
     def test_obsolete_global_dci_benchmark_surfaces_are_absent(self) -> None:
         existing = tuple(
             relative
@@ -386,16 +461,108 @@ class GenericBenchmarkProjectBoundaryTests(unittest.TestCase):
         )
         self.assertEqual(missing, ())
 
+    def test_public_redaction_boundaries_have_named_sentinel_coverage(
+        self,
+    ) -> None:
+        import tests.test_asterion_cli as application_cli_tests
+        import tests.test_benchmark_cli as benchmark_cli_tests
+        import tests.test_benchmark_evidence as evidence_tests
+        import tests.test_capability_source_resolution as source_tests
+
+        coverage = {
+            "application CLI runtime input and diagnostics": (
+                application_cli_tests.AsterionCliTests,
+                "test_bundled_dci_pi_runtime_failure_is_redacted",
+            ),
+            "application CLI invalid provider input": (
+                application_cli_tests.AsterionCliTests,
+                "test_invalid_provider_fails_before_runtime_factory_and_redacts_input",
+            ),
+            "benchmark CLI application ambiguity and private path": (
+                benchmark_cli_tests.BenchmarkCliTests,
+                "test_application_ambiguity_is_stable_and_redacted",
+            ),
+            "benchmark CLI source and suite ambiguity": (
+                benchmark_cli_tests.BenchmarkCliTests,
+                "test_source_and_suite_ambiguity_are_stable_and_redacted",
+            ),
+            "evidence prompt answer credential output and private path": (
+                evidence_tests.BenchmarkEvidenceTests,
+                "test_only_allowlisted_descriptors_statuses_and_digests_are_serialized",
+            ),
+            "source resolution source ID and digest": (
+                source_tests.CapabilitySourceResolutionTests,
+                "test_rejection_does_not_disclose_source_or_digest_values",
+            ),
+        }
+        missing = tuple(
+            boundary
+            for boundary, (case, method_name) in coverage.items()
+            if getattr(case, method_name, None) is None
+        )
+        self.assertEqual(missing, ())
+
     def test_generic_modules_do_not_import_dci_product_code(self) -> None:
         violations: list[tuple[str, int, str]] = []
-        for path, tree in _benchmark_trees():
+        allowed_roots = _DCI_OWNER_ROOTS
+        for path in _python_files_below(_GENERIC_MODULE_ROOTS):
+            if any(path.is_relative_to(root) for root in allowed_roots):
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             for node in ast.walk(tree):
                 for name in _imported_names(node):
                     if any(
                         name == prefix or name.startswith(f"{prefix}.")
                         for prefix in _FORBIDDEN_IMPORT_PREFIXES
                     ):
-                        violations.append((path.name, node.lineno, name))
+                        violations.append(
+                            (path.relative_to(PROJECT).as_posix(), node.lineno, name)
+                        )
+        self.assertEqual(violations, [])
+
+    def test_active_tree_has_no_transitional_dci_research_references(self) -> None:
+        violations: list[tuple[str, str]] = []
+        forbidden = (
+            "asterion.capabilities.dci_research",
+            "capabilities/dci_research",
+            "dci_research",
+        )
+        allowed = {
+            "tests/test_project_boundaries.py",
+            "tests/test_dci_package_ownership.py",
+            "docs/superpowers/plans/2026-07-27-dci-capability-package-migration.md",
+            "docs/status/RESUME-NEXT-SESSION.md",
+            "docs/status/CURRENT-STATE.md",
+            "docs/status/climb/research-tree.md",
+        }
+        for path in _active_boundary_files():
+            relative = path.relative_to(PROJECT).as_posix()
+            if relative in allowed:
+                continue
+            text = path.read_text(encoding="utf-8")
+            for token in forbidden:
+                if token in text:
+                    violations.append((relative, token))
+        self.assertEqual(violations, [])
+
+    def test_obsolete_dci_protocol_identifiers_are_absent_from_contracts(
+        self,
+    ) -> None:
+        violations: list[tuple[str, str]] = []
+        roots = (
+            PROJECT / "schemas",
+            PROJECT / "src",
+            PROJECT / "packages",
+            PROJECT / "tests",
+        )
+        for path in _active_contract_files(roots):
+            relative = path.relative_to(PROJECT).as_posix()
+            if relative == "tests/test_project_boundaries.py":
+                continue
+            text = path.read_text(encoding="utf-8")
+            for identifier in _OBSOLETE_DCI_PROTOCOL_IDENTIFIERS:
+                if identifier in text:
+                    violations.append((relative, identifier))
         self.assertEqual(violations, [])
 
     def test_generic_modules_do_not_embed_dci_identifiers(self) -> None:

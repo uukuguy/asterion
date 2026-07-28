@@ -1,5 +1,14 @@
 # Asterion architecture
 
+## Package source forms
+
+Asterion uses exact source forms, not heuristic selection. Built-in is one
+generic source form. The external installed-distribution path is the clean-wheel
+proof that the same portable payload can be selected by an exact source lock
+without source scanning or registry precedence. If multiple visible candidates
+would require implicit precedence, selection is ambiguous and fails closed.
+Archive and registry source forms are deferred to a separate security design.
+
 ## Generic benchmark dependency direction
 
 The benchmark subsystem follows one closed dependency direction:
@@ -46,3 +55,6 @@ The wheel publishes the generic implementation under
 `asterion.benchmark-suite/v1` schema as a package resource. Product-specific
 benchmark implementations depend on these public contracts; the generic
 subsystem does not depend on product packages.
+
+Security boundaries for manifests, source locks, operator inputs, and deferred
+archive or registry forms are documented in [Security boundaries](security.md).

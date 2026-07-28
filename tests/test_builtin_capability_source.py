@@ -16,6 +16,7 @@ from asterion.capability_packages.sources.builtin import (
     BuiltinCapabilityPackageSource,
     BuiltinCapabilitySourceError,
 )
+from asterion.capability_sdk import run_capability_conformance
 
 
 class BuiltinCapabilitySourceTests(unittest.TestCase):
@@ -84,18 +85,31 @@ class BuiltinCapabilitySourceTests(unittest.TestCase):
         self,
     ) -> None:
         source = BuiltinCapabilityPackageSource()
-        candidate = source.discover_metadata()[0]
+        candidates = source.discover_metadata()
 
-        payload = source.open_payload(candidate)
-        source.validate_source_identity(candidate, payload)
-        installed = source.load_provider(candidate)
+        self.assertEqual(
+            tuple(candidate.package_ref for candidate in candidates),
+            tuple(
+                registration.package_ref
+                for registration in builtin_capability_sources()
+            ),
+        )
+        for candidate in candidates:
+            with self.subTest(package_ref=candidate.package_ref):
+                payload = source.open_payload(candidate)
+                source.validate_source_identity(candidate, payload)
+                installed = source.load_provider(candidate)
 
-        self.assertEqual(installed.package_ref, candidate.package_ref)
-        self.assertEqual(installed.payload_sha256, payload.payload_sha256)
-        self.assertEqual(installed.source_id, candidate.source_id)
-        self.assertEqual(installed.source_kind, "builtin")
-        self.assertTrue(installed.catalog_roots)
-        self.assertTrue(installed.implementations)
+                self.assertEqual(installed.package_ref, candidate.package_ref)
+                self.assertEqual(
+                    installed.payload_sha256,
+                    payload.payload_sha256,
+                )
+                self.assertEqual(installed.source_id, candidate.source_id)
+                self.assertEqual(installed.source_kind, "builtin")
+                self.assertTrue(installed.catalog_roots)
+                self.assertTrue(installed.implementations)
+                self.assertIsNone(run_capability_conformance(installed))
 
     def test_provider_identity_mismatch_fails_closed(self) -> None:
         registration = builtin_capability_sources()[0]

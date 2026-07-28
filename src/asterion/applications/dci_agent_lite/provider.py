@@ -84,7 +84,7 @@ def create_application_acceptance_inventory() -> DciApplicationAcceptanceInvento
         create_provider as create_dci_provider,
     )
     from asterion.capabilities.builtin import create_controlled_code_package
-    from asterion.capabilities.dci_research.provider import (
+    from asterion.capabilities.dci.provider import (
         create_provider as create_installed_dci_package,
     )
 

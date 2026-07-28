@@ -105,6 +105,7 @@ class DciPackageOwnershipTests(unittest.TestCase):
         )
         self.assertFalse(LEGACY_DCI.exists())
         legacy_package = SOURCE / "capabilities/dci_research"
+        self.assertFalse(legacy_package.exists())
         self.assertFalse((legacy_package / "manifests").exists())
         for name in (
             "complete.py",
@@ -172,7 +173,6 @@ class DciPackageOwnershipTests(unittest.TestCase):
         allowed_roots = (
             PACKAGE,
             SOURCE / "applications/dci_agent_lite",
-            SOURCE / "capabilities/dci_research",
             LEGACY_DCI,
         )
         for path in sorted(SOURCE.rglob("*.py")):

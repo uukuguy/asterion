@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import tempfile
@@ -7,6 +8,9 @@ import tomllib
 import unittest
 import zipfile
 from pathlib import Path
+
+from asterion.capabilities.builtin import builtin_capability_sources
+from asterion.capability_packages.payload import open_portable_payload
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -22,9 +26,6 @@ BENCHMARK_SCHEMA_SOURCE = (
     PROJECT / "schemas/benchmark-suite/v1/benchmark-suite.schema.json"
 )
 DCI_RUNTIME_RESOURCES = {
-    "asterion/capabilities/dci/conformance/externalization.json":
-        PROJECT
-        / "src/asterion/capabilities/dci/conformance/externalization.json",
     "asterion/capabilities/dci/resources/pi/context-extension-manifest.json":
         PROJECT
         / "src/asterion/capabilities/dci/resources/pi/context-extension-manifest.json",
@@ -73,6 +74,41 @@ class AsterionDistributionTests(unittest.TestCase):
             "asterion.benchmark-suite/v1",
         )
 
+    def test_wheel_contains_builtin_externalization_conformance(self) -> None:
+        registrations = builtin_capability_sources()
+        with zipfile.ZipFile(self._wheel) as wheel:
+            members = frozenset(wheel.namelist())
+            for registration in registrations:
+                payload_root = registration.payload_root
+                source = (
+                    payload_root.parent
+                    / "conformance"
+                    / "externalization.json"
+                )
+                member = source.relative_to(PROJECT / "src").as_posix()
+                with self.subTest(package_ref=registration.package_ref):
+                    self.assertIn(member, members)
+                    self.assertEqual(wheel.read(member), source.read_bytes())
+                    document = json.loads(wheel.read(member))
+                    self.assertEqual(
+                        set(document),
+                        {"case_digests", "case_ids", "profile"},
+                    )
+                    self.assertEqual(
+                        tuple(document["case_ids"]),
+                        ("manifest-closure", "portable-identity"),
+                    )
+                    payload = open_portable_payload(payload_root)
+                    self.assertEqual(
+                        document["case_digests"],
+                        {
+                            "manifest-closure": _manifest_closure_sha256(
+                                payload_root
+                            ),
+                            "portable-identity": payload.payload_sha256,
+                        },
+                    )
+
     def test_wheel_contains_exact_dci_runtime_resources(self) -> None:
         with zipfile.ZipFile(self._wheel) as wheel:
             members = frozenset(wheel.namelist())
@@ -88,10 +124,33 @@ class AsterionDistributionTests(unittest.TestCase):
         self.assertEqual(
             project["tool"]["hatch"]["build"]["targets"]["wheel"]["artifacts"],
             [
+                "src/asterion/capabilities/controlled_code/conformance/*.json",
                 "src/asterion/capabilities/dci/conformance/*.json",
                 "src/asterion/capabilities/dci/resources/pi/*.ts",
             ],
         )
+
+
+def _manifest_closure_sha256(payload_root: Path) -> str:
+    paths = (
+        payload_root / "capability-package.json",
+        *sorted((payload_root / "capabilities").glob("*.json")),
+        *sorted((payload_root / "benchmark-suites").glob("*.json")),
+    )
+    members = tuple(
+        {
+            "path": path.relative_to(payload_root).as_posix(),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+        for path in paths
+    )
+    canonical = json.dumps(
+        members,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("ascii")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 if __name__ == "__main__":

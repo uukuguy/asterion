@@ -14,20 +14,25 @@ comparison baseline with its own framework implementation.
 ```text
 src/asterion/                         sole product distribution
 parent workspace src/dci/             mixed-repository, unpackaged benchmark baseline
-src/asterion/capabilities/dci_research/  bundled DCI capability and manifests
+src/asterion/capabilities/dci/        bundled DCI capability package payload and implementation
 src/asterion/applications/dci_agent_lite/ bundled provider and assemblies
+src/asterion/capability_packages/sources/builtin.py  generic built-in source form
 src/asterion/capabilities/controlled_code/payload/ controlled-code portable payload
 packages/typescript/asterion-runtime/ TypeScript validation and host types
 packages/rust/controlled-executor/    explicit controlled-execution service
 ```
 
+The bundled DCI package now lives under `src/asterion/capabilities/dci/`. The
+generic built-in source form resolves it by exact lock, and the external
+installed-distribution path is the clean-wheel proof that the same portable
+payload can be selected without source scanning or registry precedence.
+
 ## Stable DCI product entry
 
-The verified mixed-repository source-baseline
-`../scripts/examples/dci_basic_example.sh` and
-`../scripts/examples/dci_runtime_context_example.sh` continue loading repository
-`.env` configuration and invoke `dci.benchmark.pi_rpc_runner` through
-`PYTHONPATH=../src`. The baseline is not installed by the Asterion wheel.
+The verified mixed-repository source-baseline remains an external comparison
+baseline and is not installed by the Asterion wheel. The installed product uses
+exact application identity and the clean-wheel proof through exact source
+locks.
 
 The installed product uses exact application identity:
 

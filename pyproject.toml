@@ -32,6 +32,7 @@ dci-agent-lite = "asterion.applications.dci_agent_lite:create_provider"
 [tool.hatch.build.targets.wheel]
 packages = ["src/asterion"]
 artifacts = [
+  "src/asterion/capabilities/controlled_code/conformance/*.json",
   "src/asterion/capabilities/dci/conformance/*.json",
   "src/asterion/capabilities/dci/resources/pi/*.ts",
 ]

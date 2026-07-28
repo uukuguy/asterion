@@ -25,7 +25,7 @@ from asterion.capabilities.dci.implementation.complete import (
     INPUT_PROTOCOL,
     complete_application_identity,
 )
-from asterion.capabilities.dci_research.provider import (
+from asterion.capabilities.dci.provider import (
     create_provider as create_dci_package,
 )
 from asterion.capabilities.execution import (
@@ -73,7 +73,6 @@ from asterion.runtime.working_directory import ProcessWorkingDirectory
 PROJECT = Path(__file__).resolve().parents[1]
 SOURCE = PROJECT / "src/asterion"
 MANIFESTS = SOURCE / "capabilities/dci/payload/capabilities"
-LOCAL_SOURCE = SOURCE / "capabilities/dci_research"
 ASSEMBLIES = SOURCE / "applications/dci_agent_lite/assemblies"
 
 STAGES = (
@@ -681,7 +680,7 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
             )
         )
 
-    def test_transitional_provider_uses_authoritative_payload_and_suites(
+    def test_builtin_provider_uses_authoritative_payload_and_suites(
         self,
     ) -> None:
         payload_root = SOURCE / "capabilities/dci/payload"
@@ -694,7 +693,6 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
             tuple(path.name for path in installed.benchmark_suite_paths),
             ("all.json", "github.json", "paper-main.json"),
         )
-        self.assertFalse((LOCAL_SOURCE / "payload").exists())
 
     def test_provider_creation_is_metadata_only(self) -> None:
         provider_source = (
@@ -732,12 +730,25 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
             (CapabilityPackageRef("dci", "1.0.0"),),
         )
         installed = create_dci_package()
+        bound_capability_ids = tuple(
+            binding.capability_ref.capability_id
+            for binding in installed.implementations
+        )
         self.assertEqual(
             tuple(
-                binding.capability_ref.capability_id
-                for binding in installed.implementations
+                capability_id
+                for capability_id in bound_capability_ids
+                if capability_id in STAGES
             ),
-            STAGES,
+            tuple(sorted(STAGES)),
+        )
+        self.assertEqual(
+            tuple(
+                capability_id
+                for capability_id in bound_capability_ids
+                if capability_id not in STAGES
+            ),
+            ("protocol.observability",),
         )
         self.assertEqual(
             {path.name for path in application.assembly_paths},

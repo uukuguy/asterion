@@ -37,6 +37,11 @@ check also covers providers, capability manifests, context profiles, benchmark
 identities, and paper scopes. It does not construct runtime clients, contact an
 Agent or Judge, or run a dataset.
 
+The DCI package is exposed through a generic built-in source form and an
+external installed-distribution proof. Both resolve only exact
+`package_id@version` identities; unlocked multi-source visibility is ambiguous
+and fails closed instead of guessing precedence.
+
 ## External Pi and resources
 
 From a fresh clone, prepare the locked Pi source and the two corpora used by

@@ -149,7 +149,7 @@ Python 迁移完成的定义是 isolated wheel 可用，而不是源目录内 `u
 
 ## Phase 5：迁移 DCI 产品与应用
 
-初始策略是 **keep DCI bundled initially**：保留 `asterion/dci`、`dci_research` capability、`dci_agent_lite` provider、`asterion-dci` entry point、资源 profile 和 `scripts`。原因是当前完整产品验证、resource packaging 和应用绑定都在同一个 wheel 中有证据；在拆仓同时拆 distribution 会让问题来源不可区分。
+初始策略是 **keep DCI bundled initially**：保留 `src/asterion/capabilities/dci/`、`dci_agent_lite` provider、`asterion-dci` entry point、资源 profile 和 `scripts`。原因是外部 installed-distribution clean-wheel proof 已经验证同一 portable payload 的 exact source lock；built-in 只是另一种 generic source form。archive/registry source forms 和它们的安全设计留给单独的 security 文档，不在这一轮拆仓里一起引入。
 
 迁移步骤：
 
@@ -158,6 +158,7 @@ Python 迁移完成的定义是 isolated wheel 可用，而不是源目录内 `u
 3. 迁移 `.env.template` 的 `DCI_PI_DIR`、provider/model、语料、输出和 Judge 配置说明，不复制值。
 4. 检查缺省 Pi 路径规则：优先 `./pi`，`./pi-mono` 仅为兼容 fallback。
 5. 运行 provider discovery、product describe 和 provider-free acceptance；有凭据时再运行 bounded Pi examples，且在输出前显示 operation count。
+6. archive/registry source forms 保持 deferred，不要把它们混进第一轮独立仓库门禁。
 
 完整数据集 benchmark 不属于拆仓的默认门禁。它是昂贵、外部依赖的发布候选验证，必须显式授权并记录数据版本、模型、Judge、缓存身份和成本。
 
@@ -209,6 +210,8 @@ DCI 未来是否从核心 wheel 拆成独立 plugin，不由目录美观决定�
 - 是否有 core/plugin 版本兼容矩阵、升级策略和两个 isolated-wheel 测试？
 
 若答案不完整，继续单 wheel、内部清晰分层。通过决策门后，建议形成 `asterion-core`、`asterion-dci` 两个发行物；后者依赖前者并注册 `dci-agent-lite` provider，core 不 import plugin。
+
+archive/registry source forms 的落地时机由单独的 security 设计决定，不在这个插件决策门里展开。
 
 ## 发布门禁
 

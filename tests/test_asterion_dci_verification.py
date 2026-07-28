@@ -22,7 +22,7 @@ from asterion.applications.provider import (
     validate_installed_provider,
 )
 from asterion.capabilities.builtin import create_controlled_code_package
-from asterion.capabilities.dci_research.provider import (
+from asterion.capabilities.dci.provider import (
     create_provider as create_dci_package,
 )
 from asterion.capabilities.dci.implementation.reproduction.verification import (
@@ -738,8 +738,8 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
                     ),
                 ),
                 patch(
-                    "asterion.capabilities.dci_research.provider.__file__",
-                    str(package_root / "capabilities/dci_research/provider.py"),
+                    "asterion.capabilities.dci.provider.__file__",
+                    str(package_root / "capabilities/dci/provider.py"),
                 ),
             ):
                 result = verifier(acceptance_request())
@@ -845,7 +845,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
                 ),
             )
             with patch(
-                "asterion.capabilities.dci_research.provider.create_provider",
+                "asterion.capabilities.dci.provider.create_provider",
                 return_value=damaged,
             ):
                 result = verifier(acceptance_request())

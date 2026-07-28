@@ -61,11 +61,7 @@ PRIVATE_VALUE_MODULES = {
 }
 PACKAGE_OWNED_PREFIXES = {
     "controlled_code": ("asterion.capabilities.controlled_code",),
-    "implementation": ("asterion.capabilities.dci",),
-    "dci_research": (
-        "asterion.capabilities.dci_research",
-        "asterion.dci",
-    ),
+    "dci": ("asterion.capabilities.dci",),
 }
 
 
@@ -287,7 +283,7 @@ class CapabilitySdkTests(unittest.TestCase):
             if path.name in {"complete.py", "implementation.py"}
         )
         for path in implementation_files:
-            package = path.parent.name
+            package = path.relative_to(CAPABILITIES).parts[0]
             allowed = (
                 "asterion.capability_sdk",
                 *PACKAGE_OWNED_PREFIXES[package],
