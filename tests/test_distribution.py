@@ -22,6 +22,9 @@ BENCHMARK_SCHEMA_SOURCE = (
     PROJECT / "schemas/benchmark-suite/v1/benchmark-suite.schema.json"
 )
 DCI_RUNTIME_RESOURCES = {
+    "asterion/capabilities/dci/conformance/externalization.json":
+        PROJECT
+        / "src/asterion/capabilities/dci/conformance/externalization.json",
     "asterion/capabilities/dci/resources/pi/context-extension-manifest.json":
         PROJECT
         / "src/asterion/capabilities/dci/resources/pi/context-extension-manifest.json",
@@ -84,7 +87,10 @@ class AsterionDistributionTests(unittest.TestCase):
         project = tomllib.loads((PROJECT / "pyproject.toml").read_text())
         self.assertEqual(
             project["tool"]["hatch"]["build"]["targets"]["wheel"]["artifacts"],
-            ["src/asterion/capabilities/dci/resources/pi/*.ts"],
+            [
+                "src/asterion/capabilities/dci/conformance/*.json",
+                "src/asterion/capabilities/dci/resources/pi/*.ts",
+            ],
         )
 
 

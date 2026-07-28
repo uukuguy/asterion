@@ -19,7 +19,7 @@ from asterion.capability_packages.sources.builtin import (
 
 
 class BuiltinCapabilitySourceTests(unittest.TestCase):
-    def test_registration_table_is_explicit_immutable_and_excludes_dci(
+    def test_registration_table_is_explicit_immutable_and_includes_dci(
         self,
     ) -> None:
         registrations = builtin_capability_sources()
@@ -27,12 +27,9 @@ class BuiltinCapabilitySourceTests(unittest.TestCase):
         self.assertIs(type(registrations), tuple)
         self.assertEqual(
             tuple(registration.package_ref for registration in registrations),
-            (CapabilityPackageRef("controlled-code", "1.0.0"),),
-        )
-        self.assertNotIn(
-            "dci",
-            tuple(
-                registration.package_ref.package_id for registration in registrations
+            (
+                CapabilityPackageRef("controlled-code", "1.0.0"),
+                CapabilityPackageRef("dci", "1.0.0"),
             ),
         )
         with self.assertRaises(FrozenInstanceError):
@@ -109,7 +106,7 @@ class BuiltinCapabilitySourceTests(unittest.TestCase):
                 package_ref=CapabilityPackageRef("other.package", "1.0.0"),
             ),
             replace(valid, payload_sha256="0" * 64),
-            replace(valid, source_id="builtin:other.package@1.0.0"),
+            replace(valid, source_id="builtin.other.package.1.0.0"),
             replace(valid, source_kind="local-directory"),
         )
         for installed in mismatches:
@@ -160,7 +157,7 @@ class BuiltinCapabilitySourceTests(unittest.TestCase):
         )
         candidate = source.discover_metadata()[0]
 
-        forged = replace(candidate, source_id="builtin:forged@1.0.0")
+        forged = replace(candidate, source_id="builtin.forged.1.0.0")
         for operation in (
             source.open_payload,
             lambda value: source.validate_source_identity(

@@ -185,7 +185,7 @@ def _installed_for(
     return InstalledCapabilityPackage(
         package_ref=CapabilityPackageRef("controlled-code", "1.0.0"),
         payload_sha256=payload_sha256,
-        source_id="builtin:controlled-code@1.0.0",
+        source_id="builtin.controlled-code.1.0.0",
         source_kind="builtin",
         catalog_roots=(payload_root / "capabilities",),
         benchmark_suite_paths=(),

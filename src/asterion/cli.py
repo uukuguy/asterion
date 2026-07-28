@@ -287,12 +287,9 @@ async def _run(
     installed_packages = load_installed_capability_packages(
         selected_metadata.capability_packages,
         (
-            BuiltinCapabilityPackageSource(),
-            *(
-                ()
-                if capability_package_sources is None
-                else tuple(capability_package_sources)
-            ),
+            (BuiltinCapabilityPackageSource(),)
+            if capability_package_sources is None
+            else tuple(capability_package_sources)
         ),
     )
     provider = resolve_installed_provider(

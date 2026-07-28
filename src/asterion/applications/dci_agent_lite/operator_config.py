@@ -14,10 +14,13 @@ from dotenv import dotenv_values
 from asterion.capabilities.dci.implementation.benchmark_bindings import (
     create_benchmark_bindings,
 )
+from asterion.capabilities.dci.implementation.bindings import complete_dci_bindings
 from asterion.capabilities.dci.implementation.operator_inputs import (
     DciBenchmarkOperatorInputs,
 )
-from asterion.capabilities.dci_research.provider import (
+from asterion.capabilities.dci.provider import (
+    SOURCE_ID,
+    SOURCE_KIND,
     create_provider as create_dci_provider,
 )
 from asterion.capability_packages.model import InstalledCapabilityPackage
@@ -29,8 +32,6 @@ from asterion.capability_packages.sources.builtin import (
 
 
 PACKAGE_REF = CapabilityPackageRef("dci", "1.0.0")
-SOURCE_ID = "builtin:dci@1.0.0"
-SOURCE_KIND = "builtin"
 
 _DATASET_PREFIX = "ASTERION_DCI_DATASET_"
 _CORPUS_PREFIX = "ASTERION_DCI_CORPUS_"
@@ -58,6 +59,7 @@ def create_capability_package_source(
             installed,
             source_id=SOURCE_ID,
             source_kind=SOURCE_KIND,
+            implementations=complete_dci_bindings(),
             benchmark_bindings=create_benchmark_bindings(operator_inputs),
         )
 

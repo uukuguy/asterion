@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib import import_module
 from importlib import resources
 from pathlib import Path
 
@@ -10,11 +11,13 @@ from asterion.capability_packages.payload import open_portable_payload
 from asterion.capability_packages.protocol import CapabilityPackageRef
 from asterion.capability_packages.sources.builtin import (
     BuiltinCapabilityRegistration,
+    builtin_capability_source_id,
 )
 
 
 _CONTROLLED_CODE_REF = CapabilityPackageRef("controlled-code", "1.0.0")
-_CONTROLLED_CODE_SOURCE_ID = "builtin:controlled-code@1.0.0"
+_CONTROLLED_CODE_SOURCE_ID = builtin_capability_source_id(_CONTROLLED_CODE_REF)
+_DCI_REF = CapabilityPackageRef("dci", "1.0.0")
 
 
 def builtin_capability_sources() -> tuple[BuiltinCapabilityRegistration, ...]:
@@ -27,6 +30,11 @@ def builtin_capability_sources() -> tuple[BuiltinCapabilityRegistration, ...]:
             package_root / "capabilities/controlled_code/payload",
             create_controlled_code_package,
         ),
+        BuiltinCapabilityRegistration(
+            _DCI_REF,
+            package_root / "capabilities/dci/payload",
+            _create_dci_package,
+        ),
     )
 
 
@@ -37,7 +45,8 @@ def create_controlled_code_package() -> InstalledCapabilityPackage:
         controlled_code_bindings,
     )
 
-    payload_root = builtin_capability_sources()[0].payload_root
+    package_root = Path(str(resources.files("asterion"))).resolve()
+    payload_root = package_root / "capabilities/controlled_code/payload"
     payload = open_portable_payload(payload_root)
     return InstalledCapabilityPackage(
         package_ref=_CONTROLLED_CODE_REF,
@@ -49,3 +58,8 @@ def create_controlled_code_package() -> InstalledCapabilityPackage:
         implementations=controlled_code_bindings(),
         benchmark_bindings=(),
     )
+
+
+def _create_dci_package() -> InstalledCapabilityPackage:
+    provider = import_module("asterion.capabilities.dci.provider")
+    return provider.create_provider()

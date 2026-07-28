@@ -157,7 +157,7 @@ def installed_package(
     return InstalledCapabilityPackage(
         package_ref=PACKAGE_REF,
         payload_sha256="a" * 64,
-        source_id="builtin:example.package@1.0.0",
+        source_id="builtin.example.package.1.0.0",
         source_kind="builtin",
         catalog_roots=(catalog_root,),
         benchmark_suite_paths=(),

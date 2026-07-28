@@ -12,7 +12,10 @@ from asterion.capability_packages.model import (
     PortableCapabilityPayload,
 )
 from asterion.capability_packages.payload import open_portable_payload
-from asterion.capability_packages.protocol import CapabilityPackageRef
+from asterion.capability_packages.protocol import (
+    IDENTIFIER,
+    CapabilityPackageRef,
+)
 
 
 class BuiltinCapabilitySourceError(ValueError):
@@ -70,7 +73,7 @@ class BuiltinCapabilityPackageSource:
         return tuple(
             CapabilityPackageCandidate(
                 package_ref=registration.package_ref,
-                source_id=_source_id(registration.package_ref),
+                source_id=builtin_capability_source_id(registration.package_ref),
                 source_kind="builtin",
                 payload_sha256=None,
                 metadata={},
@@ -148,7 +151,8 @@ class BuiltinCapabilityPackageSource:
             registration
             for registration in self._registrations
             if candidate.package_ref == registration.package_ref
-            and candidate.source_id == _source_id(registration.package_ref)
+            and candidate.source_id
+            == builtin_capability_source_id(registration.package_ref)
             and candidate.source_kind == "builtin"
             and candidate.payload_sha256 is None
             and not candidate.metadata
@@ -160,8 +164,19 @@ class BuiltinCapabilityPackageSource:
         return matches[0]
 
 
-def _source_id(package_ref: CapabilityPackageRef) -> str:
-    return f"builtin:{package_ref.package_id}@{package_ref.version}"
+def builtin_capability_source_id(package_ref: CapabilityPackageRef) -> str:
+    """Return the canonical source-lock-safe ID for one built-in package."""
+
+    if not isinstance(package_ref, CapabilityPackageRef):
+        raise BuiltinCapabilitySourceError(
+            "built-in capability package ref is invalid"
+        )
+    source_id = f"builtin.{package_ref.package_id}.{package_ref.version}"
+    if IDENTIFIER.fullmatch(source_id) is None:
+        raise BuiltinCapabilitySourceError(
+            "built-in capability source id is invalid"
+        )
+    return source_id
 
 
 def _provider_resources_match(
