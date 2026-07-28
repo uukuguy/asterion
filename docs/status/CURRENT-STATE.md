@@ -8,7 +8,7 @@
 - Project route: direct
 - Canonical worklist: approved implementation plans under
   `docs/superpowers/plans/`
-- Active work package: Plan 4 Task 4 — thin DCI application adapter
+- Active work package: Plan 4 Task 5 — remove global DCI launchers
 
 ## Current Architecture
 
@@ -31,13 +31,17 @@
   below `src/asterion/capabilities/dci/payload/`, with exact 12/13/15-task
   GitHub, paper-main, and union suites.
 - All DCI domain implementation and 38 packaged resources now live below
-  `src/asterion/capabilities/dci/`; the legacy `asterion.dci` namespace has
-  only its transitional `__init__.py` and `cli.py`.
+  `src/asterion/capabilities/dci/`; the legacy `asterion.dci` namespace is
+  absent.
 - Installed host-service entry points, TypeScript resource synchronization,
   wheel contents, and the transitional provider shell all resolve the
   authoritative package-owned implementation and payload.
 - Application assembly inventory and acceptance identities are application
   owned and injected into package verification as immutable values.
+- `asterion-dci` is a thin `dci_agent_lite` adapter over generic application
+  and benchmark hosts. It translates private operator configuration, performs
+  provider-free readiness checks, and uses the generic built-in package source
+  lifecycle.
 - The approved migration proves DCI as an installed extension before exposing
   the identical portable payload through the built-in adapter.
 - Installed provider resources stay package-rooted; explicit DCI operator
@@ -46,9 +50,9 @@
 - DCI package implementation owns one-use execution authority, exact
   scope/selection plans, budgets, private output identities, and immutable
   dataset bindings.
-- `src/asterion/dci/cli.py` keeps reproduction plan-only by default; explicit
-  execution requires exact scope, limit, private output root, and five positive
-  operation/cost caps.
+- Generic benchmark execution remains plan-only by default and requires
+  explicit `--execute`; private DCI roots remain application-owned and
+  redacted.
 - Package-owned benchmark code revalidates complete scope, bounded selection,
   raw dataset content, benchmark identity, and descriptor identity before
   authority consumption or Agent/Judge work.
@@ -59,11 +63,11 @@
 
 ## Open Problems (theme-level)
 
-- Plan 4 Tasks 4-8 remain; current source still contains the transitional
-  `asterion.dci` CLI/top-level adapter, the `dci_research` provider shell, and
-  root benchmark launchers.
-- Task 4 must replace the transitional DCI CLI with an application adapter and
-  remove the final legacy `asterion.dci` files.
+- Plan 4 Tasks 5-8 remain; current source still contains the transitional
+  `dci_research` provider shell and obsolete root benchmark
+  orchestrators/launchers.
+- Task 5 must remove the global DCI benchmark orchestration and per-task shell
+  launchers, then update all active usage and resource metadata.
 - Provider-backed bounded reproduction still requires fresh exact finite
   authorization, an operator-selected private output root, and any
   scope-specific external datasets.
@@ -105,7 +109,9 @@
 - `src/asterion/runtime/protocol.py` — public runtime protocol
 - `src/asterion/packages/composition.py` — deterministic package composition
 - `src/asterion/runner/application.py` — resolved application execution
-- `src/asterion/dci/cli.py` — transitional DCI CLI removed by Task 4
+- `src/asterion/applications/dci_agent_lite/cli.py` — thin DCI CLI adapter
+- `src/asterion/applications/dci_agent_lite/operator_config.py` — private
+  operator translation and provider-free readiness
 - `src/asterion/applications/dci_agent_lite/provider.py` — DCI application
   ownership, exact assemblies, and injected acceptance inventory
 - `src/asterion/capabilities/dci/implementation/` — DCI domain implementation
@@ -119,7 +125,7 @@
 2. Read `RESUME-NEXT-SESSION.md` for the next concrete action.
 3. Read `MEMORY.md` for collaboration rules and corrected feedback.
 4. Run `git status --short` and `git log --oneline -5`.
-5. Continue Plan 4 Task 4 in the isolated capability-package worktree.
+5. Continue Plan 4 Task 5 in the isolated capability-package worktree.
 6. Treat external execution as unauthorized unless the operator supplies a new
    exact scope, limit, private output root, and five finite positive caps.
 7. Keep any bounded result `External-limited`; never promote it to full-paper

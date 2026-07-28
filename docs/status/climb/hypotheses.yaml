@@ -70,9 +70,19 @@
       "expected_lift": "+1 completed task",
       "cost_h": 3.0,
       "ranking": 0.85,
-      "status": "in-flight",
+      "status": "confirmed",
       "created_at": "2026-07-28T12:00:00",
-      "results": []
+      "results": [
+        {
+          "session": "2026-07-28-plan4",
+          "cycle": 4,
+          "run": "plan4-climb-h004",
+          "local": 4,
+          "verdict": "confirmed",
+          "decision_reason": "Task 4 approved after three High and one Medium fixes; 123 focused and 719 full passed; make check, promotion, docs, build green",
+          "commit_range": "a59b06f..af26301"
+        }
+      ]
     },
     {
       "id": "H-005",
@@ -81,7 +91,7 @@
       "expected_lift": "+1 completed task",
       "cost_h": 2.0,
       "ranking": 0.8,
-      "status": "pending",
+      "status": "in-flight",
       "created_at": "2026-07-28T12:00:00",
       "results": []
     },

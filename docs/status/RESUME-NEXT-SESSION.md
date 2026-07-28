@@ -1,17 +1,17 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-28 15:20. **Session remains active — not a final handoff.**
+> Updated: 2026-07-28 17:17. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
 - Plans 1–3 remain complete and verified.
-- Plan 4 Tasks 1–3 are complete and independently approved.
-- Task 3 moved all DCI implementation and 38 resources under
-  `src/asterion/capabilities/dci/`; its final commits are `7168667`,
-  `d89c51f`, and `fce7ba5`.
-- Final Task 3 verification passed 731 Python tests, TypeScript resource
-  checks, docs, packaging, and promotion with zero provider operations.
-- climb is at 3/8; H-004 / Plan 4 Task 4 is the immediate next action.
+- Plan 4 Tasks 1–4 are complete and independently approved.
+- Task 4 replaced the legacy DCI CLI with a thin application adapter in
+  commits `890138d` and `af26301`; `src/asterion/dci` is absent.
+- Final Task 4 verification passed 123 focused and 719 full Python tests,
+  cross-language checks, docs, packaging, and promotion with zero provider
+  operations.
+- climb is at 4/8; H-005 / Plan 4 Task 5 is the immediate next action.
 
 ## Where things stand
 
@@ -22,28 +22,32 @@
   portable closure.
 - The transitional `dci_research` provider shell delegates to the authoritative
   payload and owns no duplicate manifests or conformance data.
-- The legacy `asterion.dci` namespace contains only `__init__.py` and `cli.py`;
-  Task 4 replaces them with a thin `dci_agent_lite` application adapter.
+- `asterion-dci` delegates to generic hosts; its adapter has no source
+  lifecycle, benchmark loop, evidence writer, composer, or process runner.
+- Private relative paths are anchored to the explicit env-file directory, and
+  provider-free preflight fails closed for incomplete or unsafe roots.
 - climb state is tracked under `docs/status/climb/`; the adapter uses only
   provider-free local test gates and has no external push.
 
 ## Next steps
 
-1. Execute Plan 4 Task 4 from `.superpowers/sdd/task-4-brief.md`.
-2. Start with the missing `tests.test_dci_application_adapter` contract.
-3. Move DCI argument aliases, operator configuration translation, preflight,
-   and redacted presentation into `applications/dci_agent_lite`; delegate
-   planning/execution to public generic hosts.
+1. Execute Plan 4 Task 5 from `.superpowers/sdd/task-5-brief.md`.
+2. Start with the obsolete-surface absence assertions in
+   `tests.test_project_boundaries`.
+3. Delete the global DCI orchestrators and all 14 per-task launchers; replace
+   active usage with generic `asterion benchmark` or thin `asterion-dci`
+   commands.
 4. Run focused and full provider-free verification, independent task review,
-   then advance H-004 through `tools/climb/cycle.sh`.
+   then advance H-005 through `tools/climb/cycle.sh`.
 
 ## Boundaries and ruled-out paths
 
 - Do not place Python source files inside a portable payload root.
 - Do not add a validator exception for DCI.
-- Do not restore legacy DCI implementation modules or duplicate payloads.
-- Keep task loops, evidence writing, composition, process running, and source
-  discovery out of the application adapter.
+- Do not leave compatibility wrappers for deleted launchers.
+- Preserve suite IDs, task counts, plan-only defaults, explicit execution,
+  resume compatibility, and private evidence semantics in active docs.
+- Paths must come from application/operator configuration, never manifests.
 - Preserve explicit generic execution authorization and plan-only defaults.
 - Do not run provider-backed benchmarks, downloads, setup mutation, or full
   corpus reads.
@@ -53,5 +57,5 @@
 ```bash
 cd .worktrees/capability-package-architecture
 git status --short
-uv run python -m unittest -v tests.test_dci_application_adapter
+uv run python -m unittest -v tests.test_project_boundaries
 ```

@@ -2,3 +2,4 @@ run_id,cycle,session,hypothesis_id,paradigm,parent_run,pushed_at,lb_landed_at,lo
 plan4-climb-h001,1,2026-07-28-plan4,H-001,plan4-task-1,,,,1,,,LOCAL,19 focused and 712 full passed; independent review approved,confirmed,1.5,
 plan4-climb-h002,2,2026-07-28-plan4,H-002,plan4-task-2,,,,2,,,LOCAL,22 focused and 720 full passed; two Important review findings fixed and re-review approved,confirmed,2.0,
 plan4-climb-h003,3,2026-07-28-plan4,H-003,plan4-task-3,,,,3,,,LOCAL,"Task 3 approved after five Important and one Minor fixes; 731 Python tests, TypeScript 16/16 plus resource check, docs-check, promotion-check PASS",confirmed,4.0,
+plan4-climb-h004,4,2026-07-28-plan4,H-004,plan4-task-4,,,,4,,,LOCAL,"Task 4 approved after three High and one Medium fixes; 123 focused and 719 full passed; make check, promotion, docs, build green",confirmed,3.0,

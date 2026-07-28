@@ -7,6 +7,7 @@
 | D-2026-07-26-01 | 🟢 active | Anchor explicit operator configuration to the environment-file directory |
 | D-2026-07-28-01 | 🟢 active | Keep Python source envelopes outside closed portable payload roots |
 | D-2026-07-28-02 | 🟢 active | Keep application acceptance inventory outside package implementation |
+| D-2026-07-28-03 | 🟢 active | Configure generic package sources instead of implementing lifecycle in adapters |
 
 ## D-2026-07-26-01 — Operator configuration root
 
@@ -54,3 +55,18 @@
 - Evidence: commits `d89c51f` and `fce7ba5`;
   `tests.test_dci_package_ownership`,
   `tests.test_dci_complete_application`, and final Task 3 review approved.
+
+## D-2026-07-28-03 — Generic source lifecycle
+
+- Status: 🟢 active
+- Decision: Product adapters may register an exact payload and deferred bound
+  provider through `BuiltinCapabilityPackageSource`, but they do not implement
+  discovery, payload opening, identity validation, or provider loading.
+- Rationale: Package-source lifecycle is generic framework behavior. Duplicating
+  it in an application adapter weakens source neutrality and can bypass shared
+  identity checks.
+- Consequence: The DCI adapter owns private input translation and binding
+  injection while the generic built-in source owns metadata-first discovery
+  and exact payload/provider validation.
+- Evidence: commit `af26301`; `tests.test_dci_application_adapter`; final Task 4
+  re-review approved.
