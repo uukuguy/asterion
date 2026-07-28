@@ -65,6 +65,14 @@ class DciSourceFormEquivalenceTests(unittest.TestCase):
         cls.root = Path(cls._temporary.name).resolve()
         cls.clean_cwd = cls.root / "clean-cwd"
         cls.clean_cwd.mkdir()
+        cls.probe_root = cls.root / "probe"
+        probe_tests = cls.probe_root / "tests"
+        probe_tests.mkdir(parents=True)
+        (probe_tests / "__init__.py").write_text("", encoding="utf-8")
+        shutil.copy2(
+            Path(__file__),
+            probe_tests / "test_dci_source_form_equivalence.py",
+        )
         cls.wheel_dir = cls.root / "wheels"
         cls.wheel_dir.mkdir()
         cls.venv = cls.root / "venv"
@@ -185,7 +193,8 @@ class DciSourceFormEquivalenceTests(unittest.TestCase):
         environment.update(
             {
                 "ASTERION_DCI_LOCAL_COPY": str(self.local_source_root),
-                "PYTHONPATH": str(PROJECT),
+                "ASTERION_REPO_ROOT": str(PROJECT),
+                "PYTHONPATH": str(self.probe_root),
                 "PYTHONNOUSERSITE": "1",
             }
         )
@@ -344,7 +353,10 @@ def _identity(installed: object, lock: CapabilitySourceLock) -> dict[str, object
             )
         ),
         "conformance_profile": _json(installed.catalog_roots[0].parent / "conformance/profile.json"),
-        "conformance_results": _conformance_results(installed.catalog_roots[0].parent / "conformance/profile.json"),
+        "conformance_results": _conformance_results(
+            installed.catalog_roots[0].parent,
+            installed.payload_sha256,
+        ),
         "synthetic_capability_result": capability_result,
         "synthetic_resolved_plan": benchmark["plan"],
         "synthetic_task_results": benchmark["task_results"],
@@ -508,12 +520,42 @@ def _json(path: Path) -> object:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _conformance_results(path: Path) -> dict[str, str]:
-    profile = _json(path)
+def _conformance_results(
+    payload_root: Path,
+    payload_sha256: str,
+) -> dict[str, str]:
+    profile = _json(payload_root / "conformance/profile.json")
+    if tuple(profile["case_ids"]) != (
+        "manifest-closure",
+        "portable-identity",
+    ):
+        raise AssertionError("unexpected externalization conformance profile")
     return {
-        case_id: hashlib.sha256(case_id.encode("utf-8")).hexdigest()
-        for case_id in profile["case_ids"]
+        "manifest-closure": _manifest_closure_sha256(payload_root),
+        "portable-identity": payload_sha256,
     }
+
+
+def _manifest_closure_sha256(payload_root: Path) -> str:
+    paths = (
+        payload_root / "capability-package.json",
+        *sorted((payload_root / "capabilities").glob("*.json")),
+        *sorted((payload_root / "benchmark-suites").glob("*.json")),
+    )
+    members = tuple(
+        {
+            "path": path.relative_to(payload_root).as_posix(),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+        for path in paths
+    )
+    canonical = json.dumps(
+        members,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("ascii")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def _plain(value: object) -> object:
@@ -640,8 +682,13 @@ def create_provider():
 
 _DISTRIBUTION_SCRIPT = textwrap.dedent(
     r'''
+    import importlib.resources
     import json
     import os
+    import pathlib
+    import sys
+
+    import asterion
 
     from asterion.capability_packages.protocol import CapabilityPackageRef
     from asterion.capability_packages.resolution import (
@@ -656,8 +703,38 @@ _DISTRIBUTION_SCRIPT = textwrap.dedent(
     from tests.test_dci_source_form_equivalence import _load_source_fingerprint
 
     PACKAGE_REF = CapabilityPackageRef("dci", "1.0.0")
+    repo = pathlib.Path(os.environ["ASTERION_REPO_ROOT"]).resolve()
+    repo_src = repo / "src"
+    assert all(
+        pathlib.Path(item).resolve() not in {repo, repo_src}
+        for item in sys.path
+        if item
+    )
+    for name, module in tuple(sys.modules.items()):
+        if name == "asterion" or name.startswith("asterion."):
+            module_file = getattr(module, "__file__", None)
+            if module_file is not None:
+                assert not pathlib.Path(module_file).resolve().is_relative_to(repo)
+    package_root = pathlib.Path(
+        str(importlib.resources.files("asterion"))
+    ).resolve()
+    assert not package_root.is_relative_to(repo)
+    assert (
+        package_root
+        / "capabilities/dci/payload/capability-package.json"
+    ).is_file()
+    assert (
+        package_root
+        / "capabilities/dci/conformance/externalization.json"
+    ).is_file()
+
     source = DistributionCapabilityPackageSource()
     result = _load_source_fingerprint(source)
+    for name, module in tuple(sys.modules.items()):
+        if name == "asterion" or name.startswith("asterion."):
+            module_file = getattr(module, "__file__", None)
+            if module_file is not None:
+                assert not pathlib.Path(module_file).resolve().is_relative_to(repo)
     local_root = os.environ["ASTERION_DCI_LOCAL_COPY"]
     payload = open_portable_payload(__import__("pathlib").Path(local_root) / "payload")
     local_source = LocalDirectoryCapabilityPackageSource(
