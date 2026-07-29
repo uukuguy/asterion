@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -55,10 +56,11 @@ FORBIDDEN_PROTOCOL_IDENTIFIERS = (
 )
 
 
-def identity_files() -> tuple[Path, ...]:
+def identity_files(*, root: Path = PROJECT) -> tuple[Path, ...]:
+    project_root = root.resolve()
     files: list[Path] = []
-    for path in PROJECT.rglob("*"):
-        relative = path.relative_to(PROJECT)
+    for path in project_root.rglob("*"):
+        relative = path.relative_to(project_root)
         if (
             not path.is_file()
             or any(part in RECURSIVE_EXCLUDED_NAMES for part in relative.parts)
@@ -107,6 +109,15 @@ class AsterionProjectBoundaryTests(unittest.TestCase):
         self.assertNotIn("../", text)
         self.assertNotRegex(text, r"(?m)^\s*members\s*=")
 
+    def test_identity_files_can_scan_an_isolated_project_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            active = root / ".superpowers/active-protocol-guide.md"
+            active.parent.mkdir(parents=True)
+            active.write_text("# Active protocol guide\n", encoding="utf-8")
+
+            self.assertEqual(identity_files(root=root), (active,))
+
     def test_active_repository_surfaces_do_not_reference_old_protocol_ids(self) -> None:
         offenders: list[tuple[Path, str]] = []
         for path in identity_files():
@@ -117,21 +128,22 @@ class AsterionProjectBoundaryTests(unittest.TestCase):
         self.assertEqual(offenders, [])
 
     def test_active_superpowers_documents_are_scanned_when_not_historical(self) -> None:
-        path = PROJECT / ".superpowers/active-protocol-guide.md"
-        path.write_text("# Active protocol guide\n", encoding="utf-8")
-        try:
-            self.assertIn(path, identity_files())
-        finally:
-            path.unlink()
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            path = root / ".superpowers/active-protocol-guide.md"
+            path.parent.mkdir(parents=True)
+            path.write_text("# Active protocol guide\n", encoding="utf-8")
+
+            self.assertIn(path, identity_files(root=root))
 
     def test_generated_sdd_evidence_is_not_scanned_as_active_surface(self) -> None:
-        path = PROJECT / ".superpowers/sdd/generated-review-evidence.md"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("# Generated review evidence\n", encoding="utf-8")
-        try:
-            self.assertNotIn(path, identity_files())
-        finally:
-            path.unlink()
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            path = root / ".superpowers/sdd/generated-review-evidence.md"
+            path.parent.mkdir(parents=True)
+            path.write_text("# Generated review evidence\n", encoding="utf-8")
+
+            self.assertNotIn(path, identity_files(root=root))
 
 
 if __name__ == "__main__":
