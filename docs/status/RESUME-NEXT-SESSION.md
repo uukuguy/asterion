@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-30 01:26. **Session remains active — not a final handoff.**
+> Updated: 2026-07-30 03:06. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -76,9 +76,13 @@
   immutable partial resume, ordered lifecycle, strict JSON, and failed/cancelled
   run closure. Independent re-review found no remaining issue; 52 focused tests
   and static checks pass.
-- The immediate next action is Plan 3 Task 5: sequential benchmark execution,
-  process-tree cancellation, and runner integration against the approved
-  evidence protocol.
+- Plan 3 Task 5 adds the sequential runner in `c645ab5`, closes invocation,
+  progress, terminal-evidence, and crash-window gaps through `327b116`, and
+  binds process payloads to host issuers in `286ecd7`. Cancellation kills the
+  complete process group, including a TERM-ignoring grandchild. Both runner
+  and process tracks passed independent review.
+- The immediate next action is Plan 3 Task 6: the generic benchmark host
+  command and provider-free CLI boundary.
 
 ## Where things stand
 
@@ -125,16 +129,19 @@
 - Plan 3 Task 4 evidence verification passed 46 focused benchmark
   model/resolution/planning/evidence tests, Pyright, Ruff, compileall, and
   diff-check after `29fa698`.
+- Plan 3 Task 5 final focused verification passed 98 benchmark tests plus
+  Pyright, Ruff, compileall, and diff-check. Process tests passed repeatedly;
+  independent process review also ran `make check` with 779 Python tests and
+  all TypeScript, Rust, docs, lint, and wheel gates green.
 - `dci.agent-runtime/v1` remains only as the deliberate absence-test needle in
   Task 1 scope; no compatibility alias was added.
 - Plan 2 is complete and independently reviewed.
 
 ## Next action
 
-1. Start Plan 3 Task 5 by writing runner boundary RED tests against
-   `BenchmarkEvidenceStore`.
-2. Implement sequential execution and process-tree cancellation without
-   discovery, authorization, retries, persistence, scheduling, or service start.
+1. Implement Plan 3 Task 6 generic benchmark plan/run/resume CLI commands.
+2. Keep plan provider-free and require explicit execution authorization,
+   source locks, evidence root, and finite case bounds.
 3. Continue the approved generic benchmark subsystem plan task by task.
 
 ## Boundaries and ruled-out paths
