@@ -7,17 +7,15 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 
-from asterion.benchmarks.model import (
+from asterion.capability_sdk import (
+    BenchmarkTaskBinding,
     BenchmarkTaskInvocation,
     BenchmarkTaskRequest,
+    CapabilityPackageRef,
 )
 from asterion.capabilities.dci.implementation.operator_inputs import (
     DciBenchmarkOperatorInputs,
 )
-from asterion.capability_packages.model import BenchmarkTaskBinding
-from asterion.capability_packages.protocol import CapabilityPackageRef
-
-
 _DCI_PACKAGE = CapabilityPackageRef("dci", "1.0.0")
 _DCI_SUITES = frozenset(("dci.all", "dci.github", "dci.paper-main"))
 

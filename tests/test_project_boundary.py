@@ -142,7 +142,7 @@ class AsterionProjectBoundaryTests(unittest.TestCase):
     def test_project_metadata_and_resources_are_internal(self) -> None:
         self.assertTrue((PROJECT / "pyproject.toml").is_file())
         self.assertTrue((PROJECT / "schemas/agent-runtime/v1/event.schema.json").is_file())
-        self.assertTrue((SOURCE / "dci/resources/batch-profiles.json").is_file())
+        self.assertTrue((SOURCE / "capabilities/dci/resources/batch-profiles.json").is_file())
 
     def test_project_metadata_does_not_require_a_parent_workspace(self) -> None:
         text = (PROJECT / "pyproject.toml").read_text(encoding="utf-8")

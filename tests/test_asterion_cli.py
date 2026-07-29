@@ -14,6 +14,9 @@ from asterion.cli import _load_available_capability_packages, _parser, main
 from asterion.applications.dci_agent_lite.provider import (
     create_provider as create_dci_provider,
 )
+from asterion.applications.dci_agent_lite.acceptance import (
+    installed_acceptance_checks,
+)
 from asterion.applications.provider import (
     ApplicationProviderError,
     InstalledApplication,
@@ -28,8 +31,8 @@ from asterion.applications.product import (
     VerificationProfile,
     VerificationResult,
 )
-from asterion.dci.verification import create_dci_product
-from asterion.dci.services import create_local_corpus_service_factory
+from asterion.capabilities.dci.implementation.reproduction.verification import create_dci_product
+from asterion.capabilities.dci.implementation.services import create_local_corpus_service_factory
 from asterion.capability_packages import (
     CapabilityPackageRef,
     CapabilitySourceDeclaration,
@@ -209,7 +212,7 @@ def dci_host_arguments() -> tuple[str, str]:
 
 
 def transitional_dci_package() -> InstalledCapabilityPackage:
-    root = Path(__file__).resolve().parents[1] / "src/asterion/capabilities/dci_research"
+    root = Path(__file__).resolve().parents[1] / "src/asterion/capabilities/dci"
     package_ref = CapabilityPackageRef("dci", "1.0.0")
     payload = open_portable_payload(root / "payload")
     source = LocalDirectoryCapabilityPackageSource(
@@ -222,7 +225,7 @@ def transitional_dci_package() -> InstalledCapabilityPackage:
                 private_locator={
                     "root": root,
                     "payload_root": "payload",
-                    "module_path": "local_provider.py",
+                    "module_path": "implementation/local_provider.py",
                     "factory_name": "create_package",
                 },
             ),
@@ -893,7 +896,10 @@ class AsterionCliTests(unittest.TestCase):
         value = create_dci_provider()
         return replace(
             value,
-            product=create_dci_product(repo_root=root),
+            product=create_dci_product(
+                repo_root=root,
+                acceptance_checks=installed_acceptance_checks,
+            ),
         )
 
     def test_dci_acceptance_cli_reports_installed_package_closure(self) -> None:

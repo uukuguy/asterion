@@ -18,7 +18,7 @@ from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING, TextIO, TypedDict
 
-from asterion.dci.ablation import (
+from asterion.capabilities.dci.implementation.reproduction.ablation import (
     bounded_ablation_input_paths,
     bounded_ablation_resolution_registry_path,
     paper_ablation_matrix_sha256,
@@ -28,23 +28,23 @@ from asterion.dci.ablation import (
     resolve_paper_ablation_row,
     validate_paper_ablation_matrix,
 )
-from asterion.dci.config import (
+from asterion.capabilities.dci.implementation.config import (
     DciRuntimeOptions,
     load_asterion_dci_env,
     resolve_dci_paths,
     resolve_dci_runtime_options,
 )
-from asterion.dci.context_profiles import context_profile_names
-from asterion.dci.benchmark import (
+from asterion.capabilities.dci.implementation.research.context_profiles import context_profile_names
+from asterion.capabilities.dci.implementation.evaluation.benchmark import (
     AuthorizedBenchmarkExecution,
     BenchmarkRequest,
     DciBenchmarkError,
     run_benchmark,
     validate_benchmark_metric_selection,
 )
-from asterion.dci.artifacts import DciConversationFeatures
-from asterion.dci.evaluation import DciEvaluationError, evaluate_run_directory
-from asterion.dci.export import (
+from asterion.capabilities.dci.implementation.evaluation.artifacts import DciConversationFeatures
+from asterion.capabilities.dci.implementation.evaluation.evaluation import DciEvaluationError, evaluate_run_directory
+from asterion.capabilities.dci.implementation.export import (
     BRIGHT_SUBSETS,
     DciExportError,
     export_bcplus,
@@ -52,18 +52,18 @@ from asterion.dci.export import (
     export_bright,
     export_resolution_summary,
 )
-from asterion.dci.judge import (
+from asterion.capabilities.dci.implementation.evaluation.judge import (
     DEFAULT_JUDGE_API,
     DEFAULT_JUDGE_BASE_URL,
     DEFAULT_JUDGE_MODEL,
     JudgeConfig,
 )
-from asterion.dci.pi_rpc import run_pi_terminal, validate_terminal_cwd
-from asterion.dci.prompts import (
+from asterion.capabilities.dci.implementation.runtime.pi_rpc import run_pi_terminal, validate_terminal_cwd
+from asterion.capabilities.dci.implementation.research.prompts import (
     ASTERION_SAFE_PROMPT_CONTRACT,
     resolve_prompt_contract,
 )
-from asterion.dci.run import (
+from asterion.capabilities.dci.implementation.runtime.run import (
     DciRunError,
     DciRunResult,
     request_from_runtime_options,
@@ -71,11 +71,11 @@ from asterion.dci.run import (
     run_pi_research,
     validate_dci_run_request,
 )
-from asterion.dci.system_prompt import render_pi_system_prompt
+from asterion.capabilities.dci.implementation.research.system_prompt import render_pi_system_prompt
 
 if TYPE_CHECKING:
-    from asterion.dci.experiment_profiles import ExperimentProfile
-    from asterion.dci.paper_benchmarks import DatasetInputBinding
+    from asterion.capabilities.dci.implementation.research.experiment_profiles import ExperimentProfile
+    from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import DatasetInputBinding
 
 _EXPERIMENT_PROFILE_CLI_ALIASES = {
     "current-default/pi": "asterion-safe/pi",
@@ -408,7 +408,7 @@ def main(
             return 2
     if args.command == "paper":
         try:
-            from asterion.dci.verification import (
+            from asterion.capabilities.dci.implementation.reproduction.verification import (
                 paper_benchmark_acceptance_main,
                 paper_product_contract,
             )
@@ -422,8 +422,8 @@ def main(
                 )
                 return 0
             if args.paper_command == "compare":
-                from asterion.dci.experiment_profiles import resolve_experiment_profile
-                from asterion.dci.reproduction import (
+                from asterion.capabilities.dci.implementation.research.experiment_profiles import resolve_experiment_profile
+                from asterion.capabilities.dci.implementation.reproduction.reproduction import (
                     compare_reproduction_runs,
                     load_run_manifest,
                     write_comparison_report,
@@ -845,10 +845,10 @@ def _paper_reproduce_cli(
     invocation_cwd: Path,
     stdout: TextIO,
 ) -> int:
-    from asterion.dci import benchmark as benchmark_module
-    from asterion.dci import experiment_profiles as experiment_profile_module
-    from asterion.dci.experiment_profiles import experiment_profile_sha256
-    from asterion.dci.paper_benchmarks import (
+    from asterion.capabilities.dci.implementation.evaluation import benchmark as benchmark_module
+    from asterion.capabilities.dci.implementation.research import experiment_profiles as experiment_profile_module
+    from asterion.capabilities.dci.implementation.research.experiment_profiles import experiment_profile_sha256
+    from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import (
         canonical_sha256,
         paper_benchmark_ids,
     )
@@ -980,7 +980,7 @@ def _paper_reproduce_cli(
         planned_agent_operations=max_agent_operations,
         planned_judge_operations=max_judge_operations,
     )
-    from asterion.dci.experiment_profiles import authorized_scope_output_root
+    from asterion.capabilities.dci.implementation.research.experiment_profiles import authorized_scope_output_root
 
     try:
         execution_items = tuple(
@@ -1065,7 +1065,7 @@ def _reproduction_scope_ids(
     profile: ExperimentProfile,
     require_executable: bool,
 ) -> tuple[str, ...]:
-    from asterion.dci.paper_benchmarks import (
+    from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import (
         resolve_experiment_scope,
         resolve_paper_benchmark,
         resolve_paper_experiment_scope,
@@ -1099,7 +1099,7 @@ def _paper_scope_operation_counts(
     scope_ids: tuple[str, ...],
     limit: int | None,
 ) -> tuple[int, int]:
-    from asterion.dci.paper_benchmarks import (
+    from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import (
         resolve_paper_benchmark,
         resolve_paper_experiment_scope,
     )
@@ -1129,7 +1129,7 @@ def _preflight_reproduction_request(
     invocation_cwd: Path,
     limit: int | None,
 ) -> BenchmarkRequest:
-    from asterion.dci.paper_benchmarks import (
+    from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import (
         resolve_paper_benchmark,
         resolve_paper_experiment_scope,
     )
@@ -1264,13 +1264,13 @@ def _preflight_benchmark_host_inputs(request: BenchmarkRequest) -> None:
 def _preflight_scope_selected_ids(
     request: BenchmarkRequest, scope_id: str
 ) -> tuple[tuple[str, ...], DatasetInputBinding]:
-    from asterion.dci.datasets import (
+    from asterion.capabilities.dci.implementation.datasets import (
         DatasetError,
         load_beir_benchmark_rows_bytes,
         load_benchmark_rows_bytes,
         load_bright_benchmark_rows_bytes,
     )
-    from asterion.dci.paper_benchmarks import (
+    from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import (
         resolve_paper_benchmark,
         resolve_paper_experiment_scope,
         read_paper_benchmark_dataset,
@@ -1360,7 +1360,7 @@ def _write_reproduction_execution_result(
         ):
             raise ValueError("paper reproduction result is invalid")
         try:
-            from asterion.dci.paper_benchmarks import (
+            from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import (
                 resolve_paper_experiment_scope,
             )
 
@@ -1557,7 +1557,7 @@ _BATCH_PROFILE_PATH_FIELDS = frozenset({"dataset", "output_root", "corpus"})
 
 
 def _load_batch_profiles() -> dict[str, dict[str, object]]:
-    resource = resources.files("asterion.dci.resources").joinpath(
+    resource = resources.files("asterion.capabilities.dci.resources").joinpath(
         "batch-profiles.json"
     )
     document = json.loads(resource.read_text(encoding="utf-8"))

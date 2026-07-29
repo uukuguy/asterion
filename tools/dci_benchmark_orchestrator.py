@@ -849,7 +849,7 @@ def _summary_payload(
     plan: RunPlan, rows: list[dict[str, object]], *, passed: bool
 ) -> dict[str, object]:
     return {
-        "schema": "asterion.dci.benchmark-orchestrator-summary/v1",
+        "schema": "asterion.capabilities.dci.implementation.evaluation.benchmark-orchestrator-summary/v1",
         "suite": plan.options.suite,
         "run_label": plan.run_label,
         "limit": plan.options.limit,

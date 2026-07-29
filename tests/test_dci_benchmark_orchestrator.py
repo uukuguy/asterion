@@ -737,7 +737,7 @@ class BenchmarkExecutionTests(unittest.TestCase):
             )
             self.assertEqual(
                 summary["schema"],
-                "asterion.dci.benchmark-orchestrator-summary/v1",
+                "asterion.capabilities.dci.implementation.evaluation.benchmark-orchestrator-summary/v1",
             )
             self.assertEqual(summary["status"], "PASS")
             self.assertEqual(len(summary["tasks"]), 1)

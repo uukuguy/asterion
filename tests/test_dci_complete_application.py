@@ -15,7 +15,7 @@ from asterion.assembly.protocol import resolve_assembly
 from asterion.adapters.claude_code import ClaudeCodeProtocolAdapter
 from asterion.applications.dci_agent_lite.provider import create_provider
 from asterion.cli import main
-from asterion.capabilities.dci_research.complete import (
+from asterion.capabilities.dci.implementation.complete import (
     DciCompleteAnalysisImplementation,
     DciCompleteBenchmarkImplementation,
     DciCompleteEvaluationImplementation,
@@ -25,20 +25,20 @@ from asterion.capabilities.dci_research.complete import (
     _aggregate_results,
     complete_application_identity,
 )
-from asterion.capabilities.dci_research._artifacts import DciInProcessArtifactPayload
+from asterion.capabilities.dci.implementation._artifacts import DciInProcessArtifactPayload
 from asterion.capabilities.execution import project_public_value
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
-from asterion.dci.services import (
+from asterion.capabilities.dci.implementation.services import (
     create_answer_judge_service_factory,
     create_local_corpus_service_factory,
 )
-from asterion.dci.provenance import (
+from asterion.capabilities.dci.implementation.reproduction.provenance import (
     DCI_COMPLETE_IMPLEMENTATION_RESOURCES,
     dci_complete_implementation_identity,
 )
 from tests.test_application_discovery import FakeEntryPoint
 from tests.test_asterion_cli import transitional_dci_package
-from asterion.dci.dual_runtime_verification import (
+from asterion.capabilities.dci.implementation.reproduction.dual_runtime_verification import (
     DciDualRuntimeVerificationError,
     audit_restricted_claude_application,
     audit_restricted_pi_application,
@@ -86,49 +86,49 @@ ARTIFACTS = (
     "application/vnd.dci.export+json",
 )
 DCI_EXECUTABLE_SOURCE_ROOTS = (
-    "capabilities/dci_research/complete.py",
-    "capabilities/dci_research/implementation.py",
-    "dci/benchmark.py",
-    "dci/bridge.py",
-    "dci/evaluation.py",
-    "dci/judge.py",
-    "dci/run.py",
-    "dci/services.py",
+    "capabilities/dci/implementation/complete.py",
+    "capabilities/dci/implementation/implementation.py",
+    "capabilities/dci/implementation/evaluation/benchmark.py",
+    "capabilities/dci/implementation/runtime/bridge.py",
+    "capabilities/dci/implementation/evaluation/evaluation.py",
+    "capabilities/dci/implementation/evaluation/judge.py",
+    "capabilities/dci/implementation/runtime/run.py",
+    "capabilities/dci/implementation/services.py",
 )
 DCI_PACKAGED_RESOURCE_CLOSURE = {
-    "dci/resources/batch-profiles.json",
-    "dci/resources/context-profile.schema.json",
-    "dci/resources/context-profiles.json",
-    "dci/resources/experiment-profile.schema.json",
-    "dci/resources/experiment-profiles.json",
-    "dci/resources/gold-document-manifest.schema.json",
-    "dci/resources/gold-document-registry.schema.json",
-    "dci/resources/paper-ablation-matrix.json",
-    "dci/resources/paper-ablation.schema.json",
-    "dci/resources/paper-benchmark.schema.json",
-    "dci/resources/paper-benchmarks.json",
-    "dci/resources/paper-bounded-corpus-manifests.json",
-    "dci/resources/paper-bounded-fixtures.json",
-    "dci/resources/paper-experiment-scope.schema.json",
-    "dci/resources/paper-experiment-scopes.json",
-    "dci/resources/paper-fixtures/corpora/base-plus-one/distractor-1.txt",
-    "dci/resources/paper-fixtures/corpora/base-plus-one/doc.txt",
-    "dci/resources/paper-fixtures/corpora/base-plus-two/distractor-1.txt",
-    "dci/resources/paper-fixtures/corpora/base-plus-two/distractor-2.txt",
-    "dci/resources/paper-fixtures/corpora/base-plus-two/doc.txt",
-    "dci/resources/paper-fixtures/corpora/base/doc.txt",
-    "dci/resources/paper-fixtures/corpus/doc.txt",
-    "dci/resources/paper-fixtures/gold/qa-manifest.json",
-    "dci/resources/paper-fixtures/gold/qa-registry.json",
-    "dci/resources/paper-fixtures/ir.jsonl",
-    "dci/resources/paper-fixtures/qa.jsonl",
-    "dci/resources/paper-selected-id-manifests.json",
-    "dci/resources/pi/context-extension-manifest.json",
-    "dci/resources/pi/dci-context-extension.ts",
-    "dci/resources/reproduction-result.schema.json",
-    "dci/resources/reproduction-target.schema.json",
-    "dci/resources/reproduction-targets.json",
-    "dci/resources/trajectory-resolution.schema.json",
+    "capabilities/dci/resources/batch-profiles.json",
+    "capabilities/dci/resources/context-profile.schema.json",
+    "capabilities/dci/resources/context-profiles.json",
+    "capabilities/dci/resources/experiment-profile.schema.json",
+    "capabilities/dci/resources/experiment-profiles.json",
+    "capabilities/dci/resources/gold-document-manifest.schema.json",
+    "capabilities/dci/resources/gold-document-registry.schema.json",
+    "capabilities/dci/resources/paper-ablation-matrix.json",
+    "capabilities/dci/resources/paper-ablation.schema.json",
+    "capabilities/dci/resources/paper-benchmark.schema.json",
+    "capabilities/dci/resources/paper-benchmarks.json",
+    "capabilities/dci/resources/paper-bounded-corpus-manifests.json",
+    "capabilities/dci/resources/paper-bounded-fixtures.json",
+    "capabilities/dci/resources/paper-experiment-scope.schema.json",
+    "capabilities/dci/resources/paper-experiment-scopes.json",
+    "capabilities/dci/resources/paper-fixtures/corpora/base-plus-one/distractor-1.txt",
+    "capabilities/dci/resources/paper-fixtures/corpora/base-plus-one/doc.txt",
+    "capabilities/dci/resources/paper-fixtures/corpora/base-plus-two/distractor-1.txt",
+    "capabilities/dci/resources/paper-fixtures/corpora/base-plus-two/distractor-2.txt",
+    "capabilities/dci/resources/paper-fixtures/corpora/base-plus-two/doc.txt",
+    "capabilities/dci/resources/paper-fixtures/corpora/base/doc.txt",
+    "capabilities/dci/resources/paper-fixtures/corpus/doc.txt",
+    "capabilities/dci/resources/paper-fixtures/gold/qa-manifest.json",
+    "capabilities/dci/resources/paper-fixtures/gold/qa-registry.json",
+    "capabilities/dci/resources/paper-fixtures/ir.jsonl",
+    "capabilities/dci/resources/paper-fixtures/qa.jsonl",
+    "capabilities/dci/resources/paper-selected-id-manifests.json",
+    "capabilities/dci/resources/pi/context-extension-manifest.json",
+    "capabilities/dci/resources/pi/dci-context-extension.ts",
+    "capabilities/dci/resources/reproduction-result.schema.json",
+    "capabilities/dci/resources/reproduction-target.schema.json",
+    "capabilities/dci/resources/reproduction-targets.json",
+    "capabilities/dci/resources/trajectory-resolution.schema.json",
 }
 
 
@@ -215,11 +215,12 @@ def _dci_import_closure(roots: tuple[str, ...]) -> set[str]:
             elif isinstance(node, ast.ImportFrom) and node.module is not None:
                 modules = (node.module,)
             for module in modules:
-                if not module.startswith("asterion.dci."):
+                prefix = "asterion.capabilities.dci.implementation."
+                if not module.startswith(prefix):
                     continue
                 imported = (
-                    "dci/"
-                    + module.removeprefix("asterion.dci.").replace(".", "/")
+                    "capabilities/dci/implementation/"
+                    + module.removeprefix(prefix).replace(".", "/")
                     + ".py"
                 )
                 if SOURCE.joinpath(imported).is_file() and imported not in closure:
@@ -253,7 +254,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
             if name.endswith(".py")
         }
         self.assertEqual(declared, reachable)
-        self.assertEqual(len(DCI_COMPLETE_IMPLEMENTATION_RESOURCES), 66)
+        self.assertEqual(len(DCI_COMPLETE_IMPLEMENTATION_RESOURCES), 68)
 
     def test_transitive_identity_contains_explicit_packaged_resource_closure(
         self,
@@ -261,20 +262,20 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
         declared = {
             name
             for name in DCI_COMPLETE_IMPLEMENTATION_RESOURCES
-            if name.startswith("dci/resources/")
+            if name.startswith("capabilities/dci/resources/")
         }
         self.assertEqual(declared, DCI_PACKAGED_RESOURCE_CLOSURE)
 
         referenced = set()
-        root = SOURCE / "dci/resources"
+        root = SOURCE / "capabilities/dci/resources"
         bounded = json.loads(
             root.joinpath("paper-bounded-fixtures.json").read_text()
         )
         for artifact in bounded["artifacts"].values():
             referenced.update(
                 {
-                    f"dci/resources/{artifact['dataset_resource']}",
-                    f"dci/resources/{artifact['corpus_document_resource']}",
+                    f"capabilities/dci/resources/{artifact['dataset_resource']}",
+                    f"capabilities/dci/resources/{artifact['corpus_document_resource']}",
                 }
             )
         corpora = json.loads(
@@ -282,18 +283,18 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
         )
         for manifest in corpora["manifests"]:
             referenced.update(
-                f"dci/resources/{document['resource']}"
+                f"capabilities/dci/resources/{document['resource']}"
                 for document in manifest["documents"]
             )
         extension = json.loads(
             root.joinpath("pi/context-extension-manifest.json").read_text()
         )
-        referenced.add(f"dci/resources/pi/{extension['resource']}")
+        referenced.add(f"capabilities/dci/resources/pi/{extension['resource']}")
         registry = json.loads(
             root.joinpath("paper-fixtures/gold/qa-registry.json").read_text()
         )
         referenced.update(
-            f"dci/resources/paper-fixtures/gold/{item['path']}"
+            f"capabilities/dci/resources/paper-fixtures/gold/{item['path']}"
             for item in registry["manifests"]
         )
         self.assertLessEqual(referenced, declared)
@@ -376,13 +377,9 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
                 if not name.startswith(
                     "capabilities/dci/payload/capabilities/"
                 )
-                and not name.startswith("dci/resources/")
+                and not name.startswith("capabilities/dci/resources/")
             },
-            _dci_import_closure(DCI_EXECUTABLE_SOURCE_ROOTS)
-            | {
-                "applications/dci_agent_lite/assemblies/dci-complete-application-claude.json",
-                "applications/dci_agent_lite/assemblies/dci-complete-application-pi.json",
-            },
+            _dci_import_closure(DCI_EXECUTABLE_SOURCE_ROOTS),
         )
         assembly_capability_ids: set[str] | None = None
         for assembly_path in sorted(
@@ -463,7 +460,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
             DCI_COMPLETE_IMPLEMENTATION_RESOURCES
             + (DCI_COMPLETE_IMPLEMENTATION_RESOURCES[-1],),
             DCI_COMPLETE_IMPLEMENTATION_RESOURCES + ("dci/../judge.py",),
-            (*DCI_COMPLETE_IMPLEMENTATION_RESOURCES[:-1], ["dci/judge.py"]),
+            (*DCI_COMPLETE_IMPLEMENTATION_RESOURCES[:-1], ["capabilities/dci/implementation/evaluation/judge.py"]),
         )
         for names in invalid_names:
             with self.subTest(names=names), self.assertRaisesRegex(
@@ -599,7 +596,7 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
         ).read_text()
         with (
             patch(
-                "asterion.dci.application_executor.EnvironmentDciRunExecutor.__init__",
+                "asterion.capabilities.dci.implementation.runtime.application_executor.EnvironmentDciRunExecutor.__init__",
                 side_effect=AssertionError("executor construction"),
             ),
             patch.object(Path, "cwd", side_effect=AssertionError("cwd access")),
@@ -637,19 +634,21 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
         )
 
     def test_transitional_dci_package_uses_explicit_local_source(self) -> None:
-        verification_source = (SOURCE / "dci/verification.py").read_text()
+        acceptance_source = (
+            SOURCE / "applications/dci_agent_lite/acceptance.py"
+        ).read_text()
         package = transitional_dci_package()
 
-        self.assertIn("CapabilitySourceDeclaration", verification_source)
-        self.assertIn("LocalDirectoryCapabilityPackageSource", verification_source)
-        self.assertNotIn("InstalledCapabilityPackage(", verification_source)
+        self.assertIn("CapabilitySourceDeclaration", acceptance_source)
+        self.assertIn("LocalDirectoryCapabilityPackageSource", acceptance_source)
+        self.assertNotIn("InstalledCapabilityPackage(", acceptance_source)
         self.assertEqual(package.package_ref.package_id, "dci")
         self.assertEqual(package.source_id, "dci.transitional-local")
         self.assertEqual(package.source_kind, "local-directory")
         self.assertEqual(len(package.payload_sha256), 64)
         self.assertEqual(
             package.catalog_roots,
-            (SOURCE / "capabilities/dci_research/payload/capabilities",),
+            (SOURCE / "capabilities/dci/payload/capabilities",),
         )
 
     def test_implementation_identity_is_stable_and_digest_shaped(self) -> None:
@@ -658,7 +657,7 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
         self.assertEqual(identity, complete_application_identity())
 
     def test_package_owned_aggregate_matches_previous_dci_analysis_schema(self) -> None:
-        from asterion.dci.analysis import aggregate_results as previous_aggregate
+        from asterion.capabilities.dci.implementation.evaluation.analysis import aggregate_results as previous_aggregate
 
         results = (
             {
@@ -814,7 +813,7 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
                     clear=False,
                 ),
                 patch(
-                    "asterion.dci.services.judge_answer_async",
+                    "asterion.capabilities.dci.implementation.services.judge_answer_async",
                     answer_judge,
                 ),
             ):
@@ -1233,7 +1232,7 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
                 (CapabilityRef("dci.export", "1.0.0"), DciCompleteExportImplementation()),
             )
             with patch(
-                "asterion.dci.application_executor.EnvironmentDciRunExecutor.run",
+                "asterion.capabilities.dci.implementation.runtime.application_executor.EnvironmentDciRunExecutor.run",
                 side_effect=AssertionError("native bypass"),
             ):
                 result = await run_composed_application(

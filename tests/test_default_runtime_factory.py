@@ -14,7 +14,7 @@ from asterion.runtime.factory import RuntimeFactoryError
 from asterion.runtime.defaults import _claude_provider_environment
 from asterion.runtime.host import RunRequest
 from asterion.runtime.working_directory import ProcessWorkingDirectory
-from asterion.dci.services import create_local_corpus_service_factory
+from asterion.capabilities.dci.implementation.services import create_local_corpus_service_factory
 from asterion.services.registry import HostServiceFactoryContext
 
 

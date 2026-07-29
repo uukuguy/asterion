@@ -2,7 +2,7 @@
 
 本文描述随 `asterion` wheel 发布的 DCI 产品。快速上手见[能力包使用指南](asterion-capability-usage.md)，分层验收见[完整功能验证指南](../verification/asterion-dci-validation-guide.md)。
 
-Asterion DCI 自己拥有研究、产物、恢复、Judge、benchmark、分析和导出实现。它可以独立安装，不导入、启动或打包父工作区的原始 DCI 基线。权威领域实现位于 [`asterion/dci`](../../src/asterion/dci/)。
+Asterion DCI 自己拥有研究、产物、恢复、Judge、benchmark、分析和导出实现。它可以独立安装，不导入、启动或打包父工作区的原始 DCI 基线。权威领域实现位于 [`asterion.capabilities.dci`](../../src/asterion/capabilities/dci/)。
 
 ## 证据状态说明
 
@@ -41,7 +41,7 @@ DCI_EVAL_JUDGE_MODEL=
 DCI_EVAL_JUDGE_API_KEY_ENV=
 ```
 
-Pi、corpora、datasets、凭据和运行输出都不进入 wheel/Git。Agent 与 Judge 是独立角色，各自绑定 provider、model、request shape、凭据和 cache identity。实现见 [`config.py`](../../src/asterion/dci/config.py) 和 [`pi_rpc.py`](../../src/asterion/dci/pi_rpc.py)。
+Pi、corpora、datasets、凭据和运行输出都不进入 wheel/Git。Agent 与 Judge 是独立角色，各自绑定 provider、model、request shape、凭据和 cache identity。实现见 [`config.py`](../../src/asterion/capabilities/dci/implementation/config.py) 和 [`pi_rpc.py`](../../src/asterion/capabilities/dci/implementation/runtime/pi_rpc.py)。
 
 新 checkout 的准备路径是：
 
@@ -71,7 +71,7 @@ uv run asterion-dci run \
   "Answer using only the local corpus."
 ```
 
-`--question-file`、`--system-prompt-file`、`--append-system-prompt-file`、`--show-tools`、`--keep-session`、`--node-max-old-space-size-mb` 和重复 `--extra-arg` 都是显式 argv，不经 shell 解释。校验和运行逻辑见 [`run.py`](../../src/asterion/dci/run.py)。
+`--question-file`、`--system-prompt-file`、`--append-system-prompt-file`、`--show-tools`、`--keep-session`、`--node-max-old-space-size-mb` 和重复 `--extra-arg` 都是显式 argv，不经 shell 解释。校验和运行逻辑见 [`run.py`](../../src/asterion/capabilities/dci/implementation/runtime/run.py)。
 
 ### `terminal`
 
@@ -95,7 +95,7 @@ uv run asterion-dci system-prompt \
 
 ## 原生产物、隐私与恢复
 
-私有运行目录包含 question、events、state、完整/处理后 conversation、provenance 和可选 evaluation。公开 CLI/application 结果只投影状态、计数、digest 和 artifact reference，不返回问题、回答、提示词、凭据或私有路径正文。产物实现见 [`artifacts.py`](../../src/asterion/dci/artifacts.py)。
+私有运行目录包含 question、events、state、完整/处理后 conversation、provenance 和可选 evaluation。公开 CLI/application 结果只投影状态、计数、digest 和 artifact reference，不返回问题、回答、提示词、凭据或私有路径正文。产物实现见 [`artifacts.py`](../../src/asterion/capabilities/dci/implementation/evaluation/artifacts.py)。
 
 ```bash
 uv run asterion-dci resume --output-dir path/to/run-directory
@@ -126,7 +126,7 @@ uv run asterion-dci evaluate \
   --reference-answer "expected answer"
 ```
 
-Judge 请求身份绑定最终回答证据、model、API 类型、endpoint、prompt/schema、thinking/store、token limit、超时与价格字段。影响 request shaping 的任一字段变化都会使缓存失效。实现见 [`evaluation.py`](../../src/asterion/dci/evaluation.py)。
+Judge 请求身份绑定最终回答证据、model、API 类型、endpoint、prompt/schema、thinking/store、token limit、超时与价格字段。影响 request shaping 的任一字段变化都会使缓存失效。实现见 [`evaluation.py`](../../src/asterion/capabilities/dci/implementation/evaluation/evaluation.py)。
 
 Judge 失败不得把 Agent 结果标记为评测成功；取消和 deadline 会终止并等待正在运行的请求。
 
@@ -203,7 +203,7 @@ profile，BrowseComp+ 的 analysis、appendix-a1、context-ablation scopes 的 l
 
 ## Benchmark DCI-Agent-Lite
 
-[`benchmark.py`](../../src/asterion/dci/benchmark.py) 负责有限数据集切片、并发运行、精确 reuse、Judge 缓存、QA/IR 汇总与中断恢复：
+[`benchmark.py`](../../src/asterion/capabilities/dci/implementation/evaluation/benchmark.py) 负责有限数据集切片、并发运行、精确 reuse、Judge 缓存、QA/IR 汇总与中断恢复：
 
 ```bash
 uv run asterion-dci benchmark \
@@ -261,7 +261,7 @@ selection seeds、重复处理、segment 大小或 evidence overlap 的位置必
 
 ## 指标、分析、图表与导出
 
-[`analysis.py`](../../src/asterion/dci/analysis.py) 与 `metrics.py` 生成 QA accuracy、IR NDCG、成功/失败计数、运行时间、token/cache/tool 分布、percentile/slice/group 统计、JSON/Markdown 汇总与图表。
+[`analysis.py`](../../src/asterion/capabilities/dci/implementation/evaluation/analysis.py) 与 `metrics.py` 生成 QA accuracy、IR NDCG、成功/失败计数、运行时间、token/cache/tool 分布、percentile/slice/group 统计、JSON/Markdown 汇总与图表。
 
 ```bash
 uv run asterion-dci export bcplus --source-dir SOURCE --output-dir OUTPUT
@@ -272,7 +272,7 @@ uv run asterion-dci export resolution \
   --gold-manifest GOLD.json --segment-characters 20000
 ```
 
-[`export.py`](../../src/asterion/dci/export.py) 实现 BC+ 文档、BRIGHT corpus subset、BC+ QA 与 authoritative resolution 导出。最后一种重算 body-free projection，不盲信已保存公开 summary。
+[`export.py`](../../src/asterion/capabilities/dci/implementation/export.py) 实现 BC+ 文档、BRIGHT corpus subset、BC+ QA 与 authoritative resolution 导出。最后一种重算 body-free projection，不盲信已保存公开 summary。
 
 指标/导出为 **Implemented**，单元和集成行为为 **Verified**；完整数据集图表和已发表数值为 **Not rerun**。
 

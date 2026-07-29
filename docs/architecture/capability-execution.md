@@ -22,7 +22,9 @@ The application host resolves an assembly and supplies bindings directly:
 ```python
 from asterion.capabilities.catalog import CapabilityRef
 from asterion.runner import run_composed_application
-from asterion.capabilities.dci_research import DciLocalResearchImplementation
+from asterion.capabilities.dci.implementation.implementation import (
+    DciLocalResearchImplementation,
+)
 
 result = await run_composed_application(
     plan,
@@ -84,8 +86,8 @@ than authority.
 ## DCI capability and baseline isolation
 
 The DCI local-corpus implementation and the independent `asterion-dci` product
-live in the one `asterion` wheel. `asterion.dci.run.DciRunResult` is converted
-only by `asterion.dci.bridge.project_dci_run`, which exposes native artifact
+live in the one `asterion` wheel. `asterion.capabilities.dci.implementation.runtime.run.DciRunResult` is converted
+only by `asterion.capabilities.dci.implementation.runtime.bridge.project_dci_run`, which exposes native artifact
 references without answer, question, command, or stderr bodies. The generic
 Asterion CLI stays framework-neutral: it imports no DCI modules, and
 provider-free commands remain provider-free. DCI-specific behavior enters only

@@ -16,17 +16,36 @@ EXPECTED_PUBLIC = (
     "CapabilityInvocation",
     "CapabilityExecutionResult",
     "CapabilityExecutionError",
+    "CapabilityImplementation",
+    "CapabilityImplementationBinding",
     "CapabilityPackageProvider",
     "InstalledCapabilityPackage",
     "BenchmarkTaskBinding",
+    "BenchmarkTaskImplementation",
+    "BenchmarkTaskInvocation",
+    "BenchmarkTaskRequest",
     "CancellationSignal",
     "HostServices",
+    "open_portable_payload",
     "run_capability_conformance",
 )
 
 BUILTIN_CAPABILITY_DIRS = (
     CAPABILITY_ROOT / "controlled_code",
-    CAPABILITY_ROOT / "dci_research",
+)
+DCI_CAPABILITY_IMPLEMENTATIONS = tuple(
+    CAPABILITY_ROOT / "dci/implementation" / name
+    for name in (
+        "_analysis.py",
+        "_artifacts.py",
+        "_provenance.py",
+        "_runtime.py",
+        "benchmark_bindings.py",
+        "complete.py",
+        "implementation.py",
+        "local_provider.py",
+        "operator_inputs.py",
+    )
 )
 
 
@@ -183,7 +202,7 @@ class CapabilitySdkSurfaceTests(unittest.TestCase):
             package.implementations[0].capability_ref.capability_id,
             "example.capability",
         )
-        self.assertNotIn("CapabilityImplementationBinding", EXPECTED_PUBLIC)
+        self.assertIn("CapabilityImplementationBinding", EXPECTED_PUBLIC)
 
     def test_host_services_is_read_only_mapping_protocol(self) -> None:
         from asterion.capability_sdk import HostServices
@@ -206,7 +225,7 @@ class BuiltinCapabilityImportBoundaryTests(unittest.TestCase):
             path
             for root in BUILTIN_CAPABILITY_DIRS
             for path in sorted(root.rglob("*.py"))
-        )
+        ) + DCI_CAPABILITY_IMPLEMENTATIONS
         self.assertGreater(len(files), 5)
         for path in files:
             package_prefix = (
@@ -243,7 +262,7 @@ class BuiltinCapabilityImportBoundaryTests(unittest.TestCase):
         detected = {
             name: imports_from_source(
                 source,
-                "asterion.capabilities.dci_research.local_provider",
+                "asterion.capabilities.example.local_provider",
             )
             for name, source in cases.items()
         }

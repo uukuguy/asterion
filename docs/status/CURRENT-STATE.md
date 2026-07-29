@@ -30,16 +30,16 @@
 - Installed provider resources stay package-rooted; explicit DCI operator
   configuration is rooted at the selected environment file for preflight and
   basic execution.
-- `src/asterion/dci/experiment_profiles.py` owns one-use execution authority,
+- `src/asterion/capabilities/dci/implementation/research/experiment_profiles.py` owns one-use execution authority,
   exact scope/selection plans, budgets, private output identities, and immutable
   dataset bindings.
 - `src/asterion/dci/cli.py` keeps reproduction plan-only by default; explicit
   execution requires exact scope, limit, private output root, and five positive
   operation/cost caps.
-- `src/asterion/dci/benchmark.py` revalidates complete scope, bounded selection,
+- `src/asterion/capabilities/dci/implementation/evaluation/benchmark.py` revalidates complete scope, bounded selection,
   raw dataset content, benchmark identity, and descriptor identity before
   authority consumption or Agent/Judge work.
-- `src/asterion/dci/reproduction.py` compiles locked body-free RunManifest
+- `src/asterion/capabilities/dci/implementation/reproduction/reproduction.py` compiles locked body-free RunManifest
   evidence and writes it descriptor-safely outside closed batch roots.
 - Canonical `limit-N` evidence is non-full, non-comparable,
   `External-limited`, and cannot produce an acceptance PASS.
@@ -89,11 +89,11 @@
 - `src/asterion/runtime/protocol.py` — public runtime protocol
 - `src/asterion/packages/composition.py` — deterministic package composition
 - `src/asterion/runner/application.py` — resolved application execution
-- `src/asterion/dci/experiment_profiles.py` — DCI profiles and authority
+- `src/asterion/capabilities/dci/implementation/research/experiment_profiles.py` — DCI profiles and authority
 - `src/asterion/dci/cli.py` — DCI plan/preflight/execute orchestration
-- `src/asterion/dci/verification.py` — product readiness and bounded verification
-- `src/asterion/dci/benchmark.py` — bounded benchmark execution
-- `src/asterion/dci/reproduction.py` — evidence compilation and comparison
+- `src/asterion/capabilities/dci/implementation/reproduction/verification.py` — product readiness and bounded verification
+- `src/asterion/capabilities/dci/implementation/evaluation/benchmark.py` — bounded benchmark execution
+- `src/asterion/capabilities/dci/implementation/reproduction/reproduction.py` — evidence compilation and comparison
 - `schemas/` — canonical cross-language protocol schemas
 
 ## Resume Instructions

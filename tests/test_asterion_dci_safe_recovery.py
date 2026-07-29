@@ -7,16 +7,16 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from asterion.dci.application_executor import EnvironmentDciRunExecutor
+from asterion.capabilities.dci.implementation.runtime.application_executor import EnvironmentDciRunExecutor
 from asterion.dci.cli import main as dci_main
-from asterion.dci.config import DciRuntimeOptions, resolve_dci_paths
-from asterion.dci.pi_rpc import FINAL_ANSWER_RECOVERY_PROMPT
-from asterion.dci.prompts import (
+from asterion.capabilities.dci.implementation.config import DciRuntimeOptions, resolve_dci_paths
+from asterion.capabilities.dci.implementation.runtime.pi_rpc import FINAL_ANSWER_RECOVERY_PROMPT
+from asterion.capabilities.dci.implementation.research.prompts import (
     PAPER_REFERENCE_PROMPT_CONTRACT,
     UPSTREAM_GITHUB_PROMPT_CONTRACT,
     resolve_prompt_contract,
 )
-from asterion.dci.run import (
+from asterion.capabilities.dci.implementation.runtime.run import (
     DciRunError,
     DciRunRequest,
     DciRunResult,
@@ -24,7 +24,7 @@ from asterion.dci.run import (
     resume_request_from_output_dir,
     run_pi_research,
 )
-from asterion.dci.verification import (
+from asterion.capabilities.dci.implementation.reproduction.verification import (
     BASIC_CASES,
     PaperBenchmarkReadiness,
     _basic_request,
@@ -84,7 +84,7 @@ class AsterionSafeRecoveryTests(unittest.TestCase):
         request: DciRunRequest,
         output_dir: Path,
     ) -> DciRunResult:
-        with patch("asterion.dci.run.PiRpcClient", _EmptyFirstClient):
+        with patch("asterion.capabilities.dci.implementation.runtime.run.PiRpcClient", _EmptyFirstClient):
             result = run_pi_research(
                 resolve_dci_paths(root), request, output_dir=output_dir
             )
@@ -101,7 +101,7 @@ class AsterionSafeRecoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             stdout, stderr = io.StringIO(), io.StringIO()
-            with patch("asterion.dci.run.PiRpcClient", _EmptyFirstClient):
+            with patch("asterion.capabilities.dci.implementation.runtime.run.PiRpcClient", _EmptyFirstClient):
                 status = dci_main(
                     [
                         "run",
@@ -127,14 +127,14 @@ class AsterionSafeRecoveryTests(unittest.TestCase):
             root = Path(directory).resolve()
             output_dir = root / "run"
             failed_request = _request(root)
-            with patch("asterion.dci.run.PiRpcClient", _EmptyFirstClient):
+            with patch("asterion.capabilities.dci.implementation.runtime.run.PiRpcClient", _EmptyFirstClient):
                 with self.assertRaises(DciRunError):
                     run_pi_research(
                         resolve_dci_paths(root), failed_request, output_dir=output_dir
                     )
             _EmptyFirstClient.instances.clear()
             stdout, stderr = io.StringIO(), io.StringIO()
-            with patch("asterion.dci.run.PiRpcClient", _EmptyFirstClient):
+            with patch("asterion.capabilities.dci.implementation.runtime.run.PiRpcClient", _EmptyFirstClient):
                 status = dci_main(
                     ["resume", "--output-dir", str(output_dir)],
                     repo_root=root,
@@ -154,18 +154,18 @@ class AsterionSafeRecoveryTests(unittest.TestCase):
             paths = resolve_dci_paths(root)
             executor = EnvironmentDciRunExecutor(repo_root=root)
             with (
-                patch("asterion.dci.application_executor.load_asterion_dci_env"),
+                patch("asterion.capabilities.dci.implementation.runtime.application_executor.load_asterion_dci_env"),
                 patch(
-                    "asterion.dci.application_executor.resolve_dci_runtime_options",
+                    "asterion.capabilities.dci.implementation.runtime.application_executor.resolve_dci_runtime_options",
                     return_value=DciRuntimeOptions(
                         provider="openai-codex", model="gpt-test", tools="read"
                     ),
                 ),
                 patch(
-                    "asterion.dci.application_executor.resolve_dci_paths",
+                    "asterion.capabilities.dci.implementation.runtime.application_executor.resolve_dci_paths",
                     return_value=paths,
                 ),
-                patch("asterion.dci.run.PiRpcClient", _EmptyFirstClient),
+                patch("asterion.capabilities.dci.implementation.runtime.run.PiRpcClient", _EmptyFirstClient),
             ):
                 result = executor.run(_request(root))
 
@@ -191,7 +191,7 @@ class AsterionSafeRecoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             output_dir = root / "run"
-            with patch("asterion.dci.run.PiRpcClient", _EmptyFirstClient):
+            with patch("asterion.capabilities.dci.implementation.runtime.run.PiRpcClient", _EmptyFirstClient):
                 with self.assertRaises(DciRunError):
                     run_pi_research(
                         resolve_dci_paths(root), _request(root), output_dir=output_dir
@@ -216,7 +216,7 @@ class AsterionSafeRecoveryTests(unittest.TestCase):
                 ).final_answer_recovery
             )
             output_dir = root / "run"
-            with patch("asterion.dci.run.PiRpcClient", _EmptyFirstClient):
+            with patch("asterion.capabilities.dci.implementation.runtime.run.PiRpcClient", _EmptyFirstClient):
                 with self.assertRaises(DciRunError):
                     run_pi_research(
                         resolve_dci_paths(root), _request(root), output_dir=output_dir
@@ -242,7 +242,7 @@ class AsterionSafeRecoveryTests(unittest.TestCase):
                 corpus_dir=root,
             )
             with patch(
-                "asterion.dci.verification.run_pi_research",
+                "asterion.capabilities.dci.implementation.reproduction.verification.run_pi_research",
                 side_effect=DciRunError("expected"),
             ) as run:
                 with self.assertRaises(DciRunError):
@@ -264,7 +264,7 @@ class AsterionSafeRecoveryTests(unittest.TestCase):
                     ).final_answer_recovery,
                 )
                 self.assertIsNone(request.final_answer_recovery)
-                with patch("asterion.dci.run.PiRpcClient", _EmptyFirstClient):
+                with patch("asterion.capabilities.dci.implementation.runtime.run.PiRpcClient", _EmptyFirstClient):
                     with self.assertRaises(DciRunError):
                         run_pi_research(
                             resolve_dci_paths(root), request, output_dir=root / "run"

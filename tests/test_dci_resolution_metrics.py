@@ -7,7 +7,7 @@ import json
 import unittest
 from pathlib import Path
 
-from asterion.dci.resolution_metrics import (
+from asterion.capabilities.dci.implementation.evaluation.resolution_metrics import (
     aggregate_dataset_localization,
     best_document_localization,
     compute_query_coverage,
@@ -15,7 +15,7 @@ from asterion.dci.resolution_metrics import (
     query_localization,
     surfaced_gold_set,
 )
-from asterion.dci.trajectory_resolution import (
+from asterion.capabilities.dci.implementation.research.trajectory_resolution import (
     _GoldDocument,
     _ToolObservation,
     _align,

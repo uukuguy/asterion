@@ -1,6 +1,6 @@
 """DCI local-corpus research capability."""
 
-from asterion.capabilities.dci_research.implementation import (
+from asterion.capabilities.dci.implementation.implementation import (
     DciLocalResearchImplementation,
 )
 

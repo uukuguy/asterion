@@ -147,6 +147,7 @@ actual_paths = {
         'applications/*/assemblies/*.json',
         'capabilities/*/capability-package.json',
         'capabilities/*/manifests/*.json',
+        'capabilities/dci/payload/capabilities/*.json',
     )
     for path in root.glob(pattern)
 }

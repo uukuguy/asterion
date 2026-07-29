@@ -12,7 +12,7 @@ from asterion.capability_sdk import (
     InstalledCapabilityPackage,
 )
 from asterion.capabilities.dci_research import DciLocalResearchImplementation
-from asterion.capabilities.dci_research.complete import (
+from asterion.capabilities.dci.implementation.complete import (
     INPUT_PROTOCOL,
     DciCompleteResearchImplementation,
     complete_dci_bindings,
