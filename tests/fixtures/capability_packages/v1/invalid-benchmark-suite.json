@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "capabilities": [],
   "benchmark_suites": [
-    {"suite_id": "example.suite", "version": "1.0.0"}
+    {"suite_id": "example.suite", "version": "latest"}
   ],
   "resources": []
 }

@@ -1,0 +1,15 @@
+{
+  "protocol": "asterion.capability-lock/v1",
+  "entries": [
+    {
+      "package_ref": {"package_id": "example.package", "version": "1.0.0"},
+      "payload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source_id": "example.source"
+    },
+    {
+      "package_ref": {"package_id": "example.package", "version": "1.0.0"},
+      "payload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "source_id": "example.source"
+    }
+  ]
+}

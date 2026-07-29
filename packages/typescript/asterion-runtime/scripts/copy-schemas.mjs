@@ -17,6 +17,30 @@ const assemblyManifestSource = fileURLToPath(
     import.meta.url,
   ),
 );
+const capabilityPackageManifestSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/capability-packages/v1/capability-package.schema.json",
+    import.meta.url,
+  ),
+);
+const benchmarkSuiteManifestSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/benchmark-suite/v1/benchmark-suite.schema.json",
+    import.meta.url,
+  ),
+);
+const capabilitySourceDeclarationSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/capability-source/v1/source.schema.json",
+    import.meta.url,
+  ),
+);
+const capabilitySourceLockSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/capability-source/v1/lock.schema.json",
+    import.meta.url,
+  ),
+);
 const destination = `${packageRoot}/dist/schemas`;
 
 rmSync(destination, { force: true, recursive: true });
@@ -26,4 +50,20 @@ cpSync(capabilityManifestSource, `${destination}/capability-manifest.schema.json
 cpSync(
   assemblyManifestSource,
   `${destination}/application-assembly.schema.json`,
+);
+cpSync(
+  capabilityPackageManifestSource,
+  `${destination}/capability-package.schema.json`,
+);
+cpSync(
+  benchmarkSuiteManifestSource,
+  `${destination}/benchmark-suite.schema.json`,
+);
+cpSync(
+  capabilitySourceDeclarationSource,
+  `${destination}/capability-source.schema.json`,
+);
+cpSync(
+  capabilitySourceLockSource,
+  `${destination}/capability-lock.schema.json`,
 );

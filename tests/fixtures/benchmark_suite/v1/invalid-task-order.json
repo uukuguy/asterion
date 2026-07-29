@@ -1,0 +1,27 @@
+{
+  "protocol": "asterion.benchmark-suite/v1",
+  "suite_id": "example.suite",
+  "version": "1.0.0",
+  "owner_package": {"package_id": "example.package", "version": "1.0.0"},
+  "tasks": [
+    {
+      "task_id": "example.zebra",
+      "capability": {"capability_id": "example.benchmark", "version": "1.0.0"},
+      "binding_id": "example.zebra",
+      "metric_contract_id": "example.metric/v1",
+      "result_contract_id": "example.result/v1",
+      "note": ""
+    },
+    {
+      "task_id": "example.alpha",
+      "capability": {"capability_id": "example.benchmark", "version": "1.0.0"},
+      "binding_id": "example.alpha",
+      "metric_contract_id": "example.metric/v1",
+      "result_contract_id": "example.result/v1",
+      "note": ""
+    }
+  ],
+  "artifact_media_types": ["application/json"],
+  "default_case_limit": 1,
+  "default_concurrency": 1
+}

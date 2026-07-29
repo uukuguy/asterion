@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asterion.local/schemas/capability-source/v1/source.schema.json",
+  "title": "Asterion Capability Source Public Declaration v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "source_id",
+    "kind",
+    "package_ref",
+    "payload_sha256"
+  ],
+  "properties": {
+    "protocol": {"const": "asterion.capability-source/v1"},
+    "source_id": {"$ref": "#/$defs/identity"},
+    "kind": {
+      "enum": [
+        "archive",
+        "builtin",
+        "local-directory",
+        "python-distribution",
+        "registry"
+      ]
+    },
+    "package_ref": {"$ref": "#/$defs/package_ref"},
+    "payload_sha256": {
+      "oneOf": [
+        {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        {"type": "null"}
+      ]
+    }
+  },
+  "$defs": {
+    "identity": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$"
+    },
+    "package_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["package_id", "version"],
+      "properties": {
+        "package_id": {"$ref": "#/$defs/identity"},
+        "version": {"$ref": "#/$defs/version"}
+      }
+    }
+  }
+}

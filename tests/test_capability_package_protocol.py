@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from asterion.capability_packages.protocol import (
+    BenchmarkSuiteRef,
     CAPABILITY_PACKAGE_PROTOCOL_VERSION,
     CapabilityPackageManifest,
     CapabilityPackageProtocolError,
@@ -102,10 +103,50 @@ class CapabilityPackageProtocolTests(unittest.TestCase):
         )
         self.assertNotIn("payload_sha256", schema["properties"])
         self.assertEqual(
-            schema["properties"]["benchmark_suites"],
-            {"type": "array", "maxItems": 0},
+            schema["properties"]["benchmark_suites"]["items"],
+            {"$ref": "#/$defs/benchmark_suite_ref"},
         )
-        self.assertNotIn("benchmark_suite_ref", schema["$defs"])
+        self.assertTrue(schema["properties"]["benchmark_suites"]["uniqueItems"])
+        self.assertIn("benchmark_suite_ref", schema["$defs"])
+
+    def test_accepts_sorted_unique_exact_benchmark_suite_refs(self) -> None:
+        value = fixture("valid-minimal.json")
+        value["benchmark_suites"] = [
+            {"suite_id": "example.alpha", "version": "1.0.0"},
+            {"suite_id": "example.zebra", "version": "2.0.0"},
+        ]
+        manifest = validate_capability_package_manifest(value)
+
+        self.assertEqual(
+            manifest.benchmark_suites,
+            (
+                BenchmarkSuiteRef("example.alpha", "1.0.0"),
+                BenchmarkSuiteRef("example.zebra", "2.0.0"),
+            ),
+        )
+        suites = value["benchmark_suites"]
+        assert isinstance(suites, list)
+        first = suites[0]
+        assert isinstance(first, dict)
+        first["suite_id"] = "changed"
+        self.assertEqual(manifest.benchmark_suites[0].suite_id, "example.alpha")
+
+    def test_rejects_noncanonical_benchmark_suite_refs(self) -> None:
+        valid = fixture("valid-minimal.json")
+        suite = {"suite_id": "example.suite", "version": "1.0.0"}
+        for suites in (
+            [suite, suite],
+            [
+                {"suite_id": "example.zebra", "version": "1.0.0"},
+                {"suite_id": "example.alpha", "version": "1.0.0"},
+            ],
+        ):
+            with self.subTest(suites=suites), self.assertRaises(
+                CapabilityPackageProtocolError
+            ):
+                validate_capability_package_manifest(
+                    {**valid, "benchmark_suites": suites}
+                )
 
     def test_rejects_shared_invalid_fixtures(self) -> None:
         for name in (

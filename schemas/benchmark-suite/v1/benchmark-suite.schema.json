@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asterion.local/schemas/benchmark-suite/v1/benchmark-suite.schema.json",
+  "$comment": "Canonical ordering is a protocol semantic gate above structural JSON Schema: protocol validators MUST enforce Unicode scalar ascending task_id and artifact media-type ordering with uniqueness.",
+  "title": "Asterion Benchmark Suite v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "suite_id",
+    "version",
+    "owner_package",
+    "tasks",
+    "artifact_media_types",
+    "default_case_limit",
+    "default_concurrency"
+  ],
+  "properties": {
+    "protocol": {"const": "asterion.benchmark-suite/v1"},
+    "suite_id": {"$ref": "#/$defs/identity"},
+    "version": {"$ref": "#/$defs/version"},
+    "owner_package": {"$ref": "#/$defs/package_ref"},
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/task"}
+    },
+    "artifact_media_types": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/media_type"}
+    },
+    "default_case_limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000000
+    },
+    "default_concurrency": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 256
+    }
+  },
+  "$defs": {
+    "identity": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$"
+    },
+    "contract_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*/v(?:0|[1-9][0-9]*)$"
+    },
+    "media_type": {
+      "type": "string",
+      "pattern": "^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+$"
+    },
+    "package_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["package_id", "version"],
+      "properties": {
+        "package_id": {"$ref": "#/$defs/identity"},
+        "version": {"$ref": "#/$defs/version"}
+      }
+    },
+    "capability_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability_id", "version"],
+      "properties": {
+        "capability_id": {"$ref": "#/$defs/identity"},
+        "version": {"$ref": "#/$defs/version"}
+      }
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_id",
+        "capability",
+        "binding_id",
+        "metric_contract_id",
+        "result_contract_id",
+        "note"
+      ],
+      "properties": {
+        "task_id": {"$ref": "#/$defs/identity"},
+        "capability": {"$ref": "#/$defs/capability_ref"},
+        "binding_id": {"$ref": "#/$defs/identity"},
+        "metric_contract_id": {"$ref": "#/$defs/contract_id"},
+        "result_contract_id": {"$ref": "#/$defs/contract_id"},
+        "note": {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^[^\\r\\n]*$"
+        }
+      }
+    }
+  }
+}

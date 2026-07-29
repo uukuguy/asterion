@@ -23,7 +23,9 @@
     },
     "benchmark_suites": {
       "type": "array",
-      "maxItems": 0
+      "$comment": "Canonical ordering is a protocol semantic gate above structural JSON Schema: protocol validators MUST enforce Unicode-scalar ascending order by (suite_id, version) and uniqueness.",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/benchmark_suite_ref"}
     },
     "resources": {
       "type": "array",
@@ -46,6 +48,15 @@
       "required": ["capability_id", "version"],
       "properties": {
         "capability_id": {"$ref": "#/$defs/identity"},
+        "version": {"$ref": "#/$defs/version"}
+      }
+    },
+    "benchmark_suite_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["suite_id", "version"],
+      "properties": {
+        "suite_id": {"$ref": "#/$defs/identity"},
         "version": {"$ref": "#/$defs/version"}
       }
     },

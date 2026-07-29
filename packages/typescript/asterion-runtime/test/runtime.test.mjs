@@ -6,11 +6,19 @@ import Ajv2020 from "ajv/dist/2020.js";
 
 import {
   APPLICATION_ASSEMBLY_PROTOCOL_VERSION,
+  BENCHMARK_SUITE_PROTOCOL_VERSION,
+  CAPABILITY_LOCK_PROTOCOL_VERSION,
+  CAPABILITY_PACKAGE_PROTOCOL_VERSION,
   CAPABILITY_PROTOCOL_VERSION,
+  CAPABILITY_SOURCE_PROTOCOL_VERSION,
   ProtocolValidationError,
   RUNTIME_PROTOCOL_VERSION,
   validateAssemblyManifest,
+  validateBenchmarkSuiteManifest,
+  validateCapabilityPackageManifest,
   validateCapabilityManifest,
+  validateCapabilitySourceDeclaration,
+  validateCapabilitySourceLock,
   validateEventStream,
   validateRunRequest,
   validateRuntimeManifest,
@@ -29,6 +37,18 @@ const sourceDirectory = new URL("../src/", import.meta.url);
 const schemaCopyScript = new URL("../scripts/copy-schemas.mjs", import.meta.url);
 const assemblyFixtures = new URL(
   "../../../../tests/fixtures/application_assembly/v1/",
+  import.meta.url,
+);
+const capabilityPackageFixtures = new URL(
+  "../../../../tests/fixtures/capability_packages/v1/",
+  import.meta.url,
+);
+const benchmarkSuiteFixtures = new URL(
+  "../../../../tests/fixtures/benchmark_suite/v1/",
+  import.meta.url,
+);
+const capabilitySourceFixtures = new URL(
+  "../../../../tests/fixtures/capability_source/v1/",
   import.meta.url,
 );
 const referenceAssemblyRoots = [
@@ -52,6 +72,10 @@ async function readCapabilityJson(name) {
 
 async function readAssemblyJson(name) {
   return JSON.parse(await readFile(new URL(name, assemblyFixtures), "utf8"));
+}
+
+async function readFixture(root, name) {
+  return JSON.parse(await readFile(new URL(name, root), "utf8"));
 }
 
 async function readJsonl(name) {
@@ -155,6 +179,10 @@ test("validates the shared runtime manifest fixtures", async () => {
     "../../../../schemas/agent-runtime/v1",
     "../../../../schemas/capabilities/v1/capability-manifest.schema.json",
     "../../../../schemas/application-assembly/v1/application-assembly.schema.json",
+    "../../../../schemas/capability-packages/v1/capability-package.schema.json",
+    "../../../../schemas/benchmark-suite/v1/benchmark-suite.schema.json",
+    "../../../../schemas/capability-source/v1/source.schema.json",
+    "../../../../schemas/capability-source/v1/lock.schema.json",
   ]) {
     assert.ok(copyScript.includes(source), source);
   }
@@ -169,6 +197,129 @@ test("validates the shared runtime manifest fixtures", async () => {
     const invalid = await readJson(name);
     assert.throws(() => validateRuntimeManifest(invalid), ProtocolValidationError);
   }
+});
+
+test("validates capability packages with exact benchmark suite refs", async () => {
+  assert.equal(
+    CAPABILITY_PACKAGE_PROTOCOL_VERSION,
+    "asterion.capability-package/v1",
+  );
+  const valid = await readFixture(capabilityPackageFixtures, "valid-minimal.json");
+  valid.benchmark_suites = [
+    { suite_id: "example.alpha", version: "1.0.0" },
+    { suite_id: "example.zebra", version: "2.0.0" },
+  ];
+  const validated = validateCapabilityPackageManifest(valid);
+  assert.deepEqual(validated, valid);
+  valid.benchmark_suites[0].suite_id = "changed";
+  assert.equal(validated.benchmark_suites[0].suite_id, "example.alpha");
+  assert.ok(Object.isFrozen(validated.benchmark_suites[0]));
+
+  for (const benchmark_suites of [
+    [
+      { suite_id: "example.zebra", version: "1.0.0" },
+      { suite_id: "example.alpha", version: "1.0.0" },
+    ],
+    [
+      { suite_id: "example.alpha", version: "1.0.0" },
+      { suite_id: "example.alpha", version: "1.0.0" },
+    ],
+  ]) {
+    assert.throws(
+      () =>
+        validateCapabilityPackageManifest({
+          ...valid,
+          benchmark_suites,
+        }),
+      ProtocolValidationError,
+    );
+  }
+});
+
+test("validates closed declarative benchmark suites and semantic order", async () => {
+  assert.equal(
+    BENCHMARK_SUITE_PROTOCOL_VERSION,
+    "asterion.benchmark-suite/v1",
+  );
+  const valid = await readFixture(benchmarkSuiteFixtures, "valid-minimal.json");
+  assert.deepEqual(validateBenchmarkSuiteManifest(valid), valid);
+  for (const name of ["invalid-command.json", "invalid-task-order.json"]) {
+    const invalid = await readFixture(benchmarkSuiteFixtures, name);
+    assert.throws(
+      () => validateBenchmarkSuiteManifest(invalid),
+      ProtocolValidationError,
+    );
+  }
+  const task = valid.tasks[0];
+  for (const field of [
+    "command",
+    "dataset_path",
+    "corpus_path",
+    "provider",
+    "environment",
+  ]) {
+    assert.throws(
+      () =>
+        validateBenchmarkSuiteManifest({
+          ...valid,
+          tasks: [{ ...task, [field]: "SECRET" }],
+        }),
+      ProtocolValidationError,
+    );
+  }
+  assert.throws(
+    () =>
+      validateBenchmarkSuiteManifest({
+        ...valid,
+        artifact_media_types: ["text/plain", "application/json"],
+      }),
+    ProtocolValidationError,
+  );
+});
+
+test("validates public source declarations and exact canonical locks", async () => {
+  assert.equal(
+    CAPABILITY_SOURCE_PROTOCOL_VERSION,
+    "asterion.capability-source/v1",
+  );
+  assert.equal(CAPABILITY_LOCK_PROTOCOL_VERSION, "asterion.capability-lock/v1");
+  const source = await readFixture(capabilitySourceFixtures, "valid-source.json");
+  const lock = await readFixture(capabilitySourceFixtures, "valid-lock.json");
+  assert.deepEqual(validateCapabilitySourceDeclaration(source), source);
+  assert.deepEqual(validateCapabilitySourceLock(lock), lock);
+  for (const name of [
+    "invalid-private-public-field.json",
+    "invalid-duplicate-lock.json",
+  ]) {
+    const invalid = await readFixture(capabilitySourceFixtures, name);
+    const validate = name.includes("lock")
+      ? validateCapabilitySourceLock
+      : validateCapabilitySourceDeclaration;
+    assert.throws(() => validate(invalid), ProtocolValidationError);
+  }
+  assert.throws(
+    () =>
+      validateCapabilitySourceLock({
+        ...lock,
+        entries: [
+          {
+            ...lock.entries[0],
+            package_ref: {
+              package_id: "zebra.package",
+              version: "1.0.0",
+            },
+          },
+          {
+            ...lock.entries[0],
+            package_ref: {
+              package_id: "alpha.package",
+              version: "1.0.0",
+            },
+          },
+        ],
+      }),
+    ProtocolValidationError,
+  );
 });
 
 test("returns a deep immutable validation snapshot", async () => {

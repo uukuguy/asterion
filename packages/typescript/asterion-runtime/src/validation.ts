@@ -8,7 +8,11 @@ import {
 
 import type {
   AssemblyManifest,
+  BenchmarkSuiteManifest,
+  CapabilityPackageManifest,
   CapabilityManifest,
+  CapabilitySourceDeclaration,
+  CapabilitySourceLock,
   RunEvent,
   RunRequest,
   RuntimeManifest,
@@ -27,6 +31,18 @@ const capabilityManifestValidator = ajv.compile(
 );
 const assemblyManifestValidator = ajv.compile(
   readSchema("application-assembly.schema.json"),
+);
+const capabilityPackageManifestValidator = ajv.compile(
+  readSchema("capability-package.schema.json"),
+);
+const benchmarkSuiteManifestValidator = ajv.compile(
+  readSchema("benchmark-suite.schema.json"),
+);
+const capabilitySourceDeclarationValidator = ajv.compile(
+  readSchema("capability-source.schema.json"),
+);
+const capabilitySourceLockValidator = ajv.compile(
+  readSchema("capability-lock.schema.json"),
 );
 const requestValidator = ajv.compile(readSchema("run-request.schema.json"));
 const eventValidator = ajv.compile(readSchema("event.schema.json"));
@@ -161,11 +177,13 @@ export function validateAssemblyManifest(value: unknown): AssemblyManifest {
     "assembly manifest capability packages",
     assembly.capability_packages,
     ({ package_id }) => package_id,
+    ({ version }) => version,
   );
   requireSortedUniqueRefs(
     "assembly manifest capabilities",
     assembly.capabilities,
     ({ capability_id }) => capability_id,
+    ({ version }) => version,
   );
   for (const field of assemblyEdgeFields) {
     requireSortedUnique(`assembly manifest ${field}`, assembly[field]);
@@ -173,16 +191,92 @@ export function validateAssemblyManifest(value: unknown): AssemblyManifest {
   return assembly;
 }
 
-function requireSortedUniqueRefs<T extends { readonly version: string }>(
+export function validateCapabilityPackageManifest(
+  value: unknown,
+): CapabilityPackageManifest {
+  const manifest = requireValid<CapabilityPackageManifest>(
+    "capability package manifest",
+    capabilityPackageManifestValidator,
+    value,
+  );
+  requireSortedUniqueRefs(
+    "capability package capabilities",
+    manifest.capabilities,
+    ({ capability_id }) => capability_id,
+    ({ version }) => version,
+  );
+  requireSortedUniqueRefs(
+    "capability package benchmark suites",
+    manifest.benchmark_suites,
+    ({ suite_id }) => suite_id,
+    ({ version }) => version,
+  );
+  requireSortedUniqueKeys(
+    "capability package resources",
+    manifest.resources,
+    ({ resource_id }) => resource_id,
+  );
+  return manifest;
+}
+
+export function validateBenchmarkSuiteManifest(
+  value: unknown,
+): BenchmarkSuiteManifest {
+  const manifest = requireValid<BenchmarkSuiteManifest>(
+    "benchmark suite manifest",
+    benchmarkSuiteManifestValidator,
+    value,
+  );
+  requireSortedUniqueKeys(
+    "benchmark suite tasks",
+    manifest.tasks,
+    ({ task_id }) => task_id,
+  );
+  requireSortedUnique(
+    "benchmark suite artifact media types",
+    manifest.artifact_media_types,
+  );
+  return manifest;
+}
+
+export function validateCapabilitySourceDeclaration(
+  value: unknown,
+): CapabilitySourceDeclaration {
+  return requireValid<CapabilitySourceDeclaration>(
+    "capability source declaration",
+    capabilitySourceDeclarationValidator,
+    value,
+  );
+}
+
+export function validateCapabilitySourceLock(
+  value: unknown,
+): CapabilitySourceLock {
+  const lock = requireValid<CapabilitySourceLock>(
+    "capability source lock",
+    capabilitySourceLockValidator,
+    value,
+  );
+  requireSortedUniqueRefs(
+    "capability source lock entries",
+    lock.entries,
+    ({ package_ref }) => package_ref.package_id,
+    ({ package_ref }) => package_ref.version,
+  );
+  return lock;
+}
+
+function requireSortedUniqueRefs<T>(
   label: string,
   references: readonly T[],
   identity: (reference: T) => string,
+  version: (reference: T) => string,
 ): void {
   if (
     references.some(
       (reference) =>
         hasSurrogateCodePoint(identity(reference)) ||
-        hasSurrogateCodePoint(reference.version),
+        hasSurrogateCodePoint(version(reference)),
     ) ||
     references.some((reference, index) => {
       if (index === 0) {
@@ -196,12 +290,23 @@ function requireSortedUniqueRefs<T extends { readonly version: string }>(
       return (
         identityOrder > 0 ||
         (identityOrder === 0 &&
-          compareUnicodeScalarStrings(previous.version, reference.version) >= 0)
+          compareUnicodeScalarStrings(
+            version(previous),
+            version(reference),
+          ) >= 0)
       );
     })
   ) {
     throw new ProtocolValidationError(label, null);
   }
+}
+
+function requireSortedUniqueKeys<T>(
+  label: string,
+  values: readonly T[],
+  key: (value: T) => string,
+): void {
+  requireSortedUnique(label, values.map(key));
 }
 
 export function validateRunRequest(value: unknown): RunRequest {
