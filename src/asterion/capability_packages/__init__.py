@@ -22,6 +22,14 @@ from asterion.capability_packages.protocol import (
     validate_capability_source_declaration,
     validate_capability_source_lock,
 )
+from asterion.capability_packages.model import (
+    SOURCE_KINDS as ADAPTER_SOURCE_KINDS,
+    BenchmarkTaskBinding,
+    CapabilityPackageCandidate,
+    CapabilityPackageModelError,
+    InstalledCapabilityPackage,
+    PortableCapabilityPayload,
+)
 
 __all__ = (
     "BENCHMARK_SUITE_PROTOCOL_VERSION",
@@ -40,6 +48,12 @@ __all__ = (
     "CapabilitySourceLockEntry",
     "CapabilitySourceProtocolError",
     "ResourceIdentity",
+    "ADAPTER_SOURCE_KINDS",
+    "BenchmarkTaskBinding",
+    "CapabilityPackageCandidate",
+    "CapabilityPackageModelError",
+    "InstalledCapabilityPackage",
+    "PortableCapabilityPayload",
     "validate_benchmark_suite_manifest",
     "validate_capability_package_manifest",
     "validate_capability_source_declaration",
