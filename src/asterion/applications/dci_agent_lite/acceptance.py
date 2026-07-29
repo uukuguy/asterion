@@ -11,15 +11,11 @@ from asterion.applications.provider import (
     ApplicationProviderError,
     compose_installed_provider,
 )
-from asterion.capabilities.builtin import create_controlled_code_package
-from asterion.capability_packages import (
-    CapabilityPackageRef,
-    CapabilitySourceDeclaration,
-    open_portable_payload,
-    resolve_capability_source,
+from asterion.capabilities.builtin import (
+    create_controlled_code_package,
 )
-from asterion.capability_packages.sources.local import (
-    LocalDirectoryCapabilityPackageSource,
+from asterion.capabilities.dci.provider import (
+    create_dci_package as create_dci_package_for_source,
 )
 from asterion.capabilities.catalog import (
     CapabilityCatalogError,
@@ -104,34 +100,14 @@ _EXPECTED_PAPER_SCOPES_SHA256 = (
 
 
 def create_dci_package():
-    """Load the selected package-owned DCI provider through its exact local source."""
+    """Load the exact packaged DCI built-in selected by acceptance."""
 
     root = Path(str(resources.files("asterion.capabilities.dci"))).resolve()
-    package_ref = CapabilityPackageRef("dci", "1.0.0")
-    payload = open_portable_payload(root / "payload")
-    source = LocalDirectoryCapabilityPackageSource(
-        (
-            CapabilitySourceDeclaration(
-                source_id="dci.transitional-local",
-                kind="local-directory",
-                package_ref=package_ref,
-                payload_sha256=payload.payload_sha256,
-                private_locator={
-                    "root": root,
-                    "payload_root": "payload",
-                    "module_path": "implementation/local_provider.py",
-                    "factory_name": "create_package",
-                },
-            ),
-        )
+    return create_dci_package_for_source(
+        payload_root=root / "payload",
+        source_id="dci.builtin",
+        source_kind="builtin",
     )
-    candidate = resolve_capability_source(
-        package_ref,
-        source.discover_metadata(),
-        None,
-    )
-    source.validate_source_identity(candidate, source.open_payload(candidate))
-    return source.load_provider(candidate)
 
 
 def _acceptance_check(

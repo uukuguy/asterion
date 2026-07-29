@@ -38,6 +38,9 @@ from asterion.capabilities.dci.implementation.reproduction.provenance import (
 )
 from tests.test_application_discovery import FakeEntryPoint
 from tests.test_asterion_cli import transitional_dci_package
+from asterion.applications.dci_agent_lite.acceptance import (
+    create_dci_package as installed_dci_package,
+)
 from asterion.capabilities.dci.implementation.reproduction.dual_runtime_verification import (
     DciDualRuntimeVerificationError,
     audit_restricted_claude_application,
@@ -633,23 +636,26 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
             },
         )
 
-    def test_transitional_dci_package_uses_explicit_local_source(self) -> None:
+    def test_builtin_dci_package_replaces_transitional_acceptance_source(self) -> None:
         acceptance_source = (
             SOURCE / "applications/dci_agent_lite/acceptance.py"
         ).read_text()
-        package = transitional_dci_package()
+        package = installed_dci_package()
+        transitional = transitional_dci_package()
 
-        self.assertIn("CapabilitySourceDeclaration", acceptance_source)
-        self.assertIn("LocalDirectoryCapabilityPackageSource", acceptance_source)
+        self.assertIn('source_id="dci.builtin"', acceptance_source)
+        self.assertNotIn("LocalDirectoryCapabilityPackageSource", acceptance_source)
         self.assertNotIn("InstalledCapabilityPackage(", acceptance_source)
         self.assertEqual(package.package_ref.package_id, "dci")
-        self.assertEqual(package.source_id, "dci.transitional-local")
-        self.assertEqual(package.source_kind, "local-directory")
+        self.assertEqual(package.source_id, "dci.builtin")
+        self.assertEqual(package.source_kind, "builtin")
         self.assertEqual(len(package.payload_sha256), 64)
         self.assertEqual(
             package.catalog_roots,
             (SOURCE / "capabilities/dci/payload/capabilities",),
         )
+        self.assertEqual(transitional.source_id, "dci.transitional-local")
+        self.assertEqual(transitional.source_kind, "local-directory")
 
     def test_implementation_identity_is_stable_and_digest_shaped(self) -> None:
         identity = complete_application_identity()

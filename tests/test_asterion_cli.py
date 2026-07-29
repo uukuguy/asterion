@@ -388,7 +388,7 @@ class AsterionCliTests(unittest.TestCase):
                 self.assertEqual(code, 0, stderr.getvalue())
                 self.assertIn("dci", stdout.getvalue())
 
-    def test_dci_run_without_transitional_package_fails_before_runtime(self) -> None:
+    def test_dci_run_resolves_builtin_package_without_transitional_injection(self) -> None:
         contexts: list[object] = []
         registry = RuntimeFactoryRegistry(
             (
@@ -407,6 +407,7 @@ class AsterionCliTests(unittest.TestCase):
             )
         )
         stderr = io.StringIO()
+        stdout = io.StringIO()
 
         code = main(
             [
@@ -424,13 +425,16 @@ class AsterionCliTests(unittest.TestCase):
             entry_points=(FakeEntryPoint(name="dci-agent-lite", factory=create_dci_provider),),
             host_service_entry_points=(dci_host_entry(),),
             runtime_factories=registry,
-            stdout=io.StringIO(),
+            stdout=stdout,
             stderr=stderr,
         )
 
-        self.assertEqual(code, 2)
-        self.assertEqual(contexts, [])
-        self.assertNotIn("dci.transitional-local", stderr.getvalue())
+        self.assertEqual(code, 0, stderr.getvalue())
+        self.assertEqual(len(contexts), 1)
+        self.assertEqual(
+            json.loads(stdout.getvalue())["application_id"],
+            "dci.research-capability",
+        )
 
     def test_dci_run_accepts_explicit_transitional_package_injection(self) -> None:
         runtime = DciPiFixtureRuntime()

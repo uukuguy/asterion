@@ -22,6 +22,7 @@ from asterion.capability_packages.sources.builtin import (
 
 
 CONTROLLED_CODE = CapabilityPackageRef("controlled-code", "1.0.0")
+DCI = CapabilityPackageRef("dci", "1.0.0")
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "extensions" / "minimal" / "payload"
 
 
@@ -66,10 +67,13 @@ def _installed_package(
 
 
 class BuiltinCapabilitySourceTests(unittest.TestCase):
-    def test_builtin_registration_table_is_explicit_and_controlled_code_only(self) -> None:
+    def test_builtin_registration_table_is_explicit(self) -> None:
         registrations = builtin_capability_sources()
 
-        self.assertEqual(tuple(item.package_ref for item in registrations), (CONTROLLED_CODE,))
+        self.assertEqual(
+            tuple(item.package_ref for item in registrations),
+            (CONTROLLED_CODE, DCI),
+        )
         self.assertNotIn(
             CapabilityPackageRef("dci-agent-lite", "1.0.0"),
             tuple(item.package_ref for item in registrations),

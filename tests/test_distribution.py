@@ -9,6 +9,7 @@ from zipfile import ZipFile
 
 PROJECT = Path(__file__).resolve().parents[1]
 BENCHMARK_SOURCE = PROJECT / "src/asterion/benchmarks"
+DCI_SOURCE = PROJECT / "src/asterion/capabilities/dci"
 BENCHMARK_SCHEMA = (
     PROJECT / "schemas/benchmark-suite/v1/benchmark-suite.schema.json"
 )
@@ -46,6 +47,18 @@ class DistributionTests(unittest.TestCase):
                     if "__pycache__" not in path.parts
                 )
                 self.assertEqual(expected_modules - members, frozenset())
+                expected_dci_members = frozenset(
+                    path.relative_to(PROJECT / "src").as_posix()
+                    for path in DCI_SOURCE.rglob("*")
+                    if path.is_file() and "__pycache__" not in path.parts
+                )
+                self.assertEqual(expected_dci_members - members, frozenset())
+                for relative in expected_dci_members:
+                    if relative.endswith(".json"):
+                        self.assertEqual(
+                            wheel.read(relative),
+                            (PROJECT / "src" / relative).read_bytes(),
+                        )
                 self.assertIn(PACKAGED_BENCHMARK_SCHEMA, members)
                 self.assertEqual(
                     wheel.read(PACKAGED_BENCHMARK_SCHEMA),
