@@ -11,11 +11,12 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
-from asterion.cli import _parser, main
+from asterion.cli import _load_available_capability_packages, _parser, main
 from asterion.applications.dci_agent_lite.provider import (
     create_provider as create_dci_provider,
 )
 from asterion.applications.provider import (
+    ApplicationProviderError,
     InstalledApplication,
     InstalledApplicationProvider,
 )
@@ -496,6 +497,24 @@ class AsterionCliTests(unittest.TestCase):
         self.assertEqual(code, 0, stderr.getvalue())
         self.assertEqual(len(runtime.requests), 1)
         self.assertNotIn("SECRET-INPUT", stdout.getvalue())
+
+    def test_extra_capability_package_injection_fails_before_runtime(self) -> None:
+        extra = replace(
+            transitional_dci_package(),
+            package_ref=CapabilityPackageRef("unused", "1.0.0"),
+            source_id="secret-extra-source",
+        )
+
+        with self.assertRaisesRegex(
+            ApplicationProviderError,
+            "^capability package injection is invalid$",
+        ) as context:
+            _load_available_capability_packages(
+                create_dci_provider(),
+                (transitional_dci_package(), extra),
+            )
+
+        self.assertNotIn("secret-extra-source", str(context.exception))
 
     def test_missing_or_invalid_host_authority_fails_before_runtime(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -40,6 +40,7 @@ from asterion.capabilities.execution import (
     project_public_value,
 )
 from asterion.capability_packages import (
+    CapabilityPackageRef,
     InstalledCapabilityPackage,
     resolve_capability_source,
 )
@@ -326,7 +327,10 @@ def _load_available_capability_packages(
             }
         )
     )
-    installed = _injected_capability_package_map(injected_packages)
+    installed = _injected_capability_package_map(
+        injected_packages,
+        required_refs=frozenset(package_refs),
+    )
     missing_refs = tuple(
         package_ref for package_ref in package_refs if package_ref not in installed
     )
@@ -343,14 +347,36 @@ def _load_available_capability_packages(
 
 def _injected_capability_package_map(
     packages: tuple[InstalledCapabilityPackage, ...],
-) -> dict[object, InstalledCapabilityPackage]:
-    installed: dict[object, InstalledCapabilityPackage] = {}
+    *,
+    required_refs: frozenset[CapabilityPackageRef],
+) -> dict[CapabilityPackageRef, InstalledCapabilityPackage]:
+    installed: dict[CapabilityPackageRef, InstalledCapabilityPackage] = {}
     for package in packages:
         if type(package) is not InstalledCapabilityPackage:
             raise ApplicationProviderError("capability package injection is invalid")
-        if package.package_ref in installed:
+        package_ref = package.package_ref
+        if (
+            type(package_ref) is not CapabilityPackageRef
+            or type(package_ref.package_id) is not str
+            or type(package_ref.version) is not str
+        ):
             raise ApplicationProviderError("capability package injection is invalid")
-        installed[package.package_ref] = package
+        try:
+            if required_refs and package_ref not in required_refs:
+                raise ApplicationProviderError(
+                    "capability package injection is invalid"
+                )
+            if package_ref in installed:
+                raise ApplicationProviderError(
+                    "capability package injection is invalid"
+                )
+            installed[package_ref] = package
+        except ApplicationProviderError:
+            raise
+        except Exception:
+            raise ApplicationProviderError(
+                "capability package injection is invalid"
+            ) from None
     return installed
 
 

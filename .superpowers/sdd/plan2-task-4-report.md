@@ -47,3 +47,20 @@ GREEN:
 
 Concerns:
 - Broad `make check` was intentionally not run per current instruction.
+
+## Minor Injection Exactness Fix
+
+Status: PASS
+
+RED:
+- `uv run python -m unittest -v tests.test_asterion_cli.AsterionCliTests.test_extra_capability_package_injection_fails_before_runtime` initially failed because an unused but valid injected package was silently ignored instead of rejected.
+
+GREEN:
+- `uv run python -m unittest -v tests.test_asterion_cli.AsterionCliTests.test_dci_list_provider_and_describe_do_not_require_package_resolution tests.test_asterion_cli.AsterionCliTests.test_dci_run_without_transitional_package_fails_before_runtime tests.test_asterion_cli.AsterionCliTests.test_dci_run_accepts_explicit_transitional_package_injection tests.test_asterion_cli.AsterionCliTests.test_extra_capability_package_injection_fails_before_runtime tests.test_builtin_capability_source tests.test_installed_application_provider tests.test_builtin_controlled_code_application` -> 24 tests OK.
+- `uv run pyright src/asterion/applications/dci_agent_lite/provider.py src/asterion/applications/provider.py src/asterion/cli.py` -> 0 errors.
+- `uv run ruff check src/asterion/cli.py tests/test_asterion_cli.py` -> all checks passed.
+- `git diff --check` -> PASS.
+
+Design:
+- Injected package refs must be a subset of the selected provider's exact required package refs.
+- Malformed injected package identities and normal hash/equality failures are converted to the same context-free `ApplicationProviderError`; `BaseException` remains uncaught.
