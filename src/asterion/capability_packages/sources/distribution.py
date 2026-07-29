@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from importlib import metadata
+from os import PathLike
 from pathlib import Path, PurePosixPath
 
 from asterion.capability_packages.model import (
@@ -256,15 +257,27 @@ def _payload_root_for(
     matches = tuple(path for path in files if PurePosixPath(str(path)) == descriptor)
     if len(matches) != 1:
         raise DistributionCapabilitySourceError(_ERROR_MESSAGE)
+    distribution_base = _distribution_base(distribution)
+    descriptor_path = _declared_descriptor_path(distribution, matches[0])
+    expected_descriptor = distribution_base / descriptor
+    expected_root = distribution_base / relative_root
     failed = False
-    result: Path | None = None
+    expected_descriptor_path: Path | None = None
+    expected_root_path: Path | None = None
     try:
-        result = Path(str(distribution.locate_file(relative_root)))
+        expected_descriptor_path = expected_descriptor.resolve(strict=True)
+        expected_root_path = expected_root.resolve(strict=True)
     except Exception:
         failed = True
-    if failed or result is None:
+    if (
+        failed
+        or expected_descriptor_path is None
+        or expected_root_path is None
+        or descriptor_path != expected_descriptor_path
+        or descriptor_path.parent != expected_root_path
+    ):
         raise DistributionCapabilitySourceError(_ERROR_MESSAGE)
-    return result
+    return descriptor_path.parent
 
 
 def _distribution_files(distribution: metadata.Distribution) -> tuple[object, ...]:
@@ -272,6 +285,22 @@ def _distribution_files(distribution: metadata.Distribution) -> tuple[object, ..
     if files is None:
         raise DistributionCapabilitySourceError(_ERROR_MESSAGE)
     return tuple(files)
+
+
+def _distribution_base(distribution: metadata.Distribution) -> Path:
+    return Path(str(distribution.locate_file(PurePosixPath("")))).resolve(strict=True)
+
+
+def _declared_descriptor_path(
+    distribution: metadata.Distribution,
+    declared_descriptor: object,
+) -> Path:
+    locate = getattr(declared_descriptor, "locate", None)
+    if callable(locate):
+        return Path(str(locate())).resolve(strict=True)
+    if not isinstance(declared_descriptor, (str, PathLike)):
+        raise DistributionCapabilitySourceError(_ERROR_MESSAGE)
+    return Path(str(distribution.locate_file(declared_descriptor))).resolve(strict=True)
 
 
 def _payload_relative_root(package_ref: CapabilityPackageRef) -> PurePosixPath:

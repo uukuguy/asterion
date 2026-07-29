@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -28,6 +29,7 @@ SOURCE_ID = "acme.sample.python-distribution"
 SOURCE_KIND = "python-distribution"
 DIST_NAME = "asterion-acme-sample-extension"
 PAYLOAD_RELATIVE = "asterion_capability_packages/acme.sample/1.0.0/payload"
+DESCRIPTOR_RELATIVE = f"{PAYLOAD_RELATIVE}/capability-package.json"
 
 
 def assert_stable_error(
@@ -150,6 +152,40 @@ class FakeDistribution:
         return Path("/private/SECRET-payload")
 
 
+class FakePackagePath:
+    def __init__(self, relative_path: str, located_path: Path) -> None:
+        self._relative_path = relative_path
+        self._located_path = located_path
+
+    def __str__(self) -> str:
+        return self._relative_path
+
+    def locate(self) -> Path:
+        return self._located_path
+
+
+class RebindingDistribution(FakeDistribution):
+    def __init__(
+        self,
+        *,
+        entry: FakeEntryPoint,
+        distribution_base: Path,
+        descriptor_path: Path,
+        rebound_root: Path,
+    ) -> None:
+        super().__init__((entry,))
+        self.files = (FakePackagePath(DESCRIPTOR_RELATIVE, descriptor_path),)
+        self.locate_requests: list[object] = []
+        self._distribution_base = distribution_base
+        self._rebound_root = rebound_root
+
+    def locate_file(self, path: object) -> Path:
+        self.locate_requests.append(path)
+        if str(path) in {"", "."}:
+            return self._distribution_base
+        return self._rebound_root
+
+
 class HostileFilesDistribution(FakeDistribution):
     def __init__(self, entries: tuple[FakeEntryPoint, ...]) -> None:
         super().__init__(entries)
@@ -245,6 +281,39 @@ class DistributionCapabilitySourceTests(unittest.TestCase):
         self.assertEqual(distribution.files_accesses, 0)
         self.assertFalse(first.loaded)
         self.assertFalse(second.loaded)
+
+    def test_descriptor_package_path_rebinding_is_rejected_before_provider_load(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            declared_root = root / "declared" / PAYLOAD_RELATIVE
+            rebound_root = root / "rebound" / PAYLOAD_RELATIVE
+            shutil.copytree(FIXTURE_PROJECT / "payload", declared_root)
+            shutil.copytree(FIXTURE_PROJECT / "payload", rebound_root)
+            entry = FakeEntryPoint(
+                name="acme.sample@1.0.0",
+                distribution=cast(Any, None),
+            )
+            distribution = RebindingDistribution(
+                entry=entry,
+                distribution_base=root / "declared",
+                descriptor_path=rebound_root / "capability-package.json",
+                rebound_root=rebound_root,
+            )
+            source = DistributionCapabilityPackageSource((cast(Any, distribution),))
+
+            with self.assertRaises(DistributionCapabilitySourceError) as raised:
+                source.discover_metadata()
+
+        assert_stable_error(
+            self,
+            raised.exception,
+            "installed capability distribution source is invalid",
+            (str(rebound_root), str(declared_root), "SECRET-ENTRY-POINT-LOAD"),
+        )
+        self.assertNotIn(PAYLOAD_RELATIVE, tuple(str(path) for path in distribution.locate_requests))
+        self.assertFalse(entry.loaded)
 
     def test_invalid_entry_point_and_hostile_metadata_errors_are_redacted(self) -> None:
         cases = (
