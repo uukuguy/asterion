@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dci.local/schemas/agent-runtime/v1/event.schema.json",
-  "title": "DCI Agent Runtime Protocol v1 Event",
+  "title": "Asterion Agent Runtime Protocol v1 Event",
   "type": "object",
   "additionalProperties": false,
   "required": ["protocol", "run_id", "sequence", "type", "payload"],
   "properties": {
-    "protocol": {"const": "dci.agent-runtime/v1"},
+    "protocol": {"const": "asterion.agent-runtime/v1"},
     "run_id": {"type": "string", "minLength": 1},
     "sequence": {"type": "integer", "minimum": 1},
     "type": {

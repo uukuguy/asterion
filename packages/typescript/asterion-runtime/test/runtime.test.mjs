@@ -6,6 +6,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 
 import {
   ProtocolValidationError,
+  RUNTIME_PROTOCOL_VERSION,
   validateAssemblyManifest,
   validateEventStream,
   validatePackageManifest,
@@ -58,6 +59,10 @@ async function readJsonl(name) {
     .map((line) => JSON.parse(line));
 }
 
+test("uses the Asterion-owned runtime protocol identity", () => {
+  assert.equal(RUNTIME_PROTOCOL_VERSION, "asterion.agent-runtime/v1");
+});
+
 test("validates the shared runtime manifest fixtures", async () => {
   const copyScript = await readFile(schemaCopyScript, "utf8");
   for (const source of [
@@ -92,7 +97,7 @@ test("returns a deep immutable validation snapshot", async () => {
 
 test("validates shared requests and complete event streams", async () => {
   const request = {
-    protocol: "dci.agent-runtime/v1",
+    protocol: "asterion.agent-runtime/v1",
     run_id: "typescript-host",
     input: { text: "Investigate the fixture corpus" },
     requested_capabilities: ["filesystem.read"],

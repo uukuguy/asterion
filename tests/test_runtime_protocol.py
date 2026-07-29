@@ -8,6 +8,7 @@ from pathlib import Path
 
 from asterion.runtime.protocol import (
     ProtocolError,
+    RUNTIME_PROTOCOL_VERSION,
     validate_event_stream,
     validate_run_request,
     validate_runtime_manifest,
@@ -15,6 +16,7 @@ from asterion.runtime.protocol import (
 
 
 FIXTURES = Path(__file__).parent / "fixtures" / "agent_runtime" / "v1"
+PROJECT = Path(__file__).resolve().parents[1]
 
 
 def _json(name: str) -> object:
@@ -30,6 +32,11 @@ def _jsonl(name: str) -> list[object]:
 
 
 class TestRuntimeProtocol(unittest.TestCase):
+    def test_runtime_protocol_is_asterion_owned(self) -> None:
+        self.assertEqual(RUNTIME_PROTOCOL_VERSION, "asterion.agent-runtime/v1")
+        for path in (PROJECT / "schemas/agent-runtime/v1").glob("*.json"):
+            self.assertNotIn("dci.agent-runtime/v1", path.read_text(encoding="utf-8"))
+
     def test_rejects_shared_invalid_runtime_manifests(self) -> None:
         for name in (
             "invalid-runtime-manifest.json",
@@ -64,7 +71,7 @@ class TestRuntimeProtocol(unittest.TestCase):
                 "runtime-manifest",
                 validate_runtime_manifest,
                 {
-                    "protocol": "dci.agent-runtime/v1",
+                    "protocol": "asterion.agent-runtime/v1",
                     "runtime_id": "fixture.runtime",
                     "capabilities": [],
                     sentinel: "provider-controlled",
@@ -74,7 +81,7 @@ class TestRuntimeProtocol(unittest.TestCase):
                 "request",
                 validate_run_request,
                 {
-                    "protocol": "dci.agent-runtime/v1",
+                    "protocol": "asterion.agent-runtime/v1",
                     "run_id": "fixture-run",
                     "input": {"text": "fixture"},
                     sentinel: "provider-controlled",
@@ -84,7 +91,7 @@ class TestRuntimeProtocol(unittest.TestCase):
                 "request-input",
                 validate_run_request,
                 {
-                    "protocol": "dci.agent-runtime/v1",
+                    "protocol": "asterion.agent-runtime/v1",
                     "run_id": "fixture-run",
                     "input": {
                         "text": "fixture",
@@ -97,7 +104,7 @@ class TestRuntimeProtocol(unittest.TestCase):
                 validate_event_stream,
                 [
                     {
-                        "protocol": "dci.agent-runtime/v1",
+                        "protocol": "asterion.agent-runtime/v1",
                         "run_id": "fixture-run",
                         "sequence": 1,
                         "type": "run.started",
@@ -111,7 +118,7 @@ class TestRuntimeProtocol(unittest.TestCase):
                 validate_event_stream,
                 [
                     {
-                        "protocol": "dci.agent-runtime/v1",
+                        "protocol": "asterion.agent-runtime/v1",
                         "run_id": "fixture-run",
                         "sequence": 1,
                         "type": "run.started",
@@ -191,7 +198,7 @@ def _event(
     payload: dict[str, object],
 ) -> dict[str, object]:
     return {
-        "protocol": "dci.agent-runtime/v1",
+        "protocol": "asterion.agent-runtime/v1",
         "run_id": "fixture-run",
         "sequence": sequence,
         "type": event_type,

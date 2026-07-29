@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://dci.local/schemas/agent-runtime/v1/runtime-manifest.schema.json",
-  "title": "DCI Agent Runtime Protocol v1 Runtime Manifest",
+  "title": "Asterion Agent Runtime Protocol v1 Runtime Manifest",
   "type": "object",
   "additionalProperties": false,
   "required": ["protocol", "runtime_id", "capabilities"],
   "properties": {
-    "protocol": {"const": "dci.agent-runtime/v1"},
+    "protocol": {"const": "asterion.agent-runtime/v1"},
     "runtime_id": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"

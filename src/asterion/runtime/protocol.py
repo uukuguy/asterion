@@ -1,4 +1,4 @@
-"""Reference validation for DCI Agent Runtime Protocol v1."""
+"""Reference validation for Asterion Agent Runtime Protocol v1."""
 
 from __future__ import annotations
 
@@ -6,7 +6,8 @@ import re
 from collections.abc import Iterable, Mapping
 
 
-PROTOCOL_VERSION = "dci.agent-runtime/v1"
+RUNTIME_PROTOCOL_VERSION = "asterion.agent-runtime/v1"
+PROTOCOL_VERSION = RUNTIME_PROTOCOL_VERSION
 MAX_DEADLINE_MS = 86_400_000
 EVENT_TYPES = {
     "run.started",
@@ -90,8 +91,8 @@ def validate_runtime_manifest(manifest: Mapping[str, object]) -> None:
         label="runtime manifest",
         required={"protocol", "runtime_id", "capabilities"},
     )
-    if manifest["protocol"] != PROTOCOL_VERSION:
-        raise ProtocolError("runtime manifest protocol is not dci.agent-runtime/v1")
+    if manifest["protocol"] != RUNTIME_PROTOCOL_VERSION:
+        raise ProtocolError("runtime manifest protocol is not asterion.agent-runtime/v1")
     _require_identifier(manifest["runtime_id"], "runtime manifest runtime_id")
     _validate_string_list(manifest["capabilities"], "runtime manifest capabilities")
 
@@ -106,8 +107,8 @@ def validate_run_request(request: Mapping[str, object]) -> None:
         required={"protocol", "run_id", "input"},
         optional={"requested_capabilities", "deadline_ms"},
     )
-    if request["protocol"] != PROTOCOL_VERSION:
-        raise ProtocolError("request protocol is not dci.agent-runtime/v1")
+    if request["protocol"] != RUNTIME_PROTOCOL_VERSION:
+        raise ProtocolError("request protocol is not asterion.agent-runtime/v1")
     _require_non_empty_string(request["run_id"], "request run_id")
 
     input_value = _require_mapping(request["input"], "request input")
@@ -156,8 +157,8 @@ def _validate_event(event: Mapping[str, object]) -> tuple[str, str]:
         label="event",
         required={"protocol", "run_id", "sequence", "type", "payload"},
     )
-    if event["protocol"] != PROTOCOL_VERSION:
-        raise ProtocolError("event protocol is not dci.agent-runtime/v1")
+    if event["protocol"] != RUNTIME_PROTOCOL_VERSION:
+        raise ProtocolError("event protocol is not asterion.agent-runtime/v1")
     run_id = _require_non_empty_string(event["run_id"], "event run_id")
     sequence = event["sequence"]
     if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 1:
