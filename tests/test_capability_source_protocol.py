@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import operator
 import unittest
 from pathlib import Path
+from typing import cast
 
 from asterion.capability_packages.protocol import (
     CAPABILITY_LOCK_PROTOCOL_VERSION,
@@ -47,7 +49,11 @@ class CapabilitySourceProtocolTests(unittest.TestCase):
             },
         )
         with self.assertRaises(TypeError):
-            source.public_projection["source_id"] = "changed"
+            operator.setitem(
+                cast(dict[str, object], source.public_projection),
+                "source_id",
+                "changed",
+            )
 
     def test_private_locator_is_deeply_immutable_and_never_public(self) -> None:
         private = {
@@ -69,15 +75,16 @@ class CapabilitySourceProtocolTests(unittest.TestCase):
 
         rendered = repr(source)
         public = source.public_projection
+        private_locator = cast(dict[str, object], source.private_locator)
         self.assertNotIn("/private/operator/package", rendered)
         self.assertNotIn("private.module:create", rendered)
         self.assertNotIn("SECRET", rendered)
         self.assertNotIn("private_locator", public)
         self.assertNotIn("/private/operator/package", repr(public))
-        self.assertEqual(source.private_locator["root"], "/private/operator/package")
-        self.assertEqual(source.private_locator["options"], ("SECRET",))
+        self.assertEqual(private_locator["root"], "/private/operator/package")
+        self.assertEqual(private_locator["options"], ("SECRET",))
         with self.assertRaises(TypeError):
-            source.private_locator["root"] = "/changed"
+            operator.setitem(private_locator, "root", "/changed")
 
     def test_rejects_private_or_authority_fields_in_public_document(self) -> None:
         with self.assertRaises(CapabilitySourceProtocolError):
@@ -102,6 +109,12 @@ class CapabilitySourceProtocolTests(unittest.TestCase):
                 validate_capability_source_declaration(
                     {**valid, forbidden: "SECRET"}
                 )
+
+    def test_rejects_registry_as_a_public_source_kind(self) -> None:
+        with self.assertRaises(CapabilitySourceProtocolError):
+            validate_capability_source_declaration(
+                fixture("invalid-registry-kind.json")
+            )
 
     def test_validates_an_exact_immutable_source_lock(self) -> None:
         value = fixture("valid-lock.json")
@@ -130,7 +143,7 @@ class CapabilitySourceProtocolTests(unittest.TestCase):
         entry["source_id"] = "changed"
         self.assertEqual(lock.entries[0].source_id, "example.source")
         with self.assertRaises(AttributeError):
-            lock.entries += lock.entries
+            setattr(lock, "entries", lock.entries + lock.entries)
 
     def test_rejects_duplicate_unsorted_and_malformed_lock_entries(self) -> None:
         with self.assertRaises(CapabilitySourceProtocolError):
@@ -186,6 +199,7 @@ class CapabilitySourceProtocolTests(unittest.TestCase):
         self.assertNotIn("locator", source_schema["properties"])
         self.assertNotIn("path", source_schema["properties"])
         self.assertNotIn("provider_factory", source_schema["properties"])
+        self.assertNotIn("registry", source_schema["properties"]["kind"]["enum"])
 
 
 if __name__ == "__main__":

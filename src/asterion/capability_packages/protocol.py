@@ -17,7 +17,7 @@ BENCHMARK_SUITE_PROTOCOL_VERSION = "asterion.benchmark-suite/v1"
 CAPABILITY_SOURCE_PROTOCOL_VERSION = "asterion.capability-source/v1"
 CAPABILITY_LOCK_PROTOCOL_VERSION = "asterion.capability-lock/v1"
 SOURCE_KINDS = frozenset(
-    {"archive", "builtin", "local-directory", "python-distribution", "registry"}
+    {"archive", "builtin", "local-directory", "python-distribution"}
 )
 REQUIRED_FIELDS = {
     "protocol",

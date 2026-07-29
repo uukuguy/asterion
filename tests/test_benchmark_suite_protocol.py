@@ -68,7 +68,7 @@ class BenchmarkSuiteProtocolTests(unittest.TestCase):
         first["binding_id"] = "changed"
         self.assertEqual(manifest.tasks[0].binding_id, "example.task")
         with self.assertRaises(AttributeError):
-            manifest.tasks += manifest.tasks
+            setattr(manifest, "tasks", manifest.tasks + manifest.tasks)
 
     def test_rejects_safe_declarative_boundary_violations(self) -> None:
         with self.assertRaises(BenchmarkSuiteProtocolError):

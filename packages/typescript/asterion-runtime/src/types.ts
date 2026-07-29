@@ -112,8 +112,7 @@ export type CapabilitySourceKind =
   | "archive"
   | "builtin"
   | "local-directory"
-  | "python-distribution"
-  | "registry";
+  | "python-distribution";
 
 export interface CapabilitySourceDeclaration {
   readonly protocol: CapabilitySourceProtocolVersion;

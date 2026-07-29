@@ -289,6 +289,7 @@ test("validates public source declarations and exact canonical locks", async () 
   assert.deepEqual(validateCapabilitySourceLock(lock), lock);
   for (const name of [
     "invalid-private-public-field.json",
+    "invalid-registry-kind.json",
     "invalid-duplicate-lock.json",
   ]) {
     const invalid = await readFixture(capabilitySourceFixtures, name);

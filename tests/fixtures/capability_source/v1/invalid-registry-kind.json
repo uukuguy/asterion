@@ -1,0 +1,7 @@
+{
+  "protocol": "asterion.capability-source/v1",
+  "source_id": "example.source",
+  "kind": "registry",
+  "package_ref": {"package_id": "example.package", "version": "1.0.0"},
+  "payload_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

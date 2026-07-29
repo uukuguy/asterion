@@ -19,8 +19,7 @@
         "archive",
         "builtin",
         "local-directory",
-        "python-distribution",
-        "registry"
+        "python-distribution"
       ]
     },
     "package_ref": {"$ref": "#/$defs/package_ref"},

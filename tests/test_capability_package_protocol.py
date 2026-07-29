@@ -78,7 +78,12 @@ class CapabilityPackageProtocolTests(unittest.TestCase):
             ),
         )
         with self.assertRaises(AttributeError):
-            manifest.capabilities += (CapabilityRef("example.other", "1.0.0"),)
+            setattr(
+                manifest,
+                "capabilities",
+                manifest.capabilities
+                + (CapabilityRef("example.other", "1.0.0"),),
+            )
         capabilities = value["capabilities"]
         assert isinstance(capabilities, list)
         capability = capabilities[0]
