@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-29 23:11. **Session remains active — not a final handoff.**
+> Updated: 2026-07-29 23:33. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -59,8 +59,11 @@
   no remaining issue.
 - Plan 2 whole-branch review found no Critical or Important issue; its one
   type-diagnostic Minor was closed in `812b209`, and final full gates passed.
-- The immediate next action is Plan 3 Task 1: immutable generic benchmark
-  runtime values.
+- Plan 3 Task 1 defines immutable generic benchmark values in `75327b1`, then
+  closes protocol, suite-closure, public-argument, and deep-freeze review gaps
+  through `82449c5`; 11 focused tests and static checks pass.
+- The immediate next action is Plan 3 Task 2: exact suite, capability, and
+  benchmark task-binding resolution.
 
 ## Where things stand
 
@@ -110,8 +113,8 @@
 
 ## Next action
 
-1. Implement Plan 3 Task 1 with RED immutability and redaction tests.
-2. Review and close the benchmark model task before beginning resolution.
+1. Implement Plan 3 Task 2 with the complete pre-execution rejection matrix.
+2. Review and close exact resolution before bounded planning.
 3. Continue the approved generic benchmark subsystem plan task by task.
 
 ## Boundaries and ruled-out paths
