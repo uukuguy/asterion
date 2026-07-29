@@ -2,8 +2,6 @@
 
 ## Static composition, not execution
 
-# Static composition, not execution
-
 `asterion.capability/v1` describes portable capability dependencies and outputs.
 The Python reference composer validates a set of manifests, resolves their
 dependency DAG, and returns a deterministic summary. It does not execute a workflow, select a

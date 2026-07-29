@@ -97,27 +97,63 @@ with tempfile.TemporaryDirectory() as temporary:
 WHEEL_PROTOCOL_RESOURCE_SMOKE = r"""
 import json
 from importlib import resources
+from pathlib import Path
 
-root = resources.files('asterion')
+root = Path(str(resources.files('asterion')))
 expected = {
     'applications/controlled_code/assemblies/controlled-code-validation.json':
+        'asterion.application-assembly/v1',
+    'applications/dci_agent_lite/assemblies/dci-complete-application-claude.json':
+        'asterion.application-assembly/v1',
+    'applications/dci_agent_lite/assemblies/dci-complete-application-pi.json':
+        'asterion.application-assembly/v1',
+    'applications/dci_agent_lite/assemblies/dci-local-research.json':
+        'asterion.application-assembly/v1',
+    'applications/dci_agent_lite/assemblies/dci-research-capability-claude.json':
         'asterion.application-assembly/v1',
     'applications/dci_agent_lite/assemblies/dci-research-capability.json':
         'asterion.application-assembly/v1',
     'capabilities/controlled_code/capability-package.json':
         'asterion.capability-package/v1',
+    'capabilities/controlled_code/manifests/code-quality-evaluation.json':
+        'asterion.capability/v1',
     'capabilities/controlled_code/manifests/code-quality-workflow.json':
+        'asterion.capability/v1',
+    'capabilities/controlled_code/manifests/controlled-code-policy.json':
+        'asterion.capability/v1',
+    'capabilities/controlled_code/manifests/execution-audit-observability.json':
         'asterion.capability/v1',
     'capabilities/dci_research/capability-package.json':
         'asterion.capability-package/v1',
+    'capabilities/dci_research/manifests/dci-analysis.json':
+        'asterion.capability/v1',
+    'capabilities/dci_research/manifests/dci-benchmark.json':
+        'asterion.capability/v1',
+    'capabilities/dci_research/manifests/dci-evaluation.json':
+        'asterion.capability/v1',
+    'capabilities/dci_research/manifests/dci-export.json':
+        'asterion.capability/v1',
     'capabilities/dci_research/manifests/dci-research.json':
         'asterion.capability/v1',
+    'capabilities/dci_research/manifests/local-corpus-policy.json':
+        'asterion.capability/v1',
+    'capabilities/dci_research/manifests/protocol-observability.json':
+        'asterion.capability/v1',
 }
-for name, protocol in expected.items():
-    resource = root.joinpath(name)
-    text = resource.read_text(encoding='utf-8')
+actual_paths = {
+    str(path.relative_to(root))
+    for pattern in (
+        'applications/*/assemblies/*.json',
+        'capabilities/*/capability-package.json',
+        'capabilities/*/manifests/*.json',
+    )
+    for path in root.glob(pattern)
+}
+assert actual_paths == set(expected), sorted(actual_paths ^ set(expected))
+for name in sorted(actual_paths):
+    text = (root / name).read_text(encoding='utf-8')
     payload = json.loads(text)
-    assert payload.get('protocol') == protocol, name
+    assert payload.get('protocol') == expected[name], name
     assert 'dci.' + 'agent-runtime/v1' not in text, name
     assert 'dci.' + 'package/v1' not in text, name
     assert 'dci.' + 'assembly/v1' not in text, name

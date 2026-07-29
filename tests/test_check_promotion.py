@@ -255,8 +255,33 @@ class PromotionCheckTests(unittest.TestCase):
             and "asterion.capability/v1" in command[2]
         )
         self.assertEqual(len(protocol_smokes), 1)
-        self.assertIn("applications/dci_agent_lite/assemblies", protocol_smokes[0][2])
-        self.assertIn("capabilities/dci_research/manifests", protocol_smokes[0][2])
+        smoke_source = protocol_smokes[0][2]
+        self.assertIn("'applications/*/assemblies/*.json'", smoke_source)
+        self.assertIn("'capabilities/*/capability-package.json'", smoke_source)
+        self.assertIn("'capabilities/*/manifests/*.json'", smoke_source)
+        self.assertIn("root.glob(pattern)", smoke_source)
+        for expected in (
+            "applications/controlled_code/assemblies/controlled-code-validation.json",
+            "applications/dci_agent_lite/assemblies/dci-complete-application-claude.json",
+            "applications/dci_agent_lite/assemblies/dci-complete-application-pi.json",
+            "applications/dci_agent_lite/assemblies/dci-local-research.json",
+            "applications/dci_agent_lite/assemblies/dci-research-capability-claude.json",
+            "applications/dci_agent_lite/assemblies/dci-research-capability.json",
+            "capabilities/controlled_code/capability-package.json",
+            "capabilities/controlled_code/manifests/code-quality-evaluation.json",
+            "capabilities/controlled_code/manifests/code-quality-workflow.json",
+            "capabilities/controlled_code/manifests/controlled-code-policy.json",
+            "capabilities/controlled_code/manifests/execution-audit-observability.json",
+            "capabilities/dci_research/capability-package.json",
+            "capabilities/dci_research/manifests/dci-analysis.json",
+            "capabilities/dci_research/manifests/dci-benchmark.json",
+            "capabilities/dci_research/manifests/dci-evaluation.json",
+            "capabilities/dci_research/manifests/dci-export.json",
+            "capabilities/dci_research/manifests/dci-research.json",
+            "capabilities/dci_research/manifests/local-corpus-policy.json",
+            "capabilities/dci_research/manifests/protocol-observability.json",
+        ):
+            self.assertIn(expected, smoke_source)
         for suffix in (
             ("list",),
             ("describe", "--provider", "dci-agent-lite", "--json"),
