@@ -315,6 +315,45 @@ class DistributionCapabilitySourceTests(unittest.TestCase):
         self.assertNotIn(PAYLOAD_RELATIVE, tuple(str(path) for path in distribution.locate_requests))
         self.assertFalse(entry.loaded)
 
+    def test_symlinked_distribution_payload_root_is_rejected_before_provider_load(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            distribution_base = root / "declared"
+            standard_parent = (
+                distribution_base / "asterion_capability_packages" / "acme.sample" / "1.0.0"
+            )
+            external_root = root / "external" / "payload"
+            shutil.copytree(FIXTURE_PROJECT / "payload", external_root)
+            standard_parent.mkdir(parents=True)
+            (standard_parent / "payload").symlink_to(
+                external_root,
+                target_is_directory=True,
+            )
+            entry = FakeEntryPoint(
+                name="acme.sample@1.0.0",
+                distribution=cast(Any, None),
+            )
+            distribution = RebindingDistribution(
+                entry=entry,
+                distribution_base=distribution_base,
+                descriptor_path=external_root / "capability-package.json",
+                rebound_root=external_root,
+            )
+            source = DistributionCapabilityPackageSource((cast(Any, distribution),))
+
+            with self.assertRaises(DistributionCapabilitySourceError) as raised:
+                source.discover_metadata()
+
+        assert_stable_error(
+            self,
+            raised.exception,
+            "installed capability distribution source is invalid",
+            (str(external_root), str(distribution_base), "SECRET-ENTRY-POINT-LOAD"),
+        )
+        self.assertFalse(entry.loaded)
+
     def test_invalid_entry_point_and_hostile_metadata_errors_are_redacted(self) -> None:
         cases = (
             (

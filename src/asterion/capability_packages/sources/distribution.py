@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import stat
 from collections.abc import Iterable
 from importlib import metadata
 from os import PathLike
@@ -259,8 +260,8 @@ def _payload_root_for(
         raise DistributionCapabilitySourceError(_ERROR_MESSAGE)
     distribution_base = _distribution_base(distribution)
     descriptor_path = _declared_descriptor_path(distribution, matches[0])
-    expected_descriptor = distribution_base / descriptor
-    expected_root = distribution_base / relative_root
+    expected_descriptor = _distribution_owned_path(distribution_base, descriptor)
+    expected_root = _distribution_owned_path(distribution_base, relative_root)
     failed = False
     expected_descriptor_path: Path | None = None
     expected_root_path: Path | None = None
@@ -277,7 +278,7 @@ def _payload_root_for(
         or descriptor_path.parent != expected_root_path
     ):
         raise DistributionCapabilitySourceError(_ERROR_MESSAGE)
-    return descriptor_path.parent
+    return expected_root
 
 
 def _distribution_files(distribution: metadata.Distribution) -> tuple[object, ...]:
@@ -301,6 +302,36 @@ def _declared_descriptor_path(
     if not isinstance(declared_descriptor, (str, PathLike)):
         raise DistributionCapabilitySourceError(_ERROR_MESSAGE)
     return Path(str(distribution.locate_file(declared_descriptor))).resolve(strict=True)
+
+
+def _distribution_owned_path(base: Path, relative_path: PurePosixPath) -> Path:
+    if relative_path.is_absolute() or any(
+        part in {"", ".", ".."} for part in relative_path.parts
+    ):
+        raise DistributionCapabilitySourceError(_ERROR_MESSAGE)
+    current = base
+    failed = False
+    for part in relative_path.parts:
+        current = current / part
+        try:
+            mode = current.lstat().st_mode
+        except OSError:
+            failed = True
+            break
+        if stat.S_ISLNK(mode):
+            failed = True
+            break
+    if failed or not _is_relative_to(current, base):
+        raise DistributionCapabilitySourceError(_ERROR_MESSAGE)
+    return current
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
 
 
 def _payload_relative_root(package_ref: CapabilityPackageRef) -> PurePosixPath:
