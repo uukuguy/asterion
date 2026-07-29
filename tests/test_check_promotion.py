@@ -260,6 +260,9 @@ class PromotionCheckTests(unittest.TestCase):
         self.assertIn("'capabilities/*/capability-package.json'", smoke_source)
         self.assertIn("'capabilities/*/manifests/*.json'", smoke_source)
         self.assertIn("root.glob(pattern)", smoke_source)
+        self.assertIn("capability_sdk/templates/minimal", smoke_source)
+        self.assertIn("asterion.capability_sdk", smoke_source)
+        self.assertIn("asterion.capability_packages.payload", smoke_source)
         for expected in (
             "applications/controlled_code/assemblies/controlled-code-validation.json",
             "applications/dci_agent_lite/assemblies/dci-complete-application-claude.json",
@@ -300,6 +303,7 @@ class PromotionCheckTests(unittest.TestCase):
             )
         self.assertEqual(len(set(roots)), 1)
         self.assertNotEqual(roots[0], source)
+        self.assertEqual(roots[0], roots[0].resolve())
         command_text = "\n".join(rendered).lower()
         for forbidden in (
             "api_key",
@@ -387,6 +391,8 @@ def is_acceptance(command: tuple[str, ...]) -> bool:
 
 def acceptance_stdout(command: tuple[str, ...]) -> str:
     if not is_acceptance(command):
+        if "validate" in command and "capability" in command:
+            return json.dumps({"payload_sha256": "1" * 64})
         return ""
     return json.dumps(
         {

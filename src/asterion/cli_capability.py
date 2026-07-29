@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
 import tempfile
 from collections.abc import Sequence
 from contextlib import redirect_stderr, redirect_stdout
@@ -18,7 +17,6 @@ from asterion.capabilities.protocol import CAPABILITY_ID, SEMANTIC_VERSION
 from asterion.capability_packages.model import (
     CapabilityPackageCandidate,
     PortableCapabilityPayload,
-    SOURCE_KINDS,
 )
 from asterion.capability_packages.payload import open_portable_payload
 from asterion.capability_packages.protocol import (
@@ -36,6 +34,29 @@ ARCHIVE_UNSUPPORTED = "asterion: capability archive forms are not supported yet\
 _ERROR = "asterion: command failed\n"
 _LOCAL_SOURCE_KIND = "local-directory"
 _DEFAULT_VERSION = "0.1.0"
+_ARCHIVE_SOURCE_KIND = "archive"
+_PACK_SOURCE_KINDS = frozenset({_LOCAL_SOURCE_KIND})
+_CONVERT_SOURCE_KINDS = frozenset({_LOCAL_SOURCE_KIND, _ARCHIVE_SOURCE_KIND})
+_TEMPLATE_DIRECTORIES = frozenset(
+    {
+        Path("."),
+        Path("payload"),
+        Path("payload/benchmark-suites"),
+        Path("payload/capabilities"),
+        Path("payload/conformance"),
+        Path("payload/resources"),
+    }
+)
+_TEMPLATE_FILES = frozenset(
+    {
+        Path("provider.py"),
+        Path("payload/benchmark-suites/suite.json"),
+        Path("payload/capabilities/research.json"),
+        Path("payload/capability-package.json"),
+        Path("payload/conformance/externalization.json"),
+        Path("payload/resources/example.conformance"),
+    }
+)
 
 
 class CapabilityCliError(ValueError):
@@ -139,7 +160,7 @@ def _parser() -> argparse.ArgumentParser:
         help="validate staged archive-pack arguments",
     )
     pack.add_argument("--package", required=True)
-    pack.add_argument("--source", required=True, choices=tuple(sorted(SOURCE_KINDS)))
+    pack.add_argument("--source", required=True)
     pack.add_argument("--output", required=True)
 
     convert = subparsers.add_parser(
@@ -147,8 +168,8 @@ def _parser() -> argparse.ArgumentParser:
         help="validate staged form-conversion arguments",
     )
     convert.add_argument("--package", required=True)
-    convert.add_argument("--from", dest="from_kind", required=True, choices=tuple(sorted(SOURCE_KINDS)))
-    convert.add_argument("--to", dest="to_kind", required=True, choices=tuple(sorted(SOURCE_KINDS)))
+    convert.add_argument("--from", dest="from_kind", required=True)
+    convert.add_argument("--to", dest="to_kind", required=True)
     convert.add_argument("--output", required=True)
     return parser
 
@@ -165,18 +186,18 @@ def _add_local_source_arguments(parser: argparse.ArgumentParser) -> None:
 
 def _init(args: argparse.Namespace, stdout: TextIO) -> int:
     package_ref = _package_ref_from_parts(args.package_id, args.version)
-    target = _new_target_directory(Path(args.target))
+    target = _new_target_directory(args.target)
     template_root = _template_root()
     temporary = Path(
         tempfile.mkdtemp(prefix=f".{target.name}.", dir=str(target.parent))
     )
     try:
-        shutil.copytree(template_root, temporary, dirs_exist_ok=True, symlinks=False)
+        _copy_template_closed(template_root, temporary)
         _customize_template(temporary, package_ref)
         open_portable_payload(temporary / "payload")
         os.replace(temporary, target)
     except BaseException:
-        shutil.rmtree(temporary, ignore_errors=True)
+        _remove_tree(temporary)
         raise
     stdout.write(json.dumps({"created": _package_selector(package_ref)}, sort_keys=True) + "\n")
     return 0
@@ -230,18 +251,18 @@ def _test(args: argparse.Namespace, stdout: TextIO) -> int:
 
 def _validate_pack(args: argparse.Namespace) -> None:
     _parse_package_selector(args.package)
-    _validate_source_kind(args.source)
-    _validate_future_output(Path(args.output))
+    _validate_source_kind(args.source, allowed=_PACK_SOURCE_KINDS)
+    _validate_future_output(args.output)
     raise CapabilityArchiveUnsupported()
 
 
 def _validate_convert(args: argparse.Namespace) -> None:
     _parse_package_selector(args.package)
-    from_kind = _validate_source_kind(args.from_kind)
-    to_kind = _validate_source_kind(args.to_kind)
+    from_kind = _validate_source_kind(args.from_kind, allowed=_CONVERT_SOURCE_KINDS)
+    to_kind = _validate_source_kind(args.to_kind, allowed=_CONVERT_SOURCE_KINDS)
     if from_kind == to_kind:
         raise CapabilityCliError("capability conversion source and target are invalid")
-    _validate_future_output(Path(args.output))
+    _validate_future_output(args.output)
     raise CapabilityArchiveUnsupported()
 
 
@@ -253,7 +274,7 @@ def _selected_local_source(
     CapabilityPackageCandidate,
 ]:
     package_ref = _parse_package_selector(args.package)
-    root = _canonical_existing_directory(Path(args.root))
+    root = _local_root(args.root)
     declaration = CapabilitySourceDeclaration(
         source_id=_source_id(args.source_id),
         kind=_LOCAL_SOURCE_KIND,
@@ -290,6 +311,48 @@ def _payload_summary(payload: PortableCapabilityPayload) -> dict[str, object]:
 
 def _template_root() -> Path:
     return Path(str(resources.files("asterion.capability_sdk"))) / "templates/minimal"
+
+
+def _copy_template_closed(source: Path, target: Path) -> None:
+    root = _canonical_existing_directory(source)
+    seen_directories: set[Path] = set()
+    seen_files: set[Path] = set()
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root)
+        if path.is_symlink():
+            raise CapabilityCliError("capability template is invalid")
+        if path.is_dir():
+            if relative not in _TEMPLATE_DIRECTORIES:
+                raise CapabilityCliError("capability template is invalid")
+            seen_directories.add(relative)
+            continue
+        if path.is_file():
+            if relative not in _TEMPLATE_FILES:
+                raise CapabilityCliError("capability template is invalid")
+            seen_files.add(relative)
+            continue
+        raise CapabilityCliError("capability template is invalid")
+    if seen_directories != _TEMPLATE_DIRECTORIES - {Path(".")} or seen_files != _TEMPLATE_FILES:
+        raise CapabilityCliError("capability template is invalid")
+    for directory in sorted(_TEMPLATE_DIRECTORIES):
+        if directory == Path("."):
+            continue
+        (target / directory).mkdir()
+    for relative in sorted(_TEMPLATE_FILES):
+        source_path = root / relative
+        target_path = target / relative
+        target_path.write_bytes(source_path.read_bytes())
+
+
+def _remove_tree(root: Path) -> None:
+    if not root.exists() and not root.is_symlink():
+        return
+    for path in sorted(root.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+        if path.is_dir() and not path.is_symlink():
+            path.rmdir()
+        else:
+            path.unlink()
+    root.rmdir()
 
 
 def _customize_template(root: Path, package_ref: CapabilityPackageRef) -> None:
@@ -372,13 +435,18 @@ def _customize_template(root: Path, package_ref: CapabilityPackageRef) -> None:
             "default_concurrency": 1,
         },
     )
-    (root / "provider.py").write_text(_provider_template(package_ref, capability_ref, binding_id), encoding="utf-8")
+    payload_sha256 = open_portable_payload(payload_root).payload_sha256
+    (root / "provider.py").write_text(
+        _provider_template(package_ref, capability_ref, binding_id, payload_sha256),
+        encoding="utf-8",
+    )
 
 
 def _provider_template(
     package_ref: CapabilityPackageRef,
     capability_ref: CapabilityRef,
     binding_id: str,
+    payload_sha256: str,
 ) -> str:
     return f'''\
 """Asterion capability package provider template."""
@@ -386,6 +454,7 @@ def _provider_template(
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 from asterion.capability_sdk import (
     BenchmarkTaskBinding,
@@ -393,7 +462,9 @@ from asterion.capability_sdk import (
     CapabilityRef,
     InstalledCapabilityPackage,
 )
-from asterion.capability_packages.payload import open_portable_payload
+
+
+PAYLOAD_SHA256 = "{payload_sha256}"
 
 
 class ResearchImplementation:
@@ -404,17 +475,19 @@ class ResearchImplementation:
 def create_package():
     payload_root = Path(__file__).resolve().parent / "payload"
     package_ref = CapabilityPackageRef("{package_ref.package_id}", "{package_ref.version}")
-    payload = open_portable_payload(payload_root)
     implementation = ResearchImplementation()
     return InstalledCapabilityPackage(
         package_ref=package_ref,
-        payload_sha256=payload.payload_sha256,
+        payload_sha256=PAYLOAD_SHA256,
         source_id="{package_ref.package_id}.local-directory",
         source_kind="local-directory",
         catalog_roots=(payload_root / "capabilities",),
         benchmark_suite_paths=(payload_root / "benchmark-suites",),
-        implementations=(
-            (CapabilityRef("{capability_ref.capability_id}", "{capability_ref.version}"), implementation),
+        implementations=cast(
+            Any,
+            (
+                (CapabilityRef("{capability_ref.capability_id}", "{capability_ref.version}"), implementation),
+            ),
         ),
         benchmark_bindings=(
             BenchmarkTaskBinding(
@@ -434,8 +507,8 @@ def _write_json(path: Path, value: object) -> None:
     )
 
 
-def _new_target_directory(path: Path) -> Path:
-    raw = path.expanduser()
+def _new_target_directory(value: object) -> Path:
+    raw = _future_path(value, error_message="capability template target is invalid")
     if raw.exists() or raw.is_symlink():
         raise CapabilityCliError("capability template target is invalid")
     parent = _canonical_existing_directory(raw.parent)
@@ -443,20 +516,79 @@ def _new_target_directory(path: Path) -> Path:
 
 
 def _canonical_existing_directory(path: Path) -> Path:
-    if path.is_symlink():
+    raw = path.expanduser()
+    if raw.is_symlink():
         raise CapabilityCliError("capability directory is invalid")
-    resolved = path.expanduser().resolve(strict=True)
-    if not resolved.is_dir() or path.expanduser().is_symlink():
+    resolved = _resolve_without_symlinks(raw)
+    if not resolved.is_dir() or raw.is_symlink():
         raise CapabilityCliError("capability directory is invalid")
     return resolved
 
 
-def _validate_future_output(path: Path) -> Path:
-    raw = path.expanduser()
+def _validate_future_output(value: object) -> Path:
+    raw = _future_path(value, error_message="capability output is invalid")
     if raw.exists() or raw.is_symlink():
         raise CapabilityCliError("capability output is invalid")
     parent = _canonical_existing_directory(raw.parent)
     return parent / raw.name
+
+
+def _future_path(value: object, *, error_message: str) -> Path:
+    text = _path_text(value, error_message=error_message)
+    _reject_dot_components(text, error_message=error_message)
+    path = Path(text).expanduser()
+    if path.name in {"", ".", ".."}:
+        raise CapabilityCliError(error_message)
+    return path
+
+
+def _local_root(value: object) -> Path:
+    text = _path_text(value, error_message="capability directory is invalid")
+    _reject_dot_components(text, error_message="capability directory is invalid")
+    path = Path(text)
+    if not path.is_absolute():
+        raise CapabilityCliError("capability directory is invalid")
+    return path
+
+
+def _path_text(value: object, *, error_message: str) -> str:
+    if not isinstance(value, (str, os.PathLike)):
+        raise CapabilityCliError(error_message)
+    text = os.fspath(value)
+    if not isinstance(text, str) or text == "":
+        raise CapabilityCliError(error_message)
+    return text
+
+
+def _reject_dot_components(text: str, *, error_message: str) -> None:
+    if any(component in {".", ".."} for component in text.split(os.sep)):
+        raise CapabilityCliError(error_message)
+
+
+def _resolve_without_symlinks(path: Path) -> Path:
+    absolute = path if path.is_absolute() else Path.cwd() / path
+    current = Path(absolute.anchor)
+    failed = False
+    for part in absolute.parts[1:]:
+        if part in {"", "."}:
+            continue
+        if part == "..":
+            raise CapabilityCliError("capability directory is invalid")
+        current = current / part
+        try:
+            if current.is_symlink():
+                failed = True
+                break
+            current.lstat()
+        except OSError:
+            failed = True
+            break
+    if failed:
+        raise CapabilityCliError("capability directory is invalid")
+    try:
+        return absolute.resolve(strict=True)
+    except OSError:
+        raise CapabilityCliError("capability directory is invalid") from None
 
 
 def _parse_package_selector(value: object) -> CapabilityPackageRef:
@@ -479,8 +611,8 @@ def _package_ref_from_parts(package_id: object, version: object) -> CapabilityPa
     return CapabilityPackageRef(package_id, version)
 
 
-def _validate_source_kind(value: object) -> str:
-    if not isinstance(value, str) or value not in SOURCE_KINDS:
+def _validate_source_kind(value: object, *, allowed: frozenset[str]) -> str:
+    if not isinstance(value, str) or value not in allowed:
         raise CapabilityCliError("capability source kind is invalid")
     return value
 

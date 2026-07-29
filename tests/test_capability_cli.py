@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import json
 import os
+import py_compile
 import shutil
 import tempfile
 import unittest
+from importlib import resources
 from pathlib import Path
+from unittest.mock import patch
 
 from asterion.cli import main
 from asterion.capability_packages.payload import open_portable_payload
@@ -35,12 +39,16 @@ def copy_fixture(target: Path) -> Path:
 
 
 def local_args(root: Path) -> list[str]:
+    return local_args_for(root, package=PACKAGE, source_id=SOURCE_ID)
+
+
+def local_args_for(root: Path, *, package: str, source_id: str) -> list[str]:
     payload_sha256 = open_portable_payload(root / "payload").payload_sha256
     return [
         "--package",
-        PACKAGE,
+        package,
         "--source-id",
-        SOURCE_ID,
+        source_id,
         "--root",
         str(root),
         "--payload-root",
@@ -64,7 +72,19 @@ class CapabilityCliTests(unittest.TestCase):
         self.assertIn("pack and convert are staged", stdout)
         self.assertNotIn("--provider", stdout)
         self.assertNotIn("cost", stdout.lower())
+        self.assertNotIn("registry", stdout.lower())
         self.assertNotIn("token", stdout.lower())
+
+    def test_template_provider_uses_public_sdk_only(self) -> None:
+        provider = (
+            Path(str(resources.files("asterion.capability_sdk")))
+            / "templates/minimal/provider.py"
+        )
+        text = provider.read_text(encoding="utf-8")
+
+        self.assertIn("from asterion.capability_sdk import", text)
+        self.assertNotIn("asterion.capability_packages.payload", text)
+        self.assertNotIn("CapabilityImplementationBinding", text)
 
     def test_validate_accepts_portable_payload_and_reports_safe_identity(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -126,6 +146,28 @@ class CapabilityCliTests(unittest.TestCase):
         self.assertNotIn(temp_dir, stdout)
         self.assertNotIn("provider.py", stdout)
 
+    def test_inspect_rejects_symlinked_root_without_revealing_secret_path(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="SECRET-capability-root-") as temp_dir:
+            base = Path(temp_dir)
+            root = copy_fixture(base / "real")
+            link_parent = base / "linked-parent"
+            link_parent.symlink_to(root.parent, target_is_directory=True)
+            args = local_args(root)
+            args[args.index("--root") + 1] = str(link_parent / root.name)
+
+            code, stdout, stderr = run_cli(
+                [
+                    "capability",
+                    "inspect",
+                    *args,
+                ]
+            )
+
+        self.assertEqual(code, 2)
+        self.assertEqual(stdout, "")
+        self.assertEqual(stderr, "asterion: command failed\n")
+        self.assertNotIn("SECRET-capability-root", stderr)
+
     def test_test_runs_public_conformance_without_executing_implementations(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = copy_fixture(Path(temp_dir))
@@ -185,7 +227,7 @@ def create_package():
 
     def test_init_copies_closed_template_atomically_without_overwrite_or_escape(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            base = Path(temp_dir)
+            base = Path(temp_dir).resolve()
             target = base / "author-package"
 
             code, stdout, stderr = run_cli(
@@ -213,6 +255,96 @@ def create_package():
             self.assertEqual(link_code, 2)
             self.assertEqual(link_out, "")
             self.assertEqual(link_err, "asterion: command failed\n")
+
+    def test_init_rejects_dotdot_targets_without_creating_escape_directory(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="SECRET-init-target-") as temp_dir:
+            base = Path(temp_dir)
+            existing = base / "existing"
+            existing.mkdir()
+            target = existing / ".." / "escape"
+
+            code, stdout, stderr = run_cli(
+                ["capability", "init", str(target), "--package-id", "acme.demo"]
+            )
+
+            self.assertEqual(code, 2)
+            self.assertEqual(stdout, "")
+            self.assertEqual(stderr, "asterion: command failed\n")
+            self.assertFalse((base / "escape").exists())
+            self.assertNotIn("SECRET-init-target", stderr)
+
+    def test_init_rejects_generated_template_children_and_cleans_temporary_target(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="SECRET-template-copy-") as temp_dir:
+            base = Path(temp_dir)
+            source_template = (
+                Path(str(resources.files("asterion.capability_sdk")))
+                / "templates/minimal"
+            )
+            fake_sdk = base / "sdk"
+            fake_template = fake_sdk / "templates/minimal"
+            shutil.copytree(source_template, fake_template)
+            cache = fake_template / "__pycache__"
+            cache.mkdir(exist_ok=True)
+            py_compile.compile(
+                str(fake_template / "provider.py"),
+                cfile=str(cache / "provider.cpython-314.pyc"),
+            )
+            target = base / "target"
+
+            def files(anchor):
+                if anchor == "asterion.capability_sdk":
+                    return fake_sdk
+                return resources.files(anchor)
+
+            with patch("asterion.cli_capability.resources.files", side_effect=files):
+                code, stdout, stderr = run_cli(
+                    ["capability", "init", str(target), "--package-id", "acme.demo"]
+                )
+
+            self.assertEqual(code, 2)
+            self.assertEqual(stdout, "")
+            self.assertEqual(stderr, "asterion: command failed\n")
+            self.assertFalse(target.exists())
+            self.assertFalse(any(base.glob(".target.*")))
+            self.assertNotIn("SECRET-template-copy", stderr)
+
+    def test_init_generated_provider_detects_payload_edits_without_private_helpers(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="SECRET-edited-payload-") as temp_dir:
+            target = Path(temp_dir).resolve() / "author-package"
+            init_code, _, init_err = run_cli(
+                ["capability", "init", str(target), "--package-id", "acme.demo"]
+            )
+            self.assertEqual(init_code, 0, init_err)
+            changed_resource = b'{"changed":true}\n'
+            (target / "payload/resources/example.conformance").write_bytes(
+                changed_resource
+            )
+            descriptor_path = target / "payload/capability-package.json"
+            descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
+            descriptor["resources"][0]["sha256"] = hashlib.sha256(
+                changed_resource
+            ).hexdigest()
+            descriptor_path.write_text(
+                json.dumps(descriptor, sort_keys=True, separators=(",", ":")) + "\n",
+                encoding="utf-8",
+            )
+
+            code, stdout, stderr = run_cli(
+                [
+                    "capability",
+                    "test",
+                    *local_args_for(
+                        target,
+                        package="acme.demo@0.1.0",
+                        source_id="acme.demo.local-directory",
+                    ),
+                ]
+            )
+
+        self.assertEqual(code, 2)
+        self.assertEqual(stdout, "")
+        self.assertEqual(stderr, "asterion: command failed\n")
+        self.assertNotIn("SECRET-edited-payload", stderr)
 
     def test_pack_and_convert_validate_arguments_then_return_stable_unsupported(self) -> None:
         cases = (
@@ -265,6 +397,64 @@ def create_package():
         self.assertEqual(invalid_code, 2)
         self.assertEqual(invalid_out, "")
         self.assertEqual(invalid_err, "asterion: command failed\n")
+
+        with tempfile.TemporaryDirectory(prefix="SECRET-output-target-") as temp_dir:
+            base = Path(temp_dir)
+            existing = base / "existing"
+            existing.mkdir()
+            output = existing / ".." / "escape.tar"
+
+            output_code, output_out, output_err = run_cli(
+                [
+                    "capability",
+                    "pack",
+                    "--package",
+                    PACKAGE,
+                    "--source",
+                    "local-directory",
+                    "--output",
+                    str(output),
+                ]
+            )
+
+            self.assertEqual(output_code, 2)
+            self.assertEqual(output_out, "")
+            self.assertEqual(output_err, "asterion: command failed\n")
+            self.assertFalse((base / "escape.tar").exists())
+            self.assertNotIn("SECRET-output-target", output_err)
+
+    def test_pack_and_convert_reject_unstaged_sources_without_argparse_echo(self) -> None:
+        secret = "registry-SECRET-authority"
+        cases = (
+            [
+                "pack",
+                "--package",
+                PACKAGE,
+                "--source",
+                secret,
+                "--output",
+                "package.tar",
+            ],
+            [
+                "convert",
+                "--package",
+                PACKAGE,
+                "--from",
+                "local-directory",
+                "--to",
+                secret,
+                "--output",
+                "package.tar",
+            ],
+        )
+        for command in cases:
+            with self.subTest(command=command[0]):
+                code, stdout, stderr = run_cli(["capability", *command])
+
+                self.assertEqual(code, 2)
+                self.assertEqual(stdout, "")
+                self.assertEqual(stderr, "asterion: command failed\n")
+                self.assertNotIn(secret, stderr)
 
 
 if __name__ == "__main__":

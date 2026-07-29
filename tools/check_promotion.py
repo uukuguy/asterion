@@ -160,6 +160,23 @@ for name in sorted(actual_paths):
     assert 'dci.' + 'assembly/v1' not in text, name
 template = root / 'capability_sdk/templates/minimal'
 assert (template / 'provider.py').is_file()
+template_files = {
+    str(path.relative_to(template))
+    for path in template.rglob('*')
+    if path.is_file()
+}
+assert template_files == {
+    'provider.py',
+    'payload/benchmark-suites/suite.json',
+    'payload/capabilities/research.json',
+    'payload/capability-package.json',
+    'payload/conformance/externalization.json',
+    'payload/resources/example.conformance',
+}
+provider_text = (template / 'provider.py').read_text(encoding='utf-8')
+assert 'from asterion.capability_sdk import' in provider_text
+assert 'asterion.capability_packages.payload' not in provider_text
+assert 'CapabilityImplementationBinding' not in provider_text
 template_descriptor = template / 'payload/capability-package.json'
 assert template_descriptor.is_file()
 assert json.loads(template_descriptor.read_text()).get('protocol') == (
@@ -559,7 +576,7 @@ def run_promotion(
     if not source.is_dir():
         raise PromotionError("standalone source root is unavailable")
     with tempfile.TemporaryDirectory(prefix="asterion-promotion-") as temporary:
-        workspace = Path(temporary)
+        workspace = Path(temporary).resolve()
         copy_root = workspace / "project"
         _copy_project(source, copy_root)
         _audit_copy(copy_root)
