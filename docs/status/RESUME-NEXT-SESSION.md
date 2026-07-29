@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-29 18:58. **Session remains active — not a final handoff.**
+> Updated: 2026-07-29 19:06. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -36,8 +36,11 @@
 - Plan 2 Task 2 added descriptor-relative portable payload validation in
   `07e154b`, then bound immutable verified bytes, exact declared conformance
   closure, and strict finite JSON through `8b9bc9f`.
-- The immediate next action is Plan 2 Task 3: implement exact source-lock
-  resolution without fallback, sorting, or implicit precedence.
+- Plan 2 Task 3 added exact source-lock resolution in `20732bf`, then redacted
+  hostile digest comparison failures in `4c9f699`; selection remains exact by
+  package ref, source ID, and digest.
+- The immediate next action is Plan 2 Task 4: implement the built-in source
+  adapter without giving built-ins a bypass around metadata-first selection.
 
 ## Where things stand
 
@@ -64,17 +67,19 @@
   tests with Pyright and Ruff clean; independent review is approved.
 - Plan 2 Task 2 focused verification passed 36 Python and 19 TypeScript tests
   with Pyright and Ruff clean; immutable-view and closure probes passed review.
+- Plan 2 Task 3 focused verification passed 15 source-resolution tests and 48
+  adjacent package/source/model/payload tests with Pyright, Ruff, compileall,
+  `make lint`, and `git diff --check` clean.
 - `dci.agent-runtime/v1` remains only as the deliberate absence-test needle in
   Task 1 scope; no compatibility alias was added.
 - Plans 2-4 remain dependent on completion of the six Plan 1 tasks.
 
 ## Next action
 
-1. Dispatch Plan 2 Task 3 from the approved source plan.
-2. Require the complete zero/one/many/locked resolution truth table before
-   implementing exact selection.
-3. Never sort-and-pick, accept ranges, or let an unrelated lock/candidate
-   influence the requested exact package ref.
+1. Dispatch Plan 2 Task 4 from the approved source plan.
+2. Prove built-in discovery is metadata-only and never calls provider factories.
+3. Keep built-in packages on the same exact selection path as third-party
+   sources; no direct catalog/provider bypass.
 
 ## Boundaries and ruled-out paths
 
