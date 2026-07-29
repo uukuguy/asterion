@@ -81,10 +81,7 @@ def _imports(path: Path) -> tuple[str, ...]:
 
 class DciPackageOwnershipTests(unittest.TestCase):
     def test_all_domain_modules_have_one_package_owner(self) -> None:
-        self.assertEqual(
-            {path.name for path in (SOURCE / "dci").glob("*.py")},
-            {"__init__.py", "cli.py"},
-        )
+        self.assertFalse((SOURCE / "dci").exists())
         self.assertEqual(
             {path.name for path in IMPLEMENTATION.glob("*.py")},
             EXPECTED_ROOT_MODULES,
@@ -177,7 +174,11 @@ class DciPackageOwnershipTests(unittest.TestCase):
             "asterion.capabilities.dci_research.complete",
         ):
             with self.subTest(module=module):
-                self.assertIsNone(importlib.util.find_spec(module))
+                try:
+                    spec = importlib.util.find_spec(module)
+                except ModuleNotFoundError:
+                    spec = None
+                self.assertIsNone(spec)
 
 
 if __name__ == "__main__":

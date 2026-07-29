@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import hashlib
-import os
 import tempfile
 import unittest
 from importlib import resources
@@ -23,7 +22,6 @@ from asterion.capabilities.dci.implementation.evaluation.benchmark import (
     validate_benchmark_metric_selection,
 )
 from asterion.capabilities.dci.implementation.evaluation.artifacts import DciConversationFeatures
-from asterion.dci.cli import main as dci_main
 from asterion.capabilities.dci.implementation.config import DciRuntimeOptions, resolve_dci_paths
 from asterion.capabilities.dci.implementation.research.experiment_profiles import (
     ExperimentAuthorizationError,
@@ -506,145 +504,8 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         with self.assertRaisesRegex(DciBenchmarkError, "resolution configuration"):
             validate_benchmark_metric_selection(request)
 
-    def test_benchmark_cli_propagates_explicit_resolution_overlap(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory).resolve()
-            dataset = root / "dataset.jsonl"
-            corpus = root / "corpus"
-            corpus.mkdir()
-            registry = root / "registry.json"
-            registry.write_text("{}\n", encoding="utf-8")
-            dataset.write_text(
-                json.dumps({"query_id": "q-1", "query": "question", "answer": "answer"}) + "\n",
-                encoding="utf-8",
-            )
-            captured: list[BenchmarkRequest] = []
 
-            def capture(request: BenchmarkRequest, *, paths: object) -> BenchmarkResult:
-                del paths
-                captured.append(request)
-                return BenchmarkResult(request.output_root, {"total": 1})
 
-            with patch("asterion.dci.cli.run_benchmark", side_effect=capture), patch(
-                "asterion.dci.cli.validate_dci_run_request"
-            ):
-                stdout = __import__("io").StringIO()
-                stderr = __import__("io").StringIO()
-                code = dci_main(
-                    [
-                        "benchmark",
-                        "--dataset", str(dataset),
-                        "--output-root", str(root / "out"),
-                        "--cwd", str(root),
-                        "--corpus", str(corpus),
-                        "--resolution-registry", str(registry),
-                        "--resolution-segment-characters", "4096",
-                        "--resolution-read-minimum-evidence-overlap", "0.75",
-                    ],
-                    repo_root=root,
-                    stdout=stdout,
-                    stderr=stderr,
-                )
-
-        self.assertEqual(code, 0, stderr.getvalue())
-        self.assertEqual(captured[0].resolution_read_minimum_evidence_overlap, 0.75)
-
-    def test_benchmark_cli_propagates_coordinator_output_identity(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory).resolve()
-            dataset = root / "dataset.jsonl"
-            corpus = root / "corpus"
-            output = root / "out"
-            corpus.mkdir()
-            output.mkdir(mode=0o700)
-            dataset.write_text(
-                json.dumps(
-                    {
-                        "query_id": "q-1",
-                        "query": "question",
-                        "answer": "answer",
-                    }
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-            metadata = output.stat()
-            captured: list[BenchmarkRequest] = []
-
-            def capture(
-                request: BenchmarkRequest, *, paths: object
-            ) -> BenchmarkResult:
-                del paths
-                captured.append(request)
-                return BenchmarkResult(request.output_root, {"total": 1})
-
-            with (
-                patch.dict(
-                    os.environ,
-                    {
-                        "ASTERION_DCI_EXPECTED_OUTPUT_DEVICE": str(
-                            metadata.st_dev
-                        ),
-                        "ASTERION_DCI_EXPECTED_OUTPUT_INODE": str(
-                            metadata.st_ino
-                        ),
-                    },
-                ),
-                patch(
-                    "asterion.dci.cli.run_benchmark",
-                    side_effect=capture,
-                ),
-                patch("asterion.dci.cli.validate_dci_run_request"),
-            ):
-                code = dci_main(
-                    [
-                        "benchmark",
-                        "--dataset",
-                        str(dataset),
-                        "--output-root",
-                        str(output),
-                        "--cwd",
-                        str(root),
-                        "--corpus",
-                        str(corpus),
-                    ],
-                    repo_root=root,
-                    stdout=__import__("io").StringIO(),
-                    stderr=__import__("io").StringIO(),
-                )
-
-        self.assertEqual(code, 0)
-        self.assertEqual(
-            captured[0].expected_output_root_identity,
-            (metadata.st_dev, metadata.st_ino),
-        )
-
-    def test_ablation_propagates_its_exact_resolution_overlap(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory).resolve()
-            captured: list[BenchmarkRequest] = []
-
-            def capture(request: BenchmarkRequest, *, paths: object) -> BenchmarkResult:
-                del paths
-                captured.append(request)
-                return BenchmarkResult(request.output_root, {"total": 1})
-
-            with patch("asterion.dci.cli.run_benchmark", side_effect=capture), patch(
-                "asterion.dci.cli.validate_dci_run_request"
-            ):
-                code = dci_main(
-                    [
-                        "benchmark",
-                        "--ablation-row", "bounded.context.level0",
-                        "--output-root", str(root / "out"),
-                    ],
-                    repo_root=root,
-                    stdout=__import__("io").StringIO(),
-                    stderr=__import__("io").StringIO(),
-                )
-
-        self.assertEqual(code, 0)
-        self.assertEqual(captured[0].resolution_read_minimum_evidence_overlap, 0.5)
 
     def setUp(self) -> None:
         from asterion.capabilities.dci.implementation.research import experiment_profiles
@@ -832,71 +693,6 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         self.assertNotIn(str(corpus), str(raised.exception))
         run.assert_not_called()
 
-    def test_benchmark_cli_requires_and_propagates_paper_ir_assumption(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory).resolve()
-            dataset = root / "dataset.jsonl"
-            corpus = root / "corpus"
-            corpus.mkdir()
-            dataset.write_text(
-                json.dumps(
-                    {
-                        "query_id": "q-1",
-                        "query": "question",
-                        "gold_ids": ["doc.txt"],
-                    }
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-            captured: list[BenchmarkRequest] = []
-
-            def capture(request: BenchmarkRequest, *, paths: object) -> BenchmarkResult:
-                del paths
-                captured.append(request)
-                return BenchmarkResult(output_root=request.output_root, counts={"total": 1})
-
-            benchmark_args = [
-                "benchmark",
-                "--dataset", str(dataset),
-                "--output-root", str(root / "out"),
-                "--cwd", str(root),
-                "--corpus", str(corpus),
-                "--mode", "ir",
-                "--experiment-profile", "paper-reference/pi",
-            ]
-            with patch("asterion.dci.cli.run_benchmark", side_effect=capture), patch(
-                "asterion.dci.cli.validate_dci_run_request"
-            ):
-                stdout = __import__("io").StringIO()
-                stderr = __import__("io").StringIO()
-                code = dci_main(
-                    [
-                        *benchmark_args,
-                        "--paper-ir-duplicate-handling", "deduplicated",
-                    ],
-                    repo_root=root,
-                    stdout=stdout,
-                    stderr=stderr,
-                )
-            with patch("asterion.dci.cli.run_benchmark") as missing_run, patch(
-                "asterion.dci.cli.validate_dci_run_request"
-            ):
-                missing_stdout = __import__("io").StringIO()
-                missing_stderr = __import__("io").StringIO()
-                missing_code = dci_main(
-                    benchmark_args,
-                    repo_root=root,
-                    stdout=missing_stdout,
-                    stderr=missing_stderr,
-                )
-
-        self.assertEqual(code, 0, stderr.getvalue())
-        self.assertEqual(captured[0].profile, "paper-reference/pi")
-        self.assertEqual(captured[0].paper_ir_duplicate_handling, "deduplicated")
-        self.assertEqual(missing_code, 2)
-        self.assertEqual(missing_stderr.getvalue(), "DCI benchmark failed\n")
-        missing_run.assert_not_called()
 
 
     def test_benchmark_passes_only_the_selected_contract_recovery_to_runs(self) -> None:
@@ -1163,55 +959,6 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
             with self.subTest(label=label):
                 self._assert_invalid_profile_mutation(profile_id, mutate)
 
-    def test_current_default_alias_is_cli_only_and_never_enters_evidence(
-        self,
-    ) -> None:
-        aliases = (
-            ("current-default/pi", "asterion-safe/pi", ()),
-            (
-                "current-default/claude-subscription",
-                "asterion-safe/claude-subscription",
-                (),
-            ),
-            (
-                "current-default/claude-minimax",
-                "asterion-safe/claude-minimax",
-                ("--provider", "minimax", "--model", "minimax-test"),
-            ),
-        )
-        for alias, canonical, invocation in aliases:
-            with self.subTest(alias=alias):
-                with self.assertRaisesRegex(
-                    ValueError, "^DCI experiment profile is invalid$"
-                ):
-                    resolve_experiment_profile(alias)
-                with tempfile.TemporaryDirectory() as temporary_directory:
-                    stdout = __import__("io").StringIO()
-                    stderr = __import__("io").StringIO()
-                    code = dci_main(
-                        [
-                            "paper",
-                            "reproduce",
-                            "--profile",
-                            alias,
-                            "--output-root",
-                            str(Path(temporary_directory) / "out"),
-                            *invocation,
-                        ],
-                        stdout=stdout,
-                        stderr=stderr,
-                    )
-                self.assertEqual(code, 0, stderr.getvalue())
-                self.assertIn(f"Profile: {canonical}", stdout.getvalue())
-                self.assertNotIn("current-default", stdout.getvalue())
-
-        from asterion.capabilities.dci.implementation.reproduction.verification import paper_product_contract
-
-        canonical_evidence = json.dumps(
-            paper_product_contract(), sort_keys=True
-        )
-        self.assertNotIn("current-default", canonical_evidence)
-        self.assertIn("asterion-safe/pi", canonical_evidence)
 
     def test_authorized_reproduction_coordinator_dispatches_exact_child_roots(
         self,

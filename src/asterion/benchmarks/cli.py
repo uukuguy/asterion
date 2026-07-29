@@ -18,6 +18,7 @@ from asterion.benchmarks.planning import (
     render_benchmark_plan,
 )
 from asterion.capability_packages import BenchmarkSuiteRef
+from asterion.capability_packages.sources import CapabilityPackageSource
 
 
 _RUN_ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
@@ -279,7 +280,18 @@ class _RedactingArgumentParser(argparse.ArgumentParser):
         raise BenchmarkCliError("arguments are invalid")
 
 
-class _DefaultBenchmarkHost:
+class InstalledBenchmarkCommandHost:
+    """Generic installed benchmark host with explicit package sources."""
+
+    def __init__(
+        self,
+        *,
+        package_sources: Sequence[CapabilityPackageSource] | None = None,
+    ) -> None:
+        self._package_sources = (
+            None if package_sources is None else tuple(package_sources)
+        )
+
     def discover_metadata(
         self,
         *,
@@ -336,6 +348,7 @@ class _DefaultBenchmarkHost:
             suite_ref=suite_ref,
             case_limit=case_limit,
             source_lock_path=source_lock,
+            package_sources=self._package_sources,
         )
 
     def authorize_execution(
@@ -371,7 +384,7 @@ class _DefaultBenchmarkHost:
 
 def _host(host: BenchmarkCommandHost | None) -> BenchmarkCommandHost:
     if host is None:
-        return _DefaultBenchmarkHost()
+        return InstalledBenchmarkCommandHost()
     if not isinstance(host, BenchmarkCommandHost):
         _fail("benchmark host is invalid")
     return host
@@ -516,6 +529,7 @@ def _fail(message: str) -> NoReturn:
 __all__ = (
     "BenchmarkCliError",
     "BenchmarkCommandHost",
+    "InstalledBenchmarkCommandHost",
     "add_benchmark_parser",
     "main",
 )

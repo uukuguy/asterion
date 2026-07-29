@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import tempfile
 import unittest
 from dataclasses import replace
@@ -8,7 +7,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 from asterion.capabilities.dci.implementation.runtime.application_executor import EnvironmentDciRunExecutor
-from asterion.dci.cli import main as dci_main
 from asterion.capabilities.dci.implementation.config import DciRuntimeOptions, resolve_dci_paths
 from asterion.capabilities.dci.implementation.runtime.pi_rpc import FINAL_ANSWER_RECOVERY_PROMPT
 from asterion.capabilities.dci.implementation.research.prompts import (
@@ -97,56 +95,7 @@ class AsterionSafeRecoveryTests(unittest.TestCase):
         )
         return result
 
-    def test_standalone_cli_run_selects_safe_recovery(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            stdout, stderr = io.StringIO(), io.StringIO()
-            with patch("asterion.capabilities.dci.implementation.runtime.run.PiRpcClient", _EmptyFirstClient):
-                status = dci_main(
-                    [
-                        "run",
-                        "answer from the local corpus",
-                        "--cwd",
-                        str(root),
-                        "--output-dir",
-                        str(root / "run"),
-                    ],
-                    repo_root=root,
-                    stdout=stdout,
-                    stderr=stderr,
-                )
 
-        self.assertEqual(status, 0, stderr.getvalue())
-        self.assertEqual(
-            _EmptyFirstClient.instances[0].recoveries,
-            [FINAL_ANSWER_RECOVERY_PROMPT],
-        )
-
-    def test_standalone_cli_resume_selects_safe_recovery(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            output_dir = root / "run"
-            failed_request = _request(root)
-            with patch("asterion.capabilities.dci.implementation.runtime.run.PiRpcClient", _EmptyFirstClient):
-                with self.assertRaises(DciRunError):
-                    run_pi_research(
-                        resolve_dci_paths(root), failed_request, output_dir=output_dir
-                    )
-            _EmptyFirstClient.instances.clear()
-            stdout, stderr = io.StringIO(), io.StringIO()
-            with patch("asterion.capabilities.dci.implementation.runtime.run.PiRpcClient", _EmptyFirstClient):
-                status = dci_main(
-                    ["resume", "--output-dir", str(output_dir)],
-                    repo_root=root,
-                    stdout=stdout,
-                    stderr=stderr,
-                )
-
-        self.assertEqual(status, 0, stderr.getvalue())
-        self.assertEqual(
-            _EmptyFirstClient.instances[0].recoveries,
-            [FINAL_ANSWER_RECOVERY_PROMPT],
-        )
 
     def test_environment_executor_selects_safe_recovery(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
