@@ -1,5 +1,12 @@
-"""Generic benchmark planning and execution contracts."""
+"""Generic benchmark planning, evidence, and execution contracts."""
 
+from asterion.benchmarks.evidence import (
+    BenchmarkEvidenceError,
+    BenchmarkProgressEvent,
+    BenchmarkRunResult,
+    BenchmarkTaskResult,
+    LocalPrivateBenchmarkEvidenceStore,
+)
 from asterion.benchmarks.model import (
     ApplicationRef,
     BenchmarkModelError,
@@ -28,19 +35,24 @@ from asterion.benchmarks.resolution import (
 
 __all__ = (
     "ApplicationRef",
+    "BenchmarkEvidenceError",
     "BenchmarkModelError",
     "BenchmarkExecutionAuthorization",
     "BenchmarkExecutionAuthorizer",
     "BenchmarkPlanRequest",
     "BenchmarkPlanningError",
+    "BenchmarkProgressEvent",
+    "BenchmarkRunResult",
     "BenchmarkTaskImplementation",
     "BenchmarkTaskInvocation",
     "BenchmarkTaskRequest",
+    "BenchmarkTaskResult",
     "BenchmarkResolutionError",
     "ResolvedBenchmarkPlan",
     "ResolvedBenchmarkTask",
     "ResolvedCapability",
     "create_benchmark_plan",
+    "LocalPrivateBenchmarkEvidenceStore",
     "public_plan_dict",
     "render_benchmark_plan",
     "resolve_benchmark_suite",
