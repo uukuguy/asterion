@@ -1,0 +1,27 @@
+{
+  "protocol": "asterion.benchmark-suite/v1",
+  "suite_id": "example.other",
+  "version": "1.0.0",
+  "owner_package": {
+    "package_id": "example.package",
+    "version": "1.0.0"
+  },
+  "tasks": [
+    {
+      "task_id": "example.gamma",
+      "capability": {
+        "capability_id": "example.gamma",
+        "version": "1.0.0"
+      },
+      "binding_id": "example.gamma",
+      "metric_contract_id": "example.metric/v1",
+      "result_contract_id": "example.result/v1",
+      "note": "declared by another suite"
+    }
+  ],
+  "artifact_media_types": [
+    "application/json"
+  ],
+  "default_case_limit": 5,
+  "default_concurrency": 1
+}

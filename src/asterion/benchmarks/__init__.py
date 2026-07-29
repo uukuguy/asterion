@@ -11,6 +11,11 @@ from asterion.benchmarks.model import (
     ResolvedCapability,
     public_plan_dict,
 )
+from asterion.benchmarks.resolution import (
+    BenchmarkResolutionError,
+    resolve_benchmark_suite,
+    resolve_benchmark_tasks,
+)
 
 
 __all__ = (
@@ -19,8 +24,11 @@ __all__ = (
     "BenchmarkTaskImplementation",
     "BenchmarkTaskInvocation",
     "BenchmarkTaskRequest",
+    "BenchmarkResolutionError",
     "ResolvedBenchmarkPlan",
     "ResolvedBenchmarkTask",
     "ResolvedCapability",
     "public_plan_dict",
+    "resolve_benchmark_suite",
+    "resolve_benchmark_tasks",
 )
