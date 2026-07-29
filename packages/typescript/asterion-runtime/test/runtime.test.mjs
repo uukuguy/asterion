@@ -5,6 +5,7 @@ import test from "node:test";
 import Ajv2020 from "ajv/dist/2020.js";
 
 import {
+  APPLICATION_ASSEMBLY_PROTOCOL_VERSION,
   CAPABILITY_PROTOCOL_VERSION,
   ProtocolValidationError,
   RUNTIME_PROTOCOL_VERSION,
@@ -27,7 +28,7 @@ const referenceManifestRoots = [
 const sourceDirectory = new URL("../src/", import.meta.url);
 const schemaCopyScript = new URL("../scripts/copy-schemas.mjs", import.meta.url);
 const assemblyFixtures = new URL(
-  "../../../../tests/fixtures/assembly/v1/",
+  "../../../../tests/fixtures/application_assembly/v1/",
   import.meta.url,
 );
 const referenceAssemblyRoots = [
@@ -76,12 +77,84 @@ test("uses the Asterion-owned individual capability protocol identity", () => {
   );
 });
 
+test("uses the Asterion-owned application assembly protocol and exact refs", () => {
+  assert.equal(
+    APPLICATION_ASSEMBLY_PROTOCOL_VERSION,
+    "asterion.application-assembly/v1",
+  );
+  const valid = {
+    protocol: "asterion.application-assembly/v1",
+    application_id: "example.research",
+    version: "1.0.0",
+    runtime_id: "example.runtime",
+    capability_packages: [
+      { package_id: "example", version: "1.0.0" },
+      { package_id: "example.extension", version: "1.0.0" },
+    ],
+    capabilities: [
+      { capability_id: "example.policy", version: "1.0.0" },
+      { capability_id: "example.research", version: "1.0.0" },
+    ],
+    host_capabilities: [],
+    host_policies: [],
+    host_events: [],
+    host_artifacts: [],
+  };
+  const validated = validateAssemblyManifest(valid);
+  assert.deepEqual(validated, valid);
+  valid.capabilities.push({
+    capability_id: "z.changed",
+    version: "1.0.0",
+  });
+  assert.equal(validated.capabilities.length, 2);
+  assert.ok(Object.isFrozen(validated));
+  assert.ok(Object.isFrozen(validated.capabilities));
+  assert.ok(Object.isFrozen(validated.capabilities[0]));
+  assert.throws(
+    () => {
+      validated.capabilities[0].capability_id = "z.changed";
+    },
+    TypeError,
+  );
+  valid.capabilities.pop();
+  for (const invalid of [
+    { ...valid, protocol: "dci.assembly/v1" },
+    Object.fromEntries(
+      Object.entries({ ...valid, packages: valid.capabilities }).filter(
+        ([key]) => key !== "capabilities",
+      ),
+    ),
+    {
+      ...valid,
+      capabilities: [{ package_id: "example.policy", version: "1.0.0" }],
+    },
+  ]) {
+    assert.throws(() => validateAssemblyManifest(invalid), ProtocolValidationError);
+  }
+  assert.throws(
+    () =>
+      validateAssemblyManifest({
+        ...valid,
+        capability_packages: [...valid.capability_packages].reverse(),
+      }),
+    ProtocolValidationError,
+  );
+  assert.throws(
+    () =>
+      validateAssemblyManifest({
+        ...valid,
+        capabilities: [...valid.capabilities].reverse(),
+      }),
+    ProtocolValidationError,
+  );
+});
+
 test("validates the shared runtime manifest fixtures", async () => {
   const copyScript = await readFile(schemaCopyScript, "utf8");
   for (const source of [
     "../../../../schemas/agent-runtime/v1",
     "../../../../schemas/capabilities/v1/capability-manifest.schema.json",
-    "../../../../schemas/assembly/v1/assembly.schema.json",
+    "../../../../schemas/application-assembly/v1/application-assembly.schema.json",
   ]) {
     assert.ok(copyScript.includes(source), source);
   }
@@ -255,7 +328,7 @@ test("canonical schemas reject a surrogate after a line terminator", async () =>
     },
     {
       schema: new URL(
-        "../../../../schemas/assembly/v1/assembly.schema.json",
+        "../../../../schemas/application-assembly/v1/application-assembly.schema.json",
         import.meta.url,
       ),
       fixture: await readAssemblyJson(
@@ -302,7 +375,22 @@ test("rejects non-canonical assembly arrays", async () => {
     await readFile(new URL("valid-dci.json", assemblyFixtures), "utf8"),
   );
   assert.throws(
-    () => validateAssemblyManifest({ ...valid, packages: [...valid.packages].reverse() }),
+    () =>
+      validateAssemblyManifest({
+        ...valid,
+        capabilities: [...valid.capabilities].reverse(),
+      }),
+    ProtocolValidationError,
+  );
+  assert.throws(
+    () =>
+      validateAssemblyManifest({
+        ...valid,
+        capability_packages: [
+          { package_id: "z.last", version: "1.0.0" },
+          { package_id: "a.first", version: "1.0.0" },
+        ],
+      }),
     ProtocolValidationError,
   );
   assert.throws(

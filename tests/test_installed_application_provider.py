@@ -16,6 +16,7 @@ from asterion.applications.provider import (
     validate_installed_provider,
 )
 from asterion.applications.product import InstalledCapabilityProduct
+from asterion.capability_packages import CapabilityPackageRef
 from asterion.capabilities.catalog import CapabilityRef, discover_capabilities
 from asterion.capabilities.execution import CapabilityExecutionResult, CapabilityInvocation
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
@@ -44,11 +45,16 @@ def write_assembly(
     path.write_text(
         json.dumps(
             {
-                "protocol": "dci.assembly/v1",
+                "protocol": "asterion.application-assembly/v1",
                 "application_id": application_id,
                 "version": "1.0.0",
                 "runtime_id": runtime_id,
-                "packages": [{"package_id": "example.research", "version": "1.0.0"}],
+                "capability_packages": [
+                    {"package_id": "example", "version": "1.0.0"}
+                ],
+                "capabilities": [
+                    {"capability_id": "example.research", "version": "1.0.0"}
+                ],
                 "host_capabilities": [],
                 "host_policies": [],
                 "host_events": ["run.started"],
@@ -413,6 +419,10 @@ class InstalledApplicationProviderTests(unittest.TestCase):
         self.assertEqual(
             value.applications[0].assemblies[0].plan.application_id,
             "example.research",
+        )
+        self.assertEqual(
+            value.applications[0].assemblies[0].plan.capability_package_refs,
+            (CapabilityPackageRef("example", "1.0.0"),),
         )
         with self.assertRaises((AttributeError, TypeError)):
             value.applications[0].runtime_ids += ("other.runtime",)

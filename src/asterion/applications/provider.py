@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -229,8 +230,8 @@ def _validate_application_metadata(
         assert isinstance(runtime_id, str)
         assembly_runtime_ids.append(runtime_id)
         capability_refs = {
-            CapabilityRef(item["package_id"], item["version"])
-            for item in assembly["packages"]
+            CapabilityRef(item["capability_id"], item["version"])
+            for item in assembly["capabilities"]
         }
         if not refs.issubset(capability_refs):
             raise ApplicationProviderError(
@@ -312,7 +313,7 @@ def _read_assembly_snapshot(
     assembly_path: Path,
     *,
     application: InstalledApplication,
-) -> dict[str, object]:
+) -> Mapping[str, object]:
     try:
         assembly = json.loads(assembly_path.read_text())
         validate_assembly_manifest(assembly)
@@ -320,7 +321,6 @@ def _read_assembly_snapshot(
         raise ApplicationProviderError(
             "installed application assembly is invalid"
         ) from None
-    assert isinstance(assembly, dict)
     if (
         assembly["application_id"] != application.application_id
         or assembly["version"] != application.version

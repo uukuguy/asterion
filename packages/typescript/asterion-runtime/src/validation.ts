@@ -26,7 +26,7 @@ const capabilityManifestValidator = ajv.compile(
   readSchema("capability-manifest.schema.json"),
 );
 const assemblyManifestValidator = ajv.compile(
-  readSchema("assembly.schema.json"),
+  readSchema("application-assembly.schema.json"),
 );
 const requestValidator = ajv.compile(readSchema("run-request.schema.json"));
 const eventValidator = ajv.compile(readSchema("event.schema.json"));
@@ -157,32 +157,51 @@ export function validateAssemblyManifest(value: unknown): AssemblyManifest {
     assemblyManifestValidator,
     value,
   );
-  if (
-    assembly.packages.some(({ package_id, version }) =>
-      hasSurrogateCodePoint(package_id) || hasSurrogateCodePoint(version)
-    ) ||
-    assembly.packages.some((reference, index) => {
-      if (index === 0) {
-        return false;
-      }
-      const previous = assembly.packages[index - 1]!;
-      const packageIdOrder = compareUnicodeScalarStrings(
-        previous.package_id,
-        reference.package_id,
-      );
-      return (
-        packageIdOrder > 0 ||
-        (packageIdOrder === 0 &&
-          compareUnicodeScalarStrings(previous.version, reference.version) >= 0)
-      );
-    })
-  ) {
-    throw new ProtocolValidationError("assembly manifest packages", null);
-  }
+  requireSortedUniqueRefs(
+    "assembly manifest capability packages",
+    assembly.capability_packages,
+    ({ package_id }) => package_id,
+  );
+  requireSortedUniqueRefs(
+    "assembly manifest capabilities",
+    assembly.capabilities,
+    ({ capability_id }) => capability_id,
+  );
   for (const field of assemblyEdgeFields) {
     requireSortedUnique(`assembly manifest ${field}`, assembly[field]);
   }
   return assembly;
+}
+
+function requireSortedUniqueRefs<T extends { readonly version: string }>(
+  label: string,
+  references: readonly T[],
+  identity: (reference: T) => string,
+): void {
+  if (
+    references.some(
+      (reference) =>
+        hasSurrogateCodePoint(identity(reference)) ||
+        hasSurrogateCodePoint(reference.version),
+    ) ||
+    references.some((reference, index) => {
+      if (index === 0) {
+        return false;
+      }
+      const previous = references[index - 1]!;
+      const identityOrder = compareUnicodeScalarStrings(
+        identity(previous),
+        identity(reference),
+      );
+      return (
+        identityOrder > 0 ||
+        (identityOrder === 0 &&
+          compareUnicodeScalarStrings(previous.version, reference.version) >= 0)
+      );
+    })
+  ) {
+    throw new ProtocolValidationError(label, null);
+  }
 }
 
 export function validateRunRequest(value: unknown): RunRequest {

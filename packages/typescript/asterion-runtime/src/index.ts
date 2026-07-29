@@ -1,7 +1,7 @@
 export type {
   AgentRuntimeClient,
+  ApplicationAssemblyProtocolVersion,
   AssemblyManifest,
-  AssemblyProtocolVersion,
   CapabilityKind,
   CapabilityManifest,
   CapabilityProtocolVersion,
@@ -11,7 +11,7 @@ export type {
   RuntimeManifest,
 } from "./types.js";
 export {
-  ASSEMBLY_PROTOCOL_VERSION,
+  APPLICATION_ASSEMBLY_PROTOCOL_VERSION,
   CAPABILITY_PROTOCOL_VERSION,
   PROTOCOL_VERSION,
   RUNTIME_PROTOCOL_VERSION,

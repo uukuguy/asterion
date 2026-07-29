@@ -12,7 +12,10 @@ const capabilityManifestSource = fileURLToPath(
   ),
 );
 const assemblyManifestSource = fileURLToPath(
-  new URL("../../../../schemas/assembly/v1/assembly.schema.json", import.meta.url),
+  new URL(
+    "../../../../schemas/application-assembly/v1/application-assembly.schema.json",
+    import.meta.url,
+  ),
 );
 const destination = `${packageRoot}/dist/schemas`;
 
@@ -20,4 +23,7 @@ rmSync(destination, { force: true, recursive: true });
 mkdirSync(destination, { recursive: true });
 cpSync(source, destination, { recursive: true });
 cpSync(capabilityManifestSource, `${destination}/capability-manifest.schema.json`);
-cpSync(assemblyManifestSource, `${destination}/assembly.schema.json`);
+cpSync(
+  assemblyManifestSource,
+  `${destination}/application-assembly.schema.json`,
+);

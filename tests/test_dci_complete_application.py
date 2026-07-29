@@ -347,7 +347,14 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
             ASSEMBLIES.glob("dci-complete-application-*.json")
         ):
             assembly = json.loads(assembly_path.read_text())
-            self.assertEqual(assembly["protocol"], "dci.assembly/v1")
+            self.assertEqual(
+                assembly["protocol"],
+                "asterion.application-assembly/v1",
+            )
+            self.assertEqual(
+                assembly["capability_packages"],
+                [{"package_id": "dci", "version": "1.0.0"}],
+            )
             runtime_ids.add(assembly["runtime_id"])
         self.assertEqual(
             runtime_ids, {"claude-code.reference", "pi.reference"}
@@ -356,7 +363,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
             manifest = json.loads(manifest_path.read_text())
             self.assertEqual(manifest["protocol"], "asterion.capability/v1")
 
-    def test_transitive_identity_closure_matches_complete_assembly_packages(
+    def test_transitive_identity_closure_matches_complete_assembly_capabilities(
         self,
     ) -> None:
         self.assertEqual(
@@ -378,8 +385,8 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
         ):
             assembly = json.loads(assembly_path.read_text())
             current = {
-                f"{item['package_id']}@{item['version']}"
-                for item in assembly["packages"]
+                f"{item['capability_id']}@{item['version']}"
+                for item in assembly["capabilities"]
             }
             if assembly_capability_ids is None:
                 assembly_capability_ids = current

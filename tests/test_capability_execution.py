@@ -153,13 +153,16 @@ def evidence_plan():
         )
     )
     assembly = {
-        "protocol": "dci.assembly/v1",
+        "protocol": "asterion.application-assembly/v1",
         "application_id": "evidence.application",
         "version": "1.0.0",
         "runtime_id": "pi.reference",
-        "packages": [
-            {"package_id": "evidence.consumer", "version": "1.0.0"},
-            {"package_id": "evidence.producer", "version": "1.0.0"},
+        "capability_packages": [
+            {"package_id": "evidence", "version": "1.0.0"},
+        ],
+        "capabilities": [
+            {"capability_id": "evidence.consumer", "version": "1.0.0"},
+            {"capability_id": "evidence.producer", "version": "1.0.0"},
         ],
         "host_capabilities": [],
         "host_policies": [],
