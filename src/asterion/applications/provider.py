@@ -14,6 +14,11 @@ from asterion.assembly.protocol import (
     resolve_assembly,
     validate_assembly_manifest,
 )
+from asterion.capability_packages import (
+    CapabilityPackageManifest,
+    CapabilityPackageRef,
+    validate_capability_package_manifest,
+)
 from asterion.capabilities.catalog import (
     CapabilityCatalogError,
     CapabilityRef,
@@ -210,6 +215,7 @@ def _validate_application_metadata(
         _resource_beneath(path, root=root, kind="directory")
         for path in application.catalog_roots
     )
+    packages = _load_capability_package_manifests(catalogs, root=root)
     refs: set[CapabilityRef] = set()
     implementations: list[tuple[CapabilityRef, CapabilityImplementation]] = []
     for binding in application.implementations:
@@ -233,6 +239,24 @@ def _validate_application_metadata(
             CapabilityRef(item["capability_id"], item["version"])
             for item in assembly["capabilities"]
         }
+        package_refs = tuple(
+            CapabilityPackageRef(item["package_id"], item["version"])
+            for item in assembly["capability_packages"]
+        )
+        try:
+            package_capabilities = {
+                capability
+                for package_ref in package_refs
+                for capability in packages[package_ref].capabilities
+            }
+        except KeyError:
+            raise ApplicationProviderError(
+                "installed application package closure is invalid"
+            ) from None
+        if not capability_refs.issubset(package_capabilities):
+            raise ApplicationProviderError(
+                "installed application package closure is invalid"
+            )
         if not refs.issubset(capability_refs):
             raise ApplicationProviderError(
                 "installed application binding is unavailable"
@@ -251,6 +275,31 @@ def _validate_application_metadata(
         runtime_ids=application.runtime_ids,
         assemblies=(),
     )
+
+
+def _load_capability_package_manifests(
+    catalogs: tuple[Path, ...], *, root: Path
+) -> Mapping[CapabilityPackageRef, CapabilityPackageManifest]:
+    packages: dict[CapabilityPackageRef, CapabilityPackageManifest] = {}
+    for catalog_root in catalogs:
+        descriptor_path = _resource_beneath(
+            catalog_root.parent / "capability-package.json",
+            root=root,
+            kind="file",
+        )
+        try:
+            descriptor = json.loads(descriptor_path.read_text())
+            manifest = validate_capability_package_manifest(descriptor)
+        except (OSError, UnicodeError, TypeError, ValueError):
+            raise ApplicationProviderError(
+                "installed application capability package is invalid"
+            ) from None
+        if manifest.package_ref in packages:
+            raise ApplicationProviderError(
+                "installed application capability packages are invalid"
+            )
+        packages[manifest.package_ref] = manifest
+    return packages
 
 
 def _compose_application(

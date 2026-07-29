@@ -32,12 +32,43 @@ class NonCallableImplementation:
     execute = "SECRET-NON-CALLABLE-IMPLEMENTATION"
 
 
+def write_capability_package(
+    root: Path,
+    *,
+    package_id: str = "example",
+    version: str = "1.0.0",
+    capabilities: tuple[dict[str, str], ...] = (
+        {"capability_id": "example.research", "version": "1.0.0"},
+    ),
+) -> Path:
+    path = root / "capability-package.json"
+    path.write_text(
+        json.dumps(
+            {
+                "protocol": "asterion.capability-package/v1",
+                "package_id": package_id,
+                "version": version,
+                "capabilities": list(capabilities),
+                "benchmark_suites": [],
+                "resources": [],
+            }
+        )
+    )
+    return path
+
+
 def write_assembly(
     root: Path,
     *,
     application_id: str = "example.research",
     filename: str = "research.json",
     runtime_id: str = "pi.reference",
+    capability_packages: tuple[dict[str, str], ...] = (
+        {"package_id": "example", "version": "1.0.0"},
+    ),
+    capabilities: tuple[dict[str, str], ...] = (
+        {"capability_id": "example.research", "version": "1.0.0"},
+    ),
 ) -> Path:
     assembly_dir = root / "assemblies"
     assembly_dir.mkdir(exist_ok=True)
@@ -49,12 +80,8 @@ def write_assembly(
                 "application_id": application_id,
                 "version": "1.0.0",
                 "runtime_id": runtime_id,
-                "capability_packages": [
-                    {"package_id": "example", "version": "1.0.0"}
-                ],
-                "capabilities": [
-                    {"capability_id": "example.research", "version": "1.0.0"}
-                ],
+                "capability_packages": list(capability_packages),
+                "capabilities": list(capabilities),
                 "host_capabilities": [],
                 "host_policies": [],
                 "host_events": ["run.started"],
@@ -81,6 +108,7 @@ def runtime_factories(*runtime_ids: str) -> RuntimeFactoryRegistry:
 
 
 def provider(root: Path) -> InstalledApplicationProvider:
+    write_capability_package(root)
     catalog = root / "manifests"
     catalog.mkdir(exist_ok=True)
     (catalog / "research.json").write_text(
@@ -312,6 +340,87 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                         ),
                         runtime_factories=registry,
                     )
+
+    def test_unknown_or_mismatched_assembly_package_ref_fails_before_resolution(
+        self,
+    ) -> None:
+        sentinel = "secret.missing-package"
+        cases = (
+            (
+                "unknown-package",
+                ({"package_id": sentinel, "version": "1.0.0"},),
+                sentinel,
+            ),
+            (
+                "mismatched-version",
+                ({"package_id": "example", "version": "9.9.9"},),
+                "9.9.9",
+            ),
+        )
+        for case, package_refs, secret in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                valid = provider(root)
+                application = valid.applications[0]
+                assembly_path = write_assembly(
+                    root,
+                    filename="missing-package-ref.json",
+                    capability_packages=package_refs,
+                )
+                invalid = InstalledApplicationProvider(
+                    protocol=valid.protocol,
+                    provider_id=valid.provider_id,
+                    resource_root=valid.resource_root,
+                    applications=(
+                        InstalledApplication(
+                            application_id=application.application_id,
+                            version=application.version,
+                            assembly_paths=(assembly_path,),
+                            catalog_roots=application.catalog_roots,
+                            implementations=application.implementations,
+                            runtime_ids=application.runtime_ids,
+                        ),
+                    ),
+                )
+
+                with self.assertRaises(ApplicationProviderError) as raised:
+                    validate_installed_provider(invalid, selected_id="example-app")
+                self.assertNotIn(secret, str(raised.exception))
+
+    def test_assembly_capability_must_belong_to_referenced_package(self) -> None:
+        sentinel = "secret.extra-capability"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            valid = provider(root)
+            application = valid.applications[0]
+            assembly_path = write_assembly(
+                root,
+                filename="extra-capability.json",
+                capabilities=(
+                    {"capability_id": "example.research", "version": "1.0.0"},
+                    {"capability_id": sentinel, "version": "1.0.0"},
+                ),
+            )
+            invalid = InstalledApplicationProvider(
+                protocol=valid.protocol,
+                provider_id=valid.provider_id,
+                resource_root=valid.resource_root,
+                applications=(
+                    InstalledApplication(
+                        application_id=application.application_id,
+                        version=application.version,
+                        assembly_paths=(assembly_path,),
+                        catalog_roots=application.catalog_roots,
+                        implementations=application.implementations,
+                        runtime_ids=application.runtime_ids,
+                    ),
+                ),
+            )
+
+            with self.assertRaises(ApplicationProviderError) as raised:
+                validate_installed_provider(invalid, selected_id="example-app")
+
+        self.assertNotIn(sentinel, str(raised.exception))
 
     def test_resolution_revalidates_the_exact_assembly_snapshot(self) -> None:
         sentinel = "other.secret"
