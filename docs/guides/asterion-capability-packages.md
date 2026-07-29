@@ -13,7 +13,7 @@ asterion capability validate ./my-package/payload
 asterion capability inspect \
   --package acme.demo@0.1.0 \
   --source-id acme.demo.local-directory \
-  --root ./my-package \
+  --root /absolute/path/to/my-package \
   --payload-root payload \
   --module-path provider.py \
   --factory-name create_package \
@@ -21,7 +21,7 @@ asterion capability inspect \
 asterion capability test \
   --package acme.demo@0.1.0 \
   --source-id acme.demo.local-directory \
-  --root ./my-package \
+  --root /absolute/path/to/my-package \
   --payload-root payload \
   --module-path provider.py \
   --factory-name create_package \

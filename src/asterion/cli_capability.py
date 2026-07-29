@@ -319,6 +319,8 @@ def _copy_template_closed(source: Path, target: Path) -> None:
     seen_files: set[Path] = set()
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root)
+        if "__pycache__" in relative.parts or relative.suffix == ".pyc":
+            continue
         if path.is_symlink():
             raise CapabilityCliError("capability template is invalid")
         if path.is_dir():

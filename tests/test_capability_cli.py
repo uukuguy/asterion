@@ -273,9 +273,9 @@ def create_package():
             self.assertFalse((base / "escape").exists())
             self.assertNotIn("SECRET-init-target", stderr)
 
-    def test_init_rejects_generated_template_children_and_cleans_temporary_target(self) -> None:
+    def test_init_ignores_generated_template_cache_without_copying_it(self) -> None:
         with tempfile.TemporaryDirectory(prefix="SECRET-template-copy-") as temp_dir:
-            base = Path(temp_dir)
+            base = Path(temp_dir).resolve()
             source_template = (
                 Path(str(resources.files("asterion.capability_sdk")))
                 / "templates/minimal"
@@ -301,12 +301,49 @@ def create_package():
                     ["capability", "init", str(target), "--package-id", "acme.demo"]
                 )
 
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(json.loads(stdout), {"created": "acme.demo@0.1.0"})
+            self.assertFalse((target / "__pycache__").exists())
+            self.assertFalse(any(path.suffix == ".pyc" for path in target.rglob("*")))
+            self.assertFalse(any(base.glob(".target.*")))
+            self.assertNotIn("SECRET-template-copy", stderr)
+
+    def test_init_rejects_unknown_template_children_and_cleans_temporary_target(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="SECRET-template-extra-") as temp_dir:
+            base = Path(temp_dir).resolve()
+            source_template = (
+                Path(str(resources.files("asterion.capability_sdk")))
+                / "templates/minimal"
+            )
+            fake_sdk = base / "sdk"
+            fake_template = fake_sdk / "templates/minimal"
+            shutil.copytree(
+                source_template,
+                fake_template,
+                ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+            )
+            (fake_template / "unexpected.txt").write_text(
+                "SECRET-template-body", encoding="utf-8"
+            )
+            target = base / "target"
+
+            def files(anchor):
+                if anchor == "asterion.capability_sdk":
+                    return fake_sdk
+                return resources.files(anchor)
+
+            with patch("asterion.cli_capability.resources.files", side_effect=files):
+                code, stdout, stderr = run_cli(
+                    ["capability", "init", str(target), "--package-id", "acme.demo"]
+                )
+
             self.assertEqual(code, 2)
             self.assertEqual(stdout, "")
             self.assertEqual(stderr, "asterion: command failed\n")
             self.assertFalse(target.exists())
             self.assertFalse(any(base.glob(".target.*")))
-            self.assertNotIn("SECRET-template-copy", stderr)
+            self.assertNotIn("SECRET-template-extra", stderr)
+            self.assertNotIn("SECRET-template-body", stderr)
 
     def test_init_generated_provider_detects_payload_edits_without_private_helpers(self) -> None:
         with tempfile.TemporaryDirectory(prefix="SECRET-edited-payload-") as temp_dir:
