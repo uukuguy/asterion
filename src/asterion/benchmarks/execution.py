@@ -55,19 +55,20 @@ class BenchmarkRunner:
         cancellation: CancellationSignal,
     ) -> BenchmarkRunResult:
         evidence.initialize(plan)
-        completed = evidence.compatible_completed_task_results(plan)
-        completed_by_id = frozenset(result.task_id for result in completed)
-        results = list(completed)
-        sequence = evidence.next_progress_sequence(plan)
-        run_status = "completed"
         persisted_run = evidence.compatible_run_result(plan)
         if persisted_run is not None:
             evidence.finish_run(persisted_run)
             return persisted_run
 
+        completed = evidence.compatible_completed_task_results(plan)
+        completed_by_id = frozenset(result.task_id for result in completed)
+        results = list(completed)
+        sequence = evidence.next_progress_sequence(plan)
+        run_status = "completed"
+        terminal_progress_status = evidence.terminal_progress_status(plan)
+
         if len(completed) == len(plan.tasks):
             result = BenchmarkRunResult(status="completed", tasks=tuple(results))
-            terminal_progress_status = evidence.terminal_progress_status(plan)
             if terminal_progress_status is None:
                 evidence.append_progress(
                     BenchmarkProgressEvent(sequence=sequence, status="run.completed")
@@ -77,15 +78,14 @@ class BenchmarkRunner:
             evidence.finish_run(result)
             return result
 
+        if terminal_progress_status is not None:
+            raise BenchmarkEvidenceError("benchmark evidence resume is invalid")
+
         if cancellation.cancelled:
             result = BenchmarkRunResult(status="cancelled", tasks=tuple(results))
-            terminal_progress_status = evidence.terminal_progress_status(plan)
-            if terminal_progress_status is None:
-                evidence.append_progress(
-                    BenchmarkProgressEvent(sequence=sequence, status="run.cancelled")
-                )
-            elif terminal_progress_status != "run.cancelled":
-                raise BenchmarkEvidenceError("benchmark evidence resume is invalid")
+            evidence.append_progress(
+                BenchmarkProgressEvent(sequence=sequence, status="run.cancelled")
+            )
             evidence.finish_run(result)
             return result
 

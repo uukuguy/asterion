@@ -278,7 +278,7 @@ class LocalPrivateBenchmarkEvidenceStore:
                     persisted = _load_optional_run_result(
                         plan,
                         run,
-                        _completed_result_prefix_ids(result.tasks),
+                        _completed_result_prefix_results(result.tasks),
                     )
                 if persisted == result:
                     return
@@ -296,7 +296,8 @@ class LocalPrivateBenchmarkEvidenceStore:
                 )
                 if persisted != result.tasks:
                     _fail("benchmark run result is invalid")
-                _validate_terminal_progress_closure(plan, run, result)
+                if _terminal_progress_status(run, plan) != f"run.{result.status}":
+                    _fail("benchmark run result is invalid")
                 _atomic_write_json(run, "result.json", _run_result_dict(result))
             self._run_finished = True
             self._terminal_task_result_pending_run = False
@@ -331,7 +332,7 @@ class LocalPrivateBenchmarkEvidenceStore:
                 _load_optional_run_result(
                     plan,
                     run,
-                    tuple(task.task_id for task in completed),
+                    completed,
                 )
                 _terminal_progress_status(run, plan)
                 return completed
@@ -355,7 +356,7 @@ class LocalPrivateBenchmarkEvidenceStore:
                 return _load_optional_run_result(
                     plan,
                     run,
-                    tuple(task.task_id for task in completed),
+                    completed,
                 )
         except BenchmarkEvidenceError:
             raise
@@ -393,7 +394,7 @@ class LocalPrivateBenchmarkEvidenceStore:
                 _load_optional_run_result(
                     plan,
                     run,
-                    tuple(task.task_id for task in completed),
+                    completed,
                 )
                 return _next_progress_sequence(run, plan)
         except BenchmarkEvidenceError:
@@ -409,7 +410,7 @@ class LocalPrivateBenchmarkEvidenceStore:
     def _load_existing_state(self, plan: ResolvedBenchmarkPlan, run_fd: int) -> None:
         completed = _completed_prefix_results_from_evidence(plan, run_fd)
         completed_ids = tuple(task.task_id for task in completed)
-        result = _load_optional_run_result(plan, run_fd, completed_ids)
+        result = _load_optional_run_result(plan, run_fd, completed)
         self._completed_task_ids = (
             tuple(task.task_id for task in result.tasks)
             if result is not None
@@ -885,12 +886,17 @@ def _completed_prefix_results_from_evidence(
 def _load_optional_run_result(
     plan: ResolvedBenchmarkPlan,
     run_fd: int,
-    completed: tuple[str, ...],
+    completed: tuple[BenchmarkTaskResult, ...],
 ) -> BenchmarkRunResult | None:
+    completed_ids = tuple(task.task_id for task in completed)
+    terminal_status = _terminal_progress_status(run_fd, plan)
     if not _json_member_exists(run_fd, "result.json"):
-        if _has_noncompleted_task_result(plan, run_fd):
-            _fail("benchmark evidence resume is invalid")
-        return None
+        return _run_result_from_terminal_progress(
+            plan,
+            run_fd,
+            completed,
+            terminal_status,
+        )
     result = _run_result_from_json(_read_json(run_fd, "result.json"))
     _validate_run_result_for_plan(plan, result)
     result_ids = tuple(task.task_id for task in result.tasks)
@@ -898,56 +904,119 @@ def _load_optional_run_result(
     if persisted != result.tasks:
         _fail("benchmark evidence resume is invalid")
     if result.status == "completed":
-        if result_ids != _plan_task_ids(plan) or completed != _plan_task_ids(plan):
+        if result_ids != _plan_task_ids(plan) or completed_ids != _plan_task_ids(plan):
             _fail("benchmark evidence resume is invalid")
     else:
         completed_in_result = tuple(
             task.task_id for task in result.tasks if task.status == "completed"
         )
-        if completed_in_result != completed:
+        if completed_in_result != completed_ids:
             _fail("benchmark evidence resume is invalid")
-    _validate_terminal_progress_closure(plan, run_fd, result)
+    if terminal_status != f"run.{result.status}":
+        _fail("benchmark evidence resume is invalid")
     return result
 
 
-def _validate_terminal_progress_closure(
+def _run_result_from_terminal_progress(
     plan: ResolvedBenchmarkPlan,
     run_fd: int,
-    result: BenchmarkRunResult,
-) -> None:
-    terminal_status = _terminal_progress_status(run_fd, plan)
-    if terminal_status != f"run.{result.status}":
+    completed: tuple[BenchmarkTaskResult, ...],
+    terminal_status: str | None,
+) -> BenchmarkRunResult | None:
+    if terminal_status is None:
+        if _has_task_result_from_index(plan, run_fd, len(completed)):
+            _fail("benchmark evidence resume is invalid")
+        return None
+
+    if terminal_status == "run.completed":
+        if tuple(task.task_id for task in completed) != _plan_task_ids(plan):
+            _fail("benchmark evidence resume is invalid")
+        return BenchmarkRunResult(status="completed", tasks=completed)
+
+    if terminal_status not in {"run.failed", "run.cancelled"}:
         _fail("benchmark evidence resume is invalid")
+
+    status = terminal_status.removeprefix("run.")
+    task_ids = _plan_task_ids(plan)
+    results = list(completed)
+    consumed = len(results)
+    if status == "failed":
+        if consumed >= len(task_ids):
+            _fail("benchmark evidence resume is invalid")
+        terminal_task = _optional_task_result(plan, run_fd, task_ids[consumed])
+        if terminal_task is None or terminal_task.status != "failed":
+            _fail("benchmark evidence resume is invalid")
+        results.append(terminal_task)
+        consumed += 1
+    elif consumed < len(task_ids):
+        terminal_task = _optional_task_result(plan, run_fd, task_ids[consumed])
+        if terminal_task is not None:
+            if terminal_task.status != "cancelled":
+                _fail("benchmark evidence resume is invalid")
+            results.append(terminal_task)
+            consumed += 1
+
+    if _has_task_result_from_index(plan, run_fd, consumed):
+        _fail("benchmark evidence resume is invalid")
+    return BenchmarkRunResult(status=status, tasks=tuple(results))
 
 
 def _completed_result_prefix_ids(
     results: tuple[BenchmarkTaskResult, ...],
 ) -> tuple[str, ...]:
-    completed: list[str] = []
+    return tuple(result.task_id for result in _completed_result_prefix_results(results))
+
+
+def _completed_result_prefix_results(
+    results: tuple[BenchmarkTaskResult, ...],
+) -> tuple[BenchmarkTaskResult, ...]:
+    completed: list[BenchmarkTaskResult] = []
     for result in results:
         if result.status != "completed":
             break
-        completed.append(result.task_id)
+        completed.append(result)
     return tuple(completed)
 
 
-def _has_noncompleted_task_result(plan: ResolvedBenchmarkPlan, run_fd: int) -> bool:
+def _has_task_result_from_index(
+    plan: ResolvedBenchmarkPlan,
+    run_fd: int,
+    start_index: int,
+) -> bool:
     tasks_fd = _open_required_dir(run_fd, "tasks")
     try:
-        for task_id in _plan_task_ids(plan):
+        for task_id in _plan_task_ids(plan)[start_index:]:
             task_fd = _open_required_dir(tasks_fd, task_id)
             try:
-                if not _json_member_exists(task_fd, "result.json"):
-                    continue
-                result = _task_result_from_json(_read_json(task_fd, "result.json"))
-                _validate_task_result_for_plan(plan, result)
-                if result.status != "completed":
+                if _json_member_exists(task_fd, "result.json"):
                     return True
             finally:
                 os.close(task_fd)
     finally:
         os.close(tasks_fd)
     return False
+
+
+def _optional_task_result(
+    plan: ResolvedBenchmarkPlan,
+    run_fd: int,
+    task_id: str,
+) -> BenchmarkTaskResult | None:
+    tasks_fd = _open_required_dir(run_fd, "tasks")
+    try:
+        task_fd = _open_required_dir(tasks_fd, task_id)
+        try:
+            if not _json_member_exists(task_fd, "result.json"):
+                return None
+            result = _task_result_from_json(_read_json(task_fd, "result.json"))
+            _validate_task_result_for_plan(plan, result)
+            if result.task_id != task_id or result.case_count > plan.case_limit:
+                _fail("benchmark evidence resume is invalid")
+            return result
+        finally:
+            os.close(task_fd)
+    finally:
+        os.close(tasks_fd)
 
 
 def _persisted_task_results(
