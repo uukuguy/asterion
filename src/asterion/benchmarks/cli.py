@@ -8,15 +8,20 @@ import re
 from collections.abc import Sequence
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-from typing import NoReturn, Protocol, TextIO, runtime_checkable
+from typing import Callable, NoReturn, Protocol, TextIO, TypeVar, runtime_checkable
 
 from asterion.benchmarks.evidence import BenchmarkRunResult
-from asterion.benchmarks.model import ApplicationRef
-from asterion.benchmarks.planning import BenchmarkExecutionAuthorization
+from asterion.benchmarks.host import create_installed_benchmark_plan
+from asterion.benchmarks.model import ApplicationRef, ResolvedBenchmarkPlan
+from asterion.benchmarks.planning import (
+    BenchmarkExecutionAuthorization,
+    render_benchmark_plan,
+)
 from asterion.capability_packages import BenchmarkSuiteRef
 
 
 _RUN_ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
+_T = TypeVar("_T")
 
 
 class BenchmarkCliError(ValueError):
@@ -56,7 +61,7 @@ class BenchmarkCommandHost(Protocol):
         execute: bool,
         authorization: BenchmarkExecutionAuthorization | None,
         resume_run_id: str | None,
-    ) -> str: ...
+    ) -> ResolvedBenchmarkPlan: ...
 
     def authorize_execution(
         self,
@@ -76,7 +81,7 @@ class BenchmarkCommandHost(Protocol):
 
     def run(
         self,
-        plan: str,
+        plan: ResolvedBenchmarkPlan,
         providers: object,
         *,
         evidence_root: Path,
@@ -100,20 +105,22 @@ def main(
         application_ref = _parse_application_ref(args.application)
         suite_ref = _parse_suite_ref(args.suite)
         case_limit = _case_limit(args.case_limit)
-        source_lock = _source_lock(args.capability_source_lock)
-        evidence_root = _evidence_root(args.evidence_root)
         resume_run_id = _resume_run_id(command, getattr(args, "run_id", None))
         execute = bool(getattr(args, "execute", False))
 
         if command in {"run", "resume"}:
             if not execute:
                 _fail("benchmark execution requires --execute")
+        elif execute:
+            _fail("benchmark execution is invalid")
+
+        source_lock = _source_lock(args.capability_source_lock)
+        evidence_root = _evidence_root(args.evidence_root)
+        if command in {"run", "resume"}:
             if source_lock is None:
                 _fail("benchmark source lock is required")
             if evidence_root is None:
                 _fail("benchmark evidence root is required")
-        elif execute:
-            _fail("benchmark execution is invalid")
 
         command_host = _host(host)
         metadata = command_host.discover_metadata(
@@ -128,33 +135,51 @@ def main(
             suite_ref=suite_ref,
         )
 
-        authorization: BenchmarkExecutionAuthorization | None = None
-        if execute:
-            assert evidence_root is not None
-            authorization = command_host.authorize_execution(
+        draft = _host_call(
+            lambda: command_host.create_plan(
+                resolved,
                 application_ref=application_ref,
                 suite_ref=suite_ref,
                 case_limit=case_limit,
+                execute=False,
+                authorization=None,
+                resume_run_id=None,
+            )
+        )
+        _validate_plan(draft, application_ref, suite_ref)
+        if not execute:
+            stdout.write(render_benchmark_plan(draft) + "\n")
+            return 0
+
+        assert evidence_root is not None
+        authorization = _host_call(
+            lambda: command_host.authorize_execution(
+                application_ref=application_ref,
+                suite_ref=suite_ref,
+                case_limit=draft.case_limit,
                 evidence_root=evidence_root,
                 resume_run_id=resume_run_id,
             )
-        plan = command_host.create_plan(
-            resolved,
-            application_ref=application_ref,
-            suite_ref=suite_ref,
-            case_limit=case_limit,
-            execute=execute,
-            authorization=authorization,
-            resume_run_id=resume_run_id,
         )
-        if not execute:
-            stdout.write(plan.rstrip("\n") + "\n")
-            return 0
-
+        plan = _host_call(
+            lambda: command_host.create_plan(
+                resolved,
+                application_ref=application_ref,
+                suite_ref=suite_ref,
+                case_limit=draft.case_limit,
+                execute=True,
+                authorization=authorization,
+                resume_run_id=resume_run_id,
+            )
+        )
+        _validate_execution_plan(draft, plan, resume_run_id=resume_run_id)
         assert authorization is not None
-        assert evidence_root is not None
-        providers = command_host.load_selected_providers(payloads, authorization)
-        result = command_host.run(plan, providers, evidence_root=evidence_root)
+        providers = _host_call(
+            lambda: command_host.load_selected_providers(payloads, authorization)
+        )
+        result = _host_call(
+            lambda: command_host.run(plan, providers, evidence_root=evidence_root)
+        )
         stdout.write(_result_json(result) + "\n")
         if result.status == "cancelled":
             return 130
@@ -164,6 +189,9 @@ def main(
     except BenchmarkCliError as error:
         stderr.write(f"asterion benchmark: {error}\n")
         return 2
+    except KeyboardInterrupt:
+        stderr.write("asterion benchmark: command interrupted\n")
+        return 130
     except Exception:
         stderr.write("asterion benchmark: command failed\n")
         return 2
@@ -251,23 +279,20 @@ class _RedactingArgumentParser(argparse.ArgumentParser):
         raise BenchmarkCliError("arguments are invalid")
 
 
-class _UnavailableBenchmarkHost:
+class _DefaultBenchmarkHost:
     def discover_metadata(
         self,
         *,
         application_ref: ApplicationRef,
         suite_ref: BenchmarkSuiteRef,
     ) -> object:
-        del application_ref, suite_ref
-        _fail("benchmark host is unavailable")
+        return application_ref, suite_ref
 
     def resolve_source_lock(self, source_lock: Path | None) -> object:
-        del source_lock
-        _fail("benchmark host is unavailable")
+        return source_lock
 
     def open_selected_payloads(self, metadata: object, source_lock: object) -> object:
-        del metadata, source_lock
-        _fail("benchmark host is unavailable")
+        return metadata, source_lock
 
     def resolve_application(
         self,
@@ -276,8 +301,7 @@ class _UnavailableBenchmarkHost:
         application_ref: ApplicationRef,
         suite_ref: BenchmarkSuiteRef,
     ) -> object:
-        del payloads, application_ref, suite_ref
-        _fail("benchmark host is unavailable")
+        return payloads, application_ref, suite_ref
 
     def create_plan(
         self,
@@ -289,17 +313,30 @@ class _UnavailableBenchmarkHost:
         execute: bool,
         authorization: BenchmarkExecutionAuthorization | None,
         resume_run_id: str | None,
-    ) -> str:
-        del (
-            resolved,
-            application_ref,
-            suite_ref,
-            case_limit,
-            execute,
-            authorization,
-            resume_run_id,
+    ) -> ResolvedBenchmarkPlan:
+        if execute or authorization is not None or resume_run_id is not None:
+            _fail("benchmark execution authority is unavailable")
+        if (
+            not isinstance(resolved, tuple)
+            or len(resolved) != 3
+            or not isinstance(resolved[0], tuple)
+            or len(resolved[0]) != 2
+        ):
+            _fail("benchmark host planning is invalid")
+        payloads, selected_application, selected_suite = resolved
+        _, source_lock = payloads
+        if (
+            selected_application != application_ref
+            or selected_suite != suite_ref
+            or source_lock is not None and not isinstance(source_lock, Path)
+        ):
+            _fail("benchmark host planning is invalid")
+        return create_installed_benchmark_plan(
+            application_ref=application_ref,
+            suite_ref=suite_ref,
+            case_limit=case_limit,
+            source_lock_path=source_lock,
         )
-        _fail("benchmark host is unavailable")
 
     def authorize_execution(
         self,
@@ -311,7 +348,7 @@ class _UnavailableBenchmarkHost:
         resume_run_id: str | None,
     ) -> BenchmarkExecutionAuthorization:
         del application_ref, suite_ref, case_limit, evidence_root, resume_run_id
-        _fail("benchmark host is unavailable")
+        _fail("benchmark execution authority is unavailable")
 
     def load_selected_providers(
         self,
@@ -319,22 +356,22 @@ class _UnavailableBenchmarkHost:
         authorization: BenchmarkExecutionAuthorization,
     ) -> object:
         del payloads, authorization
-        _fail("benchmark host is unavailable")
+        _fail("benchmark execution authority is unavailable")
 
     def run(
         self,
-        plan: str,
+        plan: ResolvedBenchmarkPlan,
         providers: object,
         *,
         evidence_root: Path,
     ) -> BenchmarkRunResult:
         del plan, providers, evidence_root
-        _fail("benchmark host is unavailable")
+        _fail("benchmark execution authority is unavailable")
 
 
 def _host(host: BenchmarkCommandHost | None) -> BenchmarkCommandHost:
     if host is None:
-        return _UnavailableBenchmarkHost()
+        return _DefaultBenchmarkHost()
     if not isinstance(host, BenchmarkCommandHost):
         _fail("benchmark host is invalid")
     return host
@@ -374,18 +411,31 @@ def _case_limit(value: int | None) -> int | None:
 
 
 def _source_lock(value: str | None) -> Path | None:
-    return None if value is None else _path(value, "benchmark source lock is invalid")
+    if value is None:
+        return None
+    path = _path(value, "benchmark source lock is invalid", strict=True)
+    if path.is_symlink() or not path.is_file():
+        _fail("benchmark source lock is invalid")
+    return path
 
 
 def _evidence_root(value: str | None) -> Path | None:
-    return None if value is None else _path(value, "benchmark evidence root is invalid")
+    if value is None:
+        return None
+    path = _path(value, "benchmark evidence root is invalid", strict=False)
+    if path.is_symlink() or path.exists() and not path.is_dir():
+        _fail("benchmark evidence root is invalid")
+    return path
 
 
-def _path(value: str, message: str) -> Path:
+def _path(value: str, message: str, *, strict: bool) -> Path:
     if type(value) is not str or not value or "\x00" in value:
         _fail(message)
     try:
-        return Path(value).expanduser().resolve()
+        path = Path(value).expanduser()
+        if path.is_symlink():
+            _fail(message)
+        return path.resolve(strict=strict)
     except OSError:
         _fail(message)
 
@@ -417,6 +467,46 @@ def _result_json(result: BenchmarkRunResult) -> str:
         sort_keys=True,
         separators=(",", ":"),
     )
+
+
+def _host_call(call: Callable[[], _T]) -> _T:
+    try:
+        return call()
+    except KeyboardInterrupt:
+        raise
+    except Exception:
+        _fail("benchmark host command failed")
+
+
+def _validate_plan(
+    plan: object,
+    application_ref: ApplicationRef,
+    suite_ref: BenchmarkSuiteRef,
+) -> None:
+    if (
+        not isinstance(plan, ResolvedBenchmarkPlan)
+        or plan.application_ref != application_ref
+        or plan.suite.suite_ref != suite_ref
+    ):
+        _fail("benchmark plan is invalid")
+
+
+def _validate_execution_plan(
+    draft: ResolvedBenchmarkPlan,
+    plan: object,
+    *,
+    resume_run_id: str | None,
+) -> None:
+    _validate_plan(plan, draft.application_ref, draft.suite.suite_ref)
+    assert isinstance(plan, ResolvedBenchmarkPlan)
+    if (
+        plan.case_limit != draft.case_limit
+        or plan.suite != draft.suite
+        or plan.tasks != draft.tasks
+        or plan.package_locks != draft.package_locks
+        or resume_run_id is not None and plan.run_id != resume_run_id
+    ):
+        _fail("benchmark execution plan is invalid")
 
 
 def _fail(message: str) -> NoReturn:

@@ -2,12 +2,14 @@
 
 ## Benchmark
 
-`asterion benchmark` coordinates generic benchmark planning and execution through
-an injected host boundary. The generic command accepts exact public selectors and
-bounded limits only; product-specific datasets, corpora, launchers, prompts,
-providers, and budget amounts are not command-line authority.
+`asterion benchmark` creates generic benchmark plans from installed application
+and capability metadata. Execution remains behind an embedding host's explicit
+authorization, implementation, executor, and evidence boundaries. The command
+accepts exact public selectors and bounded limits only; product-specific datasets,
+corpora, launchers, prompts, providers, and budget amounts are not command-line
+authority.
 
-Plan a deterministic, body-free benchmark plan:
+Plan an immutable, body-free benchmark plan from an ordinary installation:
 
 ```bash
 asterion benchmark plan --application ID@VERSION --suite ID@VERSION
@@ -45,7 +47,9 @@ Common options:
 - `--evidence-root PATH` selects the private evidence root required for execution
   and resume.
 
-`plan` prints the deterministic plan, does not create evidence, and does not
-load benchmark implementations. `run` and `resume` print the public run result
-after the host records evidence; both reject before host loading unless
-`--execute`, `--capability-source-lock`, and `--evidence-root` are present.
+`plan` prints the plan, does not create evidence, and does not load capability
+implementation providers. The plain installed CLI intentionally has no execution
+authority. An embedding host may supply that authority and the exact
+implementations; then `run` and `resume` print the public result after evidence is
+closed. Both commands reject before implementation loading unless `--execute`,
+`--capability-source-lock`, and `--evidence-root` are present.

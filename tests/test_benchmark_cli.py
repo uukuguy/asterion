@@ -7,9 +7,14 @@ import unittest
 from pathlib import Path
 
 from asterion.benchmarks.evidence import BenchmarkRunResult, BenchmarkTaskResult
-from asterion.benchmarks.model import ApplicationRef
+from asterion.benchmarks.cli import BenchmarkCliError
+from asterion.benchmarks.model import ApplicationRef, ResolvedBenchmarkPlan
 from asterion.benchmarks.planning import BenchmarkExecutionAuthorization
-from asterion.capability_packages import BenchmarkSuiteRef
+from asterion.capability_packages import (
+    BenchmarkSuiteManifest,
+    BenchmarkSuiteRef,
+    CapabilityPackageRef,
+)
 from asterion.cli import main as asterion_main
 
 
@@ -128,6 +133,7 @@ class BenchmarkCliTests(unittest.TestCase):
                 "resolve_source_lock",
                 "open_selected_payloads",
                 "resolve_application",
+                "create_plan",
                 "authorize_execution",
                 "create_plan",
                 "load_selected_providers",
@@ -300,6 +306,27 @@ class BenchmarkCliTests(unittest.TestCase):
                 self.assertIn(expected, stderr.getvalue())
                 self.assertNotIn("SECRET", stderr.getvalue())
 
+    def test_host_errors_and_invalid_plan_values_are_redacted(self) -> None:
+        for host in (SecretFailingBenchmarkHost(), InvalidPlanBenchmarkHost()):
+            with self.subTest(type(host).__name__):
+                stderr = io.StringIO()
+                code = asterion_main(
+                    [
+                        "benchmark",
+                        "plan",
+                        "--application",
+                        "example.application@1.0.0",
+                        "--suite",
+                        "example.suite@1.0.0",
+                    ],
+                    benchmark_host=host,
+                    stdout=io.StringIO(),
+                    stderr=stderr,
+                )
+                self.assertEqual(code, 2)
+                self.assertNotIn("SECRET", stderr.getvalue())
+                self.assertIn("benchmark host command failed", stderr.getvalue())
+
     def test_help_describes_bounded_defaults_and_external_authorization(self) -> None:
         stdout = io.StringIO()
         code = asterion_main(
@@ -380,23 +407,28 @@ class RecordingBenchmarkHost:
         execute: bool,
         authorization: BenchmarkExecutionAuthorization | None,
         resume_run_id: str | None,
-    ) -> str:
-        del resolved, application_ref, suite_ref, execute, authorization
+    ) -> ResolvedBenchmarkPlan:
+        del resolved, application_ref, suite_ref, authorization
         self.calls.append("create_plan")
         if resume_run_id is not None:
             self.resume_run_ids.append(resume_run_id)
         selected_case_limit = 10 if case_limit is None else case_limit
-        return json.dumps(
-            {
-                "application": "example.application@1.0.0",
-                "case_limit": selected_case_limit,
-                "package_locks": [],
-                "run_id": resume_run_id or "run-plan-001",
-                "suite": "example.suite@1.0.0",
-                "tasks": [],
-            },
-            sort_keys=True,
-            separators=(",", ":"),
+        return ResolvedBenchmarkPlan(
+            run_id=resume_run_id or (
+                "run-auth-001" if execute else "run-plan-001"
+            ),
+            application_ref=ApplicationRef("example.application", "1.0.0"),
+            suite=BenchmarkSuiteManifest(
+                suite_ref=BenchmarkSuiteRef("example.suite", "1.0.0"),
+                owner_package=CapabilityPackageRef("example.package", "1.0.0"),
+                tasks=(),
+                artifact_media_types=("application/json",),
+                default_case_limit=10,
+                default_concurrency=1,
+            ),
+            tasks=(),
+            case_limit=selected_case_limit,
+            package_locks=(),
         )
 
     def authorize_execution(
@@ -420,7 +452,7 @@ class RecordingBenchmarkHost:
 
     def run(
         self,
-        plan: str,
+        plan: ResolvedBenchmarkPlan,
         providers: object,
         *,
         evidence_root: Path,
@@ -432,6 +464,18 @@ class RecordingBenchmarkHost:
 
 class HostAuthorization:
     pass
+
+
+class SecretFailingBenchmarkHost(RecordingBenchmarkHost):
+    def create_plan(self, *args: object, **kwargs: object) -> ResolvedBenchmarkPlan:
+        del args, kwargs
+        raise BenchmarkCliError("SECRET-/private/operator/path")
+
+
+class InvalidPlanBenchmarkHost(RecordingBenchmarkHost):
+    def create_plan(self, *args: object, **kwargs: object) -> ResolvedBenchmarkPlan:
+        del args, kwargs
+        raise TypeError("SECRET-invalid-plan")
 
 
 if __name__ == "__main__":
