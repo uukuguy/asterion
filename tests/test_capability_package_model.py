@@ -64,6 +64,11 @@ class HostileMetadata(Mapping[object, object]):
         return 2
 
 
+class HostileMetadataValue:
+    def __str__(self) -> str:
+        raise RuntimeError("SECRET-METADATA-CONVERSION")
+
+
 class HostileManifestIterable:
     def __iter__(self) -> Iterator[CapabilityRef]:
         raise RuntimeError("SECRET-MANIFEST-ITERATION")
@@ -75,6 +80,26 @@ class InterruptingManifestIterable:
 
     def __iter__(self) -> Iterator[CapabilityRef]:
         raise self._error
+
+
+def assert_no_exception_chain(
+    test_case: unittest.TestCase,
+    error: BaseException,
+    sentinels: tuple[str, ...],
+) -> None:
+    cursor: BaseException | None = error
+    seen: set[int] = set()
+    while cursor is not None:
+        if id(cursor) in seen:
+            test_case.fail("exception chain contains a cycle")
+        seen.add(id(cursor))
+        rendered = repr(cursor)
+        for sentinel in sentinels:
+            test_case.assertNotIn(sentinel, rendered)
+        cursor = cursor.__cause__ or cursor.__context__
+
+    test_case.assertIsNone(error.__cause__)
+    test_case.assertIsNone(error.__context__)
 
 
 class CandidateTests(unittest.TestCase):
@@ -122,19 +147,30 @@ class CandidateTests(unittest.TestCase):
         self.assertNotIn("SECRET", message)
 
     def test_candidate_metadata_failures_do_not_iterate_or_leak_arbitrary_bodies(self) -> None:
-        with self.assertRaises(CapabilityPackageModelError) as raised:
-            CapabilityPackageCandidate(
-                package_ref=CapabilityPackageRef("example.package", "1.0.0"),
-                source_id="example.source",
-                source_kind="python-distribution",
-                payload_sha256=None,
-                metadata=cast(Any, HostileMetadata()),
-            )
+        cases = (
+            (
+                HostileMetadata(),
+                ("SECRET-COMPARATOR", "SECRET-METADATA-ACCESS"),
+            ),
+            (
+                {"distribution_name": HostileMetadataValue()},
+                ("SECRET-METADATA-CONVERSION",),
+            ),
+        )
+        for metadata, sentinels in cases:
+            with self.subTest(sentinels=sentinels):
+                with self.assertRaises(CapabilityPackageModelError) as raised:
+                    CapabilityPackageCandidate(
+                        package_ref=CapabilityPackageRef("example.package", "1.0.0"),
+                        source_id="example.source",
+                        source_kind="python-distribution",
+                        payload_sha256=None,
+                        metadata=cast(Any, metadata),
+                    )
 
-        message = str(raised.exception)
-        self.assertEqual(message, "capability package metadata is invalid")
-        self.assertNotIn("SECRET-COMPARATOR", message)
-        self.assertNotIn("SECRET-METADATA-ACCESS", message)
+                message = str(raised.exception)
+                self.assertEqual(message, "capability package metadata is invalid")
+                assert_no_exception_chain(self, raised.exception, sentinels)
 
     def test_candidate_rejects_noncanonical_identity_values_with_body_free_errors(self) -> None:
         cases = (
@@ -280,7 +316,11 @@ class PackageValueTests(unittest.TestCase):
 
         message = str(raised.exception)
         self.assertEqual(message, "capability package manifest is invalid")
-        self.assertNotIn("SECRET-MANIFEST-ITERATION", message)
+        assert_no_exception_chain(
+            self,
+            raised.exception,
+            ("SECRET-MANIFEST-ITERATION",),
+        )
 
     def test_payload_manifest_snapshot_preserves_process_interrupts(self) -> None:
         for error in (KeyboardInterrupt("SECRET-INTERRUPT"), SystemExit("SECRET-EXIT")):

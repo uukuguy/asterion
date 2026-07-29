@@ -110,8 +110,10 @@ class InstalledCapabilityPackage:
 def _snapshot_manifest(manifest: CapabilityPackageManifest) -> CapabilityPackageManifest:
     if not isinstance(manifest, CapabilityPackageManifest):
         raise CapabilityPackageModelError("capability package manifest is invalid")
+    snapshot: CapabilityPackageManifest | None = None
+    failed = False
     try:
-        return validate_capability_package_manifest(
+        snapshot = validate_capability_package_manifest(
             {
                 "protocol": CAPABILITY_PACKAGE_PROTOCOL_VERSION,
                 "package_id": manifest.package_ref.package_id,
@@ -141,14 +143,18 @@ def _snapshot_manifest(manifest: CapabilityPackageManifest) -> CapabilityPackage
             }
         )
     except Exception:
-        raise CapabilityPackageModelError("capability package manifest is invalid") from None
+        failed = True
+    if failed or snapshot is None:
+        raise CapabilityPackageModelError("capability package manifest is invalid")
+    return snapshot
 
 
 def _safe_metadata(metadata: Mapping[str, object]) -> Mapping[str, str]:
     if not isinstance(metadata, Mapping):
         raise CapabilityPackageModelError("capability package metadata is invalid")
+    failed = False
+    safe_metadata: dict[str, str] = {}
     try:
-        safe_metadata = {}
         for key in _SAFE_METADATA_KEYS:
             try:
                 value = metadata[key]
@@ -156,7 +162,9 @@ def _safe_metadata(metadata: Mapping[str, object]) -> Mapping[str, str]:
                 continue
             safe_metadata[key] = str(value)
     except Exception:
-        raise CapabilityPackageModelError("capability package metadata is invalid") from None
+        failed = True
+    if failed:
+        raise CapabilityPackageModelError("capability package metadata is invalid")
     return MappingProxyType(safe_metadata)
 
 
