@@ -82,6 +82,8 @@ class BenchmarkModelTests(unittest.TestCase):
             "model.v1",
             "top5@stable",
             "n0",
+            "monkey",
+            "keynote",
         )
         invocation = BenchmarkTaskInvocation(
             task_id="example.task",
@@ -115,6 +117,32 @@ class BenchmarkModelTests(unittest.TestCase):
                         public_arguments=(argument,),
                         private_payload={"secret": "SECRET-PAYLOAD"},
                     )
+
+    def test_task_invocation_rejects_reserved_public_argument_tokens_without_echo(
+        self,
+    ) -> None:
+        rejected = (
+            "password",
+            "token",
+            "api-key",
+            "apikey",
+            "config.prod",
+            "provider.model",
+            "env.prod",
+            "credential",
+            "auth",
+            "authorization",
+        )
+        for argument in rejected:
+            with self.subTest(argument=argument):
+                with self.assertRaises(BenchmarkModelError) as context:
+                    BenchmarkTaskInvocation(
+                        task_id="example.task",
+                        binding_id="example.binding",
+                        public_arguments=(argument,),
+                        private_payload=None,
+                    )
+                self.assertNotIn(argument, repr(context.exception))
 
     def test_task_implementation_protocol_is_runtime_checkable(self) -> None:
         self.assertIsInstance(ExampleBenchmarkImplementation(), BenchmarkTaskImplementation)
@@ -193,6 +221,34 @@ class BenchmarkModelTests(unittest.TestCase):
                 },
             )
         self.assertNotIn("SECRET-MANIFEST", repr(context.exception))
+
+    def test_resolved_capability_rejects_non_json_like_manifest_values_redacted(
+        self,
+    ) -> None:
+        cases: tuple[tuple[str, object, tuple[str, ...]], ...] = (
+            ("bytes", b"SECRET-BYTES", ("SECRET-BYTES",)),
+            ("bytearray", bytearray(b"SECRET-BYTEARRAY"), ("SECRET-BYTEARRAY",)),
+            ("custom object", HostileManifestValue(), ("SECRET-HOSTILE",)),
+            ("positive infinity", float("inf"), ("inf",)),
+            ("negative infinity", float("-inf"), ("inf",)),
+            ("nan", float("nan"), ("nan",)),
+        )
+        for label, value, sentinels in cases:
+            with self.subTest(label):
+                with self.assertRaises(BenchmarkModelError) as context:
+                    ResolvedCapability(
+                        ref=CapabilityRef("example.capability", "1.0.0"),
+                        manifest={
+                            "capability_id": "example.capability",
+                            "version": "1.0.0",
+                            "value": value,
+                        },
+                    )
+                self.assertIsNone(context.exception.__cause__)
+                self.assertIsNone(context.exception.__context__)
+                rendered = repr(context.exception)
+                for sentinel in sentinels:
+                    self.assertNotIn(sentinel, rendered)
 
     def test_resolved_plan_snapshots_tuples_and_public_dict_redacts_private_values(
         self,
@@ -422,6 +478,14 @@ class ExplodingBenchmarkImplementation:
 class NonBenchmarkImplementation:
     def __repr__(self) -> str:
         return "SECRET-NON-IMPLEMENTATION"
+
+
+class HostileManifestValue:
+    def __repr__(self) -> str:
+        raise RuntimeError("SECRET-HOSTILE-REPR")
+
+    def __str__(self) -> str:
+        raise RuntimeError("SECRET-HOSTILE-STR")
 
 
 if __name__ == "__main__":

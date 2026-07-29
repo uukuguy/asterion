@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from math import isfinite
 from pathlib import Path
 from types import MappingProxyType
 from typing import Protocol, runtime_checkable
@@ -24,6 +25,22 @@ _SEMANTIC_VERSION = re.compile(
     r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
 )
 _SYMBOLIC_ARGUMENT = re.compile(r"^[a-z0-9](?:[a-z0-9]|[._@-](?=[a-z0-9]))*$")
+_SYMBOLIC_ARGUMENT_SEPARATOR = re.compile(r"[._@-]+")
+_RESERVED_ARGUMENT_TOKENS = frozenset(
+    {
+        "api",
+        "apikey",
+        "auth",
+        "authorization",
+        "config",
+        "credential",
+        "env",
+        "key",
+        "password",
+        "provider",
+        "token",
+    }
+)
 _SECRET_ARGUMENT_PREFIXES = ("sk-",)
 _SECRET_ARGUMENT_FRAGMENTS = ("secret",)
 
@@ -59,6 +76,8 @@ class ResolvedCapability:
             raise BenchmarkModelError("resolved benchmark capability is invalid")
         try:
             manifest = _freeze_manifest(self.manifest)
+        except BenchmarkModelError:
+            raise
         except Exception:
             raise BenchmarkModelError(
                 "resolved benchmark capability is invalid"
@@ -218,6 +237,9 @@ def _is_symbolic_argument(value: object) -> bool:
         _SYMBOLIC_ARGUMENT.fullmatch(value) is not None
         and not lowered.startswith(_SECRET_ARGUMENT_PREFIXES)
         and not any(fragment in lowered for fragment in _SECRET_ARGUMENT_FRAGMENTS)
+        and _RESERVED_ARGUMENT_TOKENS.isdisjoint(
+            _SYMBOLIC_ARGUMENT_SEPARATOR.split(lowered)
+        )
     )
 
 
@@ -239,7 +261,11 @@ def _freeze_manifest_value(value: object) -> object:
         return tuple(_freeze_manifest_value(item) for item in value)
     if isinstance(value, set | frozenset):
         return frozenset(_freeze_manifest_value(item) for item in value)
-    return value
+    if value is None or type(value) is bool or type(value) is int or type(value) is str:
+        return value
+    if type(value) is float and isfinite(value):
+        return value
+    raise BenchmarkModelError("resolved benchmark capability is invalid")
 
 
 def _manifest_key(value: object) -> str:
