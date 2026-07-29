@@ -211,3 +211,6 @@
 - 18:03 Redacted hostile model failure paths to close re-review leaks [d3a34eb]
 - 18:07 Discarded hostile exception contexts from model validation failures [33e31a8]
 - 18:10 Closed package-source Task 1 after all model review findings were fixed [33e31a8]
+- 18:10 Saved source-model recovery boundary before portable payload validation [c620dec]
+- 18:23 Validated portable payload closure before source adapters [07e154b]
+- 18:26 Verified payload Task 2 with green tests and static checks [07e154b]
