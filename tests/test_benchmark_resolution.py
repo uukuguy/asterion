@@ -273,11 +273,14 @@ import os
 import sys
 from pathlib import Path
 
-import importlib.resources.abc
-
-missing = sys.argv[1]
-if hasattr(os, missing):
-    delattr(os, missing)
+mode, name = sys.argv[1:3]
+if mode == "missing":
+    if hasattr(os, name):
+        delattr(os, name)
+elif mode == "unsupported":
+    setattr(os, name, frozenset())
+else:
+    raise AssertionError(f"unknown probe mode: {mode}")
 
 from asterion.benchmarks.resolution import (
     BenchmarkResolutionError,
@@ -306,21 +309,21 @@ except BenchmarkResolutionError as error:
     assert error.__cause__ is None
     assert error.__suppress_context__
     assert "SECRET-MISSING-FD-CONSTANT" not in rendered
-    assert missing not in rendered
+    assert name not in rendered
 else:
     raise AssertionError("resolver did not fail closed")
 """
-        for missing in (
-            "O_DIRECTORY",
-            "O_NOFOLLOW",
-            "O_CLOEXEC",
-            "supports_dir_fd",
-            "supports_fd",
-            "supports_follow_symlinks",
+        for mode, name in (
+            ("missing", "O_DIRECTORY"),
+            ("missing", "O_NOFOLLOW"),
+            ("missing", "O_CLOEXEC"),
+            ("unsupported", "supports_dir_fd"),
+            ("unsupported", "supports_fd"),
+            ("unsupported", "supports_follow_symlinks"),
         ):
-            with self.subTest(missing):
+            with self.subTest(name):
                 result = subprocess.run(
-                    [sys.executable, "-c", script, missing],
+                    [sys.executable, "-c", script, mode, name],
                     cwd=Path.cwd(),
                     env={**os.environ, "PYTHONPATH": str(Path.cwd() / "src")},
                     stdout=subprocess.PIPE,
