@@ -220,3 +220,8 @@
 - 19:06 Added exact source-lock resolver to prevent implicit capability source selection [20732bf]
 - 19:13 Redacted hostile digest comparisons to keep source resolution errors body-free [4c9f699]
 - 19:15 Closed package-source Task 3 after exact resolution review passed [4c9f699]
+- 19:15 Saved exact-resolution recovery boundary before built-in source adaptation [1cea2c9]
+- 19:42 Loaded controlled-code built-in through source adapter after focused verification [c708053]
+- 19:58 Preserved DCI transitional loading with explicit package injection [d77a14f]
+- 20:05 Rejected extra package injections to keep host authority exact [e0d8168]
+- 20:06 Closed package-source Task 4 after built-in and DCI transition review passed [e0d8168]

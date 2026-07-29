@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-29 19:06. **Session remains active — not a final handoff.**
+> Updated: 2026-07-29 20:06. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -39,8 +39,11 @@
 - Plan 2 Task 3 added exact source-lock resolution in `20732bf`, then redacted
   hostile digest comparison failures in `4c9f699`; selection remains exact by
   package ref, source ID, and digest.
-- The immediate next action is Plan 2 Task 4: implement the built-in source
-  adapter without giving built-ins a bypass around metadata-first selection.
+- Plan 2 Task 4 routes controlled-code through an explicit built-in source
+  adapter in `c708053`, preserves DCI as an unregistered host-injected
+  transition in `d77a14f`, and rejects extra package authority in `e0d8168`.
+- The immediate next action is Plan 2 Task 5: implement metadata-only installed
+  distribution discovery without loading entry-point providers.
 
 ## Where things stand
 
@@ -70,16 +73,20 @@
 - Plan 2 Task 3 focused verification passed 15 source-resolution tests and 48
   adjacent package/source/model/payload tests with Pyright, Ruff, compileall,
   `make lint`, and `git diff --check` clean.
+- Plan 2 Task 4 focused built-in, installed-provider, controlled-code, DCI,
+  list/describe, and injection tests passed; modified production modules are
+  Pyright/Ruff clean and independent review is approved.
 - `dci.agent-runtime/v1` remains only as the deliberate absence-test needle in
   Task 1 scope; no compatibility alias was added.
 - Plans 2-4 remain dependent on completion of the six Plan 1 tasks.
 
 ## Next action
 
-1. Dispatch Plan 2 Task 4 from the approved source plan.
-2. Prove built-in discovery is metadata-only and never calls provider factories.
-3. Keep built-in packages on the same exact selection path as third-party
-   sources; no direct catalog/provider bypass.
+1. Dispatch Plan 2 Task 5 from the approved source plan.
+2. Build/install the isolated fixture distribution and prove metadata
+   discovery/opening never calls `EntryPoint.load()` or imports its provider.
+3. Load only the exact selected provider after payload/source identity is
+   validated; duplicates and identity/digest mismatch fail closed.
 
 ## Boundaries and ruled-out paths
 
