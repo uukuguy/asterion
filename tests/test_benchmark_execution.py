@@ -745,20 +745,22 @@ class BenchmarkExecutionTests(unittest.TestCase):
         )
         self.assertEqual(result.status, "completed")
 
-        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
-            with self.assertRaises(BenchmarkEvidenceError):
-                BenchmarkRunner(
-                    output_directory_factory=RecordingOutputFactory(
-                        Path(temp_dir) / "outputs"
-                    ),
-                ).run(
-                    plan(),
-                    executor=ForbiddenProgressExecutor("run.completed"),
-                    evidence=LocalPrivateBenchmarkEvidenceStore(
-                        Path(temp_dir) / "evidence"
-                    ),
-                    cancellation=ManualCancellation(),
-                )
+        for status in ("executor.note", "run.completed"):
+            with self.subTest(status=status):
+                with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+                    with self.assertRaises(BenchmarkEvidenceError):
+                        BenchmarkRunner(
+                            output_directory_factory=RecordingOutputFactory(
+                                Path(temp_dir) / "outputs"
+                            ),
+                        ).run(
+                            plan(),
+                            executor=ForbiddenProgressExecutor(status),
+                            evidence=LocalPrivateBenchmarkEvidenceStore(
+                                Path(temp_dir) / "evidence"
+                            ),
+                            cancellation=ManualCancellation(),
+                        )
 
     def test_callback_evidence_failure_is_not_swallowed_as_task_failure(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:

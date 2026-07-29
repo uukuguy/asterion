@@ -203,6 +203,7 @@ def _failed_result(task_id: str) -> BenchmarkTaskResult:
 def _validate_callback_progress(event: BenchmarkProgressEvent) -> None:
     if (
         not isinstance(event, BenchmarkProgressEvent)
+        or not event.status.startswith("task.")
         or event.status.startswith("run.")
         or event.status in _TASK_TERMINAL_PROGRESS
     ):
