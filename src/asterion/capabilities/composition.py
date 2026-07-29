@@ -32,7 +32,7 @@ def compose_capabilities(
 
     capabilities: dict[str, Mapping[str, object]] = {}
     for manifest in manifests:
-        validate_capability_manifest(manifest)
+        manifest = validate_capability_manifest(manifest)
         capability_id = manifest["capability_id"]
         assert isinstance(capability_id, str)
         if capability_id in capabilities:
@@ -130,7 +130,7 @@ def compose_capabilities(
 
 def _edges(manifest: Mapping[str, object], field: str) -> list[str]:
     values = manifest[field]
-    assert isinstance(values, list) and all(isinstance(value, str) for value in values)
+    assert isinstance(values, tuple) and all(isinstance(value, str) for value in values)
     return values
 
 

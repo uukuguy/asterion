@@ -1,7 +1,7 @@
 import type {
   AgentRuntimeClient,
   AssemblyManifest,
-  PackageManifest,
+  CapabilityManifest,
   RunEvent,
   RunRequest,
   RuntimeManifest,
@@ -19,9 +19,9 @@ export const fixtureAssembly: AssemblyManifest = {
   host_artifacts: ["text/plain"],
 };
 
-export const fixturePackage: PackageManifest = {
-  protocol: "dci.package/v1",
-  package_id: "dci.research",
+export const fixtureCapability: CapabilityManifest = {
+  protocol: "asterion.capability/v1",
+  capability_id: "dci.research",
   version: "1.0.0",
   kind: "capability",
   provides_capabilities: ["research.local-corpus"],

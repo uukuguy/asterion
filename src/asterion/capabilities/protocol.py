@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from types import MappingProxyType
 
 from asterion.protocol_ordering import is_sorted_unique_scalar_strings
 
@@ -72,4 +73,18 @@ def validate_capability_manifest(value: object) -> Mapping[str, object]:
             or not is_sorted_unique_scalar_strings(values)
         ):
             raise CapabilityProtocolError(f"{field} must be a sorted unique string array")
-    return manifest
+    return _freeze_mapping(manifest)
+
+
+def _freeze_mapping(value: Mapping[str, object]) -> Mapping[str, object]:
+    return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+
+
+def _freeze(value: object) -> object:
+    if isinstance(value, Mapping):
+        return _freeze_mapping(value)
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze(item) for item in value)
+    if isinstance(value, set):
+        return frozenset(_freeze(item) for item in value)
+    return value

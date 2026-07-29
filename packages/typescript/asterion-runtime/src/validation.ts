@@ -8,7 +8,7 @@ import {
 
 import type {
   AssemblyManifest,
-  PackageManifest,
+  CapabilityManifest,
   RunEvent,
   RunRequest,
   RuntimeManifest,
@@ -22,8 +22,8 @@ function readSchema(name: string): object {
 
 const ajv = new Ajv2020({ allErrors: true });
 const manifestValidator = ajv.compile(readSchema("runtime-manifest.schema.json"));
-const packageManifestValidator = ajv.compile(
-  readSchema("package-manifest.schema.json"),
+const capabilityManifestValidator = ajv.compile(
+  readSchema("capability-manifest.schema.json"),
 );
 const assemblyManifestValidator = ajv.compile(
   readSchema("assembly.schema.json"),
@@ -122,7 +122,7 @@ export function validateRuntimeManifest(value: unknown): RuntimeManifest {
   return manifest;
 }
 
-const packageEdgeFields = [
+const capabilityEdgeFields = [
   "provides_capabilities",
   "requires_capabilities",
   "requires_policies",
@@ -132,14 +132,14 @@ const packageEdgeFields = [
   "consumes_artifacts",
 ] as const;
 
-export function validatePackageManifest(value: unknown): PackageManifest {
-  const manifest = requireValid<PackageManifest>(
-    "package manifest",
-    packageManifestValidator,
+export function validateCapabilityManifest(value: unknown): CapabilityManifest {
+  const manifest = requireValid<CapabilityManifest>(
+    "capability manifest",
+    capabilityManifestValidator,
     value,
   );
-  for (const field of packageEdgeFields) {
-    requireSortedUnique(`package manifest ${field}`, manifest[field]);
+  for (const field of capabilityEdgeFields) {
+    requireSortedUnique(`capability manifest ${field}`, manifest[field]);
   }
   return manifest;
 }

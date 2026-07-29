@@ -5,18 +5,19 @@ import test from "node:test";
 import Ajv2020 from "ajv/dist/2020.js";
 
 import {
+  CAPABILITY_PROTOCOL_VERSION,
   ProtocolValidationError,
   RUNTIME_PROTOCOL_VERSION,
   validateAssemblyManifest,
+  validateCapabilityManifest,
   validateEventStream,
-  validatePackageManifest,
   validateRunRequest,
   validateRuntimeManifest,
 } from "../dist/src/index.js";
 
 const fixtures = new URL("../../../../tests/fixtures/agent_runtime/v1/", import.meta.url);
-const packageFixtures = new URL(
-  "../../../../tests/fixtures/packages/v1/",
+const capabilityFixtures = new URL(
+  "../../../../tests/fixtures/capabilities/v1/",
   import.meta.url,
 );
 const referenceManifestRoots = [
@@ -44,8 +45,8 @@ async function readJson(name) {
   return JSON.parse(await readFile(new URL(name, fixtures), "utf8"));
 }
 
-async function readPackageJson(name) {
-  return JSON.parse(await readFile(new URL(name, packageFixtures), "utf8"));
+async function readCapabilityJson(name) {
+  return JSON.parse(await readFile(new URL(name, capabilityFixtures), "utf8"));
 }
 
 async function readAssemblyJson(name) {
@@ -63,11 +64,23 @@ test("uses the Asterion-owned runtime protocol identity", () => {
   assert.equal(RUNTIME_PROTOCOL_VERSION, "asterion.agent-runtime/v1");
 });
 
+test("uses the Asterion-owned individual capability protocol identity", () => {
+  assert.equal(CAPABILITY_PROTOCOL_VERSION, "asterion.capability/v1");
+  assert.throws(
+    () =>
+      validateCapabilityManifest({
+        protocol: "dci.package/v1",
+        capability_id: "example.research",
+      }),
+    ProtocolValidationError,
+  );
+});
+
 test("validates the shared runtime manifest fixtures", async () => {
   const copyScript = await readFile(schemaCopyScript, "utf8");
   for (const source of [
     "../../../../schemas/agent-runtime/v1",
-    "../../../../schemas/packages/v1/package-manifest.schema.json",
+    "../../../../schemas/capabilities/v1/capability-manifest.schema.json",
     "../../../../schemas/assembly/v1/assembly.schema.json",
   ]) {
     assert.ok(copyScript.includes(source), source);
@@ -130,42 +143,42 @@ test("validates shared requests and complete event streams", async () => {
   }
 });
 
-test("validates the shared package manifest fixture", async () => {
+test("validates the shared capability manifest fixture", async () => {
   for (const name of [
     "valid-capability.json",
     "valid-unicode-scalar-order.json",
   ]) {
-    const valid = await readPackageJson(name);
-    assert.deepEqual(validatePackageManifest(valid), valid);
+    const valid = await readCapabilityJson(name);
+    assert.deepEqual(validateCapabilityManifest(valid), valid);
   }
 });
 
-test("rejects every shared invalid package manifest fixture", async () => {
+test("rejects every shared invalid capability manifest fixture", async () => {
   for (const name of [
     "invalid-unknown-field.json",
     "invalid-duplicate-edge.json",
-    "invalid-package-id.json",
+    "invalid-capability-id.json",
     "invalid-forbidden-command.json",
     "invalid-unicode-scalar-order.json",
     "invalid-surrogate-edge.json",
     "invalid-line-terminator-surrogate-edge.json",
   ]) {
-    const invalid = await readPackageJson(name);
-    assert.throws(() => validatePackageManifest(invalid), ProtocolValidationError);
+    const invalid = await readCapabilityJson(name);
+    assert.throws(() => validateCapabilityManifest(invalid), ProtocolValidationError);
   }
 });
 
-test("rejects package edge arrays that are not sorted", async () => {
-  const valid = await readPackageJson("valid-capability.json");
+test("rejects capability edge arrays that are not sorted", async () => {
+  const valid = await readCapabilityJson("valid-capability.json");
   const unsorted = {
     ...valid,
     provides_capabilities: ["z.last", "a.first"],
   };
 
-  assert.throws(() => validatePackageManifest(unsorted), ProtocolValidationError);
+  assert.throws(() => validateCapabilityManifest(unsorted), ProtocolValidationError);
 });
 
-test("validates every checked-in reference package manifest", async () => {
+test("validates every checked-in reference capability manifest", async () => {
   const entries = (
     await Promise.all(
       referenceManifestRoots.map(async (root) =>
@@ -193,11 +206,11 @@ test("validates every checked-in reference package manifest", async () => {
     const manifest = JSON.parse(
       await readFile(new URL(name, root), "utf8"),
     );
-    assert.deepEqual(validatePackageManifest(manifest), manifest);
+    assert.deepEqual(validateCapabilityManifest(manifest), manifest);
   }
 });
 
-test("keeps package composition outside the TypeScript host", async () => {
+test("keeps capability composition outside the TypeScript host", async () => {
   const sources = await Promise.all(
     (await readdir(sourceDirectory))
       .filter((name) => name.endsWith(".ts"))
@@ -205,7 +218,7 @@ test("keeps package composition outside the TypeScript host", async () => {
   );
   const publicSource = sources.join("\n");
 
-  assert.doesNotMatch(publicSource, /composePackages|PackageComposition/);
+  assert.doesNotMatch(publicSource, /composeCapabilities|CapabilityComposition/);
 });
 
 test("validates the shared assembly fixtures", async () => {
@@ -233,10 +246,10 @@ test("canonical schemas reject a surrogate after a line terminator", async () =>
   const cases = [
     {
       schema: new URL(
-        "../../../../schemas/packages/v1/package-manifest.schema.json",
+        "../../../../schemas/capabilities/v1/capability-manifest.schema.json",
         import.meta.url,
       ),
-      fixture: await readPackageJson(
+      fixture: await readCapabilityJson(
         "invalid-line-terminator-surrogate-edge.json",
       ),
     },

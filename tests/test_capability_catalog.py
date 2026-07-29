@@ -17,6 +17,29 @@ from asterion.capabilities.protocol import validate_capability_manifest
 
 
 FIXTURES = Path(__file__).parent / "fixtures/capabilities/v1"
+VALID_CAPABILITY_FIXTURE = {
+    "protocol": "asterion.capability/v1",
+    "capability_id": "example.research",
+    "version": "1.0.0",
+    "kind": "research",
+    "provides_capabilities": ["research.local"],
+    "requires_capabilities": [],
+    "requires_policies": [],
+    "emits_events": ["research.completed"],
+    "consumes_events": [],
+    "produces_artifacts": ["application/vnd.example.research+json"],
+    "consumes_artifacts": [],
+}
+VALIDATED_CAPABILITY_FIXTURE = {
+    **VALID_CAPABILITY_FIXTURE,
+    "provides_capabilities": ("research.local",),
+    "requires_capabilities": (),
+    "requires_policies": (),
+    "emits_events": ("research.completed",),
+    "consumes_events": (),
+    "produces_artifacts": ("application/vnd.example.research+json",),
+    "consumes_artifacts": (),
+}
 
 
 def manifest(capability_id: str, *, version: str = "1.0.0") -> dict[str, object]:
@@ -77,8 +100,27 @@ class CapabilityCatalogTests(unittest.TestCase):
 
         validated = validate_capability_manifest(value)
 
-        self.assertEqual(validated["protocol"], "asterion.capability/v1")
-        self.assertEqual(validated["capability_id"], "example.research")
+        self.assertEqual(value, VALID_CAPABILITY_FIXTURE)
+        self.assertEqual(validated, VALIDATED_CAPABILITY_FIXTURE)
+
+    def test_validated_manifest_is_a_deep_immutable_snapshot(self) -> None:
+        source = manifest("example.research")
+
+        validated = validate_capability_manifest(source)
+        source["kind"] = "policy"
+        source["provides_capabilities"].append("changed")
+
+        self.assertEqual(validated["kind"], "capability")
+        self.assertEqual(
+            validated["provides_capabilities"],
+            ("example.research.provided",),
+        )
+        with self.assertRaises(TypeError):
+            validated["kind"] = "policy"  # type: ignore[reportIndexIssue]
+        with self.assertRaises(AttributeError):
+            validated["provides_capabilities"].append(  # type: ignore[reportAttributeAccessIssue]
+                "changed"
+            )
 
     def test_capability_ref_has_an_exact_selector(self) -> None:
         self.assertEqual(

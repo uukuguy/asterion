@@ -243,7 +243,7 @@ def _read_manifest(
     root: _PinnedRoot,
     name: str,
     source: Path,
-) -> dict[str, object] | None:
+) -> Mapping[str, object] | None:
     try:
         details = os.stat(name, dir_fd=root.fd, follow_symlinks=False)
     except OSError as error:
@@ -281,10 +281,9 @@ def _read_manifest(
     if not isinstance(manifest, dict):
         raise CapabilityCatalogError(f"capability document is invalid: {source}")
     try:
-        validate_capability_manifest(manifest)
+        return validate_capability_manifest(manifest)
     except CapabilityProtocolError as error:
         raise CapabilityCatalogError(f"capability document is invalid: {source}") from error
-    return manifest
 
 
 def _freeze_mapping(value: Mapping[str, object]) -> Mapping[str, object]:

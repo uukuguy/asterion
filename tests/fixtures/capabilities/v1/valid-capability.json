@@ -7,7 +7,7 @@
   "requires_capabilities": [],
   "requires_policies": [],
   "emits_events": ["research.completed"],
-  "consumes_events": ["run.started"],
+  "consumes_events": [],
   "produces_artifacts": ["application/vnd.example.research+json"],
   "consumes_artifacts": []
 }

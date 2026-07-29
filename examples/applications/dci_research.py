@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from asterion.assembly.protocol import resolve_assembly
-from asterion.packages.catalog import PackageRef, discover_packages
+from asterion.capabilities.catalog import CapabilityRef, discover_capabilities
 from asterion.runner.application import ApplicationRunResult
 from asterion.runner.composed import run_composed_application
 from asterion.runtime.host import AgentRuntimeClient, CancellationSignal
@@ -30,14 +30,14 @@ async def run_dci_research_application(
         raise ValueError("DCI research assembly must be an object")
     plan = resolve_assembly(
         assembly,
-        catalog=discover_packages(catalog_roots),
+        catalog=discover_capabilities(catalog_roots),
         runtime_manifest=runtime.manifest.to_mapping(),
     )
     return await run_composed_application(
         plan,
         implementations=(
             (
-                PackageRef("dci.research", "1.0.0"),
+                CapabilityRef("dci.research", "1.0.0"),
                 DciLocalResearchImplementation(),
             ),
         ),
