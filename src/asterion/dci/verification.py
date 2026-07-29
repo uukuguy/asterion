@@ -16,7 +16,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
-from typing import Protocol, TextIO, cast
+from typing import Protocol, TextIO
 
 from asterion.dci.ablation import (
     bounded_ablation_input_paths,
@@ -153,65 +153,39 @@ _EXPECTED_PAPER_SCOPES_SHA256 = (
 )
 
 
-class _TransitionalDciResearchImplementation:
-    def __init__(self) -> None:
-        from asterion.capabilities.dci_research import DciLocalResearchImplementation
-        from asterion.capabilities.dci_research.complete import (
-            DciCompleteResearchImplementation,
-        )
-
-        self._local = DciLocalResearchImplementation()
-        self._complete = DciCompleteResearchImplementation()
-
-    async def execute(self, invocation):
-        from asterion.capabilities.dci_research.complete import INPUT_PROTOCOL
-
-        try:
-            value = json.loads(invocation.input_text)
-        except ValueError:
-            value = None
-        if isinstance(value, dict) and value.get("protocol") == INPUT_PROTOCOL:
-            return await self._complete.execute(invocation)
-        return await self._local.execute(invocation)
-
-
 def _transitional_dci_package():
-    from asterion.capabilities.dci_research.complete import complete_dci_bindings
-    from asterion.capabilities.catalog import CapabilityRef
-    from asterion.capabilities.execution import (
-        CapabilityImplementation,
-        CapabilityImplementationBinding,
-    )
     from asterion.capability_packages import (
         CapabilityPackageRef,
-        InstalledCapabilityPackage,
+        CapabilitySourceDeclaration,
+        open_portable_payload,
+        resolve_capability_source,
+    )
+    from asterion.capability_packages.sources.local import (
+        LocalDirectoryCapabilityPackageSource,
     )
 
     root = Path(str(resources.files("asterion.capabilities.dci_research"))).resolve()
-    bindings: tuple[tuple[CapabilityRef, CapabilityImplementation], ...] = (
-        *cast(
-            tuple[tuple[CapabilityRef, CapabilityImplementation], ...],
-            complete_dci_bindings(),
-        ),
+    package_ref = CapabilityPackageRef("dci", "1.0.0")
+    payload = open_portable_payload(root / "payload")
+    source = LocalDirectoryCapabilityPackageSource(
         (
-            CapabilityRef("dci.research", "1.0.0"),
-            cast(CapabilityImplementation, _TransitionalDciResearchImplementation()),
-        ),
+            CapabilitySourceDeclaration(
+                source_id="dci.transitional-local",
+                kind="local-directory",
+                package_ref=package_ref,
+                payload_sha256=payload.payload_sha256,
+                private_locator={
+                    "root": root,
+                    "payload_root": "payload",
+                    "module_path": "local_provider.py",
+                    "factory_name": "create_package",
+                },
+            ),
+        )
     )
-    deduped: dict[CapabilityRef, CapabilityImplementation] = dict(bindings)
-    return InstalledCapabilityPackage(
-        package_ref=CapabilityPackageRef("dci", "1.0.0"),
-        payload_sha256="d" * 64,
-        source_id="dci.transitional-local",
-        source_kind="local-directory",
-        catalog_roots=((root / "manifests").resolve(),),
-        benchmark_suite_paths=(),
-        implementations=tuple(
-            CapabilityImplementationBinding(ref, implementation)
-            for ref, implementation in sorted(deduped.items())
-        ),
-        benchmark_bindings=(),
-    )
+    candidate = resolve_capability_source(package_ref, source.discover_metadata(), None)
+    source.validate_source_identity(candidate, source.open_payload(candidate))
+    return source.load_provider(candidate)
 
 
 @dataclass(frozen=True)

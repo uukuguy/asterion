@@ -230,3 +230,5 @@
 - 20:29 Bound distribution payload roots to declared files to reject rebinding [16f75bd]
 - 20:34 Rejected symlinked distribution payload roots to prevent external payload escapes [a0873b8]
 - 20:36 Closed package-source Task 5 after distribution ownership review passed [a0873b8]
+- 20:36 Saved distribution-source recovery boundary before local-directory loading [e32b387]
+- 21:11 Loaded explicit local capability packages through exact source declarations

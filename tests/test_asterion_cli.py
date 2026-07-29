@@ -8,7 +8,6 @@ import unittest
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
-from typing import cast
 from unittest.mock import patch
 
 from asterion.cli import _load_available_capability_packages, _parser, main
@@ -31,23 +30,19 @@ from asterion.applications.product import (
 )
 from asterion.dci.verification import create_dci_product
 from asterion.dci.services import create_local_corpus_service_factory
-from asterion.capabilities.dci_research import DciLocalResearchImplementation
-from asterion.capabilities.dci_research.complete import (
-    DciCompleteResearchImplementation,
-    INPUT_PROTOCOL,
-    complete_dci_bindings,
-)
 from asterion.capability_packages import (
     CapabilityPackageRef,
+    CapabilitySourceDeclaration,
     InstalledCapabilityPackage,
+    open_portable_payload,
+    resolve_capability_source,
 )
 from asterion.capabilities.catalog import CapabilityRef
 from asterion.capabilities.execution import (
-    CapabilityImplementationBinding,
-    CapabilityImplementation,
     InProcessArtifactPayload,
     CapabilityExecutionResult,
 )
+from asterion.capability_packages.sources.local import LocalDirectoryCapabilityPackageSource
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 from asterion.services.controlled_executor import ControlledExecutionResult
@@ -213,49 +208,29 @@ def dci_host_arguments() -> tuple[str, str]:
     )
 
 
-class TransitionalDciResearchImplementation:
-    def __init__(self) -> None:
-        self.local = DciLocalResearchImplementation()
-        self.complete = DciCompleteResearchImplementation()
-
-    async def execute(self, invocation):
-        try:
-            value = json.loads(invocation.input_text)
-        except ValueError:
-            value = None
-        if isinstance(value, dict) and value.get("protocol") == INPUT_PROTOCOL:
-            return await self.complete.execute(invocation)
-        return await self.local.execute(invocation)
-
-
 def transitional_dci_package() -> InstalledCapabilityPackage:
     root = Path(__file__).resolve().parents[1] / "src/asterion/capabilities/dci_research"
-    bindings: tuple[tuple[CapabilityRef, CapabilityImplementation], ...] = (
-        *cast(
-            tuple[tuple[CapabilityRef, CapabilityImplementation], ...],
-            complete_dci_bindings(),
-        ),
+    package_ref = CapabilityPackageRef("dci", "1.0.0")
+    payload = open_portable_payload(root / "payload")
+    source = LocalDirectoryCapabilityPackageSource(
         (
-            CapabilityRef("dci.research", "1.0.0"),
-            cast(CapabilityImplementation, TransitionalDciResearchImplementation()),
-        ),
+            CapabilitySourceDeclaration(
+                source_id="dci.transitional-local",
+                kind="local-directory",
+                package_ref=package_ref,
+                payload_sha256=payload.payload_sha256,
+                private_locator={
+                    "root": root,
+                    "payload_root": "payload",
+                    "module_path": "local_provider.py",
+                    "factory_name": "create_package",
+                },
+            ),
+        )
     )
-    deduped: dict[CapabilityRef, CapabilityImplementation] = {}
-    for ref, implementation in bindings:
-        deduped[ref] = implementation
-    return InstalledCapabilityPackage(
-        package_ref=CapabilityPackageRef("dci", "1.0.0"),
-        payload_sha256="d" * 64,
-        source_id="dci.transitional-local",
-        source_kind="local-directory",
-        catalog_roots=((root / "manifests").resolve(),),
-        benchmark_suite_paths=(),
-        implementations=tuple(
-            CapabilityImplementationBinding(ref, implementation)
-            for ref, implementation in sorted(deduped.items())
-        ),
-        benchmark_bindings=(),
-    )
+    candidate = resolve_capability_source(package_ref, source.discover_metadata(), None)
+    source.validate_source_identity(candidate, source.open_payload(candidate))
+    return source.load_provider(candidate)
 
 
 def provider(root: Path) -> InstalledApplicationProvider:

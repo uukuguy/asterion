@@ -632,6 +632,22 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
             },
         )
 
+    def test_transitional_dci_package_uses_explicit_local_source(self) -> None:
+        verification_source = (SOURCE / "dci/verification.py").read_text()
+        package = transitional_dci_package()
+
+        self.assertIn("CapabilitySourceDeclaration", verification_source)
+        self.assertIn("LocalDirectoryCapabilityPackageSource", verification_source)
+        self.assertNotIn("InstalledCapabilityPackage(", verification_source)
+        self.assertEqual(package.package_ref.package_id, "dci")
+        self.assertEqual(package.source_id, "dci.transitional-local")
+        self.assertEqual(package.source_kind, "local-directory")
+        self.assertEqual(len(package.payload_sha256), 64)
+        self.assertEqual(
+            package.catalog_roots,
+            (SOURCE / "capabilities/dci_research/payload/capabilities",),
+        )
+
     def test_implementation_identity_is_stable_and_digest_shaped(self) -> None:
         identity = complete_application_identity()
         self.assertEqual(len(identity), 64)
