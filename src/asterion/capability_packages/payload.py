@@ -314,10 +314,11 @@ def _validate_pinned_payload(
     expected_manifest: CapabilityPackageManifest | None,
     descriptors: ExitStack,
 ) -> tuple[CapabilityPackageManifest, str, Mapping[str, bytes]]:
-    _validate_root_children(root)
+    _validate_root_children_before_manifest(root)
     package_bytes = _read_regular_file(root, "capability-package.json")
     package_value = _loads_canonical_json(package_bytes)
     manifest = _validate_package_manifest(package_value)
+    _validate_root_children(root, manifest)
     if expected_manifest is not None and manifest != _snapshot_manifest(expected_manifest):
         raise CapabilityPackagePayloadError("capability package payload is invalid")
 
@@ -332,8 +333,13 @@ def _validate_pinned_payload(
         }
     )
 
-    suite_dir = _open_child_directory(root, "benchmark-suites", descriptors)
-    suite_contents = _validate_benchmark_suite_children(suite_dir, manifest)
+    if "benchmark-suites" in _list_children(root):
+        suite_dir = _open_child_directory(root, "benchmark-suites", descriptors)
+        suite_contents = _validate_benchmark_suite_children(suite_dir, manifest)
+    elif manifest.benchmark_suites:
+        raise CapabilityPackagePayloadError("capability package payload is invalid")
+    else:
+        suite_contents = {}
     contents.update(
         {
             f"benchmark-suites/{name}": content
@@ -362,9 +368,25 @@ def _validate_pinned_payload(
     return manifest, _digest_contents(contents), MappingProxyType(contents)
 
 
-def _validate_root_children(root: _PinnedDirectory) -> None:
+def _validate_root_children_before_manifest(root: _PinnedDirectory) -> None:
     children = _list_children(root)
-    if set(children) != _ROOT_CHILDREN:
+    if (
+        not set(children).issubset(_ROOT_CHILDREN)
+        or "capability-package.json" not in children
+    ):
+        raise CapabilityPackagePayloadError("capability package payload is invalid")
+
+
+def _validate_root_children(
+    root: _PinnedDirectory,
+    manifest: CapabilityPackageManifest,
+) -> None:
+    children = set(_list_children(root))
+    if manifest.benchmark_suites:
+        expected = _ROOT_CHILDREN
+    else:
+        expected = _ROOT_CHILDREN - {"benchmark-suites"}
+    if children not in (_ROOT_CHILDREN, expected):
         raise CapabilityPackagePayloadError("capability package payload is invalid")
 
 

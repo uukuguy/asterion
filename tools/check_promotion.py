@@ -7,6 +7,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -157,6 +158,13 @@ for name in sorted(actual_paths):
     assert 'dci.' + 'agent-runtime/v1' not in text, name
     assert 'dci.' + 'package/v1' not in text, name
     assert 'dci.' + 'assembly/v1' not in text, name
+template = root / 'capability_sdk/templates/minimal'
+assert (template / 'provider.py').is_file()
+template_descriptor = template / 'payload/capability-package.json'
+assert template_descriptor.is_file()
+assert json.loads(template_descriptor.read_text()).get('protocol') == (
+    'asterion.capability-package/v1'
+)
 """
 
 ROOT_EXCLUDED_NAMES = frozenset(
@@ -399,6 +407,24 @@ def _run_quick(copy_root: Path, runner: Runner) -> int:
             "uv",
             "run",
             "asterion",
+            "capability",
+            "init",
+            ".promotion-capability-template",
+            "--package-id",
+            "acme.promotion",
+        ),
+        (
+            "uv",
+            "run",
+            "asterion",
+            "capability",
+            "validate",
+            ".promotion-capability-template/payload",
+        ),
+        (
+            "uv",
+            "run",
+            "asterion",
             "describe",
             "--provider",
             "dci-agent-lite",
@@ -459,6 +485,20 @@ def _run_full(copy_root: Path, venv_root: Path, runner: Runner) -> int:
         (str(python), "-c", WHEEL_CWD_SHIM_SMOKE),
         (str(python), "-c", WHEEL_PROTOCOL_RESOURCE_SMOKE),
         (str(asterion), "list"),
+        (
+            str(asterion),
+            "capability",
+            "init",
+            str(copy_root / ".wheel-capability-template"),
+            "--package-id",
+            "acme.wheel",
+        ),
+        (
+            str(asterion),
+            "capability",
+            "validate",
+            str(copy_root / ".wheel-capability-template/payload"),
+        ),
         (str(asterion), "describe", "--provider", "dci-agent-lite", "--json"),
     )
     for command in installed_commands:
@@ -540,7 +580,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             source_root=Path(__file__).resolve().parents[1], quick=arguments.quick
         )
     except PromotionError as error:
-        print(f"promotion check failed: {error}", file=os.sys.stderr)
+        print(f"promotion check failed: {error}", file=sys.stderr)
         return 1
     mode = "quick" if arguments.quick else "full"
     print(

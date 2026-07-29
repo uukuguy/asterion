@@ -85,6 +85,11 @@ def main(
     assert stdin is not None
     assert stdout is not None
     assert stderr is not None
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if raw_argv[:1] == ["capability"]:
+        from asterion.cli_capability import main as capability_main
+
+        return capability_main(raw_argv[1:], stdout=stdout, stderr=stderr)
     registry = (
         default_runtime_factory_registry()
         if runtime_factories is None
@@ -98,7 +103,7 @@ def main(
     )
     parser = _parser()
     try:
-        args = parser.parse_args(argv)
+        args = parser.parse_args(raw_argv)
         if args.command == "list":
             if args.provider is not None:
                 provider = load_application_provider(
@@ -398,6 +403,9 @@ def _select_application_assembly(
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="asterion")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    from asterion.cli_capability import add_capability_parser
+
+    add_capability_parser(subparsers)
     list_command = subparsers.add_parser("list")
     list_command.add_argument("--provider")
     describe = subparsers.add_parser(

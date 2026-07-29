@@ -27,6 +27,10 @@ from asterion.capability_packages.protocol import (
 
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "extensions" / "minimal" / "payload"
+DCI_PAYLOAD_ROOT = (
+    Path(__file__).resolve().parents[1]
+    / "src/asterion/capabilities/dci_research/payload"
+)
 
 
 def _canonical_json(value: object) -> bytes:
@@ -267,6 +271,19 @@ class CapabilityPackagePayloadTests(unittest.TestCase):
 
         self.assertEqual(open_portable_payload(copied).payload_sha256, payload.payload_sha256)
         self.assertEqual(canonical_payload_sha256(copied, manifest), payload.payload_sha256)
+
+    def test_missing_empty_benchmark_suite_directory_matches_wheel_materialization(
+        self,
+    ) -> None:
+        source_payload = open_portable_payload(DCI_PAYLOAD_ROOT)
+        copied = self.root.parent / "dci-wheel-like" / "payload"
+        shutil.copytree(DCI_PAYLOAD_ROOT, copied)
+        (copied / "benchmark-suites").rmdir()
+
+        materialized = open_portable_payload(copied)
+
+        self.assertEqual(materialized.manifest.benchmark_suites, ())
+        self.assertEqual(materialized.payload_sha256, source_payload.payload_sha256)
 
     def test_rejects_declared_closure_violations_with_body_free_errors(self) -> None:
         def add_nested_declared_child(root: Path) -> None:

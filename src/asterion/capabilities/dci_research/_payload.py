@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import stat
 from pathlib import Path
 
@@ -22,11 +23,27 @@ def payload_sha256(root: Path) -> str:
     """Return the canonical location-independent digest for the shipped payload."""
 
     root = Path(root)
-    if {child.name for child in root.iterdir()} != _ROOT_CHILDREN:
+    try:
+        descriptor = _read_regular_file(root / "capability-package.json")
+        manifest = json.loads(descriptor)
+    except Exception:
+        raise ValueError("dci payload is invalid") from None
+    benchmark_suites = manifest.get("benchmark_suites")
+    if not isinstance(benchmark_suites, list):
         raise ValueError("dci payload is invalid")
-    contents = {"capability-package.json": _read_regular_file(root / "capability-package.json")}
+    expected_children = (
+        _ROOT_CHILDREN
+        if benchmark_suites
+        else _ROOT_CHILDREN - {"benchmark-suites"}
+    )
+    children = {child.name for child in root.iterdir()}
+    if children not in (_ROOT_CHILDREN, expected_children):
+        raise ValueError("dci payload is invalid")
+    contents = {"capability-package.json": descriptor}
     for directory_name in ("capabilities", "benchmark-suites", "resources", "conformance"):
         directory = root / directory_name
+        if directory_name == "benchmark-suites" and not directory.exists():
+            continue
         if not _is_regular_directory(directory):
             raise ValueError("dci payload is invalid")
         for child in sorted(directory.iterdir(), key=lambda item: item.name):

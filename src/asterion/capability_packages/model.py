@@ -204,7 +204,6 @@ def _implementation_binding_tuple(
                 raise CapabilityPackageModelError(
                     "capability implementation bindings are invalid"
                 )
-            _validate_implementation(binding.implementation)
             converted.append(binding)
             continue
         if (
