@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-30 03:06. **Session remains active — not a final handoff.**
+> Updated: 2026-07-30 03:43. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -81,8 +81,14 @@
   binds process payloads to host issuers in `286ecd7`. Cancellation kills the
   complete process group, including a TERM-ignoring grandchild. Both runner
   and process tracks passed independent review.
-- The immediate next action is Plan 3 Task 6: the generic benchmark host
-  command and provider-free CLI boundary.
+- Plan 3 Task 6 adds metadata-only application indexing, separates live task
+  implementations from typed plans, and makes the installed benchmark planning
+  command usable through `726d0a8`. Exact DCI application selectors are indexed;
+  execution remains externally authorized. Independent review is clean, `make
+  check` passes 800 Python tests plus all cross-language gates, and promotion is
+  22/22 with provider operations `0`.
+- The immediate next action is Plan 3 Task 7: structural packaging and
+  domain-neutral benchmark boundary closure.
 
 ## Where things stand
 
@@ -133,16 +139,18 @@
   Pyright, Ruff, compileall, and diff-check. Process tests passed repeatedly;
   independent process review also ran `make check` with 779 Python tests and
   all TypeScript, Rust, docs, lint, and wheel gates green.
+- Plan 3 Task 6 focused verification passed 102 benchmark/application tests,
+  Pyright, Ruff, docs, `make check`, and `make promotion-check`; the installed
+  controlled-code plan path loads no capability implementation provider.
 - `dci.agent-runtime/v1` remains only as the deliberate absence-test needle in
   Task 1 scope; no compatibility alias was added.
 - Plan 2 is complete and independently reviewed.
 
 ## Next action
 
-1. Implement Plan 3 Task 6 generic benchmark plan/run/resume CLI commands.
-2. Keep plan provider-free and require explicit execution authorization,
-   source locks, evidence root, and finite case bounds.
-3. Continue the approved generic benchmark subsystem plan task by task.
+1. Complete Plan 3 Task 7 structural benchmark boundary and wheel tests.
+2. Run the final generic subsystem phase gates with provider operations `0`.
+3. Only after Plan 3 closes, begin Plan 4 DCI package migration.
 
 ## Boundaries and ruled-out paths
 
