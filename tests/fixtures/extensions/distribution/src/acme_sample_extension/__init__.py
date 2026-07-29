@@ -1,0 +1,1 @@
+"""Installed capability package fixture."""
