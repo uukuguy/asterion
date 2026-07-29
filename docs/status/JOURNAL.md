@@ -192,3 +192,7 @@
 - 15:22 Established application-assembly protocol with exact capability-package refs [5b17eca]
 - 15:30 Declared assembly ordering semantics in schema and enforced them in Python and TypeScript [c021198]
 - 15:33 Closed protocol Task 4 after ordering semantics fix and clean independent review [c021198]
+- 15:34 Saved live recovery checkpoint after Task 4 review [4ffa499]
+- 15:47 Added closed benchmark and capability-source protocols for safe exact package composition [d82126c]
+- 15:58 Removed registry source kind and cleared Task 5 Pyright findings to close reviewed public contract [7311029]
+- 16:06 Closed protocol Task 5 after all independent review findings were fixed [7311029]

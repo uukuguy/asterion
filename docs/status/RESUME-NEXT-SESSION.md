@@ -1,13 +1,13 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-29 15:33. **Session remains active — not a final handoff.**
+> Updated: 2026-07-29 16:06. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
 - Plan 1 is active in
   `.worktrees/capability-protocol-foundation` on
   `feature/capability-protocol-foundation`.
-- Tasks 1-4 are complete and independently reviewed: runtime identity is
+- Tasks 1-5 are complete and independently reviewed: runtime identity is
   `asterion.agent-runtime/v1`, and the individual capability core is
   `asterion.capability/v1`.
 - Task 2 landed in `92e7113` plus review fixes `0307a0f`; Python and
@@ -19,8 +19,12 @@
 - Task 4 established `asterion.application-assembly/v1`, independently
   ordered `capability_packages`/`capabilities`, exact built-in refs, and
   schema-declared semantic ordering in `5b17eca` plus `c021198`.
-- The immediate next action is Plan 1 Task 5: add benchmark-suite,
-  capability-source, and source-lock protocols under strict TDD.
+- Task 5 added closed benchmark-suite, capability-source, and source-lock
+  protocols in `d82126c`, then removed the prohibited public registry source
+  surface and cleared Pyright findings in `7311029`.
+- The immediate next action is Plan 1 Task 6: prove removal of old protocol
+  identities and make repository, documentation, copied-schema, and
+  installed-wheel gates coherent.
 
 ## Where things stand
 
@@ -34,6 +38,9 @@
   descriptor packaging, and independent review.
 - Task 4 focused verification passed 57 Python tests, 16 TypeScript tests,
   lint, and independent review with no remaining issues.
+- Task 5 focused verification passed 25 Python tests, 19 TypeScript tests,
+  TypeScript build, Pyright, Ruff, and independent review with no remaining
+  issues.
 - The broad docs checker intentionally remains red on stale Markdown imports
   and one renamed local link; Task 6 owns that coherence gate.
 - `dci.agent-runtime/v1` remains only as the deliberate absence-test needle in
@@ -42,11 +49,12 @@
 
 ## Next action
 
-1. Dispatch the Task 5 implementer from
-   `.superpowers/sdd/task-5-brief.md`.
-2. Require failing safe-declarative fixtures before adding benchmark-suite,
-   source, or lock schemas/values in Python and TypeScript.
-3. Run independent task review before advancing to the Task 6 phase gate.
+1. Dispatch the Task 6 implementer from
+   `.superpowers/sdd/task-6-brief.md`.
+2. Add the forbidden old-identity gate before correcting active docs,
+   examples, schema-copy resources, and installed-wheel assertions.
+3. Run the full phase gate and independent task review, then perform a final
+   whole-branch review before advancing to Plan 2.
 
 ## Boundaries and ruled-out paths
 
