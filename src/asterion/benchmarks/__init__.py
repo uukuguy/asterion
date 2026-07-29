@@ -11,6 +11,13 @@ from asterion.benchmarks.model import (
     ResolvedCapability,
     public_plan_dict,
 )
+from asterion.benchmarks.planning import (
+    BenchmarkExecutionAuthorization,
+    BenchmarkPlanningError,
+    create_benchmark_plan,
+    execute_benchmark_plan,
+    render_public_benchmark_plan,
+)
 from asterion.benchmarks.resolution import (
     BenchmarkResolutionError,
     resolve_benchmark_suite,
@@ -21,6 +28,8 @@ from asterion.benchmarks.resolution import (
 __all__ = (
     "ApplicationRef",
     "BenchmarkModelError",
+    "BenchmarkExecutionAuthorization",
+    "BenchmarkPlanningError",
     "BenchmarkTaskImplementation",
     "BenchmarkTaskInvocation",
     "BenchmarkTaskRequest",
@@ -28,7 +37,10 @@ __all__ = (
     "ResolvedBenchmarkPlan",
     "ResolvedBenchmarkTask",
     "ResolvedCapability",
+    "create_benchmark_plan",
+    "execute_benchmark_plan",
     "public_plan_dict",
+    "render_public_benchmark_plan",
     "resolve_benchmark_suite",
     "resolve_benchmark_tasks",
 )
