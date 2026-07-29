@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-29 20:36. **Session remains active — not a final handoff.**
+> Updated: 2026-07-29 21:04. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -45,8 +45,11 @@
 - Plan 2 Task 5 adds metadata-only installed-distribution discovery in
   `7ddd5a3`, then binds declared descriptor ownership and rejects standard-root
   symlink escapes through `a0873b8`.
-- The immediate next action is Plan 2 Task 6: implement the explicit
-  local-directory source and move transitional DCI injection onto it.
+- Plan 2 Task 6 adds explicit local-directory loading and moves transitional
+  DCI through that source in `6fff8bf`, then requires canonical absolute roots
+  and exact scoped-module restoration in `13be67f`.
+- The immediate next action is Plan 2 Task 7: publish the stable capability SDK
+  and provider conformance kit.
 
 ## Where things stand
 
@@ -82,17 +85,19 @@
 - Plan 2 Task 5 passed 9 real-wheel distribution tests and 46 adjacent source
   tests with Pyright/Ruff clean; rebinding and symlink escape probes passed
   independent review.
+- Plan 2 Task 6 passed 81 local/DCI/CLI tests with targeted Pyright/Ruff clean;
+  root-canonicality and module-cleanup probes passed independent review.
 - `dci.agent-runtime/v1` remains only as the deliberate absence-test needle in
   Task 1 scope; no compatibility alias was added.
 - Plans 2-4 remain dependent on completion of the six Plan 1 tasks.
 
 ## Next action
 
-1. Dispatch Plan 2 Task 6 from the approved source plan.
-2. Require explicit-root symlink, escape, factory, identity, and redaction
-   failures before implementing scoped local imports.
-3. Replace the DCI host-injected package object with one explicit
-   local-directory source declaration; never register DCI as built-in.
+1. Dispatch Plan 2 Task 7 from the approved source plan.
+2. Lock the exact public `capability_sdk.__all__` surface and private-import
+   AST gate before adding re-exports or conformance logic.
+3. Run conformance without provider/runtime execution and migrate built-in
+   implementations to public SDK imports only.
 
 ## Boundaries and ruled-out paths
 
