@@ -13,6 +13,7 @@ from asterion.benchmarks.model import (
 )
 from asterion.benchmarks.planning import (
     BenchmarkExecutionAuthorization,
+    BenchmarkExecutionAuthorizer,
     BenchmarkPlanRequest,
     BenchmarkPlanningError,
     create_benchmark_plan,
@@ -29,6 +30,7 @@ __all__ = (
     "ApplicationRef",
     "BenchmarkModelError",
     "BenchmarkExecutionAuthorization",
+    "BenchmarkExecutionAuthorizer",
     "BenchmarkPlanRequest",
     "BenchmarkPlanningError",
     "BenchmarkTaskImplementation",

@@ -4,9 +4,8 @@ import shutil
 import tempfile
 import unittest
 from collections.abc import Sequence
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import overload
+from typing import cast, overload
 from unittest.mock import patch
 
 import asterion.benchmarks as benchmarks
@@ -16,6 +15,7 @@ from asterion.assembly.protocol import AssemblyPlan
 from asterion.benchmarks.model import ApplicationRef, BenchmarkTaskRequest
 from asterion.benchmarks.planning import (
     BenchmarkExecutionAuthorization,
+    BenchmarkExecutionAuthorizer,
     BenchmarkPlanRequest,
     BenchmarkPlanningError,
     create_benchmark_plan,
@@ -40,7 +40,6 @@ OTHER_PACKAGE_REF = CapabilityPackageRef("other.package", "1.0.0")
 SUITE_REF = BenchmarkSuiteRef("example.suite", "1.0.0")
 ALPHA_REF = CapabilityRef("example.alpha", "1.0.0")
 BETA_REF = CapabilityRef("example.beta", "1.0.0")
-NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 class BenchmarkPlanningTests(unittest.TestCase):
@@ -50,11 +49,11 @@ class BenchmarkPlanningTests(unittest.TestCase):
         with fixture_payload(VALID_SUITE) as suite_dir:
             alpha = SpyBenchmarkImplementation()
             beta = SpyBenchmarkImplementation()
-            application = installed_application()
             packages = (
-                other_package(),
                 benchmark_package(suite_dir, alpha=alpha, beta=beta),
+                other_package(),
             )
+            application = installed_application(packages=packages)
             request = BenchmarkPlanRequest(
                 application_ref=APPLICATION_REF,
                 suite_ref=SUITE_REF,
@@ -94,18 +93,20 @@ class BenchmarkPlanningTests(unittest.TestCase):
             execute=False,
         )
         with fixture_payload(VALID_SUITE) as first_dir:
+            packages = (benchmark_package(first_dir), other_package())
             with patch.object(planning, "_new_run_id", return_value="run-fixed"):
                 first = create_benchmark_plan(
                     request,
-                    installed_application(),
-                    (other_package(), benchmark_package(first_dir)),
+                    installed_application(packages=packages),
+                    tuple(reversed(packages)),
                 )
         with fixture_payload(VALID_SUITE) as second_dir:
+            packages = (benchmark_package(second_dir), other_package())
             with patch.object(planning, "_new_run_id", return_value="run-fixed"):
                 second = create_benchmark_plan(
                     request,
-                    installed_application(),
-                    (benchmark_package(second_dir), other_package()),
+                    installed_application(packages=packages),
+                    packages,
                 )
 
         self.assertEqual(
@@ -115,10 +116,10 @@ class BenchmarkPlanningTests(unittest.TestCase):
 
     def test_plan_only_auth_does_not_grant_or_change_authority(self) -> None:
         with fixture_payload(VALID_SUITE) as suite_dir:
-            authorization = issued_authorization(
-                run_id="run-auth-001",
-                case_limit=3,
-            )
+            packages = (benchmark_package(suite_dir), other_package())
+            authorization = HostClaim("trusted")
+            authorizer = SpyAuthorizer("run-auth-001")
+            self.assertIsInstance(authorizer, BenchmarkExecutionAuthorizer)
             request = BenchmarkPlanRequest(
                 application_ref=APPLICATION_REF,
                 suite_ref=SUITE_REF,
@@ -130,35 +131,31 @@ class BenchmarkPlanningTests(unittest.TestCase):
             with patch.object(planning, "_new_run_id", return_value="run-plan-001"):
                 plan = create_benchmark_plan(
                     request,
-                    installed_application(),
-                    (benchmark_package(suite_dir), other_package()),
+                    installed_application(packages=packages),
+                    packages,
+                    authorizer=authorizer,
                 )
 
         self.assertEqual(plan.run_id, "run-plan-001")
         self.assertEqual(plan.case_limit, 3)
         self.assertNotIn("run-auth-001", render_benchmark_plan(plan))
-        self.assertNotIn("nonce", repr(request))
+        self.assertEqual(authorizer.calls, ())
+        self.assertNotIn("trusted", repr(request))
 
-    def test_execute_request_uses_exact_private_authorization_without_invocation(
+    def test_execute_request_uses_injected_authorizer_without_invocation(
         self,
     ) -> None:
-        with self.assertRaisesRegex(TypeError, "host-issued"):
-            BenchmarkExecutionAuthorization(
-                application_ref=APPLICATION_REF,
-                suite_ref=SUITE_REF,
-                run_id="run-auth-001",
-                case_limit=3,
-                issued_at=NOW,
-                expires_at=NOW + timedelta(minutes=5),
-            )
+        self.assertIsInstance(HostClaim("trusted"), BenchmarkExecutionAuthorization)
 
         with fixture_payload(VALID_SUITE) as suite_dir:
             alpha = SpyBenchmarkImplementation()
             beta = SpyBenchmarkImplementation()
-            authorization = issued_authorization(
-                run_id="run-auth-001",
-                case_limit=3,
+            packages = (
+                benchmark_package(suite_dir, alpha=alpha, beta=beta),
+                other_package(),
             )
+            authorization = HostClaim("trusted")
+            authorizer = SpyAuthorizer("run-auth-001")
             request = BenchmarkPlanRequest(
                 application_ref=APPLICATION_REF,
                 suite_ref=SUITE_REF,
@@ -168,7 +165,6 @@ class BenchmarkPlanningTests(unittest.TestCase):
             )
 
             with (
-                patch.object(planning, "_utc_now", return_value=NOW),
                 patch.object(
                     planning,
                     "_new_run_id",
@@ -177,79 +173,98 @@ class BenchmarkPlanningTests(unittest.TestCase):
             ):
                 first = create_benchmark_plan(
                     request,
-                    installed_application(),
-                    (benchmark_package(suite_dir, alpha=alpha, beta=beta), other_package()),
+                    installed_application(packages=packages),
+                    packages,
+                    authorizer=authorizer,
                 )
                 second = create_benchmark_plan(
                     request,
-                    installed_application(),
-                    (other_package(), benchmark_package(suite_dir, alpha=alpha, beta=beta)),
+                    installed_application(packages=packages),
+                    tuple(reversed(packages)),
+                    authorizer=authorizer,
                 )
 
         self.assertEqual(first.run_id, "run-auth-001")
         self.assertEqual(second.run_id, "run-auth-001")
+        self.assertEqual(
+            authorizer.calls,
+            (
+                (authorization, APPLICATION_REF, SUITE_REF, 3),
+                (authorization, APPLICATION_REF, SUITE_REF, 3),
+            ),
+        )
         self.assertFalse(alpha.called)
         self.assertFalse(beta.called)
 
-    def test_rejects_invalid_or_stale_authorization_body_free(self) -> None:
+    def test_execute_request_requires_authorizer_and_redacts_authorizer_failures(
+        self,
+    ) -> None:
         with fixture_payload(VALID_SUITE) as suite_dir:
             packages = (benchmark_package(suite_dir), other_package())
             cases = (
                 (
-                    "forged",
-                    forged_authorization(run_id="run-auth-001", case_limit=3),
-                    3,
+                    "missing authorizer",
+                    HostClaim("trusted"),
+                    None,
                 ),
                 (
-                    "future",
-                    issued_authorization(
-                        run_id="run-auth-002",
-                        case_limit=3,
-                        issued_at=NOW + timedelta(seconds=1),
-                    ),
-                    3,
+                    "missing claim",
+                    None,
+                    SpyAuthorizer("run-auth-001"),
                 ),
                 (
-                    "expired",
-                    issued_authorization(
-                        run_id="run-auth-003",
-                        case_limit=3,
-                        expires_at=NOW - timedelta(seconds=1),
-                    ),
-                    3,
+                    "host rejection",
+                    HostClaim("forged"),
+                    RejectingAuthorizer("SECRET-HOST-AUTH"),
                 ),
                 (
-                    "overlong",
-                    issued_authorization(
-                        run_id="run-auth-004",
-                        case_limit=3,
-                        expires_at=NOW + timedelta(hours=2),
-                    ),
-                    3,
+                    "invalid run id",
+                    HostClaim("trusted"),
+                    SpyAuthorizer("SECRET-run"),
                 ),
                 (
-                    "case mismatch",
-                    issued_authorization(run_id="run-auth-005", case_limit=4),
-                    3,
+                    "hostile authorizer",
+                    HostClaim("trusted"),
+                    HostileAuthorizer("SECRET-HOSTILE-AUTHORIZER"),
                 ),
             )
-            for label, authorization, case_limit in cases:
+            for label, authorization, authorizer in cases:
                 with self.subTest(label):
                     request = BenchmarkPlanRequest(
                         application_ref=APPLICATION_REF,
                         suite_ref=SUITE_REF,
-                        case_limit=case_limit,
+                        case_limit=3,
                         execute=True,
                         authorization=authorization,
                     )
-                    with (
-                        patch.object(planning, "_utc_now", return_value=NOW),
-                        self.assertRaises(BenchmarkPlanningError) as context,
-                    ):
-                        create_benchmark_plan(request, installed_application(), packages)
+                    with self.assertRaises(BenchmarkPlanningError) as context:
+                        create_benchmark_plan(
+                            request,
+                            installed_application(packages=packages),
+                            packages,
+                            authorizer=cast(BenchmarkExecutionAuthorizer | None, authorizer),
+                        )
                     self.assertIsNone(context.exception.__cause__)
                     self.assertTrue(context.exception.__suppress_context__)
                     self.assertNotIn("SECRET", repr(context.exception))
+
+    def test_trusted_authorizer_rejects_plain_caller_claim(self) -> None:
+        with fixture_payload(VALID_SUITE) as suite_dir:
+            packages = (benchmark_package(suite_dir), other_package())
+            request = BenchmarkPlanRequest(
+                application_ref=APPLICATION_REF,
+                suite_ref=SUITE_REF,
+                case_limit=3,
+                execute=True,
+                authorization=object(),
+            )
+            with self.assertRaises(BenchmarkPlanningError):
+                create_benchmark_plan(
+                    request,
+                    installed_application(packages=packages),
+                    packages,
+                    authorizer=SpyAuthorizer("run-auth-001"),
+                )
 
     def test_rejects_request_application_and_package_closure_mismatches(self) -> None:
         with fixture_payload(VALID_SUITE) as suite_dir:
@@ -263,7 +278,7 @@ class BenchmarkPlanningTests(unittest.TestCase):
                         case_limit=None,
                         execute=False,
                     ),
-                    installed_application(),
+                    installed_application(packages=valid_packages),
                     valid_packages,
                 ),
                 (
@@ -274,7 +289,7 @@ class BenchmarkPlanningTests(unittest.TestCase):
                         case_limit=None,
                         execute=False,
                     ),
-                    installed_application(),
+                    installed_application(packages=valid_packages),
                     (benchmark_package(suite_dir),),
                 ),
                 (
@@ -285,7 +300,10 @@ class BenchmarkPlanningTests(unittest.TestCase):
                         case_limit=None,
                         execute=False,
                     ),
-                    installed_application(assembly_package_refs=(PACKAGE_REF,)),
+                    installed_application(
+                        packages=valid_packages,
+                        assembly_package_refs=(PACKAGE_REF,),
+                    ),
                     valid_packages,
                 ),
                 (
@@ -297,6 +315,7 @@ class BenchmarkPlanningTests(unittest.TestCase):
                         execute=False,
                     ),
                     installed_application(
+                        packages=valid_packages,
                         capability_refs=(ALPHA_REF,),
                         capability_manifests=(capability_manifest(ALPHA_REF),),
                     ),
@@ -322,6 +341,7 @@ class BenchmarkPlanningTests(unittest.TestCase):
 
     def test_rejects_case_limits_before_authorization_match(self) -> None:
         with fixture_payload(VALID_SUITE) as suite_dir:
+            packages = (benchmark_package(suite_dir), other_package())
             for case_limit in (0, -1, 11):
                 with self.subTest(case_limit):
                     request = BenchmarkPlanRequest(
@@ -329,27 +349,71 @@ class BenchmarkPlanningTests(unittest.TestCase):
                         suite_ref=SUITE_REF,
                         case_limit=case_limit,
                         execute=True,
-                        authorization=issued_authorization(
-                            run_id="run-auth-001",
-                            case_limit=3,
-                        ),
+                        authorization=HostClaim("trusted"),
                     )
                     with self.assertRaises(BenchmarkPlanningError):
                         create_benchmark_plan(
                             request,
-                            installed_application(),
-                            (benchmark_package(suite_dir), other_package()),
+                            installed_application(packages=packages),
+                            packages,
+                            authorizer=SpyAuthorizer("run-auth-001"),
                         )
+
+    def test_rejects_replacement_packages_not_from_composed_closure(self) -> None:
+        with fixture_payload(VALID_SUITE) as suite_dir:
+            package = benchmark_package(suite_dir)
+            other = other_package()
+            application = installed_application(packages=(package, other))
+            request = BenchmarkPlanRequest(
+                application_ref=APPLICATION_REF,
+                suite_ref=SUITE_REF,
+                case_limit=None,
+                execute=False,
+            )
+            replacements = (
+                (),
+                (replacement_package(package, payload_sha256="c" * 64), other),
+                (replacement_package(package, source_id="changed.source"), other),
+                (
+                    replacement_package(
+                        package,
+                        benchmark_suite_paths=(),
+                    ),
+                    other,
+                ),
+                (
+                    replacement_package(
+                        package,
+                        benchmark_bindings=(),
+                    ),
+                    other,
+                ),
+                (HostilePackageSequence("SECRET-PACKAGE-SEQUENCE"),),
+            )
+            for packages in replacements:
+                with self.subTest(packages=type(packages[0]).__name__ if packages else "empty"):
+                    with self.assertRaises(BenchmarkPlanningError) as context:
+                        create_benchmark_plan(
+                            request,
+                            application,
+                            cast(Sequence[InstalledCapabilityPackage], packages),
+                        )
+                    self.assertNotIn("SECRET", repr(context.exception))
 
     def test_obsolete_execution_api_is_not_exported(self) -> None:
         self.assertFalse(hasattr(planning, "execute_benchmark_plan"))
         self.assertFalse(hasattr(benchmarks, "execute_benchmark_plan"))
         self.assertFalse(hasattr(planning, "render_public_benchmark_plan"))
         self.assertFalse(hasattr(benchmarks, "render_public_benchmark_plan"))
+        self.assertFalse(hasattr(planning, "_issue_benchmark_execution_authorization"))
+        self.assertFalse(hasattr(planning, "_BENCHMARK_AUTHORIZATION_ISSUER"))
+        self.assertFalse(hasattr(planning, "_utc_now"))
+        self.assertFalse(hasattr(planning, "_MAX_AUTHORIZATION_VALIDITY"))
 
 
 def installed_application(
     *,
+    packages: tuple[InstalledCapabilityPackage, ...],
     capability_packages: tuple[CapabilityPackageRef, ...] = (
         PACKAGE_REF,
         OTHER_PACKAGE_REF,
@@ -381,13 +445,13 @@ def installed_application(
         host_events=(),
         host_artifacts=(),
     )
-    application = InstalledApplication(
+    return InstalledApplication(
         application_id=APPLICATION_REF.application_id,
         version=APPLICATION_REF.version,
         assembly_paths=(Path("/private/SECRET-assembly.json"),),
         capability_packages=capability_packages,
         runtime_ids=("python",),
-        installed_packages=(),
+        installed_packages=packages,
         assemblies=(
             InstalledAssembly(
                 runtime_id="python",
@@ -396,12 +460,6 @@ def installed_application(
             ),
         ),
     )
-    object.__setattr__(
-        application,
-        "installed_packages",
-        HostileSequence("SECRET-INSTALLED-PACKAGES"),
-    )
-    return application
 
 
 def capability_manifest(ref: CapabilityRef) -> dict[str, object]:
@@ -460,40 +518,6 @@ def binding(
     )
 
 
-def issued_authorization(
-    *,
-    run_id: str,
-    case_limit: int,
-    issued_at: datetime = NOW,
-    expires_at: datetime = NOW + timedelta(minutes=5),
-) -> BenchmarkExecutionAuthorization:
-    return planning._issue_benchmark_execution_authorization(
-        application_ref=APPLICATION_REF,
-        suite_ref=SUITE_REF,
-        run_id=run_id,
-        case_limit=case_limit,
-        issued_at=issued_at,
-        expires_at=expires_at,
-        issuance_capability=planning._BENCHMARK_AUTHORIZATION_ISSUER,
-    )
-
-
-def forged_authorization(
-    *,
-    run_id: str,
-    case_limit: int,
-) -> BenchmarkExecutionAuthorization:
-    authorization = object.__new__(BenchmarkExecutionAuthorization)
-    object.__setattr__(authorization, "application_ref", APPLICATION_REF)
-    object.__setattr__(authorization, "suite_ref", SUITE_REF)
-    object.__setattr__(authorization, "run_id", run_id)
-    object.__setattr__(authorization, "case_limit", case_limit)
-    object.__setattr__(authorization, "issued_at", NOW)
-    object.__setattr__(authorization, "expires_at", NOW + timedelta(minutes=5))
-    object.__setattr__(authorization, "_issuance_capability", object())
-    return authorization
-
-
 def hostile_application(secret: str) -> InstalledApplication:
     application = object.__new__(InstalledApplication)
     object.__setattr__(application, "application_id", APPLICATION_REF.application_id)
@@ -501,7 +525,26 @@ def hostile_application(secret: str) -> InstalledApplication:
     object.__setattr__(application, "capability_packages", HostileSequence(secret))
     object.__setattr__(application, "runtime_ids", ("python",))
     object.__setattr__(application, "assemblies", ())
+    object.__setattr__(application, "installed_packages", ())
     return application
+
+
+def replacement_package(
+    package: InstalledCapabilityPackage,
+    **overrides: object,
+) -> InstalledCapabilityPackage:
+    values: dict[str, object] = {
+        "package_ref": package.package_ref,
+        "payload_sha256": package.payload_sha256,
+        "source_id": package.source_id,
+        "source_kind": package.source_kind,
+        "catalog_roots": package.catalog_roots,
+        "benchmark_suite_paths": package.benchmark_suite_paths,
+        "implementations": package.implementations,
+        "benchmark_bindings": package.benchmark_bindings,
+    }
+    values.update(overrides)
+    return InstalledCapabilityPackage(**values)  # type: ignore[arg-type]
 
 
 class fixture_payload:
@@ -539,6 +582,91 @@ class SpyBenchmarkImplementation:
 
     def __repr__(self) -> str:
         return "SECRET-IMPLEMENTATION"
+
+
+class HostClaim:
+    def __init__(self, marker: str) -> None:
+        self.marker = marker
+
+    def __repr__(self) -> str:
+        return f"SECRET-CLAIM-{self.marker}"
+
+
+class SpyAuthorizer:
+    def __init__(self, run_id: str) -> None:
+        self.run_id = run_id
+        self.calls: tuple[
+            tuple[
+                BenchmarkExecutionAuthorization,
+                ApplicationRef,
+                BenchmarkSuiteRef,
+                int,
+            ],
+            ...,
+        ] = ()
+
+    def authorize_benchmark_execution(
+        self,
+        authorization: BenchmarkExecutionAuthorization,
+        *,
+        application_ref: ApplicationRef,
+        suite_ref: BenchmarkSuiteRef,
+        case_limit: int,
+    ) -> str:
+        if not isinstance(authorization, HostClaim) or authorization.marker != "trusted":
+            raise RuntimeError("SECRET-UNTRUSTED-CLAIM")
+        self.calls += ((authorization, application_ref, suite_ref, case_limit),)
+        return self.run_id
+
+
+class RejectingAuthorizer:
+    def __init__(self, secret: str) -> None:
+        self.secret = secret
+
+    def authorize_benchmark_execution(
+        self,
+        authorization: BenchmarkExecutionAuthorization,
+        *,
+        application_ref: ApplicationRef,
+        suite_ref: BenchmarkSuiteRef,
+        case_limit: int,
+    ) -> str:
+        del authorization, application_ref, suite_ref, case_limit
+        raise RuntimeError(self.secret)
+
+
+class HostileAuthorizer:
+    def __init__(self, secret: str) -> None:
+        self.secret = secret
+
+    def __getattribute__(self, name: str) -> object:
+        if name == "authorize_benchmark_execution":
+            raise RuntimeError(object.__getattribute__(self, "secret"))
+        return object.__getattribute__(self, name)
+
+
+class HostilePackageSequence(Sequence[InstalledCapabilityPackage]):
+    def __init__(self, secret: str) -> None:
+        self.secret = secret
+
+    def __len__(self) -> int:
+        raise RuntimeError(self.secret)
+
+    @overload
+    def __getitem__(self, index: int) -> InstalledCapabilityPackage: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> Sequence[InstalledCapabilityPackage]: ...
+
+    def __getitem__(
+        self,
+        index: int | slice,
+    ) -> InstalledCapabilityPackage | Sequence[InstalledCapabilityPackage]:
+        del index
+        raise RuntimeError(self.secret)
+
+    def __iter__(self):
+        raise RuntimeError(self.secret)
 
 
 class HostileSequence(Sequence[CapabilityPackageRef]):

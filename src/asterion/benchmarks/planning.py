@@ -7,8 +7,7 @@ import re
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
-from typing import NoReturn
+from typing import NoReturn, Protocol, runtime_checkable
 
 from asterion.applications import InstalledApplication, InstalledAssembly
 from asterion.assembly.protocol import AssemblyPlan
@@ -36,8 +35,6 @@ from asterion.capability_packages.protocol import CapabilitySourceProtocolError
 
 
 _RUN_ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
-_MAX_AUTHORIZATION_VALIDITY = timedelta(minutes=15)
-_BENCHMARK_AUTHORIZATION_ISSUER = object()
 
 
 class BenchmarkPlanningError(ValueError):
@@ -73,32 +70,41 @@ class BenchmarkPlanRequest:
             _fail("benchmark plan request is invalid")
 
 
-@dataclass(frozen=True, init=False, slots=True)
-class BenchmarkExecutionAuthorization:
-    application_ref: ApplicationRef
-    suite_ref: BenchmarkSuiteRef
-    run_id: str
-    case_limit: int
-    issued_at: datetime
-    expires_at: datetime
-    _issuance_capability: object = field(repr=False, compare=False)
+@runtime_checkable
+class BenchmarkExecutionAuthorization(Protocol):
+    """Opaque host-owned benchmark execution authorization claim."""
 
-    def __init__(self, *args: object, **kwargs: object) -> None:
-        del args, kwargs
-        raise TypeError(
-            "benchmark execution authorization must be host-issued"
-        )
+
+@runtime_checkable
+class BenchmarkExecutionAuthorizer(Protocol):
+    """Host-owned service that validates opaque execution authorization claims."""
+
+    def authorize_benchmark_execution(
+        self,
+        authorization: BenchmarkExecutionAuthorization,
+        *,
+        application_ref: ApplicationRef,
+        suite_ref: BenchmarkSuiteRef,
+        case_limit: int,
+    ) -> str: ...
 
 
 def create_benchmark_plan(
     request: BenchmarkPlanRequest,
     application: InstalledApplication,
     packages: Sequence[InstalledCapabilityPackage],
+    *,
+    authorizer: BenchmarkExecutionAuthorizer | None = None,
 ) -> ResolvedBenchmarkPlan:
     """Resolve a benchmark plan without building invocations or self-authorizing."""
 
     try:
-        return _create_benchmark_plan(request, application, packages)
+        return _create_benchmark_plan(
+            request,
+            application,
+            packages,
+            authorizer=authorizer,
+        )
     except BenchmarkPlanningError:
         raise
     except Exception:
@@ -133,47 +139,12 @@ def render_benchmark_plan(plan: ResolvedBenchmarkPlan) -> str:
         _fail("benchmark planning is invalid")
 
 
-def _issue_benchmark_execution_authorization(
-    *,
-    application_ref: ApplicationRef,
-    suite_ref: BenchmarkSuiteRef,
-    run_id: str,
-    case_limit: int,
-    issued_at: datetime,
-    expires_at: datetime,
-    issuance_capability: object,
-) -> BenchmarkExecutionAuthorization:
-    if issuance_capability is not _BENCHMARK_AUTHORIZATION_ISSUER:
-        _fail("benchmark execution authorization is invalid")
-    if (
-        not isinstance(application_ref, ApplicationRef)
-        or not isinstance(suite_ref, BenchmarkSuiteRef)
-        or not _is_run_id(run_id)
-        or type(case_limit) is not int
-        or case_limit < 1
-        or not isinstance(issued_at, datetime)
-        or not isinstance(expires_at, datetime)
-    ):
-        _fail("benchmark execution authorization is invalid")
-    authorization = object.__new__(BenchmarkExecutionAuthorization)
-    object.__setattr__(authorization, "application_ref", application_ref)
-    object.__setattr__(authorization, "suite_ref", suite_ref)
-    object.__setattr__(authorization, "run_id", run_id)
-    object.__setattr__(authorization, "case_limit", case_limit)
-    object.__setattr__(authorization, "issued_at", issued_at)
-    object.__setattr__(authorization, "expires_at", expires_at)
-    object.__setattr__(
-        authorization,
-        "_issuance_capability",
-        _BENCHMARK_AUTHORIZATION_ISSUER,
-    )
-    return authorization
-
-
 def _create_benchmark_plan(
     request: BenchmarkPlanRequest,
     application: InstalledApplication,
     packages: Sequence[InstalledCapabilityPackage],
+    *,
+    authorizer: BenchmarkExecutionAuthorizer | None,
 ) -> ResolvedBenchmarkPlan:
     if not isinstance(request, BenchmarkPlanRequest) or not isinstance(
         application,
@@ -189,7 +160,11 @@ def _create_benchmark_plan(
     try:
         suite = resolve_benchmark_suite(request.suite_ref, package_values)
         case_limit = _case_limit(request.case_limit, suite.default_case_limit)
-        run_id = _authorized_run_id(request, case_limit) if request.execute else _new_run_id()
+        run_id = (
+            _authorized_run_id(request, case_limit, authorizer=authorizer)
+            if request.execute
+            else _new_run_id()
+        )
         tasks = resolve_benchmark_tasks(suite, capabilities, package_values)
         locks = _source_locks(package_values)
         return ResolvedBenchmarkPlan(
@@ -209,30 +184,27 @@ def _create_benchmark_plan(
         _fail("benchmark planning is invalid")
 
 
-def _authorized_run_id(request: BenchmarkPlanRequest, case_limit: int) -> str:
+def _authorized_run_id(
+    request: BenchmarkPlanRequest,
+    case_limit: int,
+    *,
+    authorizer: BenchmarkExecutionAuthorizer | None,
+) -> str:
     authorization = request.authorization
-    if (
-        type(authorization) is not BenchmarkExecutionAuthorization
-        or getattr(authorization, "_issuance_capability", None)
-        is not _BENCHMARK_AUTHORIZATION_ISSUER
-    ):
+    if authorizer is None or authorization is None:
         _fail("benchmark execution authorization is invalid")
-    now = _utc_now()
-    if (
-        authorization.application_ref != request.application_ref
-        or authorization.suite_ref != request.suite_ref
-        or authorization.case_limit != case_limit
-        or not _is_run_id(authorization.run_id)
-        or not _is_utc(authorization.issued_at)
-        or not _is_utc(authorization.expires_at)
-        or not _is_utc(now)
-        or authorization.issued_at > now
-        or authorization.expires_at <= now
-        or authorization.expires_at - authorization.issued_at
-        > _MAX_AUTHORIZATION_VALIDITY
-    ):
+    try:
+        run_id = authorizer.authorize_benchmark_execution(
+            authorization,
+            application_ref=request.application_ref,
+            suite_ref=request.suite_ref,
+            case_limit=case_limit,
+        )
+    except Exception:
         _fail("benchmark execution authorization is invalid")
-    return authorization.run_id
+    if not _is_run_id(run_id):
+        _fail("benchmark execution authorization is invalid")
+    return run_id
 
 
 def _application_ref(application: InstalledApplication) -> ApplicationRef:
@@ -247,15 +219,24 @@ def _application_packages(
     packages: Sequence[InstalledCapabilityPackage],
 ) -> tuple[InstalledCapabilityPackage, ...]:
     package_refs = _package_ref_tuple(application.capability_packages)
-    package_values = _package_tuple(packages)
-    package_map: dict[CapabilityPackageRef, InstalledCapabilityPackage] = {}
-    for package in package_values:
-        if package.package_ref in package_map:
-            _fail("benchmark planning is invalid")
-        package_map[package.package_ref] = package
-    if set(package_map) != set(package_refs):
+    try:
+        composed_values = _package_tuple(application.installed_packages)
+    except Exception:
         _fail("benchmark planning is invalid")
-    return tuple(package_map[package_ref] for package_ref in package_refs)
+    explicit_values = _package_tuple(packages)
+    composed_map = _package_map(composed_values)
+    explicit_map = _package_map(explicit_values)
+    if set(composed_map) != set(package_refs) or set(explicit_map) != set(package_refs):
+        _fail("benchmark planning is invalid")
+    for package_ref in package_refs:
+        composed = composed_map[package_ref]
+        explicit = explicit_map[package_ref]
+        if explicit is not composed and not _same_installed_package_snapshot(
+            explicit,
+            composed,
+        ):
+            _fail("benchmark planning is invalid")
+    return tuple(composed_map[package_ref] for package_ref in package_refs)
 
 
 def _application_assemblies(
@@ -363,6 +344,51 @@ def _package_tuple(
     return package_values
 
 
+def _package_map(
+    packages: Sequence[InstalledCapabilityPackage],
+) -> dict[CapabilityPackageRef, InstalledCapabilityPackage]:
+    result: dict[CapabilityPackageRef, InstalledCapabilityPackage] = {}
+    for package in packages:
+        if package.package_ref in result:
+            _fail("benchmark planning is invalid")
+        result[package.package_ref] = package
+    return result
+
+
+def _same_installed_package_snapshot(
+    left: InstalledCapabilityPackage,
+    right: InstalledCapabilityPackage,
+) -> bool:
+    try:
+        return (
+            left.package_ref == right.package_ref
+            and left.payload_sha256 == right.payload_sha256
+            and left.source_id == right.source_id
+            and left.source_kind == right.source_kind
+            and left.catalog_roots == right.catalog_roots
+            and left.benchmark_suite_paths == right.benchmark_suite_paths
+            and _implementation_binding_refs(left) == _implementation_binding_refs(right)
+            and _benchmark_binding_refs(left) == _benchmark_binding_refs(right)
+        )
+    except Exception:
+        _fail("benchmark planning is invalid")
+
+
+def _implementation_binding_refs(
+    package: InstalledCapabilityPackage,
+) -> tuple[CapabilityRef, ...]:
+    return tuple(binding.capability_ref for binding in package.implementations)
+
+
+def _benchmark_binding_refs(
+    package: InstalledCapabilityPackage,
+) -> tuple[tuple[CapabilityPackageRef, str], ...]:
+    return tuple(
+        (binding.owner_package, binding.binding_id)
+        for binding in package.benchmark_bindings
+    )
+
+
 def _case_limit(value: int | None, maximum: int) -> int:
     selected = maximum if value is None else value
     if type(selected) is not int or selected < 1 or selected > maximum:
@@ -384,16 +410,8 @@ def _new_run_id() -> str:
     return f"run-{uuid.uuid4().hex}"
 
 
-def _utc_now() -> datetime:
-    return datetime.now(UTC)
-
-
 def _is_run_id(value: object) -> bool:
     return type(value) is str and _RUN_ID.fullmatch(value) is not None
-
-
-def _is_utc(value: datetime) -> bool:
-    return isinstance(value, datetime) and value.utcoffset() == timedelta(0)
 
 
 def _package_selector(ref: CapabilityPackageRef) -> str:
