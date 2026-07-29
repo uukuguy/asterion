@@ -1,4 +1,4 @@
-"""Executable package values and exact implementation binding."""
+"""Executable capability values and exact implementation binding."""
 
 from __future__ import annotations
 
@@ -9,20 +9,20 @@ from pathlib import PurePath
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol
 
-from asterion.packages.catalog import PackageRef
+from asterion.capabilities.catalog import CapabilityRef
 from asterion.runtime.host import AgentRuntimeClient, CancellationSignal
 
 if TYPE_CHECKING:
     from asterion.assembly.protocol import AssemblyPlan
 
 
-EXECUTABLE_PACKAGE_KINDS = frozenset(
+EXECUTABLE_CAPABILITY_KINDS = frozenset(
     {"capability", "workflow", "memory", "observability", "evaluation"}
 )
 
 
-class PackageExecutionError(RuntimeError):
-    """Raised when a package cannot execute through its declared boundary."""
+class CapabilityExecutionError(RuntimeError):
+    """Raised when a capability cannot execute through its declared boundary."""
 
 
 class InProcessArtifactPayload:
@@ -39,17 +39,17 @@ class InProcessArtifactPayload:
         if not isinstance(private_value, Mapping) or not isinstance(
             public_projection, Mapping
         ):
-            raise PackageExecutionError("private artifact payload is invalid")
+            raise CapabilityExecutionError("private artifact payload is invalid")
         try:
             frozen_private = _freeze_private_mapping(private_value)
             projected = project_public_value(public_projection)
             if not isinstance(projected, dict):
                 raise TypeError
             frozen_public = _freeze_mapping(projected)
-        except PackageExecutionError:
+        except CapabilityExecutionError:
             raise
         except Exception:
-            raise PackageExecutionError("private artifact payload is invalid") from None
+            raise CapabilityExecutionError("private artifact payload is invalid") from None
         object.__setattr__(self, "_private_value", frozen_private)
         object.__setattr__(self, "_public_projection", frozen_public)
 
@@ -72,8 +72,8 @@ class InProcessArtifactPayload:
 
 
 @dataclass(frozen=True)
-class PackageInvocation:
-    package_ref: PackageRef
+class CapabilityInvocation:
+    capability_ref: CapabilityRef
     manifest: Mapping[str, object]
     run_id: str
     input_text: str
@@ -113,7 +113,7 @@ class PackageInvocation:
 
 
 @dataclass(frozen=True)
-class PackageExecutionResult:
+class CapabilityExecutionResult:
     events: tuple[Mapping[str, object], ...]
     artifacts: tuple[Mapping[str, object], ...]
 
@@ -128,48 +128,54 @@ class PackageExecutionResult:
         )
 
 
-class PackageImplementation(Protocol):
+class CapabilityImplementation(Protocol):
     async def execute(
-        self, invocation: PackageInvocation
-    ) -> PackageExecutionResult: ...
+        self, invocation: CapabilityInvocation
+    ) -> CapabilityExecutionResult: ...
+
+
+@dataclass(frozen=True, slots=True)
+class CapabilityImplementationBinding:
+    capability_ref: CapabilityRef
+    implementation: CapabilityImplementation
 
 
 def validate_implementation_bindings(
     plan: AssemblyPlan,
-    bindings: Iterable[tuple[PackageRef, PackageImplementation]],
-) -> Mapping[PackageRef, PackageImplementation]:
-    """Return complete exact bindings for every executable package."""
+    bindings: Iterable[tuple[CapabilityRef, CapabilityImplementation]],
+) -> Mapping[CapabilityRef, CapabilityImplementation]:
+    """Return complete exact bindings for every executable capability."""
 
-    resolved: dict[PackageRef, PackageImplementation] = {}
+    resolved: dict[CapabilityRef, CapabilityImplementation] = {}
     for ref, implementation in bindings:
         try:
             execute = getattr(implementation, "execute")
         except Exception:
-            raise PackageExecutionError(
-                "package implementation binding is invalid"
+            raise CapabilityExecutionError(
+                "capability implementation binding is invalid"
             ) from None
         if not callable(execute):
-            raise PackageExecutionError(
-                "package implementation binding is invalid"
+            raise CapabilityExecutionError(
+                "capability implementation binding is invalid"
             )
         if ref in resolved:
-            raise PackageExecutionError("package implementation binding is duplicated")
+            raise CapabilityExecutionError("capability implementation binding is duplicated")
         resolved[ref] = implementation
 
     expected = {
-        PackageRef(str(manifest["package_id"]), str(manifest["version"]))
-        for manifest in plan.package_manifests
-        if manifest["kind"] in EXECUTABLE_PACKAGE_KINDS
+        CapabilityRef(str(manifest["capability_id"]), str(manifest["version"]))
+        for manifest in plan.capability_manifests
+        if manifest["kind"] in EXECUTABLE_CAPABILITY_KINDS
     }
     if set(resolved) - expected:
-        raise PackageExecutionError("package implementation binding is unknown")
+        raise CapabilityExecutionError("capability implementation binding is unknown")
     if expected - set(resolved):
-        raise PackageExecutionError("package implementation binding is missing")
+        raise CapabilityExecutionError("capability implementation binding is missing")
     return MappingProxyType(resolved)
 
 
-def validate_package_result(
-    manifest: Mapping[str, object], result: PackageExecutionResult
+def validate_capability_result(
+    manifest: Mapping[str, object], result: CapabilityExecutionResult
 ) -> None:
     """Validate one implementation result against its portable declarations."""
 
@@ -177,30 +183,30 @@ def validate_package_result(
     declared_artifacts = _string_tuple(manifest, "produces_artifacts")
     for event in result.events:
         if event.keys() != {"type", "payload"}:
-            raise PackageExecutionError("package output event is invalid")
+            raise CapabilityExecutionError("capability output event is invalid")
         event_type = event["type"]
         if not isinstance(event_type, str) or event_type not in declared_events:
-            raise PackageExecutionError("package output event is undeclared")
+            raise CapabilityExecutionError("capability output event is undeclared")
         if not isinstance(event["payload"], Mapping):
-            raise PackageExecutionError("package output event is invalid")
+            raise CapabilityExecutionError("capability output event is invalid")
 
     artifact_ids: set[str] = set()
     for artifact in result.artifacts:
         if artifact.keys() != {"artifact_id", "media_type", "value"}:
-            raise PackageExecutionError("package output artifact is invalid")
+            raise CapabilityExecutionError("capability output artifact is invalid")
         artifact_id = artifact["artifact_id"]
         if (
             not isinstance(artifact_id, str)
             or not artifact_id
             or artifact_id in artifact_ids
         ):
-            raise PackageExecutionError("package output artifact identity is invalid")
+            raise CapabilityExecutionError("capability output artifact identity is invalid")
         artifact_ids.add(artifact_id)
         media_type = artifact["media_type"]
         if not isinstance(media_type, str) or media_type not in declared_artifacts:
-            raise PackageExecutionError("package output artifact is undeclared")
+            raise CapabilityExecutionError("capability output artifact is undeclared")
         if not isinstance(artifact["value"], Mapping):
-            raise PackageExecutionError("package output artifact is invalid")
+            raise CapabilityExecutionError("capability output artifact is invalid")
 
 
 def _string_tuple(manifest: Mapping[str, object], field: str) -> tuple[str, ...]:
@@ -208,7 +214,7 @@ def _string_tuple(manifest: Mapping[str, object], field: str) -> tuple[str, ...]
     if not isinstance(values, tuple) or not all(
         isinstance(value, str) for value in values
     ):
-        raise PackageExecutionError("package declaration is invalid")
+        raise CapabilityExecutionError("capability declaration is invalid")
     return values
 
 
@@ -261,7 +267,7 @@ def project_public_value(value: object) -> object:
         projected: dict[str, object] = {}
         for key, item in value.items():
             if type(key) is not str:
-                raise PackageExecutionError(
+                raise CapabilityExecutionError(
                     "artifact public projection is invalid"
                 )
             projected[key] = project_public_value(item)
@@ -272,4 +278,4 @@ def project_public_value(value: object) -> object:
         return value
     if type(value) is float and math.isfinite(value):
         return value
-    raise PackageExecutionError("artifact public projection is invalid")
+    raise CapabilityExecutionError("artifact public projection is invalid")

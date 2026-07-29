@@ -1,19 +1,19 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://dci.local/schemas/packages/v1/package-manifest.schema.json",
-  "title": "DCI Framework Package Manifest v1",
+  "$id": "https://asterion.local/schemas/capabilities/v1/capability-manifest.schema.json",
+  "title": "Asterion Capability Manifest v1",
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "protocol", "package_id", "version", "kind",
+    "protocol", "capability_id", "version", "kind",
     "provides_capabilities", "requires_capabilities", "requires_policies",
     "emits_events", "consumes_events", "produces_artifacts", "consumes_artifacts"
   ],
   "properties": {
-    "protocol": {"const": "dci.package/v1"},
-    "package_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"},
+    "protocol": {"const": "asterion.capability/v1"},
+    "capability_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"},
     "version": {"type": "string", "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$"},
-    "kind": {"enum": ["capability", "workflow", "policy", "memory", "observability", "evaluation"]},
+    "kind": {"enum": ["capability", "workflow", "policy", "memory", "observability", "evaluation", "research"]},
     "provides_capabilities": {"$ref": "#/$defs/edges"},
     "requires_capabilities": {"$ref": "#/$defs/edges"},
     "requires_policies": {"$ref": "#/$defs/edges"},

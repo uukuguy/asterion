@@ -29,10 +29,10 @@ from asterion.applications.product import (
 )
 from asterion.dci.verification import create_dci_product
 from asterion.dci.services import create_local_corpus_service_factory
-from asterion.packages.catalog import PackageRef
-from asterion.packages.execution import (
+from asterion.capabilities.catalog import CapabilityRef
+from asterion.capabilities.execution import (
     InProcessArtifactPayload,
-    PackageExecutionResult,
+    CapabilityExecutionResult,
 )
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
@@ -948,7 +948,7 @@ class AsterionCliTests(unittest.TestCase):
         class PrivateImplementation:
             async def execute(self, invocation):
                 del invocation
-                return PackageExecutionResult(
+                return CapabilityExecutionResult(
                     events=(),
                     artifacts=(
                         {
@@ -992,7 +992,7 @@ class AsterionCliTests(unittest.TestCase):
                         application,
                         implementations=(
                             (
-                                PackageRef("example.research", "1.0.0"),
+                                CapabilityRef("example.research", "1.0.0"),
                                 PrivateImplementation(),
                             ),
                         ),

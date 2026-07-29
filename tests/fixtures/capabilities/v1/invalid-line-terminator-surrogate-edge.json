@@ -1,6 +1,6 @@
 {
-  "protocol": "dci.package/v1",
-  "package_id": "example.surrogate-line",
+  "protocol": "asterion.capability/v1",
+  "capability_id": "example.surrogate-line",
   "version": "1.0.0",
   "kind": "capability",
   "provides_capabilities": ["line\n\uD800"],

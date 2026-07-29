@@ -1,9 +1,9 @@
 {
-  "protocol": "dci.package/v1",
-  "package_id": "dci.research",
+  "protocol": "asterion.capability/v1",
+  "capability_id": "DCI Research",
   "version": "1.0.0",
   "kind": "capability",
-  "provides_capabilities": ["research.local-corpus", "research.local-corpus"],
+  "provides_capabilities": [],
   "requires_capabilities": [],
   "requires_policies": [],
   "emits_events": [],

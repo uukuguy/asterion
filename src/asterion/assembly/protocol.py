@@ -7,11 +7,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
-from asterion.packages.catalog import PackageCatalog, PackageCatalogError, PackageRef
-from asterion.packages.composition import (
-    PackageComposition,
-    PackageCompositionError,
-    compose_packages,
+from asterion.capabilities.catalog import CapabilityCatalog, CapabilityCatalogError, CapabilityRef
+from asterion.capabilities.composition import (
+    CapabilityComposition,
+    CapabilityCompositionError,
+    compose_capabilities,
 )
 from asterion.protocol_ordering import is_sorted_unique_scalar_strings
 from asterion.runtime.protocol import ProtocolError, validate_runtime_manifest
@@ -47,9 +47,9 @@ class AssemblyPlan:
     application_id: str
     version: str
     runtime_id: str
-    package_refs: tuple[PackageRef, ...]
-    package_manifests: tuple[Mapping[str, object], ...]
-    composition: PackageComposition
+    capability_refs: tuple[CapabilityRef, ...]
+    capability_manifests: tuple[Mapping[str, object], ...]
+    composition: CapabilityComposition
     runtime_capabilities: tuple[str, ...]
     host_capabilities: tuple[str, ...]
     host_events: tuple[str, ...]
@@ -111,7 +111,7 @@ def validate_assembly_manifest(value: Mapping[str, object]) -> None:
 def resolve_assembly(
     assembly: Mapping[str, object],
     *,
-    catalog: PackageCatalog,
+    catalog: CapabilityCatalog,
     runtime_manifest: Mapping[str, object],
 ) -> AssemblyPlan:
     """Resolve portable identities and edges into a static composition plan."""
@@ -126,22 +126,22 @@ def resolve_assembly(
 
     raw_packages = assembly["packages"]
     assert isinstance(raw_packages, list)
-    package_refs = tuple(
-        PackageRef(package["package_id"], package["version"])
+    capability_refs = tuple(
+        CapabilityRef(package["package_id"], package["version"])
         for package in raw_packages
         if isinstance(package, Mapping)
         and isinstance(package["package_id"], str)
         and isinstance(package["version"], str)
     )
     try:
-        manifests = catalog.select(package_refs)
-    except PackageCatalogError as error:
+        manifests = catalog.select(capability_refs)
+    except CapabilityCatalogError as error:
         raise AssemblyError("assembly package selection is unavailable") from error
 
     runtime_capabilities = runtime_manifest["capabilities"]
     assert isinstance(runtime_capabilities, list)
     try:
-        composition = compose_packages(
+        composition = compose_capabilities(
             manifests,
             host_capabilities=set(runtime_capabilities)
             | set(_string_edges(assembly, "host_capabilities")),
@@ -149,7 +149,7 @@ def resolve_assembly(
             host_events=set(_string_edges(assembly, "host_events")),
             host_artifacts=set(_string_edges(assembly, "host_artifacts")),
         )
-    except PackageCompositionError as error:
+    except CapabilityCompositionError as error:
         raise AssemblyError("assembly package graph cannot compose") from error
 
     application_id = assembly["application_id"]
@@ -158,15 +158,15 @@ def resolve_assembly(
     assert isinstance(application_id, str)
     assert isinstance(version, str)
     assert isinstance(runtime_id, str)
-    manifests_by_id = {manifest["package_id"]: manifest for manifest in manifests}
+    manifests_by_id = {manifest["capability_id"]: manifest for manifest in manifests}
     return AssemblyPlan(
         application_id=application_id,
         version=version,
         runtime_id=runtime_id,
-        package_refs=package_refs,
-        package_manifests=tuple(
+        capability_refs=capability_refs,
+        capability_manifests=tuple(
             _freeze_mapping(manifests_by_id[package_id])
-            for package_id in composition.package_ids
+            for package_id in composition.capability_ids
         ),
         composition=composition,
         runtime_capabilities=tuple(sorted(runtime_capabilities)),

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from asterion.assembly.protocol import resolve_assembly
 from asterion.capabilities.controlled_code import controlled_code_bindings
-from asterion.packages.catalog import discover_packages
+from asterion.capabilities.catalog import discover_capabilities
 from asterion.runner.application import ApplicationRunError
 from asterion.runner.composed import run_composed_application
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
@@ -64,7 +64,7 @@ def plan():
     assembly = json.loads(ASSEMBLY.read_text())
     return resolve_assembly(
         assembly,
-        catalog=discover_packages((MANIFESTS,)),
+        catalog=discover_capabilities((MANIFESTS,)),
         runtime_manifest=FixtureRuntime.manifest.to_mapping(),
     )
 

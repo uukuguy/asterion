@@ -1,9 +1,9 @@
 {
-  "protocol": "dci.package/v1",
-  "package_id": "DCI Research",
+  "protocol": "asterion.capability/v1",
+  "capability_id": "example.unicode-order",
   "version": "1.0.0",
   "kind": "capability",
-  "provides_capabilities": [],
+  "provides_capabilities": ["\uD800\uDC00", "\uE000"],
   "requires_capabilities": [],
   "requires_policies": [],
   "emits_events": [],

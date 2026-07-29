@@ -7,21 +7,25 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import asterion.packages.catalog as package_catalog
-from asterion.packages.catalog import (
-    PackageCatalogError,
-    PackageRef,
-    discover_packages,
+import asterion.capabilities.catalog as capability_catalog
+from asterion.capabilities.catalog import (
+    CapabilityCatalogError,
+    CapabilityRef,
+    discover_capabilities,
 )
+from asterion.capabilities.protocol import validate_capability_manifest
 
 
-def manifest(package_id: str, *, version: str = "1.0.0") -> dict[str, object]:
+FIXTURES = Path(__file__).parent / "fixtures/capabilities/v1"
+
+
+def manifest(capability_id: str, *, version: str = "1.0.0") -> dict[str, object]:
     return {
-        "protocol": "dci.package/v1",
-        "package_id": package_id,
+        "protocol": "asterion.capability/v1",
+        "capability_id": capability_id,
         "version": version,
         "kind": "capability",
-        "provides_capabilities": [f"{package_id}.provided"],
+        "provides_capabilities": [f"{capability_id}.provided"],
         "requires_capabilities": [],
         "requires_policies": [],
         "emits_events": [],
@@ -41,11 +45,11 @@ def _fd_identity(fd: int) -> tuple[int, int]:
     return value.st_dev, value.st_ino
 
 
-class PackageCatalogTests(unittest.TestCase):
+class CapabilityCatalogTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
         physical_temporary_root = Path(self.temporary_directory.name).resolve()
-        self.root = physical_temporary_root / "packages"
+        self.root = physical_temporary_root / "capabilitys"
         self.root.mkdir()
         self.write_manifest(self.root / "capability.json", manifest("capability.one"))
 
@@ -55,8 +59,35 @@ class PackageCatalogTests(unittest.TestCase):
     def write_manifest(self, path: Path, value: dict[str, object]) -> None:
         path.write_text(json.dumps(value))
 
+    def test_rejects_the_removed_package_identity_and_protocol(self) -> None:
+        valid = manifest("example.research")
+        invalid_values = (
+            {**valid, "package_id": valid["capability_id"]},
+            {**valid, "protocol": "dci.package/v1"},
+        )
+
+        for value in invalid_values:
+            with self.subTest(value=value):
+                self.write_manifest(self.root / "invalid.json", value)
+                with self.assertRaises(CapabilityCatalogError):
+                    discover_capabilities((self.root,))
+
+    def test_valid_capability_fixture_uses_the_asterion_identity(self) -> None:
+        value = json.loads((FIXTURES / "valid-capability.json").read_text())
+
+        validated = validate_capability_manifest(value)
+
+        self.assertEqual(validated["protocol"], "asterion.capability/v1")
+        self.assertEqual(validated["capability_id"], "example.research")
+
+    def test_capability_ref_has_an_exact_selector(self) -> None:
+        self.assertEqual(
+            CapabilityRef("example.research", "1.0.0").selector,
+            "example.research@1.0.0",
+        )
+
     def test_entry_manifest_is_deeply_immutable(self) -> None:
-        catalog = discover_packages((self.root,))
+        catalog = discover_capabilities((self.root,))
         entry = catalog.entries[0]
 
         with self.assertRaises(TypeError):
@@ -67,7 +98,7 @@ class PackageCatalogTests(unittest.TestCase):
             )
 
     def test_selected_manifest_is_fresh(self) -> None:
-        catalog = discover_packages((self.root,))
+        catalog = discover_capabilities((self.root,))
         ref = catalog.entries[0].ref
 
         first: dict[str, object] = catalog.select((ref,))[0]
@@ -85,21 +116,21 @@ class PackageCatalogTests(unittest.TestCase):
         )
 
     def test_duplicate_catalog_roots_are_rejected(self) -> None:
-        with self.assertRaises(PackageCatalogError):
-            discover_packages((self.root, self.root))
+        with self.assertRaises(CapabilityCatalogError):
+            discover_capabilities((self.root, self.root))
 
     def test_symlink_catalog_root_is_rejected(self) -> None:
-        symlink = self.root.parent / "packages-link"
+        symlink = self.root.parent / "capabilitys-link"
         symlink.symlink_to(self.root, target_is_directory=True)
 
-        with self.assertRaises(PackageCatalogError) as caught:
-            discover_packages((symlink,))
+        with self.assertRaises(CapabilityCatalogError) as caught:
+            discover_capabilities((symlink,))
 
         self.assertIn("catalog root is a symlink", str(caught.exception))
 
     def test_intermediate_symlink_catalog_root_is_rejected(self) -> None:
         external_parent = self.root.parent / "external-parent"
-        external_root = external_parent / "packages"
+        external_root = external_parent / "capabilitys"
         external_root.mkdir(parents=True)
         self.write_manifest(
             external_root / "external.json",
@@ -108,16 +139,16 @@ class PackageCatalogTests(unittest.TestCase):
         alias = self.root.parent / "alias"
         alias.symlink_to(external_parent, target_is_directory=True)
 
-        with self.assertRaises(PackageCatalogError) as caught:
-            discover_packages((alias / "packages",))
+        with self.assertRaises(CapabilityCatalogError) as caught:
+            discover_capabilities((alias / "capabilitys",))
 
         self.assertNotIn("sentinel.intermediate-alias", str(caught.exception))
 
     def test_parent_component_catalog_root_is_rejected(self) -> None:
         aliased_root = self.root / ".." / self.root.name
 
-        with self.assertRaises(PackageCatalogError) as caught:
-            discover_packages((aliased_root,))
+        with self.assertRaises(CapabilityCatalogError) as caught:
+            discover_capabilities((aliased_root,))
 
         self.assertEqual(str(caught.exception), f"catalog root is invalid: {aliased_root}")
 
@@ -127,10 +158,10 @@ class PackageCatalogTests(unittest.TestCase):
             os.chdir(self.root)
             for root in (Path("."), Path("")):
                 with self.subTest(root=str(root)):
-                    catalog = discover_packages((root,))
+                    catalog = discover_capabilities((root,))
                     self.assertEqual(
                         tuple(entry.ref for entry in catalog.entries),
-                        (PackageRef("capability.one", "1.0.0"),),
+                        (CapabilityRef("capability.one", "1.0.0"),),
                     )
                     self.assertEqual(
                         catalog.entries[0].source,
@@ -140,14 +171,14 @@ class PackageCatalogTests(unittest.TestCase):
             os.fchdir(current_directory)
             os.close(current_directory)
 
-    def test_symlink_package_document_is_rejected(self) -> None:
+    def test_symlink_capability_document_is_rejected(self) -> None:
         document = self.root / "linked.json"
         document.symlink_to(self.root / "capability.json")
 
-        with self.assertRaises(PackageCatalogError) as caught:
-            discover_packages((self.root,))
+        with self.assertRaises(CapabilityCatalogError) as caught:
+            discover_capabilities((self.root,))
 
-        self.assertIn("package document is a symlink", str(caught.exception))
+        self.assertIn("capability document is a symlink", str(caught.exception))
 
     def test_document_replacement_cannot_open_external_manifest(self) -> None:
         document = self.root / "capability.json"
@@ -198,14 +229,14 @@ class PackageCatalogTests(unittest.TestCase):
             patch.object(Path, "is_symlink", raced_is_symlink),
             patch.object(os, "open", raced_open),
             patch.object(os, "fdopen", guarded_fdopen),
-            self.assertRaises(PackageCatalogError) as caught,
+            self.assertRaises(CapabilityCatalogError) as caught,
         ):
-            discover_packages((self.root,))
+            discover_capabilities((self.root,))
 
         self.assertNotIn("sentinel.external-document", str(caught.exception))
 
     def test_root_replacement_cannot_open_external_manifest(self) -> None:
-        original_root = self.root.parent / "packages-original"
+        original_root = self.root.parent / "capabilitys-original"
         external_root = self.root.parent / "external-root"
         external_root.mkdir()
         external_document = external_root / "external.json"
@@ -258,9 +289,9 @@ class PackageCatalogTests(unittest.TestCase):
             patch.object(Path, "is_symlink", raced_is_symlink),
             patch.object(os, "open", raced_open),
             patch.object(os, "fdopen", guarded_fdopen),
-            self.assertRaises(PackageCatalogError) as caught,
+            self.assertRaises(CapabilityCatalogError) as caught,
         ):
-            discover_packages((self.root,))
+            discover_capabilities((self.root,))
 
         self.assertNotIn("sentinel.external-root", str(caught.exception))
 
@@ -282,13 +313,13 @@ class PackageCatalogTests(unittest.TestCase):
         with (
             patch.object(os, "open", recording_open),
             patch.object(
-                package_catalog,
+                capability_catalog,
                 "_path_from_descriptor",
                 side_effect=KeyboardInterrupt,
             ),
             self.assertRaises(KeyboardInterrupt),
         ):
-            discover_packages((self.root,))
+            discover_capabilities((self.root,))
 
         leaked: list[int] = []
         for descriptor in opened_descriptors:
@@ -303,55 +334,55 @@ class PackageCatalogTests(unittest.TestCase):
     def test_discovery_fails_closed_without_pinned_filesystem_primitives(self) -> None:
         with (
             patch.object(
-                package_catalog,
+                capability_catalog,
                 "_PINNED_DISCOVERY_AVAILABLE",
                 False,
                 create=True,
             ),
-            self.assertRaises(PackageCatalogError) as caught,
+            self.assertRaises(CapabilityCatalogError) as caught,
         ):
-            discover_packages((self.root,))
+            discover_capabilities((self.root,))
 
         self.assertEqual(
             str(caught.exception),
-            "secure package discovery is unavailable",
+            "secure capability discovery is unavailable",
         )
 
-    def test_duplicate_package_identity_is_rejected(self) -> None:
+    def test_duplicate_capability_identity_is_rejected(self) -> None:
         self.write_manifest(
             self.root / "duplicate.json", manifest("capability.one")
         )
 
-        with self.assertRaises(PackageCatalogError):
-            discover_packages((self.root,))
+        with self.assertRaises(CapabilityCatalogError):
+            discover_capabilities((self.root,))
 
     def test_unknown_exact_ref_is_rejected(self) -> None:
-        catalog = discover_packages((self.root,))
+        catalog = discover_capabilities((self.root,))
 
-        with self.assertRaises(PackageCatalogError):
-            catalog.select((PackageRef("capability.unknown", "1.0.0"),))
+        with self.assertRaises(CapabilityCatalogError):
+            catalog.select((CapabilityRef("capability.unknown", "1.0.0"),))
 
     def test_duplicate_selection_is_rejected(self) -> None:
-        catalog = discover_packages((self.root,))
+        catalog = discover_capabilities((self.root,))
         ref = catalog.entries[0].ref
 
-        with self.assertRaises(PackageCatalogError):
+        with self.assertRaises(CapabilityCatalogError):
             catalog.select((ref, ref))
 
     def test_entries_have_stable_source_ordering(self) -> None:
-        other_root = self.root.parent / "other-packages"
+        other_root = self.root.parent / "other-capabilitys"
         other_root.mkdir()
         self.write_manifest(other_root / "z.json", manifest("capability.z"))
         self.write_manifest(self.root / "a.json", manifest("capability.a"))
 
-        catalog = discover_packages((other_root, self.root))
+        catalog = discover_capabilities((other_root, self.root))
 
         self.assertEqual(
             tuple(entry.ref for entry in catalog.entries),
             (
-                PackageRef("capability.a", "1.0.0"),
-                PackageRef("capability.one", "1.0.0"),
-                PackageRef("capability.z", "1.0.0"),
+                CapabilityRef("capability.a", "1.0.0"),
+                CapabilityRef("capability.one", "1.0.0"),
+                CapabilityRef("capability.z", "1.0.0"),
             ),
         )
 

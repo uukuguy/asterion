@@ -1,4 +1,4 @@
-"""Deterministic discovery for portable local framework packages."""
+"""Deterministic discovery for portable local framework capabilities."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 
-from asterion.packages.protocol import PackageProtocolError, validate_package_manifest
+from asterion.capabilities.protocol import CapabilityProtocolError, validate_capability_manifest
 
 if sys.platform == "darwin":
     import fcntl as _fcntl
@@ -21,40 +21,44 @@ else:
     _fcntl = None
 
 
-class PackageCatalogError(ValueError):
-    """Raised when local package discovery or selection is ambiguous or invalid."""
+class CapabilityCatalogError(ValueError):
+    """Raised when local capability discovery or selection is ambiguous or invalid."""
 
 
-@dataclass(frozen=True, order=True)
-class PackageRef:
-    package_id: str
+@dataclass(frozen=True, order=True, slots=True)
+class CapabilityRef:
+    capability_id: str
     version: str
+
+    @property
+    def selector(self) -> str:
+        return f"{self.capability_id}@{self.version}"
 
 
 @dataclass(frozen=True)
 class CatalogEntry:
-    ref: PackageRef
+    ref: CapabilityRef
     source: Path
     manifest: Mapping[str, object]
 
 
 @dataclass(frozen=True)
-class PackageCatalog:
+class CapabilityCatalog:
     entries: tuple[CatalogEntry, ...]
 
     def select(
-        self, refs: Iterable[PackageRef]
+        self, refs: Iterable[CapabilityRef]
     ) -> tuple[dict[str, object], ...]:
-        """Return fresh manifests for exact package identities in stable order."""
+        """Return fresh manifests for exact capability identities in stable order."""
 
         requested = list(refs)
         if len(requested) != len(set(requested)):
-            raise PackageCatalogError("duplicate package selection")
+            raise CapabilityCatalogError("duplicate capability selection")
         entries = {entry.ref: entry for entry in self.entries}
         missing = next((ref for ref in requested if ref not in entries), None)
         if missing is not None:
-            raise PackageCatalogError(
-                f"unknown package identity: {missing.package_id}@{missing.version}"
+            raise CapabilityCatalogError(
+                f"unknown capability identity: {missing.capability_id}@{missing.version}"
             )
         return tuple(
             _thaw_manifest(entries[ref].manifest) for ref in sorted(requested)
@@ -79,20 +83,20 @@ _PINNED_DISCOVERY_AVAILABLE = (
 )
 
 
-def discover_packages(roots: Iterable[Path]) -> PackageCatalog:
+def discover_capabilities(roots: Iterable[Path]) -> CapabilityCatalog:
     """Discover validated direct JSON children under explicit local roots."""
 
     if not _PINNED_DISCOVERY_AVAILABLE:
-        raise PackageCatalogError("secure package discovery is unavailable")
+        raise CapabilityCatalogError("secure capability discovery is unavailable")
 
     entries: list[CatalogEntry] = []
-    identities: set[PackageRef] = set()
+    identities: set[CapabilityRef] = set()
     with _pin_roots(roots) as pinned_roots:
         for root in pinned_roots:
             try:
                 children = sorted(os.listdir(root.fd))
             except OSError as error:
-                raise PackageCatalogError(
+                raise CapabilityCatalogError(
                     f"catalog root is invalid: {root.path}"
                 ) from error
             for name in children:
@@ -102,13 +106,13 @@ def discover_packages(roots: Iterable[Path]) -> PackageCatalog:
                 manifest = _read_manifest(root, name, source)
                 if manifest is None:
                     continue
-                package_id = manifest["package_id"]
+                capability_id = manifest["capability_id"]
                 version = manifest["version"]
-                assert isinstance(package_id, str) and isinstance(version, str)
-                ref = PackageRef(package_id, version)
+                assert isinstance(capability_id, str) and isinstance(version, str)
+                ref = CapabilityRef(capability_id, version)
                 if ref in identities:
-                    raise PackageCatalogError(
-                        f"duplicate package identity: {package_id}@{version}"
+                    raise CapabilityCatalogError(
+                        f"duplicate capability identity: {capability_id}@{version}"
                     )
                 identities.add(ref)
                 entries.append(
@@ -118,7 +122,7 @@ def discover_packages(roots: Iterable[Path]) -> PackageCatalog:
                         manifest=_freeze_mapping(manifest),
                     )
                 )
-    return PackageCatalog(
+    return CapabilityCatalog(
         entries=tuple(sorted(entries, key=lambda entry: (entry.ref, str(entry.source))))
     )
 
@@ -134,11 +138,11 @@ def _pin_roots(roots: Iterable[Path]):
             descriptor = _open_root(root, descriptors)
             details = os.fstat(descriptor)
             if not stat.S_ISDIR(details.st_mode):
-                raise PackageCatalogError(f"catalog root is invalid: {root}")
+                raise CapabilityCatalogError(f"catalog root is invalid: {root}")
             canonical = _path_from_descriptor(descriptor)
             identity = (details.st_dev, details.st_ino)
             if canonical in paths or identity in identities:
-                raise PackageCatalogError(f"duplicate catalog root: {canonical}")
+                raise CapabilityCatalogError(f"duplicate catalog root: {canonical}")
             paths.add(canonical)
             identities.add(identity)
             pinned.append(_PinnedRoot(canonical, descriptor, identity))
@@ -148,7 +152,7 @@ def _pin_roots(roots: Iterable[Path]):
 def _open_root(root: Path, descriptors: ExitStack) -> int:
     components = root.parts[1:] if root.is_absolute() else root.parts
     if ".." in components:
-        raise PackageCatalogError(f"catalog root is invalid: {root}")
+        raise CapabilityCatalogError(f"catalog root is invalid: {root}")
 
     flags = (
         os.O_RDONLY
@@ -196,8 +200,8 @@ def _open_directory(
             and parent_fd is not None
             and _is_symlink_at(parent_fd, name)
         ):
-            raise PackageCatalogError(f"catalog root is a symlink: {root}") from error
-        raise PackageCatalogError(f"catalog root is invalid: {root}") from error
+            raise CapabilityCatalogError(f"catalog root is a symlink: {root}") from error
+        raise CapabilityCatalogError(f"catalog root is invalid: {root}") from error
     descriptors.callback(os.close, descriptor)
     return descriptor
 
@@ -227,11 +231,11 @@ def _path_from_descriptor(descriptor: int) -> Path:
         else:
             raise OSError("unsupported descriptor path")
     except OSError as error:
-        raise PackageCatalogError(
-            "secure package discovery is unavailable"
+        raise CapabilityCatalogError(
+            "secure capability discovery is unavailable"
         ) from error
     if not path.is_absolute():
-        raise PackageCatalogError("secure package discovery is unavailable")
+        raise CapabilityCatalogError("secure capability discovery is unavailable")
     return path
 
 
@@ -243,9 +247,9 @@ def _read_manifest(
     try:
         details = os.stat(name, dir_fd=root.fd, follow_symlinks=False)
     except OSError as error:
-        raise PackageCatalogError(f"package document is invalid: {source}") from error
+        raise CapabilityCatalogError(f"capability document is invalid: {source}") from error
     if stat.S_ISLNK(details.st_mode):
-        raise PackageCatalogError(f"package document is a symlink: {source}")
+        raise CapabilityCatalogError(f"capability document is a symlink: {source}")
     if not stat.S_ISREG(details.st_mode):
         return None
 
@@ -266,20 +270,20 @@ def _read_manifest(
             manifest = json.load(stream)
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         if isinstance(error, OSError) and error.errno == errno.ELOOP:
-            raise PackageCatalogError(
-                f"package document is a symlink: {source}"
+            raise CapabilityCatalogError(
+                f"capability document is a symlink: {source}"
             ) from error
-        raise PackageCatalogError(f"package document is invalid: {source}") from error
+        raise CapabilityCatalogError(f"capability document is invalid: {source}") from error
     finally:
         if descriptor >= 0:
             os.close(descriptor)
 
     if not isinstance(manifest, dict):
-        raise PackageCatalogError(f"package document is invalid: {source}")
+        raise CapabilityCatalogError(f"capability document is invalid: {source}")
     try:
-        validate_package_manifest(manifest)
-    except PackageProtocolError as error:
-        raise PackageCatalogError(f"package document is invalid: {source}") from error
+        validate_capability_manifest(manifest)
+    except CapabilityProtocolError as error:
+        raise CapabilityCatalogError(f"capability document is invalid: {source}") from error
     return manifest
 
 

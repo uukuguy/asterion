@@ -33,8 +33,8 @@ from asterion.applications.selection import (
     select_installed_application,
 )
 from asterion.assembly.protocol import AssemblyError
-from asterion.packages.execution import (
-    PackageExecutionError,
+from asterion.capabilities.execution import (
+    CapabilityExecutionError,
     project_public_value,
 )
 from asterion.runner.application import ApplicationRunError
@@ -187,7 +187,7 @@ def main(
         ApplicationProviderError,
         ApplicationRunError,
         AssemblyError,
-        PackageExecutionError,
+        CapabilityExecutionError,
         RuntimeFactoryError,
         HostServiceRegistryError,
         OSError,

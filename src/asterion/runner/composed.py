@@ -1,4 +1,4 @@
-"""Execute resolved package implementations in deterministic order."""
+"""Execute resolved capability implementations in deterministic order."""
 
 from __future__ import annotations
 
@@ -6,14 +6,14 @@ from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 
 from asterion.assembly.protocol import AssemblyPlan
-from asterion.packages.catalog import PackageRef
-from asterion.packages.execution import (
-    EXECUTABLE_PACKAGE_KINDS,
-    PackageExecutionError,
-    PackageImplementation,
-    PackageInvocation,
+from asterion.capabilities.catalog import CapabilityRef
+from asterion.capabilities.execution import (
+    EXECUTABLE_CAPABILITY_KINDS,
+    CapabilityExecutionError,
+    CapabilityImplementation,
+    CapabilityInvocation,
     validate_implementation_bindings,
-    validate_package_result,
+    validate_capability_result,
 )
 from asterion.runner.application import (
     ApplicationRunError,
@@ -30,7 +30,7 @@ from asterion.runtime.protocol import ProtocolError
 async def run_composed_application(
     plan: AssemblyPlan,
     *,
-    implementations: Iterable[tuple[PackageRef, PackageImplementation]],
+    implementations: Iterable[tuple[CapabilityRef, CapabilityImplementation]],
     runtime: AgentRuntimeClient,
     run_id: str,
     input_text: str,
@@ -39,7 +39,7 @@ async def run_composed_application(
     host_artifacts: tuple[Mapping[str, object], ...] = (),
     signal: CancellationSignal | None = None,
 ) -> ApplicationRunResult:
-    """Run explicitly bound package implementations sequentially."""
+    """Run explicitly bound capability implementations sequentially."""
 
     try:
         host_events_snapshot = tuple(
@@ -63,19 +63,19 @@ async def run_composed_application(
     )
     try:
         bindings = validate_implementation_bindings(plan, implementations)
-    except PackageExecutionError:
-        raise ApplicationRunError("application package binding is invalid") from None
+    except CapabilityExecutionError:
+        raise ApplicationRunError("application capability binding is invalid") from None
 
     events: list[Mapping[str, object]] = []
     artifacts: list[Mapping[str, object]] = []
     artifact_ids: set[str] = set()
-    for manifest in plan.package_manifests:
-        if manifest["kind"] not in EXECUTABLE_PACKAGE_KINDS:
+    for manifest in plan.capability_manifests:
+        if manifest["kind"] not in EXECUTABLE_CAPABILITY_KINDS:
             continue
         if signal is not None and signal.cancelled:
-            raise ApplicationRunError("application package execution was cancelled")
-        package_ref = PackageRef(
-            str(manifest["package_id"]), str(manifest["version"])
+            raise ApplicationRunError("application capability execution was cancelled")
+        capability_ref = CapabilityRef(
+            str(manifest["capability_id"]), str(manifest["version"])
         )
         consumed_events = manifest["consumes_events"]
         consumed_artifacts = manifest["consumes_artifacts"]
@@ -99,8 +99,8 @@ async def run_composed_application(
             for artifact in host_artifacts_snapshot
             if artifact.get("media_type") in consumed_artifacts
         )
-        invocation = PackageInvocation(
-            package_ref=package_ref,
+        invocation = CapabilityInvocation(
+            capability_ref=capability_ref,
             manifest=manifest,
             run_id=run_id,
             input_text=input_text,
@@ -113,18 +113,18 @@ async def run_composed_application(
             signal=signal,
         )
         try:
-            result = await bindings[package_ref].execute(invocation)
-            validate_package_result(manifest, result)
+            result = await bindings[capability_ref].execute(invocation)
+            validate_capability_result(manifest, result)
             for artifact in result.artifacts:
                 artifact_id = artifact["artifact_id"]
                 assert isinstance(artifact_id, str)
                 if artifact_id in artifact_ids:
-                    raise PackageExecutionError(
+                    raise CapabilityExecutionError(
                         "application artifact identity is duplicated"
                     )
                 artifact_ids.add(artifact_id)
         except Exception:
-            raise ApplicationRunError("application package execution failed") from None
+            raise ApplicationRunError("application capability execution failed") from None
         events.extend(result.events)
         artifacts.extend(result.artifacts)
 

@@ -1,6 +1,6 @@
 {
-  "protocol": "dci.package/v1",
-  "package_id": "policy.local-corpus",
+  "protocol": "asterion.capability/v1",
+  "capability_id": "policy.local-corpus",
   "version": "1.0.0",
   "kind": "policy",
   "provides_capabilities": [],

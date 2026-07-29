@@ -8,7 +8,7 @@ from asterion.applications.discovery import (
     list_application_providers,
     load_application_provider,
 )
-from asterion.packages.catalog import PackageRef
+from asterion.capabilities.catalog import CapabilityRef
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -34,9 +34,9 @@ class BuiltinControlledCodeApplicationTests(unittest.TestCase):
         self.assertEqual(
             {ref for ref, _ in application.implementations},
             {
-                PackageRef("evaluation.code-quality", "1.0.0"),
-                PackageRef("observability.execution-audit", "1.0.0"),
-                PackageRef("workflow.code-quality", "1.0.0"),
+                CapabilityRef("evaluation.code-quality", "1.0.0"),
+                CapabilityRef("observability.execution-audit", "1.0.0"),
+                CapabilityRef("workflow.code-quality", "1.0.0"),
             },
         )
         self.assertTrue(application.assembly_paths[0].is_relative_to(provider.resource_root))

@@ -1064,9 +1064,9 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
         validate_installed_provider,
     )
     from asterion.applications.provider import ApplicationProviderError
-    from asterion.packages.catalog import PackageCatalogError, discover_packages
-    from asterion.packages.execution import (
-        PackageExecutionError,
+    from asterion.capabilities.catalog import CapabilityCatalogError, discover_capabilities
+    from asterion.capabilities.execution import (
+        CapabilityExecutionError,
         validate_implementation_bindings,
     )
     from asterion.runtime.defaults import default_runtime_factory_registry
@@ -1146,7 +1146,7 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
                     validate_implementation_bindings(
                         assembly.plan, application.implementations
                     )
-                except (PackageExecutionError, TypeError, ValueError):
+                except (CapabilityExecutionError, TypeError, ValueError):
                     continue
                 identity = package_identity(assembly.path)
                 if identity is not None:
@@ -1163,8 +1163,8 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
         )
     )
     try:
-        manifests = discover_packages(catalog_roots).entries
-    except (OSError, TypeError, ValueError, PackageCatalogError):
+        manifests = discover_capabilities(catalog_roots).entries
+    except (OSError, TypeError, ValueError, CapabilityCatalogError):
         manifests = ()
     try:
         packaged_assemblies = tuple(
@@ -1294,7 +1294,7 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
                 ),
                 _acceptance_check(
                     "packaged-assemblies",
-                    "Packaged assembly inventory is valid",
+                    "Capabilityd assembly inventory is valid",
                     actual=len(packaged_assemblies),
                     expected=6,
                     exact=packaged_assemblies

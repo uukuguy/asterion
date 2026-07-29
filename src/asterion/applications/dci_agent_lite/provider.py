@@ -13,7 +13,7 @@ from asterion.applications.provider import (
 from asterion.capabilities.dci_research import DciLocalResearchImplementation
 from asterion.capabilities.dci_research.complete import complete_dci_bindings
 from asterion.dci.verification import create_dci_product
-from asterion.packages.catalog import PackageRef
+from asterion.capabilities.catalog import CapabilityRef
 
 
 def create_provider() -> InstalledApplicationProvider:
@@ -38,7 +38,7 @@ def create_provider() -> InstalledApplicationProvider:
                 catalog_roots=(capability_root / "manifests",),
                 implementations=(
                     (
-                        PackageRef("dci.research", "1.0.0"),
+                        CapabilityRef("dci.research", "1.0.0"),
                         DciLocalResearchImplementation(),
                     ),
                 ),

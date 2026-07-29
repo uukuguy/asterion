@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Protocol
 
 from asterion.dci.run import DciRunRequest, DciRunResult
-from asterion.packages.execution import PackageExecutionResult
+from asterion.capabilities.execution import CapabilityExecutionResult
 from asterion.runtime.protocol import validate_event_stream
 
 
@@ -26,7 +26,7 @@ class DciRunExecutor(Protocol):
     ) -> DciRunResult: ...
 
 
-def project_dci_run(result: DciRunResult) -> PackageExecutionResult:
+def project_dci_run(result: DciRunResult) -> CapabilityExecutionResult:
     """Project verified native artifacts without exposing answer or diagnostic bodies."""
 
     if result.status != "completed" or result.events[-1].type != "run.completed":
@@ -57,7 +57,7 @@ def project_dci_run(result: DciRunResult) -> PackageExecutionResult:
     if context_policy is not None:
         value["context_policy_artifact_uri"] = "context-policy.json"
         value["context_policy"] = context_policy
-    return PackageExecutionResult(
+    return CapabilityExecutionResult(
         events=(
             {"type": "research.completed", "payload": {"status": "completed"}},
         ),

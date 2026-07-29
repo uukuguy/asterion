@@ -37,7 +37,7 @@ async def run_application(
     host_services: Mapping[str, object],
     signal: CancellationSignal | None = None,
 ) -> ApplicationRunResult:
-    """Run a resolved plan once without discovering packages or services."""
+    """Run a resolved plan once without discovering capabilities or services."""
 
     if runtime.manifest.runtime_id != plan.runtime_id:
         raise ApplicationRunError("application runtime identity does not match")
