@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-30 00:54. **Session remains active — not a final handoff.**
+> Updated: 2026-07-30 01:26. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -69,8 +69,14 @@
   request interface and pure-planning boundary in `3c413ec`, then binds
   execution intent to an injected host authorizer and composed packages in
   `fcdbaf1`.
-- The immediate next action is Plan 3 Task 4: descriptor-bound private
-  evidence storage and compatible resume.
+- Plan 3 Task 4 adds descriptor-bound private benchmark evidence in `aaba158`,
+  then aligns it to the approved `BenchmarkEvidenceStore` runner contract in
+  `29fa698`: stateful `initialize/start_task/append_progress/finish_*`,
+  immutable partial resume, ordered lifecycle, strict JSON, and failed/cancelled
+  run closure.
+- The immediate next action is Plan 3 Task 5: sequential benchmark execution,
+  process-tree cancellation, and runner integration against the approved
+  evidence protocol.
 
 ## Where things stand
 
@@ -114,14 +120,19 @@
 - Plan 2 Task 8 passed its focused adversarial review and the full phase gates:
   `make check` and `make promotion-check` both exited 0, with provider
   operations `0` and full dataset `no`.
+- Plan 3 Task 4 evidence verification passed 46 focused benchmark
+  model/resolution/planning/evidence tests, Pyright, Ruff, compileall, and
+  diff-check after `29fa698`.
 - `dci.agent-runtime/v1` remains only as the deliberate absence-test needle in
   Task 1 scope; no compatibility alias was added.
 - Plan 2 is complete and independently reviewed.
 
 ## Next action
 
-1. Implement Plan 3 Task 4 with descriptor, redaction, and resume RED tests.
-2. Review and close private evidence storage before sequential execution.
+1. Start Plan 3 Task 5 by writing runner boundary RED tests against
+   `BenchmarkEvidenceStore`.
+2. Implement sequential execution and process-tree cancellation without
+   discovery, authorization, retries, persistence, scheduling, or service start.
 3. Continue the approved generic benchmark subsystem plan task by task.
 
 ## Boundaries and ruled-out paths

@@ -270,3 +270,6 @@
 - 00:54 Removed planning-time execution and generic authorization state [3c413ec]
 - 00:54 Injected host authorization and bound plans to composed packages [fcdbaf1]
 - 00:54 Closed generic benchmark Task 3 after independent review passed [fcdbaf1]
+- 00:54 Saved bounded planning recovery boundary before evidence storage [ce17e7c]
+- 01:26 Persisted private benchmark evidence layout with descriptor-safe writes [aaba158]
+- 01:26 Aligned evidence store with runner resume protocol and partial closure [29fa698]
