@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import operator
 import unittest
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -38,6 +39,42 @@ class SentinelImplementation:
 
     def __repr__(self) -> str:
         return "<SECRET-FACTORY locator=/private/provider>"
+
+
+class HostileMetadataKey:
+    def __lt__(self, other: object) -> bool:
+        del other
+        raise RuntimeError("SECRET-COMPARATOR")
+
+    def __str__(self) -> str:
+        return "hostile.key"
+
+
+class HostileMetadata(Mapping[object, object]):
+    def __getitem__(self, key: object) -> object:
+        if key == "distribution_name":
+            raise RuntimeError("SECRET-METADATA-ACCESS")
+        raise KeyError(key)
+
+    def __iter__(self) -> Iterator[object]:
+        yield HostileMetadataKey()
+        yield HostileMetadataKey()
+
+    def __len__(self) -> int:
+        return 2
+
+
+class HostileManifestIterable:
+    def __iter__(self) -> Iterator[CapabilityRef]:
+        raise RuntimeError("SECRET-MANIFEST-ITERATION")
+
+
+class InterruptingManifestIterable:
+    def __init__(self, error: BaseException) -> None:
+        self._error = error
+
+    def __iter__(self) -> Iterator[CapabilityRef]:
+        raise self._error
 
 
 class CandidateTests(unittest.TestCase):
@@ -83,6 +120,21 @@ class CandidateTests(unittest.TestCase):
         message = str(raised.exception)
         self.assertNotIn("remote-registry://SECRET", message)
         self.assertNotIn("SECRET", message)
+
+    def test_candidate_metadata_failures_do_not_iterate_or_leak_arbitrary_bodies(self) -> None:
+        with self.assertRaises(CapabilityPackageModelError) as raised:
+            CapabilityPackageCandidate(
+                package_ref=CapabilityPackageRef("example.package", "1.0.0"),
+                source_id="example.source",
+                source_kind="python-distribution",
+                payload_sha256=None,
+                metadata=cast(Any, HostileMetadata()),
+            )
+
+        message = str(raised.exception)
+        self.assertEqual(message, "capability package metadata is invalid")
+        self.assertNotIn("SECRET-COMPARATOR", message)
+        self.assertNotIn("SECRET-METADATA-ACCESS", message)
 
     def test_candidate_rejects_noncanonical_identity_values_with_body_free_errors(self) -> None:
         cases = (
@@ -210,6 +262,41 @@ class PackageValueTests(unittest.TestCase):
                     )
 
                 self.assertNotIn("SECRET", str(raised.exception))
+
+    def test_payload_manifest_iteration_failures_are_body_free(self) -> None:
+        manifest = CapabilityPackageManifest(
+            package_ref=CapabilityPackageRef("example.package", "1.0.0"),
+            capabilities=cast(Any, HostileManifestIterable()),
+            benchmark_suites=(),
+            resources=(),
+        )
+
+        with self.assertRaises(CapabilityPackageModelError) as raised:
+            PortableCapabilityPayload(
+                manifest=manifest,
+                payload_sha256="c" * 64,
+                resource_root=Path("/private/operator/payload"),
+            )
+
+        message = str(raised.exception)
+        self.assertEqual(message, "capability package manifest is invalid")
+        self.assertNotIn("SECRET-MANIFEST-ITERATION", message)
+
+    def test_payload_manifest_snapshot_preserves_process_interrupts(self) -> None:
+        for error in (KeyboardInterrupt("SECRET-INTERRUPT"), SystemExit("SECRET-EXIT")):
+            manifest = CapabilityPackageManifest(
+                package_ref=CapabilityPackageRef("example.package", "1.0.0"),
+                capabilities=cast(Any, InterruptingManifestIterable(error)),
+                benchmark_suites=(),
+                resources=(),
+            )
+            with self.subTest(error=type(error).__name__):
+                with self.assertRaises(type(error)):
+                    PortableCapabilityPayload(
+                        manifest=manifest,
+                        payload_sha256="c" * 64,
+                        resource_root=Path("/private/operator/payload"),
+                    )
 
     def test_payload_and_installed_package_hide_private_roots_and_implementations(self) -> None:
         manifest = CapabilityPackageManifest(

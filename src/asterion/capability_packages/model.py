@@ -14,7 +14,6 @@ from asterion.capabilities.protocol import CAPABILITY_ID, SEMANTIC_VERSION
 from asterion.capability_packages.protocol import (
     CAPABILITY_PACKAGE_PROTOCOL_VERSION,
     CapabilityPackageManifest,
-    CapabilityPackageProtocolError,
     CapabilityPackageRef,
     validate_capability_package_manifest,
 )
@@ -27,7 +26,7 @@ SOURCE_KINDS = (
     "python-distribution",
     "registry",
 )
-_SAFE_METADATA_KEYS = frozenset({"distribution_name", "distribution_version"})
+_SAFE_METADATA_KEYS = ("distribution_name", "distribution_version")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -141,20 +140,24 @@ def _snapshot_manifest(manifest: CapabilityPackageManifest) -> CapabilityPackage
                 ],
             }
         )
-    except (AttributeError, CapabilityPackageProtocolError, TypeError):
+    except Exception:
         raise CapabilityPackageModelError("capability package manifest is invalid") from None
 
 
 def _safe_metadata(metadata: Mapping[str, object]) -> Mapping[str, str]:
     if not isinstance(metadata, Mapping):
         raise CapabilityPackageModelError("capability package metadata is invalid")
-    return MappingProxyType(
-        {
-            str(key): str(value)
-            for key, value in sorted(metadata.items())
-            if key in _SAFE_METADATA_KEYS
-        }
-    )
+    try:
+        safe_metadata = {}
+        for key in _SAFE_METADATA_KEYS:
+            try:
+                value = metadata[key]
+            except KeyError:
+                continue
+            safe_metadata[key] = str(value)
+    except Exception:
+        raise CapabilityPackageModelError("capability package metadata is invalid") from None
+    return MappingProxyType(safe_metadata)
 
 
 def _path_tuple(paths: Iterable[Path]) -> tuple[Path, ...]:
