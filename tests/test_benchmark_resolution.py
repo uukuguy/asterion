@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tempfile
 import unittest
+import atexit
+from collections.abc import Generator, Sequence
 from pathlib import Path
+from typing import cast
 
 from asterion.benchmarks.model import (
     BenchmarkTaskInvocation,
@@ -36,6 +40,15 @@ OTHER_SUITE_REF = BenchmarkSuiteRef("example.other", "1.0.0")
 ALPHA_REF = CapabilityRef("example.alpha", "1.0.0")
 BETA_REF = CapabilityRef("example.beta", "1.0.0")
 GAMMA_REF = CapabilityRef("example.gamma", "1.0.0")
+TEMPORARY_ROOTS: list[Path] = []
+
+
+def _cleanup_temporary_roots() -> None:
+    for root in TEMPORARY_ROOTS:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+atexit.register(_cleanup_temporary_roots)
 
 
 class BenchmarkResolutionTests(unittest.TestCase):
@@ -79,7 +92,7 @@ class BenchmarkResolutionTests(unittest.TestCase):
                 (
                     "missing suite",
                     SUITE_REF,
-                    (installed_package(Path(tempfile.mkdtemp())),),
+                    (installed_package(empty_suite_dir()),),
                     (),
                 ),
                 (
@@ -108,6 +121,147 @@ class BenchmarkResolutionTests(unittest.TestCase):
                     rendered = repr(context.exception)
                     for sentinel in sentinels:
                         self.assertNotIn(sentinel, rendered)
+
+    def test_rejects_duplicate_package_refs_and_any_duplicate_suite_ref(self) -> None:
+        with fixture_payload(VALID_SUITE) as suite_dir:
+            other_dir = copy_fixture_suite(OTHER_SUITE)
+            other_package_dir = copy_fixture_suite(
+                OTHER_SUITE,
+                owner_package={
+                    "package_id": OTHER_PACKAGE_REF.package_id,
+                    "version": OTHER_PACKAGE_REF.version,
+                },
+            )
+            third_package_ref = CapabilityPackageRef("third.package", "1.0.0")
+            third_package_dir = copy_fixture_suite(
+                OTHER_SUITE,
+                owner_package={
+                    "package_id": third_package_ref.package_id,
+                    "version": third_package_ref.version,
+                },
+            )
+
+            cases = (
+                (
+                    "duplicate package ref",
+                    (
+                        installed_package(suite_dir),
+                        installed_package(other_dir),
+                    ),
+                ),
+                (
+                    "duplicate unselected suite ref across packages",
+                    (
+                        installed_package(suite_dir),
+                        installed_package(
+                            other_package_dir,
+                            package_ref=OTHER_PACKAGE_REF,
+                            benchmark_bindings=(),
+                        ),
+                        installed_package(
+                            third_package_dir,
+                            package_ref=third_package_ref,
+                            benchmark_bindings=(),
+                        ),
+                    ),
+                ),
+                (
+                    "duplicate suite ref in one package across roots",
+                    (
+                        installed_package(
+                            suite_dir,
+                            benchmark_suite_paths=(suite_dir, other_dir, other_dir),
+                        ),
+                    ),
+                ),
+            )
+            for label, packages in cases:
+                with self.subTest(label):
+                    with self.assertRaises(BenchmarkResolutionError):
+                        resolve_benchmark_suite(SUITE_REF, packages)
+
+    def test_rejects_symlink_suite_roots_and_files(self) -> None:
+        with fixture_payload(VALID_SUITE) as suite_dir:
+            symlink_root = suite_dir.parent / "suite-root-link"
+            symlink_file_dir = suite_dir.parent / "suite-file-link-root"
+            symlink_file_dir.mkdir()
+            try:
+                os.symlink(suite_dir, symlink_root)
+                os.symlink(VALID_SUITE, symlink_file_dir / "valid-suite.json")
+            except OSError as error:
+                self.skipTest(f"symlink unavailable: {error}")
+
+            cases = (
+                ("symlink root", symlink_root),
+                ("symlink file", symlink_file_dir),
+            )
+            for label, root in cases:
+                with self.subTest(label):
+                    with self.assertRaises(BenchmarkResolutionError):
+                        resolve_benchmark_suite(
+                            SUITE_REF,
+                            (installed_package(root),),
+                        )
+
+    def test_rejects_invalid_utf8_and_oversized_suite_files_redacted(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            invalid_utf8_dir = Path(temp_dir) / "invalid-utf8"
+            invalid_utf8_dir.mkdir()
+            invalid_utf8_path = invalid_utf8_dir / "SECRET-UTF8.json"
+            invalid_utf8_path.write_bytes(b"\xffSECRET-UTF8")
+
+            oversized_dir = Path(temp_dir) / "oversized"
+            oversized_dir.mkdir()
+            oversized_path = oversized_dir / "SECRET-HUGE.json"
+            oversized_path.write_bytes(
+                VALID_SUITE.read_bytes() + (b" " * (1024 * 1024 + 1))
+            )
+
+            cases = (
+                ("invalid utf8", invalid_utf8_dir, ("SECRET-UTF8",)),
+                ("oversized suite", oversized_dir, ("SECRET-HUGE",)),
+            )
+            for label, root, sentinels in cases:
+                with self.subTest(label):
+                    with self.assertRaises(BenchmarkResolutionError) as context:
+                        resolve_benchmark_suite(
+                            SUITE_REF,
+                            (installed_package(root),),
+                        )
+                    self.assertIsNone(context.exception.__cause__)
+                    self.assertTrue(context.exception.__suppress_context__)
+                    rendered = repr(context.exception)
+                    for sentinel in sentinels:
+                        self.assertNotIn(sentinel, rendered)
+
+    def test_hostile_iterables_and_path_ops_are_redacted(self) -> None:
+        cases = (
+            (
+                "package iterable",
+                lambda: resolve_benchmark_suite(
+                    SUITE_REF,
+                    cast(Sequence[InstalledCapabilityPackage], HostilePackages()),
+                ),
+                ("SECRET-PACKAGE-ITER",),
+            ),
+            (
+                "suite path operation",
+                lambda: resolve_benchmark_suite(
+                    SUITE_REF,
+                    (hostile_installed_package(HostilePath("/private/SECRET-PATH")),),
+                ),
+                ("SECRET-PATH",),
+            ),
+        )
+        for label, action, sentinels in cases:
+            with self.subTest(label):
+                with self.assertRaises(BenchmarkResolutionError) as context:
+                    action()
+                self.assertIsNone(context.exception.__cause__)
+                self.assertTrue(context.exception.__suppress_context__)
+                rendered = repr(context.exception)
+                for sentinel in sentinels:
+                    self.assertNotIn(sentinel, rendered)
 
     def test_resolves_tasks_in_suite_order_independent_of_input_enumeration(
         self,
@@ -147,6 +301,34 @@ class BenchmarkResolutionTests(unittest.TestCase):
             ("example.alpha", "example.beta"),
         )
         self.assertFalse(gamma_spy.called)
+
+    def test_rejects_forged_caller_suite_not_matching_installed_declaration(
+        self,
+    ) -> None:
+        installed_suite = valid_suite_manifest()
+        forged_suite = BenchmarkSuiteManifest(
+            suite_ref=installed_suite.suite_ref,
+            owner_package=installed_suite.owner_package,
+            tasks=(installed_suite.tasks[0],),
+            artifact_media_types=installed_suite.artifact_media_types,
+            default_case_limit=installed_suite.default_case_limit,
+            default_concurrency=installed_suite.default_concurrency,
+        )
+        with fixture_payload(VALID_SUITE) as suite_dir:
+            with self.assertRaises(BenchmarkResolutionError):
+                resolve_benchmark_tasks(
+                    forged_suite,
+                    (resolved_capability(ALPHA_REF), resolved_capability(BETA_REF)),
+                    (
+                        installed_package(
+                            suite_dir,
+                            benchmark_bindings=(
+                                binding("example.alpha", ALPHA_REF),
+                                binding("example.beta", BETA_REF),
+                            ),
+                        ),
+                    ),
+                )
 
     def test_rejects_unselected_or_ambiguous_capabilities(self) -> None:
         suite = valid_suite_manifest()
@@ -284,6 +466,7 @@ def installed_package(
     suite_dir: Path,
     *,
     package_ref: CapabilityPackageRef = PACKAGE_REF,
+    benchmark_suite_paths: tuple[Path, ...] | None = None,
     benchmark_bindings: tuple[BenchmarkTaskBinding, ...] | None = None,
 ) -> InstalledCapabilityPackage:
     return InstalledCapabilityPackage(
@@ -292,7 +475,9 @@ def installed_package(
         source_id=f"{package_ref.package_id}.local-directory",
         source_kind="local-directory",
         catalog_roots=(),
-        benchmark_suite_paths=(suite_dir,),
+        benchmark_suite_paths=benchmark_suite_paths
+        if benchmark_suite_paths is not None
+        else (suite_dir,),
         implementations=(),
         benchmark_bindings=benchmark_bindings
         if benchmark_bindings is not None
@@ -309,7 +494,7 @@ class fixture_payload:
         self._temporary_directory: tempfile.TemporaryDirectory[str] | None = None
 
     def __enter__(self) -> Path:
-        self._temporary_directory = tempfile.TemporaryDirectory()
+        self._temporary_directory = tempfile.TemporaryDirectory(dir=Path.cwd())
         suite_dir = Path(self._temporary_directory.name) / "benchmark-suites"
         suite_dir.mkdir()
         for suite_file in self._suite_files:
@@ -327,13 +512,35 @@ class fixture_payload:
 
 
 def copy_fixture_suite(suite_file: Path, **overrides: object) -> Path:
-    target = tempfile.mkdtemp()
+    target = tempfile.mkdtemp(dir=Path.cwd())
+    TEMPORARY_ROOTS.append(Path(target))
     suite_dir = Path(target) / "benchmark-suites"
     suite_dir.mkdir()
     value = json.loads(suite_file.read_text())
     value.update(overrides)
     (suite_dir / suite_file.name).write_text(json.dumps(value), encoding="utf-8")
     return suite_dir
+
+
+def empty_suite_dir() -> Path:
+    target = tempfile.mkdtemp(dir=Path.cwd())
+    TEMPORARY_ROOTS.append(Path(target))
+    suite_dir = Path(target) / "benchmark-suites"
+    suite_dir.mkdir()
+    return suite_dir
+
+
+def hostile_installed_package(suite_root: Path) -> InstalledCapabilityPackage:
+    package = object.__new__(InstalledCapabilityPackage)
+    object.__setattr__(package, "package_ref", PACKAGE_REF)
+    object.__setattr__(package, "payload_sha256", "a" * 64)
+    object.__setattr__(package, "source_id", "example.package.local-directory")
+    object.__setattr__(package, "source_kind", "local-directory")
+    object.__setattr__(package, "catalog_roots", ())
+    object.__setattr__(package, "benchmark_suite_paths", (suite_root,))
+    object.__setattr__(package, "implementations", ())
+    object.__setattr__(package, "benchmark_bindings", ())
+    return package
 
 
 class SpyBenchmarkImplementation:
@@ -363,6 +570,19 @@ class SpyBenchmarkImplementation:
     def host_services(self) -> None:
         self.forbidden_touches += ("host",)
         raise AssertionError("SECRET-HOST-TOUCHED")
+
+
+class HostilePackages:
+    def __iter__(self) -> object:
+        raise RuntimeError("SECRET-PACKAGE-ITER")
+
+
+class HostilePath(type(Path())):
+    def iterdir(self) -> Generator[Path, None, None]:
+        raise RuntimeError("SECRET-PATH-ITERDIR")
+
+    def __fspath__(self) -> str:
+        raise RuntimeError("SECRET-PATH-FSPATH")
 
 
 if __name__ == "__main__":
