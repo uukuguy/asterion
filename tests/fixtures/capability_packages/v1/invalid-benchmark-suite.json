@@ -1,0 +1,10 @@
+{
+  "protocol": "asterion.capability-package/v1",
+  "package_id": "example.package",
+  "version": "1.0.0",
+  "capabilities": [],
+  "benchmark_suites": [
+    {"suite_id": "example.suite", "version": "1.0.0"}
+  ],
+  "resources": []
+}

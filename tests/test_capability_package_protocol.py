@@ -101,12 +101,18 @@ class CapabilityPackageProtocolTests(unittest.TestCase):
             ],
         )
         self.assertNotIn("payload_sha256", schema["properties"])
+        self.assertEqual(
+            schema["properties"]["benchmark_suites"],
+            {"type": "array", "maxItems": 0},
+        )
+        self.assertNotIn("benchmark_suite_ref", schema["$defs"])
 
     def test_rejects_shared_invalid_fixtures(self) -> None:
         for name in (
             "invalid-duplicate-capability.json",
             "invalid-duplicate-resource.json",
             "invalid-duplicate-resource-id.json",
+            "invalid-benchmark-suite.json",
             "invalid-unknown-field.json",
             "invalid-unsorted-capabilities.json",
             "invalid-unsorted-resources.json",
