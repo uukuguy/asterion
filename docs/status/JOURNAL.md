@@ -184,3 +184,7 @@
 - 14:24 Renamed package core to Asterion capabilities with exact closed protocol [92e7113]
 - 14:38 Aligned TypeScript capability contract and immutable Python validation [0307a0f]
 - 14:41 Closed protocol Task 2 after all independent review findings were fixed [0307a0f]
+- 14:42 Saved live recovery checkpoint after Task 2 review [2a9ce70]
+- 14:53 Defined portable capability-package protocol and built-in descriptors [04e5456]
+- 15:03 Aligned capability-package schema with deferred benchmark-suite support [b4102a5]
+- 15:07 Closed protocol Task 3 after schema alignment and clean independent review [b4102a5]
