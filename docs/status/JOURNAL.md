@@ -180,3 +180,7 @@
 - 14:07 Renamed runtime wire protocol to Asterion identity across contracts and fixtures [d90311e]
 - 14:13 Verified isolated baseline: 536 Python tests plus TypeScript, Rust, lint, docs, and wheel build passed
 - 14:13 Closed protocol Task 1 after clean independent spec and quality review [d90311e]
+- 14:14 Saved live recovery checkpoint after Task 1 review [9fb5498]
+- 14:24 Renamed package core to Asterion capabilities with exact closed protocol [92e7113]
+- 14:38 Aligned TypeScript capability contract and immutable Python validation [0307a0f]
+- 14:41 Closed protocol Task 2 after all independent review findings were fixed [0307a0f]

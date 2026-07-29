@@ -1,17 +1,21 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-29 14:13. **Session remains active — not a final handoff.**
+> Updated: 2026-07-29 14:41. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
 - Plan 1 is active in
   `.worktrees/capability-protocol-foundation` on
   `feature/capability-protocol-foundation`.
-- Task 1 hard-renamed the runtime wire identity to
-  `asterion.agent-runtime/v1` in commit `d90311e`; independent review found
-  no Critical or Important issues.
-- The immediate next action is Plan 1 Task 2: replace individual package
-  terminology and modules with capability terminology under strict TDD.
+- Tasks 1-2 are complete and independently reviewed: runtime identity is
+  `asterion.agent-runtime/v1`, and the individual capability core is
+  `asterion.capability/v1`.
+- Task 2 landed in `92e7113` plus review fixes `0307a0f`; Python and
+  TypeScript capability contracts agree and no old executable package core
+  remains.
+- The immediate next action is Plan 1 Task 3: add the portable
+  capability-package protocol, immutable values, fixtures, and built-in
+  descriptors under strict TDD.
 
 ## Where things stand
 
@@ -19,17 +23,21 @@
   and wheel build.
 - Task 1 GREEN verification passed 9 focused Python tests, 14 TypeScript tests,
   and 537 full Python tests.
+- Task 2 focused verification passed 47 Python tests, 15 TypeScript tests,
+  example imports, and lint; independent re-review found no remaining issues.
+- The broad docs checker intentionally remains red on stale Markdown imports
+  and one renamed local link; Task 6 owns that coherence gate.
 - `dci.agent-runtime/v1` remains only as the deliberate absence-test needle in
   Task 1 scope; no compatibility alias was added.
 - Plans 2-4 remain dependent on completion of the six Plan 1 tasks.
 
 ## Next action
 
-1. Dispatch the Task 2 implementer from
-   `.superpowers/sdd/task-2-brief.md`.
-2. Require the planned failing capability tests before deleting or renaming
-   production package modules.
-3. Run independent task review before advancing to Task 3.
+1. Dispatch the Task 3 implementer from
+   `.superpowers/sdd/task-3-brief.md`.
+2. Require closed-schema and forbidden-authority tests before creating
+   production capability-package values or descriptors.
+3. Run independent task review before advancing to Task 4.
 
 ## Boundaries and ruled-out paths
 
