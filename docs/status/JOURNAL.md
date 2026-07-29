@@ -196,3 +196,8 @@
 - 15:47 Added closed benchmark and capability-source protocols for safe exact package composition [d82126c]
 - 15:58 Removed registry source kind and cleared Task 5 Pyright findings to close reviewed public contract [7311029]
 - 16:06 Closed protocol Task 5 after all independent review findings were fixed [7311029]
+- 16:06 Saved Task 5 recovery boundary so autonomous execution resumes at final coherence gate [a54b3d0]
+- 16:23 Enforced active Asterion protocol gates to block removed IDs [d905d79]
+- 16:45 Closed protocol review gaps with narrower scans and complete wheel inventory [a2b2d97]
+- 16:54 Isolated boundary scan fixtures to avoid touching user worktree files [e3b1ebd]
+- 16:59 Closed protocol Task 6 after full gates and independent review passed [e3b1ebd]

@@ -1,13 +1,13 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-29 16:06. **Session remains active — not a final handoff.**
+> Updated: 2026-07-29 16:59. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
 - Plan 1 is active in
   `.worktrees/capability-protocol-foundation` on
   `feature/capability-protocol-foundation`.
-- Tasks 1-5 are complete and independently reviewed: runtime identity is
+- All six Plan 1 tasks are complete and independently reviewed: runtime identity is
   `asterion.agent-runtime/v1`, and the individual capability core is
   `asterion.capability/v1`.
 - Task 2 landed in `92e7113` plus review fixes `0307a0f`; Python and
@@ -22,9 +22,11 @@
 - Task 5 added closed benchmark-suite, capability-source, and source-lock
   protocols in `d82126c`, then removed the prohibited public registry source
   surface and cleared Pyright findings in `7311029`.
-- The immediate next action is Plan 1 Task 6: prove removal of old protocol
-  identities and make repository, documentation, copied-schema, and
-  installed-wheel gates coherent.
+- Task 6 added active-surface old-identity rejection and complete installed
+  wheel resource inventory checks in `d905d79`, strengthened exclusions and
+  wheel coverage in `a2b2d97`, and isolated boundary fixtures in `e3b1ebd`.
+- The immediate next action is the required final whole-branch review for
+  Plan 1, followed by its final verification checkpoint before Plan 2.
 
 ## Where things stand
 
@@ -41,20 +43,19 @@
 - Task 5 focused verification passed 25 Python tests, 19 TypeScript tests,
   TypeScript build, Pyright, Ruff, and independent review with no remaining
   issues.
-- The broad docs checker intentionally remains red on stale Markdown imports
-  and one renamed local link; Task 6 owns that coherence gate.
+- Task 6 verification passed 574 Python tests, `make check`, and all 20
+  provider-free promotion commands; docs, TypeScript, Rust, and wheel build
+  are green with provider operations `0` and full dataset `no`.
 - `dci.agent-runtime/v1` remains only as the deliberate absence-test needle in
   Task 1 scope; no compatibility alias was added.
 - Plans 2-4 remain dependent on completion of the six Plan 1 tasks.
 
 ## Next action
 
-1. Dispatch the Task 6 implementer from
-   `.superpowers/sdd/task-6-brief.md`.
-2. Add the forbidden old-identity gate before correcting active docs,
-   examples, schema-copy resources, and installed-wheel assertions.
-3. Run the full phase gate and independent task review, then perform a final
-   whole-branch review before advancing to Plan 2.
+1. Run the required final whole-branch review for `a0302ec..e3b1ebd`.
+2. Fix and re-review every Critical or Important finding.
+3. Run final verification and checkpoint Plan 1 before advancing to the
+   capability-package source plan.
 
 ## Boundaries and ruled-out paths
 
