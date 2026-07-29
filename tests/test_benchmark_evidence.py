@@ -50,10 +50,22 @@ class BenchmarkEvidenceTests(unittest.TestCase):
             root = Path(temp_dir) / "evidence"
             old_umask = os.umask(0)
             try:
+                p = plan()
                 store = LocalPrivateBenchmarkEvidenceStore(root)
                 self.assertIsInstance(store, BenchmarkEvidenceStore)
-                store.initialize(plan())
-                store.start_task(plan().tasks[0])
+                store.initialize(p)
+                alpha = BenchmarkTaskResult(
+                    task_id="example.alpha",
+                    status="completed",
+                    case_count=3,
+                    artifact_ids=("artifact.alpha",),
+                )
+                beta = BenchmarkTaskResult(
+                    task_id="example.beta",
+                    status="completed",
+                    case_count=3,
+                )
+                store.start_task(p.tasks[0])
                 store.append_progress(
                     BenchmarkProgressEvent(
                         sequence=1,
@@ -61,37 +73,13 @@ class BenchmarkEvidenceTests(unittest.TestCase):
                         task_id="example.alpha",
                     ),
                 )
-                store.finish_task(
-                    BenchmarkTaskResult(
-                        task_id="example.alpha",
-                        status="completed",
-                        case_count=3,
-                        artifact_ids=("artifact.alpha",),
-                    ),
-                )
-                store.start_task(plan().tasks[1])
-                store.finish_task(
-                    BenchmarkTaskResult(
-                        task_id="example.beta",
-                        status="completed",
-                        case_count=3,
-                    ),
-                )
+                store.finish_task(alpha)
+                store.start_task(p.tasks[1])
+                store.finish_task(beta)
                 store.finish_run(
                     BenchmarkRunResult(
                         status="completed",
-                        tasks=(
-                            BenchmarkTaskResult(
-                                task_id="example.alpha",
-                                status="completed",
-                                case_count=3,
-                            ),
-                            BenchmarkTaskResult(
-                                task_id="example.beta",
-                                status="completed",
-                                case_count=3,
-                            ),
-                        ),
+                        tasks=(alpha, beta),
                     ),
                 )
             finally:
@@ -136,7 +124,8 @@ class BenchmarkEvidenceTests(unittest.TestCase):
 
             root = temp / "evidence"
             store = LocalPrivateBenchmarkEvidenceStore(root)
-            store.initialize(plan())
+            p = plan()
+            store.initialize(p)
             run = root / "runs" / "run-001"
             for path in (run / "manifest.json", run / "progress"):
                 if path.is_dir():
@@ -146,7 +135,7 @@ class BenchmarkEvidenceTests(unittest.TestCase):
                 os.symlink(target, path)
                 with self.subTest(member=path.name):
                     with self.assertRaises(BenchmarkEvidenceError) as context:
-                        store.compatible_completed_tasks(plan())
+                        store.compatible_completed_tasks(p)
                     self.assertNotIn("SECRET", repr(context.exception))
                 path.unlink()
                 if path.name == "progress":
@@ -157,13 +146,14 @@ class BenchmarkEvidenceTests(unittest.TestCase):
             result = run / "result.json"
             result.mkdir()
             with self.assertRaises(BenchmarkEvidenceError):
-                store.compatible_completed_tasks(plan())
+                store.compatible_completed_tasks(p)
 
     def test_atomic_write_rejects_validation_to_replace_race_redacted(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
             root = Path(temp_dir) / "evidence"
             store = LocalPrivateBenchmarkEvidenceStore(root)
-            store.initialize(plan())
+            p = plan()
+            store.initialize(p)
             original_replace = os.replace
 
             def raced_replace(
@@ -212,6 +202,7 @@ class BenchmarkEvidenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
             root = Path(temp_dir) / "evidence"
             store = LocalPrivateBenchmarkEvidenceStore(root)
+            p = plan()
             result = BenchmarkRunResult(
                 status="completed",
                 tasks=(
@@ -227,16 +218,16 @@ class BenchmarkEvidenceTests(unittest.TestCase):
                     ),
                 ),
             )
-            store.initialize(plan())
+            store.initialize(p)
             with self.assertRaises(BenchmarkEvidenceError):
                 store.finish_run(result)
-            for task_result, task in zip(result.tasks, plan().tasks, strict=True):
+            for task_result, task in zip(result.tasks, p.tasks, strict=True):
                 store.start_task(task)
                 store.finish_task(task_result)
             store.finish_run(result)
 
             self.assertEqual(
-                store.compatible_completed_tasks(plan()),
+                store.compatible_completed_tasks(p),
                 frozenset(("example.alpha", "example.beta")),
             )
 
@@ -255,14 +246,15 @@ class BenchmarkEvidenceTests(unittest.TestCase):
             result_path = root / "runs" / "run-001" / "result.json"
             result_path.write_text("{", encoding="utf-8")
             with self.assertRaises(BenchmarkEvidenceError):
-                store.compatible_completed_tasks(plan())
+                store.compatible_completed_tasks(p)
 
     def test_compatible_resume_returns_only_completed_ordered_prefix(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
             root = Path(temp_dir) / "evidence"
             store = LocalPrivateBenchmarkEvidenceStore(root)
-            store.initialize(plan())
-            store.start_task(plan().tasks[0])
+            p = plan()
+            store.initialize(p)
+            store.start_task(p.tasks[0])
             store.finish_task(
                 BenchmarkTaskResult(
                     task_id="example.alpha",
@@ -271,19 +263,19 @@ class BenchmarkEvidenceTests(unittest.TestCase):
                 )
             )
             self.assertEqual(
-                store.compatible_completed_tasks(plan()),
+                store.compatible_completed_tasks(p),
                 frozenset(("example.alpha",)),
             )
 
             resumed = LocalPrivateBenchmarkEvidenceStore(root)
-            resumed.initialize(plan())
+            resumed.initialize(p)
             self.assertEqual(
-                resumed.compatible_completed_tasks(plan()),
+                resumed.compatible_completed_tasks(p),
                 frozenset(("example.alpha",)),
             )
             with self.assertRaises(BenchmarkEvidenceError):
-                resumed.start_task(plan().tasks[0])
-            resumed.start_task(plan().tasks[1])
+                resumed.start_task(p.tasks[0])
+            resumed.start_task(p.tasks[1])
             resumed.finish_task(
                 BenchmarkTaskResult(
                     task_id="example.beta",
@@ -292,16 +284,212 @@ class BenchmarkEvidenceTests(unittest.TestCase):
                 )
             )
 
+    def test_compatible_completed_task_results_returns_exact_persisted_prefix(self) -> None:
+        from asterion.benchmarks import BenchmarkEvidenceStore as ExportedStore
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            root = Path(temp_dir) / "evidence"
+            p = plan()
+            store = LocalPrivateBenchmarkEvidenceStore(root)
+            self.assertIs(BenchmarkEvidenceStore, ExportedStore)
+            self.assertIsInstance(store, BenchmarkEvidenceStore)
+            store.initialize(p)
+
+            alpha = BenchmarkTaskResult(
+                task_id="example.alpha",
+                status="completed",
+                case_count=2,
+                artifact_ids=("artifact.alpha",),
+            )
+            beta = BenchmarkTaskResult(
+                task_id="example.beta",
+                status="completed",
+                case_count=1,
+                artifact_ids=("artifact.beta",),
+            )
+            store.start_task(p.tasks[0])
+            store.finish_task(alpha)
+            self.assertEqual(
+                store.compatible_completed_task_results(p),
+                (alpha,),
+            )
+
+            store.start_task(p.tasks[1])
+            store.finish_task(beta)
+            store.finish_run(BenchmarkRunResult(status="completed", tasks=(alpha, beta)))
+
+            resumed = LocalPrivateBenchmarkEvidenceStore(root)
+            self.assertEqual(
+                resumed.compatible_completed_task_results(p),
+                (alpha, beta),
+            )
+
+    def test_initialize_existing_run_rejects_before_repairing_missing_or_corrupt_closure(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            for name, manifest_body in (
+                ("missing", None),
+                ("corrupt", "{"),
+            ):
+                with self.subTest(name=name):
+                    root = Path(temp_dir) / name
+                    run = root / "runs" / "run-001"
+                    run.mkdir(parents=True, mode=0o700)
+                    if manifest_body is not None:
+                        (run / "manifest.json").write_text(
+                            manifest_body,
+                            encoding="utf-8",
+                        )
+
+                    with self.assertRaises(BenchmarkEvidenceError):
+                        LocalPrivateBenchmarkEvidenceStore(root).initialize(plan())
+
+                    self.assertFalse((run / "progress").exists())
+                    self.assertFalse((run / "tasks").exists())
+                    if manifest_body is None:
+                        self.assertFalse((run / "manifest.json").exists())
+
+    def test_compatible_resume_rejects_existing_run_with_bad_or_missing_members(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            p = plan()
+            root = Path(temp_dir) / "evidence"
+            store = LocalPrivateBenchmarkEvidenceStore(root)
+            store.initialize(p)
+
+            cases = (
+                ("missing-progress", lambda run: (run / "progress").rmdir()),
+                (
+                    "gapped-progress",
+                    lambda run: (run / "progress" / "000002.json").write_text(
+                        '{"sequence":2,"status":"run.gapped"}',
+                        encoding="utf-8",
+                    ),
+                ),
+                (
+                    "unknown-task-progress",
+                    lambda run: (run / "progress" / "000001.json").write_text(
+                        '{"sequence":1,"status":"task.started","task_id":"example.missing"}',
+                        encoding="utf-8",
+                    ),
+                ),
+            )
+            for case_name, mutate in cases:
+                with self.subTest(case=case_name):
+                    copy_root = Path(temp_dir) / f"copy-{case_name}"
+                    copy_store = LocalPrivateBenchmarkEvidenceStore(copy_root)
+                    copy_store.initialize(p)
+                    copy_run = copy_root / "runs" / "run-001"
+                    mutate(copy_run)
+                    with self.assertRaises(BenchmarkEvidenceError):
+                        copy_store.compatible_completed_tasks(p)
+
+    def test_finish_run_rejects_persisted_task_result_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            root = Path(temp_dir) / "evidence"
+            p = plan()
+            store = LocalPrivateBenchmarkEvidenceStore(root)
+            store.initialize(p)
+            alpha = BenchmarkTaskResult(
+                task_id="example.alpha",
+                status="completed",
+                case_count=1,
+                artifact_ids=("artifact.alpha",),
+            )
+            beta = BenchmarkTaskResult(
+                task_id="example.beta",
+                status="completed",
+                case_count=1,
+            )
+            store.start_task(p.tasks[0])
+            store.finish_task(alpha)
+            result_path = root / "runs" / "run-001" / "tasks" / "example.alpha" / "result.json"
+            result_path.write_text(
+                '{"artifact_ids":[],"case_count":1,"status":"completed","task_id":"example.alpha"}',
+                encoding="utf-8",
+            )
+            store.start_task(p.tasks[1])
+            store.finish_task(beta)
+
+            with self.assertRaises(BenchmarkEvidenceError):
+                store.finish_run(BenchmarkRunResult(status="completed", tasks=(alpha, beta)))
+
+    def test_append_progress_is_live_and_bound_to_active_task(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            root = Path(temp_dir) / "evidence"
+            p = plan()
+            store = LocalPrivateBenchmarkEvidenceStore(root)
+            store.initialize(p)
+            with self.assertRaises(BenchmarkEvidenceError):
+                store.append_progress(
+                    BenchmarkProgressEvent(
+                        sequence=1,
+                        status="task.started",
+                        task_id="example.alpha",
+                    )
+                )
+            store.append_progress(BenchmarkProgressEvent(sequence=1, status="run.started"))
+            store.start_task(p.tasks[0])
+            with self.assertRaises(BenchmarkEvidenceError):
+                store.append_progress(
+                    BenchmarkProgressEvent(
+                        sequence=2,
+                        status="task.started",
+                        task_id="example.beta",
+                    )
+                )
+            store.append_progress(BenchmarkProgressEvent(sequence=2, status="task.running"))
+            store.append_progress(
+                BenchmarkProgressEvent(
+                    sequence=3,
+                    status="task.running",
+                    task_id="example.alpha",
+                )
+            )
+            alpha = BenchmarkTaskResult(
+                task_id="example.alpha",
+                status="completed",
+                case_count=1,
+            )
+            beta = BenchmarkTaskResult(
+                task_id="example.beta",
+                status="completed",
+                case_count=1,
+            )
+            store.finish_task(alpha)
+            store.start_task(p.tasks[1])
+            store.finish_task(beta)
+            store.finish_run(BenchmarkRunResult(status="completed", tasks=(alpha, beta)))
+
+            with self.assertRaises(BenchmarkEvidenceError):
+                store.append_progress(BenchmarkProgressEvent(sequence=4, status="run.done"))
+
+    def test_start_task_requires_exact_planned_task_object(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            root = Path(temp_dir) / "evidence"
+            p = plan()
+            forged_same_identity = plan().tasks[0]
+            store = LocalPrivateBenchmarkEvidenceStore(root)
+            store.initialize(p)
+
+            with self.assertRaises(BenchmarkEvidenceError):
+                store.start_task(forged_same_identity)
+
+            store.start_task(p.tasks[0])
+
     def test_task_lifecycle_is_once_ordered_and_bounded(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
             root = Path(temp_dir) / "evidence"
             store = LocalPrivateBenchmarkEvidenceStore(root)
-            store.initialize(plan())
+            p = plan()
+            store.initialize(p)
             with self.assertRaises(BenchmarkEvidenceError):
-                store.start_task(plan().tasks[1])
-            store.start_task(plan().tasks[0])
+                store.start_task(p.tasks[1])
+            store.start_task(p.tasks[0])
             with self.assertRaises(BenchmarkEvidenceError):
-                store.start_task(plan().tasks[1])
+                store.start_task(p.tasks[1])
             with self.assertRaises(BenchmarkEvidenceError):
                 store.finish_task(
                     BenchmarkTaskResult(
@@ -330,7 +518,8 @@ class BenchmarkEvidenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
             root = Path(temp_dir) / "evidence"
             store = LocalPrivateBenchmarkEvidenceStore(root)
-            store.initialize(plan())
+            p = plan()
+            store.initialize(p)
             store.append_progress(BenchmarkProgressEvent(sequence=1, status="run.started"))
             with self.assertRaises(BenchmarkEvidenceError):
                 store.append_progress(BenchmarkProgressEvent(sequence=1, status="run.repeat"))
@@ -371,8 +560,9 @@ class BenchmarkEvidenceTests(unittest.TestCase):
                 with self.subTest(status=result.status, tasks=len(result.tasks)):
                     root = Path(temp_dir) / f"evidence-{result.status}-{len(result.tasks)}"
                     store = LocalPrivateBenchmarkEvidenceStore(root)
-                    store.initialize(plan())
-                    for task_result, task in zip(result.tasks, plan().tasks, strict=False):
+                    p = plan()
+                    store.initialize(p)
+                    for task_result, task in zip(result.tasks, p.tasks, strict=False):
                         store.start_task(task)
                         store.finish_task(task_result)
                     store.finish_run(result)
@@ -396,8 +586,9 @@ class BenchmarkEvidenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
             root = Path(temp_dir) / "evidence"
             store = LocalPrivateBenchmarkEvidenceStore(root)
-            store.initialize(plan())
-            store.start_task(plan().tasks[0])
+            p = plan()
+            store.initialize(p)
+            store.start_task(p.tasks[0])
             store.finish_task(
                 BenchmarkTaskResult(
                     task_id="example.alpha",
@@ -408,13 +599,14 @@ class BenchmarkEvidenceTests(unittest.TestCase):
 
             resumed = LocalPrivateBenchmarkEvidenceStore(root)
             with self.assertRaises(BenchmarkEvidenceError):
-                resumed.compatible_completed_tasks(plan())
+                resumed.compatible_completed_tasks(p)
 
     def test_strict_json_rejects_duplicate_unknown_missing_and_nonfinite_values(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
             root = Path(temp_dir) / "evidence"
             store = LocalPrivateBenchmarkEvidenceStore(root)
-            store.initialize(plan())
+            p = plan()
+            store.initialize(p)
             run = root / "runs" / "run-001"
             cases = (
                 '{"status":"completed","status":"completed","tasks":[]}',
@@ -426,13 +618,14 @@ class BenchmarkEvidenceTests(unittest.TestCase):
                 with self.subTest(body=body):
                     (run / "result.json").write_text(body, encoding="utf-8")
                     with self.assertRaises(BenchmarkEvidenceError):
-                        store.compatible_completed_tasks(plan())
+                        store.compatible_completed_tasks(p)
 
     def test_atomic_write_cleans_only_created_temp_and_requires_fsync(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
             root = Path(temp_dir) / "evidence"
             store = LocalPrivateBenchmarkEvidenceStore(root)
-            store.initialize(plan())
+            p = plan()
+            store.initialize(p)
             run = root / "runs" / "run-001"
             existing_temp = run / ".result.json.tmp-fixed"
             existing_temp.write_text("KEEP", encoding="utf-8")
