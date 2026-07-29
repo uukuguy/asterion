@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-30 00:21. **Session remains active — not a final handoff.**
+> Updated: 2026-07-30 00:54. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -65,8 +65,12 @@
 - Plan 3 Task 2 adds exact closed-world suite/task resolution in `c1c0b18`,
   then closes declaration, duplicate, descriptor, redaction, and valid
   cross-platform fail-closed review gaps through `aba1503`.
-- The immediate next action is Plan 3 Task 3: deterministic bounded plans and
-  exact external execution authorization.
+- Plan 3 Task 3 adds bounded planning in `b52dc3d`, restores the approved
+  request interface and pure-planning boundary in `3c413ec`, then binds
+  execution intent to an injected host authorizer and composed packages in
+  `fcdbaf1`.
+- The immediate next action is Plan 3 Task 4: descriptor-bound private
+  evidence storage and compatible resume.
 
 ## Where things stand
 
@@ -116,8 +120,8 @@
 
 ## Next action
 
-1. Implement Plan 3 Task 3 with bounded planning and authority RED tests.
-2. Review and close deterministic planning before evidence storage.
+1. Implement Plan 3 Task 4 with descriptor, redaction, and resume RED tests.
+2. Review and close private evidence storage before sequential execution.
 3. Continue the approved generic benchmark subsystem plan task by task.
 
 ## Boundaries and ruled-out paths

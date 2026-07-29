@@ -265,3 +265,8 @@
 - 00:21 Preserved cold benchmark imports across unsupported fd capability sets [2354ed2]
 - 00:21 Corrected unsupported-platform probes to model valid Python environments [aba1503]
 - 00:21 Closed generic benchmark Task 2 after independent review passed [aba1503]
+- 00:21 Saved benchmark resolution recovery boundary before bounded planning [1b04451]
+- 00:54 Added bounded benchmark planning with explicit execution intent [b52dc3d]
+- 00:54 Removed planning-time execution and generic authorization state [3c413ec]
+- 00:54 Injected host authorization and bound plans to composed packages [fcdbaf1]
+- 00:54 Closed generic benchmark Task 3 after independent review passed [fcdbaf1]
