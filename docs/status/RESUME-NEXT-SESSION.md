@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-29 23:33. **Session remains active — not a final handoff.**
+> Updated: 2026-07-30 00:21. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -62,8 +62,11 @@
 - Plan 3 Task 1 defines immutable generic benchmark values in `75327b1`, then
   closes protocol, suite-closure, public-argument, and deep-freeze review gaps
   through `82449c5`; 11 focused tests and static checks pass.
-- The immediate next action is Plan 3 Task 2: exact suite, capability, and
-  benchmark task-binding resolution.
+- Plan 3 Task 2 adds exact closed-world suite/task resolution in `c1c0b18`,
+  then closes declaration, duplicate, descriptor, redaction, and valid
+  cross-platform fail-closed review gaps through `aba1503`.
+- The immediate next action is Plan 3 Task 3: deterministic bounded plans and
+  exact external execution authorization.
 
 ## Where things stand
 
@@ -113,8 +116,8 @@
 
 ## Next action
 
-1. Implement Plan 3 Task 2 with the complete pre-execution rejection matrix.
-2. Review and close exact resolution before bounded planning.
+1. Implement Plan 3 Task 3 with bounded planning and authority RED tests.
+2. Review and close deterministic planning before evidence storage.
 3. Continue the approved generic benchmark subsystem plan task by task.
 
 ## Boundaries and ruled-out paths

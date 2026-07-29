@@ -254,3 +254,14 @@
 - 23:26 Hardened benchmark model values to close Task 1 review gaps [25f6f10]
 - 23:33 Restricted benchmark public data domains to close final model review [82449c5]
 - 23:33 Closed generic benchmark Task 1 after independent review passed [82449c5]
+- 23:33 Saved benchmark model recovery boundary before exact resolution [13aab47]
+
+## 2026-07-30
+
+- 00:21 Resolved exact benchmark suite and task bindings before execution [c1c0b18]
+- 00:21 Hardened suite declarations and descriptor reads against ambiguity and races [1c063a7]
+- 00:21 Gated resolver fd security so unsupported platforms fail closed [c5a36e0]
+- 00:21 Guarded fd capability probes against absent support sets [3f1fcce]
+- 00:21 Preserved cold benchmark imports across unsupported fd capability sets [2354ed2]
+- 00:21 Corrected unsupported-platform probes to model valid Python environments [aba1503]
+- 00:21 Closed generic benchmark Task 2 after independent review passed [aba1503]
