@@ -22,12 +22,14 @@
     "version": {"$ref": "#/$defs/version"},
     "runtime_id": {"$ref": "#/$defs/identifier"},
     "capability_packages": {
+      "$comment": "Canonical ordering is a protocol semantic gate above structural JSON Schema: protocol validators MUST enforce Unicode-scalar ascending order by (package_id, version) and uniqueness.",
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
       "items": {"$ref": "#/$defs/package_ref"}
     },
     "capabilities": {
+      "$comment": "Canonical ordering is a protocol semantic gate above structural JSON Schema: protocol validators MUST enforce Unicode-scalar ascending order by (capability_id, version) and uniqueness.",
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
@@ -66,6 +68,7 @@
       }
     },
     "edges": {
+      "$comment": "Canonical ordering is a protocol semantic gate above structural JSON Schema: protocol validators MUST enforce Unicode-scalar ascending string order and uniqueness.",
       "type": "array",
       "items": {
         "type": "string",

@@ -16,6 +16,13 @@ from asterion.capabilities.protocol import (
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
+APPLICATION_ASSEMBLY_SCHEMA = (
+    Path(__file__).parent.parent
+    / "schemas"
+    / "application-assembly"
+    / "v1"
+    / "application-assembly.schema.json"
+)
 
 
 def fixture(protocol: str, name: str) -> dict[str, object]:
@@ -51,6 +58,28 @@ class ProtocolCanonicalOrderingTests(unittest.TestCase):
             "asterion.application-assembly/v1",
         )
         validate_assembly_manifest(self.application_assembly())
+
+    def test_schema_declares_semantic_canonical_ordering_gates(self) -> None:
+        schema = json.loads(APPLICATION_ASSEMBLY_SCHEMA.read_text())
+
+        self.assertEqual(
+            schema["properties"]["capability_packages"].get("$comment"),
+            "Canonical ordering is a protocol semantic gate above structural "
+            "JSON Schema: protocol validators MUST enforce Unicode-scalar "
+            "ascending order by (package_id, version) and uniqueness.",
+        )
+        self.assertEqual(
+            schema["properties"]["capabilities"].get("$comment"),
+            "Canonical ordering is a protocol semantic gate above structural "
+            "JSON Schema: protocol validators MUST enforce Unicode-scalar "
+            "ascending order by (capability_id, version) and uniqueness.",
+        )
+        self.assertEqual(
+            schema["$defs"]["edges"].get("$comment"),
+            "Canonical ordering is a protocol semantic gate above structural "
+            "JSON Schema: protocol validators MUST enforce Unicode-scalar "
+            "ascending string order and uniqueness.",
+        )
 
     def test_rejects_removed_assembly_protocol_and_fields(self) -> None:
         valid = self.application_assembly()
