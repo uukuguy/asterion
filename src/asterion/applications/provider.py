@@ -15,9 +15,8 @@ from asterion.assembly.protocol import (
     validate_assembly_manifest,
 )
 from asterion.capability_packages import (
-    CapabilityPackageManifest,
     CapabilityPackageRef,
-    validate_capability_package_manifest,
+    InstalledCapabilityPackage,
 )
 from asterion.capabilities.catalog import (
     CapabilityCatalogError,
@@ -59,10 +58,28 @@ class InstalledApplication:
     application_id: str
     version: str
     assembly_paths: tuple[Path, ...]
-    catalog_roots: tuple[Path, ...]
-    implementations: tuple[tuple[CapabilityRef, CapabilityImplementation], ...]
+    capability_packages: tuple[CapabilityPackageRef, ...]
     runtime_ids: tuple[str, ...]
+    installed_packages: tuple[InstalledCapabilityPackage, ...] = ()
     assemblies: tuple[InstalledAssembly, ...] = ()
+
+    @property
+    def catalog_roots(self) -> tuple[Path, ...]:
+        return tuple(
+            root
+            for package in self.installed_packages
+            for root in package.catalog_roots
+        )
+
+    @property
+    def implementations(
+        self,
+    ) -> tuple[tuple[CapabilityRef, CapabilityImplementation], ...]:
+        return tuple(
+            (binding.capability_ref, binding.implementation)
+            for package in self.installed_packages
+            for binding in package.implementations
+        )
 
 
 @dataclass(frozen=True)
@@ -136,11 +153,14 @@ def resolve_installed_provider(
     provider: InstalledApplicationProvider,
     *,
     runtime_factories: RuntimeFactoryRegistry,
+    installed_packages: tuple[InstalledCapabilityPackage, ...] = (),
 ) -> InstalledApplicationProvider:
     """Resolve every installed application into an exact executable closure."""
 
     composed = compose_installed_provider(
-        provider, runtime_factories=runtime_factories
+        provider,
+        runtime_factories=runtime_factories,
+        installed_packages=installed_packages,
     )
     try:
         for application in composed.applications:
@@ -159,6 +179,7 @@ def compose_installed_provider(
     provider: InstalledApplicationProvider,
     *,
     runtime_factories: RuntimeFactoryRegistry,
+    installed_packages: tuple[InstalledCapabilityPackage, ...] = (),
 ) -> InstalledApplicationProvider:
     """Compose exact installed plans without asserting executable bindings."""
 
@@ -169,8 +190,13 @@ def compose_installed_provider(
     metadata = validate_installed_provider_metadata(
         provider, selected_id=provider.provider_id
     )
+    package_map = _installed_package_map(installed_packages)
     applications = tuple(
-        _compose_application(application, runtime_factories=runtime_factories)
+        _compose_application(
+            application,
+            runtime_factories=runtime_factories,
+            installed_packages=package_map,
+        )
         for application in metadata.applications
     )
     return InstalledApplicationProvider(
@@ -190,14 +216,14 @@ def _validate_application_metadata(
         or not application.assembly_paths
     ):
         raise ApplicationProviderError("installed application assemblies are invalid")
-    if (
-        not isinstance(application.catalog_roots, tuple)
-        or not application.catalog_roots
-    ):
-        raise ApplicationProviderError("installed application catalogs are invalid")
-    if not isinstance(application.implementations, tuple):
+    if not isinstance(application.capability_packages, tuple):
         raise ApplicationProviderError(
-            "installed application implementations are invalid"
+            "installed application capability packages are invalid"
+        )
+    application_package_refs = _package_ref_tuple(application.capability_packages)
+    if not application_package_refs:
+        raise ApplicationProviderError(
+            "installed application capability packages are invalid"
         )
     if (
         not isinstance(application.runtime_ids, tuple)
@@ -211,23 +237,6 @@ def _validate_application_metadata(
         _resource_beneath(path, root=root, kind="file")
         for path in application.assembly_paths
     )
-    catalogs = tuple(
-        _resource_beneath(path, root=root, kind="directory")
-        for path in application.catalog_roots
-    )
-    packages = _load_capability_package_manifests(catalogs, root=root)
-    refs: set[CapabilityRef] = set()
-    implementations: list[tuple[CapabilityRef, CapabilityImplementation]] = []
-    for binding in application.implementations:
-        if (
-            not isinstance(binding, tuple)
-            or len(binding) != 2
-            or not isinstance(binding[0], CapabilityRef)
-            or binding[0] in refs
-        ):
-            raise ApplicationProviderError("installed application binding is invalid")
-        refs.add(binding[0])
-        implementations.append(binding)
 
     assembly_runtime_ids: list[str] = []
     for assembly_path in assemblies:
@@ -235,31 +244,17 @@ def _validate_application_metadata(
         runtime_id = assembly["runtime_id"]
         assert isinstance(runtime_id, str)
         assembly_runtime_ids.append(runtime_id)
-        capability_refs = {
-            CapabilityRef(item["capability_id"], item["version"])
-            for item in assembly["capabilities"]
-        }
-        package_refs = tuple(
-            CapabilityPackageRef(item["package_id"], item["version"])
-            for item in assembly["capability_packages"]
-        )
-        try:
-            package_capabilities = {
-                capability
-                for package_ref in package_refs
-                for capability in packages[package_ref].capabilities
-            }
-        except KeyError:
-            raise ApplicationProviderError(
-                "installed application package closure is invalid"
-            ) from None
-        if not capability_refs.issubset(package_capabilities):
+        raw_packages = assembly["capability_packages"]
+        if not isinstance(raw_packages, list):
             raise ApplicationProviderError(
                 "installed application package closure is invalid"
             )
-        if not refs.issubset(capability_refs):
+        assembly_package_refs = tuple(
+            _assembly_package_ref(item) for item in raw_packages
+        )
+        if assembly_package_refs != application_package_refs:
             raise ApplicationProviderError(
-                "installed application binding is unavailable"
+                "installed application package closure is invalid"
             )
     if tuple(sorted(assembly_runtime_ids)) != application.runtime_ids:
         raise ApplicationProviderError(
@@ -270,45 +265,30 @@ def _validate_application_metadata(
         application_id=application.application_id,
         version=application.version,
         assembly_paths=assemblies,
-        catalog_roots=catalogs,
-        implementations=tuple(implementations),
+        capability_packages=application_package_refs,
         runtime_ids=application.runtime_ids,
+        installed_packages=(),
         assemblies=(),
     )
-
-
-def _load_capability_package_manifests(
-    catalogs: tuple[Path, ...], *, root: Path
-) -> Mapping[CapabilityPackageRef, CapabilityPackageManifest]:
-    packages: dict[CapabilityPackageRef, CapabilityPackageManifest] = {}
-    for catalog_root in catalogs:
-        descriptor_path = _resource_beneath(
-            catalog_root.parent / "capability-package.json",
-            root=root,
-            kind="file",
-        )
-        try:
-            descriptor = json.loads(descriptor_path.read_text())
-            manifest = validate_capability_package_manifest(descriptor)
-        except (OSError, UnicodeError, TypeError, ValueError):
-            raise ApplicationProviderError(
-                "installed application capability package is invalid"
-            ) from None
-        if manifest.package_ref in packages:
-            raise ApplicationProviderError(
-                "installed application capability packages are invalid"
-            )
-        packages[manifest.package_ref] = manifest
-    return packages
 
 
 def _compose_application(
     application: InstalledApplication,
     *,
     runtime_factories: RuntimeFactoryRegistry,
+    installed_packages: Mapping[CapabilityPackageRef, InstalledCapabilityPackage],
 ) -> InstalledApplication:
     try:
-        catalog = discover_capabilities(application.catalog_roots)
+        packages = _packages_for_application(application, installed_packages)
+        catalog_roots = tuple(
+            root for package in packages for root in package.catalog_roots
+        )
+        implementations = tuple(
+            (binding.capability_ref, binding.implementation)
+            for package in packages
+            for binding in package.implementations
+        )
+        catalog = discover_capabilities(catalog_roots)
         assemblies: list[InstalledAssembly] = []
         for assembly_path in application.assembly_paths:
             assembly = _read_assembly_snapshot(
@@ -322,6 +302,18 @@ def _compose_application(
                 catalog=catalog,
                 runtime_manifest=runtime_binding.manifest.to_mapping(),
             )
+            package_capabilities = set().union(
+                *(_package_capabilities(package, catalog=catalog) for package in packages)
+            )
+            if not set(plan.capability_refs).issubset(package_capabilities):
+                raise ApplicationProviderError(
+                    "installed application package closure is invalid"
+                )
+            bound_refs = {binding[0] for binding in implementations}
+            if not bound_refs.issubset(set(plan.capability_refs)):
+                raise ApplicationProviderError(
+                    "installed application binding is unavailable"
+                )
             assemblies.append(
                 InstalledAssembly(
                     runtime_id=runtime_id,
@@ -351,9 +343,9 @@ def _compose_application(
         application_id=application.application_id,
         version=application.version,
         assembly_paths=application.assembly_paths,
-        catalog_roots=application.catalog_roots,
-        implementations=application.implementations,
+        capability_packages=application.capability_packages,
         runtime_ids=application.runtime_ids,
+        installed_packages=packages,
         assemblies=values,
     )
 
@@ -379,6 +371,90 @@ def _read_assembly_snapshot(
             "installed application assembly identity is invalid"
         )
     return assembly
+
+
+def _package_ref_tuple(
+    values: tuple[CapabilityPackageRef, ...],
+) -> tuple[CapabilityPackageRef, ...]:
+    try:
+        package_refs = tuple(values)
+    except Exception:
+        raise ApplicationProviderError(
+            "installed application capability packages are invalid"
+        ) from None
+    if (
+        not all(type(package_ref) is CapabilityPackageRef for package_ref in package_refs)
+        or tuple(sorted(package_refs)) != package_refs
+        or len(set(package_refs)) != len(package_refs)
+    ):
+        raise ApplicationProviderError(
+            "installed application capability packages are invalid"
+        )
+    return package_refs
+
+
+def _assembly_package_ref(value: object) -> CapabilityPackageRef:
+    if not isinstance(value, Mapping):
+        raise ApplicationProviderError(
+            "installed application package closure is invalid"
+        )
+    package_id = value.get("package_id")
+    version = value.get("version")
+    if not isinstance(package_id, str) or not isinstance(version, str):
+        raise ApplicationProviderError(
+            "installed application package closure is invalid"
+        )
+    return CapabilityPackageRef(package_id, version)
+
+
+def _installed_package_map(
+    values: tuple[InstalledCapabilityPackage, ...],
+) -> Mapping[CapabilityPackageRef, InstalledCapabilityPackage]:
+    if not isinstance(values, tuple):
+        raise ApplicationProviderError(
+            "installed application capability packages are invalid"
+        )
+    packages: dict[CapabilityPackageRef, InstalledCapabilityPackage] = {}
+    for package in values:
+        if type(package) is not InstalledCapabilityPackage:
+            raise ApplicationProviderError(
+                "installed application capability packages are invalid"
+            )
+        if package.package_ref in packages:
+            raise ApplicationProviderError(
+                "installed application capability packages are invalid"
+            )
+        packages[package.package_ref] = package
+    return packages
+
+
+def _packages_for_application(
+    application: InstalledApplication,
+    installed_packages: Mapping[CapabilityPackageRef, InstalledCapabilityPackage],
+) -> tuple[InstalledCapabilityPackage, ...]:
+    packages = tuple(
+        installed_packages[package_ref]
+        for package_ref in application.capability_packages
+        if package_ref in installed_packages
+    )
+    if len(packages) != len(application.capability_packages):
+        raise ApplicationProviderError(
+            "installed application capability packages are unavailable"
+        )
+    return packages
+
+
+def _package_capabilities(
+    package: InstalledCapabilityPackage,
+    *,
+    catalog,
+) -> set[CapabilityRef]:
+    roots = tuple(Path(root).resolve(strict=True) for root in package.catalog_roots)
+    return {
+        entry.ref
+        for entry in catalog.entries
+        if any(entry.source.is_relative_to(root) for root in roots)
+    }
 
 
 def _canonical_resource(value: Path, *, kind: str) -> Path:

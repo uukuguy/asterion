@@ -16,9 +16,13 @@ from asterion.applications.provider import (
     validate_installed_provider,
 )
 from asterion.applications.product import InstalledCapabilityProduct
-from asterion.capability_packages import CapabilityPackageRef
+from asterion.capability_packages import CapabilityPackageRef, InstalledCapabilityPackage
 from asterion.capabilities.catalog import CapabilityRef, discover_capabilities
-from asterion.capabilities.execution import CapabilityExecutionResult, CapabilityInvocation
+from asterion.capabilities.execution import (
+    CapabilityExecutionResult,
+    CapabilityImplementationBinding,
+    CapabilityInvocation,
+)
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
 
 
@@ -137,17 +141,46 @@ def provider(root: Path) -> InstalledApplicationProvider:
                 application_id="example.research",
                 version="1.0.0",
                 assembly_paths=(write_assembly(root),),
-                catalog_roots=(catalog,),
-                implementations=(
-                    (
-                        CapabilityRef("example.research", "1.0.0"),
-                        FixtureImplementation(),
-                    ),
-                ),
+                capability_packages=(CapabilityPackageRef("example", "1.0.0"),),
                 runtime_ids=("pi.reference",),
+                installed_packages=(example_package(catalog),),
             ),
         ),
     )
+
+
+def example_package(
+    catalog: Path,
+    *,
+    implementations: tuple[
+        tuple[CapabilityRef, FixtureImplementation | NonCallableImplementation | object],
+        ...,
+    ] = (
+        (
+            CapabilityRef("example.research", "1.0.0"),
+            FixtureImplementation(),
+        ),
+    ),
+) -> InstalledCapabilityPackage:
+    return InstalledCapabilityPackage(
+        package_ref=CapabilityPackageRef("example", "1.0.0"),
+        payload_sha256="a" * 64,
+        source_id="example.source",
+        source_kind="local-directory",
+        catalog_roots=(catalog.resolve(),),
+        benchmark_suite_paths=(),
+        implementations=tuple(
+            CapabilityImplementationBinding(ref, implementation)
+            for ref, implementation in implementations
+        ),
+        benchmark_bindings=(),
+    )
+
+
+def package_set(
+    application: InstalledApplication,
+) -> tuple[InstalledCapabilityPackage, ...]:
+    return application.installed_packages
 
 
 class InstalledApplicationProviderTests(unittest.TestCase):
@@ -164,8 +197,7 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                         application_id=application.application_id,
                         version=application.version,
                         assembly_paths=application.assembly_paths,
-                        catalog_roots=application.catalog_roots,
-                        implementations=(),
+                        capability_packages=application.capability_packages,
                         runtime_ids=application.runtime_ids,
                     ),
                 ),
@@ -173,7 +205,11 @@ class InstalledApplicationProviderTests(unittest.TestCase):
             registry = runtime_factories("pi.reference")
 
             composed = compose_installed_provider(
-                missing_binding, runtime_factories=registry
+                missing_binding,
+                runtime_factories=registry,
+                installed_packages=(
+                    example_package(application.catalog_roots[0], implementations=()),
+                ),
             )
 
             self.assertEqual(
@@ -185,7 +221,11 @@ class InstalledApplicationProviderTests(unittest.TestCase):
             )
             with self.assertRaises(ApplicationProviderError):
                 resolve_installed_provider(
-                    missing_binding, runtime_factories=registry
+                    missing_binding,
+                    runtime_factories=registry,
+                    installed_packages=(
+                        example_package(application.catalog_roots[0], implementations=()),
+                    ),
                 )
 
     def test_executable_resolution_composes_exactly_once(self) -> None:
@@ -197,7 +237,9 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                 wraps=compose_installed_provider,
             ) as composition:
                 resolved = resolve_installed_provider(
-                    valid, runtime_factories=registry
+                    valid,
+                    runtime_factories=registry,
+                    installed_packages=package_set(valid.applications[0]),
                 )
 
         self.assertEqual(composition.call_count, 1)
@@ -246,90 +288,119 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                 )
 
             cases = {
-                "runtime-without-assembly": with_application(
-                    InstalledApplication(
-                        application_id=application.application_id,
-                        version=application.version,
-                        assembly_paths=application.assembly_paths,
-                        catalog_roots=(catalog,),
-                        implementations=application.implementations,
-                        runtime_ids=("other.runtime", "pi.reference"),
-                    )
+                "runtime-without-assembly": (
+                    with_application(
+                        InstalledApplication(
+                            application_id=application.application_id,
+                            version=application.version,
+                            assembly_paths=application.assembly_paths,
+                            capability_packages=application.capability_packages,
+                            runtime_ids=("other.runtime", "pi.reference"),
+                        )
+                    ),
+                    package_set(application),
                 ),
-                "two-assemblies-for-one-runtime": with_application(
-                    InstalledApplication(
-                        application_id=application.application_id,
-                        version=application.version,
-                        assembly_paths=(*application.assembly_paths, duplicate_path),
-                        catalog_roots=(catalog,),
-                        implementations=application.implementations,
-                        runtime_ids=("pi.reference",),
-                    )
+                "two-assemblies-for-one-runtime": (
+                    with_application(
+                        InstalledApplication(
+                            application_id=application.application_id,
+                            version=application.version,
+                            assembly_paths=(*application.assembly_paths, duplicate_path),
+                            capability_packages=application.capability_packages,
+                            runtime_ids=("pi.reference",),
+                        )
+                    ),
+                    package_set(application),
                 ),
-                "assembly-runtime-not-listed": with_application(
-                    InstalledApplication(
-                        application_id=application.application_id,
-                        version=application.version,
-                        assembly_paths=(unlisted_path,),
-                        catalog_roots=(catalog,),
-                        implementations=application.implementations,
-                        runtime_ids=("pi.reference",),
-                    )
+                "assembly-runtime-not-listed": (
+                    with_application(
+                        InstalledApplication(
+                            application_id=application.application_id,
+                            version=application.version,
+                            assembly_paths=(unlisted_path,),
+                            capability_packages=application.capability_packages,
+                            runtime_ids=("pi.reference",),
+                        )
+                    ),
+                    package_set(application),
                 ),
-                "missing-package-implementation": with_application(
-                    InstalledApplication(
-                        application_id=application.application_id,
-                        version=application.version,
-                        assembly_paths=application.assembly_paths,
-                        catalog_roots=(catalog,),
-                        implementations=(),
-                        runtime_ids=application.runtime_ids,
-                    )
+                "missing-package-implementation": (
+                    with_application(
+                        InstalledApplication(
+                            application_id=application.application_id,
+                            version=application.version,
+                            assembly_paths=application.assembly_paths,
+                            capability_packages=application.capability_packages,
+                            runtime_ids=application.runtime_ids,
+                        )
+                    ),
+                    (example_package(catalog, implementations=()),),
                 ),
-                "unknown-package-implementation": with_application(
-                    InstalledApplication(
-                        application_id=application.application_id,
-                        version=application.version,
-                        assembly_paths=application.assembly_paths,
-                        catalog_roots=(catalog,),
-                        implementations=(
-                            *application.implementations,
-                            (
-                                CapabilityRef("example.unknown", "1.0.0"),
-                                FixtureImplementation(),
+                "unknown-package-implementation": (
+                    with_application(
+                        InstalledApplication(
+                            application_id=application.application_id,
+                            version=application.version,
+                            assembly_paths=application.assembly_paths,
+                            capability_packages=application.capability_packages,
+                            runtime_ids=application.runtime_ids,
+                        )
+                    ),
+                    (
+                        example_package(
+                            catalog,
+                            implementations=(
+                                *application.implementations,
+                                (
+                                    CapabilityRef("example.unknown", "1.0.0"),
+                                    FixtureImplementation(),
+                                ),
                             ),
                         ),
-                        runtime_ids=application.runtime_ids,
-                    )
+                    ),
                 ),
-                "non-callable-package-implementation": with_application(
-                    InstalledApplication(
-                        application_id=application.application_id,
-                        version=application.version,
-                        assembly_paths=application.assembly_paths,
-                        catalog_roots=(catalog,),
-                        implementations=(
-                            (
-                                CapabilityRef("example.research", "1.0.0"),
-                                NonCallableImplementation(),
+                "non-callable-package-implementation": (
+                    with_application(
+                        InstalledApplication(
+                            application_id=application.application_id,
+                            version=application.version,
+                            assembly_paths=application.assembly_paths,
+                            capability_packages=application.capability_packages,
+                            runtime_ids=application.runtime_ids,
+                        )
+                    ),
+                    (
+                        example_package(
+                            catalog,
+                            implementations=(
+                                (
+                                    CapabilityRef("example.research", "1.0.0"),
+                                    NonCallableImplementation(),
+                                ),
                             ),
                         ),
-                        runtime_ids=application.runtime_ids,
-                    )
+                    ),
                 ),
-                "uncomposable-bound-assembly": with_application(
-                    InstalledApplication(
-                        application_id=application.application_id,
-                        version=application.version,
-                        assembly_paths=application.assembly_paths,
-                        catalog_roots=(uncomposable_catalog,),
-                        implementations=application.implementations,
-                        runtime_ids=application.runtime_ids,
-                    )
+                "uncomposable-bound-assembly": (
+                    with_application(
+                        InstalledApplication(
+                            application_id=application.application_id,
+                            version=application.version,
+                            assembly_paths=application.assembly_paths,
+                            capability_packages=application.capability_packages,
+                            runtime_ids=application.runtime_ids,
+                        )
+                    ),
+                    (
+                        example_package(
+                            uncomposable_catalog,
+                            implementations=application.implementations,
+                        ),
+                    ),
                 ),
             }
             registry = runtime_factories("other.runtime", "pi.reference")
-            for case, value in cases.items():
+            for case, (value, installed_packages) in cases.items():
                 with (
                     self.subTest(case=case),
                     self.assertRaises(ApplicationProviderError),
@@ -339,6 +410,7 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                             value, selected_id=value.provider_id
                         ),
                         runtime_factories=registry,
+                        installed_packages=installed_packages,
                     )
 
     def test_unknown_or_mismatched_assembly_package_ref_fails_before_resolution(
@@ -376,8 +448,7 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                             application_id=application.application_id,
                             version=application.version,
                             assembly_paths=(assembly_path,),
-                            catalog_roots=application.catalog_roots,
-                            implementations=application.implementations,
+                            capability_packages=application.capability_packages,
                             runtime_ids=application.runtime_ids,
                         ),
                     ),
@@ -406,19 +477,22 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                 provider_id=valid.provider_id,
                 resource_root=valid.resource_root,
                 applications=(
-                    InstalledApplication(
-                        application_id=application.application_id,
-                        version=application.version,
-                        assembly_paths=(assembly_path,),
-                        catalog_roots=application.catalog_roots,
-                        implementations=application.implementations,
-                        runtime_ids=application.runtime_ids,
+                        InstalledApplication(
+                            application_id=application.application_id,
+                            version=application.version,
+                            assembly_paths=(assembly_path,),
+                            capability_packages=application.capability_packages,
+                            runtime_ids=application.runtime_ids,
+                        ),
                     ),
-                ),
-            )
+                )
 
             with self.assertRaises(ApplicationProviderError) as raised:
-                validate_installed_provider(invalid, selected_id="example-app")
+                resolve_installed_provider(
+                    validate_installed_provider(invalid, selected_id="example-app"),
+                    runtime_factories=runtime_factories("pi.reference"),
+                    installed_packages=package_set(application),
+                )
 
         self.assertNotIn(sentinel, str(raised.exception))
 
@@ -426,8 +500,10 @@ class InstalledApplicationProviderTests(unittest.TestCase):
         sentinel = "other.secret"
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
+            raw = provider(root)
+            packages = package_set(raw.applications[0])
             metadata = validate_installed_provider(
-                provider(root), selected_id="example-app"
+                raw, selected_id="example-app"
             )
             assembly_path = metadata.applications[0].assembly_paths[0]
 
@@ -448,6 +524,7 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                 resolve_installed_provider(
                     metadata,
                     runtime_factories=runtime_factories("pi.reference"),
+                    installed_packages=packages,
                 )
 
         self.assertIs(type(raised.exception), ApplicationProviderError)
@@ -468,15 +545,14 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                 provider_id=valid.provider_id,
                 resource_root=valid.resource_root,
                 applications=(
-                    InstalledApplication(
-                        application_id=application.application_id,
-                        version=application.version,
-                        assembly_paths=(hostile_path,),
-                        catalog_roots=application.catalog_roots,
-                        implementations=application.implementations,
-                        runtime_ids=application.runtime_ids,
+                        InstalledApplication(
+                            application_id=application.application_id,
+                            version=application.version,
+                            assembly_paths=(hostile_path,),
+                            capability_packages=application.capability_packages,
+                            runtime_ids=application.runtime_ids,
+                        ),
                     ),
-                ),
             )
 
             with self.assertRaises(ApplicationProviderError) as raised:
@@ -505,9 +581,9 @@ class InstalledApplicationProviderTests(unittest.TestCase):
 
     def test_valid_provider_is_deeply_immutable_and_exact(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            metadata = validate_installed_provider(
-                provider(Path(temp_dir)), selected_id="example-app"
-            )
+            raw = provider(Path(temp_dir))
+            packages = package_set(raw.applications[0])
+            metadata = validate_installed_provider(raw, selected_id="example-app")
             with patch(
                 "asterion.applications.provider.discover_capabilities",
                 wraps=discover_capabilities,
@@ -515,6 +591,7 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                 value = resolve_installed_provider(
                     metadata,
                     runtime_factories=runtime_factories("pi.reference"),
+                    installed_packages=packages,
                 )
 
         self.assertEqual(metadata.applications[0].assemblies, ())
@@ -577,19 +654,27 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                 provider_id=valid.provider_id,
                 resource_root=valid.resource_root,
                 applications=(
-                    InstalledApplication(
-                        application_id=application.application_id,
-                        version=application.version,
-                        assembly_paths=application.assembly_paths,
-                        catalog_roots=(link,),
-                        implementations=application.implementations,
-                        runtime_ids=application.runtime_ids,
+                        InstalledApplication(
+                            application_id=application.application_id,
+                            version=application.version,
+                            assembly_paths=application.assembly_paths,
+                            capability_packages=application.capability_packages,
+                            runtime_ids=application.runtime_ids,
+                        ),
                     ),
-                ),
-            )
+                )
 
             with self.assertRaises(ApplicationProviderError) as raised:
-                validate_installed_provider(invalid, selected_id="example-app")
+                resolve_installed_provider(
+                    validate_installed_provider(invalid, selected_id="example-app"),
+                    runtime_factories=runtime_factories("pi.reference"),
+                    installed_packages=(
+                        example_package(
+                            link,
+                            implementations=application.implementations,
+                        ),
+                    ),
+                )
 
         self.assertNotIn(sentinel, str(raised.exception))
 
@@ -599,14 +684,13 @@ class InstalledApplicationProviderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             valid = provider(Path(temp_dir))
             application = valid.applications[0]
-            duplicate_binding = InstalledApplication(
+            duplicate_package = InstalledApplication(
                 application_id=application.application_id,
                 version=application.version,
                 assembly_paths=application.assembly_paths,
-                catalog_roots=application.catalog_roots,
-                implementations=(
-                    application.implementations[0],
-                    application.implementations[0],
+                capability_packages=(
+                    application.capability_packages[0],
+                    application.capability_packages[0],
                 ),
                 runtime_ids=application.runtime_ids,
             )
@@ -614,8 +698,7 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                 application_id=application.application_id,
                 version=application.version,
                 assembly_paths=application.assembly_paths,
-                catalog_roots=application.catalog_roots,
-                implementations=application.implementations,
+                capability_packages=application.capability_packages,
                 runtime_ids=(),
             )
             cases = (
@@ -629,7 +712,7 @@ class InstalledApplicationProviderTests(unittest.TestCase):
                     protocol=valid.protocol,
                     provider_id=valid.provider_id,
                     resource_root=valid.resource_root,
-                    applications=(duplicate_binding,),
+                    applications=(duplicate_package,),
                 ),
                 InstalledApplicationProvider(
                     protocol=valid.protocol,

@@ -8,7 +8,7 @@ from asterion.applications.discovery import (
     list_application_providers,
     load_application_provider,
 )
-from asterion.capabilities.catalog import CapabilityRef
+from asterion.capability_packages import CapabilityPackageRef
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -32,15 +32,12 @@ class BuiltinControlledCodeApplicationTests(unittest.TestCase):
         self.assertEqual((application.application_id, application.version), ("code.quality", "1.0.0"))
         self.assertEqual(application.runtime_ids, ("pi.reference",))
         self.assertEqual(
-            {ref for ref, _ in application.implementations},
-            {
-                CapabilityRef("evaluation.code-quality", "1.0.0"),
-                CapabilityRef("observability.execution-audit", "1.0.0"),
-                CapabilityRef("workflow.code-quality", "1.0.0"),
-            },
+            application.capability_packages,
+            (CapabilityPackageRef("controlled-code", "1.0.0"),),
         )
         self.assertTrue(application.assembly_paths[0].is_relative_to(provider.resource_root))
-        self.assertTrue(application.catalog_roots[0].is_relative_to(provider.resource_root))
+        self.assertEqual(application.catalog_roots, ())
+        self.assertEqual(application.implementations, ())
 
 
 if __name__ == "__main__":

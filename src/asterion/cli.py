@@ -8,9 +8,10 @@ import json
 import os
 import sys
 from collections.abc import Iterable, Mapping
+from contextlib import AbstractAsyncContextManager
 from pathlib import Path
 from types import MappingProxyType
-from typing import Callable, TextIO
+from typing import Callable, TextIO, cast
 
 from asterion.applications.discovery import (
     list_application_providers,
@@ -20,6 +21,7 @@ from asterion.applications.provider import (
     ApplicationProviderError,
     InstalledApplication,
     InstalledAssembly,
+    InstalledApplicationProvider,
     resolve_installed_provider,
 )
 from asterion.applications.product import (
@@ -37,6 +39,11 @@ from asterion.capabilities.execution import (
     CapabilityExecutionError,
     project_public_value,
 )
+from asterion.capability_packages import (
+    InstalledCapabilityPackage,
+    resolve_capability_source,
+)
+from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
 from asterion.runner.application import ApplicationRunError
 from asterion.runner.composed import run_composed_application
 from asterion.runtime.factory import (
@@ -73,6 +80,9 @@ def main(
     stdin = sys.stdin if stdin is None else stdin
     stdout = sys.stdout if stdout is None else stdout
     stderr = sys.stderr if stderr is None else stderr
+    assert stdin is not None
+    assert stdout is not None
+    assert stderr is not None
     registry = (
         default_runtime_factory_registry()
         if runtime_factories is None
@@ -208,10 +218,13 @@ async def _run(
     stdin: TextIO,
     stdout: TextIO,
 ) -> int:
+    metadata_provider = load_application_provider(args.provider, entry_points=entry_points)
     provider = resolve_installed_provider(
-        load_application_provider(args.provider, entry_points=entry_points),
+        metadata_provider,
         runtime_factories=registry,
+        installed_packages=_load_builtin_capability_packages(metadata_provider),
     )
+    assembly_path: Path | None = None
     if args.application is not None:
         application = select_installed_application(
             provider, parse_application_selector(args.application)
@@ -237,7 +250,7 @@ async def _run(
     if runtime_id not in application.runtime_ids:
         raise ApplicationProviderError("application runtime selection is invalid")
     assembly = _select_application_assembly(application, runtime_id)
-    if args.application is None and assembly.path != assembly_path:
+    if assembly_path is not None and assembly.path != assembly_path:
         raise ApplicationProviderError("application assembly selection is invalid")
     assembly_path = assembly.path
     runtime_options = _runtime_options(args.runtime_option)
@@ -245,12 +258,13 @@ async def _run(
     runtime_binding = registry.select(runtime_id)
     plan = assembly.plan
     operator_config = _operator_executor_config(args, plan.host_capabilities)
-    managed_services = (
+    managed_services: Mapping[str, AbstractAsyncContextManager[object]] = (
         {}
         if operator_config is None
-        else {
-            "executor.controlled": managed_executor_factory(operator_config)
-        }
+        else cast(
+            Mapping[str, AbstractAsyncContextManager[object]],
+            {"executor.controlled": managed_executor_factory(operator_config)},
+        )
     )
     async with host_service_registry.open(
         provider_id=provider.provider_id,
@@ -291,6 +305,29 @@ def _runtime_options(values: list[str]) -> Mapping[str, str]:
             raise RuntimeFactoryError("runtime option is invalid")
         parsed[key] = item
     return MappingProxyType(parsed)
+
+
+def _load_builtin_capability_packages(
+    provider: InstalledApplicationProvider,
+) -> tuple[InstalledCapabilityPackage, ...]:
+    source = BuiltinCapabilitySource()
+    candidates = source.discover_metadata()
+    package_refs = tuple(
+        sorted(
+            {
+                package_ref
+                for application in provider.applications
+                for package_ref in application.capability_packages
+            }
+        )
+    )
+    installed: list[InstalledCapabilityPackage] = []
+    for package_ref in package_refs:
+        candidate = resolve_capability_source(package_ref, candidates, None)
+        payload = source.open_payload(candidate)
+        source.validate_source_identity(candidate, payload)
+        installed.append(source.load_provider(candidate))
+    return tuple(installed)
 
 
 def _select_application_assembly(
