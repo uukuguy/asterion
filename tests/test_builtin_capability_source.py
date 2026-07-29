@@ -75,7 +75,7 @@ class BuiltinCapabilitySourceTests(unittest.TestCase):
             tuple(item.package_ref for item in registrations),
         )
         with self.assertRaises((AttributeError, TypeError)):
-            registrations[0].payload_root = Path("/private")
+            setattr(registrations[0], "payload_root", Path("/private"))
 
     def test_discovery_is_metadata_only_and_never_calls_provider_factory(self) -> None:
         called = Mock(side_effect=AssertionError("SECRET-FACTORY-CALLED"))
