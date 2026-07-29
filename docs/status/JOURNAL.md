@@ -174,3 +174,9 @@
 - 08:09 Checkpointed capability-package design review so implementation remains gated on written-spec approval [b13acfa]
 - 08:28 Planned four staged delivery boundaries so capability-package implementation remains source-neutral and reviewable [e873093]
 - 08:29 Checkpointed approved execution plans so recovery starts at protocol foundation without stale design gating [ae87535]
+
+## 2026-07-29
+
+- 14:07 Renamed runtime wire protocol to Asterion identity across contracts and fixtures [d90311e]
+- 14:13 Verified isolated baseline: 536 Python tests plus TypeScript, Rust, lint, docs, and wheel build passed
+- 14:13 Closed protocol Task 1 after clean independent spec and quality review [d90311e]
