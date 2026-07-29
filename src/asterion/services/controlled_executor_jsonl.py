@@ -51,7 +51,11 @@ class TrustedValidationConfig:
 
 
 class ControlledExecutorJsonlClient:
-    """Correlate requests over caller-owned JSONL streams without process startup."""
+    """Correlate requests over caller-owned JSONL streams without process startup.
+
+    Structural request values are normalized to exact ``ControlledExecutionRequest``
+    before transport validation.
+    """
 
     def __init__(self, *, reader: asyncio.StreamReader, writer: object, config: TrustedValidationConfig) -> None:
         self._reader = reader
@@ -61,7 +65,7 @@ class ControlledExecutorJsonlClient:
         self._cancel_counter = 0
         self._lock = asyncio.Lock()
 
-    async def execute(self, request: ControlledExecutionRequest, *, signal=None) -> ControlledExecutionResult:
+    async def execute(self, request: object, *, signal=None) -> ControlledExecutionResult:
         if not isinstance(request, ControlledExecutionRequest):
             failed = False
             converted: ControlledExecutionRequest | None = None

@@ -50,3 +50,12 @@
 - `uv run ruff check src tests tools` -> PASS.
 - `uv run python -m compileall -q src tests tools` -> PASS.
 - `git diff --check` -> PASS.
+
+## Final Typed API Fix
+- RED: `uv run python -m unittest -v tests.test_controlled_executor_jsonl` failed because `ControlledExecutorJsonlClient.execute` still annotated `request` as exact `ControlledExecutionRequest` while runtime intentionally accepts package-owned structural requests.
+- GREEN: changed the request annotation to `object`, documented normalization to exact `ControlledExecutionRequest`, and kept hostile structural request redaction plus `BaseException` preservation.
+- `uv run python -m unittest -v tests.test_controlled_executor_jsonl tests.test_controlled_code_application tests.test_builtin_controlled_code_application` -> PASS, 11 tests.
+- `uv run pyright src/asterion/services/controlled_executor_jsonl.py src/asterion/capabilities/controlled_code/implementation.py tests/test_controlled_executor_jsonl.py tests/test_controlled_code_application.py tests/test_builtin_controlled_code_application.py` -> PASS, 0 errors.
+- `uv run ruff check src tests tools` -> PASS.
+- `uv run python -m compileall -q src tests tools` -> PASS.
+- `git diff --check` -> PASS.

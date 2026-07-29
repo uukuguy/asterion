@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import unittest
+from typing import get_type_hints
 
 from asterion.services.controlled_executor import (
     ControlledExecutionRequest,
@@ -60,6 +61,11 @@ def response(**overrides):
 
 
 class ControlledExecutorJsonlTests(unittest.IsolatedAsyncioTestCase):
+    def test_execute_type_contract_accepts_structural_requests(self) -> None:
+        hints = get_type_hints(ControlledExecutorJsonlClient.execute)
+
+        self.assertIs(hints["request"], object)
+
     async def test_translates_logical_target_using_trusted_configuration(self) -> None:
         reader = asyncio.StreamReader()
         reader.feed_data((json.dumps(response()) + "\n").encode())
