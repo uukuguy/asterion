@@ -201,3 +201,7 @@
 - 16:45 Closed protocol review gaps with narrower scans and complete wheel inventory [a2b2d97]
 - 16:54 Isolated boundary scan fixtures to avoid touching user worktree files [e3b1ebd]
 - 16:59 Closed protocol Task 6 after full gates and independent review passed [e3b1ebd]
+- 16:59 Saved Plan 1 recovery boundary before final whole-branch review [ee40222]
+- 17:27 Bound installed assemblies to exact package descriptors to close final review gap [18ed670]
+- 17:35 Approved Plan 1 whole-branch review after exact package closure enforcement [18ed670]
+- 17:35 Verified Plan 1 with 577 tests and 20 provider-free promotion commands

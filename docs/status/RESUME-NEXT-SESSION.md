@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-29 16:59. **Session remains active — not a final handoff.**
+> Updated: 2026-07-29 17:35. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -25,8 +25,14 @@
 - Task 6 added active-surface old-identity rejection and complete installed
   wheel resource inventory checks in `d905d79`, strengthened exclusions and
   wheel coverage in `a2b2d97`, and isolated boundary fixtures in `e3b1ebd`.
-- The immediate next action is the required final whole-branch review for
-  Plan 1, followed by its final verification checkpoint before Plan 2.
+- Final whole-branch review found and closed package-closure enforcement:
+  installed assemblies now require exact package descriptors and capability
+  membership before composition in `18ed670`.
+- Fresh final verification passed 577 Python tests, all cross-language gates,
+  and 20 provider-free promotion commands.
+- The immediate next action is Plan 2 Task 1 in
+  `2026-07-27-asterion-capability-package-sources.md`: define source-neutral,
+  immutable package values under strict TDD.
 
 ## Where things stand
 
@@ -46,16 +52,20 @@
 - Task 6 verification passed 574 Python tests, `make check`, and all 20
   provider-free promotion commands; docs, TypeScript, Rust, and wheel build
   are green with provider operations `0` and full dataset `no`.
+- Final post-review verification passed 577 Python tests through `make check`;
+  `make promotion-check` reported `commands=20 provider_operations=0
+  full_dataset=no`.
 - `dci.agent-runtime/v1` remains only as the deliberate absence-test needle in
   Task 1 scope; no compatibility alias was added.
 - Plans 2-4 remain dependent on completion of the six Plan 1 tasks.
 
 ## Next action
 
-1. Run the required final whole-branch review for `a0302ec..e3b1ebd`.
-2. Fix and re-review every Critical or Important finding.
-3. Run final verification and checkpoint Plan 1 before advancing to the
-   capability-package source plan.
+1. Create the Plan 2 task ledger/briefs and dispatch its Task 1 implementer.
+2. Keep candidate/provider locator data operator-private; public source
+   projections remain constrained by the Plan 1 protocol.
+3. Require RED immutability/body-free representation tests before adding
+   source-neutral package values.
 
 ## Boundaries and ruled-out paths
 
