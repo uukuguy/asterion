@@ -246,3 +246,6 @@
 - 22:49 Hardened Task 8 author boundaries against traversal, source echo, and generated template files [9e35aff]
 - 22:59 Ignored compiler caches while preserving closed capability templates after verification [2ad265e]
 - 23:00 Closed package-source Task 8 after final independent review passed [2ad265e]
+- 23:01 Saved package-source recovery boundary before whole-branch review [1d2a200]
+- 23:09 Kept the frozen-registration probe type-clean to close Plan 2 review [812b209]
+- 23:11 Closed Plan 2 after whole-branch review and final provider-free gates passed [812b209]

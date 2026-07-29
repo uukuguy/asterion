@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-29 23:00. **Session remains active — not a final handoff.**
+> Updated: 2026-07-29 23:11. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -57,8 +57,10 @@
 - Fresh Plan 2 Task 8 verification passed 684 Python tests, all cross-language
   checks, and 22 provider-free promotion commands; independent review found
   no remaining issue.
-- The immediate next action is the required whole-branch Plan 2 review, then
-  Plan 3 generic benchmark subsystem implementation.
+- Plan 2 whole-branch review found no Critical or Important issue; its one
+  type-diagnostic Minor was closed in `812b209`, and final full gates passed.
+- The immediate next action is Plan 3 Task 1: immutable generic benchmark
+  runtime values.
 
 ## Where things stand
 
@@ -104,13 +106,13 @@
   operations `0` and full dataset `no`.
 - `dci.agent-runtime/v1` remains only as the deliberate absence-test needle in
   Task 1 scope; no compatibility alias was added.
-- Plan 2 implementation tasks are complete; its whole-branch review remains.
+- Plan 2 is complete and independently reviewed.
 
 ## Next action
 
-1. Perform the required whole-branch review of `861207a..HEAD`.
-2. Fix every Critical or Important finding and rerun the phase gates.
-3. Start Plan 3 Task 1 from the approved generic benchmark subsystem plan.
+1. Implement Plan 3 Task 1 with RED immutability and redaction tests.
+2. Review and close the benchmark model task before beginning resolution.
+3. Continue the approved generic benchmark subsystem plan task by task.
 
 ## Boundaries and ruled-out paths
 
