@@ -79,9 +79,13 @@ class BenchmarkRunner:
 
         if cancellation.cancelled:
             result = BenchmarkRunResult(status="cancelled", tasks=tuple(results))
-            evidence.append_progress(
-                BenchmarkProgressEvent(sequence=sequence, status="run.cancelled")
-            )
+            terminal_progress_status = evidence.terminal_progress_status(plan)
+            if terminal_progress_status is None:
+                evidence.append_progress(
+                    BenchmarkProgressEvent(sequence=sequence, status="run.cancelled")
+                )
+            elif terminal_progress_status != "run.cancelled":
+                raise BenchmarkEvidenceError("benchmark evidence resume is invalid")
             evidence.finish_run(result)
             return result
 
