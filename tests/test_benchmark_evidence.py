@@ -158,6 +158,30 @@ class BenchmarkEvidenceTests(unittest.TestCase):
             store = LocalPrivateBenchmarkEvidenceStore(root)
             p = plan()
             store.initialize(p)
+            result = BenchmarkRunResult(
+                status="completed",
+                tasks=(
+                    BenchmarkTaskResult(
+                        task_id="example.alpha",
+                        status="completed",
+                        case_count=1,
+                    ),
+                    BenchmarkTaskResult(
+                        task_id="example.beta",
+                        status="completed",
+                        case_count=1,
+                    ),
+                ),
+            )
+            for task_result, task in zip(result.tasks, p.tasks, strict=True):
+                store.start_task(task)
+                store.finish_task(task_result)
+            store.append_progress(
+                BenchmarkProgressEvent(
+                    sequence=store.next_progress_sequence(p),
+                    status="run.completed",
+                )
+            )
             original_replace = os.replace
 
             def raced_replace(
@@ -183,23 +207,7 @@ class BenchmarkEvidenceTests(unittest.TestCase):
                 patch.object(os, "replace", raced_replace),
                 self.assertRaises(BenchmarkEvidenceError) as context,
             ):
-                store.finish_run(
-                    BenchmarkRunResult(
-                        status="completed",
-                        tasks=(
-                            BenchmarkTaskResult(
-                                task_id="example.alpha",
-                                status="completed",
-                                case_count=1,
-                            ),
-                            BenchmarkTaskResult(
-                                task_id="example.beta",
-                                status="completed",
-                                case_count=1,
-                            ),
-                        ),
-                    ),
-                )
+                store.finish_run(result)
             self.assertNotIn("SECRET-RACE", repr(context.exception))
 
     def test_resume_requires_exact_completed_closure(self) -> None:
@@ -888,6 +896,9 @@ class BenchmarkEvidenceTests(unittest.TestCase):
             class FixedUuid:
                 hex = "fixed"
 
+            store.append_progress(
+                BenchmarkProgressEvent(sequence=1, status="run.cancelled")
+            )
             with (
                 patch(
                     "asterion.benchmarks.evidence.uuid.uuid4", return_value=FixedUuid()
