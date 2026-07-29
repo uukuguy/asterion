@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from asterion.benchmarks.evidence import (
+    BenchmarkEvidenceStore,
     BenchmarkEvidenceError,
     BenchmarkProgressEvent,
     BenchmarkRunResult,
@@ -50,17 +51,17 @@ class BenchmarkEvidenceTests(unittest.TestCase):
             old_umask = os.umask(0)
             try:
                 store = LocalPrivateBenchmarkEvidenceStore(root)
-                store.prepare_run(plan())
-                store.write_progress(
-                    plan(),
+                self.assertIsInstance(store, BenchmarkEvidenceStore)
+                store.initialize(plan())
+                store.start_task(plan().tasks[0])
+                store.append_progress(
                     BenchmarkProgressEvent(
                         sequence=1,
                         status="task.started",
                         task_id="example.alpha",
                     ),
                 )
-                store.write_task_result(
-                    plan(),
+                store.finish_task(
                     BenchmarkTaskResult(
                         task_id="example.alpha",
                         status="completed",
@@ -68,8 +69,15 @@ class BenchmarkEvidenceTests(unittest.TestCase):
                         artifact_ids=("artifact.alpha",),
                     ),
                 )
-                store.write_run_result(
-                    plan(),
+                store.start_task(plan().tasks[1])
+                store.finish_task(
+                    BenchmarkTaskResult(
+                        task_id="example.beta",
+                        status="completed",
+                        case_count=3,
+                    ),
+                )
+                store.finish_run(
                     BenchmarkRunResult(
                         status="completed",
                         tasks=(
@@ -124,11 +132,11 @@ class BenchmarkEvidenceTests(unittest.TestCase):
                 self.skipTest(f"symlink unavailable: {error}")
 
             with self.assertRaises(BenchmarkEvidenceError):
-                LocalPrivateBenchmarkEvidenceStore(root_link).prepare_run(plan())
+                LocalPrivateBenchmarkEvidenceStore(root_link).initialize(plan())
 
             root = temp / "evidence"
             store = LocalPrivateBenchmarkEvidenceStore(root)
-            store.prepare_run(plan())
+            store.initialize(plan())
             run = root / "runs" / "run-001"
             for path in (run / "manifest.json", run / "progress"):
                 if path.is_dir():
@@ -138,7 +146,7 @@ class BenchmarkEvidenceTests(unittest.TestCase):
                 os.symlink(target, path)
                 with self.subTest(member=path.name):
                     with self.assertRaises(BenchmarkEvidenceError) as context:
-                        store.resume_completed_run(plan())
+                        store.compatible_completed_tasks(plan())
                     self.assertNotIn("SECRET", repr(context.exception))
                 path.unlink()
                 if path.name == "progress":
@@ -149,13 +157,13 @@ class BenchmarkEvidenceTests(unittest.TestCase):
             result = run / "result.json"
             result.mkdir()
             with self.assertRaises(BenchmarkEvidenceError):
-                store.resume_completed_run(plan())
+                store.compatible_completed_tasks(plan())
 
     def test_atomic_write_rejects_validation_to_replace_race_redacted(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
             root = Path(temp_dir) / "evidence"
             store = LocalPrivateBenchmarkEvidenceStore(root)
-            store.prepare_run(plan())
+            store.initialize(plan())
             original_replace = os.replace
 
             def raced_replace(
@@ -181,8 +189,7 @@ class BenchmarkEvidenceTests(unittest.TestCase):
                 patch.object(os, "replace", raced_replace),
                 self.assertRaises(BenchmarkEvidenceError) as context,
             ):
-                store.write_run_result(
-                    plan(),
+                store.finish_run(
                     BenchmarkRunResult(
                         status="completed",
                         tasks=(
@@ -220,12 +227,18 @@ class BenchmarkEvidenceTests(unittest.TestCase):
                     ),
                 ),
             )
-            store.prepare_run(plan())
+            store.initialize(plan())
             with self.assertRaises(BenchmarkEvidenceError):
-                store.resume_completed_run(plan())
-            store.write_run_result(plan(), result)
+                store.finish_run(result)
+            for task_result, task in zip(result.tasks, plan().tasks, strict=True):
+                store.start_task(task)
+                store.finish_task(task_result)
+            store.finish_run(result)
 
-            self.assertEqual(store.resume_completed_run(plan()), result)
+            self.assertEqual(
+                store.compatible_completed_tasks(plan()),
+                frozenset(("example.alpha", "example.beta")),
+            )
 
             cases = (
                 plan(application_ref=ApplicationRef("other.application", "1.0.0")),
@@ -237,12 +250,213 @@ class BenchmarkEvidenceTests(unittest.TestCase):
             for changed in cases:
                 with self.subTest(run_id=changed.run_id, case_limit=changed.case_limit):
                     with self.assertRaises(BenchmarkEvidenceError):
-                        store.resume_completed_run(changed)
+                        store.compatible_completed_tasks(changed)
 
             result_path = root / "runs" / "run-001" / "result.json"
             result_path.write_text("{", encoding="utf-8")
             with self.assertRaises(BenchmarkEvidenceError):
-                store.resume_completed_run(plan())
+                store.compatible_completed_tasks(plan())
+
+    def test_compatible_resume_returns_only_completed_ordered_prefix(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            root = Path(temp_dir) / "evidence"
+            store = LocalPrivateBenchmarkEvidenceStore(root)
+            store.initialize(plan())
+            store.start_task(plan().tasks[0])
+            store.finish_task(
+                BenchmarkTaskResult(
+                    task_id="example.alpha",
+                    status="completed",
+                    case_count=2,
+                )
+            )
+            self.assertEqual(
+                store.compatible_completed_tasks(plan()),
+                frozenset(("example.alpha",)),
+            )
+
+            resumed = LocalPrivateBenchmarkEvidenceStore(root)
+            resumed.initialize(plan())
+            self.assertEqual(
+                resumed.compatible_completed_tasks(plan()),
+                frozenset(("example.alpha",)),
+            )
+            with self.assertRaises(BenchmarkEvidenceError):
+                resumed.start_task(plan().tasks[0])
+            resumed.start_task(plan().tasks[1])
+            resumed.finish_task(
+                BenchmarkTaskResult(
+                    task_id="example.beta",
+                    status="completed",
+                    case_count=2,
+                )
+            )
+
+    def test_task_lifecycle_is_once_ordered_and_bounded(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            root = Path(temp_dir) / "evidence"
+            store = LocalPrivateBenchmarkEvidenceStore(root)
+            store.initialize(plan())
+            with self.assertRaises(BenchmarkEvidenceError):
+                store.start_task(plan().tasks[1])
+            store.start_task(plan().tasks[0])
+            with self.assertRaises(BenchmarkEvidenceError):
+                store.start_task(plan().tasks[1])
+            with self.assertRaises(BenchmarkEvidenceError):
+                store.finish_task(
+                    BenchmarkTaskResult(
+                        task_id="example.alpha",
+                        status="completed",
+                        case_count=4,
+                    )
+                )
+            store.finish_task(
+                BenchmarkTaskResult(
+                    task_id="example.alpha",
+                    status="completed",
+                    case_count=3,
+                )
+            )
+            with self.assertRaises(BenchmarkEvidenceError):
+                store.finish_task(
+                    BenchmarkTaskResult(
+                        task_id="example.alpha",
+                        status="completed",
+                        case_count=3,
+                    )
+                )
+
+    def test_progress_sequences_are_contiguous_known_and_never_overwritten(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            root = Path(temp_dir) / "evidence"
+            store = LocalPrivateBenchmarkEvidenceStore(root)
+            store.initialize(plan())
+            store.append_progress(BenchmarkProgressEvent(sequence=1, status="run.started"))
+            with self.assertRaises(BenchmarkEvidenceError):
+                store.append_progress(BenchmarkProgressEvent(sequence=1, status="run.repeat"))
+            with self.assertRaises(BenchmarkEvidenceError):
+                store.append_progress(
+                    BenchmarkProgressEvent(
+                        sequence=2,
+                        status="task.started",
+                        task_id="example.missing",
+                    )
+                )
+            store.append_progress(BenchmarkProgressEvent(sequence=2, status="run.ready"))
+
+    def test_failed_and_cancelled_run_results_use_ordered_prefix_closure(self) -> None:
+        failed = BenchmarkRunResult(
+            status="failed",
+            tasks=(
+                BenchmarkTaskResult(
+                    task_id="example.alpha",
+                    status="failed",
+                    case_count=1,
+                ),
+            ),
+        )
+        cancelled_before_task = BenchmarkRunResult(status="cancelled", tasks=())
+        cancelled_mid_task = BenchmarkRunResult(
+            status="cancelled",
+            tasks=(
+                BenchmarkTaskResult(
+                    task_id="example.alpha",
+                    status="cancelled",
+                    case_count=1,
+                ),
+            ),
+        )
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            for result in (failed, cancelled_before_task, cancelled_mid_task):
+                with self.subTest(status=result.status, tasks=len(result.tasks)):
+                    root = Path(temp_dir) / f"evidence-{result.status}-{len(result.tasks)}"
+                    store = LocalPrivateBenchmarkEvidenceStore(root)
+                    store.initialize(plan())
+                    for task_result, task in zip(result.tasks, plan().tasks, strict=False):
+                        store.start_task(task)
+                        store.finish_task(task_result)
+                    store.finish_run(result)
+
+            invalid = BenchmarkRunResult(
+                status="failed",
+                tasks=(
+                    BenchmarkTaskResult(
+                        task_id="example.alpha",
+                        status="completed",
+                        case_count=1,
+                    ),
+                ),
+            )
+            store = LocalPrivateBenchmarkEvidenceStore(Path(temp_dir) / "invalid")
+            store.initialize(plan())
+            with self.assertRaises(BenchmarkEvidenceError):
+                store.finish_run(invalid)
+
+    def test_noncompleted_task_result_without_run_result_is_incomplete(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            root = Path(temp_dir) / "evidence"
+            store = LocalPrivateBenchmarkEvidenceStore(root)
+            store.initialize(plan())
+            store.start_task(plan().tasks[0])
+            store.finish_task(
+                BenchmarkTaskResult(
+                    task_id="example.alpha",
+                    status="failed",
+                    case_count=1,
+                )
+            )
+
+            resumed = LocalPrivateBenchmarkEvidenceStore(root)
+            with self.assertRaises(BenchmarkEvidenceError):
+                resumed.compatible_completed_tasks(plan())
+
+    def test_strict_json_rejects_duplicate_unknown_missing_and_nonfinite_values(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            root = Path(temp_dir) / "evidence"
+            store = LocalPrivateBenchmarkEvidenceStore(root)
+            store.initialize(plan())
+            run = root / "runs" / "run-001"
+            cases = (
+                '{"status":"completed","status":"completed","tasks":[]}',
+                '{"status":"completed","tasks":[],"extra":true}',
+                '{"status":"completed"}',
+                '{"status":NaN,"tasks":[]}',
+            )
+            for body in cases:
+                with self.subTest(body=body):
+                    (run / "result.json").write_text(body, encoding="utf-8")
+                    with self.assertRaises(BenchmarkEvidenceError):
+                        store.compatible_completed_tasks(plan())
+
+    def test_atomic_write_cleans_only_created_temp_and_requires_fsync(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            root = Path(temp_dir) / "evidence"
+            store = LocalPrivateBenchmarkEvidenceStore(root)
+            store.initialize(plan())
+            run = root / "runs" / "run-001"
+            existing_temp = run / ".result.json.tmp-fixed"
+            existing_temp.write_text("KEEP", encoding="utf-8")
+
+            class FixedUuid:
+                hex = "fixed"
+
+            with (
+                patch("asterion.benchmarks.evidence.uuid.uuid4", return_value=FixedUuid()),
+                self.assertRaises(BenchmarkEvidenceError),
+            ):
+                store.finish_run(BenchmarkRunResult(status="cancelled", tasks=()))
+            self.assertEqual(existing_temp.read_text(encoding="utf-8"), "KEEP")
+
+            def failed_fsync(fd: int) -> None:
+                del fd
+                raise OSError("SECRET-FSYNC")
+
+            with (
+                patch.object(os, "fsync", failed_fsync),
+                self.assertRaises(BenchmarkEvidenceError) as context,
+            ):
+                store.append_progress(BenchmarkProgressEvent(sequence=1, status="run.started"))
+            self.assertNotIn("SECRET-FSYNC", repr(context.exception))
 
     def test_public_values_are_frozen_closed_and_body_free(self) -> None:
         event = BenchmarkProgressEvent(
@@ -306,7 +520,7 @@ from asterion.benchmarks.evidence import (
 )
 
 try:
-    LocalPrivateBenchmarkEvidenceStore(Path("/private/SECRET-FD")).prepare_run(object())
+    LocalPrivateBenchmarkEvidenceStore(Path("/private/SECRET-FD")).initialize(object())
 except BenchmarkEvidenceError as error:
     rendered = repr(error)
     assert error.__cause__ is None
