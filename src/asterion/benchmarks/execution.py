@@ -24,6 +24,9 @@ from asterion.runtime.host import CancellationSignal
 
 
 OutputDirectoryFactory = Callable[[ResolvedBenchmarkPlan, ResolvedBenchmarkTask], Path]
+_TASK_TERMINAL_PROGRESS = frozenset(
+    {"task.started", "task.completed", "task.failed", "task.cancelled"}
+)
 
 
 @runtime_checkable
@@ -55,19 +58,19 @@ class BenchmarkRunner:
         completed = evidence.compatible_completed_task_results(plan)
         completed_by_id = frozenset(result.task_id for result in completed)
         results = list(completed)
-        sequence = 1
+        sequence = evidence.next_progress_sequence(plan)
         run_status = "completed"
 
         if len(completed) == len(plan.tasks):
             result = BenchmarkRunResult(status="completed", tasks=tuple(results))
-            try:
-                evidence.finish_run(result)
-            except BenchmarkEvidenceError:
-                pass
+            evidence.finish_run(result)
             return result
 
         if cancellation.cancelled:
             result = BenchmarkRunResult(status="cancelled", tasks=tuple(results))
+            evidence.append_progress(
+                BenchmarkProgressEvent(sequence=sequence, status="run.cancelled")
+            )
             evidence.finish_run(result)
             return result
 
@@ -99,11 +102,10 @@ class BenchmarkRunner:
                 break
 
         run_result = BenchmarkRunResult(status=run_status, tasks=tuple(results))
-        if not results or results[-1].status == "completed":
-            terminal_status = f"run.{run_status}"
-            evidence.append_progress(
-                BenchmarkProgressEvent(sequence=sequence, status=terminal_status)
-            )
+        terminal_status = f"run.{run_status}"
+        evidence.append_progress(
+            BenchmarkProgressEvent(sequence=sequence, status=terminal_status)
+        )
         evidence.finish_run(run_result)
         return run_result
 
@@ -130,12 +132,13 @@ class BenchmarkRunner:
 
         def append_progress(event: BenchmarkProgressEvent) -> None:
             nonlocal progress_count
+            _validate_callback_progress(event)
             progress_count += 1
             evidence.append_progress(
                 BenchmarkProgressEvent(
                     sequence=next_sequence + progress_count - 1,
                     status=event.status,
-                    task_id=event.task_id,
+                    task_id=task_id,
                 )
             )
 
@@ -153,13 +156,22 @@ class BenchmarkRunner:
                 task.binding.implementation,
             )
             invocation = implementation.build_invocation(request)
-            result = executor.execute(
-                invocation,
-                cancellation=cancellation,
-                on_progress=append_progress,
-            )
+            if (
+                not isinstance(invocation, BenchmarkTaskInvocation)
+                or invocation.task_id != task_id
+                or invocation.binding_id != task.binding.binding_id
+            ):
+                result = _failed_result(task_id)
+            else:
+                result = executor.execute(
+                    invocation,
+                    cancellation=cancellation,
+                    on_progress=append_progress,
+                )
             if result.task_id != task_id or result.case_count > plan.case_limit:
                 result = _failed_result(task_id)
+        except BenchmarkEvidenceError:
+            raise
         except Exception:
             result = _failed_result(task_id)
 
@@ -175,6 +187,15 @@ class _TaskExecutionResult:
 
 def _failed_result(task_id: str) -> BenchmarkTaskResult:
     return BenchmarkTaskResult(task_id=task_id, status="failed", case_count=0)
+
+
+def _validate_callback_progress(event: BenchmarkProgressEvent) -> None:
+    if (
+        not isinstance(event, BenchmarkProgressEvent)
+        or event.status.startswith("run.")
+        or event.status in _TASK_TERMINAL_PROGRESS
+    ):
+        raise BenchmarkEvidenceError("benchmark progress event is invalid")
 
 
 __all__ = (

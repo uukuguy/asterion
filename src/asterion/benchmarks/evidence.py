@@ -86,9 +86,7 @@ class BenchmarkRunResult:
         if self.status not in {"completed", "failed", "cancelled"}:
             _fail("benchmark run result is invalid")
         tasks = tuple(self.tasks)
-        if (
-            not all(isinstance(task, BenchmarkTaskResult) for task in tasks)
-        ):
+        if not all(isinstance(task, BenchmarkTaskResult) for task in tasks):
             _fail("benchmark run result is invalid")
         task_ids = tuple(task.task_id for task in tasks)
         if len(set(task_ids)) != len(task_ids):
@@ -116,6 +114,8 @@ class BenchmarkEvidenceStore(Protocol):
         self, plan: ResolvedBenchmarkPlan
     ) -> tuple[BenchmarkTaskResult, ...]: ...
 
+    def next_progress_sequence(self, plan: ResolvedBenchmarkPlan) -> int: ...
+
 
 class LocalPrivateBenchmarkEvidenceStore:
     """Descriptor-relative private evidence store under one local root."""
@@ -127,6 +127,8 @@ class LocalPrivateBenchmarkEvidenceStore:
         self._active_task_id: str | None = None
         self._next_sequence = 1
         self._run_finished = False
+        self._terminal_task_result_pending_run = False
+        self._terminal_progress_appended = False
 
     def initialize(self, plan: ResolvedBenchmarkPlan) -> None:
         try:
@@ -170,19 +172,23 @@ class LocalPrivateBenchmarkEvidenceStore:
         try:
             plan = self._require_plan()
             expected_ids = _plan_task_ids(plan)
-            if self._run_finished or self._active_task_id is not None:
+            if (
+                self._run_finished
+                or self._terminal_task_result_pending_run
+                or self._terminal_progress_appended
+                or self._active_task_id is not None
+            ):
                 _fail("benchmark task lifecycle is invalid")
             if not isinstance(task, ResolvedBenchmarkTask):
                 _fail("benchmark task lifecycle is invalid")
             completed_count = len(self._completed_task_ids)
-            if completed_count >= len(expected_ids) or task is not plan.tasks[
-                completed_count
-            ]:
+            if (
+                completed_count >= len(expected_ids)
+                or task is not plan.tasks[completed_count]
+            ):
                 _fail("benchmark task lifecycle is invalid")
             task_id = task.task.task_id
-            if (
-                task_id != expected_ids[completed_count]
-            ):
+            if task_id != expected_ids[completed_count]:
                 _fail("benchmark task lifecycle is invalid")
             self._active_task_id = task_id
         except BenchmarkEvidenceError:
@@ -196,6 +202,13 @@ class LocalPrivateBenchmarkEvidenceStore:
                 _fail("benchmark progress event is invalid")
             plan = self._require_plan()
             if self._run_finished:
+                _fail("benchmark progress event is invalid")
+            if self._terminal_progress_appended:
+                _fail("benchmark progress event is invalid")
+            if self._terminal_task_result_pending_run and (
+                event.task_id is not None
+                or event.status not in {"run.failed", "run.cancelled"}
+            ):
                 _fail("benchmark progress event is invalid")
             if event.task_id is not None and event.task_id != self._active_task_id:
                 _fail("benchmark progress event is invalid")
@@ -212,6 +225,8 @@ class LocalPrivateBenchmarkEvidenceStore:
                 finally:
                     os.close(progress)
             self._next_sequence += 1
+            if event.status in {"run.completed", "run.failed", "run.cancelled"}:
+                self._terminal_progress_appended = True
         except BenchmarkEvidenceError:
             raise
         except Exception:
@@ -242,7 +257,7 @@ class LocalPrivateBenchmarkEvidenceStore:
             self._completed_task_ids = (*self._completed_task_ids, result.task_id)
             self._active_task_id = None
             if result.status != "completed":
-                self._run_finished = True
+                self._terminal_task_result_pending_run = True
         except BenchmarkEvidenceError:
             raise
         except Exception:
@@ -251,6 +266,16 @@ class LocalPrivateBenchmarkEvidenceStore:
     def finish_run(self, result: BenchmarkRunResult) -> None:
         try:
             plan = self._require_plan()
+            if self._run_finished:
+                with _run_fd(self._root, plan) as run:
+                    persisted = _load_optional_run_result(
+                        plan,
+                        run,
+                        _completed_result_prefix_ids(result.tasks),
+                    )
+                if persisted == result:
+                    return
+                _fail("benchmark run result is invalid")
             _validate_run_result_for_plan(plan, result)
             if self._active_task_id is not None:
                 _fail("benchmark run result is invalid")
@@ -266,14 +291,14 @@ class LocalPrivateBenchmarkEvidenceStore:
                     _fail("benchmark run result is invalid")
                 _atomic_write_json(run, "result.json", _run_result_dict(result))
             self._run_finished = True
+            self._terminal_task_result_pending_run = False
+            self._terminal_progress_appended = True
         except BenchmarkEvidenceError:
             raise
         except Exception:
             _fail("benchmark evidence is invalid")
 
-    def compatible_completed_tasks(
-        self, plan: ResolvedBenchmarkPlan
-    ) -> frozenset[str]:
+    def compatible_completed_tasks(self, plan: ResolvedBenchmarkPlan) -> frozenset[str]:
         try:
             return frozenset(
                 task.task_id for task in self.compatible_completed_task_results(plan)
@@ -307,6 +332,27 @@ class LocalPrivateBenchmarkEvidenceStore:
         except Exception:
             _fail("benchmark evidence resume is invalid")
 
+    def next_progress_sequence(self, plan: ResolvedBenchmarkPlan) -> int:
+        try:
+            expected_manifest = _plan_manifest(plan)
+            context = _existing_run_fd_or_none(self._root, plan)
+            if context is None:
+                return 1
+            with context as run:
+                if _read_json(run, "manifest.json") != expected_manifest:
+                    _fail("benchmark evidence resume is invalid")
+                completed = _completed_prefix_results_from_evidence(plan, run)
+                _load_optional_run_result(
+                    plan,
+                    run,
+                    tuple(task.task_id for task in completed),
+                )
+                return _next_progress_sequence(run, plan)
+        except BenchmarkEvidenceError:
+            raise
+        except Exception:
+            _fail("benchmark evidence resume is invalid")
+
     def _require_plan(self) -> ResolvedBenchmarkPlan:
         if self._plan is None:
             _fail("benchmark evidence is uninitialized")
@@ -316,7 +362,11 @@ class LocalPrivateBenchmarkEvidenceStore:
         completed = _completed_prefix_results_from_evidence(plan, run_fd)
         completed_ids = tuple(task.task_id for task in completed)
         result = _load_optional_run_result(plan, run_fd, completed_ids)
-        self._completed_task_ids = completed_ids
+        self._completed_task_ids = (
+            tuple(task.task_id for task in result.tasks)
+            if result is not None
+            else completed_ids
+        )
         self._active_task_id = None
         self._next_sequence = _next_progress_sequence(run_fd, plan)
         self._run_finished = result is not None and result.status in {
@@ -324,6 +374,8 @@ class LocalPrivateBenchmarkEvidenceStore:
             "failed",
             "cancelled",
         }
+        self._terminal_task_result_pending_run = False
+        self._terminal_progress_appended = self._run_finished
 
 
 class _FdContext:
@@ -808,6 +860,17 @@ def _load_optional_run_result(
     return result
 
 
+def _completed_result_prefix_ids(
+    results: tuple[BenchmarkTaskResult, ...],
+) -> tuple[str, ...]:
+    completed: list[str] = []
+    for result in results:
+        if result.status != "completed":
+            break
+        completed.append(result.task_id)
+    return tuple(completed)
+
+
 def _has_noncompleted_task_result(plan: ResolvedBenchmarkPlan, run_fd: int) -> bool:
     tasks_fd = _open_required_dir(run_fd, "tasks")
     try:
@@ -862,7 +925,10 @@ def _next_progress_sequence(run_fd: int, plan: ResolvedBenchmarkPlan) -> int:
             if (
                 event.sequence != expected
                 or name != f"{event.sequence:06d}.json"
-                or (event.task_id is not None and event.task_id not in _plan_task_ids(plan))
+                or (
+                    event.task_id is not None
+                    and event.task_id not in _plan_task_ids(plan)
+                )
             ):
                 _fail("benchmark evidence resume is invalid")
             expected += 1
@@ -949,12 +1015,7 @@ def _O_CLOEXEC_INT() -> int:
 
 
 def _member_name(name: str) -> None:
-    if (
-        type(name) is not str
-        or name in {"", ".", ".."}
-        or "/" in name
-        or "\\" in name
-    ):
+    if type(name) is not str or name in {"", ".", ".."} or "/" in name or "\\" in name:
         _fail("benchmark evidence member is invalid")
 
 

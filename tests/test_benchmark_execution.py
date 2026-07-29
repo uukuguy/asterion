@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from asterion.benchmarks.evidence import (
+    BenchmarkEvidenceError,
     BenchmarkEvidenceStore,
     BenchmarkProgressEvent,
     BenchmarkRunResult,
@@ -133,6 +134,62 @@ class BenchmarkExecutionTests(unittest.TestCase):
             ("example.alpha", "example.beta"),
         )
 
+    def test_partial_resume_continues_existing_progress_sequence(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            p = plan()
+            root = Path(temp_dir) / "evidence"
+            original = LocalPrivateBenchmarkEvidenceStore(root)
+            original.initialize(p)
+            original.append_progress(
+                BenchmarkProgressEvent(sequence=1, status="run.started")
+            )
+            original.start_task(p.tasks[0])
+            original.append_progress(
+                BenchmarkProgressEvent(
+                    sequence=2,
+                    status="task.started",
+                    task_id="example.alpha",
+                )
+            )
+            alpha = BenchmarkTaskResult(
+                task_id="example.alpha",
+                status="completed",
+                case_count=2,
+                artifact_ids=("artifact.alpha",),
+            )
+            original.finish_task(alpha)
+
+            calls: list[tuple[str, str]] = []
+            evidence = RecordingEvidence(LocalPrivateBenchmarkEvidenceStore(root))
+            result = BenchmarkRunner(
+                output_directory_factory=RecordingOutputFactory(
+                    Path(temp_dir) / "outputs"
+                ),
+            ).run(
+                plan(build_log=calls),
+                executor=VerboseExecutor(),
+                evidence=evidence,
+                cancellation=ManualCancellation(),
+            )
+
+        progress = [
+            event
+            for kind, event in evidence.events
+            if kind == "progress" and event is not None
+        ]
+        self.assertEqual([event.sequence for event in progress], [3, 4, 5, 6])
+        self.assertEqual(
+            [(event.status, event.task_id) for event in progress],
+            [
+                ("run.started", None),
+                ("task.started", "example.beta"),
+                ("task.note", "example.beta"),
+                ("run.completed", None),
+            ],
+        )
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.tasks[0], alpha)
+
     def test_resume_completed_run_returns_exact_persisted_result_without_execution(
         self,
     ) -> None:
@@ -174,6 +231,37 @@ class BenchmarkExecutionTests(unittest.TestCase):
 
         self.assertEqual(result, expected)
         self.assertEqual(calls, [])
+
+    def test_full_resume_does_not_swallow_evidence_finish_failure(self) -> None:
+        p = plan()
+        result = BenchmarkRunResult(
+            status="completed",
+            tasks=(
+                BenchmarkTaskResult(
+                    task_id="example.alpha",
+                    status="completed",
+                    case_count=1,
+                ),
+                BenchmarkTaskResult(
+                    task_id="example.beta",
+                    status="completed",
+                    case_count=1,
+                ),
+            ),
+        )
+
+        with self.assertRaisesRegex(
+            BenchmarkEvidenceError,
+            "benchmark evidence is invalid",
+        ):
+            BenchmarkRunner(
+                output_directory_factory=lambda _plan, _task: Path.cwd()
+            ).run(
+                p,
+                executor=FixedResultExecutor(result.tasks[0]),
+                evidence=FailingCompletedEvidence(result),
+                cancellation=ManualCancellation(),
+            )
 
     def test_first_task_failure_prevents_later_tasks(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
@@ -223,7 +311,17 @@ class BenchmarkExecutionTests(unittest.TestCase):
             )
 
         self.assertEqual(calls, [])
-        self.assertEqual(evidence.events, [("initialize", None), ("finish_run", None)])
+        self.assertEqual(
+            evidence.events,
+            [
+                ("initialize", None),
+                (
+                    "progress",
+                    BenchmarkProgressEvent(sequence=1, status="run.cancelled"),
+                ),
+                ("finish_run", None),
+            ],
+        )
         self.assertEqual(result, BenchmarkRunResult(status="cancelled", tasks=()))
 
     def test_mid_task_cancellation_reaches_executor_and_stops_later_tasks(self) -> None:
@@ -310,6 +408,42 @@ class BenchmarkExecutionTests(unittest.TestCase):
         )
         self.assertEqual(result.status, "completed")
 
+    def test_failed_and_cancelled_runs_emit_one_terminal_progress_event(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            for status in ("failed", "cancelled"):
+                with self.subTest(status=status):
+                    root = Path(temp_dir) / status
+                    evidence = RecordingEvidence(
+                        LocalPrivateBenchmarkEvidenceStore(root / "evidence")
+                    )
+                    calls: list[tuple[str, str]] = []
+                    result = BenchmarkRunner(
+                        output_directory_factory=RecordingOutputFactory(
+                            root / "outputs"
+                        ),
+                    ).run(
+                        plan(build_log=calls),
+                        executor=RecordingExecutor(
+                            calls,
+                            statuses={"example.alpha": status},
+                        ),
+                        evidence=evidence,
+                        cancellation=ManualCancellation(),
+                    )
+
+                    terminal = [
+                        event
+                        for kind, event in evidence.events
+                        if kind == "progress"
+                        and event is not None
+                        and event.status.startswith("run.")
+                    ]
+                    self.assertEqual(
+                        [event.status for event in terminal],
+                        ["run.started", f"run.{status}"],
+                    )
+                    self.assertEqual(result.status, status)
+
     def test_executor_exception_becomes_redacted_failed_result(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
             calls: list[tuple[str, str]] = []
@@ -382,6 +516,118 @@ class BenchmarkExecutionTests(unittest.TestCase):
             ),
         )
         self.assertNotIn("SECRET-IMPLEMENTATION", repr(result))
+
+    def test_invocation_identity_is_validated_before_executor_runs(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            cases = (
+                ("example.beta", "example.alpha"),
+                ("example.alpha", "example.beta"),
+            )
+            for invocation_task_id, binding_id in cases:
+                with self.subTest(
+                    invocation_task_id=invocation_task_id,
+                    binding_id=binding_id,
+                ):
+                    calls: list[tuple[str, str]] = []
+                    result = BenchmarkRunner(
+                        output_directory_factory=RecordingOutputFactory(
+                            Path(temp_dir) / invocation_task_id / "outputs"
+                        ),
+                    ).run(
+                        plan(
+                            build_log=calls,
+                            implementation_factory=lambda task_id, log: (
+                                WrongInvocationImplementation(
+                                    task_id,
+                                    log,
+                                    invocation_task_id=invocation_task_id,
+                                    binding_id=binding_id,
+                                )
+                            ),
+                        ),
+                        executor=ForbiddenExecutor(),
+                        evidence=LocalPrivateBenchmarkEvidenceStore(
+                            Path(temp_dir) / invocation_task_id / "evidence"
+                        ),
+                        cancellation=ManualCancellation(),
+                    )
+
+                    self.assertEqual(calls, [("build", "example.alpha")])
+                    self.assertEqual(
+                        result,
+                        BenchmarkRunResult(
+                            status="failed",
+                            tasks=(
+                                BenchmarkTaskResult(
+                                    task_id="example.alpha",
+                                    status="failed",
+                                    case_count=0,
+                                ),
+                            ),
+                        ),
+                    )
+
+    def test_callback_progress_is_task_scoped_and_nonterminal(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            evidence = RecordingEvidence(
+                LocalPrivateBenchmarkEvidenceStore(Path(temp_dir) / "evidence")
+            )
+            result = BenchmarkRunner(
+                output_directory_factory=RecordingOutputFactory(
+                    Path(temp_dir) / "outputs"
+                ),
+            ).run(
+                plan(),
+                executor=WrongTaskProgressExecutor(),
+                evidence=evidence,
+                cancellation=ManualCancellation(),
+            )
+
+        progress = [
+            event
+            for kind, event in evidence.events
+            if kind == "progress" and event is not None
+        ]
+        self.assertIn(
+            BenchmarkProgressEvent(
+                sequence=3,
+                status="task.note",
+                task_id="example.alpha",
+            ),
+            progress,
+        )
+        self.assertEqual(result.status, "completed")
+
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            with self.assertRaises(BenchmarkEvidenceError):
+                BenchmarkRunner(
+                    output_directory_factory=RecordingOutputFactory(
+                        Path(temp_dir) / "outputs"
+                    ),
+                ).run(
+                    plan(),
+                    executor=ForbiddenProgressExecutor("run.completed"),
+                    evidence=LocalPrivateBenchmarkEvidenceStore(
+                        Path(temp_dir) / "evidence"
+                    ),
+                    cancellation=ManualCancellation(),
+                )
+
+    def test_callback_evidence_failure_is_not_swallowed_as_task_failure(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            with self.assertRaises(BenchmarkEvidenceError):
+                BenchmarkRunner(
+                    output_directory_factory=RecordingOutputFactory(
+                        Path(temp_dir) / "outputs"
+                    ),
+                ).run(
+                    plan(),
+                    executor=VerboseExecutor(),
+                    evidence=FailingProgressEvidence(
+                        LocalPrivateBenchmarkEvidenceStore(Path(temp_dir) / "evidence"),
+                    ),
+                    cancellation=ManualCancellation(),
+                )
 
     def test_result_task_identity_and_case_count_are_bound_to_plan(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
@@ -573,6 +819,33 @@ class ExplodingImplementation:
         raise RuntimeError("SECRET-IMPLEMENTATION-FAILURE")
 
 
+class WrongInvocationImplementation:
+    def __init__(
+        self,
+        task_id: str,
+        log: list[tuple[str, str]],
+        *,
+        invocation_task_id: str,
+        binding_id: str,
+    ) -> None:
+        self._task_id = task_id
+        self._log = log
+        self._invocation_task_id = invocation_task_id
+        self._binding_id = binding_id
+
+    def build_invocation(
+        self,
+        request: BenchmarkTaskRequest,
+    ) -> BenchmarkTaskInvocation:
+        self._log.append(("build", request.task_id))
+        return BenchmarkTaskInvocation(
+            task_id=self._invocation_task_id,
+            binding_id=self._binding_id,
+            public_arguments=(self._task_id,),
+            private_payload={"request": request},
+        )
+
+
 class RecordingExecutor:
     def __init__(
         self,
@@ -681,6 +954,67 @@ class FixedResultExecutor:
         return self._result
 
 
+class ForbiddenExecutor:
+    def execute(
+        self,
+        invocation: BenchmarkTaskInvocation,
+        *,
+        cancellation: CancellationSignal,
+        on_progress: Callable[[BenchmarkProgressEvent], None],
+    ) -> BenchmarkTaskResult:
+        del invocation, cancellation, on_progress
+        raise AssertionError("executor must not run")
+
+
+class WrongTaskProgressExecutor:
+    def execute(
+        self,
+        invocation: BenchmarkTaskInvocation,
+        *,
+        cancellation: CancellationSignal,
+        on_progress: Callable[[BenchmarkProgressEvent], None],
+    ) -> BenchmarkTaskResult:
+        del cancellation
+        on_progress(
+            BenchmarkProgressEvent(
+                sequence=999,
+                status="task.note",
+                task_id="example.beta",
+            )
+        )
+        return BenchmarkTaskResult(
+            task_id=invocation.task_id,
+            status="completed",
+            case_count=3,
+        )
+
+
+class ForbiddenProgressExecutor:
+    def __init__(self, status: str) -> None:
+        self._status = status
+
+    def execute(
+        self,
+        invocation: BenchmarkTaskInvocation,
+        *,
+        cancellation: CancellationSignal,
+        on_progress: Callable[[BenchmarkProgressEvent], None],
+    ) -> BenchmarkTaskResult:
+        del cancellation
+        on_progress(
+            BenchmarkProgressEvent(
+                sequence=999,
+                status=self._status,
+                task_id=invocation.task_id,
+            )
+        )
+        return BenchmarkTaskResult(
+            task_id=invocation.task_id,
+            status="completed",
+            case_count=3,
+        )
+
+
 class RecordingOutputFactory:
     def __init__(self, root: Path) -> None:
         self._root = root
@@ -734,6 +1068,55 @@ class RecordingEvidence:
         plan: ResolvedBenchmarkPlan,
     ) -> tuple[BenchmarkTaskResult, ...]:
         return self._delegate.compatible_completed_task_results(plan)
+
+    def next_progress_sequence(self, plan: ResolvedBenchmarkPlan) -> int:
+        return self._delegate.next_progress_sequence(plan)
+
+
+class FailingCompletedEvidence:
+    def __init__(self, result: BenchmarkRunResult) -> None:
+        self._result = result
+
+    def initialize(self, plan: ResolvedBenchmarkPlan) -> None:
+        del plan
+
+    def start_task(self, task: ResolvedBenchmarkTask) -> None:
+        del task
+
+    def append_progress(self, event: BenchmarkProgressEvent) -> None:
+        del event
+
+    def finish_task(self, result: BenchmarkTaskResult) -> None:
+        del result
+
+    def finish_run(self, result: BenchmarkRunResult) -> None:
+        del result
+        raise BenchmarkEvidenceError("benchmark evidence is invalid")
+
+    def compatible_completed_tasks(
+        self,
+        plan: ResolvedBenchmarkPlan,
+    ) -> frozenset[str]:
+        del plan
+        return frozenset(task.task_id for task in self._result.tasks)
+
+    def compatible_completed_task_results(
+        self,
+        plan: ResolvedBenchmarkPlan,
+    ) -> tuple[BenchmarkTaskResult, ...]:
+        del plan
+        return self._result.tasks
+
+    def next_progress_sequence(self, plan: ResolvedBenchmarkPlan) -> int:
+        del plan
+        return 1
+
+
+class FailingProgressEvidence(RecordingEvidence):
+    def append_progress(self, event: BenchmarkProgressEvent) -> None:
+        if event.status == "task.note":
+            raise BenchmarkEvidenceError("benchmark progress event is invalid")
+        super().append_progress(event)
 
 
 class ManualCancellation:
