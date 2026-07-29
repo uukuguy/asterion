@@ -74,6 +74,7 @@ def main(
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
     managed_executor_factory: Callable[[OperatorExecutorConfig], object] | None = None,
+    capability_packages: Iterable[InstalledCapabilityPackage] | None = None,
 ) -> int:
     """Run the generic installed-application CLI."""
 
@@ -191,6 +192,7 @@ def main(
                 managed_executor_factory=executor_factory,
                 stdin=stdin,
                 stdout=stdout,
+                capability_packages=tuple(capability_packages or ()),
             )
         )
     except (
@@ -217,12 +219,16 @@ async def _run(
     managed_executor_factory: Callable[[OperatorExecutorConfig], object],
     stdin: TextIO,
     stdout: TextIO,
+    capability_packages: tuple[InstalledCapabilityPackage, ...] = (),
 ) -> int:
     metadata_provider = load_application_provider(args.provider, entry_points=entry_points)
     provider = resolve_installed_provider(
         metadata_provider,
         runtime_factories=registry,
-        installed_packages=_load_builtin_capability_packages(metadata_provider),
+        installed_packages=_load_available_capability_packages(
+            metadata_provider,
+            capability_packages,
+        ),
     )
     assembly_path: Path | None = None
     if args.application is not None:
@@ -307,11 +313,10 @@ def _runtime_options(values: list[str]) -> Mapping[str, str]:
     return MappingProxyType(parsed)
 
 
-def _load_builtin_capability_packages(
+def _load_available_capability_packages(
     provider: InstalledApplicationProvider,
+    injected_packages: tuple[InstalledCapabilityPackage, ...],
 ) -> tuple[InstalledCapabilityPackage, ...]:
-    source = BuiltinCapabilitySource()
-    candidates = source.discover_metadata()
     package_refs = tuple(
         sorted(
             {
@@ -321,13 +326,32 @@ def _load_builtin_capability_packages(
             }
         )
     )
-    installed: list[InstalledCapabilityPackage] = []
-    for package_ref in package_refs:
-        candidate = resolve_capability_source(package_ref, candidates, None)
-        payload = source.open_payload(candidate)
-        source.validate_source_identity(candidate, payload)
-        installed.append(source.load_provider(candidate))
-    return tuple(installed)
+    installed = _injected_capability_package_map(injected_packages)
+    missing_refs = tuple(
+        package_ref for package_ref in package_refs if package_ref not in installed
+    )
+    if missing_refs:
+        source = BuiltinCapabilitySource()
+        candidates = source.discover_metadata()
+        for package_ref in missing_refs:
+            candidate = resolve_capability_source(package_ref, candidates, None)
+            payload = source.open_payload(candidate)
+            source.validate_source_identity(candidate, payload)
+            installed[package_ref] = source.load_provider(candidate)
+    return tuple(installed[package_ref] for package_ref in package_refs)
+
+
+def _injected_capability_package_map(
+    packages: tuple[InstalledCapabilityPackage, ...],
+) -> dict[object, InstalledCapabilityPackage]:
+    installed: dict[object, InstalledCapabilityPackage] = {}
+    for package in packages:
+        if type(package) is not InstalledCapabilityPackage:
+            raise ApplicationProviderError("capability package injection is invalid")
+        if package.package_ref in installed:
+            raise ApplicationProviderError("capability package injection is invalid")
+        installed[package.package_ref] = package
+    return installed
 
 
 def _select_application_assembly(

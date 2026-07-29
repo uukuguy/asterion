@@ -26,6 +26,7 @@ from asterion.capabilities.catalog import (
 from asterion.capabilities.execution import (
     CapabilityExecutionError,
     CapabilityImplementation,
+    EXECUTABLE_CAPABILITY_KINDS,
     validate_implementation_bindings,
 )
 from asterion.applications.product import (
@@ -75,11 +76,20 @@ class InstalledApplication:
     def implementations(
         self,
     ) -> tuple[tuple[CapabilityRef, CapabilityImplementation], ...]:
-        return tuple(
+        bindings = tuple(
             (binding.capability_ref, binding.implementation)
             for package in self.installed_packages
             for binding in package.implementations
         )
+        if not self.assemblies:
+            return bindings
+        expected_refs = {
+            CapabilityRef(str(manifest["capability_id"]), str(manifest["version"]))
+            for assembly in self.assemblies
+            for manifest in assembly.plan.capability_manifests
+            if manifest["kind"] in EXECUTABLE_CAPABILITY_KINDS
+        }
+        return tuple(binding for binding in bindings if binding[0] in expected_refs)
 
 
 @dataclass(frozen=True)
@@ -310,7 +320,7 @@ def _compose_application(
                     "installed application package closure is invalid"
                 )
             bound_refs = {binding[0] for binding in implementations}
-            if not bound_refs.issubset(set(plan.capability_refs)):
+            if not bound_refs.issubset(package_capabilities):
                 raise ApplicationProviderError(
                     "installed application binding is unavailable"
                 )

@@ -35,6 +35,7 @@ from asterion.dci.provenance import (
     dci_complete_implementation_identity,
 )
 from tests.test_application_discovery import FakeEntryPoint
+from tests.test_asterion_cli import transitional_dci_package
 from asterion.dci.dual_runtime_verification import (
     DciDualRuntimeVerificationError,
     audit_restricted_claude_application,
@@ -618,9 +619,11 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
         )
         self.assertEqual(application.runtime_ids, ("claude-code.reference", "pi.reference"))
         self.assertEqual(
-            tuple(binding[0].capability_id for binding in application.implementations),
-            STAGES,
+            tuple(ref.package_id for ref in application.capability_packages),
+            ("dci",),
         )
+        self.assertEqual(application.catalog_roots, ())
+        self.assertEqual(application.implementations, ())
         self.assertEqual(
             {path.name for path in application.assembly_paths},
             {
@@ -735,6 +738,7 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
                     entry_points=(provider_entry,),
                     host_service_entry_points=host_entries,
                     runtime_factories=registry,
+                    capability_packages=(transitional_dci_package(),),
                     stdout=stdout,
                     stderr=stderr,
                 )

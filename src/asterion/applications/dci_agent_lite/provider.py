@@ -10,10 +10,11 @@ from asterion.applications.provider import (
     InstalledApplication,
     InstalledApplicationProvider,
 )
-from asterion.capabilities.dci_research import DciLocalResearchImplementation
-from asterion.capabilities.dci_research.complete import complete_dci_bindings
+from asterion.capability_packages import CapabilityPackageRef
 from asterion.dci.verification import create_dci_product
-from asterion.capabilities.catalog import CapabilityRef
+
+
+DCI_PACKAGE = CapabilityPackageRef("dci", "1.0.0")
 
 
 def create_provider() -> InstalledApplicationProvider:
@@ -21,7 +22,6 @@ def create_provider() -> InstalledApplicationProvider:
 
     root = Path(str(resources.files("asterion"))).resolve()
     application_root = root / "applications/dci_agent_lite"
-    capability_root = root / "capabilities/dci_research"
     return InstalledApplicationProvider(
         protocol=APPLICATION_PROVIDER_PROTOCOL,
         provider_id="dci-agent-lite",
@@ -35,13 +35,7 @@ def create_provider() -> InstalledApplicationProvider:
                     / "assemblies/dci-research-capability-claude.json",
                     application_root / "assemblies/dci-research-capability.json",
                 ),
-                catalog_roots=(capability_root / "manifests",),
-                implementations=(
-                    (
-                        CapabilityRef("dci.research", "1.0.0"),
-                        DciLocalResearchImplementation(),
-                    ),
-                ),
+                capability_packages=(DCI_PACKAGE,),
                 runtime_ids=("claude-code.reference", "pi.reference"),
             ),
             InstalledApplication(
@@ -51,8 +45,7 @@ def create_provider() -> InstalledApplicationProvider:
                     application_root / "assemblies/dci-complete-application-claude.json",
                     application_root / "assemblies/dci-complete-application-pi.json",
                 ),
-                catalog_roots=(capability_root / "manifests",),
-                implementations=complete_dci_bindings(),
+                capability_packages=(DCI_PACKAGE,),
                 runtime_ids=("claude-code.reference", "pi.reference"),
             ),
         ),

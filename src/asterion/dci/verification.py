@@ -16,7 +16,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
-from typing import Protocol, TextIO
+from typing import Protocol, TextIO, cast
 
 from asterion.dci.ablation import (
     bounded_ablation_input_paths,
@@ -151,6 +151,67 @@ _EXPECTED_PAPER_BENCHMARK_SHA256 = (
 _EXPECTED_PAPER_SCOPES_SHA256 = (
     "316b58ca33390b19150fbd62d4c4806ca591eb64611eb12d93281a45d5d00140"
 )
+
+
+class _TransitionalDciResearchImplementation:
+    def __init__(self) -> None:
+        from asterion.capabilities.dci_research import DciLocalResearchImplementation
+        from asterion.capabilities.dci_research.complete import (
+            DciCompleteResearchImplementation,
+        )
+
+        self._local = DciLocalResearchImplementation()
+        self._complete = DciCompleteResearchImplementation()
+
+    async def execute(self, invocation):
+        from asterion.capabilities.dci_research.complete import INPUT_PROTOCOL
+
+        try:
+            value = json.loads(invocation.input_text)
+        except ValueError:
+            value = None
+        if isinstance(value, dict) and value.get("protocol") == INPUT_PROTOCOL:
+            return await self._complete.execute(invocation)
+        return await self._local.execute(invocation)
+
+
+def _transitional_dci_package():
+    from asterion.capabilities.dci_research.complete import complete_dci_bindings
+    from asterion.capabilities.catalog import CapabilityRef
+    from asterion.capabilities.execution import (
+        CapabilityImplementation,
+        CapabilityImplementationBinding,
+    )
+    from asterion.capability_packages import (
+        CapabilityPackageRef,
+        InstalledCapabilityPackage,
+    )
+
+    root = Path(str(resources.files("asterion.capabilities.dci_research"))).resolve()
+    bindings: tuple[tuple[CapabilityRef, CapabilityImplementation], ...] = (
+        *cast(
+            tuple[tuple[CapabilityRef, CapabilityImplementation], ...],
+            complete_dci_bindings(),
+        ),
+        (
+            CapabilityRef("dci.research", "1.0.0"),
+            cast(CapabilityImplementation, _TransitionalDciResearchImplementation()),
+        ),
+    )
+    deduped: dict[CapabilityRef, CapabilityImplementation] = dict(bindings)
+    return InstalledCapabilityPackage(
+        package_ref=CapabilityPackageRef("dci", "1.0.0"),
+        payload_sha256="d" * 64,
+        source_id="dci.transitional-local",
+        source_kind="local-directory",
+        catalog_roots=((root / "manifests").resolve(),),
+        benchmark_suite_paths=(),
+        implementations=tuple(
+            CapabilityImplementationBinding(ref, implementation)
+            for ref, implementation in sorted(deduped.items())
+        ),
+        benchmark_bindings=(),
+    )
 
 
 @dataclass(frozen=True)
@@ -1069,10 +1130,13 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
         CapabilityExecutionError,
         validate_implementation_bindings,
     )
+    from asterion.capabilities.builtin import create_controlled_code_package
     from asterion.runtime.defaults import default_runtime_factory_registry
     from asterion.runtime.factory import RuntimeFactoryError
     from asterion.runtime.protocol import ProtocolError
 
+    controlled_package = create_controlled_code_package()
+    dci_package = _transitional_dci_package()
     providers = (
         validate_installed_provider(
             create_controlled_provider(), selected_id="controlled-code"
@@ -1081,6 +1145,11 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
             create_dci_provider(), selected_id="dci-agent-lite"
         ),
     )
+    installed_packages_by_provider = {
+        "controlled-code": (controlled_package,),
+        "dci-agent-lite": (dci_package,),
+    }
+    installed_packages = (controlled_package, dci_package)
     applications = tuple(
         application
         for provider in providers
@@ -1123,7 +1192,11 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
             try:
                 composed_providers.append(
                     compose_installed_provider(
-                        provider, runtime_factories=runtime_factories
+                        provider,
+                        runtime_factories=runtime_factories,
+                        installed_packages=installed_packages_by_provider[
+                            provider.provider_id
+                        ],
                     )
                 )
             except ApplicationProviderError:
@@ -1157,8 +1230,8 @@ def _installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
         sorted(
             {
                 root
-                for application in applications
-                for root in application.catalog_roots
+                for package in installed_packages
+                for root in package.catalog_roots
             }
         )
     )

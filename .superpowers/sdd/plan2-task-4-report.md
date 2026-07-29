@@ -23,3 +23,27 @@ GREEN:
 Concerns:
 - DCI is intentionally not registered as a built-in capability source in this task.
 - Full `make check` was intentionally not run per resume instruction.
+
+## Important DCI Regression Fix
+
+Status: PASS
+
+RED:
+- `uv run python -m unittest -v tests.test_asterion_cli.AsterionCliTests.test_dci_list_provider_and_describe_do_not_require_package_resolution tests.test_asterion_cli.AsterionCliTests.test_dci_run_without_transitional_package_fails_before_runtime tests.test_asterion_cli.AsterionCliTests.test_dci_run_accepts_explicit_transitional_package_injection` initially failed because DCI provider list/describe still required unresolved package composition, explicit package injection was not accepted by `main`, and only the no-package pre-runtime failure path already failed closed.
+
+Transition design:
+- `dci-agent-lite` now publishes exact `CapabilityPackageRef("dci", "1.0.0")` metadata only; it does not import DCI implementations during provider load.
+- Generic CLI run composition accepts explicitly injected `InstalledCapabilityPackage` values and falls back only to registered built-in sources for missing refs, so DCI stays unregistered and unavailable without host injection.
+- The DCI product verifier constructs a DCI-owned transitional local-directory package only inside the DCI verification boundary, preserving Task 6's future adapter direction without adding generic directory scanning.
+- Package implementation bindings may exceed one selected assembly's executable closure, but runtime execution exposes only the executable refs required by the composed assembly.
+
+GREEN:
+- `uv run python -m unittest -v ...focused 63-test command...` -> 63 tests OK.
+- `uv run pyright src/asterion/applications/dci_agent_lite/provider.py src/asterion/applications/provider.py src/asterion/cli.py` -> 0 errors.
+- `uv run pyright --outputjson ...touched files...` compared against `c708053` archive baseline -> baseline 60 errors, current 39 errors, new unique errors 0.
+- `uv run ruff check src/asterion/applications/dci_agent_lite/provider.py src/asterion/applications/provider.py src/asterion/cli.py src/asterion/dci/verification.py tests/test_asterion_cli.py tests/test_dci_complete_application.py` -> all checks passed.
+- `uv run python -m compileall -q src/asterion tests/test_asterion_cli.py tests/test_dci_complete_application.py` -> PASS.
+- `git diff --check` -> PASS.
+
+Concerns:
+- Broad `make check` was intentionally not run per current instruction.
