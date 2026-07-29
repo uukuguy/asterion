@@ -49,7 +49,7 @@ The canonical definition is
 negative fixtures live in `tests/fixtures/capabilities/v1/` and
 `tests/fixtures/application_assembly/v1/`. They include prefix capability IDs, BMP/non-BMP
 scalar ordering, and lone-surrogate rejection. The reference manifests under
-`src/asterion/capabilities/dci_research/manifests/` form the policy → research
+`src/asterion/capabilities/dci/payload/capabilities/` form the policy → research
 → evaluation → observability DCI graph.
 
 Manifests are compatibility allowlists, not output guarantees or execution

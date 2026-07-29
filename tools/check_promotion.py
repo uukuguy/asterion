@@ -126,19 +126,19 @@ expected = {
         'asterion.capability/v1',
     'capabilities/dci_research/capability-package.json':
         'asterion.capability-package/v1',
-    'capabilities/dci_research/manifests/dci-analysis.json':
+    'capabilities/dci/payload/capabilities/dci-analysis.json':
         'asterion.capability/v1',
-    'capabilities/dci_research/manifests/dci-benchmark.json':
+    'capabilities/dci/payload/capabilities/dci-benchmark.json':
         'asterion.capability/v1',
-    'capabilities/dci_research/manifests/dci-evaluation.json':
+    'capabilities/dci/payload/capabilities/dci-evaluation.json':
         'asterion.capability/v1',
-    'capabilities/dci_research/manifests/dci-export.json':
+    'capabilities/dci/payload/capabilities/dci-export.json':
         'asterion.capability/v1',
-    'capabilities/dci_research/manifests/dci-research.json':
+    'capabilities/dci/payload/capabilities/dci-research.json':
         'asterion.capability/v1',
-    'capabilities/dci_research/manifests/local-corpus-policy.json':
+    'capabilities/dci/payload/capabilities/local-corpus-policy.json':
         'asterion.capability/v1',
-    'capabilities/dci_research/manifests/protocol-observability.json':
+    'capabilities/dci/payload/capabilities/protocol-observability.json':
         'asterion.capability/v1',
 }
 actual_paths = {

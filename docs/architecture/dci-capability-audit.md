@@ -76,7 +76,7 @@ the `asterion-dci benchmark` product command.
 Two packaged resources are not provider-reachable:
 
 - `applications/dci_agent_lite/assemblies/dci-local-research.json`
-- `capabilities/dci_research/manifests/protocol-observability.json`
+- `capabilities/dci/payload/capabilities/protocol-observability.json`
 
 Installed acceptance reports the reachability classes separately: six
 packaged assemblies, five provider-bound assemblies, five composed assemblies,

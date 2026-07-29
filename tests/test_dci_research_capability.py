@@ -21,7 +21,7 @@ from asterion.capabilities.dci_research._runtime import (
 PROJECT = Path(__file__).resolve().parents[1]
 SOURCE = PROJECT / "src/asterion"
 MANIFEST_PATH = (
-    SOURCE / "capabilities/dci_research/manifests/dci-research.json"
+    SOURCE / "capabilities/dci/payload/capabilities/dci-research.json"
 )
 
 

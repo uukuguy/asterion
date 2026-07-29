@@ -57,7 +57,7 @@ from asterion.runtime.working_directory import ProcessWorkingDirectory
 
 PROJECT = Path(__file__).resolve().parents[1]
 SOURCE = PROJECT / "src/asterion"
-MANIFESTS = SOURCE / "capabilities/dci_research/manifests"
+MANIFESTS = SOURCE / "capabilities/dci/payload/capabilities"
 ASSEMBLIES = SOURCE / "applications/dci_agent_lite/assemblies"
 
 STAGES = (
@@ -373,7 +373,9 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
             {
                 name
                 for name in DCI_COMPLETE_IMPLEMENTATION_RESOURCES
-                if "/manifests/" not in name
+                if not name.startswith(
+                    "capabilities/dci/payload/capabilities/"
+                )
                 and not name.startswith("dci/resources/")
             },
             _dci_import_closure(DCI_EXECUTABLE_SOURCE_ROOTS)
@@ -401,7 +403,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
         manifest_resources = {
             name
             for name in DCI_COMPLETE_IMPLEMENTATION_RESOURCES
-            if name.startswith("capabilities/dci_research/manifests/")
+            if name.startswith("capabilities/dci/payload/capabilities/")
         }
         for resource_name in manifest_resources:
             manifest = json.loads(SOURCE.joinpath(resource_name).read_text())

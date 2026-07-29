@@ -276,13 +276,13 @@ class PromotionCheckTests(unittest.TestCase):
             "capabilities/controlled_code/manifests/controlled-code-policy.json",
             "capabilities/controlled_code/manifests/execution-audit-observability.json",
             "capabilities/dci_research/capability-package.json",
-            "capabilities/dci_research/manifests/dci-analysis.json",
-            "capabilities/dci_research/manifests/dci-benchmark.json",
-            "capabilities/dci_research/manifests/dci-evaluation.json",
-            "capabilities/dci_research/manifests/dci-export.json",
-            "capabilities/dci_research/manifests/dci-research.json",
-            "capabilities/dci_research/manifests/local-corpus-policy.json",
-            "capabilities/dci_research/manifests/protocol-observability.json",
+            "capabilities/dci/payload/capabilities/dci-analysis.json",
+            "capabilities/dci/payload/capabilities/dci-benchmark.json",
+            "capabilities/dci/payload/capabilities/dci-evaluation.json",
+            "capabilities/dci/payload/capabilities/dci-export.json",
+            "capabilities/dci/payload/capabilities/dci-research.json",
+            "capabilities/dci/payload/capabilities/local-corpus-policy.json",
+            "capabilities/dci/payload/capabilities/protocol-observability.json",
         ):
             self.assertIn(expected, smoke_source)
         for suffix in (

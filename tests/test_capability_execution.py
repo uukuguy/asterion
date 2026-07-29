@@ -29,7 +29,7 @@ from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 
 PROJECT = Path(__file__).resolve().parents[1]
 SOURCE = PROJECT / "src/asterion"
-MANIFEST_ROOT = SOURCE / "capabilities/dci_research/manifests"
+MANIFEST_ROOT = SOURCE / "capabilities/dci/payload/capabilities"
 ASSEMBLY = (
     SOURCE
     / "applications/dci_agent_lite/assemblies/dci-local-research.json"
