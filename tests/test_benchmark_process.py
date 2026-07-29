@@ -9,20 +9,27 @@ import time
 import unittest
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from typing import Any
 
+import asterion.benchmarks as benchmark_api
 from asterion.benchmarks import (
     AuthorizedProcessTaskExecutor,
-    AuthorizedProcessTaskPlan,
     BenchmarkProgressEvent,
     BenchmarkTaskInvocation,
     BenchmarkTaskResult,
 )
+from asterion.benchmarks.evidence import BenchmarkEvidenceError
 from asterion.benchmarks.process import BenchmarkProcessError
 
 
-class AuthorizedProcessTaskPlanTests(unittest.TestCase):
-    def test_plan_is_frozen_and_requires_direct_argv(self) -> None:
-        plan = AuthorizedProcessTaskPlan(
+class AuthorizedProcessTaskIssuerTests(unittest.TestCase):
+    def test_forgeable_plan_type_is_not_exported(self) -> None:
+        self.assertFalse(hasattr(benchmark_api, "AuthorizedProcessTaskPlan"))
+        self.assertNotIn("AuthorizedProcessTaskPlan", benchmark_api.__all__)
+
+    def test_issuer_creates_redacted_frozen_process_payloads(self) -> None:
+        _executor, issuer = AuthorizedProcessTaskExecutor.create_pair()
+        plan = issuer(
             argv=(sys.executable, "-c", "pass"),
             cwd=Path.cwd(),
             env={"PYTHONPATH": "src"},
@@ -30,12 +37,15 @@ class AuthorizedProcessTaskPlanTests(unittest.TestCase):
             max_output_bytes=32,
         )
 
-        self.assertEqual(plan.argv[0], sys.executable)
-        self.assertEqual(dict(plan.env), {"PYTHONPATH": "src"})
+        self.assertEqual(getattr(plan, "argv")[0], sys.executable)
+        self.assertEqual(dict(getattr(plan, "env")), {"PYTHONPATH": "src"})
+        self.assertNotIn(sys.executable, repr(plan))
+        self.assertNotIn(str(Path.cwd()), repr(plan))
+        self.assertNotIn("PYTHONPATH", repr(plan))
         with self.assertRaises(FrozenInstanceError):
-            plan.timeout_seconds = 2.0  # type: ignore[misc]
+            setattr(plan, "timeout_seconds", 2.0)
         with self.assertRaises(BenchmarkProcessError):
-            AuthorizedProcessTaskPlan(
+            issuer(
                 argv=("echo hello",),
                 cwd=Path.cwd(),
                 env={},
@@ -43,7 +53,7 @@ class AuthorizedProcessTaskPlanTests(unittest.TestCase):
                 max_output_bytes=32,
             )
         with self.assertRaises(BenchmarkProcessError):
-            AuthorizedProcessTaskPlan(
+            issuer(
                 argv=(sys.executable,),
                 cwd=Path.cwd(),
                 env={"SECRET_TOKEN": "value"},
@@ -51,9 +61,10 @@ class AuthorizedProcessTaskPlanTests(unittest.TestCase):
                 max_output_bytes=32,
             )
 
-    def test_invalid_plan_errors_do_not_echo_hostile_values(self) -> None:
+    def test_invalid_issuer_values_do_not_echo_hostile_values(self) -> None:
+        _executor, issuer = AuthorizedProcessTaskExecutor.create_pair()
         with self.assertRaises(BenchmarkProcessError) as caught:
-            AuthorizedProcessTaskPlan(
+            issuer(
                 argv=("SECRET-PROGRAM",),
                 cwd=Path("SECRET-PATH"),
                 env={},
@@ -65,20 +76,82 @@ class AuthorizedProcessTaskPlanTests(unittest.TestCase):
 
 
 class AuthorizedProcessTaskExecutorTests(unittest.TestCase):
+    def test_plain_forged_process_config_is_rejected_without_spawning(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            marker = Path(temp_dir) / "marker"
+            invocation = BenchmarkTaskInvocation(
+                task_id="example.task",
+                binding_id="example.task",
+                public_arguments=("safe",),
+                private_payload={
+                    "argv": (
+                        "/bin/sh",
+                        "-c",
+                        f"echo forged > {marker}",
+                    ),
+                    "cwd": str(Path.cwd()),
+                },
+            )
+
+            with self.assertRaises(BenchmarkProcessError):
+                AuthorizedProcessTaskExecutor.create_pair()[0].execute(
+                    invocation,
+                    cancellation=ManualCancellation(),
+                    on_progress=lambda _event: None,
+                )
+
+        self.assertFalse(marker.exists())
+
+    def test_process_plan_from_different_issuer_is_rejected_without_spawning(
+        self,
+    ) -> None:
+        executor, _issuer = AuthorizedProcessTaskExecutor.create_pair()
+        _other_executor, other_issuer = AuthorizedProcessTaskExecutor.create_pair()
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            marker = Path(temp_dir) / "marker"
+            invocation = BenchmarkTaskInvocation(
+                task_id="example.task",
+                binding_id="example.task",
+                public_arguments=("safe",),
+                private_payload=other_issuer(
+                    argv=(
+                        sys.executable,
+                        "-c",
+                        (
+                            "import pathlib, sys; "
+                            "pathlib.Path(sys.argv[1]).write_text('spawned')"
+                        ),
+                        str(marker),
+                    ),
+                    cwd=Path.cwd(),
+                    env={},
+                    timeout_seconds=2.0,
+                    max_output_bytes=128,
+                ),
+            )
+
+            with self.assertRaises(BenchmarkProcessError):
+                executor.execute(
+                    invocation,
+                    cancellation=ManualCancellation(),
+                    on_progress=lambda _event: None,
+                )
+
+        self.assertFalse(marker.exists())
+
     def test_completed_process_returns_allowlisted_task_result_only(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
             out = Path(temp_dir) / "out.json"
             result = self._execute(
                 "example.task",
-                AuthorizedProcessTaskPlan(
+                self._issue(
                     argv=(
                         sys.executable,
                         "-c",
                         (
                             "import json, pathlib, sys; "
                             "pathlib.Path(sys.argv[1]).write_text("
-                            "json.dumps({'ok': True}) + '\\n', encoding='utf-8'); "
-                            "print('SECRET-STDOUT')"
+                            "json.dumps({'ok': True}) + '\\n', encoding='utf-8')"
                         ),
                         str(out),
                     ),
@@ -106,7 +179,7 @@ class AuthorizedProcessTaskExecutorTests(unittest.TestCase):
     def test_nonzero_exit_fails_without_output_or_payload_leak(self) -> None:
         result = self._execute(
             "example.task",
-            AuthorizedProcessTaskPlan(
+            self._issue(
                 argv=(
                     sys.executable,
                     "-c",
@@ -129,7 +202,7 @@ class AuthorizedProcessTaskExecutorTests(unittest.TestCase):
             out = Path(temp_dir) / "env.json"
             result = self._execute(
                 "example.task",
-                AuthorizedProcessTaskPlan(
+                self._issue(
                     argv=(
                         sys.executable,
                         "-c",
@@ -160,7 +233,7 @@ class AuthorizedProcessTaskExecutorTests(unittest.TestCase):
             marker = Path(temp_dir) / "marker"
             result = self._execute(
                 "example.task",
-                AuthorizedProcessTaskPlan(
+                self._issue(
                     argv=(
                         sys.executable,
                         "-c",
@@ -184,7 +257,7 @@ class AuthorizedProcessTaskExecutorTests(unittest.TestCase):
             marker = Path(temp_dir) / "marker"
             result = self._execute(
                 "example.task",
-                AuthorizedProcessTaskPlan(
+                self._issue(
                     argv=(
                         sys.executable,
                         "-c",
@@ -208,7 +281,7 @@ class AuthorizedProcessTaskExecutorTests(unittest.TestCase):
     def test_timeout_kills_process_and_returns_cancelled(self) -> None:
         result = self._execute(
             "example.task",
-            AuthorizedProcessTaskPlan(
+            self._issue(
                 argv=(sys.executable, "-c", "import time; time.sleep(30)"),
                 cwd=Path.cwd(),
                 env={},
@@ -224,15 +297,11 @@ class AuthorizedProcessTaskExecutorTests(unittest.TestCase):
         events: list[BenchmarkProgressEvent] = []
         result = self._execute(
             "example.task",
-            AuthorizedProcessTaskPlan(
+            self._issue(
                 argv=(
                     sys.executable,
                     "-c",
-                    (
-                        "import sys; "
-                        "sys.stdout.write('x' * 100); "
-                        "sys.stderr.write('y' * 100)"
-                    ),
+                    "import sys; sys.stdout.write('x' * 10); sys.stderr.write('y' * 10)",
                 ),
                 cwd=Path.cwd(),
                 env={},
@@ -249,6 +318,52 @@ class AuthorizedProcessTaskExecutorTests(unittest.TestCase):
             [("task.process-exited", "example.task")],
         )
 
+    def test_output_cap_terminates_chatty_process_promptly(self) -> None:
+        for stream in ("stdout", "stderr"):
+            with self.subTest(stream=stream):
+                writer = "sys.stdout" if stream == "stdout" else "sys.stderr"
+                started = time.monotonic()
+                result = self._execute(
+                    "example.task",
+                    self._issue(
+                        argv=(
+                            sys.executable,
+                            "-c",
+                            (
+                                "import sys, time; "
+                                "\nwhile True:"
+                                f"\n    {writer}.write('x' * 4096)"
+                                f"\n    {writer}.flush()"
+                                "\n    time.sleep(0.001)"
+                            ),
+                        ),
+                        cwd=Path.cwd(),
+                        env={},
+                        timeout_seconds=10.0,
+                        max_output_bytes=1024,
+                        termination_grace_seconds=0.1,
+                    ),
+                )
+
+                self.assertEqual(result.status, "failed")
+                self.assertLess(time.monotonic() - started, 2.0)
+
+    def test_callback_exceptions_propagate_after_process_cleanup(self) -> None:
+        with self.assertRaises(BenchmarkEvidenceError):
+            self._execute(
+                "example.task",
+                self._issue(
+                    argv=(sys.executable, "-c", "pass"),
+                    cwd=Path.cwd(),
+                    env={},
+                    timeout_seconds=2.0,
+                    max_output_bytes=128,
+                ),
+                on_progress=lambda _event: (_ for _ in ()).throw(
+                    BenchmarkEvidenceError("callback failed")
+                ),
+            )
+
     @unittest.skipUnless(os.name == "posix", "POSIX process-group cancellation only")
     def test_cancellation_kills_process_tree_before_returning(self) -> None:
         if platform.system() not in {"Darwin", "Linux"}:
@@ -256,7 +371,7 @@ class AuthorizedProcessTaskExecutorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
             state = Path(temp_dir) / "pids.json"
             cancellation = ManualCancellation()
-            plan = AuthorizedProcessTaskPlan(
+            plan = self._issue(
                 argv=(
                     sys.executable,
                     "tests/fixtures/helpers/benchmark_process_tree.py",
@@ -275,9 +390,45 @@ class AuthorizedProcessTaskExecutorTests(unittest.TestCase):
                 private_payload=plan,
             )
 
-            result = AuthorizedProcessTaskExecutor(
-                poll_interval_seconds=0.02,
-            ).execute(
+            result = self._executor.execute(
+                invocation,
+                cancellation=CancellationAfterStateFile(cancellation, state),
+                on_progress=lambda _event: None,
+            )
+            pids = json.loads(state.read_text(encoding="utf-8"))
+
+        self.assertEqual(result.status, "cancelled")
+        self.assertEventuallyGone(int(pids["child_pid"]))
+        self.assertEventuallyGone(int(pids["grandchild_pid"]))
+
+    @unittest.skipUnless(os.name == "posix", "POSIX process-group cancellation only")
+    def test_cancellation_kills_grandchild_when_parent_exits_on_term(self) -> None:
+        if platform.system() not in {"Darwin", "Linux"}:
+            self.skipTest("process liveness probe is only validated on Darwin/Linux")
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            state = Path(temp_dir) / "pids.json"
+            cancellation = ManualCancellation()
+            plan = self._issue(
+                argv=(
+                    sys.executable,
+                    "tests/fixtures/helpers/benchmark_process_tree.py",
+                    str(state),
+                    "parent-exits-on-term",
+                ),
+                cwd=Path.cwd(),
+                env={},
+                timeout_seconds=10.0,
+                max_output_bytes=128,
+                termination_grace_seconds=0.1,
+            )
+            invocation = BenchmarkTaskInvocation(
+                task_id="example.task",
+                binding_id="example.task",
+                public_arguments=("tree",),
+                private_payload=plan,
+            )
+
+            result = self._executor.execute(
                 invocation,
                 cancellation=CancellationAfterStateFile(cancellation, state),
                 on_progress=lambda _event: None,
@@ -308,7 +459,7 @@ class AuthorizedProcessTaskExecutorTests(unittest.TestCase):
     def _execute(
         self,
         task_id: str,
-        plan: AuthorizedProcessTaskPlan,
+        plan: object,
         *,
         cancellation: ManualCancellation | None = None,
         on_progress=lambda _event: None,
@@ -319,11 +470,17 @@ class AuthorizedProcessTaskExecutorTests(unittest.TestCase):
             public_arguments=("safe",),
             private_payload=plan,
         )
-        return AuthorizedProcessTaskExecutor().execute(
+        return self._executor.execute(
             invocation,
             cancellation=cancellation or ManualCancellation(),
             on_progress=on_progress,
         )
+
+    def setUp(self) -> None:
+        self._executor, self._issuer = AuthorizedProcessTaskExecutor.create_pair()
+
+    def _issue(self, **kwargs: Any) -> object:
+        return self._issuer(**kwargs)
 
     def assertEventuallyGone(self, pid: int) -> None:
         deadline = time.monotonic() + 5.0
