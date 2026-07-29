@@ -23,6 +23,9 @@ _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 _SEMANTIC_VERSION = re.compile(
     r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$"
 )
+_SYMBOLIC_ARGUMENT = re.compile(r"^[a-z0-9](?:[a-z0-9]|[._@-](?=[a-z0-9]))*$")
+_SECRET_ARGUMENT_PREFIXES = ("sk-",)
+_SECRET_ARGUMENT_FRAGMENTS = ("secret",)
 
 
 class BenchmarkModelError(ValueError):
@@ -52,11 +55,20 @@ class ResolvedCapability:
     manifest: Mapping[str, object] = field(repr=False)
 
     def __post_init__(self) -> None:
-        if not isinstance(self.ref, CapabilityRef) or not isinstance(
-            self.manifest, Mapping
+        if not isinstance(self.ref, CapabilityRef):
+            raise BenchmarkModelError("resolved benchmark capability is invalid")
+        try:
+            manifest = _freeze_manifest(self.manifest)
+        except Exception:
+            raise BenchmarkModelError(
+                "resolved benchmark capability is invalid"
+            ) from None
+        if (
+            manifest.get("capability_id") != self.ref.capability_id
+            or manifest.get("version") != self.ref.version
         ):
             raise BenchmarkModelError("resolved benchmark capability is invalid")
-        object.__setattr__(self, "manifest", MappingProxyType(dict(self.manifest)))
+        object.__setattr__(self, "manifest", manifest)
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,7 +100,7 @@ class BenchmarkTaskInvocation:
         _validate_identifier(self.task_id, "benchmark task invocation is invalid")
         _validate_identifier(self.binding_id, "benchmark task invocation is invalid")
         public_arguments = tuple(self.public_arguments)
-        if not all(type(argument) is str for argument in public_arguments):
+        if not all(_is_symbolic_argument(argument) for argument in public_arguments):
             raise BenchmarkModelError("benchmark task invocation is invalid")
         object.__setattr__(self, "public_arguments", public_arguments)
 
@@ -115,6 +127,7 @@ class ResolvedBenchmarkTask:
             or not isinstance(self.binding, BenchmarkTaskBinding)
             or self.task.capability != self.capability.ref
             or self.task.binding_id != self.binding.binding_id
+            or not isinstance(self.binding.implementation, BenchmarkTaskImplementation)
         ):
             raise BenchmarkModelError("resolved benchmark task is invalid")
 
@@ -145,6 +158,10 @@ class ResolvedBenchmarkPlan:
         expected_ordinals = tuple(range(1, len(tasks) + 1))
         if tuple(task.ordinal for task in tasks) != expected_ordinals:
             raise BenchmarkModelError("resolved benchmark plan task order is invalid")
+        if tuple(task.task for task in tasks) != self.suite.tasks:
+            raise BenchmarkModelError("resolved benchmark plan task set is invalid")
+        if any(task.binding.owner_package != self.suite.owner_package for task in tasks):
+            raise BenchmarkModelError("resolved benchmark plan task set is invalid")
         task_ids = tuple(task.task.task_id for task in tasks)
         if len(set(task_ids)) != len(task_ids):
             raise BenchmarkModelError("resolved benchmark plan task set is invalid")
@@ -191,6 +208,44 @@ def _validate_version(value: object, message: str) -> None:
 def _validate_positive_int(value: object, message: str) -> None:
     if type(value) is not int or value < 1:
         raise BenchmarkModelError(message)
+
+
+def _is_symbolic_argument(value: object) -> bool:
+    if type(value) is not str:
+        return False
+    lowered = value.lower()
+    return (
+        _SYMBOLIC_ARGUMENT.fullmatch(value) is not None
+        and not lowered.startswith(_SECRET_ARGUMENT_PREFIXES)
+        and not any(fragment in lowered for fragment in _SECRET_ARGUMENT_FRAGMENTS)
+    )
+
+
+def _freeze_manifest(value: object) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise BenchmarkModelError("resolved benchmark capability is invalid")
+    return MappingProxyType(
+        {
+            _manifest_key(key): _freeze_manifest_value(item)
+            for key, item in value.items()
+        }
+    )
+
+
+def _freeze_manifest_value(value: object) -> object:
+    if isinstance(value, Mapping):
+        return _freeze_manifest(value)
+    if isinstance(value, list | tuple):
+        return tuple(_freeze_manifest_value(item) for item in value)
+    if isinstance(value, set | frozenset):
+        return frozenset(_freeze_manifest_value(item) for item in value)
+    return value
+
+
+def _manifest_key(value: object) -> str:
+    if type(value) is not str:
+        raise BenchmarkModelError("resolved benchmark capability is invalid")
+    return value
 
 
 __all__ = (

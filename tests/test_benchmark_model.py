@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from collections.abc import Mapping
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from typing import cast
@@ -72,8 +73,126 @@ class BenchmarkModelTests(unittest.TestCase):
         with self.assertRaises(FrozenInstanceError):
             setattr(invocation, "binding_id", "changed")
 
+    def test_task_invocation_accepts_only_explicit_symbolic_public_arguments(
+        self,
+    ) -> None:
+        accepted = (
+            "case-limit",
+            "limit_3",
+            "model.v1",
+            "top5@stable",
+            "n0",
+        )
+        invocation = BenchmarkTaskInvocation(
+            task_id="example.task",
+            binding_id="example.binding",
+            public_arguments=accepted,
+            private_payload=None,
+        )
+        self.assertEqual(invocation.public_arguments, accepted)
+
+        rejected = (
+            "",
+            "two words",
+            "/absolute/path",
+            "relative/path",
+            r"relative\path",
+            ".",
+            "..",
+            "../case",
+            "https://example.test",
+            "provider=model",
+            "config=prod",
+            "SECRET-value",
+            "sk-live-secret",
+        )
+        for argument in rejected:
+            with self.subTest(argument=argument):
+                with self.assertRaises(BenchmarkModelError):
+                    BenchmarkTaskInvocation(
+                        task_id="example.task",
+                        binding_id="example.binding",
+                        public_arguments=(argument,),
+                        private_payload={"secret": "SECRET-PAYLOAD"},
+                    )
+
     def test_task_implementation_protocol_is_runtime_checkable(self) -> None:
         self.assertIsInstance(ExampleBenchmarkImplementation(), BenchmarkTaskImplementation)
+
+    def test_resolved_task_requires_implementation_protocol_without_calling_it(
+        self,
+    ) -> None:
+        task = self._resolved_task(
+            1,
+            "example.task",
+            implementation=ExplodingBenchmarkImplementation(),
+        )
+
+        self.assertIsInstance(task.binding.implementation, ExplodingBenchmarkImplementation)
+
+        with self.assertRaises(BenchmarkModelError) as context:
+            self._resolved_task(
+                1,
+                "example.task",
+                implementation=NonBenchmarkImplementation(),
+            )
+        self.assertNotIn("SECRET-NON-IMPLEMENTATION", repr(context.exception))
+
+    def test_resolved_capability_freezes_manifest_and_requires_matching_identity(
+        self,
+    ) -> None:
+        manifest: dict[str, object] = {
+            "capability_id": "example.capability",
+            "version": "1.0.0",
+            "nested": {
+                "items": [{"name": "alpha"}],
+                "tags": {"stable", "public"},
+            },
+        }
+        capability = ResolvedCapability(
+            ref=CapabilityRef("example.capability", "1.0.0"),
+            manifest=manifest,
+        )
+        manifest["capability_id"] = "example.changed"
+        nested = manifest["nested"]
+        assert isinstance(nested, dict)
+        items = nested["items"]
+        assert isinstance(items, list)
+        items.append({"name": "mutated"})
+
+        self.assertEqual(capability.manifest["capability_id"], "example.capability")
+        frozen_nested = capability.manifest["nested"]
+        self.assertIsInstance(frozen_nested, object)
+        self.assertEqual(
+            frozen_nested,
+            {
+                "items": ({"name": "alpha"},),
+                "tags": frozenset({"public", "stable"}),
+            },
+        )
+        with self.assertRaises(TypeError):
+            capability.manifest["capability_id"] = "example.changed"  # type: ignore[index]
+        self.assertIsInstance(frozen_nested, Mapping)
+        frozen_nested_mapping = cast(Mapping[str, object], frozen_nested)
+        frozen_items = frozen_nested_mapping["items"]
+        self.assertIsInstance(frozen_items, tuple)
+        with self.assertRaises(TypeError):
+            cast(dict[str, object], frozen_nested)["items"] = ()
+        with self.assertRaises(TypeError):
+            cast(dict[str, object], cast(tuple[object, ...], frozen_items)[0])[
+                "name"
+            ] = "changed"
+
+        with self.assertRaises(BenchmarkModelError) as context:
+            ResolvedCapability(
+                ref=CapabilityRef("example.capability", "1.0.0"),
+                manifest={
+                    "capability_id": "other.capability",
+                    "version": "1.0.0",
+                    "secret": "SECRET-MANIFEST",
+                },
+            )
+        self.assertNotIn("SECRET-MANIFEST", repr(context.exception))
 
     def test_resolved_plan_snapshots_tuples_and_public_dict_redacts_private_values(
         self,
@@ -159,26 +278,66 @@ class BenchmarkModelTests(unittest.TestCase):
                 with self.assertRaises(BenchmarkModelError):
                     self._plan(**overrides)
 
+    def test_resolved_plan_requires_suite_task_order_and_owner_package_identity(
+        self,
+    ) -> None:
+        first = self._task_manifest("example.first")
+        second = self._task_manifest("example.second")
+        suite = self._suite_from_tasks(first, second)
+
+        cases = (
+            (
+                "manifest order",
+                (
+                    self._resolved_task_from_manifest(1, second),
+                    self._resolved_task_from_manifest(2, first),
+                ),
+            ),
+            (
+                "owner package",
+                (
+                    self._resolved_task_from_manifest(
+                        1,
+                        first,
+                        owner_package=CapabilityPackageRef("other.package", "1.0.0"),
+                    ),
+                    self._resolved_task_from_manifest(2, second),
+                ),
+            ),
+        )
+        for label, tasks in cases:
+            with self.subTest(label):
+                with self.assertRaises(BenchmarkModelError):
+                    self._plan(suite=suite, tasks=tasks)
+
     def _plan(
         self,
         *,
         case_limit: int = 1,
+        suite: BenchmarkSuiteManifest | None = None,
         tasks: tuple[ResolvedBenchmarkTask, ...] | None = None,
     ) -> ResolvedBenchmarkPlan:
         return ResolvedBenchmarkPlan(
             run_id="run-001",
             application_ref=ApplicationRef("example.application", "1.0.0"),
-            suite=self._suite("example.task"),
+            suite=suite if suite is not None else self._suite("example.task"),
             tasks=tasks if tasks is not None else (self._resolved_task(1, "example.task"),),
             case_limit=case_limit,
             package_locks=(),
         )
 
     def _suite(self, *task_ids: str) -> BenchmarkSuiteManifest:
+        return self._suite_from_tasks(
+            *(self._task_manifest(task_id) for task_id in task_ids)
+        )
+
+    def _suite_from_tasks(
+        self, *tasks: BenchmarkTaskManifest
+    ) -> BenchmarkSuiteManifest:
         return BenchmarkSuiteManifest(
             suite_ref=BenchmarkSuiteRef("example.suite", "1.0.0"),
             owner_package=CapabilityPackageRef("example.package", "1.0.0"),
-            tasks=tuple(self._task_manifest(task_id) for task_id in task_ids),
+            tasks=tasks,
             artifact_media_types=("application/json",),
             default_case_limit=10,
             default_concurrency=1,
@@ -194,25 +353,75 @@ class BenchmarkModelTests(unittest.TestCase):
             note="public note",
         )
 
-    def _resolved_task(self, ordinal: int, task_id: str) -> ResolvedBenchmarkTask:
+    def _resolved_task(
+        self,
+        ordinal: int,
+        task_id: str,
+        *,
+        implementation: object | None = None,
+    ) -> ResolvedBenchmarkTask:
+        return self._resolved_task_from_manifest(
+            ordinal,
+            self._task_manifest(task_id),
+            implementation=implementation,
+        )
+
+    def _resolved_task_from_manifest(
+        self,
+        ordinal: int,
+        task: BenchmarkTaskManifest,
+        *,
+        owner_package: CapabilityPackageRef | None = None,
+        implementation: object | None = None,
+    ) -> ResolvedBenchmarkTask:
         return ResolvedBenchmarkTask(
             ordinal=ordinal,
-            task=self._task_manifest(task_id),
+            task=task,
             capability=ResolvedCapability(
                 ref=CapabilityRef("example.capability", "1.0.0"),
-                manifest={"kind": "example.capability", "secret": "SECRET-PAYLOAD"},
+                manifest={
+                    "capability_id": "example.capability",
+                    "version": "1.0.0",
+                    "secret": "SECRET-PAYLOAD",
+                },
             ),
             binding=BenchmarkTaskBinding(
-                owner_package=CapabilityPackageRef("example.package", "1.0.0"),
+                owner_package=owner_package
+                if owner_package is not None
+                else CapabilityPackageRef("example.package", "1.0.0"),
                 binding_id="example.binding",
-                implementation=SecretImplementation(),
+                implementation=implementation
+                if implementation is not None
+                else SecretImplementation(),
             ),
         )
 
 
 class SecretImplementation:
+    def build_invocation(
+        self, request: BenchmarkTaskRequest
+    ) -> BenchmarkTaskInvocation:
+        return BenchmarkTaskInvocation(
+            task_id=request.task_id,
+            binding_id="example.binding",
+            public_arguments=("case-limit", str(request.case_limit)),
+            private_payload={"secret": "SECRET-PAYLOAD"},
+        )
+
     def __repr__(self) -> str:
         return "IMPLEMENTATION-SECRET"
+
+
+class ExplodingBenchmarkImplementation:
+    def build_invocation(
+        self, request: BenchmarkTaskRequest
+    ) -> BenchmarkTaskInvocation:
+        raise AssertionError("implementation must not be called")
+
+
+class NonBenchmarkImplementation:
+    def __repr__(self) -> str:
+        return "SECRET-NON-IMPLEMENTATION"
 
 
 if __name__ == "__main__":
