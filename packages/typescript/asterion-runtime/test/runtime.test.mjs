@@ -214,6 +214,13 @@ test("validates capability packages with exact benchmark suite refs", async () =
   valid.benchmark_suites[0].suite_id = "changed";
   assert.equal(validated.benchmark_suites[0].suite_id, "example.alpha");
   assert.ok(Object.isFrozen(validated.benchmark_suites[0]));
+  assert.deepEqual(validated.conformance, [
+    {
+      resource_id: "externalization.json",
+      media_type: "application/json",
+      sha256: "516f209e7d4076b2897f2e5c282f709d7c31c7be334e2a80e2a7a6b82e3aecab",
+    },
+  ]);
 
   for (const benchmark_suites of [
     [
@@ -230,6 +237,41 @@ test("validates capability packages with exact benchmark suite refs", async () =
         validateCapabilityPackageManifest({
           ...valid,
           benchmark_suites,
+        }),
+      ProtocolValidationError,
+    );
+  }
+  for (const conformance of [
+    [
+      {
+        resource_id: "example.zebra",
+        media_type: "application/json",
+        sha256: "a".repeat(64),
+      },
+      {
+        resource_id: "example.alpha",
+        media_type: "application/json",
+        sha256: "b".repeat(64),
+      },
+    ],
+    [
+      {
+        resource_id: "example.alpha",
+        media_type: "application/json",
+        sha256: "a".repeat(64),
+      },
+      {
+        resource_id: "example.alpha",
+        media_type: "application/json",
+        sha256: "a".repeat(64),
+      },
+    ],
+  ]) {
+    assert.throws(
+      () =>
+        validateCapabilityPackageManifest({
+          ...valid,
+          conformance,
         }),
       ProtocolValidationError,
     );

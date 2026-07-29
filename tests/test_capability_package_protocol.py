@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import unittest
 from pathlib import Path
@@ -40,6 +41,16 @@ DCI_DESCRIPTOR = (
     / "dci_research"
     / "capability-package.json"
 )
+CONFORMANCE_FIXTURE = (
+    Path(__file__).parent
+    / "fixtures"
+    / "extensions"
+    / "minimal"
+    / "payload"
+    / "conformance"
+    / "externalization.json"
+)
+CONFORMANCE_DIGEST = hashlib.sha256(CONFORMANCE_FIXTURE.read_bytes()).hexdigest()
 
 
 def fixture(name: str) -> dict[str, object]:
@@ -75,6 +86,13 @@ class CapabilityPackageProtocolTests(unittest.TestCase):
                         sha256="a" * 64,
                     ),
                 ),
+                conformance=(
+                    ResourceIdentity(
+                        resource_id="externalization.json",
+                        media_type="application/json",
+                        sha256=CONFORMANCE_DIGEST,
+                    ),
+                ),
             ),
         )
         with self.assertRaises(AttributeError):
@@ -104,6 +122,7 @@ class CapabilityPackageProtocolTests(unittest.TestCase):
                 "capabilities",
                 "benchmark_suites",
                 "resources",
+                "conformance",
             ],
         )
         self.assertNotIn("payload_sha256", schema["properties"])
@@ -113,6 +132,10 @@ class CapabilityPackageProtocolTests(unittest.TestCase):
         )
         self.assertTrue(schema["properties"]["benchmark_suites"]["uniqueItems"])
         self.assertIn("benchmark_suite_ref", schema["$defs"])
+        self.assertEqual(
+            schema["properties"]["conformance"]["items"],
+            {"$ref": "#/$defs/resource_identity"},
+        )
 
     def test_accepts_sorted_unique_exact_benchmark_suite_refs(self) -> None:
         value = fixture("valid-minimal.json")
@@ -135,6 +158,77 @@ class CapabilityPackageProtocolTests(unittest.TestCase):
         assert isinstance(first, dict)
         first["suite_id"] = "changed"
         self.assertEqual(manifest.benchmark_suites[0].suite_id, "example.alpha")
+
+    def test_accepts_sorted_unique_exact_conformance_refs(self) -> None:
+        value = fixture("valid-minimal.json")
+        value["conformance"] = [
+            {
+                "resource_id": "example.alpha",
+                "media_type": "application/json",
+                "sha256": "a" * 64,
+            },
+            {
+                "resource_id": "example.zebra",
+                "media_type": "application/json",
+                "sha256": "b" * 64,
+            },
+        ]
+        manifest = validate_capability_package_manifest(value)
+
+        self.assertEqual(
+            manifest.conformance,
+            (
+                ResourceIdentity(
+                    resource_id="example.alpha",
+                    media_type="application/json",
+                    sha256="a" * 64,
+                ),
+                ResourceIdentity(
+                    resource_id="example.zebra",
+                    media_type="application/json",
+                    sha256="b" * 64,
+                ),
+            ),
+        )
+        conformance = value["conformance"]
+        assert isinstance(conformance, list)
+        first = conformance[0]
+        assert isinstance(first, dict)
+        first["resource_id"] = "changed"
+        self.assertEqual(manifest.conformance[0].resource_id, "example.alpha")
+
+        for invalid_conformance in (
+            [
+                {
+                    "resource_id": "example.alpha",
+                    "media_type": "application/json",
+                    "sha256": "a" * 64,
+                },
+                {
+                    "resource_id": "example.alpha",
+                    "media_type": "application/json",
+                    "sha256": "a" * 64,
+                },
+            ],
+            [
+                {
+                    "resource_id": "example.zebra",
+                    "media_type": "application/json",
+                    "sha256": "a" * 64,
+                },
+                {
+                    "resource_id": "example.alpha",
+                    "media_type": "application/json",
+                    "sha256": "b" * 64,
+                },
+            ],
+        ):
+            with self.subTest(invalid_conformance=invalid_conformance), self.assertRaises(
+                CapabilityPackageProtocolError
+            ):
+                validate_capability_package_manifest(
+                    {**fixture("valid-minimal.json"), "conformance": invalid_conformance}
+                )
 
     def test_rejects_noncanonical_benchmark_suite_refs(self) -> None:
         valid = fixture("valid-minimal.json")
@@ -236,6 +330,8 @@ class CapabilityPackageProtocolTests(unittest.TestCase):
         self.assertEqual(dci.benchmark_suites, ())
         self.assertEqual(controlled_code.resources, ())
         self.assertEqual(dci.resources, ())
+        self.assertEqual(controlled_code.conformance, ())
+        self.assertEqual(dci.conformance, ())
 
 
 if __name__ == "__main__":

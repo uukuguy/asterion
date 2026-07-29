@@ -9,5 +9,6 @@
     {"capability_id": "workflow.code-quality", "version": "1.0.0"}
   ],
   "benchmark_suites": [],
+  "conformance": [],
   "resources": []
 }

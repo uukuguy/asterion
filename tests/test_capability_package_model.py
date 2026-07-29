@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import operator
 import unittest
 from collections.abc import Iterator, Mapping
@@ -27,6 +28,18 @@ from asterion.capability_packages.protocol import (
     ResourceIdentity,
 )
 from asterion.capability_packages.sources.base import CapabilityPackageSource
+
+
+CONFORMANCE_FIXTURE = (
+    Path(__file__).parent
+    / "fixtures"
+    / "extensions"
+    / "minimal"
+    / "payload"
+    / "conformance"
+    / "externalization.json"
+)
+CONFORMANCE_DIGEST = hashlib.sha256(CONFORMANCE_FIXTURE.read_bytes()).hexdigest()
 
 
 class SentinelImplementation:
@@ -247,6 +260,16 @@ class PackageValueTests(unittest.TestCase):
             capabilities=cast(Any, capabilities),
             benchmark_suites=cast(Any, benchmark_suites),
             resources=cast(Any, resources),
+            conformance=cast(
+                Any,
+                [
+                    ResourceIdentity(
+                        "externalization.json",
+                        "application/json",
+                        CONFORMANCE_DIGEST,
+                    )
+                ],
+            ),
         )
 
         payload = PortableCapabilityPayload(
@@ -272,6 +295,13 @@ class PackageValueTests(unittest.TestCase):
                         "b" * 64,
                     ),
                 ),
+                conformance=(
+                    ResourceIdentity(
+                        "externalization.json",
+                        "application/json",
+                        CONFORMANCE_DIGEST,
+                    ),
+                ),
             ),
         )
 
@@ -285,6 +315,7 @@ class PackageValueTests(unittest.TestCase):
                     capabilities=(cast(Any, {"capability_id": "SECRET"}),),
                     benchmark_suites=(),
                     resources=(),
+                    conformance=(),
                 ),
             ),
         )
@@ -305,6 +336,7 @@ class PackageValueTests(unittest.TestCase):
             capabilities=cast(Any, HostileManifestIterable()),
             benchmark_suites=(),
             resources=(),
+            conformance=(),
         )
 
         with self.assertRaises(CapabilityPackageModelError) as raised:
@@ -329,6 +361,7 @@ class PackageValueTests(unittest.TestCase):
                 capabilities=cast(Any, InterruptingManifestIterable(error)),
                 benchmark_suites=(),
                 resources=(),
+                conformance=(),
             )
             with self.subTest(error=type(error).__name__):
                 with self.assertRaises(type(error)):
@@ -348,6 +381,13 @@ class PackageValueTests(unittest.TestCase):
                     "example.resource",
                     "application/json",
                     "b" * 64,
+                ),
+            ),
+            conformance=(
+                ResourceIdentity(
+                    "externalization.json",
+                    "application/json",
+                    CONFORMANCE_DIGEST,
                 ),
             ),
         )

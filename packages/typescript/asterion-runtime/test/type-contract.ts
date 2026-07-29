@@ -45,6 +45,7 @@ export const fixtureCapabilityPackage: CapabilityPackageManifest = {
   capabilities: [{ capability_id: "example.benchmark", version: "1.0.0" }],
   benchmark_suites: [{ suite_id: "example.suite", version: "1.0.0" }],
   resources: [],
+  conformance: [],
 };
 
 export const fixtureBenchmarkSuite: BenchmarkSuiteManifest = {

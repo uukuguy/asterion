@@ -12,5 +12,6 @@
     {"capability_id": "protocol.observability", "version": "1.0.0"}
   ],
   "benchmark_suites": [],
+  "conformance": [],
   "resources": []
 }

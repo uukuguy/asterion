@@ -53,6 +53,14 @@ def _resource_digest() -> str:
     return hashlib.sha256(_resource_bytes()).hexdigest()
 
 
+def _conformance_bytes() -> bytes:
+    return b'{"case_ids":["example.case"],"profile_id":"example.conformance"}\n'
+
+
+def _conformance_digest() -> str:
+    return hashlib.sha256(_conformance_bytes()).hexdigest()
+
+
 def _capability_manifest(capability_id: str = "example.research") -> dict[str, object]:
     return {
         "protocol": "asterion.capability/v1",
@@ -96,6 +104,7 @@ def _package_manifest(
     capabilities: list[dict[str, str]] | None = None,
     suites: list[dict[str, str]] | None = None,
     resources: list[dict[str, str]] | None = None,
+    conformance: list[dict[str, str]] | None = None,
 ) -> dict[str, object]:
     return {
         "protocol": "asterion.capability-package/v1",
@@ -114,6 +123,15 @@ def _package_manifest(
                 "resource_id": "example.conformance",
                 "media_type": "application/json",
                 "sha256": _resource_digest(),
+            }
+        ],
+        "conformance": conformance
+        if conformance is not None
+        else [
+            {
+                "resource_id": "externalization.json",
+                "media_type": "application/json",
+                "sha256": _conformance_digest(),
             }
         ],
     }
@@ -196,14 +214,48 @@ class CapabilityPackagePayloadTests(unittest.TestCase):
                         _resource_digest(),
                     ),
                 ),
+                conformance=(
+                    ResourceIdentity(
+                        "externalization.json",
+                        "application/json",
+                        _conformance_digest(),
+                    ),
+                ),
             ),
         )
         self.assertEqual(
             payload.payload_sha256,
             canonical_payload_sha256(FIXTURE_ROOT, payload.manifest),
         )
+        self.assertNotIsInstance(payload.resource_root, Path)
+        self.assertNotIn(str(FIXTURE_ROOT), repr(payload.resource_root))
         with self.assertRaises(AttributeError):
             setattr(payload.manifest, "resources", ())
+
+    def test_payload_resource_root_is_a_deeply_immutable_snapshot(self) -> None:
+        payload = open_portable_payload(self.root)
+        capability_bytes = payload.resource_root.joinpath(
+            "capabilities",
+            "research.json",
+        ).read_bytes()
+        conformance_bytes = payload.resource_root.joinpath(
+            "conformance",
+            "externalization.json",
+        ).read_bytes()
+        shutil.rmtree(self.root)
+
+        self.assertEqual(
+            payload.resource_root.joinpath("capabilities", "research.json").read_bytes(),
+            capability_bytes,
+        )
+        self.assertEqual(
+            payload.resource_root.joinpath(
+                "conformance",
+                "externalization.json",
+            ).read_bytes(),
+            conformance_bytes,
+        )
+        self.assertNotIn(str(self.root), repr(payload.resource_root))
 
     def test_payload_digest_is_location_mtime_and_input_manifest_independent(self) -> None:
         payload = open_portable_payload(self.root)
@@ -232,6 +284,19 @@ class CapabilityPackagePayloadTests(unittest.TestCase):
             "resource digest mismatch": lambda root: (
                 root / "resources" / "example.conformance"
             ).write_bytes(b"SECRET-RESOURCE-BODY"),
+            "missing declared conformance member": lambda root: (
+                root / "conformance" / "externalization.json"
+            ).unlink(),
+            "extra identity-bearing conformance member": lambda root: _write_canonical_json(
+                root / "conformance" / "extra.json",
+                {"case_ids": ["example.case"], "profile_id": "example.extra"},
+            ),
+            "conformance digest mismatch": lambda root: (
+                root / "conformance" / "externalization.json"
+            ).write_text(
+                '{"case_ids":["example.case"],"profile_id":"SECRET-CONFORMANCE"}\n',
+                encoding="utf-8",
+            ),
             "non-regular file": lambda root: (
                 (root / "resources" / "example.conformance").unlink(),
                 (root / "resources" / "example.conformance").mkdir(),
@@ -267,10 +332,26 @@ class CapabilityPackagePayloadTests(unittest.TestCase):
                         "extra.json",
                         "nested",
                         "SECRET-RESOURCE-BODY",
+                        "SECRET-CONFORMANCE",
                         "SECRET-PROVIDER",
                         "SECRET-COMMAND",
                     ),
                 )
+
+    def test_rejects_nonfinite_json_constants_body_free(self) -> None:
+        for constant in ("NaN", "Infinity", "-Infinity"):
+            with self.subTest(constant=constant):
+                root = self.root.parent / f"nonfinite-{constant.lower()}"
+                shutil.copytree(self.root, root)
+                (root / "conformance" / "externalization.json").write_text(
+                    f'{{"case_ids":["example.case"],"profile_id":{constant}}}\n',
+                    encoding="utf-8",
+                )
+
+                with self.assertRaises(CapabilityPackagePayloadError) as raised:
+                    open_portable_payload(root)
+
+                _assert_body_free(self, raised.exception, (constant, str(root)))
 
     def test_rejects_symlinked_roots_and_children_without_following_them(self) -> None:
         external_root = self.root.parent / "external"

@@ -86,6 +86,11 @@ export interface CapabilityPackageManifest {
     readonly media_type: string;
     readonly sha256: string;
   }[];
+  readonly conformance: readonly {
+    readonly resource_id: string;
+    readonly media_type: string;
+    readonly sha256: string;
+  }[];
 }
 
 export interface BenchmarkTaskManifest {

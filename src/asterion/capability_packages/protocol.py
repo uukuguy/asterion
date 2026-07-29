@@ -26,6 +26,7 @@ REQUIRED_FIELDS = {
     "capabilities",
     "benchmark_suites",
     "resources",
+    "conformance",
 }
 MEDIA_TYPE = re.compile(r"^[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -98,6 +99,7 @@ class CapabilityPackageManifest:
     capabilities: tuple[CapabilityRef, ...]
     benchmark_suites: tuple[BenchmarkSuiteRef, ...]
     resources: tuple[ResourceIdentity, ...]
+    conformance: tuple[ResourceIdentity, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,11 +201,13 @@ def validate_capability_package_manifest(value: object) -> CapabilityPackageMani
     capabilities = _capability_refs(value["capabilities"])
     benchmark_suites = _benchmark_suite_refs(value["benchmark_suites"])
     resources = _resource_identities(value["resources"])
+    conformance = _resource_identities(value["conformance"])
     return CapabilityPackageManifest(
         package_ref=package_ref,
         capabilities=capabilities,
         benchmark_suites=benchmark_suites,
         resources=resources,
+        conformance=conformance,
     )
 
 

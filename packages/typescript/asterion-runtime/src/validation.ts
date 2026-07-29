@@ -216,6 +216,11 @@ export function validateCapabilityPackageManifest(
     manifest.resources,
     ({ resource_id }) => resource_id,
   );
+  requireSortedUniqueKeys(
+    "capability package conformance",
+    manifest.conformance,
+    ({ resource_id }) => resource_id,
+  );
   return manifest;
 }
 

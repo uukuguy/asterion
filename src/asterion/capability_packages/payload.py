@@ -8,11 +8,14 @@ import json
 import os
 import stat
 import sys
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass
+from importlib.resources.abc import Traversable
+from io import BytesIO, TextIOWrapper
 from pathlib import Path
-from typing import TypeVar
+from types import MappingProxyType
+from typing import Any, TypeVar, cast
 
 from asterion.capabilities.catalog import CapabilityRef
 from asterion.capabilities.protocol import (
@@ -42,6 +45,202 @@ class _PinnedDirectory:
     identity: tuple[int, int]
 
 
+@dataclass(frozen=True, slots=True)
+class _FrozenPayloadFile:
+    name: str
+    _content: bytes
+
+    def __repr__(self) -> str:
+        return "<FrozenPayloadFile>"
+
+    def iterdir(self) -> Iterator[Traversable]:
+        return iter(())
+
+    def is_dir(self) -> bool:
+        return False
+
+    def is_file(self) -> bool:
+        return True
+
+    def __truediv__(self, child: os.PathLike[str] | str) -> Traversable:
+        return self.joinpath(child)
+
+    def joinpath(self, *descendants: os.PathLike[str] | str) -> Traversable:
+        if not descendants:
+            return self
+        return _FrozenPayloadMissing(str(descendants[-1]))
+
+    def open(
+        self,
+        mode: str = "r",
+        *args: object,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> Any:
+        del args
+        if any(flag in mode for flag in ("w", "a", "x", "+")):
+            raise CapabilityPackagePayloadError("capability package payload is invalid")
+        if "b" in mode:
+            return BytesIO(self._content)
+        return TextIOWrapper(
+            BytesIO(self._content),
+            encoding=encoding or "utf-8",
+            errors=errors or "strict",
+            newline=newline,
+        )
+
+    def read_bytes(self) -> bytes:
+        return self._content
+
+    def read_text(
+        self,
+        encoding: str | None = None,
+        errors: str | None = None,
+    ) -> str:
+        return self._content.decode(encoding or "utf-8", errors or "strict")
+
+    @property
+    def content(self) -> bytes:
+        return self._content
+
+
+@dataclass(frozen=True, slots=True)
+class _FrozenPayloadDirectory:
+    name: str
+    _children: Mapping[str, Traversable]
+
+    def __repr__(self) -> str:
+        return "<FrozenPayloadDirectory>"
+
+    def iterdir(self) -> Iterator[Traversable]:
+        return iter(tuple(self._children[name] for name in sorted(self._children)))
+
+    def is_dir(self) -> bool:
+        return True
+
+    def is_file(self) -> bool:
+        return False
+
+    def __truediv__(self, child: os.PathLike[str] | str) -> Traversable:
+        return self.joinpath(child)
+
+    def joinpath(self, *descendants: os.PathLike[str] | str) -> Traversable:
+        node: Traversable = self
+        for descendant in descendants:
+            parts = str(descendant).split("/")
+            for part in parts:
+                if part in {"", ".", ".."}:
+                    return _FrozenPayloadMissing(str(descendant))
+                if not isinstance(node, _FrozenPayloadDirectory):
+                    return _FrozenPayloadMissing(str(descendant))
+                child = node._children.get(part)
+                if child is None:
+                    return _FrozenPayloadMissing(part)
+                node = child
+        return node
+
+    def open(
+        self,
+        mode: str = "r",
+        *args: object,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> Any:
+        del args, encoding, errors, newline
+        raise CapabilityPackagePayloadError("capability package payload is invalid")
+
+    def read_bytes(self) -> bytes:
+        raise CapabilityPackagePayloadError("capability package payload is invalid")
+
+    def read_text(
+        self,
+        encoding: str | None = None,
+        errors: str | None = None,
+    ) -> str:
+        del encoding, errors
+        raise CapabilityPackagePayloadError("capability package payload is invalid")
+
+
+@dataclass(frozen=True, slots=True)
+class _FrozenPayloadMissing:
+    name: str
+
+    def __repr__(self) -> str:
+        return "<FrozenPayloadMissing>"
+
+    def iterdir(self) -> Iterator[Traversable]:
+        return iter(())
+
+    def is_dir(self) -> bool:
+        return False
+
+    def is_file(self) -> bool:
+        return False
+
+    def __truediv__(self, child: os.PathLike[str] | str) -> Traversable:
+        return self.joinpath(child)
+
+    def joinpath(self, *descendants: os.PathLike[str] | str) -> Traversable:
+        del descendants
+        return self
+
+    def open(
+        self,
+        mode: str = "r",
+        *args: object,
+        encoding: str | None = None,
+        errors: str | None = None,
+        newline: str | None = None,
+    ) -> Any:
+        del mode, args, encoding, errors, newline
+        raise CapabilityPackagePayloadError("capability package payload is invalid")
+
+    def read_bytes(self) -> bytes:
+        raise CapabilityPackagePayloadError("capability package payload is invalid")
+
+    def read_text(
+        self,
+        encoding: str | None = None,
+        errors: str | None = None,
+    ) -> str:
+        del encoding, errors
+        raise CapabilityPackagePayloadError("capability package payload is invalid")
+
+
+def _freeze_payload_root(contents: Mapping[str, bytes]) -> Traversable:
+    root: dict[str, object] = {}
+    for relative_name, content in contents.items():
+        parts = relative_name.split("/")
+        cursor = root
+        for part in parts[:-1]:
+            child = cursor.get(part)
+            if not isinstance(child, dict):
+                child = {}
+                cursor[part] = child
+            cursor = child
+        cursor[parts[-1]] = _FrozenPayloadFile(parts[-1], content)
+    return _freeze_payload_directory("payload", root)
+
+
+def _freeze_payload_directory(
+    name: str,
+    children: Mapping[str, object],
+) -> _FrozenPayloadDirectory:
+    frozen_children: dict[str, Traversable] = {}
+    for key, value in children.items():
+        frozen_children[key] = (
+            _freeze_payload_directory(key, value)
+            if isinstance(value, dict)
+            else cast(Traversable, value)
+        )
+    return _FrozenPayloadDirectory(
+        name=name,
+        _children=MappingProxyType(frozen_children),
+    )
+
+
 _PINNED_PAYLOAD_AVAILABLE = (
     sys.platform in {"darwin", "linux"}
     and hasattr(os, "O_DIRECTORY")
@@ -67,18 +266,20 @@ _T = TypeVar("_T")
 def open_portable_payload(root: Path) -> PortableCapabilityPayload:
     """Validate one portable payload root and return its immutable identity."""
 
-    manifest, payload_sha256 = _validated_payload(root, expected_manifest=None)
+    manifest, payload_sha256, contents = _validated_payload(
+        root, expected_manifest=None
+    )
     return PortableCapabilityPayload(
         manifest=manifest,
         payload_sha256=payload_sha256,
-        resource_root=Path(root),
+        resource_root=_freeze_payload_root(contents),
     )
 
 
 def canonical_payload_sha256(root: Path, manifest: CapabilityPackageManifest) -> str:
     """Return the canonical location-independent payload digest for ``root``."""
 
-    _, payload_sha256 = _validated_payload(root, expected_manifest=manifest)
+    _, payload_sha256, _ = _validated_payload(root, expected_manifest=manifest)
     return payload_sha256
 
 
@@ -86,7 +287,7 @@ def _validated_payload(
     root: Path,
     *,
     expected_manifest: CapabilityPackageManifest | None,
-) -> tuple[CapabilityPackageManifest, str]:
+) -> tuple[CapabilityPackageManifest, str, Mapping[str, bytes]]:
     if not _PINNED_PAYLOAD_AVAILABLE:
         raise CapabilityPackagePayloadError(
             "secure capability payload access is unavailable"
@@ -112,7 +313,7 @@ def _validate_pinned_payload(
     *,
     expected_manifest: CapabilityPackageManifest | None,
     descriptors: ExitStack,
-) -> tuple[CapabilityPackageManifest, str]:
+) -> tuple[CapabilityPackageManifest, str, Mapping[str, bytes]]:
     _validate_root_children(root)
     package_bytes = _read_regular_file(root, "capability-package.json")
     package_value = _loads_canonical_json(package_bytes)
@@ -150,7 +351,7 @@ def _validate_pinned_payload(
     )
 
     conformance_dir = _open_child_directory(root, "conformance", descriptors)
-    conformance_contents = _validate_conformance_children(conformance_dir)
+    conformance_contents = _validate_conformance_children(conformance_dir, manifest)
     contents.update(
         {
             f"conformance/{name}": content
@@ -158,7 +359,7 @@ def _validate_pinned_payload(
         }
     )
 
-    return manifest, _digest_contents(contents)
+    return manifest, _digest_contents(contents), MappingProxyType(contents)
 
 
 def _validate_root_children(root: _PinnedDirectory) -> None:
@@ -230,11 +431,21 @@ def _validate_resource_children(
     return contents
 
 
-def _validate_conformance_children(directory: _PinnedDirectory) -> Mapping[str, bytes]:
+def _validate_conformance_children(
+    directory: _PinnedDirectory,
+    manifest: CapabilityPackageManifest,
+) -> Mapping[str, bytes]:
+    conformance = {resource.resource_id: resource for resource in manifest.conformance}
+    names = _list_children(directory)
+    if set(names) != set(conformance):
+        raise CapabilityPackagePayloadError("capability package payload is invalid")
     contents: dict[str, bytes] = {}
-    for name in _list_children(directory):
+    for name in names:
         content = _read_json_child(directory, name)
+        resource = conformance[name]
         _loads_canonical_json(content)
+        if hashlib.sha256(content).hexdigest() != resource.sha256:
+            raise CapabilityPackagePayloadError("capability package payload is invalid")
         contents[name] = content
     return contents
 
@@ -381,12 +592,17 @@ def _loads_canonical_json(content: bytes) -> object:
     failed = False
     try:
         raw = content.decode("utf-8")
-        parsed = json.loads(raw, object_pairs_hook=_unique_json_object)
+        parsed = json.loads(
+            raw,
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_nonfinite_json_constant,
+        )
         canonical = (
             json.dumps(
                 parsed,
                 ensure_ascii=False,
                 sort_keys=True,
+                allow_nan=False,
                 separators=(",", ":"),
             )
             + "\n"
@@ -407,6 +623,10 @@ def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
             raise ValueError("duplicate JSON key")
         value[key] = item
     return value
+
+
+def _reject_nonfinite_json_constant(value: str) -> None:
+    raise ValueError(f"non-finite JSON constant: {value}")
 
 
 def _validate_package_manifest(value: object) -> CapabilityPackageManifest:
@@ -457,6 +677,14 @@ def _snapshot_manifest(manifest: CapabilityPackageManifest) -> CapabilityPackage
                     "sha256": resource.sha256,
                 }
                 for resource in manifest.resources
+            ],
+            "conformance": [
+                {
+                    "resource_id": resource.resource_id,
+                    "media_type": resource.media_type,
+                    "sha256": resource.sha256,
+                }
+                for resource in manifest.conformance
             ],
         }
     )

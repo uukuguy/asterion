@@ -12,5 +12,12 @@
       "media_type": "application/json",
       "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     }
+  ],
+  "conformance": [
+    {
+      "resource_id": "externalization.json",
+      "media_type": "application/json",
+      "sha256": "516f209e7d4076b2897f2e5c282f709d7c31c7be334e2a80e2a7a6b82e3aecab"
+    }
   ]
 }

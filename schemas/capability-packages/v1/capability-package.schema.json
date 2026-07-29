@@ -10,7 +10,8 @@
     "version",
     "capabilities",
     "benchmark_suites",
-    "resources"
+    "resources",
+    "conformance"
   ],
   "properties": {
     "protocol": {"const": "asterion.capability-package/v1"},
@@ -28,6 +29,11 @@
       "items": {"$ref": "#/$defs/benchmark_suite_ref"}
     },
     "resources": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/resource_identity"}
+    },
+    "conformance": {
       "type": "array",
       "uniqueItems": true,
       "items": {"$ref": "#/$defs/resource_identity"}

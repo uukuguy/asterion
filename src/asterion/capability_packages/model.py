@@ -140,6 +140,14 @@ def _snapshot_manifest(manifest: CapabilityPackageManifest) -> CapabilityPackage
                     }
                     for resource in tuple(manifest.resources)
                 ],
+                "conformance": [
+                    {
+                        "resource_id": resource.resource_id,
+                        "media_type": resource.media_type,
+                        "sha256": resource.sha256,
+                    }
+                    for resource in tuple(manifest.conformance)
+                ],
             }
         )
     except Exception:
