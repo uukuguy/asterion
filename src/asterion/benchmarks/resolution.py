@@ -30,12 +30,14 @@ _SUITE_FILE_MAX_BYTES = 1024 * 1024
 _O_DIRECTORY = getattr(os, "O_DIRECTORY", None)
 _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", None)
 _O_CLOEXEC = getattr(os, "O_CLOEXEC", None)
+_SUPPORTS_DIR_FD = getattr(os, "supports_dir_fd", frozenset())
+_SUPPORTS_FD = getattr(os, "supports_fd", frozenset())
 _SECURE_FD_AVAILABLE = (
     isinstance(_O_DIRECTORY, int)
     and isinstance(_O_NOFOLLOW, int)
     and isinstance(_O_CLOEXEC, int)
-    and os.open in os.supports_dir_fd
-    and os.listdir in os.supports_fd
+    and os.open in _SUPPORTS_DIR_FD
+    and os.listdir in _SUPPORTS_FD
 )
 
 

@@ -273,6 +273,9 @@ import os
 import sys
 from pathlib import Path
 
+import asterion.capabilities.catalog
+import asterion.capability_packages
+
 missing = sys.argv[1]
 if hasattr(os, missing):
     delattr(os, missing)
@@ -308,7 +311,13 @@ except BenchmarkResolutionError as error:
 else:
     raise AssertionError("resolver did not fail closed")
 """
-        for missing in ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC"):
+        for missing in (
+            "O_DIRECTORY",
+            "O_NOFOLLOW",
+            "O_CLOEXEC",
+            "supports_dir_fd",
+            "supports_fd",
+        ):
             with self.subTest(missing):
                 result = subprocess.run(
                     [sys.executable, "-c", script, missing],
