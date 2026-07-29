@@ -275,26 +275,6 @@ class BenchmarkResourceSetupTests(unittest.TestCase):
             )
         )
 
-    def test_benchmark_profile_also_covers_every_checked_in_launcher_path(self) -> None:
-        import re
-
-        from asterion.capabilities.dci.implementation.resource_setup import resource_specs
-
-        launcher_paths = {
-            match
-            for launcher in (PROJECT / "scripts").rglob("*.sh")
-            for match in re.findall(
-                r'\$RESOURCE_ROOT/([^";]+)',
-                launcher.read_text(encoding="utf-8"),
-            )
-        }
-
-        self.assertTrue(
-            launcher_paths.issubset(
-                {spec.destination for spec in resource_specs("benchmark")}
-            )
-        )
-
     def test_benchmark_check_reports_exact_paths_and_upstreams(self) -> None:
         from asterion.capabilities.dci.implementation.resource_setup import prepare_resources
 

@@ -53,3 +53,23 @@ authority. An embedding host may supply that authority and the exact
 implementations; then `run` and `resume` print the public result after evidence is
 closed. Both commands reject before implementation loading unless `--execute`,
 `--capability-source-lock`, and `--evidence-root` are present.
+
+## DCI application adapter
+
+`asterion-dci benchmark` is a product adapter over the same generic host API.
+It fixes the application selector to `dci.complete-application@1.0.0` and the
+default suite to `dci.all@1.0.0`; it does not contain a task loop, composer,
+source scanner, process runner, or evidence writer.
+
+Installed DCI suite identities are:
+
+- `dci.github@1.0.0`: 12 exact GitHub-reference tasks.
+- `dci.paper-main@1.0.0`: 13 exact paper-main tasks.
+- `dci.all@1.0.0`: 15 tasks, including both distinct Bamboogle variants.
+
+Use `asterion-dci benchmark plan --case-limit 1` for the DCI-default public
+plan. `run` and `resume` retain the generic `--execute`, source-lock, private
+evidence, cancellation, and compatibility rules. Dataset/corpus roots,
+credentials, provider environment, and optional amount are private
+application/operator inputs and never enter package manifests, plans, or
+public evidence.

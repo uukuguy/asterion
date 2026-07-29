@@ -125,8 +125,8 @@ def acceptance_request(*, acceptance_root: Path | None = None) -> VerificationRe
 
 
 class InstalledAcceptanceTests(unittest.TestCase):
-    def test_paper_inventory_separates_dataset_and_launcher_provenance(self) -> None:
-        """Paper-full Bamboogle must remain distinct from upstream sample-50."""
+    def test_paper_inventory_separates_dataset_and_source_provenance(self) -> None:
+        """Paper-full Bamboogle remains distinct from the upstream sample-50."""
 
         resource_root = (
             PROJECT / "src/asterion/capabilities/dci/resources"
@@ -172,32 +172,9 @@ class InstalledAcceptanceTests(unittest.TestCase):
         self.assertEqual(by_dataset["qa.bamboogle"]["source_count"], 125)
         self.assertIsNone(by_dataset["qa.bamboogle"]["batch_profile"])
         self.assertEqual(
-            by_dataset["qa.bamboogle"]["launcher"],
-            "scripts/qa/run_bamboogle_test_sample50.sh",
+            by_dataset["qa.bamboogle"]["launcher_origin"], "upstream-github"
         )
-        for item in benchmarks:
-            launcher = item["launcher"]
-            if launcher is not None:
-                self.assertTrue(launcher.startswith("scripts/"))
-                self.assertNotIn("asterion/scripts/", launcher)
-                self.assertTrue((PROJECT / launcher).is_file())
-
-        launcher_paths = tuple(
-            sorted(
-                path.relative_to(PROJECT).as_posix()
-                for path in (PROJECT / "scripts").rglob("*.sh")
-                if path.name != "setup_pi.sh"
-                and path.relative_to(PROJECT).as_posix()
-                != "scripts/run_dci_benchmarks.sh"
-            )
-        )
-        self.assertEqual(len(launcher_paths), 14)
-        self.assertTrue((PROJECT / "scripts/run_dci_benchmarks.sh").is_file())
-        for launcher_path in launcher_paths:
-            self.assertIn(
-                "# Provenance: ",
-                (PROJECT / launcher_path).read_text(encoding="utf-8"),
-            )
+        self.assertTrue(all("launcher" not in item for item in benchmarks))
 
         self.assertEqual(len(scopes), 17)
         self.assertTrue(

@@ -39,7 +39,7 @@ make doctor
 
 - `DCI_PI_DIR`：由 `pi-revision.txt` 锁定的外部 Pi checkout，默认 `./pi`；全局 `pi` 命令不替代该源码运行时。
 - `DCI_PI_AGENT_DIR`：用户自己管理的 Pi agent/auth 目录，默认 `~/.pi/agent`；setup 不复制凭据。
-- `ASTERION_DCI_RESOURCE_ROOT`：启动器使用的外部 datasets/corpora 根。
+- `ASTERION_DCI_RESOURCE_ROOT`：operator 配置使用的外部 datasets/corpora 根。
 - `DCI_RUNTIME`、`DCI_PROVIDER`、`DCI_MODEL`：缺省为 `pi`、`openai-codex`、`gpt-5.6-luna`。
 - `DCI_EVAL_JUDGE_*`：独立 Judge 角色的 endpoint、API、model、密钥变量名和 request shape。
 - `.env` 和已导出环境只提供配置，不会自动授权模型请求或完整数据集。
@@ -49,8 +49,8 @@ make doctor
 “本地语料”表示 Asterion 不使用托管检索服务，也不把 corpus 打包进 wheel；它不表示所有内容都停留在本机。Agent 运行时，相关语料片段仍可能被发送给已配置的模型 provider。
 
 `make setup-resources-basic` 只准备 `wiki_corpus` 和 `bc_plus_docs`。
-`make setup-resources-benchmark` 另行检查/准备 launcher 清单；无法自动取得的
-BEIR 或 gated 资源会报告精确路径与来源，不会换成其他数据。所有 setup/check
+`make setup-resources-benchmark` 另行检查/准备 benchmark resource inventory；
+无法自动取得的 BEIR 或 gated 资源会报告精确路径与来源，不会换成其他数据。所有 setup/check
 命令都是 0 Agent、0 Judge，且不执行数据集。
 
 ## 查看能力：`list` 与 `describe`
@@ -125,52 +125,46 @@ make asterion-verify-complete
 ## DCI 产品命令
 
 ```bash
-uv run asterion-dci system-prompt --help
-uv run asterion-dci run --help
-uv run asterion-dci terminal --help
-uv run asterion-dci resume --help
-uv run asterion-dci evaluate --help
-uv run asterion-dci benchmark --help
-uv run asterion-dci export --help
-uv run asterion-dci ablation --help
-uv run asterion-dci paper --help
+uv run asterion-dci list
+uv run asterion-dci describe
+uv run asterion-dci preflight
+uv run asterion-dci basic
+uv run asterion-dci complete
+uv run asterion-dci benchmark plan --case-limit 1
 ```
 
 | 功能 | 主入口 | 验证重点 |
 |---|---|---|
-| 本地语料研究 | `asterion-dci run` | 有限 turns、受控 cwd、可恢复产物 |
-| 交互终端 | `asterion-dci terminal` | TTY-only、退出码传递、不伪造 RPC 产物 |
-| 中断恢复 | `asterion-dci resume` | failed/incomplete、identity 兼容、单写者 |
-| Judge 评测 | `asterion-dci evaluate` | 精确 request/cache identity、body-free 结果 |
-| QA/IR/BC+/BRIGHT/BEIR | `asterion-dci benchmark --profile ... --limit 1` | 有限 rows、并发、reuse、汇总 |
-| 导出与分析 | `asterion-dci export ...` | 临时文件安全、authoritative reanalysis |
+| 安装清单 | `asterion-dci list` / `describe` | 元数据读取、无 provider 操作 |
+| 主机预检 | `asterion-dci preflight` | 私有 operator 配置就绪、无执行授权 |
+| 有界验证 | `asterion-dci basic` / `complete` | 有限 Agent/Judge 操作 |
+| QA/IR/BC+/BRIGHT/BEIR | `asterion-dci benchmark plan` | 精确 suite、不可变 plan、body-free 输出 |
+| 执行与恢复 | `asterion-dci benchmark run|resume` | 外部授权、顺序失败即停、私有证据 |
 | 通用安装应用 | `asterion run --provider dci-agent-lite ...` | 精确 application/runtime 选择与 body-free projection |
 
 ### 顺序运行 DCI benchmark 清单
 
-先预览全部 15 个任务变体；该命令不调用 Agent 或 Judge，也不创建任务输出：
+DCI 提供三个精确 suite：`dci.github@1.0.0`（12 项）、
+`dci.paper-main@1.0.0`（13 项）和 `dci.all@1.0.0`（15 项）。
+默认 plan 不调用 Agent 或 Judge，也不创建证据：
 
 ```bash
-scripts/run_dci_benchmarks.sh
+uv run asterion-dci benchmark plan --case-limit 1
 ```
 
-显式执行一查询、单并发 smoke suite：
+通用 CLI 可显式选择应用和 suite：
 
 ```bash
-scripts/run_dci_benchmarks.sh \
-  --suite all \
-  --limit 1 \
-  --max-concurrency 1 \
-  --execute
+uv run asterion benchmark plan \
+  --application dci.complete-application@1.0.0 \
+  --suite dci.github@1.0.0 \
+  --case-limit 1
 ```
 
-可选 suite 为 `github`、`paper-main` 和 `all`。脚本读取仓库 `.env`
-中已配置的数据、语料、Pi、输出与 Judge 设置，不下载资源。直接 benchmark
-没有 USD ledger；`--limit`、单任务并发和任务间顺序执行是本入口的运行边界。
-每个任务输出到独立私有目录，失败时停止后续任务，使用相同
-`--output-root` 重跑会采用 `--resume-policy compatible`。
-
-该入口生成 Asterion benchmark 证据，不自动构成论文分数复现。
+执行和恢复只能由嵌入式 operator host 注入显式授权、精确 source lock、
+实现、executor、取消信号和私有 evidence service。`--execute`、source lock
+和 evidence root 缺一即在加载实现前失败。路径和凭据只来自私有 application/operator
+配置，不进入 capability manifest、plan 或公开证据。
 
 ## 费用与完整数据集边界
 
@@ -182,15 +176,10 @@ scripts/run_dci_benchmarks.sh \
 | `complete` | 有界，执行前显示 | 有界，执行前显示 | 否 |
 | benchmark full/paper score | 需独立授权 | 需独立授权 | 可能，默认禁止 |
 
-论文复现默认命令是 plan-only，不需要预算、不创建输出目录、不调用 provider：
-
-```bash
-uv run asterion-dci paper reproduce \
-  --profile paper-reference/pi \
-  --output-root ./evidence/reproduction
-```
-
-只有显式加入 `--execute` 才可能授权执行；同时必须提供明确 scopes 和五个正数上限：`--max-agent-operations`、`--max-judge-operations`、`--max-cost-usd`、`--max-agent-cost-per-operation-usd`、`--max-judge-cost-per-operation-usd`。零费用验证只用 `acceptance`、`make check` 或 `make promotion-check`。`.env`、缓存或历史报告不能隐式授权新请求。
+完整数据集和论文分数复现需要独立治理与有限预算；普通 benchmark plan/run
+接口不授予该权限。金额只是可选 operator 元数据，未提供时不会阻塞 plan 或执行。
+零费用验证只用 `acceptance`、`make check` 或 `make promotion-check`。
+`.env`、缓存或历史报告不能隐式授权新请求。
 
 ## 产物与隐私
 

@@ -13,8 +13,8 @@ DCI_ARGS ?=
 .PHONY: asterion-list asterion-describe asterion-verify-preflight
 .PHONY: asterion-verify-basic asterion-verify-acceptance asterion-verify-complete
 .PHONY: asterion-run
-.PHONY: dci-system-prompt dci-run dci-terminal dci-resume dci-evaluate
-.PHONY: dci-benchmark dci-export dci-ablation dci-paper
+.PHONY: dci-list dci-describe dci-preflight dci-basic dci-complete
+.PHONY: dci-run dci-benchmark
 .PHONY: dci-basic-example dci-runtime-context-example
 .PHONY: test-typescript test-rust check-rust
 
@@ -24,7 +24,7 @@ help:
 	@echo "provider-free lifecycle: sync build test lint docs-check check promotion-check"
 	@echo "provider-free framework: asterion-list asterion-describe asterion-verify-preflight asterion-verify-acceptance"
 	@echo "bounded provider-backed: asterion-verify-basic asterion-verify-complete asterion-run"
-	@echo "DCI passthrough: dci-system-prompt dci-run dci-terminal dci-resume dci-evaluate dci-benchmark dci-export dci-ablation dci-paper"
+	@echo "DCI adapter: dci-list dci-describe dci-preflight dci-basic dci-complete dci-run dci-benchmark"
 	@echo "DCI bounded examples: dci-basic-example dci-runtime-context-example"
 	@echo "Cross-language provider-free: test-typescript test-rust check-rust"
 	@echo "Cost boundary: full execution requires separate authorization"
@@ -98,32 +98,26 @@ asterion-verify-complete:
 asterion-run:
 	$(UV_BIN) run asterion run $(ASTERION_ARGS)
 
-dci-system-prompt:
-	$(UV_BIN) run asterion-dci system-prompt $(DCI_ARGS)
+dci-list:
+	$(UV_BIN) run asterion-dci list $(DCI_ARGS)
+
+dci-describe:
+	$(UV_BIN) run asterion-dci describe $(DCI_ARGS)
+
+dci-preflight:
+	$(UV_BIN) run asterion-dci preflight $(DCI_ARGS)
+
+dci-basic:
+	$(UV_BIN) run asterion-dci basic $(DCI_ARGS)
+
+dci-complete:
+	$(UV_BIN) run asterion-dci complete $(DCI_ARGS)
 
 dci-run:
 	$(UV_BIN) run asterion-dci run $(DCI_ARGS)
 
-dci-terminal:
-	$(UV_BIN) run asterion-dci terminal $(DCI_ARGS)
-
-dci-resume:
-	$(UV_BIN) run asterion-dci resume $(DCI_ARGS)
-
-dci-evaluate:
-	$(UV_BIN) run asterion-dci evaluate $(DCI_ARGS)
-
 dci-benchmark:
 	$(UV_BIN) run asterion-dci benchmark $(DCI_ARGS)
-
-dci-export:
-	$(UV_BIN) run asterion-dci export $(DCI_ARGS)
-
-dci-ablation:
-	$(UV_BIN) run asterion-dci ablation $(DCI_ARGS)
-
-dci-paper:
-	$(UV_BIN) run asterion-dci paper $(DCI_ARGS)
 
 test-typescript:
 	npm ci --prefix packages/typescript/asterion-runtime

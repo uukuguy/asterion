@@ -96,27 +96,19 @@ open all declared host services before runtime construction. The `asterion-dci`
 CLI owns its product-specific arguments. Neither it nor Asterion imports or
 modifies the parent workspace's original DCI baseline under `src/dci/benchmark/`.
 
-The package-local `asterion-dci resume --output-dir RUN_DIR` command restores
-only the immutable request recorded in native `state.json`; it rejects
-completed or malformed state before Pi starts and isolates each retry under
-`protocol/`. Native evidence includes `conversation_full.json`, the processed
-`conversation.json`, and `latest_model_context.json`. Full conversation and
-tool-result bodies remain protected native artifacts. A package projection may
-name only body-free references, including `conversation.json`,
-`latest_model_context.json`, `events.jsonl`, `state.json`, `final.txt`, and
-`protocol/`; it never contains their bodies.
+The package-local implementation retains native private run artifacts, but the
+public product restores benchmark work only through
+`asterion-dci benchmark resume` with an exact compatible run ID, source lock,
+private evidence root, and externally injected execution authority. Resume
+skips only the exact completed task prefix and rejects identity drift before
+runtime work.
 
-`asterion-dci evaluate` uses an Asterion-owned OpenAI-compatible judge contract.
-It stores `eval_result.json` only after a structured verdict and reuses it only
-when the full public configuration plus shaped request fingerprint matches.
-Only the two complete assemblies declare `evaluation.answer-judge`; the
-research-only assemblies never load it. The Judge service exposes only a public
-identity digest family to package code, while endpoint, model, credential,
-timeout, token, pricing, retry, and transport details remain behind the
-service boundary.
-`asterion-dci benchmark` accepts explicit JSONL rows and reuses only Asterion
-native run directories; aggregate package results contain references and public
-counts, not question, answer, credential, or provider-response bodies.
+Judge configuration and transport remain behind injected host-service
+boundaries. Package code receives only the narrow service protocol and safe
+public identity; endpoint, model, credential, timeout, pricing, retry, and
+transport details remain private. Generic benchmark results contain safe
+identities, references, and counts, never question, answer, credential,
+provider-response, or private-path bodies.
 
 The complete application and standalone benchmark share one deterministic
 66-resource DCI product identity. It covers the transitive product modules,

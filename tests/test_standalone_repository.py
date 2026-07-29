@@ -19,11 +19,9 @@ REQUIRED_ASSETS = (
     "Makefile",
     "README.md",
     "pi-revision.txt",
-    "scripts/run_dci_benchmarks.sh",
     "scripts/setup_pi.sh",
     "tools/check_docs.py",
     "tools/check_promotion.py",
-    "tools/run_dci_benchmarks.py",
     "tools/setup_resources.py",
     "uv.lock",
 )
@@ -56,15 +54,13 @@ FRAMEWORK_TARGETS = (
     "asterion-run",
 )
 DCI_TARGETS = (
-    "dci-system-prompt",
+    "dci-list",
+    "dci-describe",
+    "dci-preflight",
+    "dci-basic",
+    "dci-complete",
     "dci-run",
-    "dci-terminal",
-    "dci-resume",
-    "dci-evaluate",
     "dci-benchmark",
-    "dci-export",
-    "dci-ablation",
-    "dci-paper",
 )
 CROSS_LANGUAGE_TARGETS = ("test-typescript", "test-rust", "check-rust")
 
@@ -234,15 +230,13 @@ class StandaloneRepositoryTests(unittest.TestCase):
 
     def test_dci_targets_render_exact_commands(self) -> None:
         commands = {
-            "dci-system-prompt": "system-prompt",
+            "dci-list": "list",
+            "dci-describe": "describe",
+            "dci-preflight": "preflight",
+            "dci-basic": "basic",
+            "dci-complete": "complete",
             "dci-run": "run",
-            "dci-terminal": "terminal",
-            "dci-resume": "resume",
-            "dci-evaluate": "evaluate",
             "dci-benchmark": "benchmark",
-            "dci-export": "export",
-            "dci-ablation": "ablation",
-            "dci-paper": "paper",
         }
         for target, command in commands.items():
             with self.subTest(target=target):
@@ -448,7 +442,10 @@ class StandaloneRepositoryTests(unittest.TestCase):
         for statement in (
             "global `pi`",
             "DCI_PI_AGENT_DIR",
-            "setup-resources-benchmark",
+            "dci.github@1.0.0",
+            "dci.paper-main@1.0.0",
+            "dci.all@1.0.0",
+            "benchmark plan",
             "Node.js 22.19.0",
             "`npm ci`",
             "checked-in model catalogs",
@@ -476,12 +473,11 @@ class StandaloneRepositoryTests(unittest.TestCase):
             PROJECT / "docs/verification/asterion-dci-validation-guide.md",
         )
         required_fragments = (
-            "paper reproduce",
-            "--scope bright.robotics.main.full",
-            "--limit 1",
+            "benchmark plan",
+            "--case-limit 1",
+            "benchmark run",
             "--execute",
-            "--max-agent-operations 1",
-            "--max-judge-operations 1",
+            "private evidence",
             "External-limited",
         )
         for document in public_documents:

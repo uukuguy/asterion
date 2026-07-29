@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import json
-import re
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -93,17 +92,6 @@ def _benchmark_resources() -> tuple[ResourceSpec, ...]:
         for row in inventory["datasets"]
         for field in ("dataset_path", "corpus_path")
     }
-    project_root = Path(__file__).resolve().parents[5]
-    launcher_root = project_root / "scripts"
-    if launcher_root.is_dir():
-        destinations.update(
-            match
-            for launcher in launcher_root.rglob("*.sh")
-            for match in re.findall(
-                r'\$RESOURCE_ROOT/([^";]+)',
-                launcher.read_text(encoding="utf-8"),
-            )
-        )
     specs = []
     for destination in sorted(destinations):
         source_repo, source_path, conversion = _benchmark_source(destination)

@@ -58,9 +58,10 @@ make docs-check
 - **Not rerun** — the implementation exists, but a full dataset or published
   score was not reproduced in the current work.
 
-Paper reproduction docs distinguish three source families: paper-reference,
-upstream-github, and Asterion-safe. The default `paper reproduce` path is a
-provider-free plan and does not authorize or execute full reproduction.
+Benchmark docs distinguish package-owned suite identities from operator-owned
+resources and authority. `asterion-dci benchmark plan` is provider-free;
+benchmark execution and paper-score reproduction require separate explicit
+authorization.
 
 The historical `538/538` selector result is **mixed-repository only** integration
 evidence. Standalone installed acceptance is package-owned and provider-free;

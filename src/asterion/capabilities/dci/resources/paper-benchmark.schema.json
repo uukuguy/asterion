@@ -12,7 +12,7 @@
     "dataset": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["dataset_id", "family", "mode", "source_split", "source_count", "exclusion_policy", "dataset_path", "corpus_path", "gold_field", "metric", "judge_contract", "bounded_fixture", "batch_profile", "launcher", "source_family", "source_reference", "launcher_origin", "selection_kind", "selection_count", "selection_seed_status", "execution_class"],
+      "required": ["dataset_id", "family", "mode", "source_split", "source_count", "exclusion_policy", "dataset_path", "corpus_path", "gold_field", "metric", "judge_contract", "bounded_fixture", "batch_profile", "source_family", "source_reference", "launcher_origin", "selection_kind", "selection_count", "selection_seed_status", "execution_class"],
       "properties": {
         "dataset_id": {"type": "string", "minLength": 1},
         "family": {"enum": ["agentic-search", "knowledge-qa", "ir"]},
@@ -27,7 +27,6 @@
         "judge_contract": {"type": ["string", "null"]},
         "bounded_fixture": {"type": "string", "minLength": 1},
         "batch_profile": {"type": ["string", "null"], "minLength": 1},
-        "launcher": {"type": ["string", "null"], "minLength": 1},
         "source_family": {"const": "paper-reference"},
         "source_reference": {"const": "arxiv:2605.05242v1"},
         "launcher_origin": {"enum": ["upstream-github", "asterion-added"]},

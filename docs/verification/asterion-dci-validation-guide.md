@@ -1,94 +1,55 @@
 # Asterion DCI Functional Verification Guide
 
-This guide verifies the promoted standalone repository. It separates installed
-closure from external readiness, bounded provider-backed behavior, and parent
-workspace integration history. For product semantics, see the
-[complete reference](../guides/asterion-dci-complete-reference.md); for a short
-operator path, see the [capability usage guide](../guides/asterion-capability-usage.md).
+This guide validates DCI as a product built on Asterion's generic capability
+package and benchmark contracts. Product semantics are documented in the
+[complete reference](../guides/asterion-dci-complete-reference.md); the shorter
+operator path is in the [capability usage guide](../guides/asterion-capability-usage.md).
 
-## Scope and evidence language
+## Evidence language
 
-- **Implemented** means production code and a public entry point exist.
-- **Verified** means the named command passed inside the stated boundary.
-- **External-limited** means the interface is complete but needs external Pi,
-  data, a provider, or credentials.
+- **Implemented** means production code and an entry point exist.
+- **Verified** means the named command passed inside its stated boundary.
+- **External-limited** means execution still needs external data, services,
+  credentials, or operator authority.
 - **Not rerun** means a full dataset or published score was not reproduced.
 
-Command reachability is not functional closure. Standalone acceptance must load
-the installed provider and validate its complete packaged identities. Provider
-backed verification must additionally prove bounded execution and safe durable
-artifacts. No command in this guide implicitly authorizes a full dataset.
+Command reachability is not functional closure, and bounded execution is not
+paper reproduction.
 
-## Prerequisites and repository setup
-
-Provider-free work requires Python 3.10 or newer and `uv`:
+## Provider-free repository setup
 
 ```bash
 uv sync --frozen
-```
-
-Node.js 22.19.0 or newer plus npm are required to provision and run the locked
-Pi checkout; Rust is required only for its cross-language checks. Pi, corpora,
-datasets, and credentials are external:
-
-```dotenv
-DCI_PI_DIR=./pi
-DCI_PI_AGENT_DIR=~/.pi/agent
-ASTERION_DCI_RESOURCE_ROOT=.
-DCI_PROVIDER=openai-codex
-DCI_MODEL=gpt-5.6-luna
-DCI_EVAL_JUDGE_MODEL=
-DCI_EVAL_JUDGE_API_KEY_ENV=
-```
-
-Copy `.env.template` to `.env` for operator-owned settings. Prepare a fresh
-clone with:
-
-```bash
 make setup-pi
 make setup-resources-basic
 cp .env.template .env
 make doctor
 ```
 
-The setup commands may use network and disk, but make zero Agent/Judge
-operations and run no dataset. A global `pi` executable does not replace the
-checkout locked by `pi-revision.txt`; `DCI_PI_AGENT_DIR` points to separately
-managed authentication. Never commit `.env`, credentials, external resources,
-or private outputs.
+Setup may use network and disk but performs zero Agent/Judge operations and
+runs no dataset. Pi, corpora, datasets, credentials, generated output, and
+private evidence stay outside the wheel and Git.
 
-Local corpus verification proves files are operator-owned and not served through
-a hosted retrieval API. It does not prove that all relevant content stays
-on-device during an Agent run; selected content can be included in provider
-requests.
+`DCI_PI_DIR` selects the locked Pi checkout, `DCI_PI_AGENT_DIR` selects
+separately managed authentication, and `ASTERION_DCI_RESOURCE_ROOT` anchors
+operator-owned resources. A global `pi` executable does not replace the locked
+checkout.
 
-## Standalone provider-free verification
-
-### 1. Discover the installed product
+## Installed discovery and acceptance
 
 ```bash
 uv run asterion list
 uv run asterion describe --provider dci-agent-lite
-```
-
-`list` is metadata-only. `describe` loads only the selected provider and reports
-its applications, assemblies, packages, verification levels, cost boundary,
-and body-free configuration.
-
-### 2. Verify installed closure
-
-```bash
 uv run asterion verify --provider dci-agent-lite --level acceptance
-# equivalent Make entry point
-make asterion-verify-acceptance
 ```
 
-Acceptance is package-owned. It checks the exact installed providers,
-applications and assemblies, eleven capability manifests, five context
-profiles, thirteen benchmark identities, and sixteen paper scopes. It works
-from a source checkout or isolated wheel and ignores adjacent source trees.
+`list` is metadata-only. `describe` loads only the selected application
+provider. `acceptance` validates packaged providers, assemblies, capability
+manifests, suites, resources, implementation bindings, and conformance assets.
+All three paths are provider-free and must expose no prompt, answer,
+credential, private path, or provider payload.
 
-Expected cost summary:
+Expected cost boundary:
 
 ```text
 Agent operations: 0
@@ -96,236 +57,111 @@ Judge operations: 0
 Full dataset ran: no
 ```
 
-### 3. Verify repository and distribution gates
+## DCI adapter surface
+
+```bash
+uv run asterion-dci list
+uv run asterion-dci describe
+uv run asterion-dci preflight
+uv run asterion-dci basic
+uv run asterion-dci complete
+uv run asterion-dci run --help
+uv run asterion-dci benchmark --help
+```
+
+`preflight` checks readiness only. `basic` and `complete` can perform bounded
+provider work after operator configuration is supplied. The adapter fixes the
+exact DCI application and delegates benchmark behavior to the generic host.
+
+## Benchmark plan verification
+
+The package publishes `dci.github@1.0.0` (12 tasks),
+`dci.paper-main@1.0.0` (13 tasks), and `dci.all@1.0.0` (15 tasks). Verify a
+bounded provider-free plan:
+
+```bash
+uv run asterion-dci benchmark plan --case-limit 1
+```
+
+Verify the generic command shape independently:
+
+```bash
+uv run asterion benchmark plan \
+  --application dci.complete-application@1.0.0 \
+  --suite dci.all@1.0.0 \
+  --case-limit 1
+```
+
+Pass criteria:
+
+1. The plan is deterministic, immutable, body-free, and ordered by the suite.
+2. Plan creation writes no evidence and loads no implementation provider.
+3. GitHub and paper-main Bamboogle remain distinct task identities.
+4. Dataset/corpus paths and environment values never enter the public plan.
+
+## Authorized execution and resume verification
+
+The generic benchmark run shape is:
+
+```bash
+uv run asterion-dci benchmark run \
+  --case-limit 1 \
+  --capability-source-lock "$OPERATOR_SELECTED_SOURCE_LOCK" \
+  --evidence-root "$OPERATOR_SELECTED_PRIVATE_EVIDENCE_ROOT" \
+  --execute
+```
+
+This command is executable only when an embedding operator host injects
+authority, implementations, executor, cancellation, output directories, and a
+private evidence service. The plain installed CLI intentionally lacks that
+authority.
+
+Resume additionally requires the compatible run ID:
+
+```bash
+uv run asterion-dci benchmark resume \
+  --run-id "$COMPATIBLE_RUN_ID" \
+  --case-limit 1 \
+  --capability-source-lock "$OPERATOR_SELECTED_SOURCE_LOCK" \
+  --evidence-root "$OPERATOR_SELECTED_PRIVATE_EVIDENCE_ROOT" \
+  --execute
+```
+
+Pass criteria:
+
+1. Missing `--execute`, source lock, evidence root, or host authority fails
+   before implementation loading.
+2. Tasks run once, sequentially, and stop on first failure or cancellation.
+3. Compatible resume skips only the exact completed prefix.
+4. Private evidence is immutable and mode-restricted.
+5. Public results and errors redact prompts, answers, credentials, corpus
+   bodies, raw output, provider payloads, and private paths.
+
+## Repository and distribution gates
 
 ```bash
 make test
 make lint
 make docs-check
-make build
 make check
+make promotion-check
 ```
 
-`make check` runs Python, documentation, TypeScript, Rust, and distribution
-gates. None of these targets constructs a provider request.
+`make check` covers Python, TypeScript, Rust, docs, and build. The promotion
+gate repeats provider-free validation from a temporary standalone copy.
 
-### 4. Inspect the complete CLI surface
-
-```bash
-uv run asterion --help
-uv run asterion-dci --help
-uv run asterion-dci system-prompt --help
-uv run asterion-dci run --help
-uv run asterion-dci terminal --help
-uv run asterion-dci resume --help
-uv run asterion-dci evaluate --help
-uv run asterion-dci benchmark --help
-uv run asterion-dci export --help
-uv run asterion-dci ablation --help
-uv run asterion-dci paper --help
-```
-
-Help and `system-prompt` are provider-free. Other commands become cost-bearing
-only when an execution path reaches an Agent or Judge.
-
-## Cost-bearing verification
-
-### Preflight: external readiness, zero provider operations
-
-```bash
-make asterion-verify-preflight
-```
-
-Preflight checks `.env`, `DCI_PI_DIR`, Node, required corpora, and Judge
-configuration. Missing inputs produce an actionable, redacted failure. A
-successful preflight is readiness evidence, not execution authority.
-
-### Basic: bounded Agent and Judge behavior
-
-```bash
-make asterion-verify-basic
-```
-
-Basic runs the bounded cases advertised by `asterion describe`. Confirm the
-displayed operation count before proceeding. Output must stay under the chosen
-private output root and public results must contain references and aggregate
-status rather than prompts, answers, credentials, or private paths.
-
-### Complete: bounded behavior plus installed closure
-
-```bash
-make asterion-verify-complete
-```
-
-Complete composes preflight, bounded basic cases, and provider-free acceptance.
-It is not a full benchmark and must still report `Full dataset ran: no`.
-
-### Direct functional probes
-
-Use a small local corpus and finite turn limit:
-
-```bash
-uv run asterion-dci system-prompt --help
-uv run asterion-dci run \
-  --cwd "$ASTERION_DCI_RESOURCE_ROOT/corpus/wiki_corpus" \
-  --max-turns 6 \
-  "Answer using only the local corpus."
-uv run asterion-dci resume --help
-uv run asterion-dci evaluate --help
-```
-
-For generic application assembly:
-
-```bash
-uv run asterion run \
-  --provider dci-agent-lite \
-  --application dci.research-capability@1.0.0 \
-  --runtime pi.reference \
-  --run-id validation-example \
-  --input "Research the local corpus."
-```
-
-## Benchmark and launcher verification
-
-All fourteen launchers compute their own project root. Data and corpus defaults
-come from `ASTERION_DCI_RESOURCE_ROOT`, falling back to the project root. Use an
-explicit small limit for a bounded probe:
-
-```bash
-make check-resources-benchmark
-# explicitly fetch/convert supported upstreams; unavailable resources remain failures
-make setup-resources-benchmark
-```
-
-```bash
-ASTERION_DCI_RESOURCE_ROOT=/absolute/path/to/resources \
-  bash scripts/qa/run_hotpotqa_dev_sample50.sh --limit 1
-ASTERION_DCI_RESOURCE_ROOT=/absolute/path/to/resources \
-  bash scripts/bright/run_bio.sh --limit 1
-ASTERION_DCI_RESOURCE_ROOT=/absolute/path/to/resources \
-  bash scripts/beir/benchmark_arguana.sh --limit 1
-ASTERION_DCI_RESOURCE_ROOT=/absolute/path/to/resources \
-  bash scripts/bcplus_eval/run_bcplus_eval_openai.sh level3 high --limit 1
-```
-
-Before any real probe, validate syntax and path resolution without a provider:
-
-```bash
-find scripts -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
-uv run python -m unittest -v tests.test_standalone_launchers
-```
-
-The profile registry covers BC+, six QA datasets, four BRIGHT datasets, and two
-BEIR datasets. `benchmark` supports finite limits, concurrency, exact reuse,
-Judge cache identity, QA/IR modes, analysis, figures, and body-free exports.
-Full-dataset execution is **Not rerun** and requires separate authorization.
-
-Paper reproduction has its own provider-free plan gate:
-
-```bash
-uv run asterion-dci paper describe
-uv run asterion-dci paper verify
-plan_parent=$(mktemp -d)
-plan_root="$plan_parent/not-created"
-uv run asterion-dci paper reproduce \
-  --profile paper-reference/pi \
-  --scope bright.robotics.main.full \
-  --limit 1 \
-  --output-root "$plan_root"
-test ! -e "$plan_root"
-```
-
-The last command is intentionally run without `--execute`. It must report zero
-performed Agent/Judge operations, no full authorization, one selected query,
-one maximum Agent operation, zero maximum Judge operations, and no output root
-creation. It inspects closed metadata only; it does not read the dataset.
-
-The scope continues to identify its complete published selection and full
-selected-ID digest. `--limit 1` is a bounded execution selection: after
-execution preflight verifies that complete identity, it takes the deterministic
-source-order prefix and binds a separate bounded digest and selected count.
-This does not create another paper scope or change
-`paper_full_executable=false`. The plan and any eventual one-query evidence are
-not full paper reproduction or published-score verification.
-
-Provider-backed execution is **External-limited**. It requires a new operator
-approval naming the exact profile, scope, limit, private output root outside
-Git, and all five finite positive caps. Only after that approval should the
-operator substitute the approved root and USD values into this separate
-command:
-
-```bash
-uv run asterion-dci paper reproduce \
-  --profile paper-reference/pi \
-  --scope bright.robotics.main.full \
-  --limit 1 \
-  --output-root "$OPERATOR_SELECTED_PRIVATE_ROOT" \
-  --execute \
-  --max-agent-operations 1 \
-  --max-judge-operations 1 \
-  --max-cost-usd "$APPROVED_TOTAL_USD_CAP" \
-  --max-agent-cost-per-operation-usd "$APPROVED_AGENT_USD_CAP" \
-  --max-judge-cost-per-operation-usd "$APPROVED_JUDGE_USD_CAP"
-```
-
-Those variables document the invocation shape; they are not authorization.
-Credentials, configuration, cached work, prior evidence, and successful
-preflight also grant no authority. Execution verifies the complete and bounded
-selection identities and the exact root/caps before the first Agent operation.
-Authority is in-process and one-use; drift, failure, or cancellation prevents
-later work or replay.
-
-After each successful scope, the closed benchmark batch remains unchanged.
-Asterion writes its mode `0600` RunManifest to a separate mode `0700` private
-manifest directory whose device/inode descriptor was bound when authority was
-issued. Public CLI output is body-free: it reports safe authorization and
-operation counts plus `manifest_scope`, an opaque relative
-`manifest_artifact`, and `manifest_identity_sha256`, never the manifest root,
-private paths, query IDs, prompts, answers, corpus text, provider payloads, raw
-output, or credentials. Run `paper compare` explicitly on the private manifest
-and classify a bounded result as **External-limited**.
-
-## Artifacts and pass criteria
-
-A successful durable run retains private question, event, conversation, state,
-provenance, and evaluation artifacts under an operator-selected output root.
-Public CLI/application results expose only safe identities, counts, digests,
-status, and artifact references.
-
-Pass criteria:
-
-1. Every command exits zero inside its declared boundary.
-2. Acceptance reports zero provider operations and no full dataset.
-3. Source and isolated-wheel acceptance report the same installed closure.
-4. Bounded cases use finite turns/rows and the announced operation count.
-5. Resume and Judge reuse validate exact identities before reusing artifacts.
-6. Logs and public reports contain no credential, prompt, answer, or private
-   path body.
-7. Missing Pi, data, or credentials fails before provider construction.
-
-## Mixed-repository integration history
-
-The parent DCI-Agent-Lite workspace retains the original DCI baseline and its
-cross-product verifier. `tools/verify_asterion_dci_product.py` is **mixed-repository only**
-and is intentionally absent here. Its historical
-mixed-repository result covered `538/538` delegated selectors, `12/12` launcher
-pairs, product rows, extra batch selectors, and retained bounded evidence.
-
-That history supports migration confidence but is not a current standalone
-acceptance criterion. A promoted repository should run package-owned acceptance
-and its own temporary-copy promotion gate instead of reconstructing the parent
-workspace.
+Full-dataset and paper-score execution remains **Not rerun** and requires
+separate authorization plus a finite budget. A one-case run remains
+**External-limited** and must never be promoted to published-score evidence.
 
 ## Troubleshooting without weakening evidence
 
-- If acceptance searches outside this root, treat it as a packaging defect; do
-  not point it at a parent verifier.
-- If a launcher cannot find data, set `ASTERION_DCI_RESOURCE_ROOT`; do not copy
-  corpora or datasets into the wheel.
-- If Pi is missing or at the wrong revision, repair `DCI_PI_DIR`; do not edit or
-  vendor the external checkout as part of Asterion verification.
-- If Judge configuration changes, expect evaluation cache invalidation.
-- If an isolated wheel differs from source acceptance, inspect packaged
-  resources and ignore rules before changing expected counts.
-- Never convert a skipped provider case into PASS or use an old public report as
-  proof of a new execution.
+- Missing Pi or resources: repair the operator-owned external roots; do not
+  vendor them into the package.
+- Missing execution authority: use an approved embedding host; flags,
+  credentials, cache, and prior evidence do not create authority.
+- Source ambiguity: provide an exact source lock; do not introduce hidden
+  precedence.
+- Resume incompatibility: start a new run; do not mutate closed evidence.
+- Isolated-wheel mismatch: inspect packaged resources and entry points before
+  changing expected identities.

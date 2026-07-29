@@ -76,6 +76,41 @@ PRIVATE_BENCHMARK_SERIALIZATION_FIELDS = frozenset(
         "source_lock_path",
     }
 )
+OBSOLETE_DCI_BENCHMARK_SURFACES = (
+    Path("tools/dci_benchmark_orchestrator.py"),
+    Path("tools/run_dci_benchmarks.py"),
+    Path("scripts/run_dci_benchmarks.sh"),
+    Path("scripts/bcplus_eval/run_L3.sh"),
+    Path("scripts/bcplus_eval/run_bcplus_eval_openai.sh"),
+    Path("scripts/beir/benchmark_arguana.sh"),
+    Path("scripts/beir/benchmark_scifact.sh"),
+    Path("scripts/bright/run_bio.sh"),
+    Path("scripts/bright/run_earth_science.sh"),
+    Path("scripts/bright/run_economics.sh"),
+    Path("scripts/bright/run_robotics.sh"),
+    Path("scripts/qa/run_2wikimultihopqa_dev_sample50.sh"),
+    Path("scripts/qa/run_bamboogle_test_sample50.sh"),
+    Path("scripts/qa/run_hotpotqa_dev_sample50.sh"),
+    Path("scripts/qa/run_musique_dev_sample50.sh"),
+    Path("scripts/qa/run_nq_test_sample50.sh"),
+    Path("scripts/qa/run_triviaqa_test_sample50.sh"),
+    Path("tests/test_dci_benchmark_orchestrator.py"),
+)
+OBSOLETE_DCI_DOC_FRAGMENTS = (
+    "asterion-dci ablation",
+    "asterion-dci evaluate",
+    "asterion-dci export",
+    "asterion-dci paper",
+    "asterion-dci system-prompt",
+    "asterion-dci terminal",
+    "asterion-dci resume --output-dir",
+    "Asterion launcher",
+    "14 个 Asterion launcher",
+    "launcher 清单",
+    "for launchers",
+    "paper reproduce",
+    "standalone launcher",
+)
 
 
 def benchmark_trees() -> tuple[tuple[Path, ast.Module], ...]:
@@ -118,6 +153,57 @@ def identity_files(*, root: Path = PROJECT) -> tuple[Path, ...]:
 
 
 class AsterionProjectBoundaryTests(unittest.TestCase):
+    def test_obsolete_dci_benchmark_surfaces_are_absent(self) -> None:
+        self.assertEqual(
+            tuple(
+                path
+                for path in OBSOLETE_DCI_BENCHMARK_SURFACES
+                if (PROJECT / path).exists()
+            ),
+            (),
+        )
+
+    def test_active_surfaces_do_not_reference_per_task_launchers(self) -> None:
+        launcher_paths = frozenset(
+            path.as_posix()
+            for path in OBSOLETE_DCI_BENCHMARK_SURFACES
+            if len(path.parts) > 2
+            and path.parts[0] == "scripts"
+            and path.parts[1] in {"bcplus_eval", "beir", "bright", "qa"}
+        )
+        offenders: list[tuple[Path, str]] = []
+        for path in identity_files():
+            relative = path.relative_to(PROJECT)
+            if relative == Path("tests/test_project_boundary.py"):
+                continue
+            if path.suffix not in {".json", ".md", ".py"}:
+                continue
+            text = path.read_text(encoding="utf-8")
+            offenders.extend(
+                (relative, launcher)
+                for launcher in launcher_paths
+                if launcher in text
+            )
+
+        self.assertEqual(offenders, [])
+
+    def test_active_docs_do_not_publish_removed_dci_commands(self) -> None:
+        offenders: list[tuple[Path, str]] = []
+        for path in identity_files():
+            relative = path.relative_to(PROJECT)
+            if relative == Path("tests/test_project_boundary.py"):
+                continue
+            if path.suffix != ".md":
+                continue
+            text = path.read_text(encoding="utf-8")
+            offenders.extend(
+                (relative, fragment)
+                for fragment in OBSOLETE_DCI_DOC_FRAGMENTS
+                if fragment in text
+            )
+
+        self.assertEqual(offenders, [])
+
     def test_production_source_never_imports_original_dci_or_repository_tests(self) -> None:
         forbidden: list[tuple[Path, str]] = []
         for path in SOURCE.rglob("*.py"):

@@ -2,7 +2,7 @@
 
 Asterion is a composable, multi-runtime agent application framework. This
 repository contains the Python framework, built-in controlled-code and DCI
-application providers, schemas, examples, launchers, TypeScript runtime
+application providers, schemas, examples, TypeScript runtime
 components, and a Rust controlled executor.
 
 ## Installation
@@ -70,10 +70,8 @@ again.
 
 `ASTERION_DCI_RESOURCE_ROOT` is the parent of external `corpus/` and `data/`
 trees. `make setup-resources-basic` prepares only `corpus/wiki_corpus` and
-`corpus/bc_plus_docs`. `make setup-resources-benchmark` handles available
-declared sources and reports every unavailable/gated launcher path with its
-expected upstream; it never substitutes another corpus. Use the corresponding
-`check-resources-*` targets for read-only checks.
+`corpus/bc_plus_docs`. Benchmark paths come from private DCI operator
+configuration; capability manifests contain no dataset or corpus paths.
 
 Local corpus access means Asterion points Pi or Claude Code at operator-owned
 files instead of a hosted retrieval service. It does not mean every relevant
@@ -97,50 +95,36 @@ distribution.
   governance. The bounded execution interface is **External-limited** and does
   not make `paper_full_executable=false` true.
 
-The default one-query command is provider-free and plan-only:
+DCI exposes three exact suites through the generic benchmark subsystem:
+`dci.github@1.0.0` (12 tasks), `dci.paper-main@1.0.0` (13 tasks), and
+`dci.all@1.0.0` (15 tasks). The application adapter fixes the application to
+`dci.complete-application@1.0.0`. Planning is provider-free:
 
 ```bash
-plan_parent=$(mktemp -d)
-plan_root="$plan_parent/not-created"
-uv run asterion-dci paper reproduce \
-  --profile paper-reference/pi \
-  --scope bright.robotics.main.full \
-  --limit 1 \
-  --output-root "$plan_root"
-test ! -e "$plan_root"
+uv run asterion-dci benchmark plan --case-limit 1
 ```
 
-Without `--execute`, it creates no output root, issues no authority, performs no
-Agent/Judge work, and runs no full dataset. The full scope identity still names
-the complete published selection; `--limit 1` deterministically selects its
-first source-order query and binds a separate bounded digest and count. This
-plan is not full paper reproduction or published-score verification.
+Planning creates no evidence, loads no capability implementation provider,
+performs no Agent/Judge work, and runs no dataset. `--case-limit 1` applies to
+each task in suite order; it is not paper-score reproduction.
 
-Execution is a separate, explicit command. First obtain operator approval for
-the exact profile, scope, limit, private output root, and all five finite
-positive caps; then substitute those approved values:
+Execution and resume require an embedding operator host to supply explicit
+authorization, exact source selection, implementations, executor, cancellation,
+and private evidence services. The generic command shape is:
 
 ```bash
-uv run asterion-dci paper reproduce \
-  --profile paper-reference/pi \
-  --scope bright.robotics.main.full \
-  --limit 1 \
-  --output-root "$OPERATOR_SELECTED_PRIVATE_ROOT" \
-  --execute \
-  --max-agent-operations 1 \
-  --max-judge-operations 1 \
-  --max-cost-usd "$APPROVED_TOTAL_USD_CAP" \
-  --max-agent-cost-per-operation-usd "$APPROVED_AGENT_USD_CAP" \
-  --max-judge-cost-per-operation-usd "$APPROVED_JUDGE_USD_CAP"
+uv run asterion-dci benchmark run \
+  --case-limit 1 \
+  --capability-source-lock "$OPERATOR_SELECTED_SOURCE_LOCK" \
+  --evidence-root "$OPERATOR_SELECTED_PRIVATE_EVIDENCE_ROOT" \
+  --execute
 ```
 
-No placeholder, credential, existing output, or prior plan grants authority.
-A successful bounded run writes body-free RunManifest evidence to a separate
-descriptor-bound private manifest directory. The CLI prints safe authorization
-and operation counts plus the scope, opaque relative artifact name, and
-manifest digest; it does not print bodies or private paths. Its comparison
-status is **External-limited**, never a full or published-score reproduction
-result.
+The plain installed CLI deliberately has no execution authority. No credential,
+path, existing output, cached evidence, or prior plan grants authority. A host
+that authorizes execution writes immutable private evidence and exposes only
+body-free public task/run results. Resume additionally requires the compatible
+run ID. Full datasets and paper reproduction remain separately governed.
 
 Use `make help` to see the same boundary beside every command group.
 

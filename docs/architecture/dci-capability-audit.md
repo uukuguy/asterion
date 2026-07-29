@@ -97,16 +97,16 @@ unbound assembly instead of promoting packaged inventory to reachability.
 | QA and IR benchmark coverage | Thirteen dataset identities and sixteen experiment scopes are packaged | Implemented as contracts | Full datasets and published scores were not rerun |
 | Reported benchmark superiority | Reproduction targets and comparison schemas exist | Not verified | A contract or plan-only reproduction command is not experimental evidence |
 
-## Dataset and launcher reconciliation
+## Dataset and binding reconciliation
 
-The official GitHub README exposes eleven unique datasets through twelve
-launchers: one BrowseComp-Plus dataset with two configurations, six QA
-datasets, and four BRIGHT datasets. Asterion adds ArguAna and SciFact from the
-paper's BEIR evaluation, producing thirteen dataset identities and fourteen
-standalone launchers.
+The official GitHub reference covers eleven unique datasets through twelve task
+configurations: one BrowseComp-Plus dataset with two configurations, six QA
+datasets, and four BRIGHT datasets. Asterion also models ArguAna and SciFact
+from the paper's BEIR evaluation. The portable package exposes these through
+exact suite task identities and package-owned Python bindings, not shell paths.
 
-The two BEIR launchers are Asterion additions based on the paper and must be
-labelled as such. They are not GitHub launcher parity.
+The two BEIR bindings are Asterion additions based on the paper and remain
+labelled as such. They are not GitHub execution parity.
 
 The README describes the six QA datasets as fifty examples each. The paper
 appendix instead uses the full Bamboogle test set of 125 examples and random
@@ -284,44 +284,22 @@ Trajectory alignment is not yet comparable to the paper:
 
 ## Full reproduction boundary
 
-`asterion-dci paper describe` currently reports
-`paper_full_executable=false`. The truth value is derived from complete method
-and target closure, not from the existence of inventory rows. Current packaged
-inventory has thirteen dataset identities and sixteen paper scopes, but complete
-profile execution is not closed:
-
-- Bamboogle's paper-full target is 125 examples and has no batch profile.
-- BrowseComp+ `analysis.n100`, `appendix-a1.random50`, and
-  `context-ablation.random100` have `launcher_origin=unavailable`.
-- Paper-unreported method details remain labelled, including selection seeds,
-  duplicate handling, segment size, and evidence-overlap assumptions.
-
-The supported default command is plan-only:
+The supported public planning path is the generic benchmark subsystem:
 
 ```bash
-uv run asterion-dci paper reproduce \
-  --profile paper-reference/pi \
-  --output-root ./evidence/reproduction
+uv run asterion-dci benchmark plan --case-limit 1
 ```
 
-Without `--execute`, it enumerates the selected profile plan, including 1,978
-maximum Agent operations and 1,455 maximum Judge operations for the full
-paper-reference scope set, but performs zero Agent operations, zero Judge
-operations, issues no full authorization, and creates no output root.
+It produces a deterministic body-free plan and performs zero Agent/Judge
+operations. Execution requires a separately authorized embedding host, an exact
+source lock, private evidence root, implementations, executor, cancellation,
+and a finite case bound. Configuration, credentials, caches, prior evidence,
+and plan creation do not grant authority.
 
-The supported full-execution route is the same process `paper reproduce
---execute` path. It rejects missing scopes, unavailable scopes, partial method
-selections, missing resources, and missing/invalid limits before creating output
-or issuing authority. All five limits are mandatory and must be positive:
-`--max-agent-operations`, `--max-judge-operations`, `--max-cost-usd`,
-`--max-agent-cost-per-operation-usd`, and
-`--max-judge-cost-per-operation-usd`. Authorization is consumed by bounded
-benchmark execution in that process and is not granted by `.env`, caches, prior
-evidence, or a plan-only command.
-
-Reproduction comparison consumes compiled, body-free `RunManifest` evidence.
-Validated manifest compilation exists, but no provider-backed full reproduction
-or published paper-score rerun has been performed for this audit.
+The packaged paper inventory still records source and selection provenance, but
+ordinary benchmark execution does not claim full method closure or published
+score reproduction. No provider-backed full reproduction or published
+paper-score rerun has been performed for this audit.
 
 ## Prioritized gap register
 

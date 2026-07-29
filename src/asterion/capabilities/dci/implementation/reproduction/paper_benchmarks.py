@@ -90,7 +90,6 @@ _DATASET_FIELDS = frozenset(
         "judge_contract",
         "bounded_fixture",
         "batch_profile",
-        "launcher",
         "source_family",
         "source_reference",
         "launcher_origin",
@@ -132,7 +131,6 @@ _DATASET_PROPERTY_SCHEMAS = {
     "judge_contract": {"type": ["string", "null"]},
     "bounded_fixture": {"type": "string", "minLength": 1},
     "batch_profile": {"type": ["string", "null"], "minLength": 1},
-    "launcher": {"type": ["string", "null"], "minLength": 1},
     "source_family": {"const": "paper-reference"},
     "source_reference": {"const": _PAPER_SOURCE_REFERENCE},
     "launcher_origin": {"enum": ["upstream-github", "asterion-added"]},
@@ -261,7 +259,6 @@ class PaperBenchmark:
     judge_contract: str | None
     bounded_fixture: str
     batch_profile: str | None
-    launcher: str | None
     source_family: str
     source_reference: str
     launcher_origin: str
@@ -581,14 +578,6 @@ def _is_safe_relative_path(value: str) -> bool:
     return bool(value) and not path.is_absolute() and ".." not in path.parts
 
 
-def _is_launcher_path(value: object) -> bool:
-    return (
-        type(value) is str
-        and value.startswith("scripts/")
-        and _is_safe_relative_path(value)
-    )
-
-
 def _require_string(value: object) -> str:
     if type(value) is not str or not value:
         raise RuntimeError("DCI paper benchmark contract is invalid")
@@ -641,12 +630,11 @@ def _benchmarks() -> Mapping[str, PaperBenchmark]:
             and profile.get("dataset") == item["dataset_path"]
             and profile.get("corpus") == item["corpus_path"]
             and profile.get("mode") == mode
-            and _is_launcher_path(item["launcher"])
         )
         intentionally_unbound = (
             dataset_id == "qa.bamboogle"
             and item["batch_profile"] is None
-            and item["launcher"] == "scripts/qa/run_bamboogle_test_sample50.sh"
+            and item["launcher_origin"] == "upstream-github"
             and item["dataset_path"] == "paper-full/data/bamboogle/test-125.jsonl"
         )
         expected_origin = (
@@ -680,7 +668,6 @@ def _benchmarks() -> Mapping[str, PaperBenchmark]:
             "source_count",
             "judge_contract",
             "batch_profile",
-            "launcher",
             "selection_count",
         }:
             _require_string(item[field])
