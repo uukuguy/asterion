@@ -11,7 +11,7 @@ from collections.abc import Iterable, Mapping
 from contextlib import AbstractAsyncContextManager
 from pathlib import Path
 from types import MappingProxyType
-from typing import Callable, TextIO, cast
+from typing import TYPE_CHECKING, Callable, TextIO, cast
 
 from asterion.applications.discovery import (
     list_application_providers,
@@ -64,6 +64,9 @@ from asterion.services.registry import (
     parse_host_service_options,
 )
 
+if TYPE_CHECKING:
+    from asterion.benchmarks.cli import BenchmarkCommandHost
+
 
 def main(
     argv: list[str] | None = None,
@@ -76,6 +79,7 @@ def main(
     stderr: TextIO | None = None,
     managed_executor_factory: Callable[[OperatorExecutorConfig], object] | None = None,
     capability_packages: Iterable[InstalledCapabilityPackage] | None = None,
+    benchmark_host: BenchmarkCommandHost | None = None,
 ) -> int:
     """Run the generic installed-application CLI."""
 
@@ -90,6 +94,15 @@ def main(
         from asterion.cli_capability import main as capability_main
 
         return capability_main(raw_argv[1:], stdout=stdout, stderr=stderr)
+    if raw_argv[:1] == ["benchmark"]:
+        from asterion.benchmarks.cli import main as benchmark_main
+
+        return benchmark_main(
+            raw_argv[1:],
+            host=benchmark_host,
+            stdout=stdout,
+            stderr=stderr,
+        )
     registry = (
         default_runtime_factory_registry()
         if runtime_factories is None
