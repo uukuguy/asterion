@@ -36,12 +36,20 @@ from asterion.benchmarks.resolution import (
     resolve_benchmark_suite,
     resolve_benchmark_tasks,
 )
+from asterion.benchmarks.process import (
+    AuthorizedProcessTaskExecutor,
+    AuthorizedProcessTaskPlan,
+    BenchmarkProcessError,
+)
 
 
 __all__ = (
     "ApplicationRef",
+    "AuthorizedProcessTaskExecutor",
+    "AuthorizedProcessTaskPlan",
     "BenchmarkEvidenceError",
     "BenchmarkEvidenceStore",
+    "BenchmarkProcessError",
     "BenchmarkModelError",
     "BenchmarkExecutionAuthorization",
     "BenchmarkExecutionAuthorizer",
