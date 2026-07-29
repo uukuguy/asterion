@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-29 21:04. **Session remains active — not a final handoff.**
+> Updated: 2026-07-29 21:53. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -48,8 +48,11 @@
 - Plan 2 Task 6 adds explicit local-directory loading and moves transitional
   DCI through that source in `6fff8bf`, then requires canonical absolute roots
   and exact scoped-module restoration in `13be67f`.
-- The immediate next action is Plan 2 Task 7: publish the stable capability SDK
-  and provider conformance kit.
+- Plan 2 Task 7 publishes the exact capability SDK/conformance kit in
+  `50afda8`, closes executable/import/aggregate/artifact/redaction findings in
+  `c2b4be3`, and aligns structural executor typing in `4e8d3fa`.
+- The immediate next action is Plan 2 Task 8: add capability author commands,
+  documentation, and the full package-source phase gate.
 
 ## Where things stand
 
@@ -87,17 +90,21 @@
   independent review.
 - Plan 2 Task 6 passed 81 local/DCI/CLI tests with targeted Pyright/Ruff clean;
   root-canonicality and module-cleanup probes passed independent review.
+- Plan 2 Task 7 passed expanded SDK/conformance/DCI/controlled-executor focused
+  suites with production and modified-test Pyright/Ruff clean; independent
+  review is approved.
 - `dci.agent-runtime/v1` remains only as the deliberate absence-test needle in
   Task 1 scope; no compatibility alias was added.
 - Plans 2-4 remain dependent on completion of the six Plan 1 tasks.
 
 ## Next action
 
-1. Dispatch Plan 2 Task 7 from the approved source plan.
-2. Lock the exact public `capability_sdk.__all__` surface and private-import
-   AST gate before adding re-exports or conformance logic.
-3. Run conformance without provider/runtime execution and migrate built-in
-   implementations to public SDK imports only.
+1. Dispatch Plan 2 Task 8 from the approved source plan.
+2. Add CLI RED tests for help, init, validate, inspect, conformance test,
+   redaction, and staged unsupported pack/convert.
+3. Run all package-source focused suites, `make check`, and
+   `make promotion-check` with provider operations `0` and full dataset `no`,
+   then perform the required whole-branch Plan 2 review.
 
 ## Boundaries and ruled-out paths
 

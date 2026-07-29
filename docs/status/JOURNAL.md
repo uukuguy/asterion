@@ -236,3 +236,8 @@
 - 21:37 Hardened local roots and module cleanup to close Task6 review gaps [13be67f]
 - 21:04 correction: prior 21:11 and 21:37 timestamps were inaccurate; both commits and review closed before 21:04
 - 21:04 Closed package-source Task 6 after local trust-boundary review passed [13be67f]
+- 21:05 Saved local-source recovery boundary before public SDK publication [e50be85]
+- 21:23 Published capability SDK and provider-free conformance kit [50afda8]
+- 21:45 Hardened SDK conformance and package-owned DCI helpers to close review gaps [c2b4be3]
+- 21:51 Typed structural controlled requests to match package-owned executor boundary [4e8d3fa]
+- 21:53 Closed package-source Task 7 after SDK and conformance review passed [4e8d3fa]
