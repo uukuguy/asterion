@@ -21,7 +21,6 @@ from asterion.capabilities.catalog import CapabilityRef
 from asterion.capability_packages import (
     BenchmarkSuiteManifest,
     BenchmarkSuiteRef,
-    BenchmarkTaskBinding,
     BenchmarkTaskManifest,
     CapabilityPackageRef,
     CapabilitySourceLock,
@@ -147,24 +146,13 @@ class BenchmarkModelTests(unittest.TestCase):
     def test_task_implementation_protocol_is_runtime_checkable(self) -> None:
         self.assertIsInstance(ExampleBenchmarkImplementation(), BenchmarkTaskImplementation)
 
-    def test_resolved_task_requires_implementation_protocol_without_calling_it(
+    def test_resolved_task_contains_metadata_without_live_implementation(
         self,
     ) -> None:
-        task = self._resolved_task(
-            1,
-            "example.task",
-            implementation=ExplodingBenchmarkImplementation(),
-        )
+        task = self._resolved_task(1, "example.task")
 
-        self.assertIsInstance(task.binding.implementation, ExplodingBenchmarkImplementation)
-
-        with self.assertRaises(BenchmarkModelError) as context:
-            self._resolved_task(
-                1,
-                "example.task",
-                implementation=NonBenchmarkImplementation(),
-            )
-        self.assertNotIn("SECRET-NON-IMPLEMENTATION", repr(context.exception))
+        self.assertEqual(task.task.binding_id, "example.binding")
+        self.assertFalse(hasattr(task, "binding"))
 
     def test_resolved_capability_freezes_manifest_and_requires_matching_identity(
         self,
@@ -334,7 +322,7 @@ class BenchmarkModelTests(unittest.TestCase):
                 with self.assertRaises(BenchmarkModelError):
                     self._plan(**overrides)
 
-    def test_resolved_plan_requires_suite_task_order_and_owner_package_identity(
+    def test_resolved_plan_requires_suite_task_order(
         self,
     ) -> None:
         first = self._task_manifest("example.first")
@@ -347,17 +335,6 @@ class BenchmarkModelTests(unittest.TestCase):
                 (
                     self._resolved_task_from_manifest(1, second),
                     self._resolved_task_from_manifest(2, first),
-                ),
-            ),
-            (
-                "owner package",
-                (
-                    self._resolved_task_from_manifest(
-                        1,
-                        first,
-                        owner_package=CapabilityPackageRef("other.package", "1.0.0"),
-                    ),
-                    self._resolved_task_from_manifest(2, second),
                 ),
             ),
         )
@@ -413,22 +390,16 @@ class BenchmarkModelTests(unittest.TestCase):
         self,
         ordinal: int,
         task_id: str,
-        *,
-        implementation: object | None = None,
     ) -> ResolvedBenchmarkTask:
         return self._resolved_task_from_manifest(
             ordinal,
             self._task_manifest(task_id),
-            implementation=implementation,
         )
 
     def _resolved_task_from_manifest(
         self,
         ordinal: int,
         task: BenchmarkTaskManifest,
-        *,
-        owner_package: CapabilityPackageRef | None = None,
-        implementation: object | None = None,
     ) -> ResolvedBenchmarkTask:
         return ResolvedBenchmarkTask(
             ordinal=ordinal,
@@ -441,43 +412,7 @@ class BenchmarkModelTests(unittest.TestCase):
                     "secret": "SECRET-PAYLOAD",
                 },
             ),
-            binding=BenchmarkTaskBinding(
-                owner_package=owner_package
-                if owner_package is not None
-                else CapabilityPackageRef("example.package", "1.0.0"),
-                binding_id="example.binding",
-                implementation=implementation
-                if implementation is not None
-                else SecretImplementation(),
-            ),
         )
-
-
-class SecretImplementation:
-    def build_invocation(
-        self, request: BenchmarkTaskRequest
-    ) -> BenchmarkTaskInvocation:
-        return BenchmarkTaskInvocation(
-            task_id=request.task_id,
-            binding_id="example.binding",
-            public_arguments=("case-limit", str(request.case_limit)),
-            private_payload={"secret": "SECRET-PAYLOAD"},
-        )
-
-    def __repr__(self) -> str:
-        return "IMPLEMENTATION-SECRET"
-
-
-class ExplodingBenchmarkImplementation:
-    def build_invocation(
-        self, request: BenchmarkTaskRequest
-    ) -> BenchmarkTaskInvocation:
-        raise AssertionError("implementation must not be called")
-
-
-class NonBenchmarkImplementation:
-    def __repr__(self) -> str:
-        return "SECRET-NON-IMPLEMENTATION"
 
 
 class HostileManifestValue:

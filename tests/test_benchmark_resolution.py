@@ -345,14 +345,9 @@ else:
                 SUITE_REF,
                 (installed_package(suite_dir),),
             )
-            gamma_spy = SpyBenchmarkImplementation()
             package = installed_package(
                 suite_dir,
-                benchmark_bindings=(
-                    binding("example.gamma", GAMMA_REF, implementation=gamma_spy),
-                    binding("example.beta", BETA_REF),
-                    binding("example.alpha", ALPHA_REF),
-                ),
+                benchmark_bindings=(),
             )
 
             tasks = resolve_benchmark_tasks(
@@ -371,10 +366,9 @@ else:
             ("example.alpha", "example.beta"),
         )
         self.assertEqual(
-            tuple(task.binding.binding_id for task in tasks),
+            tuple(task.task.binding_id for task in tasks),
             ("example.alpha", "example.beta"),
         )
-        self.assertFalse(gamma_spy.called)
 
     def test_rejects_forged_caller_suite_not_matching_installed_declaration(
         self,
@@ -435,54 +429,21 @@ else:
                         ),
                     )
 
-    def test_rejects_missing_duplicate_wrong_package_and_unknown_bindings(
+    def test_task_resolution_does_not_require_or_inspect_live_bindings(
         self,
     ) -> None:
         suite = valid_suite_manifest()
         with fixture_payload(VALID_SUITE) as suite_dir:
-            cases = (
-                (
-                    "missing binding",
-                    (
-                        binding("example.alpha", ALPHA_REF),
-                    ),
-                ),
-                (
-                    "duplicate binding",
-                    (
-                        binding("example.alpha", ALPHA_REF),
-                        binding("example.alpha", ALPHA_REF),
-                        binding("example.beta", BETA_REF),
-                    ),
-                ),
-                (
-                    "wrong package binding",
-                    (
-                        binding("example.alpha", ALPHA_REF),
-                        binding(
-                            "example.beta",
-                            BETA_REF,
-                            owner_package=OTHER_PACKAGE_REF,
-                        ),
-                    ),
-                ),
-                (
-                    "unknown extra binding",
-                    (
-                        binding("example.alpha", ALPHA_REF),
-                        binding("example.beta", BETA_REF),
-                        binding("example.unknown", ALPHA_REF),
-                    ),
-                ),
+            tasks = resolve_benchmark_tasks(
+                suite,
+                (resolved_capability(ALPHA_REF), resolved_capability(BETA_REF)),
+                (installed_package(suite_dir, benchmark_bindings=()),),
             )
-            for label, bindings in cases:
-                with self.subTest(label):
-                    with self.assertRaises(BenchmarkResolutionError):
-                        resolve_benchmark_tasks(
-                            suite,
-                            (resolved_capability(ALPHA_REF), resolved_capability(BETA_REF)),
-                            (installed_package(suite_dir, benchmark_bindings=bindings),),
-                        )
+
+        self.assertEqual(
+            tuple(task.task.binding_id for task in tasks),
+            ("example.alpha", "example.beta"),
+        )
 
     def test_does_not_touch_provider_process_output_or_host_spies(self) -> None:
         with fixture_payload(VALID_SUITE) as suite_dir:

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Protocol, cast, runtime_checkable
+from typing import NoReturn, Protocol, runtime_checkable
 
 from asterion.benchmarks.evidence import (
     BenchmarkEvidenceError,
@@ -20,6 +20,7 @@ from asterion.benchmarks.model import (
     ResolvedBenchmarkPlan,
     ResolvedBenchmarkTask,
 )
+from asterion.capability_packages.model import BenchmarkTaskBinding
 from asterion.runtime.host import CancellationSignal
 
 
@@ -27,6 +28,10 @@ OutputDirectoryFactory = Callable[[ResolvedBenchmarkPlan, ResolvedBenchmarkTask]
 _TASK_TERMINAL_PROGRESS = frozenset(
     {"task.started", "task.completed", "task.failed", "task.cancelled"}
 )
+
+
+class BenchmarkExecutionError(ValueError):
+    """Raised when executable bindings do not exactly match a benchmark plan."""
 
 
 @runtime_checkable
@@ -50,10 +55,12 @@ class BenchmarkRunner:
         self,
         plan: ResolvedBenchmarkPlan,
         *,
+        implementations: Sequence[BenchmarkTaskBinding],
         executor: BenchmarkTaskExecutor,
         evidence: BenchmarkEvidenceStore,
         cancellation: CancellationSignal,
     ) -> BenchmarkRunResult:
+        implementation_map = _implementation_map(plan, implementations)
         evidence.initialize(plan)
         persisted_run = evidence.compatible_run_result(plan)
         if persisted_run is not None:
@@ -105,6 +112,7 @@ class BenchmarkRunner:
             task_result = self._execute_task(
                 plan,
                 task,
+                implementation=implementation_map[task.task.binding_id],
                 executor=executor,
                 evidence=evidence,
                 cancellation=cancellation,
@@ -129,6 +137,7 @@ class BenchmarkRunner:
         plan: ResolvedBenchmarkPlan,
         task: ResolvedBenchmarkTask,
         *,
+        implementation: BenchmarkTaskImplementation,
         executor: BenchmarkTaskExecutor,
         evidence: BenchmarkEvidenceStore,
         cancellation: CancellationSignal,
@@ -166,15 +175,11 @@ class BenchmarkRunner:
                 case_limit=plan.case_limit,
                 output_directory=output_directory,
             )
-            implementation = cast(
-                BenchmarkTaskImplementation,
-                task.binding.implementation,
-            )
             invocation = implementation.build_invocation(request)
             if (
                 not isinstance(invocation, BenchmarkTaskInvocation)
                 or invocation.task_id != task_id
-                or invocation.binding_id != task.binding.binding_id
+                or invocation.binding_id != task.task.binding_id
             ):
                 result = _failed_result(task_id)
             else:
@@ -187,6 +192,12 @@ class BenchmarkRunner:
                 result = _failed_result(task_id)
         except BenchmarkEvidenceError:
             raise
+        except KeyboardInterrupt:
+            result = BenchmarkTaskResult(
+                task_id=task_id,
+                status="cancelled",
+                case_count=0,
+            )
         except Exception:
             result = _failed_result(task_id)
 
@@ -204,6 +215,42 @@ def _failed_result(task_id: str) -> BenchmarkTaskResult:
     return BenchmarkTaskResult(task_id=task_id, status="failed", case_count=0)
 
 
+def _implementation_map(
+    plan: ResolvedBenchmarkPlan,
+    implementations: Sequence[BenchmarkTaskBinding],
+) -> dict[str, BenchmarkTaskImplementation]:
+    if not isinstance(plan, ResolvedBenchmarkPlan):
+        _fail("benchmark execution bindings are invalid")
+    try:
+        values = tuple(implementations)
+        expected = frozenset(task.task.binding_id for task in plan.tasks)
+        result: dict[str, BenchmarkTaskImplementation] = {}
+        for binding in values:
+            if (
+                type(binding) is not BenchmarkTaskBinding
+                or binding.owner_package != plan.suite.owner_package
+                or binding.binding_id not in expected
+                or binding.binding_id in result
+                or not isinstance(
+                    binding.implementation,
+                    BenchmarkTaskImplementation,
+                )
+            ):
+                _fail("benchmark execution bindings are invalid")
+            result[binding.binding_id] = binding.implementation
+        if frozenset(result) != expected:
+            _fail("benchmark execution bindings are invalid")
+        return result
+    except BenchmarkExecutionError:
+        raise
+    except Exception:
+        _fail("benchmark execution bindings are invalid")
+
+
+def _fail(message: str) -> NoReturn:
+    raise BenchmarkExecutionError(message) from None
+
+
 def _validate_callback_progress(event: BenchmarkProgressEvent) -> None:
     if (
         not isinstance(event, BenchmarkProgressEvent)
@@ -215,6 +262,7 @@ def _validate_callback_progress(event: BenchmarkProgressEvent) -> None:
 
 
 __all__ = (
+    "BenchmarkExecutionError",
     "BenchmarkRunner",
     "BenchmarkTaskExecutor",
     "OutputDirectoryFactory",

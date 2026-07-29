@@ -14,6 +14,7 @@ from asterion.benchmarks.evidence import (
     LocalPrivateBenchmarkEvidenceStore,
 )
 from asterion.benchmarks.execution import (
+    BenchmarkExecutionError,
     BenchmarkRunner,
     BenchmarkTaskExecutor,
 )
@@ -52,7 +53,6 @@ class BenchmarkExecutionTests(unittest.TestCase):
             calls: list[tuple[str, str]] = []
             p = plan(
                 task_ids=("example.alpha", "example.beta", "example.gamma"),
-                build_log=calls,
             )
             output_factory = RecordingOutputFactory(Path(temp_dir) / "outputs")
             executor = RecordingExecutor(calls)
@@ -60,6 +60,7 @@ class BenchmarkExecutionTests(unittest.TestCase):
 
             result = BenchmarkRunner(output_directory_factory=output_factory).run(
                 p,
+                implementations=benchmark_bindings(p, build_log=calls),
                 executor=executor,
                 evidence=evidence,
                 cancellation=ManualCancellation(),
@@ -110,7 +111,7 @@ class BenchmarkExecutionTests(unittest.TestCase):
             original.finish_task(alpha)
 
             calls: list[tuple[str, str]] = []
-            p = plan(build_log=calls)
+            p = plan()
             resumed = LocalPrivateBenchmarkEvidenceStore(root)
             result = BenchmarkRunner(
                 output_directory_factory=RecordingOutputFactory(
@@ -118,6 +119,7 @@ class BenchmarkExecutionTests(unittest.TestCase):
                 ),
             ).run(
                 p,
+                implementations=benchmark_bindings(p, build_log=calls),
                 executor=RecordingExecutor(calls),
                 evidence=resumed,
                 cancellation=ManualCancellation(),
@@ -166,7 +168,8 @@ class BenchmarkExecutionTests(unittest.TestCase):
                     Path(temp_dir) / "outputs"
                 ),
             ).run(
-                plan(build_log=calls),
+                plan(),
+                implementations=benchmark_bindings(plan(), build_log=calls),
                 executor=VerboseExecutor(),
                 evidence=evidence,
                 cancellation=ManualCancellation(),
@@ -227,6 +230,7 @@ class BenchmarkExecutionTests(unittest.TestCase):
                 ),
             ).run(
                 p,
+                implementations=benchmark_bindings(p),
                 executor=RecordingExecutor(calls),
                 evidence=LocalPrivateBenchmarkEvidenceStore(root),
                 cancellation=ManualCancellation(),
@@ -265,6 +269,7 @@ class BenchmarkExecutionTests(unittest.TestCase):
                 ),
             ).run(
                 p,
+                implementations=benchmark_bindings(p),
                 executor=ForbiddenExecutor(),
                 evidence=evidence,
                 cancellation=ManualCancellation(),
@@ -316,6 +321,7 @@ class BenchmarkExecutionTests(unittest.TestCase):
                 ),
             ).run(
                 p,
+                implementations=benchmark_bindings(p),
                 executor=ForbiddenExecutor(),
                 evidence=evidence,
                 cancellation=ManualCancellation(),
@@ -368,6 +374,7 @@ class BenchmarkExecutionTests(unittest.TestCase):
                         ),
                     ).run(
                         p,
+                        implementations=benchmark_bindings(p),
                         executor=ForbiddenExecutor(),
                         evidence=evidence,
                         cancellation=ManualCancellation(),
@@ -441,6 +448,7 @@ class BenchmarkExecutionTests(unittest.TestCase):
                         ),
                     ).run(
                         p,
+                        implementations=benchmark_bindings(p),
                         executor=ForbiddenExecutor(),
                         evidence=evidence,
                         cancellation=ManualCancellation(),
@@ -486,6 +494,7 @@ class BenchmarkExecutionTests(unittest.TestCase):
                 output_directory_factory=lambda _plan, _task: Path.cwd()
             ).run(
                 p,
+                implementations=benchmark_bindings(p),
                 executor=FixedResultExecutor(result.tasks[0]),
                 evidence=FailingCompletedEvidence(result),
                 cancellation=ManualCancellation(),
@@ -499,7 +508,8 @@ class BenchmarkExecutionTests(unittest.TestCase):
                     Path(temp_dir) / "outputs"
                 ),
             ).run(
-                plan(build_log=calls),
+                plan(),
+                implementations=benchmark_bindings(plan(), build_log=calls),
                 executor=RecordingExecutor(calls, statuses={"example.alpha": "failed"}),
                 evidence=LocalPrivateBenchmarkEvidenceStore(
                     Path(temp_dir) / "evidence"
@@ -533,6 +543,7 @@ class BenchmarkExecutionTests(unittest.TestCase):
                 ),
             ).run(
                 plan(),
+                implementations=benchmark_bindings(plan(), build_log=calls),
                 executor=RecordingExecutor(calls),
                 evidence=evidence,
                 cancellation=ManualCancellation(cancelled=True),
@@ -575,6 +586,7 @@ class BenchmarkExecutionTests(unittest.TestCase):
                         ),
                     ).run(
                         p,
+                        implementations=benchmark_bindings(p),
                         executor=ForbiddenExecutor(),
                         evidence=evidence,
                         cancellation=ManualCancellation(cancelled=live_cancelled),
@@ -622,6 +634,7 @@ class BenchmarkExecutionTests(unittest.TestCase):
                         ),
                     ).run(
                         p,
+                        implementations=benchmark_bindings(p),
                         executor=ForbiddenExecutor(),
                         evidence=evidence,
                         cancellation=ManualCancellation(cancelled=live_cancelled),
@@ -648,7 +661,8 @@ class BenchmarkExecutionTests(unittest.TestCase):
                     Path(temp_dir) / "outputs"
                 ),
             ).run(
-                plan(build_log=calls),
+                plan(),
+                implementations=benchmark_bindings(plan(), build_log=calls),
                 executor=CancellingExecutor(calls, cancellation),
                 evidence=LocalPrivateBenchmarkEvidenceStore(
                     Path(temp_dir) / "evidence"
@@ -691,6 +705,7 @@ class BenchmarkExecutionTests(unittest.TestCase):
                 ),
             ).run(
                 plan(),
+                implementations=benchmark_bindings(plan()),
                 executor=VerboseExecutor(),
                 evidence=evidence,
                 cancellation=ManualCancellation(),
@@ -737,7 +752,8 @@ class BenchmarkExecutionTests(unittest.TestCase):
                             root / "outputs"
                         ),
                     ).run(
-                        plan(build_log=calls),
+                        plan(),
+                        implementations=benchmark_bindings(plan(), build_log=calls),
                         executor=RecordingExecutor(
                             calls,
                             statuses={"example.alpha": status},
@@ -767,7 +783,8 @@ class BenchmarkExecutionTests(unittest.TestCase):
                     Path(temp_dir) / "outputs"
                 ),
             ).run(
-                plan(build_log=calls),
+                plan(),
+                implementations=benchmark_bindings(plan(), build_log=calls),
                 executor=ExplodingExecutor(calls),
                 evidence=LocalPrivateBenchmarkEvidenceStore(
                     Path(temp_dir) / "evidence"
@@ -802,11 +819,12 @@ class BenchmarkExecutionTests(unittest.TestCase):
                     Path(temp_dir) / "outputs"
                 ),
             ).run(
-                plan(
+                plan(),
+                implementations=benchmark_bindings(
+                    plan(),
                     build_log=calls,
-                    implementation_factory=lambda task_id, log: ExplodingImplementation(
-                        task_id,
-                        log,
+                    implementation_factory=lambda task_id, log: (
+                        ExplodingImplementation(task_id, log)
                     ),
                 ),
                 executor=RecordingExecutor(calls),
@@ -849,7 +867,9 @@ class BenchmarkExecutionTests(unittest.TestCase):
                             Path(temp_dir) / invocation_task_id / "outputs"
                         ),
                     ).run(
-                        plan(
+                        plan(),
+                        implementations=benchmark_bindings(
+                            plan(),
                             build_log=calls,
                             implementation_factory=lambda task_id, log: (
                                 WrongInvocationImplementation(
@@ -893,6 +913,7 @@ class BenchmarkExecutionTests(unittest.TestCase):
                 ),
             ).run(
                 plan(),
+                implementations=benchmark_bindings(plan()),
                 executor=WrongTaskProgressExecutor(),
                 evidence=evidence,
                 cancellation=ManualCancellation(),
@@ -923,6 +944,7 @@ class BenchmarkExecutionTests(unittest.TestCase):
                             ),
                         ).run(
                             plan(),
+                            implementations=benchmark_bindings(plan()),
                             executor=ForbiddenProgressExecutor(status),
                             evidence=LocalPrivateBenchmarkEvidenceStore(
                                 Path(temp_dir) / "evidence"
@@ -939,6 +961,7 @@ class BenchmarkExecutionTests(unittest.TestCase):
                     ),
                 ).run(
                     plan(),
+                    implementations=benchmark_bindings(plan()),
                     executor=VerboseExecutor(),
                     evidence=FailingProgressEvidence(
                         LocalPrivateBenchmarkEvidenceStore(Path(temp_dir) / "evidence"),
@@ -992,6 +1015,7 @@ class BenchmarkExecutionTests(unittest.TestCase):
                         ),
                     ).run(
                         plan(),
+                        implementations=benchmark_bindings(plan()),
                         executor=FixedResultExecutor(returned),
                         evidence=LocalPrivateBenchmarkEvidenceStore(root / "evidence"),
                         cancellation=ManualCancellation(),
@@ -1006,7 +1030,8 @@ class BenchmarkExecutionTests(unittest.TestCase):
                     Path(temp_dir) / "outputs"
                 ),
             ).run(
-                plan(build_log=calls),
+                plan(),
+                implementations=benchmark_bindings(plan(), build_log=calls),
                 executor=RecordingExecutor(calls, statuses={"example.alpha": "failed"}),
                 evidence=LocalPrivateBenchmarkEvidenceStore(
                     Path(temp_dir) / "evidence"
@@ -1020,14 +1045,115 @@ class BenchmarkExecutionTests(unittest.TestCase):
             [("build", "example.alpha"), ("execute", "example.alpha")],
         )
 
+    def test_bindings_must_exactly_match_plan_before_evidence_is_created(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            p = plan()
+            valid = benchmark_bindings(p)
+            cases = (
+                ("missing", valid[:1]),
+                ("duplicate", (valid[0], valid[0], valid[1])),
+                (
+                    "extra",
+                    valid
+                    + (
+                        BenchmarkTaskBinding(
+                            owner_package=PACKAGE_REF,
+                            binding_id="example.extra",
+                            implementation=RecordingImplementation(
+                                "example.extra", []
+                            ),
+                        ),
+                    ),
+                ),
+                (
+                    "wrong owner",
+                    (
+                        BenchmarkTaskBinding(
+                            owner_package=CapabilityPackageRef(
+                                "other.package", "1.0.0"
+                            ),
+                            binding_id="example.alpha",
+                            implementation=RecordingImplementation(
+                                "example.alpha", []
+                            ),
+                        ),
+                        valid[1],
+                    ),
+                ),
+                (
+                    "wrong protocol",
+                    (
+                        BenchmarkTaskBinding(
+                            owner_package=PACKAGE_REF,
+                            binding_id="example.alpha",
+                            implementation=object(),
+                        ),
+                        valid[1],
+                    ),
+                ),
+            )
+            for label, implementations in cases:
+                with self.subTest(label):
+                    evidence_root = Path(temp_dir) / label
+                    with self.assertRaises(BenchmarkExecutionError):
+                        BenchmarkRunner(
+                            output_directory_factory=RecordingOutputFactory(
+                                Path(temp_dir) / "outputs"
+                            )
+                        ).run(
+                            p,
+                            implementations=implementations,
+                            executor=RecordingExecutor([]),
+                            evidence=LocalPrivateBenchmarkEvidenceStore(evidence_root),
+                            cancellation=ManualCancellation(),
+                        )
+                    self.assertFalse(evidence_root.exists())
+
+    def test_keyboard_interrupt_closes_cancelled_task_and_run_evidence(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            p = plan(task_ids=("example.alpha",))
+            evidence = LocalPrivateBenchmarkEvidenceStore(
+                Path(temp_dir) / "evidence"
+            )
+
+            result = BenchmarkRunner(
+                output_directory_factory=RecordingOutputFactory(
+                    Path(temp_dir) / "outputs"
+                )
+            ).run(
+                p,
+                implementations=benchmark_bindings(p),
+                executor=InterruptingExecutor(),
+                evidence=evidence,
+                cancellation=ManualCancellation(),
+            )
+
+            self.assertEqual(result.status, "cancelled")
+            self.assertEqual(result.tasks[0].status, "cancelled")
+            self.assertEqual(evidence.terminal_progress_status(p), "run.cancelled")
+
+    def test_system_exit_is_not_swallowed_as_a_task_result(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            p = plan(task_ids=("example.alpha",))
+            with self.assertRaises(SystemExit):
+                BenchmarkRunner(
+                    output_directory_factory=RecordingOutputFactory(
+                        Path(temp_dir) / "outputs"
+                    )
+                ).run(
+                    p,
+                    implementations=benchmark_bindings(p),
+                    executor=SystemExitExecutor(),
+                    evidence=LocalPrivateBenchmarkEvidenceStore(
+                        Path(temp_dir) / "evidence"
+                    ),
+                    cancellation=ManualCancellation(),
+                )
+
 
 def plan(
     *,
     task_ids: tuple[str, ...] = ("example.alpha", "example.beta"),
-    build_log: list[tuple[str, str]] | None = None,
-    implementation_factory: (
-        Callable[[str, list[tuple[str, str]]], object] | None
-    ) = None,
 ) -> ResolvedBenchmarkPlan:
     suite = BenchmarkSuiteManifest(
         suite_ref=SUITE_REF,
@@ -1037,16 +1163,12 @@ def plan(
         default_case_limit=10,
         default_concurrency=1,
     )
-    log: list[tuple[str, str]] = build_log if build_log is not None else []
-    factory = implementation_factory or (
-        lambda task_id, task_log: RecordingImplementation(task_id, task_log)
-    )
     return ResolvedBenchmarkPlan(
         run_id="run-001",
         application_ref=APPLICATION_REF,
         suite=suite,
         tasks=tuple(
-            resolved_task(index, task, factory(task.task_id, log))
+            resolved_task(index, task)
             for index, task in enumerate(suite.tasks, start=1)
         ),
         case_limit=3,
@@ -1083,7 +1205,6 @@ def task_manifest(task_id: str) -> BenchmarkTaskManifest:
 def resolved_task(
     ordinal: int,
     task: BenchmarkTaskManifest,
-    implementation: object,
 ) -> ResolvedBenchmarkTask:
     return ResolvedBenchmarkTask(
         ordinal=ordinal,
@@ -1096,11 +1217,28 @@ def resolved_task(
                 "prompt": "SECRET-PROMPT-BODY",
             },
         ),
-        binding=BenchmarkTaskBinding(
-            owner_package=PACKAGE_REF,
-            binding_id=task.binding_id,
-            implementation=implementation,
-        ),
+    )
+
+
+def benchmark_bindings(
+    p: ResolvedBenchmarkPlan,
+    *,
+    build_log: list[tuple[str, str]] | None = None,
+    implementation_factory: (
+        Callable[[str, list[tuple[str, str]]], object] | None
+    ) = None,
+) -> tuple[BenchmarkTaskBinding, ...]:
+    log = build_log if build_log is not None else []
+    factory = implementation_factory or (
+        lambda task_id, task_log: RecordingImplementation(task_id, task_log)
+    )
+    return tuple(
+        BenchmarkTaskBinding(
+            owner_package=p.suite.owner_package,
+            binding_id=task.task.binding_id,
+            implementation=factory(task.task.task_id, log),
+        )
+        for task in p.tasks
     )
 
 
@@ -1187,6 +1325,30 @@ class RecordingExecutor:
             status=self._statuses.get(invocation.task_id, "completed"),
             case_count=3,
         )
+
+
+class InterruptingExecutor:
+    def execute(
+        self,
+        invocation: BenchmarkTaskInvocation,
+        *,
+        cancellation: CancellationSignal,
+        on_progress: Callable[[BenchmarkProgressEvent], None],
+    ) -> BenchmarkTaskResult:
+        del invocation, cancellation, on_progress
+        raise KeyboardInterrupt
+
+
+class SystemExitExecutor:
+    def execute(
+        self,
+        invocation: BenchmarkTaskInvocation,
+        *,
+        cancellation: CancellationSignal,
+        on_progress: Callable[[BenchmarkProgressEvent], None],
+    ) -> BenchmarkTaskResult:
+        del invocation, cancellation, on_progress
+        raise SystemExit(2)
 
 
 class VerboseExecutor:

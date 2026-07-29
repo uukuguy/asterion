@@ -19,8 +19,6 @@ from asterion.benchmarks.evidence import (
 )
 from asterion.benchmarks.model import (
     ApplicationRef,
-    BenchmarkTaskInvocation,
-    BenchmarkTaskRequest,
     ResolvedBenchmarkPlan,
     ResolvedBenchmarkTask,
     ResolvedCapability,
@@ -29,7 +27,6 @@ from asterion.capabilities.catalog import CapabilityRef
 from asterion.capability_packages import (
     BenchmarkSuiteManifest,
     BenchmarkSuiteRef,
-    BenchmarkTaskBinding,
     BenchmarkTaskManifest,
     CapabilityPackageRef,
     CapabilitySourceLock,
@@ -1075,21 +1072,7 @@ def resolved_task(ordinal: int, task: BenchmarkTaskManifest) -> ResolvedBenchmar
                 "prompt": "SECRET-PROMPT-BODY",
             },
         ),
-        binding=BenchmarkTaskBinding(
-            owner_package=PACKAGE_REF,
-            binding_id=task.binding_id,
-            implementation=Implementation(),
-        ),
     )
-
-
-class Implementation:
-    def build_invocation(
-        self,
-        request: BenchmarkTaskRequest,
-    ) -> BenchmarkTaskInvocation:
-        del request
-        raise AssertionError("SECRET-IMPLEMENTATION-CALLED")
 
 
 def finish_run_with_terminal(

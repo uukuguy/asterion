@@ -9,6 +9,7 @@ from asterion.benchmarks.evidence import (
     LocalPrivateBenchmarkEvidenceStore,
 )
 from asterion.benchmarks.execution import (
+    BenchmarkExecutionError,
     BenchmarkRunner,
     BenchmarkTaskExecutor,
 )
@@ -49,6 +50,7 @@ __all__ = (
     "AuthorizedProcessTaskIssuer",
     "BenchmarkEvidenceError",
     "BenchmarkEvidenceStore",
+    "BenchmarkExecutionError",
     "BenchmarkProcessError",
     "BenchmarkModelError",
     "BenchmarkExecutionAuthorization",

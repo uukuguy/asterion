@@ -11,7 +11,6 @@ from types import MappingProxyType
 from typing import Protocol, runtime_checkable
 
 from asterion.capabilities.catalog import CapabilityRef
-from asterion.capability_packages.model import BenchmarkTaskBinding
 from asterion.capability_packages.protocol import (
     BenchmarkSuiteManifest,
     BenchmarkSuiteRef,
@@ -136,17 +135,13 @@ class ResolvedBenchmarkTask:
     ordinal: int
     task: BenchmarkTaskManifest
     capability: ResolvedCapability
-    binding: BenchmarkTaskBinding
 
     def __post_init__(self) -> None:
         _validate_positive_int(self.ordinal, "resolved benchmark task is invalid")
         if (
             not isinstance(self.task, BenchmarkTaskManifest)
             or not isinstance(self.capability, ResolvedCapability)
-            or not isinstance(self.binding, BenchmarkTaskBinding)
             or self.task.capability != self.capability.ref
-            or self.task.binding_id != self.binding.binding_id
-            or not isinstance(self.binding.implementation, BenchmarkTaskImplementation)
         ):
             raise BenchmarkModelError("resolved benchmark task is invalid")
 
@@ -178,8 +173,6 @@ class ResolvedBenchmarkPlan:
         if tuple(task.ordinal for task in tasks) != expected_ordinals:
             raise BenchmarkModelError("resolved benchmark plan task order is invalid")
         if tuple(task.task for task in tasks) != self.suite.tasks:
-            raise BenchmarkModelError("resolved benchmark plan task set is invalid")
-        if any(task.binding.owner_package != self.suite.owner_package for task in tasks):
             raise BenchmarkModelError("resolved benchmark plan task set is invalid")
         task_ids = tuple(task.task.task_id for task in tasks)
         if len(set(task_ids)) != len(task_ids):

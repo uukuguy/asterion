@@ -19,7 +19,6 @@ from asterion.capability_packages import (
     BenchmarkSuiteManifest,
     BenchmarkSuiteProtocolError,
     BenchmarkSuiteRef,
-    BenchmarkTaskBinding,
     CapabilityPackageRef,
     InstalledCapabilityPackage,
     validate_benchmark_suite_manifest,
@@ -99,29 +98,10 @@ def resolve_benchmark_tasks(
     if declared_suite != suite:
         _fail("benchmark task resolution is invalid")
     capability_map = _capability_map(capabilities)
-    binding_map: dict[tuple[CapabilityPackageRef, str], BenchmarkTaskBinding] = {}
-    for package in index.packages:
-        for binding in package.benchmark_bindings:
-            if (
-                not isinstance(binding, BenchmarkTaskBinding)
-                or binding.owner_package != package.package_ref
-            ):
-                _fail("benchmark task resolution is invalid")
-            key = (binding.owner_package, binding.binding_id)
-            if key in binding_map:
-                _fail("benchmark task resolution is invalid")
-            binding_map[key] = binding
-    for binding in binding_map.values():
-        if binding.binding_id not in index.known_bindings.get(
-            binding.owner_package,
-            frozenset(),
-        ):
-            _fail("benchmark task resolution is invalid")
     resolved: list[ResolvedBenchmarkTask] = []
     for ordinal, task in enumerate(suite.tasks, start=1):
         capability = capability_map.get(task.capability)
-        binding = binding_map.get((suite.owner_package, task.binding_id))
-        if capability is None or binding is None:
+        if capability is None:
             _fail("benchmark task resolution is invalid")
         try:
             resolved.append(
@@ -129,7 +109,6 @@ def resolve_benchmark_tasks(
                     ordinal=ordinal,
                     task=task,
                     capability=capability,
-                    binding=binding,
                 )
             )
         except ValueError:
@@ -141,7 +120,6 @@ def resolve_benchmark_tasks(
 class _PackageSuiteIndex:
     packages: tuple[InstalledCapabilityPackage, ...]
     suites: Mapping[BenchmarkSuiteRef, BenchmarkSuiteManifest]
-    known_bindings: Mapping[CapabilityPackageRef, frozenset[str]]
 
 
 def _build_package_suite_index(
@@ -151,7 +129,6 @@ def _build_package_suite_index(
     package_values = _package_tuple(packages, message)
     seen_packages: set[CapabilityPackageRef] = set()
     suites: dict[BenchmarkSuiteRef, BenchmarkSuiteManifest] = {}
-    known_bindings: dict[CapabilityPackageRef, set[str]] = {}
     for package in package_values:
         if package.package_ref in seen_packages:
             _fail(message)
@@ -160,16 +137,9 @@ def _build_package_suite_index(
             if suite.owner_package != package.package_ref or suite.suite_ref in suites:
                 _fail(message)
             suites[suite.suite_ref] = suite
-            known_bindings.setdefault(package.package_ref, set()).update(
-                task.binding_id for task in suite.tasks
-            )
     return _PackageSuiteIndex(
         packages=package_values,
         suites=suites,
-        known_bindings={
-            package_ref: frozenset(binding_ids)
-            for package_ref, binding_ids in known_bindings.items()
-        },
     )
 
 
