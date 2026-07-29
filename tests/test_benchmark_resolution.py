@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 import atexit
@@ -262,6 +264,66 @@ class BenchmarkResolutionTests(unittest.TestCase):
                 rendered = repr(context.exception)
                 for sentinel in sentinels:
                     self.assertNotIn(sentinel, rendered)
+
+    def test_missing_fd_security_constants_import_but_public_api_fails_closed(
+        self,
+    ) -> None:
+        script = """
+import os
+import sys
+from pathlib import Path
+
+missing = sys.argv[1]
+if hasattr(os, missing):
+    delattr(os, missing)
+
+from asterion.benchmarks.resolution import (
+    BenchmarkResolutionError,
+    resolve_benchmark_suite,
+)
+from asterion.capability_packages import (
+    BenchmarkSuiteRef,
+    InstalledCapabilityPackage,
+)
+
+package = InstalledCapabilityPackage(
+    package_ref=__import__("asterion.capability_packages", fromlist=["CapabilityPackageRef"]).CapabilityPackageRef("example.package", "1.0.0"),
+    payload_sha256="a" * 64,
+    source_id="example.package.local-directory",
+    source_kind="local-directory",
+    catalog_roots=(),
+    benchmark_suite_paths=(Path("/private/SECRET-MISSING-FD-CONSTANT"),),
+    implementations=(),
+    benchmark_bindings=(),
+)
+
+try:
+    resolve_benchmark_suite(BenchmarkSuiteRef("example.suite", "1.0.0"), (package,))
+except BenchmarkResolutionError as error:
+    rendered = repr(error)
+    assert error.__cause__ is None
+    assert error.__suppress_context__
+    assert "SECRET-MISSING-FD-CONSTANT" not in rendered
+    assert missing not in rendered
+else:
+    raise AssertionError("resolver did not fail closed")
+"""
+        for missing in ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC"):
+            with self.subTest(missing):
+                result = subprocess.run(
+                    [sys.executable, "-c", script, missing],
+                    cwd=Path.cwd(),
+                    env={**os.environ, "PYTHONPATH": str(Path.cwd() / "src")},
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(
+                    result.returncode,
+                    0,
+                    result.stdout + result.stderr,
+                )
 
     def test_resolves_tasks_in_suite_order_independent_of_input_enumeration(
         self,

@@ -27,8 +27,41 @@ from asterion.capability_packages import (
 
 
 _SUITE_FILE_MAX_BYTES = 1024 * 1024
-_DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
-_FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
+_O_DIRECTORY = getattr(os, "O_DIRECTORY", None)
+_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", None)
+_O_CLOEXEC = getattr(os, "O_CLOEXEC", None)
+_SECURE_FD_AVAILABLE = (
+    isinstance(_O_DIRECTORY, int)
+    and isinstance(_O_NOFOLLOW, int)
+    and isinstance(_O_CLOEXEC, int)
+    and os.open in os.supports_dir_fd
+    and os.listdir in os.supports_fd
+)
+
+
+def _secure_fd_flags(
+    o_directory: object,
+    o_nofollow: object,
+    o_cloexec: object,
+) -> tuple[int | None, int | None]:
+    if (
+        not _SECURE_FD_AVAILABLE
+        or not isinstance(o_directory, int)
+        or not isinstance(o_nofollow, int)
+        or not isinstance(o_cloexec, int)
+    ):
+        return None, None
+    return (
+        os.O_RDONLY | o_directory | o_nofollow | o_cloexec,
+        os.O_RDONLY | o_nofollow | o_cloexec,
+    )
+
+
+_DIRECTORY_FLAGS, _FILE_FLAGS = _secure_fd_flags(
+    _O_DIRECTORY,
+    _O_NOFOLLOW,
+    _O_CLOEXEC,
+)
 
 
 class BenchmarkResolutionError(ValueError):
@@ -184,6 +217,8 @@ def _package_suites(
 
 
 def _read_suite_root(root: Path, message: str) -> tuple[BenchmarkSuiteManifest, ...]:
+    if not _SECURE_FD_AVAILABLE:
+        _fail(message)
     suites: list[BenchmarkSuiteManifest] = []
     root_fd = _open_directory_fd(root, message)
     try:
@@ -198,6 +233,8 @@ def _read_suite_root(root: Path, message: str) -> tuple[BenchmarkSuiteManifest, 
                 _fail(message)
             fd: int | None = None
             try:
+                if _FILE_FLAGS is None:
+                    _fail(message)
                 fd = os.open(name, _FILE_FLAGS, dir_fd=root_fd)
                 suites.append(_read_suite_file(fd, message))
             except BenchmarkResolutionError:
@@ -216,6 +253,8 @@ def _read_suite_root(root: Path, message: str) -> tuple[BenchmarkSuiteManifest, 
 
 
 def _open_directory_fd(root: Path, message: str) -> int:
+    if not _SECURE_FD_AVAILABLE or _DIRECTORY_FLAGS is None:
+        _fail(message)
     try:
         raw_path = os.fspath(root)
     except Exception:
