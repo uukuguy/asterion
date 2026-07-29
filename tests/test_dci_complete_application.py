@@ -22,9 +22,11 @@ from asterion.capabilities.dci_research.complete import (
     DciCompleteExportImplementation,
     DciCompleteResearchImplementation,
     INPUT_PROTOCOL,
+    _aggregate_results,
     complete_application_identity,
 )
-from asterion.capabilities.execution import InProcessArtifactPayload, project_public_value
+from asterion.capabilities.dci_research._artifacts import DciInProcessArtifactPayload
+from asterion.capabilities.execution import project_public_value
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
 from asterion.dci.services import (
     create_answer_judge_service_factory,
@@ -653,6 +655,91 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
         self.assertEqual(len(identity), 64)
         self.assertEqual(identity, complete_application_identity())
 
+    def test_package_owned_aggregate_matches_previous_dci_analysis_schema(self) -> None:
+        from asterion.dci.analysis import aggregate_results as previous_aggregate
+
+        results = (
+            {
+                "run_status": "completed",
+                "is_correct": True,
+                "ndcg_at_10": 0.8,
+                "agent_started_at": "2026-01-01T00:00:00+00:00",
+                "agent_finished_at": "2026-01-01T00:00:10+00:00",
+                "wall_time_seconds": 10.0,
+                "launcher_wall_time_seconds": 11.0,
+                "tool_time_seconds": 2.5,
+                "non_tool_time_seconds": 7.5,
+                "event_count": 9,
+                "turn_count": 3,
+                "tool_metrics": {"call_count": 2, "error_count": 1},
+                "agent_usage": {
+                    "input_tokens": 100,
+                    "output_tokens": 50,
+                    "cache_read_tokens": 20,
+                    "cache_write_tokens": 10,
+                    "total_tokens": 180,
+                    "cost_total": 0.12,
+                },
+                "judge_usage": {
+                    "input_tokens": 30,
+                    "output_tokens": 10,
+                    "total_tokens": 40,
+                },
+                "judge_cost_estimate_usd": {"total_cost": 0.02},
+                "resolution": {
+                    "metrics": {
+                        "coverage": {"any": 1.0, "mean": 0.75, "all": 0.5},
+                        "localization": {"value": 0.5, "matched_gold_count": 2},
+                        "retained_coverage": {"value": 0.25},
+                    }
+                },
+            },
+            {
+                "run_status": "failed",
+                "is_correct": False,
+                "ndcg_at_10": 0.4,
+                "agent_started_at": "2026-01-01T00:00:05+00:00",
+                "agent_finished_at": "2026-01-01T00:00:15+00:00",
+                "wall_time_seconds": 20,
+                "launcher_wall_time_seconds": 21,
+                "tool_time_seconds": 4,
+                "non_tool_time_seconds": 16,
+                "event_count": 4,
+                "turn_count": 1,
+                "tool_metrics": {"call_count": 1, "error_count": 0},
+                "agent_usage": {
+                    "input_tokens": 20,
+                    "output_tokens": 5,
+                    "cache_read_tokens": 0,
+                    "cache_write_tokens": 0,
+                    "total_tokens": 25,
+                    "cost_total": 0.03,
+                },
+                "judge_usage": {
+                    "input_tokens": 15,
+                    "output_tokens": 5,
+                    "total_tokens": 20,
+                },
+                "judge_cost_estimate_usd": {"total_cost": 0.01},
+                "resolution": {
+                    "metrics": {
+                        "coverage": {"any": 0.0, "mean": 0.25, "all": 0.0},
+                        "localization": {"value": 1.0, "matched_gold_count": 1},
+                        "retained_coverage": {"value": 0.75},
+                    }
+                },
+            },
+        )
+
+        package_aggregate = _aggregate_results(results)
+        expected = previous_aggregate(results)
+
+        self.assertEqual(package_aggregate, expected)
+        self.assertEqual(package_aggregate["ndcg_at_10"], 0.6000000000000001)
+        self.assertEqual(package_aggregate["resolution"]["matched_gold_count"], 3)
+        self.assertEqual(package_aggregate["totals"]["tool_call_count"], 3.0)
+        self.assertEqual(package_aggregate["averages"]["overall_cost_total"], 0.09)
+
     def test_generic_cli_exposes_only_complete_public_artifact_projection(
         self,
     ) -> None:
@@ -919,7 +1006,7 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
                     stopped.set()
 
         with tempfile.TemporaryDirectory() as directory:
-            stage_data = InProcessArtifactPayload(
+            stage_data = DciInProcessArtifactPayload(
                 private_value={
                     "question": "question",
                     "gold_answer": "gold",
@@ -967,7 +1054,7 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
     async def test_evaluation_binds_only_the_opaque_judge_identity(self) -> None:
         async def evaluate_with(identity: dict[str, object], directory: Path):
             directory.mkdir()
-            stage_data = InProcessArtifactPayload(
+            stage_data = DciInProcessArtifactPayload(
                 private_value={
                     "question": "SENTINEL_QUESTION",
                     "gold_answer": "SENTINEL_GOLD",

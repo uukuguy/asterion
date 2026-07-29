@@ -30,6 +30,18 @@ class MutableSignal:
         self.cancelled = False
 
 
+class HostileStructuralRequest:
+    @property
+    def target(self):
+        raise RuntimeError("SECRET-TARGET")
+
+
+class InterruptingStructuralRequest:
+    @property
+    def target(self):
+        raise KeyboardInterrupt("SECRET-INTERRUPT")
+
+
 def response(**overrides):
     value = {
         "protocol": "dci.executor/v1",
@@ -154,6 +166,35 @@ class ControlledExecutorJsonlTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ControlledExecutorError) as caught:
                 await client.execute(ControlledExecutionRequest("src/example.py"))
             self.assertNotIn("SECRET", str(caught.exception))
+
+    async def test_structural_request_target_errors_are_context_free_and_redacted(
+        self,
+    ) -> None:
+        reader = asyncio.StreamReader()
+        writer = BufferWriter()
+        client = ControlledExecutorJsonlClient(
+            reader=reader,
+            writer=writer,
+            config=TrustedValidationConfig(
+                program_id="check",
+                argument_prefix=(),
+                cwd="workspace",
+                deadline_ms=1000,
+                max_output_bytes=1024,
+            ),
+        )
+
+        with self.assertRaises(ControlledExecutorError) as caught:
+            await client.execute(HostileStructuralRequest())
+
+        self.assertEqual(str(caught.exception), "controlled execution request is invalid")
+        self.assertEqual(caught.exception.__cause__, None)
+        self.assertEqual(caught.exception.__context__, None)
+        self.assertNotIn("SECRET", repr(caught.exception))
+        self.assertEqual(writer.values, [])
+
+        with self.assertRaises(KeyboardInterrupt):
+            await client.execute(InterruptingStructuralRequest())
 
 
 if __name__ == "__main__":

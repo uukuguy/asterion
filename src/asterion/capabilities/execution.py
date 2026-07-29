@@ -263,6 +263,9 @@ def project_public_value(value: object) -> object:
 
     if isinstance(value, InProcessArtifactPayload):
         return project_public_value(value.public_projection)
+    package_projection = _package_owned_public_projection(value)
+    if package_projection is not None:
+        return project_public_value(package_projection)
     if isinstance(value, Mapping):
         projected: dict[str, object] = {}
         for key, item in value.items():
@@ -279,3 +282,19 @@ def project_public_value(value: object) -> object:
     if type(value) is float and math.isfinite(value):
         return value
     raise CapabilityExecutionError("artifact public projection is invalid")
+
+
+def _package_owned_public_projection(value: object) -> Mapping[str, object] | None:
+    module_name = type(value).__module__
+    if not module_name.startswith("asterion.capabilities."):
+        return None
+    sentinel = object()
+    try:
+        projection = getattr(value, "public_projection", sentinel)
+    except Exception:
+        raise CapabilityExecutionError("artifact public projection is invalid") from None
+    if projection is sentinel:
+        return None
+    if not isinstance(projection, Mapping):
+        raise CapabilityExecutionError("artifact public projection is invalid")
+    return projection

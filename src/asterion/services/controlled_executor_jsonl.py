@@ -63,13 +63,20 @@ class ControlledExecutorJsonlClient:
 
     async def execute(self, request: ControlledExecutionRequest, *, signal=None) -> ControlledExecutionResult:
         if not isinstance(request, ControlledExecutionRequest):
-            target = getattr(request, "target", None)
+            failed = False
+            converted: ControlledExecutionRequest | None = None
             try:
-                request = ControlledExecutionRequest(target)
-            except Exception:
+                target = getattr(request, "target")
+                converted = ControlledExecutionRequest(target)
+            except BaseException as error:
+                if not isinstance(error, Exception):
+                    raise
+                failed = True
+            if failed or converted is None:
                 raise ControlledExecutorError(
                     "controlled execution request is invalid"
-                ) from None
+                )
+            request = converted
         if signal is not None and signal.cancelled:
             return _cancelled_result()
         async with self._lock:

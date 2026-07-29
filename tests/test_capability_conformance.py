@@ -19,6 +19,7 @@ from asterion.capability_sdk import (
 )
 from asterion.capability_packages.payload import open_portable_payload
 from asterion.capabilities.builtin import create_controlled_code_package
+from asterion.capabilities.execution import CapabilityImplementationBinding
 
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "extensions" / "minimal" / "payload"
@@ -50,6 +51,39 @@ class InterruptingInstalled:
         if name == "package_ref":
             raise KeyboardInterrupt("SECRET-INTERRUPT")
         return super().__getattribute__(name)
+
+
+class MissingExecuteImplementation:
+    pass
+
+
+class NonCallableExecuteImplementation:
+    execute = "not callable"
+
+
+class HostileExecuteImplementation:
+    def __getattribute__(self, name: str) -> object:
+        if name == "execute":
+            raise RuntimeError("SECRET-IMPLEMENTATION-BODY")
+        return super().__getattribute__(name)
+
+
+class InterruptingExecuteImplementation:
+    def __getattribute__(self, name: str) -> object:
+        if name == "execute":
+            raise KeyboardInterrupt("SECRET-INTERRUPT")
+        return super().__getattribute__(name)
+
+
+class DuckInstalled:
+    package_ref = CapabilityPackageRef("example.package", "1.0.0")
+    payload_sha256 = "a" * 64
+    source_id = "example.package.local-directory"
+    source_kind = "local-directory"
+    catalog_roots: list[Path] = []
+    benchmark_suite_paths: list[Path] = []
+    implementations: list[object] = []
+    benchmark_bindings: list[object] = []
 
 
 def copy_payload(target: Path) -> Path:
@@ -123,6 +157,155 @@ class CapabilityConformanceTests(unittest.TestCase):
             cast(Any, result).passed = False
         with self.assertRaises(TypeError):
             operator.setitem(cast(Any, result.errors), 0, "changed")
+
+    def test_public_pair_conversion_rejects_non_callable_or_hostile_execute(
+        self,
+    ) -> None:
+        cases = (
+            MissingExecuteImplementation(),
+            NonCallableExecuteImplementation(),
+            HostileExecuteImplementation(),
+        )
+        for implementation in cases:
+            with self.subTest(implementation=type(implementation).__name__):
+                with self.assertRaises(ValueError) as raised:
+                    InstalledCapabilityPackage(
+                        package_ref=CapabilityPackageRef("example.package", "1.0.0"),
+                        payload_sha256="a" * 64,
+                        source_id="example.package.local-directory",
+                        source_kind="local-directory",
+                        catalog_roots=(),
+                        benchmark_suite_paths=(),
+                        implementations=cast(Any, (
+                            (
+                                CapabilityRef("example.research", "1.0.0"),
+                                implementation,
+                            ),
+                        )),
+                        benchmark_bindings=(),
+                    )
+
+                self.assertEqual(raised.exception.__cause__, None)
+                self.assertEqual(raised.exception.__context__, None)
+                self.assertNotIn("SECRET", str(raised.exception))
+
+        with self.assertRaises(KeyboardInterrupt):
+            InstalledCapabilityPackage(
+                package_ref=CapabilityPackageRef("example.package", "1.0.0"),
+                payload_sha256="a" * 64,
+                source_id="example.package.local-directory",
+                source_kind="local-directory",
+                catalog_roots=(),
+                benchmark_suite_paths=(),
+                implementations=cast(Any, (
+                    (
+                        CapabilityRef("example.research", "1.0.0"),
+                        InterruptingExecuteImplementation(),
+                    ),
+                )),
+                benchmark_bindings=(),
+            )
+
+    def test_conformance_requires_exact_frozen_installed_package_invariants(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            payload_root = copy_payload(Path(temp_dir) / "payload")
+            valid = installed_package(
+                payload_root,
+                implementations=(
+                    (CapabilityRef("example.research", "1.0.0"), ExplodingImplementation()),
+                ),
+            )
+            mutable_paths = installed_package(
+                payload_root,
+                implementations=(
+                    (CapabilityRef("example.research", "1.0.0"), ExplodingImplementation()),
+                ),
+            )
+            object.__setattr__(
+                mutable_paths,
+                "catalog_roots",
+                [payload_root / "capabilities"],
+            )
+            invalid_source = installed_package(
+                payload_root,
+                implementations=(
+                    (CapabilityRef("example.research", "1.0.0"), ExplodingImplementation()),
+                ),
+            )
+            object.__setattr__(invalid_source, "source_id", "Bad Source")
+
+            results = (
+                run_capability_conformance(DuckInstalled()),
+                run_capability_conformance(mutable_paths),
+                run_capability_conformance(invalid_source),
+                run_capability_conformance(valid),
+            )
+
+        self.assertEqual(results[0].errors, ("installed package value is invalid",))
+        self.assertEqual(results[1].errors, ("installed package value is invalid",))
+        self.assertEqual(results[2].errors, ("installed package value is invalid",))
+        self.assertTrue(results[3].passed)
+
+    def test_conformance_rejects_non_callable_or_hostile_execute_without_invoking(
+        self,
+    ) -> None:
+        cases = (
+            MissingExecuteImplementation(),
+            NonCallableExecuteImplementation(),
+            HostileExecuteImplementation(),
+        )
+        for implementation in cases:
+            with self.subTest(implementation=type(implementation).__name__):
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    payload_root = copy_payload(Path(temp_dir) / "payload")
+                    package = installed_package(
+                        payload_root,
+                        implementations=(
+                            (
+                                CapabilityRef("example.research", "1.0.0"),
+                                ExplodingImplementation(),
+                            ),
+                        ),
+                    )
+                    object.__setattr__(
+                        package,
+                        "implementations",
+                        (
+                            CapabilityImplementationBinding(
+                                CapabilityRef("example.research", "1.0.0"),
+                                cast(Any, implementation),
+                            ),
+                        ),
+                    )
+
+                    result = run_capability_conformance(package)
+
+                self.assertEqual(result.errors, ("implementation binding is invalid",))
+                self.assertNotIn("SECRET", repr(result))
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            payload_root = copy_payload(Path(temp_dir) / "payload")
+            package = installed_package(
+                payload_root,
+                implementations=(
+                    (CapabilityRef("example.research", "1.0.0"), ExplodingImplementation()),
+                ),
+            )
+            object.__setattr__(
+                package,
+                "implementations",
+                (
+                    CapabilityImplementationBinding(
+                        CapabilityRef("example.research", "1.0.0"),
+                        cast(Any, InterruptingExecuteImplementation()),
+                    ),
+                ),
+            )
+
+            with self.assertRaises(KeyboardInterrupt):
+                run_capability_conformance(package)
 
     def test_reports_deterministic_safe_aggregate_for_identity_and_digest_failures(
         self,
@@ -265,8 +448,10 @@ class CapabilityConformanceTests(unittest.TestCase):
         self.assertFalse(result.passed)
         self.assertEqual(result.errors, ("installed package value is invalid",))
         self.assertNotIn("SECRET-PROVIDER-BODY", repr(result))
-        with self.assertRaises(KeyboardInterrupt):
-            run_capability_conformance(InterruptingInstalled())
+        self.assertEqual(
+            run_capability_conformance(InterruptingInstalled()).errors,
+            ("installed package value is invalid",),
+        )
 
 
 if __name__ == "__main__":

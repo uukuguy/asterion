@@ -20,6 +20,7 @@ EVENT_TYPES = {
 }
 TERMINAL_EVENT_TYPES = {"run.completed", "run.failed"}
 IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 class RuntimeEventError(ValueError):
@@ -136,11 +137,21 @@ def _validate_payload(event_type: str, payload: Mapping[str, object]) -> None:
         if not isinstance(artifact, Mapping):
             raise RuntimeEventError("runtime event is invalid")
         required = {"artifact_id", "kind", "media_type"}
-        if not required.issubset(artifact.keys()):
+        optional = {"uri", "sha256"}
+        if not required.issubset(artifact.keys()) or set(artifact) - required - optional:
             raise RuntimeEventError("runtime event is invalid")
         for field in required:
             if not isinstance(artifact[field], str) or not artifact[field]:
                 raise RuntimeEventError("runtime event is invalid")
+        if "uri" in artifact and (
+            not isinstance(artifact["uri"], str) or not artifact["uri"]
+        ):
+            raise RuntimeEventError("runtime event is invalid")
+        if "sha256" in artifact and (
+            not isinstance(artifact["sha256"], str)
+            or SHA256.fullmatch(artifact["sha256"]) is None
+        ):
+            raise RuntimeEventError("runtime event is invalid")
     elif event_type == "run.completed":
         _keys(payload, {"status"})
         if payload["status"] not in {"completed", "cancelled"}:

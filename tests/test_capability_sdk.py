@@ -24,24 +24,91 @@ EXPECTED_PUBLIC = (
     "run_capability_conformance",
 )
 
-BUILTIN_CAPABILITY_FILES = (
-    CAPABILITY_ROOT / "controlled_code" / "__init__.py",
-    CAPABILITY_ROOT / "controlled_code" / "implementation.py",
-    CAPABILITY_ROOT / "dci_research" / "__init__.py",
-    CAPABILITY_ROOT / "dci_research" / "complete.py",
-    CAPABILITY_ROOT / "dci_research" / "implementation.py",
+BUILTIN_CAPABILITY_DIRS = (
+    CAPABILITY_ROOT / "controlled_code",
+    CAPABILITY_ROOT / "dci_research",
 )
 
 
 def imported_modules(path: Path) -> tuple[str, ...]:
-    tree = ast.parse(path.read_text(), filename=str(path))
+    return imports_from_source(path.read_text(), module_name(path), filename=str(path))
+
+
+def imports_from_source(source: str, module: str, *, filename: str = "<test>") -> tuple[str, ...]:
+    tree = ast.parse(source, filename=filename)
     modules: list[str] = []
+    importlib_aliases: set[str] = set()
+    import_module_aliases: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            modules.extend(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            modules.append(node.module)
+            for alias in node.names:
+                modules.append(alias.name)
+                if alias.name == "importlib":
+                    importlib_aliases.add(alias.asname or alias.name)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                resolved = resolve_import_from(module, node.level, node.module)
+                if resolved:
+                    modules.append(resolved)
+            elif node.module:
+                modules.append(node.module)
+                if node.module == "importlib":
+                    for alias in node.names:
+                        if alias.name == "import_module":
+                            import_module_aliases.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Call):
+            imported = dynamic_import_target(
+                node,
+                importlib_aliases=importlib_aliases,
+                import_module_aliases=import_module_aliases,
+            )
+            if imported is not None:
+                modules.append(imported)
     return tuple(sorted(modules))
+
+
+def module_name(path: Path) -> str:
+    relative = path.relative_to(PROJECT / "src").with_suffix("")
+    parts = relative.parts
+    if parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(parts)
+
+
+def resolve_import_from(module: str, level: int, imported: str | None) -> str | None:
+    parts = module.split(".")
+    if not parts:
+        return imported
+    package_parts = parts if parts[-1] == "__init__" else parts[:-1]
+    prefix = package_parts[: max(0, len(package_parts) - level + 1)]
+    if imported:
+        prefix.append(imported)
+    return ".".join(prefix) if prefix else imported
+
+
+def dynamic_import_target(
+    node: ast.Call,
+    *,
+    importlib_aliases: set[str],
+    import_module_aliases: set[str],
+) -> str | None:
+    if not node.args or not isinstance(node.args[0], ast.Constant):
+        return None
+    if not isinstance(node.args[0].value, str):
+        return None
+    function = node.func
+    if isinstance(function, ast.Name) and function.id == "__import__":
+        return node.args[0].value
+    if isinstance(function, ast.Name) and function.id in import_module_aliases:
+        return node.args[0].value
+    if (
+        isinstance(function, ast.Attribute)
+        and function.attr == "import_module"
+        and isinstance(function.value, ast.Name)
+        and function.value.id in importlib_aliases
+    ):
+        return node.args[0].value
+    return None
 
 
 def top_level(module: str) -> str:
@@ -57,6 +124,9 @@ class CapabilitySdkSurfaceTests(unittest.TestCase):
             {name for name in dir(sdk) if not name.startswith("_")},
             set(EXPECTED_PUBLIC),
         )
+        self.assertFalse(hasattr(sdk, "_InProcessArtifactPayload"))
+        self.assertFalse(hasattr(sdk, "_project_public_value"))
+        self.assertFalse(hasattr(sdk, "_PRIVATE_HELPERS"))
 
     def test_provider_protocol_exposes_only_selected_package_loading(self) -> None:
         from asterion.capability_sdk import CapabilityPackageProvider
@@ -132,7 +202,13 @@ class BuiltinCapabilityImportBoundaryTests(unittest.TestCase):
         self,
     ) -> None:
         stdlib = sys.stdlib_module_names
-        for path in BUILTIN_CAPABILITY_FILES:
+        files = tuple(
+            path
+            for root in BUILTIN_CAPABILITY_DIRS
+            for path in sorted(root.rglob("*.py"))
+        )
+        self.assertGreater(len(files), 5)
+        for path in files:
             package_prefix = (
                 "asterion.capabilities."
                 + path.relative_to(CAPABILITY_ROOT).parts[0]
@@ -149,6 +225,33 @@ class BuiltinCapabilityImportBoundaryTests(unittest.TestCase):
                     unexpected.append(module)
 
                 self.assertEqual(unexpected, [])
+
+    def test_import_gate_detects_relative_and_dynamic_framework_bypasses(self) -> None:
+        cases = {
+            "relative": "from ..execution import CapabilityImplementationBinding\n",
+            "builtin": "__import__('asterion.runner.composed')\n",
+            "importlib": (
+                "import importlib as il\n"
+                "il.import_module('asterion.capability_packages.payload')\n"
+            ),
+            "alias": (
+                "from importlib import import_module as im\n"
+                "im('asterion.capabilities.execution')\n"
+            ),
+        }
+
+        detected = {
+            name: imports_from_source(
+                source,
+                "asterion.capabilities.dci_research.local_provider",
+            )
+            for name, source in cases.items()
+        }
+
+        self.assertIn("asterion.capabilities.execution", detected["relative"])
+        self.assertIn("asterion.runner.composed", detected["builtin"])
+        self.assertIn("asterion.capability_packages.payload", detected["importlib"])
+        self.assertIn("asterion.capabilities.execution", detected["alias"])
 
 
 if __name__ == "__main__":

@@ -4,22 +4,22 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
-from asterion.capabilities.catalog import CapabilityRef
+from asterion.capability_sdk import (
+    CapabilityPackageRef,
+    CapabilityRef,
+    InstalledCapabilityPackage,
+)
 from asterion.capabilities.dci_research import DciLocalResearchImplementation
 from asterion.capabilities.dci_research.complete import (
     INPUT_PROTOCOL,
     DciCompleteResearchImplementation,
     complete_dci_bindings,
 )
-from asterion.capabilities.execution import (
-    CapabilityImplementation,
-    CapabilityImplementationBinding,
+from asterion.capabilities.dci_research._payload import (
+    payload_sha256,
 )
-from asterion.capability_packages.model import InstalledCapabilityPackage
-from asterion.capability_packages.payload import open_portable_payload
-from asterion.capability_packages.protocol import CapabilityPackageRef
 
 
 PACKAGE_REF = CapabilityPackageRef("dci", "1.0.0")
@@ -45,29 +45,22 @@ class TransitionalDciResearchImplementation:
 def create_package() -> InstalledCapabilityPackage:
     root = Path(__file__).resolve().parent
     payload_root = root / "payload"
-    payload = open_portable_payload(payload_root)
-    bindings: tuple[tuple[CapabilityRef, CapabilityImplementation], ...] = (
-        *cast(
-            tuple[tuple[CapabilityRef, CapabilityImplementation], ...],
-            complete_dci_bindings(),
-        ),
+    bindings: tuple[tuple[CapabilityRef, object], ...] = (
+        *complete_dci_bindings(),
         (
             CapabilityRef("dci.research", "1.0.0"),
-            cast(CapabilityImplementation, TransitionalDciResearchImplementation()),
+            TransitionalDciResearchImplementation(),
         ),
     )
-    deduped: dict[CapabilityRef, CapabilityImplementation] = dict(bindings)
+    deduped: dict[CapabilityRef, object] = dict(bindings)
     return InstalledCapabilityPackage(
         package_ref=PACKAGE_REF,
-        payload_sha256=payload.payload_sha256,
+        payload_sha256=payload_sha256(payload_root),
         source_id=SOURCE_ID,
         source_kind=SOURCE_KIND,
         catalog_roots=(payload_root / "capabilities",),
         benchmark_suite_paths=(payload_root / "benchmark-suites",),
-        implementations=tuple(
-            CapabilityImplementationBinding(ref, implementation)
-            for ref, implementation in sorted(deduped.items())
-        ),
+        implementations=cast(Any, tuple(sorted(deduped.items()))),
         benchmark_bindings=(),
     )
 

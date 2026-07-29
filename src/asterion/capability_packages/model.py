@@ -200,6 +200,11 @@ def _implementation_binding_tuple(
     converted: list[CapabilityImplementationBinding] = []
     for binding in values:
         if isinstance(binding, CapabilityImplementationBinding):
+            if not isinstance(binding.capability_ref, CapabilityRef):
+                raise CapabilityPackageModelError(
+                    "capability implementation bindings are invalid"
+                )
+            _validate_implementation(binding.implementation)
             converted.append(binding)
             continue
         if (
@@ -207,6 +212,7 @@ def _implementation_binding_tuple(
             and len(binding) == 2
             and isinstance(binding[0], CapabilityRef)
         ):
+            _validate_implementation(binding[1])
             converted.append(
                 CapabilityImplementationBinding(
                     binding[0],
@@ -218,6 +224,20 @@ def _implementation_binding_tuple(
             "capability implementation bindings are invalid"
         )
     return tuple(converted)
+
+
+def _validate_implementation(implementation: object) -> None:
+    failed = False
+    try:
+        execute = getattr(implementation, "execute")
+        if not callable(execute):
+            failed = True
+    except Exception:
+        failed = True
+    if failed:
+        raise CapabilityPackageModelError(
+            "capability implementation bindings are invalid"
+        )
 
 
 def _benchmark_binding_tuple(

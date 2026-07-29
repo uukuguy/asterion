@@ -12,6 +12,10 @@ from asterion.capabilities.execution import CapabilityExecutionError, Capability
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 from asterion.runtime.working_directory import ProcessWorkingDirectory
 from asterion.capabilities.dci_research import DciLocalResearchImplementation
+from asterion.capabilities.dci_research._runtime import (
+    RuntimeEventError,
+    event_mappings,
+)
 
 
 PROJECT = Path(__file__).resolve().parents[1]
@@ -196,6 +200,57 @@ class DciResearchCapabilityBoundaryTests(unittest.TestCase):
             for path in root.rglob("*.py")
         )
         self.assertNotIn("from asterion.dci.benchmark import", source)
+
+    def test_package_runtime_artifact_event_accepts_only_canonical_keys_and_sha256(
+        self,
+    ) -> None:
+        base_artifact = {
+            "artifact_id": "answer",
+            "kind": "answer",
+            "media_type": "text/plain",
+            "uri": "final.txt",
+            "sha256": "a" * 64,
+        }
+        events = (
+            {
+                "protocol": "asterion.agent-runtime/v1",
+                "run_id": "run",
+                "sequence": 1,
+                "type": "run.started",
+                "payload": {"capabilities": []},
+            },
+            {
+                "protocol": "asterion.agent-runtime/v1",
+                "run_id": "run",
+                "sequence": 2,
+                "type": "artifact.created",
+                "payload": {"artifact": base_artifact},
+            },
+            {
+                "protocol": "asterion.agent-runtime/v1",
+                "run_id": "run",
+                "sequence": 3,
+                "type": "run.completed",
+                "payload": {"status": "completed"},
+            },
+        )
+
+        self.assertEqual(event_mappings(events), events)
+
+        for artifact in (
+            {**base_artifact, "private_path": "/secret"},
+            {**base_artifact, "sha256": "A" * 64},
+            {**base_artifact, "sha256": "a" * 63},
+            {**base_artifact, "uri": ""},
+        ):
+            with self.subTest(artifact=artifact):
+                mutated = (
+                    events[0],
+                    {**events[1], "payload": {"artifact": artifact}},
+                    events[2],
+                )
+                with self.assertRaises(RuntimeEventError):
+                    event_mappings(mutated)
 
 
 if __name__ == "__main__":

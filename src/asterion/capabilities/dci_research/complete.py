@@ -11,12 +11,17 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 from asterion.capability_sdk import (
-    CapabilityRef,
     CapabilityExecutionError,
     CapabilityExecutionResult,
     CapabilityInvocation,
-    _InProcessArtifactPayload,
-    _project_public_value,
+    CapabilityRef,
+)
+from asterion.capabilities.dci_research._analysis import (
+    aggregate_results as _aggregate_results,
+)
+from asterion.capabilities.dci_research._artifacts import (
+    DciInProcessArtifactPayload,
+    project_dci_public_value,
 )
 from asterion.capabilities.dci_research._provenance import (
     dci_complete_implementation_identity,
@@ -172,7 +177,7 @@ class DciCompleteResearchImplementation:
             raise CapabilityExecutionError("complete research evidence is unavailable") from None
         if not predicted_answer:
             raise CapabilityExecutionError("complete research evidence is unavailable")
-        stage_data = _InProcessArtifactPayload(
+        stage_data = DciInProcessArtifactPayload(
             private_value={
                 "question": question,
                 "gold_answer": gold,
@@ -222,7 +227,7 @@ class DciCompleteEvaluationImplementation:
         private = _research_private_value(research)
         judge = _require_answer_judge(invocation)
         try:
-            identity = _project_public_value(cast(Any, judge).public_identity)
+            identity = project_dci_public_value(cast(Any, judge).public_identity)
             identity_sha256 = hashlib.sha256(
                 json.dumps(
                     identity,
@@ -263,7 +268,7 @@ def _research_private_value(
 ) -> Mapping[str, object]:
     try:
         stage_data = research["stage_data"]
-        if not isinstance(stage_data, _InProcessArtifactPayload):
+        if not isinstance(stage_data, DciInProcessArtifactPayload):
             raise TypeError
         private = stage_data.private_value
         if set(private) != {
@@ -350,7 +355,7 @@ class DciCompleteExportImplementation:
         )
 
 
-def complete_dci_bindings() -> tuple[tuple[object, object], ...]:
+def complete_dci_bindings() -> tuple[tuple[CapabilityRef, object], ...]:
     return (
         (CapabilityRef("dci.research", "1.0.0"), DciCompleteResearchImplementation()),
         (CapabilityRef("dci.evaluation", "1.0.0"), DciCompleteEvaluationImplementation()),
@@ -362,24 +367,3 @@ def complete_dci_bindings() -> tuple[tuple[object, object], ...]:
 
 def _text_sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
-def _aggregate_results(results: tuple[Mapping[str, object], ...]) -> dict[str, object]:
-    total = len(results)
-    judged = sum(result.get("is_correct") is not None for result in results)
-    correct = sum(result.get("is_correct") is True for result in results)
-    failed = sum(result.get("run_status") != "completed" for result in results)
-    return {
-        "schema": "asterion.dci.batch-summary/v1",
-        "counts": {
-            "total": total,
-            "judged": judged,
-            "correct": correct,
-            "incorrect_or_unjudged": total - correct,
-            "failed_runs": failed,
-        },
-        "accuracy": {
-            "over_total": correct / total if total else 0.0,
-            "over_judged": correct / judged if judged else 0.0,
-        },
-    }

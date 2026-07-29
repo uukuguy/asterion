@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -16,8 +16,11 @@ from asterion.capabilities.execution import (
 )
 from asterion.capability_packages.model import (
     BenchmarkTaskBinding,
+    InstalledCapabilityPackage,
     PortableCapabilityPayload,
+    SOURCE_KINDS,
 )
+from asterion.capabilities.protocol import CAPABILITY_ID
 from asterion.capability_packages.payload import open_portable_payload
 from asterion.capability_packages.protocol import (
     BenchmarkSuiteManifest,
@@ -53,34 +56,22 @@ def run_capability_conformance(installed: object) -> _CapabilityConformanceResul
 
 def _conformance_errors(installed: object) -> tuple[str, ...]:
     errors: list[str] = []
-    try:
-        package_ref = _field(installed, "package_ref")
-        payload_sha256 = _field(installed, "payload_sha256")
-        source_kind = _field(installed, "source_kind")
-        catalog_roots = tuple(cast(Iterable[object], _field(installed, "catalog_roots")))
-        suite_paths = tuple(
-            cast(Iterable[object], _field(installed, "benchmark_suite_paths"))
-        )
-        implementations = tuple(
-            cast(Iterable[object], _field(installed, "implementations"))
-        )
-        benchmark_bindings = tuple(
-            cast(Iterable[object], _field(installed, "benchmark_bindings"))
-        )
-    except BaseException as error:
-        if not isinstance(error, Exception):
-            raise
+    if type(installed) is not InstalledCapabilityPackage:
         return ("installed package value is invalid",)
+    if not _installed_invariants_hold(installed):
+        return ("installed package value is invalid",)
+
+    package_ref = installed.package_ref
+    payload_sha256 = installed.payload_sha256
+    source_kind = installed.source_kind
+    catalog_roots = installed.catalog_roots
+    suite_paths = installed.benchmark_suite_paths
+    implementations = installed.implementations
+    benchmark_bindings = installed.benchmark_bindings
 
     if not isinstance(package_ref, CapabilityPackageRef):
         return ("installed package value is invalid",)
-    if source_kind not in {
-        "archive",
-        "builtin",
-        "local-directory",
-        "python-distribution",
-        "registry",
-    }:
+    if source_kind not in SOURCE_KINDS:
         return ("installed package value is invalid",)
 
     payload_root = _payload_root(catalog_roots, suite_paths)
@@ -108,8 +99,22 @@ def _conformance_errors(installed: object) -> tuple[str, ...]:
     return tuple(errors)
 
 
-def _field(value: object, name: str) -> object:
-    return getattr(value, name)
+def _installed_invariants_hold(installed: InstalledCapabilityPackage) -> bool:
+    return (
+        isinstance(installed.package_ref, CapabilityPackageRef)
+        and isinstance(installed.payload_sha256, str)
+        and isinstance(installed.source_id, str)
+        and CAPABILITY_ID.fullmatch(installed.source_id) is not None
+        and isinstance(installed.source_kind, str)
+        and installed.source_kind in SOURCE_KINDS
+        and type(installed.catalog_roots) is tuple
+        and all(isinstance(root, Path) for root in installed.catalog_roots)
+        and type(installed.benchmark_suite_paths) is tuple
+        and all(isinstance(root, Path) for root in installed.benchmark_suite_paths)
+        and type(installed.implementations) is tuple
+        and type(installed.benchmark_bindings) is tuple
+        and all(type(binding) is BenchmarkTaskBinding for binding in installed.benchmark_bindings)
+    )
 
 
 def _payload_root(catalog_roots: tuple[object, ...], suite_paths: tuple[object, ...]) -> Path | None:
@@ -162,7 +167,9 @@ def _implementation_errors(
     }
     seen: set[CapabilityRef] = set()
     for binding in implementations:
-        if not isinstance(binding, CapabilityImplementationBinding):
+        if type(binding) is not CapabilityImplementationBinding:
+            return ("implementation binding is invalid",)
+        if not _has_callable_execute(binding.implementation):
             return ("implementation binding is invalid",)
         ref = binding.capability_ref
         if ref in seen:
@@ -175,6 +182,19 @@ def _implementation_errors(
         del unknown
         return ("implementation binding is unknown",)
     return ()
+
+
+def _has_callable_execute(implementation: object) -> bool:
+    failed = False
+    try:
+        execute = getattr(implementation, "execute")
+        if not callable(execute):
+            failed = True
+    except BaseException as error:
+        if not isinstance(error, Exception):
+            raise
+        failed = True
+    return not failed
 
 
 def _benchmark_errors(
