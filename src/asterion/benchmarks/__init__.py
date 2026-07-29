@@ -8,6 +8,10 @@ from asterion.benchmarks.evidence import (
     BenchmarkTaskResult,
     LocalPrivateBenchmarkEvidenceStore,
 )
+from asterion.benchmarks.execution import (
+    BenchmarkRunner,
+    BenchmarkTaskExecutor,
+)
 from asterion.benchmarks.model import (
     ApplicationRef,
     BenchmarkModelError,
@@ -44,8 +48,10 @@ __all__ = (
     "BenchmarkPlanRequest",
     "BenchmarkPlanningError",
     "BenchmarkProgressEvent",
+    "BenchmarkRunner",
     "BenchmarkRunResult",
     "BenchmarkTaskImplementation",
+    "BenchmarkTaskExecutor",
     "BenchmarkTaskInvocation",
     "BenchmarkTaskRequest",
     "BenchmarkTaskResult",
