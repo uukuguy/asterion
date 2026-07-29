@@ -4,15 +4,18 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any, cast
 
-from asterion.dci.services import LocalCorpusService
-from asterion.capabilities.execution import (
+from asterion.capability_sdk import (
     CapabilityExecutionError,
     CapabilityExecutionResult,
     CapabilityInvocation,
 )
-from asterion.runtime.host import RunRequest
-from asterion.runtime.protocol import ProtocolError, validate_event_stream
+from asterion.capabilities.dci_research._runtime import (
+    RuntimeEventError,
+    RuntimeRequest,
+    event_mappings,
+)
 
 
 class DciLocalResearchImplementation:
@@ -27,21 +30,20 @@ class DciLocalResearchImplementation:
             isinstance(capability, str) for capability in required
         ):
             raise CapabilityExecutionError("research capability declaration is invalid")
-        request = RunRequest(
+        request = RuntimeRequest(
             run_id=invocation.run_id,
             input_text=invocation.input_text,
             requested_capabilities=required,
         )
         try:
-            events = [
-                event.to_mapping()
-                async for event in invocation.runtime.run(
+            events = event_mappings([
+                event
+                async for event in cast(Any, invocation.runtime).run(
                     request, signal=invocation.signal
                 )
-            ]
-            validate_event_stream(events)
+            ])
             answer_uri = _answer_artifact_uri(events)
-        except (ProtocolError, TypeError, ValueError, RuntimeError):
+        except (RuntimeEventError, TypeError, ValueError, RuntimeError):
             raise CapabilityExecutionError("research runtime execution failed") from None
         return CapabilityExecutionResult(
             events=(
@@ -60,9 +62,7 @@ class DciLocalResearchImplementation:
 def _require_local_corpus(invocation: CapabilityInvocation) -> Path:
     try:
         service = invocation.host_services.get("corpus.local-root")
-        if not isinstance(service, LocalCorpusService):
-            raise TypeError
-        root = service.root
+        root = cast(Any, service).root
     except Exception:
         raise CapabilityExecutionError("local corpus service is unavailable") from None
     if not isinstance(root, Path):

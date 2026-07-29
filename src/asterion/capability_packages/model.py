@@ -8,8 +8,13 @@ from dataclasses import dataclass, field
 from importlib.resources.abc import Traversable
 from pathlib import Path
 from types import MappingProxyType
+from typing import cast
 
-from asterion.capabilities.execution import CapabilityImplementationBinding
+from asterion.capabilities.catalog import CapabilityRef
+from asterion.capabilities.execution import (
+    CapabilityImplementation,
+    CapabilityImplementationBinding,
+)
 from asterion.capabilities.protocol import CAPABILITY_ID, SEMANTIC_VERSION
 from asterion.capability_packages.protocol import (
     CAPABILITY_PACKAGE_PROTOCOL_VERSION,
@@ -184,7 +189,7 @@ def _path_tuple(paths: Iterable[Path]) -> tuple[Path, ...]:
 
 
 def _implementation_binding_tuple(
-    bindings: Iterable[CapabilityImplementationBinding],
+    bindings: Iterable[CapabilityImplementationBinding | tuple[object, object]],
 ) -> tuple[CapabilityImplementationBinding, ...]:
     try:
         values = tuple(bindings)
@@ -192,11 +197,27 @@ def _implementation_binding_tuple(
         raise CapabilityPackageModelError(
             "capability implementation bindings are invalid"
         ) from None
-    if not all(isinstance(binding, CapabilityImplementationBinding) for binding in values):
+    converted: list[CapabilityImplementationBinding] = []
+    for binding in values:
+        if isinstance(binding, CapabilityImplementationBinding):
+            converted.append(binding)
+            continue
+        if (
+            isinstance(binding, tuple)
+            and len(binding) == 2
+            and isinstance(binding[0], CapabilityRef)
+        ):
+            converted.append(
+                CapabilityImplementationBinding(
+                    binding[0],
+                    cast(CapabilityImplementation, binding[1]),
+                )
+            )
+            continue
         raise CapabilityPackageModelError(
             "capability implementation bindings are invalid"
         )
-    return values
+    return tuple(converted)
 
 
 def _benchmark_binding_tuple(

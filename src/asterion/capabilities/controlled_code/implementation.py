@@ -2,18 +2,55 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Awaitable, Mapping
+from dataclasses import dataclass
+from pathlib import PurePosixPath
+from typing import Protocol, cast
 
-from asterion.capabilities.catalog import CapabilityRef
-from asterion.capabilities.execution import (
+from asterion.capability_sdk import (
+    CapabilityRef,
     CapabilityExecutionError,
     CapabilityExecutionResult,
     CapabilityInvocation,
 )
-from asterion.services.controlled_executor import ControlledExecutionRequest
 
 
 REPORT_MEDIA_TYPE = "application/vnd.dci.code-quality+json"
+
+
+@dataclass(frozen=True, slots=True)
+class _ControlledExecutionRequest:
+    target: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.target, str) or not self.target or "\x00" in self.target:
+            raise CapabilityExecutionError("controlled execution target is invalid")
+        path = PurePosixPath(self.target)
+        if path.is_absolute() or ".." in path.parts or self.target.strip() != self.target:
+            raise CapabilityExecutionError("controlled execution target is invalid")
+
+    def __eq__(self, other: object) -> bool:
+        return getattr(other, "target", None) == self.target
+
+
+class _ControlledExecutionResult(Protocol):
+    status: str
+    exit_code: int | None
+    stdout_bytes: int
+    stderr_bytes: int
+    stdout_truncated: bool
+    stderr_truncated: bool
+    duration_ms: int
+    failure_class: str | None
+
+
+class _ControlledExecutor(Protocol):
+    def execute(
+        self,
+        request: _ControlledExecutionRequest,
+        *,
+        signal: object | None = None,
+    ) -> Awaitable[_ControlledExecutionResult]: ...
 
 
 class CodeQualityWorkflowImplementation:
@@ -22,8 +59,8 @@ class CodeQualityWorkflowImplementation:
         execute = getattr(service, "execute", None)
         if not callable(execute):
             raise CapabilityExecutionError("controlled executor service is invalid")
-        result = await execute(
-            ControlledExecutionRequest(invocation.input_text), signal=invocation.signal
+        result = await cast(_ControlledExecutor, service).execute(
+            _ControlledExecutionRequest(invocation.input_text), signal=invocation.signal
         )
         report = {
             "status": result.status,
@@ -128,4 +165,4 @@ def _report(invocation: CapabilityInvocation) -> Mapping[str, object]:
     )
     if len(matches) != 1:
         raise CapabilityExecutionError("controlled-code report is unavailable")
-    return matches[0]
+    return cast(Mapping[str, object], matches[0])

@@ -8,6 +8,7 @@ from importlib import resources
 from pathlib import Path
 
 from asterion.capability_packages.model import InstalledCapabilityPackage
+from asterion.capability_packages.model import BenchmarkTaskBinding
 from asterion.capability_packages.payload import open_portable_payload
 from asterion.capability_packages.protocol import CapabilityPackageRef
 from asterion.capabilities.execution import CapabilityImplementationBinding
@@ -64,7 +65,13 @@ def create_controlled_code_package() -> InstalledCapabilityPackage:
             CapabilityImplementationBinding(ref, implementation)
             for ref, implementation in controlled_code_bindings()
         ),
-        benchmark_bindings=(),
+        benchmark_bindings=(
+            BenchmarkTaskBinding(
+                owner_package=CONTROLLED_CODE_PACKAGE,
+                binding_id="controlled-code.conformance",
+                implementation=object(),
+            ),
+        ),
     )
 
 

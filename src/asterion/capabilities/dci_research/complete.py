@@ -8,19 +8,24 @@ import os
 import stat
 from pathlib import Path
 from collections.abc import Mapping
+from typing import Any, cast
 
-from asterion.dci.analysis import aggregate_results
-from asterion.dci.provenance import dci_complete_implementation_identity
-from asterion.dci.services import AnswerJudgeService, LocalCorpusService
-from asterion.capabilities.execution import (
-    InProcessArtifactPayload,
+from asterion.capability_sdk import (
+    CapabilityRef,
     CapabilityExecutionError,
     CapabilityExecutionResult,
     CapabilityInvocation,
-    project_public_value,
+    _InProcessArtifactPayload,
+    _project_public_value,
 )
-from asterion.runtime.host import RunRequest
-from asterion.runtime.protocol import ProtocolError, validate_event_stream
+from asterion.capabilities.dci_research._provenance import (
+    dci_complete_implementation_identity,
+)
+from asterion.capabilities.dci_research._runtime import (
+    RuntimeEventError,
+    RuntimeRequest,
+    event_mappings,
+)
 
 
 INPUT_PROTOCOL = "asterion.dci.complete-input/v1"
@@ -65,7 +70,10 @@ def _artifact(invocation: CapabilityInvocation, media_type: str) -> dict[str, ob
     ]
     if len(matches) != 1 or not isinstance(matches[0].get("value"), Mapping):
         raise CapabilityExecutionError("complete application upstream evidence is invalid")
-    value = dict(matches[0]["value"])
+    raw_value = matches[0]["value"]
+    if not isinstance(raw_value, Mapping):
+        raise CapabilityExecutionError("complete application upstream evidence is invalid")
+    value = {str(key): item for key, item in raw_value.items()}
     if (
         value.get("schema") != IMPLEMENTATION_PROTOCOL
         or value.get("implementation_sha256") != complete_application_identity()
@@ -110,28 +118,29 @@ class DciCompleteResearchImplementation:
                 isinstance(capability, str) for capability in required
             ):
                 raise TypeError
-            request = RunRequest(
+            request = RuntimeRequest(
                 run_id=invocation.run_id,
                 input_text=question,
                 requested_capabilities=required,
             )
-            events = [
-                event.to_mapping()
-                async for event in invocation.runtime.run(
+            events = event_mappings([
+                event
+                async for event in cast(Any, invocation.runtime).run(
                     request, signal=invocation.signal
                 )
-            ]
-            validate_event_stream(events)
-        except (ProtocolError, RuntimeError, TypeError, ValueError):
+            ])
+        except (RuntimeEventError, RuntimeError, TypeError, ValueError):
             raise CapabilityExecutionError("complete research execution failed") from None
-        answer_artifacts = [
-            event["payload"]["artifact"]
-            for event in events
-            if event.get("type") == "artifact.created"
-            and isinstance(event.get("payload"), Mapping)
-            and isinstance(event["payload"].get("artifact"), Mapping)
-            and event["payload"]["artifact"].get("kind") == "answer"
-        ]
+        answer_artifacts: list[Mapping[str, object]] = []
+        for event in events:
+            payload = event.get("payload")
+            if event.get("type") != "artifact.created" or not isinstance(
+                payload, Mapping
+            ):
+                continue
+            artifact = payload.get("artifact")
+            if isinstance(artifact, Mapping) and artifact.get("kind") == "answer":
+                answer_artifacts.append(artifact)
         if len(answer_artifacts) != 1:
             raise CapabilityExecutionError("complete research evidence is unavailable")
         answer_artifact = answer_artifacts[0]
@@ -139,6 +148,7 @@ class DciCompleteResearchImplementation:
         answer_artifact_id = answer_artifact.get("artifact_id")
         if answer != "final.txt" or not isinstance(answer_artifact_id, str):
             raise CapabilityExecutionError("complete research evidence is unavailable")
+        answer_name = str(answer)
         completed_run_dir = getattr(invocation.runtime, "completed_run_dir", None)
         output_dir = (
             completed_run_dir(invocation.run_id)
@@ -148,7 +158,7 @@ class DciCompleteResearchImplementation:
         if not isinstance(output_dir, Path):
             raise CapabilityExecutionError("complete research evidence is unavailable")
         try:
-            final_path = output_dir / answer
+            final_path = output_dir / answer_name
             metadata = final_path.lstat()
             if (
                 final_path.is_symlink()
@@ -162,7 +172,7 @@ class DciCompleteResearchImplementation:
             raise CapabilityExecutionError("complete research evidence is unavailable") from None
         if not predicted_answer:
             raise CapabilityExecutionError("complete research evidence is unavailable")
-        stage_data = InProcessArtifactPayload(
+        stage_data = _InProcessArtifactPayload(
             private_value={
                 "question": question,
                 "gold_answer": gold,
@@ -188,9 +198,7 @@ class DciCompleteResearchImplementation:
 def _require_local_corpus(invocation: CapabilityInvocation) -> Path:
     try:
         service = invocation.host_services.get("corpus.local-root")
-        if not isinstance(service, LocalCorpusService):
-            raise TypeError
-        root = service.root
+        root = cast(Any, service).root
     except Exception:
         raise CapabilityExecutionError("local corpus service is unavailable") from None
     if not isinstance(root, Path):
@@ -214,7 +222,7 @@ class DciCompleteEvaluationImplementation:
         private = _research_private_value(research)
         judge = _require_answer_judge(invocation)
         try:
-            identity = project_public_value(judge.public_identity)
+            identity = _project_public_value(cast(Any, judge).public_identity)
             identity_sha256 = hashlib.sha256(
                 json.dumps(
                     identity,
@@ -223,7 +231,7 @@ class DciCompleteEvaluationImplementation:
                     sort_keys=True,
                 ).encode("utf-8")
             ).hexdigest()
-            verdict = await judge.judge(
+            verdict = await cast(Any, judge).judge(
                 question=str(private["question"]),
                 gold_answer=str(private["gold_answer"]),
                 predicted_answer=str(private["predicted_answer"]),
@@ -255,7 +263,7 @@ def _research_private_value(
 ) -> Mapping[str, object]:
     try:
         stage_data = research["stage_data"]
-        if not isinstance(stage_data, InProcessArtifactPayload):
+        if not isinstance(stage_data, _InProcessArtifactPayload):
             raise TypeError
         private = stage_data.private_value
         if set(private) != {
@@ -280,12 +288,13 @@ def _research_private_value(
         ) from None
 
 
-def _require_answer_judge(invocation: CapabilityInvocation) -> AnswerJudgeService:
+def _require_answer_judge(invocation: CapabilityInvocation) -> object:
     try:
         service = invocation.host_services.get("evaluation.answer-judge")
-        if not isinstance(service, AnswerJudgeService):
+        judge = getattr(service, "judge")
+        if not callable(judge):
             raise TypeError
-        public_identity = service.public_identity
+        public_identity = cast(Any, service).public_identity
         if not isinstance(public_identity, Mapping):
             raise TypeError
     except Exception:
@@ -312,7 +321,9 @@ class DciCompleteAnalysisImplementation:
         correct = benchmark.get("correct")
         if type(correct) is not int or correct not in {0, 1}:
             raise CapabilityExecutionError("complete analysis evidence is invalid")
-        aggregate = aggregate_results(({"is_correct": bool(correct), "run_status": "completed"},))
+        aggregate = _aggregate_results(
+            ({"is_correct": bool(correct), "run_status": "completed"},)
+        )
         return _result(
             stage="analysis",
             media_type="application/vnd.dci.analysis+json",
@@ -340,8 +351,6 @@ class DciCompleteExportImplementation:
 
 
 def complete_dci_bindings() -> tuple[tuple[object, object], ...]:
-    from asterion.capabilities.catalog import CapabilityRef
-
     return (
         (CapabilityRef("dci.research", "1.0.0"), DciCompleteResearchImplementation()),
         (CapabilityRef("dci.evaluation", "1.0.0"), DciCompleteEvaluationImplementation()),
@@ -353,3 +362,24 @@ def complete_dci_bindings() -> tuple[tuple[object, object], ...]:
 
 def _text_sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _aggregate_results(results: tuple[Mapping[str, object], ...]) -> dict[str, object]:
+    total = len(results)
+    judged = sum(result.get("is_correct") is not None for result in results)
+    correct = sum(result.get("is_correct") is True for result in results)
+    failed = sum(result.get("run_status") != "completed" for result in results)
+    return {
+        "schema": "asterion.dci.batch-summary/v1",
+        "counts": {
+            "total": total,
+            "judged": judged,
+            "correct": correct,
+            "incorrect_or_unjudged": total - correct,
+            "failed_runs": failed,
+        },
+        "accuracy": {
+            "over_total": correct / total if total else 0.0,
+            "over_judged": correct / judged if judged else 0.0,
+        },
+    }

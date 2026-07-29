@@ -6,6 +6,7 @@ import asyncio
 import json
 from dataclasses import dataclass
 from time import monotonic
+from typing import Any, cast
 
 from asterion.services.controlled_executor import (
     ControlledExecutionRequest,
@@ -62,7 +63,13 @@ class ControlledExecutorJsonlClient:
 
     async def execute(self, request: ControlledExecutionRequest, *, signal=None) -> ControlledExecutionResult:
         if not isinstance(request, ControlledExecutionRequest):
-            raise ControlledExecutorError("controlled execution request is invalid")
+            target = getattr(request, "target", None)
+            try:
+                request = ControlledExecutionRequest(target)
+            except Exception:
+                raise ControlledExecutorError(
+                    "controlled execution request is invalid"
+                ) from None
         if signal is not None and signal.cancelled:
             return _cancelled_result()
         async with self._lock:
@@ -80,8 +87,9 @@ class ControlledExecutorJsonlClient:
             }
             try:
                 validate_message(message)
-                self._writer.write((json.dumps(message, separators=(",", ":")) + "\n").encode())
-                await self._writer.drain()
+                writer = cast(Any, self._writer)
+                writer.write((json.dumps(message, separators=(",", ":")) + "\n").encode())
+                await writer.drain()
                 started = monotonic()
                 cancellation_sent = False
                 cancel_request_id = ""
@@ -96,10 +104,10 @@ class ControlledExecutorJsonlClient:
                             "target_request_id": request_id,
                         }
                         validate_message(cancel)
-                        self._writer.write(
+                        writer.write(
                             (json.dumps(cancel, separators=(",", ":")) + "\n").encode()
                         )
-                        await self._writer.drain()
+                        await writer.drain()
                         cancellation_sent = True
                     try:
                         raw = await asyncio.wait_for(self._reader.readline(), timeout=0.05)
@@ -130,6 +138,8 @@ class ControlledExecutorJsonlClient:
 
 def _result(response: dict[str, object], *, duration_ms: int) -> ControlledExecutionResult:
     status = response["status"]
+    if not isinstance(status, str):
+        raise ControlledExecutorError("controlled executor response is invalid")
     mapped = {
         "completed": "succeeded",
         "failed": "failed",
@@ -139,11 +149,11 @@ def _result(response: dict[str, object], *, duration_ms: int) -> ControlledExecu
     }[status]
     return ControlledExecutionResult(
         status=mapped,
-        exit_code=response["exit_code"],
-        stdout_bytes=len(response["stdout"].encode()),
-        stderr_bytes=len(response["stderr"].encode()),
-        stdout_truncated=response["stdout_truncated"],
-        stderr_truncated=response["stderr_truncated"],
+        exit_code=cast(int | None, response["exit_code"]),
+        stdout_bytes=len(cast(str, response["stdout"]).encode()),
+        stderr_bytes=len(cast(str, response["stderr"]).encode()),
+        stdout_truncated=cast(bool, response["stdout_truncated"]),
+        stderr_truncated=cast(bool, response["stderr_truncated"]),
         duration_ms=duration_ms,
         failure_class=None if mapped == "succeeded" else f"execution-{status}",
     )
