@@ -26,6 +26,8 @@ EXPECTED_PUBLIC = (
     "BenchmarkTaskRequest",
     "CancellationSignal",
     "HostServices",
+    "CapabilityAuthorError",
+    "materialize_portable_payload",
     "open_portable_payload",
     "run_capability_conformance",
 )

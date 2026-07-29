@@ -26,6 +26,10 @@ from asterion.capability_packages.protocol import (
 from asterion.capability_sdk.conformance import (
     run_capability_conformance as run_capability_conformance,
 )
+from asterion.capability_sdk.author import (
+    CapabilityAuthorError as CapabilityAuthorError,
+    materialize_portable_payload as materialize_portable_payload,
+)
 from asterion.capability_sdk.provider import (
     CapabilityPackageProvider as CapabilityPackageProvider,
     CancellationSignal as CancellationSignal,
@@ -49,8 +53,11 @@ __all__ = (
     "BenchmarkTaskRequest",
     "CancellationSignal",
     "HostServices",
+    "CapabilityAuthorError",
+    "materialize_portable_payload",
     "open_portable_payload",
     "run_capability_conformance",
 )
 globals().pop("conformance", None)
 globals().pop("provider", None)
+globals().pop("author", None)

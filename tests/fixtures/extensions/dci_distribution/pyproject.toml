@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "asterion-dci-extension"
+version = "1.0.0"
+description = "External-form DCI capability package fixture"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.entry-points."asterion.capability_packages"]
+"dci@1.0.0" = "asterion_dci_extension.provider:create_provider"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/asterion_dci_extension"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"payload" = "asterion_capability_packages/dci/1.0.0/payload"
