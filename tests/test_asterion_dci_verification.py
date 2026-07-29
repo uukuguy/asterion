@@ -301,7 +301,18 @@ class InstalledAcceptanceTests(unittest.TestCase):
             6,
         )
         self.assertEqual(
-            len(tuple((package_root / "capabilities").glob("*/manifests/*.json"))),
+            len(
+                tuple(
+                    (package_root / "capabilities").glob(
+                        "controlled_code/manifests/*.json"
+                    )
+                )
+                + tuple(
+                    (package_root / "capabilities").glob(
+                        "dci/payload/capabilities/*.json"
+                    )
+                )
+            ),
             11,
         )
 

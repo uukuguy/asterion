@@ -186,14 +186,21 @@ class TestDciCapabilityPayload(unittest.TestCase):
 
     def test_manifests_exclude_operator_and_private_state(self) -> None:
         forbidden_keys = {
+            "api_key",
             "command",
             "commands",
             "corpus_path",
+            "credential",
+            "credential_path",
+            "credentials",
             "dataset_path",
             "environment",
             "executable",
+            "mutable_state",
+            "private_state",
             "prompt",
             "provider",
+            "secret",
         }
         forbidden_text = (
             "scripts/",
@@ -204,11 +211,7 @@ class TestDciCapabilityPayload(unittest.TestCase):
             "ANTHROPIC_API_KEY",
         )
 
-        manifest_paths = (
-            [PAYLOAD_ROOT / "capability-package.json"]
-            + sorted((PAYLOAD_ROOT / "capabilities").glob("*.json"))
-            + sorted((PAYLOAD_ROOT / "benchmark-suites").glob("*.json"))
-        )
+        manifest_paths = sorted(PAYLOAD_ROOT.rglob("*.json"))
         for path in manifest_paths:
             with self.subTest(path=path.name):
                 value = _load_json(path)
