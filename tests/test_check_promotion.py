@@ -247,6 +247,16 @@ class PromotionCheckTests(unittest.TestCase):
         self.assertIn("PYTHONHOME", wheel_smoke[2])
         self.assertIn("PYTHONPATH", wheel_smoke[2])
         self.assertIn("'-I', '-S'", wheel_smoke[2])
+        protocol_smokes = tuple(
+            command
+            for command in commands
+            if len(command) == 3
+            and command[1] == "-c"
+            and "asterion.capability/v1" in command[2]
+        )
+        self.assertEqual(len(protocol_smokes), 1)
+        self.assertIn("applications/dci_agent_lite/assemblies", protocol_smokes[0][2])
+        self.assertIn("capabilities/dci_research/manifests", protocol_smokes[0][2])
         for suffix in (
             ("list",),
             ("describe", "--provider", "dci-agent-lite", "--json"),

@@ -94,6 +94,35 @@ with tempfile.TemporaryDirectory() as temporary:
     assert not marker.exists()
 """
 
+WHEEL_PROTOCOL_RESOURCE_SMOKE = r"""
+import json
+from importlib import resources
+
+root = resources.files('asterion')
+expected = {
+    'applications/controlled_code/assemblies/controlled-code-validation.json':
+        'asterion.application-assembly/v1',
+    'applications/dci_agent_lite/assemblies/dci-research-capability.json':
+        'asterion.application-assembly/v1',
+    'capabilities/controlled_code/capability-package.json':
+        'asterion.capability-package/v1',
+    'capabilities/controlled_code/manifests/code-quality-workflow.json':
+        'asterion.capability/v1',
+    'capabilities/dci_research/capability-package.json':
+        'asterion.capability-package/v1',
+    'capabilities/dci_research/manifests/dci-research.json':
+        'asterion.capability/v1',
+}
+for name, protocol in expected.items():
+    resource = root.joinpath(name)
+    text = resource.read_text(encoding='utf-8')
+    payload = json.loads(text)
+    assert payload.get('protocol') == protocol, name
+    assert 'dci.' + 'agent-runtime/v1' not in text, name
+    assert 'dci.' + 'package/v1' not in text, name
+    assert 'dci.' + 'assembly/v1' not in text, name
+"""
+
 ROOT_EXCLUDED_NAMES = frozenset(
     {
         "build",
@@ -392,6 +421,7 @@ def _run_full(copy_root: Path, venv_root: Path, runner: Runner) -> int:
         ("uv", "venv", str(venv_root)),
         ("uv", "pip", "install", "--python", str(python), str(wheels[0])),
         (str(python), "-c", WHEEL_CWD_SHIM_SMOKE),
+        (str(python), "-c", WHEEL_PROTOCOL_RESOURCE_SMOKE),
         (str(asterion), "list"),
         (str(asterion), "describe", "--provider", "dci-agent-lite", "--json"),
     )

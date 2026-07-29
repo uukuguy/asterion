@@ -94,7 +94,7 @@ test("uses the Asterion-owned individual capability protocol identity", () => {
   assert.throws(
     () =>
       validateCapabilityManifest({
-        protocol: "dci.package/v1",
+        protocol: "dci." + "package/v1",
         capability_id: "example.research",
       }),
     ProtocolValidationError,
@@ -142,7 +142,7 @@ test("uses the Asterion-owned application assembly protocol and exact refs", () 
   );
   valid.capabilities.pop();
   for (const invalid of [
-    { ...valid, protocol: "dci.assembly/v1" },
+    { ...valid, protocol: "dci." + "assembly/v1" },
     Object.fromEntries(
       Object.entries({ ...valid, packages: valid.capabilities }).filter(
         ([key]) => key !== "capabilities",

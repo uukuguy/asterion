@@ -7,6 +7,70 @@ from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parents[1]
 SOURCE = PROJECT / "src/asterion"
+TEXT_SUFFIXES = frozenset(
+    {
+        ".cfg",
+        ".ini",
+        ".json",
+        ".jsonl",
+        ".md",
+        ".mjs",
+        ".py",
+        ".rs",
+        ".sh",
+        ".template",
+        ".toml",
+        ".ts",
+        ".txt",
+        ".yaml",
+        ".yml",
+    }
+)
+TEXT_NAMES = frozenset({"AGENTS.md", "Makefile", ".gitignore"})
+RECURSIVE_EXCLUDED_NAMES = frozenset(
+    {
+        ".git",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".tox",
+        ".venv",
+        "__pycache__",
+        "build",
+        "dist",
+        "node_modules",
+        "target",
+    }
+)
+HISTORICAL_DOCUMENT_ROOTS = (
+    Path(".superpowers"),
+    Path("docs/status"),
+    Path("docs/superpowers/plans"),
+    Path("docs/superpowers/specs"),
+)
+FORBIDDEN_PROTOCOL_IDENTIFIERS = (
+    "dci." + "agent-runtime/v1",
+    "dci." + "package/v1",
+    "dci." + "assembly/v1",
+)
+
+
+def identity_files() -> tuple[Path, ...]:
+    files: list[Path] = []
+    for path in PROJECT.rglob("*"):
+        relative = path.relative_to(PROJECT)
+        if (
+            not path.is_file()
+            or any(part in RECURSIVE_EXCLUDED_NAMES for part in relative.parts)
+            or any(
+                relative == root or relative.is_relative_to(root)
+                for root in HISTORICAL_DOCUMENT_ROOTS
+            )
+            or (path.suffix not in TEXT_SUFFIXES and path.name not in TEXT_NAMES)
+        ):
+            continue
+        files.append(path)
+    return tuple(sorted(files))
 
 
 class AsterionProjectBoundaryTests(unittest.TestCase):
@@ -40,6 +104,15 @@ class AsterionProjectBoundaryTests(unittest.TestCase):
         text = (PROJECT / "pyproject.toml").read_text(encoding="utf-8")
         self.assertNotIn("../", text)
         self.assertNotRegex(text, r"(?m)^\s*members\s*=")
+
+    def test_active_repository_surfaces_do_not_reference_old_protocol_ids(self) -> None:
+        offenders: list[tuple[Path, str]] = []
+        for path in identity_files():
+            text = path.read_text(encoding="utf-8")
+            for value in FORBIDDEN_PROTOCOL_IDENTIFIERS:
+                if value in text:
+                    offenders.append((path.relative_to(PROJECT), value))
+        self.assertEqual(offenders, [])
 
 
 if __name__ == "__main__":

@@ -3,9 +3,11 @@
 ## Package and application ownership
 
 An Asterion capability package is a **reusable executable unit**. It declares
-portable requirements and outputs in `dci.package/v1`, and an independently
-owned implementation supplies its behavior. An application is the executable composition boundary:
-it selects exact package versions, one runtime, host
+portable requirements and outputs in `asterion.capability/v1` capability
+manifests plus an `asterion.capability-package/v1` package descriptor, and an
+independently owned implementation supplies behavior for executable
+capabilities. An application is the executable composition boundary:
+it selects exact capability versions, one runtime, host
 services, and operator input.
 
 Policy packages remain declarative in the first execution slice. Capability,
@@ -18,14 +20,14 @@ partial bindings fail before a runtime or implementation is invoked.
 The application host resolves an assembly and supplies bindings directly:
 
 ```python
-from asterion.packages.catalog import PackageRef
+from asterion.capabilities.catalog import CapabilityRef
 from asterion.runner import run_composed_application
 from asterion.capabilities.dci_research import DciLocalResearchImplementation
 
 result = await run_composed_application(
     plan,
     implementations=((
-        PackageRef("dci.research", "1.0.0"),
+        CapabilityRef("dci.research", "1.0.0"),
         DciLocalResearchImplementation(),
     ),),
     runtime=runtime,

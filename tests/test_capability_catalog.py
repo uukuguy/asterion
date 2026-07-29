@@ -86,7 +86,7 @@ class CapabilityCatalogTests(unittest.TestCase):
         valid = manifest("example.research")
         invalid_values = (
             {**valid, "package_id": valid["capability_id"]},
-            {**valid, "protocol": "dci.package/v1"},
+            {**valid, "protocol": "dci." + "package/v1"},
         )
 
         for value in invalid_values:

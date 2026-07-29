@@ -5,7 +5,7 @@
 相关源码入口：
 
 - [Runtime](../../src/asterion/runtime/)
-- [Package](../../src/asterion/packages/)
+- [Capability protocol](../../src/asterion/capabilities/)
 - [Assembly](../../src/asterion/assembly/)
 - [Runner](../../src/asterion/runner/)
 - [Installed provider contract](../../src/asterion/applications/provider.py)
@@ -20,8 +20,7 @@ standalone-repository-root/
 └── src/asterion/
     ├── runtime/                 # 运行时中立协议、host client、factory
     ├── runtimes/                # Pi、Claude Code 等具体 adapter
-    ├── packages/                # package manifest、catalog、组合与执行契约
-    ├── capabilities/            # 能力实现及其 package manifests
+    ├── capabilities/            # capability manifest、catalog、组合、执行契约与能力实现
     ├── assembly/                # application 静态装配协议与解析
     ├── applications/            # installed provider 与内置应用装配
     ├── runner/                  # 已解析 application 的执行器
@@ -85,12 +84,12 @@ Adapter 把外部 agent 的命令、事件和错误转成 Runtime Protocol；它
 
 ## Package、Capability 与实现绑定
 
-Package manifest 使用封闭的 `dci.package/v1` 协议。每个 JSON 必须且只能包含：
+Capability manifest 使用封闭的 `asterion.capability/v1` 协议。每个 JSON 必须且只能包含：
 
 ```json
 {
-  "protocol": "dci.package/v1",
-  "package_id": "example.research",
+  "protocol": "asterion.capability/v1",
+  "capability_id": "example.research",
   "version": "1.0.0",
   "kind": "capability",
   "provides_capabilities": ["research.local"],
@@ -105,24 +104,27 @@ Package manifest 使用封闭的 `dci.package/v1` 协议。每个 JSON 必须且
 
 数组必须排序、去重；ID 和版本必须符合约束。`kind=policy` 可以参与组合但不执行；`capability`、`workflow`、`memory`、`observability`、`evaluation` 必须有精确 implementation binding。
 
-Capability 是“声明 + 实现”，不是一个任意 Python 目录。实现遵守 `PackageImplementation.execute(invocation)`，接收冻结后的 `PackageInvocation`，返回 `PackageExecutionResult`。结果只能产生 manifest 已声明的事件和 artifact media type；未声明输出、重复 artifact ID、缺失或多余 binding 都会失败。
+Capability 是“声明 + 实现”，不是一个任意 Python 目录。实现遵守 `CapabilityImplementation.execute(invocation)`，接收冻结后的 `CapabilityInvocation`，返回 `CapabilityExecutionResult`。结果只能产生 manifest 已声明的事件和 artifact media type；未声明输出、重复 artifact ID、缺失或多余 binding 都会失败。
 
 组合器根据 provides/requires、policy、event 与 artifact 边构造确定性顺序。能力提供者冲突、依赖缺失或循环不会在运行中临时解决，而是在 assembly resolve 阶段拒绝。
 
 ## Application、Assembly 与 Provider
 
-Application 是一组已固定版本 package、一个 runtime 身份以及 host 边界的静态装配。`dci.assembly/v1` 只引用 package 身份，不嵌入 Python 对象。例如：
+Application 是一组已固定版本 capability package、capability、一个 runtime 身份以及 host 边界的静态装配。`asterion.application-assembly/v1` 只引用 package 与 capability 身份，不嵌入 Python 对象。例如：
 
 ```json
 {
-  "protocol": "dci.assembly/v1",
+  "protocol": "asterion.application-assembly/v1",
   "application_id": "example.research-app",
   "version": "1.0.0",
   "runtime_id": "pi.reference",
-  "packages": [
-    {"package_id": "example.observability", "version": "1.0.0"},
-    {"package_id": "example.policy", "version": "1.0.0"},
-    {"package_id": "example.research", "version": "1.0.0"}
+  "capability_packages": [
+    {"package_id": "example-suite", "version": "1.0.0"}
+  ],
+  "capabilities": [
+    {"capability_id": "example.observability", "version": "1.0.0"},
+    {"capability_id": "example.policy", "version": "1.0.0"},
+    {"capability_id": "example.research", "version": "1.0.0"}
   ],
   "host_capabilities": [],
   "host_policies": [],
@@ -139,7 +141,7 @@ Application 是一组已固定版本 package、一个 runtime 身份以及 host 
 
 - provider ID：一个发行物暴露的装配提供者，例如 `dci-agent-lite`；
 - application identity：例如 `example.research-app@1.0.0`；
-- package identity：例如 `example.research@1.0.0`。
+- capability identity：例如 `example.research@1.0.0`。
 
 ## Host Service 与受控执行
 
@@ -183,7 +185,7 @@ uv run asterion-dci benchmark --help
 
 1. Manifest
 
-   在发行物资源目录中创建 `example.policy`、`example.research` 和 `example.observability` 三个符合 `dci.package/v1` 的 JSON。先用 manifest validator 测试字段封闭、数组排序、边完整。
+   在发行物资源目录中创建 `example.policy`、`example.research` 和 `example.observability` 三个符合 `asterion.capability/v1` 的 JSON，并创建引用它们的 `asterion.capability-package/v1` descriptor。先用 manifest validator 测试字段封闭、数组排序、边完整。
 
 2. Implementation binding
 
@@ -191,9 +193,9 @@ uv run asterion-dci benchmark --help
 
    ```python
    implementations = (
-       (PackageRef("example.research", "1.0.0"), ResearchImplementation()),
+       (CapabilityRef("example.research", "1.0.0"), ResearchImplementation()),
        (
-           PackageRef("example.observability", "1.0.0"),
+           CapabilityRef("example.observability", "1.0.0"),
            ObservabilityImplementation(),
        ),
    )
@@ -201,7 +203,7 @@ uv run asterion-dci benchmark --help
 
 3. Assembly
 
-   创建前文所示 `example.research-app@1.0.0` assembly，固定 `pi.reference` 和三个 package 的确切版本。若还支持另一 runtime，应增加另一份 assembly，而不是在一份文件中放条件逻辑。
+   创建前文所示 `example.research-app@1.0.0` assembly，固定 `pi.reference`、capability package 和三个 capability 的确切版本。若还支持另一 runtime，应增加另一份 assembly，而不是在一份文件中放条件逻辑。
 
 4. Installed provider
 

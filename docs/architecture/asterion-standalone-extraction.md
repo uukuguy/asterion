@@ -15,7 +15,7 @@ DCI-Agent-Lite 仓库根；**standalone repository root after promotion** 是把
 
 - Python 发行物：`asterion`，生成 `asterion` wheel，包含框架、adapter、runtime、能力、应用、DCI 产品和两个 CLI。
 - Runtime Protocol schemas：`schemas/agent-runtime/v1`。
-- Package、assembly 与 executor schemas：`schemas/packages/v1`、`schemas/assembly/v1`、`schemas/executor/v1`。
+- Capability、capability-package、application-assembly、benchmark-suite 与 capability-source schemas：`schemas/capabilities/v1`、`schemas/capability-packages/v1`、`schemas/application-assembly/v1`、`schemas/benchmark-suite/v1`、`schemas/capability-source/v1`。
 - TypeScript 包：`packages/typescript/asterion-runtime`，当前 npm 名为 `@dci/agent-runtime`；拆分前应单独决定是否改名。
 - Rust 包：`packages/rust/controlled-executor`，当前 crate 名为 `dci-controlled-executor`；拆分前同样单独决定发布名。
 - 跨语言协议 fixtures：`tests/fixtures`。
@@ -58,9 +58,11 @@ standalone-repository-root/
 │   └── rust/controlled-executor/
 ├── schemas/
 │   ├── agent-runtime/v1/
-│   ├── assembly/v1/
-│   ├── packages/v1/
-│   └── executor/v1/
+│   ├── application-assembly/v1/
+│   ├── benchmark-suite/v1/
+│   ├── capabilities/v1/
+│   ├── capability-packages/v1/
+│   └── capability-source/v1/
 ├── tests/
 │   ├── fixtures/
 │   └── test_asterion_*.py

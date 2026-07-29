@@ -1,7 +1,7 @@
 # `@dci/agent-runtime`
 
-Public TypeScript host contract for DCI Agent Runtime Protocol v1 and portable
-Asterion Capability manifests.
+Public TypeScript host contract for Asterion Agent Runtime Protocol v1 and
+portable Asterion capability protocols.
 
 The package exports portable runtime-manifest, run-request, event, and asynchronous
 client types. Runtime and capability validators use canonical schemas copied from
@@ -22,5 +22,5 @@ import {
 From the repository root, run its complete build and shared-fixture suite with:
 
 ```bash
-make test-typescript-host
+make test-typescript
 ```

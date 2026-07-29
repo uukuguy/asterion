@@ -51,6 +51,14 @@ def _documents(root: Path) -> tuple[Path, ...]:
     return (root / "README.md", *sorted((root / "docs").rglob("*.md")))
 
 
+def _is_historical_document(path: Path) -> bool:
+    return (
+        path.parts[:2] == ("docs", "status")
+        or path.parts[:3] == ("docs", "superpowers", "plans")
+        or path.parts[:3] == ("docs", "superpowers", "specs")
+    )
+
+
 def _link_target(raw: str) -> str:
     value = raw.strip()
     if value.startswith("<") and ">" in value:
@@ -87,7 +95,8 @@ def check_docs(root: Path) -> tuple[int, int, tuple[str, ...]]:
                 errors.append(
                     f"{relative}:{line_number}: integration count lacks history label"
                 )
-        errors.extend(_check_asterion_imports(relative, text))
+        if not _is_historical_document(relative):
+            errors.extend(_check_asterion_imports(relative, text))
 
         for match in LINK_PATTERN.finditer(text):
             target = _link_target(match.group(1))

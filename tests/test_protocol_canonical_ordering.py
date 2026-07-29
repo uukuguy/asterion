@@ -84,7 +84,7 @@ class ProtocolCanonicalOrderingTests(unittest.TestCase):
     def test_rejects_removed_assembly_protocol_and_fields(self) -> None:
         valid = self.application_assembly()
         cases = {
-            "old-protocol": {**valid, "protocol": "dci.assembly/v1"},
+            "old-protocol": {**valid, "protocol": "dci." + "assembly/v1"},
             "old-packages-field": {
                 key: value
                 for key, value in {

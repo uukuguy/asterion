@@ -4,7 +4,7 @@
 
 **Asterion owns framework contracts.** Its authoritative Python implementation
 lives under `src/asterion/`: runtime protocol and hosts, normalized adapters,
-package catalogs and composition, static assembly, and host-service contracts.
+capability catalogs and composition, static assembly, and host-service contracts.
 
 **Asterion must not import the DCI baseline.** Its first-party DCI capability and
 application are modular Asterion namespaces. The mixed-repository dependency
@@ -46,11 +46,12 @@ explicit compatibility path and must itself declare the selected runtime.
 
 ## Wire compatibility
 
-Filesystem and import ownership changed before protocol identity. AF-095 retains
-`dci.agent-runtime/v1`, `dci.package/v1`, `dci.assembly/v1`, and
-`dci.executor/v1` exactly. Any future `asterion.*` wire namespace requires a
-separate versioned compatibility decision; directory extraction does not create
-silent aliases.
+Filesystem and import ownership changed before protocol identity. The current
+closed Asterion protocol family uses `asterion.agent-runtime/v1`,
+`asterion.capability/v1`, `asterion.capability-package/v1`, and
+`asterion.application-assembly/v1` without compatibility aliases for removed
+generic protocol names. `dci.executor/v1` remains a product-side controlled
+executor contract.
 
 ## Boundaries
 

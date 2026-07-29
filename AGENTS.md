@@ -19,7 +19,7 @@ Framework modules (`runtime/`, `packages/`, `assembly/`, `runner/`, `services/`)
 
 ## Protocol and Composition Invariants
 
-`dci.agent-runtime/v1`, `dci.package/v1`, and `dci.assembly/v1` are closed contracts. Schemas under `schemas/`, Python validators, and TypeScript validation must agree. IDs are canonical, versions exact, and arrays sorted and unique.
+`asterion.agent-runtime/v1`, `asterion.capability/v1`, `asterion.capability-package/v1`, and `asterion.application-assembly/v1` are closed contracts. Schemas under `schemas/`, Python validators, and TypeScript validation must agree. IDs are canonical, versions exact, and arrays sorted and unique.
 
 Manifests describe compatibility, not authority. Never place prompts, credentials, commands, executable paths, environment values, provider configuration, or mutable state in them. Catalogs use explicit local roots, direct JSON children, and exact `package_id@version`; do not add source scanning, ranges, registries, hidden precedence, or symlink traversal.
 
