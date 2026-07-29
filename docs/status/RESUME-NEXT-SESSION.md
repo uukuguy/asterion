@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-29 18:10. **Session remains active — not a final handoff.**
+> Updated: 2026-07-29 18:58. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -33,8 +33,11 @@
 - Plan 2 Task 1 added source-neutral immutable package values in `33a96c1`,
   then closed canonical identity, deep snapshot, opaque repr, hostile-body,
   and exception-context review findings through `33e31a8`.
-- The immediate next action is Plan 2 Task 2: validate canonical portable
-  payload closure and location-independent content identity under strict TDD.
+- Plan 2 Task 2 added descriptor-relative portable payload validation in
+  `07e154b`, then bound immutable verified bytes, exact declared conformance
+  closure, and strict finite JSON through `8b9bc9f`.
+- The immediate next action is Plan 2 Task 3: implement exact source-lock
+  resolution without fallback, sorting, or implicit precedence.
 
 ## Where things stand
 
@@ -59,17 +62,19 @@
   full_dataset=no`.
 - Plan 2 Task 1 focused verification passed 15 model tests and 51 adjacent
   tests with Pyright and Ruff clean; independent review is approved.
+- Plan 2 Task 2 focused verification passed 36 Python and 19 TypeScript tests
+  with Pyright and Ruff clean; immutable-view and closure probes passed review.
 - `dci.agent-runtime/v1` remains only as the deliberate absence-test needle in
   Task 1 scope; no compatibility alias was added.
 - Plans 2-4 remain dependent on completion of the six Plan 1 tasks.
 
 ## Next action
 
-1. Dispatch Plan 2 Task 2 from the approved source plan.
-2. Require the full payload failure matrix before implementing descriptor-
-   relative reads and canonical hashing.
-3. Preserve location-independent identity, symlink rejection, direct-child
-   closure, body-free errors, and zero provider operations.
+1. Dispatch Plan 2 Task 3 from the approved source plan.
+2. Require the complete zero/one/many/locked resolution truth table before
+   implementing exact selection.
+3. Never sort-and-pick, accept ranges, or let an unrelated lock/candidate
+   influence the requested exact package ref.
 
 ## Boundaries and ruled-out paths
 

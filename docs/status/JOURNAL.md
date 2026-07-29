@@ -212,5 +212,7 @@
 - 18:07 Discarded hostile exception contexts from model validation failures [33e31a8]
 - 18:10 Closed package-source Task 1 after all model review findings were fixed [33e31a8]
 - 18:10 Saved source-model recovery boundary before portable payload validation [c620dec]
+- 18:43 Bound immutable payload bytes and declared conformance closure after security review [8b9bc9f]
+- 18:58 Closed package-source Task 2 after immutable payload closure review passed [8b9bc9f]
 - 18:23 Validated portable payload closure before source adapters [07e154b]
 - 18:26 Verified payload Task 2 with green tests and static checks [07e154b]
