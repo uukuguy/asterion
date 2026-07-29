@@ -241,14 +241,22 @@ def _freeze_payload_directory(
     )
 
 
+_O_DIRECTORY = getattr(os, "O_DIRECTORY", None)
+_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", None)
+_O_CLOEXEC_VALUE = getattr(os, "O_CLOEXEC", 0)
+_O_CLOEXEC = _O_CLOEXEC_VALUE if isinstance(_O_CLOEXEC_VALUE, int) else 0
+_SUPPORTS_DIR_FD = getattr(os, "supports_dir_fd", frozenset())
+_SUPPORTS_FD = getattr(os, "supports_fd", frozenset())
+_SUPPORTS_FOLLOW_SYMLINKS = getattr(os, "supports_follow_symlinks", frozenset())
+
 _PINNED_PAYLOAD_AVAILABLE = (
     sys.platform in {"darwin", "linux"}
-    and hasattr(os, "O_DIRECTORY")
-    and hasattr(os, "O_NOFOLLOW")
-    and os.open in os.supports_dir_fd
-    and os.listdir in os.supports_fd
-    and os.stat in os.supports_dir_fd
-    and os.stat in os.supports_follow_symlinks
+    and isinstance(_O_DIRECTORY, int)
+    and isinstance(_O_NOFOLLOW, int)
+    and os.open in _SUPPORTS_DIR_FD
+    and os.listdir in _SUPPORTS_FD
+    and os.stat in _SUPPORTS_DIR_FD
+    and os.stat in _SUPPORTS_FOLLOW_SYMLINKS
 )
 
 _ROOT_CHILDREN = frozenset(
@@ -261,6 +269,18 @@ _ROOT_CHILDREN = frozenset(
     }
 )
 _T = TypeVar("_T")
+
+
+def _secure_directory_open_flags() -> int:
+    if not isinstance(_O_DIRECTORY, int) or not isinstance(_O_NOFOLLOW, int):
+        raise CapabilityPackagePayloadError("capability package payload is invalid")
+    return os.O_RDONLY | _O_DIRECTORY | _O_NOFOLLOW | _O_CLOEXEC
+
+
+def _secure_file_open_flags() -> int:
+    if not isinstance(_O_NOFOLLOW, int):
+        raise CapabilityPackagePayloadError("capability package payload is invalid")
+    return os.O_RDONLY | _O_NOFOLLOW | _O_CLOEXEC
 
 
 def open_portable_payload(root: Path) -> PortableCapabilityPayload:
@@ -511,12 +531,7 @@ def _open_directory_at(
     parent_fd: int | None,
     descriptors: ExitStack,
 ) -> _PinnedDirectory:
-    flags = (
-        os.O_RDONLY
-        | os.O_DIRECTORY
-        | os.O_NOFOLLOW
-        | getattr(os, "O_CLOEXEC", 0)
-    )
+    flags = _secure_directory_open_flags()
     descriptor = -1
     try:
         if parent_fd is None:
@@ -573,7 +588,7 @@ def _read_regular_file(directory: _PinnedDirectory, name: str) -> bytes:
             failed = True
         else:
             initial_identity = (initial.st_dev, initial.st_ino)
-            flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+            flags = _secure_file_open_flags()
             descriptor = os.open(name, flags, dir_fd=directory.fd)
             opened = os.fstat(descriptor)
             opened_identity = (opened.st_dev, opened.st_ino)

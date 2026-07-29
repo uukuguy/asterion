@@ -5,6 +5,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import asterion.capabilities.catalog as capability_catalog
@@ -108,7 +109,9 @@ class CapabilityCatalogTests(unittest.TestCase):
 
         validated = validate_capability_manifest(source)
         source["kind"] = "policy"
-        source["provides_capabilities"].append("changed")
+        provides_capabilities = source["provides_capabilities"]
+        assert isinstance(provides_capabilities, list)
+        provides_capabilities.append("changed")
 
         self.assertEqual(validated["kind"], "capability")
         self.assertEqual(
@@ -263,7 +266,7 @@ class CapabilityCatalogTests(unittest.TestCase):
                 replace_document()
             return original_open(path, flags, mode, dir_fd=dir_fd)
 
-        def guarded_fdopen(fd: int, *args: object, **kwargs: object):
+        def guarded_fdopen(fd: int, *args: Any, **kwargs: Any):
             self.assertNotEqual(_fd_identity(fd), external_identity)
             return original_fdopen(fd, *args, **kwargs)
 
@@ -323,7 +326,7 @@ class CapabilityCatalogTests(unittest.TestCase):
                 replace_root()
             return original_open(path, flags, mode, dir_fd=dir_fd)
 
-        def guarded_fdopen(fd: int, *args: object, **kwargs: object):
+        def guarded_fdopen(fd: int, *args: Any, **kwargs: Any):
             self.assertNotEqual(_fd_identity(fd), external_identity)
             return original_fdopen(fd, *args, **kwargs)
 

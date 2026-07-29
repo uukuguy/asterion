@@ -273,8 +273,7 @@ import os
 import sys
 from pathlib import Path
 
-import asterion.capabilities.catalog
-import asterion.capability_packages
+import importlib.resources.abc
 
 missing = sys.argv[1]
 if hasattr(os, missing):
@@ -317,6 +316,7 @@ else:
             "O_CLOEXEC",
             "supports_dir_fd",
             "supports_fd",
+            "supports_follow_symlinks",
         ):
             with self.subTest(missing):
                 result = subprocess.run(

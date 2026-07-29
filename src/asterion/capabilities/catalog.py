@@ -72,14 +72,22 @@ class _PinnedRoot:
     identity: tuple[int, int]
 
 
+_O_DIRECTORY = getattr(os, "O_DIRECTORY", None)
+_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", None)
+_O_CLOEXEC_VALUE = getattr(os, "O_CLOEXEC", 0)
+_O_CLOEXEC = _O_CLOEXEC_VALUE if isinstance(_O_CLOEXEC_VALUE, int) else 0
+_SUPPORTS_DIR_FD = getattr(os, "supports_dir_fd", frozenset())
+_SUPPORTS_FD = getattr(os, "supports_fd", frozenset())
+_SUPPORTS_FOLLOW_SYMLINKS = getattr(os, "supports_follow_symlinks", frozenset())
+
 _PINNED_DISCOVERY_AVAILABLE = (
     sys.platform in {"darwin", "linux"}
-    and hasattr(os, "O_DIRECTORY")
-    and hasattr(os, "O_NOFOLLOW")
-    and os.open in os.supports_dir_fd
-    and os.listdir in os.supports_fd
-    and os.stat in os.supports_dir_fd
-    and os.stat in os.supports_follow_symlinks
+    and isinstance(_O_DIRECTORY, int)
+    and isinstance(_O_NOFOLLOW, int)
+    and os.open in _SUPPORTS_DIR_FD
+    and os.listdir in _SUPPORTS_FD
+    and os.stat in _SUPPORTS_DIR_FD
+    and os.stat in _SUPPORTS_FOLLOW_SYMLINKS
 )
 
 
@@ -127,6 +135,18 @@ def discover_capabilities(roots: Iterable[Path]) -> CapabilityCatalog:
     )
 
 
+def _secure_directory_open_flags() -> int:
+    if not isinstance(_O_DIRECTORY, int) or not isinstance(_O_NOFOLLOW, int):
+        raise CapabilityCatalogError("secure capability discovery is unavailable")
+    return os.O_RDONLY | _O_DIRECTORY | _O_NOFOLLOW | _O_CLOEXEC
+
+
+def _secure_file_open_flags() -> int:
+    if not isinstance(_O_NOFOLLOW, int):
+        raise CapabilityCatalogError("secure capability discovery is unavailable")
+    return os.O_RDONLY | _O_NOFOLLOW | _O_CLOEXEC
+
+
 @contextmanager
 def _pin_roots(roots: Iterable[Path]):
     with ExitStack() as descriptors:
@@ -154,12 +174,7 @@ def _open_root(root: Path, descriptors: ExitStack) -> int:
     if ".." in components:
         raise CapabilityCatalogError(f"catalog root is invalid: {root}")
 
-    flags = (
-        os.O_RDONLY
-        | os.O_DIRECTORY
-        | os.O_NOFOLLOW
-        | getattr(os, "O_CLOEXEC", 0)
-    )
+    flags = _secure_directory_open_flags()
     anchor = "/" if root.is_absolute() else "."
     current = _open_directory(
         anchor,
@@ -253,12 +268,7 @@ def _read_manifest(
     if not stat.S_ISREG(details.st_mode):
         return None
 
-    flags = (
-        os.O_RDONLY
-        | os.O_NOFOLLOW
-        | getattr(os, "O_CLOEXEC", 0)
-        | getattr(os, "O_NONBLOCK", 0)
-    )
+    flags = _secure_file_open_flags() | getattr(os, "O_NONBLOCK", 0)
     descriptor = -1
     try:
         descriptor = os.open(name, flags, dir_fd=root.fd)
