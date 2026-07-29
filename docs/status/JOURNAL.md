@@ -188,3 +188,7 @@
 - 14:53 Defined portable capability-package protocol and built-in descriptors [04e5456]
 - 15:03 Aligned capability-package schema with deferred benchmark-suite support [b4102a5]
 - 15:07 Closed protocol Task 3 after schema alignment and clean independent review [b4102a5]
+- 15:08 Saved live recovery checkpoint after Task 3 review [696f587]
+- 15:22 Established application-assembly protocol with exact capability-package refs [5b17eca]
+- 15:30 Declared assembly ordering semantics in schema and enforced them in Python and TypeScript [c021198]
+- 15:33 Closed protocol Task 4 after ordering semantics fix and clean independent review [c021198]

@@ -1,13 +1,13 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-29 15:07. **Session remains active — not a final handoff.**
+> Updated: 2026-07-29 15:33. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
 - Plan 1 is active in
   `.worktrees/capability-protocol-foundation` on
   `feature/capability-protocol-foundation`.
-- Tasks 1-3 are complete and independently reviewed: runtime identity is
+- Tasks 1-4 are complete and independently reviewed: runtime identity is
   `asterion.agent-runtime/v1`, and the individual capability core is
   `asterion.capability/v1`.
 - Task 2 landed in `92e7113` plus review fixes `0307a0f`; Python and
@@ -16,8 +16,11 @@
 - Task 3 added `asterion.capability-package/v1`, immutable package values,
   closed fixtures, and exact controlled-code/DCI descriptors in `04e5456`
   plus schema-alignment fix `b4102a5`.
-- The immediate next action is Plan 1 Task 4: replace the assembly wire
-  protocol and add exact capability-package refs under strict TDD.
+- Task 4 established `asterion.application-assembly/v1`, independently
+  ordered `capability_packages`/`capabilities`, exact built-in refs, and
+  schema-declared semantic ordering in `5b17eca` plus `c021198`.
+- The immediate next action is Plan 1 Task 5: add benchmark-suite,
+  capability-source, and source-lock protocols under strict TDD.
 
 ## Where things stand
 
@@ -29,6 +32,8 @@
   example imports, and lint; independent re-review found no remaining issues.
 - Task 3 focused verification passed 42 Python tests plus AJV, lint, build,
   descriptor packaging, and independent review.
+- Task 4 focused verification passed 57 Python tests, 16 TypeScript tests,
+  lint, and independent review with no remaining issues.
 - The broad docs checker intentionally remains red on stale Markdown imports
   and one renamed local link; Task 6 owns that coherence gate.
 - `dci.agent-runtime/v1` remains only as the deliberate absence-test needle in
@@ -37,11 +42,11 @@
 
 ## Next action
 
-1. Dispatch the Task 4 implementer from
-   `.superpowers/sdd/task-4-brief.md`.
-2. Require failing assembly identity/package-ref tests before migrating
-   schemas, fixtures, built-in assemblies, Python, or TypeScript.
-3. Run independent task review before advancing to Task 5.
+1. Dispatch the Task 5 implementer from
+   `.superpowers/sdd/task-5-brief.md`.
+2. Require failing safe-declarative fixtures before adding benchmark-suite,
+   source, or lock schemas/values in Python and TypeScript.
+3. Run independent task review before advancing to the Task 6 phase gate.
 
 ## Boundaries and ruled-out paths
 
