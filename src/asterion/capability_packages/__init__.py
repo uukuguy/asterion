@@ -30,6 +30,11 @@ from asterion.capability_packages.model import (
     InstalledCapabilityPackage,
     PortableCapabilityPayload,
 )
+from asterion.capability_packages.payload import (
+    CapabilityPackagePayloadError,
+    canonical_payload_sha256,
+    open_portable_payload,
+)
 
 __all__ = (
     "BENCHMARK_SUITE_PROTOCOL_VERSION",
@@ -52,8 +57,11 @@ __all__ = (
     "BenchmarkTaskBinding",
     "CapabilityPackageCandidate",
     "CapabilityPackageModelError",
+    "CapabilityPackagePayloadError",
     "InstalledCapabilityPackage",
     "PortableCapabilityPayload",
+    "canonical_payload_sha256",
+    "open_portable_payload",
     "validate_benchmark_suite_manifest",
     "validate_capability_package_manifest",
     "validate_capability_source_declaration",

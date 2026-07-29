@@ -1,0 +1,1 @@
+{"capability_id":"example.research","consumes_artifacts":[],"consumes_events":[],"emits_events":["research.completed"],"kind":"research","produces_artifacts":["application/vnd.example.research+json"],"protocol":"asterion.capability/v1","provides_capabilities":["research.local"],"requires_capabilities":[],"requires_policies":[],"version":"1.0.0"}
