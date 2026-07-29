@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -59,24 +60,11 @@ FORBIDDEN_BENCHMARK_IMPORT_PREFIXES = (
     "asterion.dci",
     "asterion.capabilities.dci",
 )
-FORBIDDEN_DCI_BENCHMARK_LITERAL_PREFIXES = (
-    "ASTERION_DCI_",
-    "DCI_",
-    "beir.",
-    "bright.",
-    "qa.",
-)
-FORBIDDEN_DCI_BENCHMARK_LITERALS = frozenset(
-    {
-        "browsecomp-plus",
-        "bcplus",
-        "bcplus-qa",
-        "level0",
-        "level1",
-        "level2",
-        "level3",
-        "level4",
-    }
+FORBIDDEN_DCI_BENCHMARK_LITERAL = re.compile(
+    r"(?:^|[./_@-])"
+    r"(?:dci|browsecomp(?:-plus)?|bcplus|beir|bright|qa|level[0-4])"
+    r"(?:$|[./_@-])",
+    re.IGNORECASE,
 )
 PRIVATE_BENCHMARK_SERIALIZATION_FIELDS = frozenset(
     {
@@ -93,7 +81,8 @@ PRIVATE_BENCHMARK_SERIALIZATION_FIELDS = frozenset(
 def benchmark_trees() -> tuple[tuple[Path, ast.Module], ...]:
     return tuple(
         (path, ast.parse(path.read_text(encoding="utf-8"), filename=str(path)))
-        for path in sorted(BENCHMARK_SOURCE.glob("*.py"))
+        for path in sorted(BENCHMARK_SOURCE.rglob("*.py"))
+        if "__pycache__" not in path.parts
     )
 
 
@@ -218,9 +207,7 @@ class AsterionProjectBoundaryTests(unittest.TestCase):
                 ):
                     continue
                 value = node.value
-                if value in FORBIDDEN_DCI_BENCHMARK_LITERALS or value.startswith(
-                    FORBIDDEN_DCI_BENCHMARK_LITERAL_PREFIXES
-                ):
+                if FORBIDDEN_DCI_BENCHMARK_LITERAL.search(value):
                     offenders.append((path.relative_to(PROJECT), value))
 
         self.assertEqual(offenders, [])

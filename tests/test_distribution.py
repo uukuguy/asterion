@@ -41,8 +41,9 @@ class DistributionTests(unittest.TestCase):
             with ZipFile(wheels[0]) as wheel:
                 members = frozenset(wheel.namelist())
                 expected_modules = frozenset(
-                    f"asterion/benchmarks/{path.name}"
-                    for path in BENCHMARK_SOURCE.glob("*.py")
+                    path.relative_to(PROJECT / "src").as_posix()
+                    for path in BENCHMARK_SOURCE.rglob("*.py")
+                    if "__pycache__" not in path.parts
                 )
                 self.assertEqual(expected_modules - members, frozenset())
                 self.assertIn(PACKAGED_BENCHMARK_SCHEMA, members)
