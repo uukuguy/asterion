@@ -6,10 +6,10 @@ import hashlib
 import importlib.util
 import stat
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from types import ModuleType
+from typing import cast
 
 from asterion.capability_packages.model import (
     CapabilityPackageCandidate,
@@ -193,7 +193,7 @@ class LocalDirectoryCapabilityPackageSource:
 
 def _record_for_declaration(declaration: CapabilitySourceDeclaration) -> _LocalRecord:
     locator = _locator(declaration.private_locator)
-    root = _canonical_directory(Path(str(locator["root"])))
+    root = _canonical_root(locator["root"])
     payload_root = _owned_directory(root, locator["payload_root"])
     module_path = _owned_file(root, locator["module_path"])
     factory_name = _factory_name(locator["factory_name"])
@@ -219,6 +219,15 @@ def _locator(value: object) -> Mapping[str, object]:
     if set(value.keys()) != _LOCATOR_FIELDS:
         raise LocalDirectoryCapabilitySourceError(_ERROR_MESSAGE)
     return value
+
+
+def _canonical_root(value: object) -> Path:
+    if not isinstance(value, Path) or not value.is_absolute():
+        raise LocalDirectoryCapabilitySourceError(_ERROR_MESSAGE)
+    root = _canonical_directory(value)
+    if value != root:
+        raise LocalDirectoryCapabilitySourceError(_ERROR_MESSAGE)
+    return root
 
 
 def _canonical_directory(path: Path) -> Path:
@@ -307,25 +316,25 @@ def _candidate(record: _LocalRecord) -> CapabilityPackageCandidate:
 
 def _load_factory(record: _LocalRecord) -> object:
     module_name = _scoped_module_name(record)
-    had_previous = module_name in sys.modules
-    previous: ModuleType | None = sys.modules.get(module_name)
-    module = None
+    module_cache = cast(MutableMapping[str, object], sys.modules)
+    had_previous = module_name in module_cache
+    previous = module_cache.get(module_name)
     try:
         spec = importlib.util.spec_from_file_location(module_name, record.module_path)
         if spec is None or spec.loader is None:
             raise LocalDirectoryCapabilitySourceError(_ERROR_MESSAGE)
         module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
+        module_cache[module_name] = module
         spec.loader.exec_module(module)
         factory = getattr(module, record.factory_name, _MISSING)
         if factory is _MISSING:
             raise LocalDirectoryCapabilitySourceError(_ERROR_MESSAGE)
         return factory
     finally:
-        if not had_previous:
-            sys.modules.pop(module_name, None)
-        elif previous is not None:
-            sys.modules[module_name] = previous
+        if had_previous:
+            module_cache[module_name] = previous
+        else:
+            module_cache.pop(module_name, None)
 
 
 def _scoped_module_name(record: _LocalRecord) -> str:

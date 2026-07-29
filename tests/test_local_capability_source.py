@@ -5,6 +5,8 @@ import shutil
 import sys
 import tempfile
 import unittest
+from contextlib import contextmanager
+from collections.abc import Iterator, MutableMapping
 from pathlib import Path
 from typing import cast
 
@@ -25,6 +27,7 @@ PACKAGE_REF = CapabilityPackageRef("example.package", "1.0.0")
 SOURCE_ID = "example.package.local-directory"
 SOURCE_KIND = "local-directory"
 ERROR_MESSAGE = "local capability source is invalid"
+MODULE_PREFIX = "_asterion_local_capability_"
 
 
 def assert_stable_error(
@@ -73,6 +76,26 @@ def declaration(root: Path, **overrides: object) -> CapabilitySourceDeclaration:
         payload_sha256=payload_sha256,
         private_locator=locator,
     )
+
+
+@contextmanager
+def chdir(path: Path) -> Iterator[None]:
+    previous = Path.cwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(previous)
+
+
+def scoped_module_name(root: Path) -> str:
+    import hashlib
+
+    digest = hashlib.sha256()
+    digest.update(SOURCE_ID.encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(str(root / "provider.py").encode("utf-8"))
+    return MODULE_PREFIX + digest.hexdigest()
 
 
 class LocalDirectoryCapabilitySourceTests(unittest.TestCase):
@@ -196,6 +219,43 @@ class LocalDirectoryCapabilitySourceTests(unittest.TestCase):
                         (str(base), "provider imported during local metadata discovery"),
                     )
 
+    def test_rejects_relative_and_noncanonical_roots_without_cwd_rebinding(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir).resolve()
+            root = copy_fixture(base / "valid")
+            payload_sha256 = open_portable_payload(root / "payload").payload_sha256
+            source = LocalDirectoryCapabilityPackageSource(
+                (
+                    declaration(
+                        root,
+                        payload_sha256=payload_sha256,
+                        locator={"root": Path("valid/minimal")},
+                    ),
+                )
+            )
+
+            with chdir(base):
+                with self.assertRaises(LocalDirectoryCapabilitySourceError) as raised:
+                    source.discover_metadata()
+
+            assert_stable_error(self, raised.exception, (str(base), "valid/minimal"))
+
+            rebound = copy_fixture(base / "rebound")
+            rebound_source = LocalDirectoryCapabilityPackageSource(
+                (
+                    declaration(
+                        root,
+                        payload_sha256=payload_sha256,
+                        locator={"root": rebound / ".." / "valid" / "minimal"},
+                    ),
+                )
+            )
+
+            with self.assertRaises(LocalDirectoryCapabilitySourceError) as rebound_error:
+                rebound_source.discover_metadata()
+
+            assert_stable_error(self, rebound_error.exception, (str(base), ".."))
+
     def test_rejects_missing_non_callable_and_mismatched_factory_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)
@@ -248,6 +308,56 @@ class LocalDirectoryCapabilitySourceTests(unittest.TestCase):
             with self.assertRaises(KeyboardInterrupt) as raised:
                 source.load_provider(source.discover_metadata()[0])
             self.assertEqual(str(raised.exception), "SECRET-INTERRUPT")
+
+    def test_scoped_import_restores_preexisting_none_and_object_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = copy_fixture(Path(temp_dir))
+            source = LocalDirectoryCapabilityPackageSource((declaration(root),))
+            candidate = source.discover_metadata()[0]
+            module_name = scoped_module_name(root)
+            module_cache = cast(MutableMapping[str, object], sys.modules)
+            previous = module_cache.get(module_name, None)
+            had_previous = module_name in module_cache
+            try:
+                module_cache[module_name] = None
+                installed = source.load_provider(candidate)
+                self.assertEqual(installed.package_ref, PACKAGE_REF)
+                self.assertIn(module_name, module_cache)
+                self.assertIsNone(module_cache[module_name])
+
+                marker = object()
+                module_cache[module_name] = marker
+                source.load_provider(candidate)
+                self.assertIs(module_cache[module_name], marker)
+
+                interrupt_root = copy_fixture(Path(temp_dir) / "interrupt")
+                (interrupt_root / "provider.py").write_text(
+                    "def create_package():\n"
+                    "    raise KeyboardInterrupt('SECRET-INTERRUPT')\n"
+                )
+                interrupt_source = LocalDirectoryCapabilityPackageSource(
+                    (declaration(interrupt_root),)
+                )
+                interrupt_candidate = interrupt_source.discover_metadata()[0]
+                interrupt_name = scoped_module_name(interrupt_root)
+                interrupt_marker = object()
+                interrupt_previous = module_cache.get(interrupt_name, None)
+                interrupt_had_previous = interrupt_name in module_cache
+                try:
+                    module_cache[interrupt_name] = interrupt_marker
+                    with self.assertRaises(KeyboardInterrupt):
+                        interrupt_source.load_provider(interrupt_candidate)
+                    self.assertIs(module_cache[interrupt_name], interrupt_marker)
+                finally:
+                    if interrupt_had_previous:
+                        module_cache[interrupt_name] = interrupt_previous
+                    else:
+                        module_cache.pop(interrupt_name, None)
+            finally:
+                if had_previous:
+                    module_cache[module_name] = previous
+                else:
+                    module_cache.pop(module_name, None)
 
     def test_rejects_identity_digest_and_replacement_races_without_context_leaks(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
