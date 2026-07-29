@@ -214,10 +214,15 @@ class ApplicationDiscoveryTests(unittest.TestCase):
             select_application_provider_id("code.quality@1.0.0"),
             "controlled-code",
         )
-        self.assertEqual(
-            select_application_provider_id("dci.agent-lite@1.0.0"),
-            "dci-agent-lite",
-        )
+        for selector in (
+            "dci.complete-application@1.0.0",
+            "dci.research-capability@1.0.0",
+        ):
+            with self.subTest(selector=selector):
+                self.assertEqual(
+                    select_application_provider_id(selector),
+                    "dci-agent-lite",
+                )
 
 
 if __name__ == "__main__":

@@ -27,7 +27,8 @@ dci-agent-lite = "asterion.applications.dci_agent_lite:create_provider"
 
 [project.entry-points."asterion.application_index"]
 "code.quality__1.0.0" = "asterion.applications.controlled_code:create_provider"
-"dci.agent-lite__1.0.0" = "asterion.applications.dci_agent_lite:create_provider"
+"dci.complete-application__1.0.0" = "asterion.applications.dci_agent_lite:create_provider"
+"dci.research-capability__1.0.0" = "asterion.applications.dci_agent_lite:create_provider"
 
 [project.entry-points."asterion.host_services"]
 "corpus.local-root" = "asterion.dci.services:create_local_corpus_service_factory"
