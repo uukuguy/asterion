@@ -6,10 +6,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from asterion.applications.discovery import (
+    APPLICATION_INDEX_ENTRY_POINT_GROUP,
     list_application_providers,
     load_application_provider,
+    select_application_provider_id,
 )
 from asterion.applications.provider import ApplicationProviderError
+from asterion.benchmarks.model import ApplicationRef
 from tests.test_installed_application_provider import provider
 
 
@@ -98,6 +101,123 @@ class ApplicationDiscoveryTests(unittest.TestCase):
                 with self.assertRaises(ApplicationProviderError) as raised:
                     load_application_provider(selected, entry_points=entries)
                 self.assertNotIn(sentinel, str(raised.exception))
+
+    def test_application_index_selects_provider_without_loading_entry_points(
+        self,
+    ) -> None:
+        provider_entries = (
+            FakeEntryPoint(
+                name="other-provider",
+                factory=lambda: None,
+                value="example.other:create_provider",
+            ),
+            FakeEntryPoint(
+                name="example-provider",
+                factory=lambda: None,
+                value="example.selected:create_provider",
+            ),
+        )
+        index_entries = (
+            FakeEntryPoint(
+                name="other.application__1.0.0",
+                factory=lambda: None,
+                group=APPLICATION_INDEX_ENTRY_POINT_GROUP,
+                value="example.other:create_provider",
+            ),
+            FakeEntryPoint(
+                name="example.application__1.0.0",
+                factory=lambda: None,
+                group=APPLICATION_INDEX_ENTRY_POINT_GROUP,
+                value="example.selected:create_provider",
+            ),
+        )
+
+        selected_from_ref = select_application_provider_id(
+            ApplicationRef("example.application", "1.0.0"),
+            application_entry_points=index_entries,
+            provider_entry_points=provider_entries,
+        )
+        selected_from_text = select_application_provider_id(
+            "example.application@1.0.0",
+            application_entry_points=index_entries,
+            provider_entry_points=provider_entries,
+        )
+
+        self.assertEqual(selected_from_ref, "example-provider")
+        self.assertEqual(selected_from_text, "example-provider")
+        self.assertEqual(
+            [entry.loads for entry in (*provider_entries, *index_entries)],
+            [0, 0, 0, 0],
+        )
+
+    def test_application_index_rejects_missing_and_ambiguous_matches_redacted(
+        self,
+    ) -> None:
+        sentinel = "SECRET-INDEX-TARGET"
+        selected_index = FakeEntryPoint(
+            name="example.application__1.0.0",
+            factory=lambda: None,
+            group=APPLICATION_INDEX_ENTRY_POINT_GROUP,
+            value=sentinel,
+        )
+        selected_provider = FakeEntryPoint(
+            name="example-provider",
+            factory=lambda: None,
+            value=sentinel,
+        )
+        cases = (
+            ("missing-index", (), (selected_provider,)),
+            (
+                "duplicate-index",
+                (selected_index, selected_index),
+                (selected_provider,),
+            ),
+            ("missing-provider", (selected_index,), ()),
+            (
+                "duplicate-provider-target",
+                (selected_index,),
+                (selected_provider, selected_provider),
+            ),
+        )
+
+        for name, index_entries, provider_entries in cases:
+            with self.subTest(name=name):
+                with self.assertRaises(ApplicationProviderError) as raised:
+                    select_application_provider_id(
+                        "example.application@1.0.0",
+                        application_entry_points=index_entries,
+                        provider_entry_points=provider_entries,
+                    )
+                self.assertEqual(
+                    str(raised.exception),
+                    "installed application index selection is invalid",
+                )
+                self.assertNotIn(sentinel, str(raised.exception))
+
+    def test_application_index_rejects_noncanonical_selectors(self) -> None:
+        for selector in (
+            "example.application",
+            "example.application@1",
+            " example.application@1.0.0",
+            object(),
+        ):
+            with self.subTest(selector=selector):
+                with self.assertRaises(ApplicationProviderError):
+                    select_application_provider_id(
+                        selector,
+                        application_entry_points=(),
+                        provider_entry_points=(),
+                    )
+
+    def test_builtin_application_index_covers_framework_applications(self) -> None:
+        self.assertEqual(
+            select_application_provider_id("code.quality@1.0.0"),
+            "controlled-code",
+        )
+        self.assertEqual(
+            select_application_provider_id("dci.agent-lite@1.0.0"),
+            "dci-agent-lite",
+        )
 
 
 if __name__ == "__main__":
