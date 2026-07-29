@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-29 20:06. **Session remains active — not a final handoff.**
+> Updated: 2026-07-29 20:36. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -42,8 +42,11 @@
 - Plan 2 Task 4 routes controlled-code through an explicit built-in source
   adapter in `c708053`, preserves DCI as an unregistered host-injected
   transition in `d77a14f`, and rejects extra package authority in `e0d8168`.
-- The immediate next action is Plan 2 Task 5: implement metadata-only installed
-  distribution discovery without loading entry-point providers.
+- Plan 2 Task 5 adds metadata-only installed-distribution discovery in
+  `7ddd5a3`, then binds declared descriptor ownership and rejects standard-root
+  symlink escapes through `a0873b8`.
+- The immediate next action is Plan 2 Task 6: implement the explicit
+  local-directory source and move transitional DCI injection onto it.
 
 ## Where things stand
 
@@ -76,17 +79,20 @@
 - Plan 2 Task 4 focused built-in, installed-provider, controlled-code, DCI,
   list/describe, and injection tests passed; modified production modules are
   Pyright/Ruff clean and independent review is approved.
+- Plan 2 Task 5 passed 9 real-wheel distribution tests and 46 adjacent source
+  tests with Pyright/Ruff clean; rebinding and symlink escape probes passed
+  independent review.
 - `dci.agent-runtime/v1` remains only as the deliberate absence-test needle in
   Task 1 scope; no compatibility alias was added.
 - Plans 2-4 remain dependent on completion of the six Plan 1 tasks.
 
 ## Next action
 
-1. Dispatch Plan 2 Task 5 from the approved source plan.
-2. Build/install the isolated fixture distribution and prove metadata
-   discovery/opening never calls `EntryPoint.load()` or imports its provider.
-3. Load only the exact selected provider after payload/source identity is
-   validated; duplicates and identity/digest mismatch fail closed.
+1. Dispatch Plan 2 Task 6 from the approved source plan.
+2. Require explicit-root symlink, escape, factory, identity, and redaction
+   failures before implementing scoped local imports.
+3. Replace the DCI host-injected package object with one explicit
+   local-directory source declaration; never register DCI as built-in.
 
 ## Boundaries and ruled-out paths
 

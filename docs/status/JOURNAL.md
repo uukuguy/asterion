@@ -225,3 +225,8 @@
 - 19:58 Preserved DCI transitional loading with explicit package injection [d77a14f]
 - 20:05 Rejected extra package injections to keep host authority exact [e0d8168]
 - 20:06 Closed package-source Task 4 after built-in and DCI transition review passed [e0d8168]
+- 20:06 Saved built-in-source recovery boundary before distribution discovery [7f3f699]
+- 20:20 Added distribution source adapter to discover installed capability packages without provider imports [7ddd5a3]
+- 20:29 Bound distribution payload roots to declared files to reject rebinding [16f75bd]
+- 20:34 Rejected symlinked distribution payload roots to prevent external payload escapes [a0873b8]
+- 20:36 Closed package-source Task 5 after distribution ownership review passed [a0873b8]
