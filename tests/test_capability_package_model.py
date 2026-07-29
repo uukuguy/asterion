@@ -84,6 +84,38 @@ class CandidateTests(unittest.TestCase):
         self.assertNotIn("remote-registry://SECRET", message)
         self.assertNotIn("SECRET", message)
 
+    def test_candidate_rejects_noncanonical_identity_values_with_body_free_errors(self) -> None:
+        cases = (
+            {
+                "package_ref": CapabilityPackageRef("Bad ID", "1.0.0"),
+                "source_id": "example.source",
+                "metadata": {"distribution_name": "SECRET-DIST"},
+            },
+            {
+                "package_ref": CapabilityPackageRef("example.package", "latest"),
+                "source_id": "example.source",
+                "metadata": {"distribution_name": "SECRET-DIST"},
+            },
+            {
+                "package_ref": CapabilityPackageRef("example.package", "1.0.0"),
+                "source_id": "Bad ID",
+                "metadata": {"distribution_name": "SECRET-DIST"},
+            },
+        )
+        for case in cases:
+            with self.subTest(case=case):
+                with self.assertRaises(CapabilityPackageModelError) as raised:
+                    CapabilityPackageCandidate(
+                        source_kind="builtin",
+                        payload_sha256=None,
+                        **case,
+                    )
+
+                message = str(raised.exception)
+                self.assertNotIn("Bad ID", message)
+                self.assertNotIn("latest", message)
+                self.assertNotIn("SECRET-DIST", message)
+
     def test_candidate_repr_is_body_free_but_registry_is_reserved_internally(self) -> None:
         self.assertEqual(
             SOURCE_KINDS,
@@ -112,6 +144,73 @@ class CandidateTests(unittest.TestCase):
 
 
 class PackageValueTests(unittest.TestCase):
+    def test_payload_rebuilds_manifest_as_an_immutable_defensive_snapshot(self) -> None:
+        capabilities = [CapabilityRef("example.capability", "1.0.0")]
+        benchmark_suites = [BenchmarkSuiteRef("example.suite", "1.0.0")]
+        resources = [
+            ResourceIdentity(
+                "example.resource",
+                "application/json",
+                "b" * 64,
+            )
+        ]
+        mutable_manifest = CapabilityPackageManifest(
+            package_ref=CapabilityPackageRef("example.package", "1.0.0"),
+            capabilities=cast(Any, capabilities),
+            benchmark_suites=cast(Any, benchmark_suites),
+            resources=cast(Any, resources),
+        )
+
+        payload = PortableCapabilityPayload(
+            manifest=mutable_manifest,
+            payload_sha256="c" * 64,
+            resource_root=Path("/private/operator/payload"),
+        )
+        capabilities.append(CapabilityRef("example.changed", "1.0.0"))
+        benchmark_suites.append(BenchmarkSuiteRef("example.changed", "1.0.0"))
+        resources.append(ResourceIdentity("example.changed", "application/json", "d" * 64))
+
+        self.assertIsNot(payload.manifest, mutable_manifest)
+        self.assertEqual(
+            payload.manifest,
+            CapabilityPackageManifest(
+                package_ref=CapabilityPackageRef("example.package", "1.0.0"),
+                capabilities=(CapabilityRef("example.capability", "1.0.0"),),
+                benchmark_suites=(BenchmarkSuiteRef("example.suite", "1.0.0"),),
+                resources=(
+                    ResourceIdentity(
+                        "example.resource",
+                        "application/json",
+                        "b" * 64,
+                    ),
+                ),
+            ),
+        )
+
+    def test_payload_rejects_wrong_manifest_type_and_member_types_body_free(self) -> None:
+        cases = (
+            cast(Any, {"secret": "SECRET", "package_id": "example.package"}),
+            cast(
+                Any,
+                CapabilityPackageManifest(
+                    package_ref=CapabilityPackageRef("example.package", "1.0.0"),
+                    capabilities=(cast(Any, {"capability_id": "SECRET"}),),
+                    benchmark_suites=(),
+                    resources=(),
+                ),
+            ),
+        )
+        for manifest in cases:
+            with self.subTest(manifest=manifest):
+                with self.assertRaises(CapabilityPackageModelError) as raised:
+                    PortableCapabilityPayload(
+                        manifest=manifest,
+                        payload_sha256="c" * 64,
+                        resource_root=Path("/private/operator/payload"),
+                    )
+
+                self.assertNotIn("SECRET", str(raised.exception))
+
     def test_payload_and_installed_package_hide_private_roots_and_implementations(self) -> None:
         manifest = CapabilityPackageManifest(
             package_ref=CapabilityPackageRef("example.package", "1.0.0"),
@@ -166,6 +265,18 @@ class PackageValueTests(unittest.TestCase):
             self.assertNotIn("SECRET-FACTORY", rendered)
             self.assertNotIn("/private/provider", rendered)
 
+    def test_implementation_binding_repr_hides_opaque_implementation(self) -> None:
+        rendered = repr(
+            CapabilityImplementationBinding(
+                CapabilityRef("example.capability", "1.0.0"),
+                SentinelImplementation(),
+            )
+        )
+
+        self.assertIn("example.capability", rendered)
+        self.assertNotIn("SECRET-FACTORY", rendered)
+        self.assertNotIn("/private/provider", rendered)
+
     def test_installed_package_defensively_copies_collections(self) -> None:
         roots = [Path("/private/catalog")]
         suites = [Path("/private/suites")]
@@ -201,6 +312,46 @@ class PackageValueTests(unittest.TestCase):
         self.assertEqual(installed.benchmark_suite_paths, (Path("/private/suites"),))
         self.assertEqual(len(installed.implementations), 1)
         self.assertEqual(len(installed.benchmark_bindings), 1)
+
+    def test_installed_package_rejects_invalid_binding_elements_body_free(self) -> None:
+        invalid_cases = (
+            {"implementations": [{"implementation": "SECRET"}], "benchmark_bindings": ()},
+            {"implementations": (), "benchmark_bindings": [{"implementation": "SECRET"}]},
+        )
+        for case in invalid_cases:
+            with self.subTest(case=case):
+                with self.assertRaises(CapabilityPackageModelError) as raised:
+                    InstalledCapabilityPackage(
+                        package_ref=CapabilityPackageRef("example.package", "1.0.0"),
+                        payload_sha256="d" * 64,
+                        source_id="example.source",
+                        source_kind="builtin",
+                        catalog_roots=(),
+                        benchmark_suite_paths=(),
+                        implementations=cast(Any, case["implementations"]),
+                        benchmark_bindings=cast(Any, case["benchmark_bindings"]),
+                    )
+
+                self.assertNotIn("SECRET", str(raised.exception))
+
+    def test_benchmark_binding_rejects_noncanonical_identity_values(self) -> None:
+        cases = (
+            (CapabilityPackageRef("Bad ID", "1.0.0"), "example.binding"),
+            (CapabilityPackageRef("example.package", "latest"), "example.binding"),
+            (CapabilityPackageRef("example.package", "1.0.0"), "Bad ID"),
+        )
+        for owner_package, binding_id in cases:
+            with self.subTest(owner_package=owner_package, binding_id=binding_id):
+                with self.assertRaises(CapabilityPackageModelError) as raised:
+                    BenchmarkTaskBinding(
+                        owner_package=owner_package,
+                        binding_id=binding_id,
+                        implementation=SentinelImplementation(),
+                    )
+
+                message = str(raised.exception)
+                self.assertNotIn("Bad ID", message)
+                self.assertNotIn("latest", message)
 
 
 class SourceProtocolTests(unittest.TestCase):

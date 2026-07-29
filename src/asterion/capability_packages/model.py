@@ -10,9 +10,13 @@ from pathlib import Path
 from types import MappingProxyType
 
 from asterion.capabilities.execution import CapabilityImplementationBinding
+from asterion.capabilities.protocol import CAPABILITY_ID, SEMANTIC_VERSION
 from asterion.capability_packages.protocol import (
+    CAPABILITY_PACKAGE_PROTOCOL_VERSION,
     CapabilityPackageManifest,
+    CapabilityPackageProtocolError,
     CapabilityPackageRef,
+    validate_capability_package_manifest,
 )
 
 
@@ -41,7 +45,7 @@ class CapabilityPackageCandidate:
 
     def __post_init__(self) -> None:
         _validate_package_ref(self.package_ref)
-        _validate_nonempty_string(self.source_id, "capability package source is invalid")
+        _validate_identifier(self.source_id, "capability package source is invalid")
         _validate_source_kind(self.source_kind)
         if self.payload_sha256 is not None:
             _validate_digest(self.payload_sha256)
@@ -55,6 +59,7 @@ class PortableCapabilityPayload:
     resource_root: Traversable = field(repr=False)
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "manifest", _snapshot_manifest(self.manifest))
         _validate_digest(self.payload_sha256)
 
 
@@ -66,7 +71,7 @@ class BenchmarkTaskBinding:
 
     def __post_init__(self) -> None:
         _validate_package_ref(self.owner_package)
-        _validate_nonempty_string(self.binding_id, "benchmark task binding is invalid")
+        _validate_identifier(self.binding_id, "benchmark task binding is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,7 +88,7 @@ class InstalledCapabilityPackage:
     def __post_init__(self) -> None:
         _validate_package_ref(self.package_ref)
         _validate_digest(self.payload_sha256)
-        _validate_nonempty_string(self.source_id, "installed capability source is invalid")
+        _validate_identifier(self.source_id, "installed capability source is invalid")
         _validate_source_kind(self.source_kind)
         object.__setattr__(self, "catalog_roots", _path_tuple(self.catalog_roots))
         object.__setattr__(
@@ -91,8 +96,53 @@ class InstalledCapabilityPackage:
             "benchmark_suite_paths",
             _path_tuple(self.benchmark_suite_paths),
         )
-        object.__setattr__(self, "implementations", tuple(self.implementations))
-        object.__setattr__(self, "benchmark_bindings", tuple(self.benchmark_bindings))
+        object.__setattr__(
+            self,
+            "implementations",
+            _implementation_binding_tuple(self.implementations),
+        )
+        object.__setattr__(
+            self,
+            "benchmark_bindings",
+            _benchmark_binding_tuple(self.benchmark_bindings),
+        )
+
+
+def _snapshot_manifest(manifest: CapabilityPackageManifest) -> CapabilityPackageManifest:
+    if not isinstance(manifest, CapabilityPackageManifest):
+        raise CapabilityPackageModelError("capability package manifest is invalid")
+    try:
+        return validate_capability_package_manifest(
+            {
+                "protocol": CAPABILITY_PACKAGE_PROTOCOL_VERSION,
+                "package_id": manifest.package_ref.package_id,
+                "version": manifest.package_ref.version,
+                "capabilities": [
+                    {
+                        "capability_id": capability.capability_id,
+                        "version": capability.version,
+                    }
+                    for capability in tuple(manifest.capabilities)
+                ],
+                "benchmark_suites": [
+                    {
+                        "suite_id": suite.suite_id,
+                        "version": suite.version,
+                    }
+                    for suite in tuple(manifest.benchmark_suites)
+                ],
+                "resources": [
+                    {
+                        "resource_id": resource.resource_id,
+                        "media_type": resource.media_type,
+                        "sha256": resource.sha256,
+                    }
+                    for resource in tuple(manifest.resources)
+                ],
+            }
+        )
+    except (AttributeError, CapabilityPackageProtocolError, TypeError):
+        raise CapabilityPackageModelError("capability package manifest is invalid") from None
 
 
 def _safe_metadata(metadata: Mapping[str, object]) -> Mapping[str, str]:
@@ -114,9 +164,39 @@ def _path_tuple(paths: Iterable[Path]) -> tuple[Path, ...]:
         raise CapabilityPackageModelError("capability package paths are invalid") from None
 
 
+def _implementation_binding_tuple(
+    bindings: Iterable[CapabilityImplementationBinding],
+) -> tuple[CapabilityImplementationBinding, ...]:
+    try:
+        values = tuple(bindings)
+    except TypeError:
+        raise CapabilityPackageModelError(
+            "capability implementation bindings are invalid"
+        ) from None
+    if not all(isinstance(binding, CapabilityImplementationBinding) for binding in values):
+        raise CapabilityPackageModelError(
+            "capability implementation bindings are invalid"
+        )
+    return values
+
+
+def _benchmark_binding_tuple(
+    bindings: Iterable[BenchmarkTaskBinding],
+) -> tuple[BenchmarkTaskBinding, ...]:
+    try:
+        values = tuple(bindings)
+    except TypeError:
+        raise CapabilityPackageModelError("benchmark task bindings are invalid") from None
+    if not all(isinstance(binding, BenchmarkTaskBinding) for binding in values):
+        raise CapabilityPackageModelError("benchmark task bindings are invalid")
+    return values
+
+
 def _validate_package_ref(value: CapabilityPackageRef) -> None:
     if not isinstance(value, CapabilityPackageRef):
         raise CapabilityPackageModelError("capability package identity is invalid")
+    _validate_identifier(value.package_id, "capability package identity is invalid")
+    _validate_version(value.version)
 
 
 def _validate_source_kind(value: str) -> None:
@@ -129,9 +209,14 @@ def _validate_digest(value: str) -> None:
         raise CapabilityPackageModelError("capability package digest is invalid")
 
 
-def _validate_nonempty_string(value: str, message: str) -> None:
-    if not isinstance(value, str) or not value:
+def _validate_identifier(value: str, message: str) -> None:
+    if not isinstance(value, str) or CAPABILITY_ID.fullmatch(value) is None:
         raise CapabilityPackageModelError(message)
+
+
+def _validate_version(value: str) -> None:
+    if not isinstance(value, str) or SEMANTIC_VERSION.fullmatch(value) is None:
+        raise CapabilityPackageModelError("capability package identity is invalid")
 
 
 __all__ = (

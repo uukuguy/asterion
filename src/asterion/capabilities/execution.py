@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePath
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol
@@ -137,7 +137,7 @@ class CapabilityImplementation(Protocol):
 @dataclass(frozen=True, slots=True)
 class CapabilityImplementationBinding:
     capability_ref: CapabilityRef
-    implementation: CapabilityImplementation
+    implementation: CapabilityImplementation = field(repr=False)
 
 
 def validate_implementation_bindings(
