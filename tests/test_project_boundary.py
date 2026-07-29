@@ -8,6 +8,7 @@ from pathlib import Path
 
 PROJECT = Path(__file__).resolve().parents[1]
 SOURCE = PROJECT / "src/asterion"
+BENCHMARK_SOURCE = SOURCE / "benchmarks"
 TEXT_SUFFIXES = frozenset(
     {
         ".cfg",
@@ -54,6 +55,56 @@ FORBIDDEN_PROTOCOL_IDENTIFIERS = (
     "dci." + "package/v1",
     "dci." + "assembly/v1",
 )
+FORBIDDEN_BENCHMARK_IMPORT_PREFIXES = (
+    "asterion.dci",
+    "asterion.capabilities.dci",
+)
+FORBIDDEN_DCI_BENCHMARK_LITERAL_PREFIXES = (
+    "ASTERION_DCI_",
+    "DCI_",
+    "beir.",
+    "bright.",
+    "qa.",
+)
+FORBIDDEN_DCI_BENCHMARK_LITERALS = frozenset(
+    {
+        "browsecomp-plus",
+        "bcplus",
+        "bcplus-qa",
+        "level0",
+        "level1",
+        "level2",
+        "level3",
+        "level4",
+    }
+)
+PRIVATE_BENCHMARK_SERIALIZATION_FIELDS = frozenset(
+    {
+        "assembly_paths",
+        "benchmark_suite_paths",
+        "output_directory",
+        "private_payload",
+        "resource_root",
+        "source_lock_path",
+    }
+)
+
+
+def benchmark_trees() -> tuple[tuple[Path, ast.Module], ...]:
+    return tuple(
+        (path, ast.parse(path.read_text(encoding="utf-8"), filename=str(path)))
+        for path in sorted(BENCHMARK_SOURCE.glob("*.py"))
+    )
+
+
+def imported_names(tree: ast.AST) -> tuple[str, ...]:
+    names: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            names.append(node.module)
+    return tuple(names)
 
 
 def identity_files(*, root: Path = PROJECT) -> tuple[Path, ...]:
@@ -144,6 +195,94 @@ class AsterionProjectBoundaryTests(unittest.TestCase):
             path.write_text("# Generated review evidence\n", encoding="utf-8")
 
             self.assertNotIn(path, identity_files(root=root))
+
+    def test_generic_benchmarks_do_not_import_dci_product_modules(self) -> None:
+        offenders = [
+            (path.relative_to(PROJECT), name)
+            for path, tree in benchmark_trees()
+            for name in imported_names(tree)
+            if any(
+                name == prefix or name.startswith(f"{prefix}.")
+                for prefix in FORBIDDEN_BENCHMARK_IMPORT_PREFIXES
+            )
+        ]
+
+        self.assertEqual(offenders, [])
+
+    def test_generic_benchmarks_do_not_embed_dci_operator_identifiers(self) -> None:
+        offenders: list[tuple[Path, str]] = []
+        for path, tree in benchmark_trees():
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Constant) or not isinstance(
+                    node.value, str
+                ):
+                    continue
+                value = node.value
+                if value in FORBIDDEN_DCI_BENCHMARK_LITERALS or value.startswith(
+                    FORBIDDEN_DCI_BENCHMARK_LITERAL_PREFIXES
+                ):
+                    offenders.append((path.relative_to(PROJECT), value))
+
+        self.assertEqual(offenders, [])
+
+    def test_generic_benchmark_runner_does_not_discover_package_sources(self) -> None:
+        runner = ast.parse(
+            (BENCHMARK_SOURCE / "execution.py").read_text(encoding="utf-8"),
+            filename=str(BENCHMARK_SOURCE / "execution.py"),
+        )
+        forbidden: list[str] = []
+        for node in ast.walk(runner):
+            if isinstance(node, ast.Name):
+                name = node.id
+            elif isinstance(node, ast.Attribute):
+                name = node.attr
+            else:
+                continue
+            if "discover" in name.lower() or name in {
+                "open_payload",
+                "resolve_capability_source",
+            }:
+                forbidden.append(name)
+
+        self.assertEqual(forbidden, [])
+
+    def test_generic_benchmark_subprocess_use_is_isolated_to_process_adapter(
+        self,
+    ) -> None:
+        offenders = [
+            (path.relative_to(PROJECT), name)
+            for path, tree in benchmark_trees()
+            if path.name != "process.py"
+            for name in imported_names(tree)
+            if name == "subprocess" or name.startswith("subprocess.")
+        ]
+
+        self.assertEqual(offenders, [])
+
+    def test_public_benchmark_serializers_do_not_read_private_payloads_or_paths(
+        self,
+    ) -> None:
+        offenders: list[tuple[Path, str, str]] = []
+        for path, tree in benchmark_trees():
+            for node in tree.body:
+                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                if not (
+                    node.name.startswith("public_")
+                    or node.name.startswith("render_")
+                    or "serialize" in node.name
+                ):
+                    continue
+                for child in ast.walk(node):
+                    if (
+                        isinstance(child, ast.Attribute)
+                        and child.attr in PRIVATE_BENCHMARK_SERIALIZATION_FIELDS
+                    ):
+                        offenders.append(
+                            (path.relative_to(PROJECT), node.name, child.attr)
+                        )
+
+        self.assertEqual(offenders, [])
 
 
 if __name__ == "__main__":
