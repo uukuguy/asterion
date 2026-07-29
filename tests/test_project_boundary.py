@@ -46,10 +46,10 @@ RECURSIVE_EXCLUDED_NAMES = frozenset(
     }
 )
 HISTORICAL_DOCUMENT_ROOTS = (
-    Path("docs/status"),
     Path("docs/superpowers/plans"),
     Path("docs/superpowers/specs"),
 )
+HISTORICAL_DOCUMENT_FILES = frozenset({Path("docs/status/JOURNAL.md")})
 GENERATED_SDD_EVIDENCE_ROOT = Path(".superpowers/sdd")
 FORBIDDEN_PROTOCOL_IDENTIFIERS = (
     "dci." + "agent-runtime/v1",
@@ -97,6 +97,7 @@ OBSOLETE_DCI_BENCHMARK_SURFACES = (
     Path("tests/test_dci_benchmark_orchestrator.py"),
 )
 OBSOLETE_DCI_DOC_FRAGMENTS = (
+    "capabilities/dci_research",
     "asterion-dci ablation",
     "asterion-dci evaluate",
     "asterion-dci export",
@@ -141,6 +142,7 @@ def identity_files(*, root: Path = PROJECT) -> tuple[Path, ...]:
             or any(part in RECURSIVE_EXCLUDED_NAMES for part in relative.parts)
             or relative == GENERATED_SDD_EVIDENCE_ROOT
             or relative.is_relative_to(GENERATED_SDD_EVIDENCE_ROOT)
+            or relative in HISTORICAL_DOCUMENT_FILES
             or any(
                 relative == root or relative.is_relative_to(root)
                 for root in HISTORICAL_DOCUMENT_ROOTS
@@ -153,6 +155,10 @@ def identity_files(*, root: Path = PROJECT) -> tuple[Path, ...]:
 
 
 class AsterionProjectBoundaryTests(unittest.TestCase):
+    def test_obsolete_dci_owner_directories_are_absent(self) -> None:
+        self.assertFalse((SOURCE / "dci").exists())
+        self.assertFalse((SOURCE / "capabilities/dci_research").exists())
+
     def test_obsolete_dci_benchmark_surfaces_are_absent(self) -> None:
         self.assertEqual(
             tuple(

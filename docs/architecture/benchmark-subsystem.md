@@ -36,3 +36,14 @@ body-free evidence only; it does not interpret product configuration.
 The canonical benchmark-suite schema is shipped in the wheel at
 `asterion/schemas/benchmark-suite/v1/benchmark-suite.schema.json`, alongside
 every module under `asterion.benchmarks`.
+
+DCI is one capability-package implementation of this subsystem. Its package
+owns DCI suite declarations, exact task bindings, and translation from private
+operator inputs; generic Asterion code owns planning, authorization interfaces,
+sequential execution, and body-free evidence.
+
+Planning and repository checks are provider-free. Bounded execution requires
+fresh, explicit host authorization; full datasets and paper reproduction require
+separate finite-budget governance. A monetary amount is not part of the generic
+authorization contract. DCI may receive an optional amount as private operator
+configuration, but it is never public metadata or authority.

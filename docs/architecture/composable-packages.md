@@ -91,6 +91,12 @@ mutable JSON-shaped copy; mutating it cannot affect the stored snapshot or a
 subsequent selection. This preserves deterministic composition without exposing
 mutable contract state.
 
+Built-in, installed-distribution, and explicit local-directory registrations are
+source forms, not authority tiers. Resolution applies no hidden precedence and
+fails closed when more than one source offers an exact package, including when
+their verified payload digests are equal. An exact source lock is the only
+selection authority.
+
 ## Adding a package
 
 1. Choose one portable kind: `capability`, `workflow`, `policy`, `memory`,
@@ -104,11 +110,21 @@ Create one runtime-neutral manifest, not adapter-specific variants. Runtime
 adapters translate native capabilities into protocol IDs before composition;
 package identity and dependency semantics remain unchanged.
 
+Every package admitted as built-in must also remain portable: materialize its
+payload, validate it with the public SDK and conformance kit, externalize it
+through an installed distribution, and prove that built-in, distribution, and
+local source forms resolve to equivalent public package behavior. DCI passed
+that external-first proof before its built-in registration was added.
+
 Manifests must never contain prompts, credentials, executable paths, commands,
 environment variables, mutable state, provider configuration, or adapter-private
 types. Those values belong behind runtime, policy, or controlled-executor
 boundaries. Package composition is not an authorization substitute: execution
 still requires the applicable runtime and executor policy checks.
+
+Archive and registry sources are not v1 source forms. They remain deferred
+until a separate design specifies provenance, verification, trust, lifecycle,
+and failure behavior.
 
 ## Verification
 

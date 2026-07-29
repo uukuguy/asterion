@@ -259,6 +259,14 @@ class PromotionCheckTests(unittest.TestCase):
         self.assertIn("'applications/*/assemblies/*.json'", smoke_source)
         self.assertIn("'capabilities/*/capability-package.json'", smoke_source)
         self.assertIn("'capabilities/*/manifests/*.json'", smoke_source)
+        self.assertIn(
+            "'capabilities/dci/payload/capability-package.json'",
+            smoke_source,
+        )
+        self.assertIn(
+            "'capabilities/dci/payload/benchmark-suites/*.json'",
+            smoke_source,
+        )
         self.assertIn("root.glob(pattern)", smoke_source)
         self.assertIn("capability_sdk/templates/minimal", smoke_source)
         self.assertIn("asterion.capability_sdk", smoke_source)
@@ -275,7 +283,10 @@ class PromotionCheckTests(unittest.TestCase):
             "capabilities/controlled_code/manifests/code-quality-workflow.json",
             "capabilities/controlled_code/manifests/controlled-code-policy.json",
             "capabilities/controlled_code/manifests/execution-audit-observability.json",
-            "capabilities/dci_research/capability-package.json",
+            "capabilities/dci/payload/capability-package.json",
+            "capabilities/dci/payload/benchmark-suites/all.json",
+            "capabilities/dci/payload/benchmark-suites/github.json",
+            "capabilities/dci/payload/benchmark-suites/paper-main.json",
             "capabilities/dci/payload/capabilities/dci-analysis.json",
             "capabilities/dci/payload/capabilities/dci-benchmark.json",
             "capabilities/dci/payload/capabilities/dci-evaluation.json",

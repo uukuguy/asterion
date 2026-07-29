@@ -1,170 +1,54 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-30 03:56. **Session remains active — not a final handoff.**
+> Updated: 2026-07-29. Plan 4 implementation is complete on
+> `feature/capability-protocol-foundation`.
 
-## TL;DR
+## Outcome
 
-- Plan 1 is active in
-  `.worktrees/capability-protocol-foundation` on
-  `feature/capability-protocol-foundation`.
-- All six Plan 1 tasks are complete and independently reviewed: runtime identity is
-  `asterion.agent-runtime/v1`, and the individual capability core is
-  `asterion.capability/v1`.
-- Task 2 landed in `92e7113` plus review fixes `0307a0f`; Python and
-  TypeScript capability contracts agree and no old executable package core
-  remains.
-- Task 3 added `asterion.capability-package/v1`, immutable package values,
-  closed fixtures, and exact controlled-code/DCI descriptors in `04e5456`
-  plus schema-alignment fix `b4102a5`.
-- Task 4 established `asterion.application-assembly/v1`, independently
-  ordered `capability_packages`/`capabilities`, exact built-in refs, and
-  schema-declared semantic ordering in `5b17eca` plus `c021198`.
-- Task 5 added closed benchmark-suite, capability-source, and source-lock
-  protocols in `d82126c`, then removed the prohibited public registry source
-  surface and cleared Pyright findings in `7311029`.
-- Task 6 added active-surface old-identity rejection and complete installed
-  wheel resource inventory checks in `d905d79`, strengthened exclusions and
-  wheel coverage in `a2b2d97`, and isolated boundary fixtures in `e3b1ebd`.
-- Final whole-branch review found and closed package-closure enforcement:
-  installed assemblies now require exact package descriptors and capability
-  membership before composition in `18ed670`.
-- Fresh final verification passed 577 Python tests, all cross-language gates,
-  and 20 provider-free promotion commands.
-- Plan 2 Task 1 added source-neutral immutable package values in `33a96c1`,
-  then closed canonical identity, deep snapshot, opaque repr, hostile-body,
-  and exception-context review findings through `33e31a8`.
-- Plan 2 Task 2 added descriptor-relative portable payload validation in
-  `07e154b`, then bound immutable verified bytes, exact declared conformance
-  closure, and strict finite JSON through `8b9bc9f`.
-- Plan 2 Task 3 added exact source-lock resolution in `20732bf`, then redacted
-  hostile digest comparison failures in `4c9f699`; selection remains exact by
-  package ref, source ID, and digest.
-- Plan 2 Task 4 routes controlled-code through an explicit built-in source
-  adapter in `c708053`, preserves DCI as an unregistered host-injected
-  transition in `d77a14f`, and rejects extra package authority in `e0d8168`.
-- Plan 2 Task 5 adds metadata-only installed-distribution discovery in
-  `7ddd5a3`, then binds declared descriptor ownership and rejects standard-root
-  symlink escapes through `a0873b8`.
-- Plan 2 Task 6 adds explicit local-directory loading and moves transitional
-  DCI through that source in `6fff8bf`, then requires canonical absolute roots
-  and exact scoped-module restoration in `13be67f`.
-- Plan 2 Task 7 publishes the exact capability SDK/conformance kit in
-  `50afda8`, closes executable/import/aggregate/artifact/redaction findings in
-  `c2b4be3`, and aligns structural executor typing in `4e8d3fa`.
-- Plan 2 Task 8 adds provider-free capability author commands and packaged
-  templates in `97b2dea`, hardens trust boundaries in `9e35aff`, and keeps
-  template initialization stable after compilation in `2ad265e`.
-- Fresh Plan 2 Task 8 verification passed 684 Python tests, all cross-language
-  checks, and 22 provider-free promotion commands; independent review found
-  no remaining issue.
-- Plan 2 whole-branch review found no Critical or Important issue; its one
-  type-diagnostic Minor was closed in `812b209`, and final full gates passed.
-- Plan 3 Task 1 defines immutable generic benchmark values in `75327b1`, then
-  closes protocol, suite-closure, public-argument, and deep-freeze review gaps
-  through `82449c5`; 11 focused tests and static checks pass.
-- Plan 3 Task 2 adds exact closed-world suite/task resolution in `c1c0b18`,
-  then closes declaration, duplicate, descriptor, redaction, and valid
-  cross-platform fail-closed review gaps through `aba1503`.
-- Plan 3 Task 3 adds bounded planning in `b52dc3d`, restores the approved
-  request interface and pure-planning boundary in `3c413ec`, then binds
-  execution intent to an injected host authorizer and composed packages in
-  `fcdbaf1`.
-- Plan 3 Task 4 adds descriptor-bound private benchmark evidence in `aaba158`,
-  then aligns it to the approved `BenchmarkEvidenceStore` runner contract in
-  `29fa698` and closes resume/lifecycle gaps in `7aa5208`: stateful
-  `initialize/start_task/append_progress/finish_*`,
-  immutable partial resume, ordered lifecycle, strict JSON, and failed/cancelled
-  run closure. Independent re-review found no remaining issue; 52 focused tests
-  and static checks pass.
-- Plan 3 Task 5 adds the sequential runner in `c645ab5`, closes invocation,
-  progress, terminal-evidence, and crash-window gaps through `327b116`, and
-  binds process payloads to host issuers in `286ecd7`. Cancellation kills the
-  complete process group, including a TERM-ignoring grandchild. Both runner
-  and process tracks passed independent review.
-- Plan 3 Task 6 adds metadata-only application indexing, separates live task
-  implementations from typed plans, and makes the installed benchmark planning
-  command usable through `726d0a8`. Exact DCI application selectors are indexed;
-  execution remains externally authorized. Independent review is clean, `make
-  check` passes 800 Python tests plus all cross-language gates, and promotion is
-  22/22 with provider operations `0`.
-- Plan 3 Task 7 closes recursive domain-neutral AST boundaries, wheel module
-  and schema packaging, and architecture documentation through `7df72e7`.
-  Independent review is clean; final `make check` passes 806 Python tests plus
-  all cross-language gates, and promotion is 22/22 with provider operations
-  `0` and full dataset `no`.
-- Plan 3 is complete. The immediate next action is Plan 4 Task 1: define the
-  portable DCI capability payload and three exact benchmark suites.
+DCI is implemented as `dci@1.0.0`, one capability package consumed by the
+generic Asterion benchmark subsystem. It is not a generic framework dependency
+or a parallel benchmark architecture.
 
-## Where things stand
+The package owns seven capability manifests, three exact benchmark suites,
+fifteen task bindings, its domain implementation, resources, and provider.
+The `asterion-dci` entry point is only an application adapter over the generic
+benchmark host.
 
-- Isolated baseline passed 536 Python tests plus TypeScript, Rust, lint, docs,
-  and wheel build.
-- Task 1 GREEN verification passed 9 focused Python tests, 14 TypeScript tests,
-  and 537 full Python tests.
-- Task 2 focused verification passed 47 Python tests, 15 TypeScript tests,
-  example imports, and lint; independent re-review found no remaining issues.
-- Task 3 focused verification passed 42 Python tests plus AJV, lint, build,
-  descriptor packaging, and independent review.
-- Task 4 focused verification passed 57 Python tests, 16 TypeScript tests,
-  lint, and independent review with no remaining issues.
-- Task 5 focused verification passed 25 Python tests, 19 TypeScript tests,
-  TypeScript build, Pyright, Ruff, and independent review with no remaining
-  issues.
-- Task 6 verification passed 574 Python tests, `make check`, and all 20
-  provider-free promotion commands; docs, TypeScript, Rust, and wheel build
-  are green with provider operations `0` and full dataset `no`.
-- Final post-review verification passed 577 Python tests through `make check`;
-  `make promotion-check` reported `commands=20 provider_operations=0
-  full_dataset=no`.
-- Plan 2 Task 1 focused verification passed 15 model tests and 51 adjacent
-  tests with Pyright and Ruff clean; independent review is approved.
-- Plan 2 Task 2 focused verification passed 36 Python and 19 TypeScript tests
-  with Pyright and Ruff clean; immutable-view and closure probes passed review.
-- Plan 2 Task 3 focused verification passed 15 source-resolution tests and 48
-  adjacent package/source/model/payload tests with Pyright, Ruff, compileall,
-  `make lint`, and `git diff --check` clean.
-- Plan 2 Task 4 focused built-in, installed-provider, controlled-code, DCI,
-  list/describe, and injection tests passed; modified production modules are
-  Pyright/Ruff clean and independent review is approved.
-- Plan 2 Task 5 passed 9 real-wheel distribution tests and 46 adjacent source
-  tests with Pyright/Ruff clean; rebinding and symlink escape probes passed
-  independent review.
-- Plan 2 Task 6 passed 81 local/DCI/CLI tests with targeted Pyright/Ruff clean;
-  root-canonicality and module-cleanup probes passed independent review.
-- Plan 2 Task 7 passed expanded SDK/conformance/DCI/controlled-executor focused
-  suites with production and modified-test Pyright/Ruff clean; independent
-  review is approved.
-- Plan 2 Task 8 passed its focused adversarial review and the full phase gates:
-  `make check` and `make promotion-check` both exited 0, with provider
-  operations `0` and full dataset `no`.
-- Plan 3 Task 4 evidence verification passed 46 focused benchmark
-  model/resolution/planning/evidence tests, Pyright, Ruff, compileall, and
-  diff-check after `29fa698`.
-- Plan 3 Task 5 final focused verification passed 98 benchmark tests plus
-  Pyright, Ruff, compileall, and diff-check. Process tests passed repeatedly;
-  independent process review also ran `make check` with 779 Python tests and
-  all TypeScript, Rust, docs, lint, and wheel gates green.
-- Plan 3 Task 6 focused verification passed 102 benchmark/application tests,
-  Pyright, Ruff, docs, `make check`, and `make promotion-check`; the installed
-  controlled-code plan path loads no capability implementation provider.
-- Plan 3 Task 7 final verification passed 106 focused tests, 806 full Python
-  tests, all TypeScript/Rust/docs/lint/wheel gates, and 22 provider-free
-  promotion commands.
-- `dci.agent-runtime/v1` remains only as the deliberate absence-test needle in
-  Task 1 scope; no compatibility alias was added.
-- Plan 2 is complete and independently reviewed.
+DCI passed an external-first proof in a clean wheel environment using only the
+public SDK. Its built-in, installed-distribution, and explicit local-directory
+forms have equivalent payload identity, conformance, implementation bindings,
+plans, and public results. Equal candidates remain ambiguous without an exact
+source lock.
+
+The obsolete `asterion.dci`, `asterion.capabilities.dci_research`, global
+launchers, task shell scripts, and legacy tests are absent. Generic framework
+packages do not import DCI.
+
+## Plan 4 commits
+
+- `9e5ca30` — migrate DCI manifest consumers to the portable payload.
+- `d97cb60` — harden portable DCI payload boundaries.
+- `bac48d3` — bind DCI benchmark tasks in package code.
+- `0abb75a` — move DCI implementation into its package.
+- `c720586` — make the DCI CLI an application adapter.
+- `61a966e` — remove global DCI benchmark launchers.
+- `dfddcb2` — prove DCI as an external capability package.
+- `1a3b162` — materialize DCI as an equivalent built-in source.
+
+## Boundaries
+
+- Planning, acceptance, tests, checks, and promotion are provider-free.
+- Execution requires a fresh embedding-host authorization, an exact source
+  lock, injected implementations and services, cancellation, and private
+  evidence storage.
+- A monetary amount is optional private DCI operator configuration, not a
+  generic requirement or execution authority.
+- Full datasets and paper reproduction remain separately governed and were not
+  run.
+- Archive and registry source forms remain deferred pending a separate security
+  and lifecycle design.
 
 ## Next action
 
-1. Implement Plan 4 Task 1 portable DCI payload and exact suite manifests.
-2. Preserve the external-first order; do not register DCI as built-in yet.
-3. Continue without provider, Agent, Judge, download, setup, or dataset work.
-
-## Boundaries and ruled-out paths
-
-- Do not work directly on `main` or modify its uncommitted recovered baton.
-- Do not preserve aliases for old `dci.*` generic protocols.
-- Do not conflate individual capabilities with capability-package descriptors.
-- Do not register DCI as a built-in source before its installed-distribution
-  form passes the external-first proof.
-- Do not run provider, Agent, Judge, download, setup, or full-dataset work.
+Review and integrate this branch. No Plan 4 implementation task remains after
+the final Task 8 gates and review pass.

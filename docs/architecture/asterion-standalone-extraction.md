@@ -152,7 +152,7 @@ Python 迁移完成的定义是 isolated wheel 可用，而不是源目录内 `u
 
 ## Phase 5：迁移 DCI 产品与应用
 
-初始策略是 **keep DCI bundled initially**：保留 `asterion/dci`、`dci_research` capability、`dci_agent_lite` provider、`asterion-dci` entry point、资源 profile 和 `scripts`。原因是当前完整产品验证、resource packaging 和应用绑定都在同一个 wheel 中有证据；在拆仓同时拆 distribution 会让问题来源不可区分。
+初始策略是 **keep DCI bundled initially**：先保留 DCI 产品代码、application provider、`asterion-dci` entry point 和资源 profile，以隔离拆仓与 distribution 变化。后续 capability-package 迁移已将产品代码收敛到 `asterion.capabilities.dci`，并删除旧 owner 和全局执行脚本。
 
 迁移步骤：
 

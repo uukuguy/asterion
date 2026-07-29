@@ -15,7 +15,6 @@ comparison baseline with its own framework implementation.
 src/asterion/                         sole product distribution
 parent workspace src/dci/             mixed-repository, unpackaged benchmark baseline
 src/asterion/capabilities/dci/           portable DCI payload and implementation owner
-src/asterion/capabilities/dci_research/  transitional compatibility surface
 src/asterion/applications/dci_agent_lite/ bundled provider and assemblies
 src/asterion/capabilities/controlled_code/ controlled-code declarative packages
 packages/typescript/asterion-runtime/ TypeScript validation and host types

@@ -95,6 +95,11 @@ distribution.
   governance. The bounded execution interface is **External-limited** and does
   not make `paper_full_executable=false` true.
 
+Authorization is explicit and host-owned; Asterion does not require a monetary
+amount to authorize a benchmark. An optional amount may be supplied as private
+DCI operator configuration, but it is never serialized into a manifest, plan,
+or public result and never grants execution authority.
+
 DCI exposes three exact suites through the generic benchmark subsystem:
 `dci.github@1.0.0` (12 tasks), `dci.paper-main@1.0.0` (13 tasks), and
 `dci.all@1.0.0` (15 tasks). The application adapter fixes the application to
@@ -127,6 +132,27 @@ body-free public task/run results. Resume additionally requires the compatible
 run ID. Full datasets and paper reproduction remain separately governed.
 
 Use `make help` to see the same boundary beside every command group.
+
+## Capability package sources
+
+Built-in, installed-distribution, and explicit local-directory packages are
+source forms of the same capability-package contract. A built-in registration
+is not a privileged implementation layer. DCI is one package implementation of
+the generic Asterion benchmark subsystem, and its built-in form exists only
+after the same payload was proven through a clean external wheel using the
+public SDK and conformance kit.
+
+Source resolution has no hidden precedence. Multiple candidates for the same
+exact package remain ambiguous even when their payload digests match; the host
+must supply an exact source lock. Metadata discovery does not import provider
+code, and only the selected installed extension is loaded. Installed extension
+code is therefore part of the operator's trusted computing base after exact
+selection, not trusted metadata during discovery.
+
+Operator-owned credentials, provider configuration, datasets, corpus roots,
+private environment, and evidence stay outside package manifests. Archive and
+registry source forms are intentionally deferred until their trust,
+verification, and lifecycle design is approved.
 
 ## Development
 

@@ -82,6 +82,7 @@ def _imports(path: Path) -> tuple[str, ...]:
 class DciPackageOwnershipTests(unittest.TestCase):
     def test_all_domain_modules_have_one_package_owner(self) -> None:
         self.assertFalse((SOURCE / "dci").exists())
+        self.assertFalse((SOURCE / "capabilities/dci_research").exists())
         self.assertEqual(
             {path.name for path in IMPLEMENTATION.glob("*.py")},
             EXPECTED_ROOT_MODULES,
@@ -179,6 +180,17 @@ class DciPackageOwnershipTests(unittest.TestCase):
                 except ModuleNotFoundError:
                     spec = None
                 self.assertIsNone(spec)
+
+    def test_every_dci_named_module_is_package_or_application_owned(self) -> None:
+        offenders = {
+            path.relative_to(SOURCE).as_posix()
+            for path in SOURCE.rglob("*.py")
+            if "dci" in path.relative_to(SOURCE).as_posix().lower()
+            and not path.is_relative_to(PACKAGE)
+            and not path.is_relative_to(SOURCE / "applications/dci_agent_lite")
+        }
+
+        self.assertEqual(offenders, set())
 
 
 if __name__ == "__main__":

@@ -29,7 +29,7 @@ from asterion.capability_packages.protocol import (
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "extensions" / "minimal" / "payload"
 DCI_PAYLOAD_ROOT = (
     Path(__file__).resolve().parents[1]
-    / "src/asterion/capabilities/dci_research/payload"
+    / "src/asterion/capabilities/dci/payload"
 )
 
 
@@ -275,9 +275,15 @@ class CapabilityPackagePayloadTests(unittest.TestCase):
     def test_missing_empty_benchmark_suite_directory_matches_wheel_materialization(
         self,
     ) -> None:
-        source_payload = open_portable_payload(DCI_PAYLOAD_ROOT)
-        copied = self.root.parent / "dci-wheel-like" / "payload"
-        shutil.copytree(DCI_PAYLOAD_ROOT, copied)
+        copied = self.root.parent / "wheel-like" / "payload"
+        shutil.copytree(self.root, copied)
+        descriptor_path = copied / "capability-package.json"
+        descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
+        descriptor["benchmark_suites"] = []
+        descriptor_path.write_bytes(_canonical_json(descriptor))
+        for suite_path in (copied / "benchmark-suites").glob("*.json"):
+            suite_path.unlink()
+        source_payload = open_portable_payload(copied)
         (copied / "benchmark-suites").rmdir()
 
         materialized = open_portable_payload(copied)

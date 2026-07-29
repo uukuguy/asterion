@@ -38,7 +38,8 @@ DCI_DESCRIPTOR = (
     / "src"
     / "asterion"
     / "capabilities"
-    / "dci_research"
+    / "dci"
+    / "payload"
     / "capability-package.json"
 )
 CONFORMANCE_FIXTURE = (
@@ -327,11 +328,20 @@ class CapabilityPackageProtocolTests(unittest.TestCase):
             ),
         )
         self.assertEqual(controlled_code.benchmark_suites, ())
-        self.assertEqual(dci.benchmark_suites, ())
+        self.assertEqual(
+            dci.benchmark_suites,
+            (
+                BenchmarkSuiteRef("dci.all", "1.0.0"),
+                BenchmarkSuiteRef("dci.github", "1.0.0"),
+                BenchmarkSuiteRef("dci.paper-main", "1.0.0"),
+            ),
+        )
         self.assertEqual(controlled_code.resources, ())
-        self.assertEqual(dci.resources, ())
+        self.assertEqual(len(dci.resources), 1)
+        self.assertEqual(dci.resources[0].resource_id, "dci-package.json")
         self.assertEqual(controlled_code.conformance, ())
-        self.assertEqual(dci.conformance, ())
+        self.assertEqual(len(dci.conformance), 1)
+        self.assertEqual(dci.conformance[0].resource_id, "externalization.json")
 
 
 if __name__ == "__main__":

@@ -11,7 +11,9 @@ from asterion.capabilities.catalog import CapabilityRef
 from asterion.capabilities.execution import CapabilityExecutionError, CapabilityInvocation
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 from asterion.runtime.working_directory import ProcessWorkingDirectory
-from asterion.capabilities.dci_research import DciLocalResearchImplementation
+from asterion.capabilities.dci.implementation.implementation import (
+    DciLocalResearchImplementation,
+)
 from asterion.capabilities.dci.implementation._runtime import (
     RuntimeEventError,
     event_mappings,

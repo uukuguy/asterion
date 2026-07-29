@@ -3,108 +3,77 @@
 ## Project Snapshot
 
 - Project: Asterion
-- Current branch: `main`
-- Theme-level focus: approved source-neutral capability-package architecture
-- Project route: direct
-- Canonical worklist: approved implementation plans under
-  `docs/superpowers/plans/`
-- Active work package: implementation not started; execution mode selection is
-  the next boundary
+- Active branch: `feature/capability-protocol-foundation`
+- Theme: source-neutral capability packages and generic benchmark execution
+- Plans 1–4: implemented; final Plan 4 integration gates are the current boundary
+- Next action: review and integrate the completed branch
 
 ## Current Architecture
 
-- `src/asterion/cli.py` and product CLIs select an installed provider and exact
-  application identity.
-- Providers expose static assemblies resolved through deterministic package
-  catalogs and composers.
-- Python owns orchestration, assembly, runners, runtime adapters, and injected
-  host-service protocols.
-- TypeScript validates shared contracts and Node integration; Rust owns
+- Asterion owns the public runtime, capability, capability-package, application
+  assembly, source, source-lock, and benchmark-suite contracts.
+- Python owns orchestration, deterministic composition, source resolution,
+  application assembly, benchmark planning/execution, and runtime adapters.
+- TypeScript validates shared contracts and Node integration. Rust owns
   controlled process execution.
-- DCI remains a bundled product above domain-neutral framework modules.
-- The approved target hard-renames generic `dci.*` protocols to Asterion-owned
-  contracts, treats built-in as one source form, and moves generic benchmark
-  orchestration into Asterion.
-- The approved migration proves DCI as an installed extension before exposing
-  the identical portable payload through the built-in adapter.
-- Installed provider resources stay package-rooted; explicit DCI operator
-  configuration is rooted at the selected environment file for preflight and
-  basic execution.
-- `src/asterion/capabilities/dci/implementation/research/experiment_profiles.py` owns one-use execution authority,
-  exact scope/selection plans, budgets, private output identities, and immutable
-  dataset bindings.
-- `src/asterion/dci/cli.py` keeps reproduction plan-only by default; explicit
-  execution requires exact scope, limit, private output root, and five positive
-  operation/cost caps.
-- `src/asterion/capabilities/dci/implementation/evaluation/benchmark.py` revalidates complete scope, bounded selection,
-  raw dataset content, benchmark identity, and descriptor identity before
-  authority consumption or Agent/Judge work.
-- `src/asterion/capabilities/dci/implementation/reproduction/reproduction.py` compiles locked body-free RunManifest
-  evidence and writes it descriptor-safely outside closed batch roots.
-- Canonical `limit-N` evidence is non-full, non-comparable,
-  `External-limited`, and cannot produce an acceptance PASS.
+- Built-in, installed-distribution, and explicit local-directory capability
+  packages are equivalent source forms. Resolution has no hidden precedence and
+  exact ambiguity requires a source lock.
+- DCI is `dci@1.0.0`, one capability-package implementation of the generic
+  Asterion benchmark subsystem. Generic framework modules do not import it.
+- `src/asterion/capabilities/dci/` owns the DCI portable payload, suites,
+  implementation, resources, and provider. The old top-level and transitional
+  owners are absent.
+- `src/asterion/applications/dci_agent_lite/` owns the product application,
+  assemblies, provider exposure, and thin `asterion-dci` adapter.
+- The DCI package passed external-first clean-wheel conformance before built-in
+  registration. Built-in, distribution, and local forms have equivalent public
+  behavior.
+- Global DCI benchmark launchers and per-task shell scripts are absent. DCI
+  suite bindings translate private operator inputs into generic task
+  invocations inside the package.
 
-## Open Problems (theme-level)
+## Execution Boundary
 
-- Plans 1-4 are approved but unimplemented; current source still contains the
-  old generic protocol names, top-level `asterion.dci`, and root benchmark
-  launchers.
-- Provider-backed bounded reproduction still requires fresh exact finite
-  authorization, an operator-selected private output root, and any
-  scope-specific external datasets.
-- `paper_full_executable` remains false; one-query evidence cannot establish
-  full-paper or published-score reproduction.
-- Existing DCI Pyright debt remains outside the repository's enforced
-  provider-free check boundary.
+- `asterion-dci benchmark plan` is implemented and provider-free.
+- The installed CLI has no execution authority. Run/resume require an embedding
+  host's fresh authorization, exact source selection, injected implementations,
+  executor, cancellation, and private evidence service.
+- Credentials, provider settings, datasets, corpora, paths, private environment,
+  and optional amount remain operator-owned and outside portable/public values.
+- A monetary amount is not a generic authorization requirement.
+- Full datasets and paper reproduction require separate finite-budget
+  governance and were not run during this migration.
+- Archive and registry source forms remain deferred pending a separate security
+  and lifecycle design.
+
+## Verification State
+
+- Task-level tests and reviews for Plans 1–3 and Plan 4 Tasks 1–7 are complete.
+- Plan 4 Task 8 adds permanent ownership, portable built-in, active-document,
+  wheel inventory, privacy, and source-form boundary assertions.
+- A passing command is required before any final state is labelled Verified.
+  Provider-free checks never establish paper-score reproduction.
 
 ## Key Files
 
-### Loaded every session
-
-- `AGENTS.md`
-- `CLAUDE.md`
-- `MEMORY.md` — indexed collaboration preferences and corrected feedback
-
-### State / handoff
-
-- `docs/status/RESUME-NEXT-SESSION.md` — current session handoff
-- `docs/status/CURRENT-STATE.md` — this structural snapshot
+- `AGENTS.md` — repository invariants
+- `docs/status/RESUME-NEXT-SESSION.md` — current handoff
 - `docs/status/JOURNAL.md` — append-only event history
-- `docs/status/INDEX.md` — status-file catalog
-- `docs/status/DECISIONS.md` — active architecture decisions and rationale
-
-### Architecture and design
-
-- `docs/architecture/dci-capability-audit.md` — DCI capability mapping
-- `docs/superpowers/specs/2026-07-27-asterion-capability-package-protocol-design.md`
-- `docs/superpowers/plans/2026-07-27-asterion-capability-package-rollout.md`
-- `docs/superpowers/plans/2026-07-27-asterion-capability-protocol-foundation.md`
-- `docs/superpowers/plans/2026-07-27-asterion-capability-package-sources.md`
-- `docs/superpowers/plans/2026-07-27-asterion-generic-benchmark-subsystem.md`
+- `docs/status/DECISIONS.md` — active architecture decisions
 - `docs/superpowers/plans/2026-07-27-dci-capability-package-migration.md`
-
-### Implementation entry points
-
-- `src/asterion/cli.py` — generic provider/application CLI
-- `src/asterion/runtime/protocol.py` — public runtime protocol
-- `src/asterion/packages/composition.py` — deterministic package composition
-- `src/asterion/runner/application.py` — resolved application execution
-- `src/asterion/capabilities/dci/implementation/research/experiment_profiles.py` — DCI profiles and authority
-- `src/asterion/dci/cli.py` — DCI plan/preflight/execute orchestration
-- `src/asterion/capabilities/dci/implementation/reproduction/verification.py` — product readiness and bounded verification
-- `src/asterion/capabilities/dci/implementation/evaluation/benchmark.py` — bounded benchmark execution
-- `src/asterion/capabilities/dci/implementation/reproduction/reproduction.py` — evidence compilation and comparison
-- `schemas/` — canonical cross-language protocol schemas
+- `docs/architecture/benchmark-subsystem.md`
+- `docs/architecture/composable-packages.md`
+- `docs/security.md`
+- `src/asterion/benchmarks/` — generic benchmark subsystem
+- `src/asterion/capabilities/dci/` — DCI capability package
+- `src/asterion/applications/dci_agent_lite/` — DCI application adapter
 
 ## Resume Instructions
 
-1. Read this file for the structural baseline.
-2. Read `RESUME-NEXT-SESSION.md` for the next concrete action.
-3. Read `MEMORY.md` for collaboration rules and corrected feedback.
-4. Run `git status --short` and `git log --oneline -5`.
-5. Select an execution mode, then start Plan 1 Task 1; do not skip directly to
-   DCI migration.
-6. Treat external execution as unauthorized unless the operator supplies a new
-   exact scope, limit, private output root, and five finite positive caps.
-7. Keep any bounded result `External-limited`; never promote it to full-paper
-   or published-score reproduction.
+1. Read this file and `RESUME-NEXT-SESSION.md`.
+2. Run `git status --short` and `git log --oneline -10`.
+3. Confirm the final Task 8 commit and named gates before integration.
+4. Treat all external execution as unauthorized unless the operator supplies a
+   new explicit authorization and required private services.
+5. Never promote bounded or provider-free evidence to full-paper reproduction.

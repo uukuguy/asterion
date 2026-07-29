@@ -30,6 +30,8 @@ read architecture documents when extending the framework.
   execution and composition contracts.
 - [Controlled executor operations](operator/rust-executor.md) — Rust sidecar
   policy and process boundaries.
+- [Security boundaries](security.md) — extension trust, source selection,
+  execution authority, private operator inputs, and redaction.
 
 ## Implementation plans
 

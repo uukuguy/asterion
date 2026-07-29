@@ -124,8 +124,14 @@ expected = {
         'asterion.capability/v1',
     'capabilities/controlled_code/manifests/execution-audit-observability.json':
         'asterion.capability/v1',
-    'capabilities/dci_research/capability-package.json':
+    'capabilities/dci/payload/capability-package.json':
         'asterion.capability-package/v1',
+    'capabilities/dci/payload/benchmark-suites/all.json':
+        'asterion.benchmark-suite/v1',
+    'capabilities/dci/payload/benchmark-suites/github.json':
+        'asterion.benchmark-suite/v1',
+    'capabilities/dci/payload/benchmark-suites/paper-main.json':
+        'asterion.benchmark-suite/v1',
     'capabilities/dci/payload/capabilities/dci-analysis.json':
         'asterion.capability/v1',
     'capabilities/dci/payload/capabilities/dci-benchmark.json':
@@ -147,6 +153,8 @@ actual_paths = {
         'applications/*/assemblies/*.json',
         'capabilities/*/capability-package.json',
         'capabilities/*/manifests/*.json',
+        'capabilities/dci/payload/capability-package.json',
+        'capabilities/dci/payload/benchmark-suites/*.json',
         'capabilities/dci/payload/capabilities/*.json',
     )
     for path in root.glob(pattern)

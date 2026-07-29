@@ -54,6 +54,16 @@ implementations; then `run` and `resume` print the public result after evidence 
 closed. Both commands reject before implementation loading unless `--execute`,
 `--capability-source-lock`, and `--evidence-root` are present.
 
+Built-in, installed-distribution, and explicit local-directory packages use the
+same source contract. There is no built-in precedence: two exact candidates are
+ambiguous without a source lock even when their payload digests are identical.
+Discovery reads metadata without importing provider code; selecting an installed
+extension admits its code into the operator's trusted computing base.
+
+No monetary amount is required by the generic CLI. A product may accept an
+optional amount through private operator configuration, but an amount neither
+appears in portable/public values nor grants authorization.
+
 ## DCI application adapter
 
 `asterion-dci benchmark` is a product adapter over the same generic host API.
@@ -73,3 +83,7 @@ evidence, cancellation, and compatibility rules. Dataset/corpus roots,
 credentials, provider environment, and optional amount are private
 application/operator inputs and never enter package manifests, plans, or
 public evidence.
+
+DCI is a package implementation consumed by the generic Asterion benchmark
+subsystem. Its adapter fixes product selectors and translates private operator
+inputs; it does not define a separate benchmark architecture.

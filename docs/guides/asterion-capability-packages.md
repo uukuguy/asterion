@@ -46,7 +46,23 @@ search sibling repositories, mutate `sys.path`, choose latest versions, or
 apply source precedence. Local roots, module paths, provider locators, and
 private operator details are not printed in public output.
 
+Built-in, installed-distribution, and local-directory packages are equivalent
+source forms. If more than one exact source is visible, resolution fails closed
+without an exact source lock—even when the verified payload digests match.
+Metadata discovery never imports provider code. Loading the selected installed
+extension crosses a trust boundary, so operators must install and select only
+code they trust.
+
+Every built-in package must retain a portable externalization fixture, pass the
+public conformance kit, and prove equivalent public behavior through a clean
+installed distribution and an explicit local source. DCI was validated in that
+external-first order; its built-in registration does not make generic framework
+code depend on DCI.
+
 Portable manifests must not contain prompts, commands, executable paths,
 credentials, provider configuration, environment values, private paths, or
 mutable state. Source selection grants no execution authority; host services
 and runtimes remain operator-injected after package selection.
+
+Archive and registry source support is deferred. Adding either requires a
+separate provenance, verification, trust, and lifecycle design.

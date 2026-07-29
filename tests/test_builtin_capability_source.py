@@ -19,6 +19,7 @@ from asterion.capability_packages.sources.builtin import (
     BuiltinCapabilitySource,
     BuiltinCapabilitySourceError,
 )
+from asterion.capability_sdk import run_capability_conformance
 
 
 CONTROLLED_CODE = CapabilityPackageRef("controlled-code", "1.0.0")
@@ -209,6 +210,20 @@ class BuiltinCapabilitySourceTests(unittest.TestCase):
 
         with self.assertRaises(BuiltinCapabilitySourceError):
             source.validate_source_identity(mismatched, payload)
+
+    def test_every_builtin_has_portable_externalization_and_conformance(self) -> None:
+        source = BuiltinCapabilitySource()
+
+        for candidate in source.discover_metadata():
+            with self.subTest(package=candidate.package_ref.package_id):
+                payload = source.open_payload(candidate)
+                self.assertEqual(
+                    tuple(item.resource_id for item in payload.manifest.conformance),
+                    ("externalization.json",),
+                )
+                installed = source.load_provider(candidate)
+                result = run_capability_conformance(installed)
+                self.assertTrue(result.passed, result.errors)
 
 
 if __name__ == "__main__":
