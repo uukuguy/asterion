@@ -125,6 +125,25 @@ class HostileRef(CapabilityPackageRef):
         raise RuntimeError("SECRET-REF-COMPARISON")
 
 
+class HostileDigest(str):
+    def __eq__(self, other: object) -> bool:
+        del other
+        raise RuntimeError("SECRET-DIGEST-COMPARISON")
+
+
+class InterruptingDigest(str):
+    _error: BaseException
+
+    def __new__(cls, value: str, error: BaseException) -> InterruptingDigest:
+        instance = super().__new__(cls, value)
+        instance._error = error
+        return instance
+
+    def __eq__(self, other: object) -> bool:
+        del other
+        raise self._error
+
+
 class CapabilitySourceResolutionTests(unittest.TestCase):
     def test_zero_exact_candidates_without_lock_is_unavailable(self) -> None:
         with self.assertRaises(CapabilitySourceResolutionError) as raised:
@@ -337,6 +356,19 @@ class CapabilitySourceResolutionTests(unittest.TestCase):
             ("SECRET-REF-COMPARISON",),
         )
 
+    def test_hostile_digest_comparisons_are_body_free(self) -> None:
+        hostile = candidate(digest=cast(Any, HostileDigest(DIGEST)))
+
+        with self.assertRaises(CapabilitySourceResolutionError) as raised:
+            resolve_capability_source(PACKAGE, (hostile,), lock(lock_entry()))
+
+        assert_stable_error(
+            self,
+            raised.exception,
+            "capability source candidates are invalid",
+            ("SECRET-DIGEST-COMPARISON",),
+        )
+
     def test_base_exceptions_from_sequences_are_preserved(self) -> None:
         for error in (KeyboardInterrupt("SECRET-INTERRUPT"), SystemExit("SECRET-EXIT")):
             with self.subTest(error=type(error).__name__):
@@ -345,6 +377,17 @@ class CapabilitySourceResolutionTests(unittest.TestCase):
                         PACKAGE,
                         InterruptingCandidates(error),
                         None,
+                    )
+
+    def test_base_exceptions_from_digest_comparisons_are_preserved(self) -> None:
+        for error in (KeyboardInterrupt("SECRET-INTERRUPT"), SystemExit("SECRET-EXIT")):
+            hostile = candidate(digest=cast(Any, InterruptingDigest(DIGEST, error)))
+            with self.subTest(error=type(error).__name__):
+                with self.assertRaises(type(error)):
+                    resolve_capability_source(
+                        PACKAGE,
+                        (hostile,),
+                        lock(lock_entry()),
                     )
 
 

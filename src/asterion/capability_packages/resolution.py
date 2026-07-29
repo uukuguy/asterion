@@ -48,11 +48,7 @@ def resolve_capability_source(
     source_matches = _matching_source_candidates(selected_lock, matches)
     if not source_matches:
         raise CapabilitySourceResolutionError("capability source is unavailable")
-    digest_matches = tuple(
-        candidate
-        for candidate in source_matches
-        if candidate.payload_sha256 == selected_lock.payload_sha256
-    )
+    digest_matches = _matching_digest_candidates(selected_lock, source_matches)
     if not digest_matches:
         raise CapabilitySourceResolutionError("capability source digest is rejected")
     if len(digest_matches) != 1:
@@ -151,6 +147,27 @@ def _matching_source_candidates(
             candidate
             for candidate in candidates
             if candidate.source_id == lock_entry.source_id
+        )
+    except Exception:
+        failed = True
+    if failed:
+        raise CapabilitySourceResolutionError(
+            "capability source candidates are invalid"
+        )
+    return matches
+
+
+def _matching_digest_candidates(
+    lock_entry: CapabilitySourceLockEntry,
+    candidates: tuple[CapabilityPackageCandidate, ...],
+) -> tuple[CapabilityPackageCandidate, ...]:
+    failed = False
+    matches: tuple[CapabilityPackageCandidate, ...] = ()
+    try:
+        matches = tuple(
+            candidate
+            for candidate in candidates
+            if candidate.payload_sha256 == lock_entry.payload_sha256
         )
     except Exception:
         failed = True
