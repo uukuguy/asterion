@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-29 21:53. **Session remains active — not a final handoff.**
+> Updated: 2026-07-29 23:00. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -51,8 +51,14 @@
 - Plan 2 Task 7 publishes the exact capability SDK/conformance kit in
   `50afda8`, closes executable/import/aggregate/artifact/redaction findings in
   `c2b4be3`, and aligns structural executor typing in `4e8d3fa`.
-- The immediate next action is Plan 2 Task 8: add capability author commands,
-  documentation, and the full package-source phase gate.
+- Plan 2 Task 8 adds provider-free capability author commands and packaged
+  templates in `97b2dea`, hardens trust boundaries in `9e35aff`, and keeps
+  template initialization stable after compilation in `2ad265e`.
+- Fresh Plan 2 Task 8 verification passed 684 Python tests, all cross-language
+  checks, and 22 provider-free promotion commands; independent review found
+  no remaining issue.
+- The immediate next action is the required whole-branch Plan 2 review, then
+  Plan 3 generic benchmark subsystem implementation.
 
 ## Where things stand
 
@@ -93,24 +99,24 @@
 - Plan 2 Task 7 passed expanded SDK/conformance/DCI/controlled-executor focused
   suites with production and modified-test Pyright/Ruff clean; independent
   review is approved.
+- Plan 2 Task 8 passed its focused adversarial review and the full phase gates:
+  `make check` and `make promotion-check` both exited 0, with provider
+  operations `0` and full dataset `no`.
 - `dci.agent-runtime/v1` remains only as the deliberate absence-test needle in
   Task 1 scope; no compatibility alias was added.
-- Plans 2-4 remain dependent on completion of the six Plan 1 tasks.
+- Plan 2 implementation tasks are complete; its whole-branch review remains.
 
 ## Next action
 
-1. Dispatch Plan 2 Task 8 from the approved source plan.
-2. Add CLI RED tests for help, init, validate, inspect, conformance test,
-   redaction, and staged unsupported pack/convert.
-3. Run all package-source focused suites, `make check`, and
-   `make promotion-check` with provider operations `0` and full dataset `no`,
-   then perform the required whole-branch Plan 2 review.
+1. Perform the required whole-branch review of `861207a..HEAD`.
+2. Fix every Critical or Important finding and rerun the phase gates.
+3. Start Plan 3 Task 1 from the approved generic benchmark subsystem plan.
 
 ## Boundaries and ruled-out paths
 
 - Do not work directly on `main` or modify its uncommitted recovered baton.
 - Do not preserve aliases for old `dci.*` generic protocols.
 - Do not conflate individual capabilities with capability-package descriptors.
-- Do not start Plan 2, generic benchmark extraction, or DCI migration before
-  the Plan 1 phase gate passes.
+- Do not start DCI migration before the generic benchmark subsystem phase gate
+  passes.
 - Do not run provider, Agent, Judge, download, setup, or full-dataset work.

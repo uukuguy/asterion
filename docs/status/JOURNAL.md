@@ -241,3 +241,8 @@
 - 21:45 Hardened SDK conformance and package-owned DCI helpers to close review gaps [c2b4be3]
 - 21:51 Typed structural controlled requests to match package-owned executor boundary [4e8d3fa]
 - 21:53 Closed package-source Task 7 after SDK and conformance review passed [4e8d3fa]
+- 21:53 Saved SDK recovery boundary before capability author workflow [e3c0b77]
+- 22:24 Closed Task 8 with provider-free author CLI and packaged template [97b2dea]
+- 22:49 Hardened Task 8 author boundaries against traversal, source echo, and generated template files [9e35aff]
+- 22:59 Ignored compiler caches while preserving closed capability templates after verification [2ad265e]
+- 23:00 Closed package-source Task 8 after final independent review passed [2ad265e]
