@@ -71,9 +71,11 @@
   `fcdbaf1`.
 - Plan 3 Task 4 adds descriptor-bound private benchmark evidence in `aaba158`,
   then aligns it to the approved `BenchmarkEvidenceStore` runner contract in
-  `29fa698`: stateful `initialize/start_task/append_progress/finish_*`,
+  `29fa698` and closes resume/lifecycle gaps in `7aa5208`: stateful
+  `initialize/start_task/append_progress/finish_*`,
   immutable partial resume, ordered lifecycle, strict JSON, and failed/cancelled
-  run closure.
+  run closure. Independent re-review found no remaining issue; 52 focused tests
+  and static checks pass.
 - The immediate next action is Plan 3 Task 5: sequential benchmark execution,
   process-tree cancellation, and runner integration against the approved
   evidence protocol.

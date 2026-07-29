@@ -273,3 +273,6 @@
 - 00:54 Saved bounded planning recovery boundary before evidence storage [ce17e7c]
 - 01:26 Persisted private benchmark evidence layout with descriptor-safe writes [aaba158]
 - 01:26 Aligned evidence store with runner resume protocol and partial closure [29fa698]
+- 01:27 Saved benchmark evidence recovery boundary before runner execution [7793ad8]
+- 01:46 Closed six resume and lifecycle gaps in private benchmark evidence [7aa5208]
+- 01:46 Closed generic benchmark Task 4 after clean independent re-review [7aa5208]
