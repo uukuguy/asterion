@@ -450,6 +450,11 @@ class BenchmarkExecutionTests(unittest.TestCase):
                         result,
                         BenchmarkRunResult(status=status, tasks=task_results),
                     )
+                    self.assertTrue(
+                        (
+                            root / "evidence" / "runs" / p.run_id / "result.json"
+                        ).is_file()
+                    )
                     self.assertEqual(
                         [kind for kind, _event in evidence.events],
                         ["initialize", "finish_run"],
@@ -583,6 +588,9 @@ class BenchmarkExecutionTests(unittest.TestCase):
                         result,
                         BenchmarkRunResult(status="cancelled", tasks=()),
                     )
+                    self.assertTrue(
+                        (root / "runs" / p.run_id / "result.json").is_file()
+                    )
 
     def test_completed_prefix_cancelled_progress_resume_finishes_without_duplicate(
         self,
@@ -626,6 +634,9 @@ class BenchmarkExecutionTests(unittest.TestCase):
                     self.assertEqual(
                         result,
                         BenchmarkRunResult(status="cancelled", tasks=(alpha,)),
+                    )
+                    self.assertTrue(
+                        (root / "runs" / p.run_id / "result.json").is_file()
                     )
 
     def test_mid_task_cancellation_reaches_executor_and_stops_later_tasks(self) -> None:

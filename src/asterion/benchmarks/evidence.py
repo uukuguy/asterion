@@ -410,6 +410,7 @@ class LocalPrivateBenchmarkEvidenceStore:
     def _load_existing_state(self, plan: ResolvedBenchmarkPlan, run_fd: int) -> None:
         completed = _completed_prefix_results_from_evidence(plan, run_fd)
         completed_ids = tuple(task.task_id for task in completed)
+        run_result_persisted = _json_member_exists(run_fd, "result.json")
         result = _load_optional_run_result(plan, run_fd, completed)
         self._completed_task_ids = (
             tuple(task.task_id for task in result.tasks)
@@ -419,11 +420,16 @@ class LocalPrivateBenchmarkEvidenceStore:
         self._active_task_id = None
         self._next_sequence = _next_progress_sequence(run_fd, plan)
         terminal_progress_status = _terminal_progress_status(run_fd, plan)
-        self._run_finished = result is not None and result.status in {
-            "completed",
-            "failed",
-            "cancelled",
-        }
+        self._run_finished = (
+            run_result_persisted
+            and result is not None
+            and result.status
+            in {
+                "completed",
+                "failed",
+                "cancelled",
+            }
+        )
         self._terminal_task_result_pending_run = False
         self._terminal_progress_appended = terminal_progress_status is not None
 
