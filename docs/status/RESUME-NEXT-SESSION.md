@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-30 03:43. **Session remains active — not a final handoff.**
+> Updated: 2026-07-30 03:56. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -87,8 +87,13 @@
   execution remains externally authorized. Independent review is clean, `make
   check` passes 800 Python tests plus all cross-language gates, and promotion is
   22/22 with provider operations `0`.
-- The immediate next action is Plan 3 Task 7: structural packaging and
-  domain-neutral benchmark boundary closure.
+- Plan 3 Task 7 closes recursive domain-neutral AST boundaries, wheel module
+  and schema packaging, and architecture documentation through `7df72e7`.
+  Independent review is clean; final `make check` passes 806 Python tests plus
+  all cross-language gates, and promotion is 22/22 with provider operations
+  `0` and full dataset `no`.
+- Plan 3 is complete. The immediate next action is Plan 4 Task 1: define the
+  portable DCI capability payload and three exact benchmark suites.
 
 ## Where things stand
 
@@ -142,21 +147,24 @@
 - Plan 3 Task 6 focused verification passed 102 benchmark/application tests,
   Pyright, Ruff, docs, `make check`, and `make promotion-check`; the installed
   controlled-code plan path loads no capability implementation provider.
+- Plan 3 Task 7 final verification passed 106 focused tests, 806 full Python
+  tests, all TypeScript/Rust/docs/lint/wheel gates, and 22 provider-free
+  promotion commands.
 - `dci.agent-runtime/v1` remains only as the deliberate absence-test needle in
   Task 1 scope; no compatibility alias was added.
 - Plan 2 is complete and independently reviewed.
 
 ## Next action
 
-1. Complete Plan 3 Task 7 structural benchmark boundary and wheel tests.
-2. Run the final generic subsystem phase gates with provider operations `0`.
-3. Only after Plan 3 closes, begin Plan 4 DCI package migration.
+1. Implement Plan 4 Task 1 portable DCI payload and exact suite manifests.
+2. Preserve the external-first order; do not register DCI as built-in yet.
+3. Continue without provider, Agent, Judge, download, setup, or dataset work.
 
 ## Boundaries and ruled-out paths
 
 - Do not work directly on `main` or modify its uncommitted recovered baton.
 - Do not preserve aliases for old `dci.*` generic protocols.
 - Do not conflate individual capabilities with capability-package descriptors.
-- Do not start DCI migration before the generic benchmark subsystem phase gate
-  passes.
+- Do not register DCI as a built-in source before its installed-distribution
+  form passes the external-first proof.
 - Do not run provider, Agent, Judge, download, setup, or full-dataset work.
