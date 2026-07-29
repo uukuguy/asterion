@@ -669,9 +669,37 @@ class BenchmarkEvidenceTests(unittest.TestCase):
 
             resumed = LocalPrivateBenchmarkEvidenceStore(root)
             resumed.initialize(p)
+            self.assertEqual(resumed.compatible_run_result(p), result)
             resumed.finish_run(result)
             with self.assertRaises(BenchmarkEvidenceError):
                 resumed.finish_run(BenchmarkRunResult(status="cancelled", tasks=()))
+
+    def test_compatible_run_result_distinguishes_completed_prefix_without_terminal(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            root = Path(temp_dir) / "evidence"
+            p = plan()
+            store = LocalPrivateBenchmarkEvidenceStore(root)
+            store.initialize(p)
+            alpha = BenchmarkTaskResult(
+                task_id="example.alpha",
+                status="completed",
+                case_count=1,
+            )
+            beta = BenchmarkTaskResult(
+                task_id="example.beta",
+                status="completed",
+                case_count=1,
+            )
+            store.start_task(p.tasks[0])
+            store.finish_task(alpha)
+            store.start_task(p.tasks[1])
+            store.finish_task(beta)
+
+            resumed = LocalPrivateBenchmarkEvidenceStore(root)
+            resumed.initialize(p)
+            self.assertIsNone(resumed.compatible_run_result(p))
 
     def test_noncompleted_task_result_allows_one_run_terminal_progress_only(
         self,

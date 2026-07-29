@@ -63,6 +63,13 @@ class BenchmarkRunner:
 
         if len(completed) == len(plan.tasks):
             result = BenchmarkRunResult(status="completed", tasks=tuple(results))
+            persisted_run = evidence.compatible_run_result(plan)
+            if persisted_run is None:
+                evidence.append_progress(
+                    BenchmarkProgressEvent(sequence=sequence, status="run.completed")
+                )
+            elif persisted_run != result:
+                raise BenchmarkEvidenceError("benchmark evidence resume is invalid")
             evidence.finish_run(result)
             return result
 

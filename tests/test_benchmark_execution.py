@@ -232,6 +232,54 @@ class BenchmarkExecutionTests(unittest.TestCase):
         self.assertEqual(result, expected)
         self.assertEqual(calls, [])
 
+    def test_full_completed_prefix_without_run_result_emits_terminal_progress(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            p = plan()
+            root = Path(temp_dir) / "evidence"
+            original = LocalPrivateBenchmarkEvidenceStore(root)
+            original.initialize(p)
+            alpha = BenchmarkTaskResult(
+                task_id="example.alpha",
+                status="completed",
+                case_count=1,
+            )
+            beta = BenchmarkTaskResult(
+                task_id="example.beta",
+                status="completed",
+                case_count=1,
+            )
+            original.start_task(p.tasks[0])
+            original.finish_task(alpha)
+            original.start_task(p.tasks[1])
+            original.finish_task(beta)
+
+            evidence = RecordingEvidence(LocalPrivateBenchmarkEvidenceStore(root))
+            result = BenchmarkRunner(
+                output_directory_factory=RecordingOutputFactory(
+                    Path(temp_dir) / "outputs"
+                ),
+            ).run(
+                p,
+                executor=ForbiddenExecutor(),
+                evidence=evidence,
+                cancellation=ManualCancellation(),
+            )
+
+        self.assertEqual(
+            [
+                event
+                for kind, event in evidence.events
+                if kind == "progress" and event is not None
+            ],
+            [BenchmarkProgressEvent(sequence=1, status="run.completed")],
+        )
+        self.assertEqual(
+            result,
+            BenchmarkRunResult(status="completed", tasks=(alpha, beta)),
+        )
+
     def test_full_resume_does_not_swallow_evidence_finish_failure(self) -> None:
         p = plan()
         result = BenchmarkRunResult(
@@ -1069,6 +1117,12 @@ class RecordingEvidence:
     ) -> tuple[BenchmarkTaskResult, ...]:
         return self._delegate.compatible_completed_task_results(plan)
 
+    def compatible_run_result(
+        self,
+        plan: ResolvedBenchmarkPlan,
+    ) -> BenchmarkRunResult | None:
+        return self._delegate.compatible_run_result(plan)
+
     def next_progress_sequence(self, plan: ResolvedBenchmarkPlan) -> int:
         return self._delegate.next_progress_sequence(plan)
 
@@ -1106,6 +1160,13 @@ class FailingCompletedEvidence:
     ) -> tuple[BenchmarkTaskResult, ...]:
         del plan
         return self._result.tasks
+
+    def compatible_run_result(
+        self,
+        plan: ResolvedBenchmarkPlan,
+    ) -> BenchmarkRunResult | None:
+        del plan
+        return self._result
 
     def next_progress_sequence(self, plan: ResolvedBenchmarkPlan) -> int:
         del plan

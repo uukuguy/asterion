@@ -114,6 +114,10 @@ class BenchmarkEvidenceStore(Protocol):
         self, plan: ResolvedBenchmarkPlan
     ) -> tuple[BenchmarkTaskResult, ...]: ...
 
+    def compatible_run_result(
+        self, plan: ResolvedBenchmarkPlan
+    ) -> BenchmarkRunResult | None: ...
+
     def next_progress_sequence(self, plan: ResolvedBenchmarkPlan) -> int: ...
 
 
@@ -327,6 +331,29 @@ class LocalPrivateBenchmarkEvidenceStore:
                 )
                 _next_progress_sequence(run, plan)
                 return completed
+        except BenchmarkEvidenceError:
+            raise
+        except Exception:
+            _fail("benchmark evidence resume is invalid")
+
+    def compatible_run_result(
+        self, plan: ResolvedBenchmarkPlan
+    ) -> BenchmarkRunResult | None:
+        try:
+            expected_manifest = _plan_manifest(plan)
+            context = _existing_run_fd_or_none(self._root, plan)
+            if context is None:
+                return None
+            with context as run:
+                if _read_json(run, "manifest.json") != expected_manifest:
+                    _fail("benchmark evidence resume is invalid")
+                completed = _completed_prefix_results_from_evidence(plan, run)
+                _next_progress_sequence(run, plan)
+                return _load_optional_run_result(
+                    plan,
+                    run,
+                    tuple(task.task_id for task in completed),
+                )
         except BenchmarkEvidenceError:
             raise
         except Exception:
