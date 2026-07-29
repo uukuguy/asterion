@@ -215,6 +215,9 @@ class BenchmarkExecutionTests(unittest.TestCase):
             original.start_task(p.tasks[1])
             original.finish_task(beta)
             expected = BenchmarkRunResult(status="completed", tasks=(alpha, beta))
+            original.append_progress(
+                BenchmarkProgressEvent(sequence=1, status="run.completed")
+            )
             original.finish_run(expected)
 
             calls: list[tuple[str, str]] = []
@@ -279,6 +282,102 @@ class BenchmarkExecutionTests(unittest.TestCase):
             result,
             BenchmarkRunResult(status="completed", tasks=(alpha, beta)),
         )
+
+    def test_full_completed_prefix_with_terminal_progress_finishes_without_duplicate(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            p = plan()
+            root = Path(temp_dir) / "evidence"
+            original = LocalPrivateBenchmarkEvidenceStore(root)
+            original.initialize(p)
+            alpha = BenchmarkTaskResult(
+                task_id="example.alpha",
+                status="completed",
+                case_count=1,
+            )
+            beta = BenchmarkTaskResult(
+                task_id="example.beta",
+                status="completed",
+                case_count=1,
+            )
+            original.start_task(p.tasks[0])
+            original.finish_task(alpha)
+            original.start_task(p.tasks[1])
+            original.finish_task(beta)
+            original.append_progress(
+                BenchmarkProgressEvent(sequence=1, status="run.completed")
+            )
+
+            evidence = RecordingEvidence(LocalPrivateBenchmarkEvidenceStore(root))
+            result = BenchmarkRunner(
+                output_directory_factory=RecordingOutputFactory(
+                    Path(temp_dir) / "outputs"
+                ),
+            ).run(
+                p,
+                executor=ForbiddenExecutor(),
+                evidence=evidence,
+                cancellation=ManualCancellation(),
+            )
+
+        self.assertEqual(
+            [kind for kind, _event in evidence.events],
+            ["initialize", "finish_run"],
+        )
+        self.assertEqual(
+            result,
+            BenchmarkRunResult(status="completed", tasks=(alpha, beta)),
+        )
+
+    def test_persisted_failed_or_cancelled_run_returns_without_duplicate_progress(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            for status in ("failed", "cancelled"):
+                with self.subTest(status=status):
+                    root = Path(temp_dir) / status
+                    p = plan()
+                    original = LocalPrivateBenchmarkEvidenceStore(root / "evidence")
+                    original.initialize(p)
+                    task_result = BenchmarkTaskResult(
+                        task_id="example.alpha",
+                        status=status,
+                        case_count=1,
+                    )
+                    run_result = BenchmarkRunResult(
+                        status=status,
+                        tasks=(task_result,),
+                    )
+                    original.append_progress(
+                        BenchmarkProgressEvent(sequence=1, status="run.started")
+                    )
+                    original.start_task(p.tasks[0])
+                    original.finish_task(task_result)
+                    original.append_progress(
+                        BenchmarkProgressEvent(sequence=2, status=f"run.{status}")
+                    )
+                    original.finish_run(run_result)
+
+                    evidence = RecordingEvidence(
+                        LocalPrivateBenchmarkEvidenceStore(root / "evidence")
+                    )
+                    result = BenchmarkRunner(
+                        output_directory_factory=RecordingOutputFactory(
+                            root / "outputs"
+                        ),
+                    ).run(
+                        p,
+                        executor=ForbiddenExecutor(),
+                        evidence=evidence,
+                        cancellation=ManualCancellation(),
+                    )
+
+                    self.assertEqual(result, run_result)
+                    self.assertEqual(
+                        [kind for kind, _event in evidence.events],
+                        ["initialize", "finish_run"],
+                    )
 
     def test_full_resume_does_not_swallow_evidence_finish_failure(self) -> None:
         p = plan()
@@ -1123,6 +1222,9 @@ class RecordingEvidence:
     ) -> BenchmarkRunResult | None:
         return self._delegate.compatible_run_result(plan)
 
+    def terminal_progress_status(self, plan: ResolvedBenchmarkPlan) -> str | None:
+        return self._delegate.terminal_progress_status(plan)
+
     def next_progress_sequence(self, plan: ResolvedBenchmarkPlan) -> int:
         return self._delegate.next_progress_sequence(plan)
 
@@ -1167,6 +1269,10 @@ class FailingCompletedEvidence:
     ) -> BenchmarkRunResult | None:
         del plan
         return self._result
+
+    def terminal_progress_status(self, plan: ResolvedBenchmarkPlan) -> str | None:
+        del plan
+        return f"run.{self._result.status}"
 
     def next_progress_sequence(self, plan: ResolvedBenchmarkPlan) -> int:
         del plan

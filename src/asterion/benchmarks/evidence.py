@@ -24,6 +24,7 @@ from asterion.capability_packages import CapabilityPackageRef
 _JSON_MAX_BYTES = 1024 * 1024
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 _STATUS = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
+_RUN_TERMINAL_PROGRESS = frozenset({"run.completed", "run.failed", "run.cancelled"})
 _SECRET_FRAGMENTS = ("secret", "credential", "password", "token", "answer", "prompt")
 _O_DIRECTORY = getattr(os, "O_DIRECTORY", None)
 _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", None)
@@ -117,6 +118,8 @@ class BenchmarkEvidenceStore(Protocol):
     def compatible_run_result(
         self, plan: ResolvedBenchmarkPlan
     ) -> BenchmarkRunResult | None: ...
+
+    def terminal_progress_status(self, plan: ResolvedBenchmarkPlan) -> str | None: ...
 
     def next_progress_sequence(self, plan: ResolvedBenchmarkPlan) -> int: ...
 
@@ -293,6 +296,7 @@ class LocalPrivateBenchmarkEvidenceStore:
                 )
                 if persisted != result.tasks:
                     _fail("benchmark run result is invalid")
+                _validate_terminal_progress_closure(plan, run, result)
                 _atomic_write_json(run, "result.json", _run_result_dict(result))
             self._run_finished = True
             self._terminal_task_result_pending_run = False
@@ -329,7 +333,7 @@ class LocalPrivateBenchmarkEvidenceStore:
                     run,
                     tuple(task.task_id for task in completed),
                 )
-                _next_progress_sequence(run, plan)
+                _terminal_progress_status(run, plan)
                 return completed
         except BenchmarkEvidenceError:
             raise
@@ -348,7 +352,6 @@ class LocalPrivateBenchmarkEvidenceStore:
                 if _read_json(run, "manifest.json") != expected_manifest:
                     _fail("benchmark evidence resume is invalid")
                 completed = _completed_prefix_results_from_evidence(plan, run)
-                _next_progress_sequence(run, plan)
                 return _load_optional_run_result(
                     plan,
                     run,
@@ -359,8 +362,26 @@ class LocalPrivateBenchmarkEvidenceStore:
         except Exception:
             _fail("benchmark evidence resume is invalid")
 
+    def terminal_progress_status(self, plan: ResolvedBenchmarkPlan) -> str | None:
+        try:
+            expected_manifest = _plan_manifest(plan)
+            context = _existing_run_fd_or_none(self._root, plan)
+            if context is None:
+                return None
+            with context as run:
+                if _read_json(run, "manifest.json") != expected_manifest:
+                    _fail("benchmark evidence resume is invalid")
+                _completed_prefix_results_from_evidence(plan, run)
+                return _terminal_progress_status(run, plan)
+        except BenchmarkEvidenceError:
+            raise
+        except Exception:
+            _fail("benchmark evidence resume is invalid")
+
     def next_progress_sequence(self, plan: ResolvedBenchmarkPlan) -> int:
         try:
+            if self._plan is plan:
+                return self._next_sequence
             expected_manifest = _plan_manifest(plan)
             context = _existing_run_fd_or_none(self._root, plan)
             if context is None:
@@ -396,13 +417,14 @@ class LocalPrivateBenchmarkEvidenceStore:
         )
         self._active_task_id = None
         self._next_sequence = _next_progress_sequence(run_fd, plan)
+        terminal_progress_status = _terminal_progress_status(run_fd, plan)
         self._run_finished = result is not None and result.status in {
             "completed",
             "failed",
             "cancelled",
         }
         self._terminal_task_result_pending_run = False
-        self._terminal_progress_appended = self._run_finished
+        self._terminal_progress_appended = terminal_progress_status is not None
 
 
 class _FdContext:
@@ -884,7 +906,18 @@ def _load_optional_run_result(
         )
         if completed_in_result != completed:
             _fail("benchmark evidence resume is invalid")
+    _validate_terminal_progress_closure(plan, run_fd, result)
     return result
+
+
+def _validate_terminal_progress_closure(
+    plan: ResolvedBenchmarkPlan,
+    run_fd: int,
+    result: BenchmarkRunResult,
+) -> None:
+    terminal_status = _terminal_progress_status(run_fd, plan)
+    if terminal_status != f"run.{result.status}":
+        _fail("benchmark evidence resume is invalid")
 
 
 def _completed_result_prefix_ids(
@@ -941,7 +974,35 @@ def _persisted_task_results(
 
 
 def _next_progress_sequence(run_fd: int, plan: ResolvedBenchmarkPlan) -> int:
+    return len(_progress_events(run_fd, plan)) + 1
+
+
+def _terminal_progress_status(
+    run_fd: int,
+    plan: ResolvedBenchmarkPlan,
+) -> str | None:
+    events = _progress_events(run_fd, plan)
+    terminal_positions = tuple(
+        index
+        for index, event in enumerate(events)
+        if event.status in _RUN_TERMINAL_PROGRESS
+    )
+    if not terminal_positions:
+        return None
+    if len(terminal_positions) != 1 or terminal_positions[0] != len(events) - 1:
+        _fail("benchmark evidence resume is invalid")
+    terminal = events[terminal_positions[0]]
+    if terminal.task_id is not None:
+        _fail("benchmark evidence resume is invalid")
+    return terminal.status
+
+
+def _progress_events(
+    run_fd: int,
+    plan: ResolvedBenchmarkPlan,
+) -> tuple[BenchmarkProgressEvent, ...]:
     progress_fd = _open_required_dir(run_fd, "progress")
+    events: list[BenchmarkProgressEvent] = []
     try:
         names = sorted(os.listdir(progress_fd))
         expected = 1
@@ -958,10 +1019,11 @@ def _next_progress_sequence(run_fd: int, plan: ResolvedBenchmarkPlan) -> int:
                 )
             ):
                 _fail("benchmark evidence resume is invalid")
+            events.append(event)
             expected += 1
-        return expected
     finally:
         os.close(progress_fd)
+    return tuple(events)
 
 
 def _validate_task_result_for_plan(
