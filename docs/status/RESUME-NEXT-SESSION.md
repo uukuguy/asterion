@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-29 17:35. **Session remains active — not a final handoff.**
+> Updated: 2026-07-29 18:10. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -30,9 +30,11 @@
   membership before composition in `18ed670`.
 - Fresh final verification passed 577 Python tests, all cross-language gates,
   and 20 provider-free promotion commands.
-- The immediate next action is Plan 2 Task 1 in
-  `2026-07-27-asterion-capability-package-sources.md`: define source-neutral,
-  immutable package values under strict TDD.
+- Plan 2 Task 1 added source-neutral immutable package values in `33a96c1`,
+  then closed canonical identity, deep snapshot, opaque repr, hostile-body,
+  and exception-context review findings through `33e31a8`.
+- The immediate next action is Plan 2 Task 2: validate canonical portable
+  payload closure and location-independent content identity under strict TDD.
 
 ## Where things stand
 
@@ -55,17 +57,19 @@
 - Final post-review verification passed 577 Python tests through `make check`;
   `make promotion-check` reported `commands=20 provider_operations=0
   full_dataset=no`.
+- Plan 2 Task 1 focused verification passed 15 model tests and 51 adjacent
+  tests with Pyright and Ruff clean; independent review is approved.
 - `dci.agent-runtime/v1` remains only as the deliberate absence-test needle in
   Task 1 scope; no compatibility alias was added.
 - Plans 2-4 remain dependent on completion of the six Plan 1 tasks.
 
 ## Next action
 
-1. Create the Plan 2 task ledger/briefs and dispatch its Task 1 implementer.
-2. Keep candidate/provider locator data operator-private; public source
-   projections remain constrained by the Plan 1 protocol.
-3. Require RED immutability/body-free representation tests before adding
-   source-neutral package values.
+1. Dispatch Plan 2 Task 2 from the approved source plan.
+2. Require the full payload failure matrix before implementing descriptor-
+   relative reads and canonical hashing.
+3. Preserve location-independent identity, symlink rejection, direct-child
+   closure, body-free errors, and zero provider operations.
 
 ## Boundaries and ruled-out paths
 
