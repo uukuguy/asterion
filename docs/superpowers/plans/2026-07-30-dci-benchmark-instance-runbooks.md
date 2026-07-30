@@ -17,6 +17,13 @@
 - Locking and planning remain provider-free.
 - Real execution remains explicitly authorized, finite, and separate from documentation verification.
 - `docs/status/JOURNAL.md` remains append-only and outside feature commits.
+- Inventory headings, table labels, explanations, boundaries, and
+  troubleshooting are Chinese; exact identifiers, commands, environment
+  variables, JSON fields, file names, and literal status values remain
+  unchanged.
+- The local fixture is identified as framework verification, the one-case
+  Bamboogle path as a bounded capability check, and only the fifty-case
+  `--all-cases` workflow as the complete GitHub sample evaluation.
 
 ---
 
@@ -322,3 +329,156 @@ make check
 Expected: all commands pass. Do not execute the real Bamboogle `run` command as
 part of documentation verification.
 
+---
+
+### Task 4: Localize the inventory and add the complete Bamboogle evaluation
+
+**Files:**
+- Modify: `tests/test_dci_benchmark_instances.py`
+- Modify: `docs/status/DCI-BENCHMARK-INSTANCES.md`
+- Test: `tests/test_dci_benchmark_instances.py`
+
+**Interfaces:**
+- Consumes: the implemented-instance/runbook invariant and Bamboogle's exact
+  finite `all_case_count=50`
+- Produces: a Chinese operator document with distinct one-case and complete
+  fifty-case workflows
+
+- [ ] **Step 1: Write the failing localization and complete-workflow test**
+
+Change the implemented heading assertion to:
+
+```python
+self.assertIn(f"## 运行手册：`{selector}`", text)
+```
+
+Change the planned heading assertion to:
+
+```python
+self.assertNotIn(f"## 运行手册：`{selector}`", text)
+```
+
+Add these assertions:
+
+```python
+self.assertIn("# DCI Benchmark 实例", text)
+self.assertIn("## 如何使用本文档", text)
+self.assertIn("### 完整 50 案例评估", text)
+self.assertIn(
+    'export DCI_FULL_RUN_ROOT="$PWD/outputs/manual/',
+    text,
+)
+self.assertGreaterEqual(text.count("--all-cases"), 4)
+self.assertIn(
+    'jq \'{counts,accuracy}\' "$DCI_FULL_SUMMARY"',
+    text,
+)
+self.assertIn("不产生原 DCI benchmark 评估分数", text)
+self.assertIn("尚未实现", text)
+```
+
+- [ ] **Step 2: Run the focused test to verify RED**
+
+Run:
+
+```bash
+uv run python -m unittest -v \
+  tests.test_dci_benchmark_instances.TestDciBenchmarkInstances.test_instance_runbooks_match_implemented_catalog_entries
+```
+
+Expected: FAIL because the document still uses English headings, has no
+complete fifty-case execution root, and does not show aggregate summary
+extraction.
+
+- [ ] **Step 3: Translate explanatory content while preserving contracts**
+
+Translate the title, introduction, table headers and operator-facing status
+phrases, all prose headings, dependency/cost explanations, verification
+boundaries, and troubleshooting into Chinese. Keep immutable selectors, CLI
+commands, flags, environment-variable names, JSON fields, file names, and
+literal verification states exact.
+
+State explicitly:
+
+```markdown
+`dci.local-fixture@1.0.0` 是 provider-free 的框架闭环夹具，不产生原 DCI
+benchmark 评估分数。
+```
+
+State that one-case Bamboogle execution verifies only the real Agent/Judge
+path, while `dci.qa.bamboogle.paper-full125@1.0.0` remains planned and cannot
+produce the original paper's 125-case result.
+
+- [ ] **Step 4: Add the complete fifty-case workflow**
+
+Add a `### 完整 50 案例评估` subsection with:
+
+```bash
+export DCI_FULL_RUN_ROOT="$PWD/outputs/manual/dci-bamboogle-full50-$(date +%Y%m%d-%H%M%S)"
+export DCI_FULL_SOURCE_LOCK="$DCI_FULL_RUN_ROOT/source-lock.json"
+export DCI_FULL_EVIDENCE_ROOT="$DCI_FULL_RUN_ROOT/evidence"
+export DCI_FULL_RUN_RESULT="$DCI_FULL_RUN_ROOT/run-result.json"
+mkdir -p "$DCI_FULL_RUN_ROOT"
+
+uv run asterion-dci benchmark lock \
+  --instance dci.qa.bamboogle.github-sample50@1.0.0 \
+  --output "$DCI_FULL_SOURCE_LOCK"
+
+uv run asterion-dci benchmark plan \
+  --instance dci.qa.bamboogle.github-sample50@1.0.0 \
+  --all-cases \
+  --capability-source-lock "$DCI_FULL_SOURCE_LOCK"
+
+uv run asterion-dci benchmark run \
+  --instance dci.qa.bamboogle.github-sample50@1.0.0 \
+  --all-cases \
+  --capability-source-lock "$DCI_FULL_SOURCE_LOCK" \
+  --evidence-root "$DCI_FULL_EVIDENCE_ROOT" \
+  --execute | tee "$DCI_FULL_RUN_RESULT"
+
+export DCI_FULL_RUN_ID="$(jq -er '.run_id' "$DCI_FULL_RUN_RESULT")"
+
+uv run asterion-dci benchmark resume \
+  --instance dci.qa.bamboogle.github-sample50@1.0.0 \
+  --run-id "$DCI_FULL_RUN_ID" \
+  --all-cases \
+  --capability-source-lock "$DCI_FULL_SOURCE_LOCK" \
+  --evidence-root "$DCI_FULL_EVIDENCE_ROOT" \
+  --execute
+
+export DCI_FULL_SUMMARY="$DCI_FULL_EVIDENCE_ROOT/outputs/$DCI_FULL_RUN_ID/qa.bamboogle.github-sample50/summary.json"
+jq '{counts,accuracy}' "$DCI_FULL_SUMMARY"
+```
+
+Explain that this authorizes at most fifty Agent and fifty Judge operations,
+produces the GitHub sample50 aggregate accuracy, and still does not reproduce
+the planned paper-full125 result.
+
+- [ ] **Step 5: Verify GREEN and provider-free boundaries**
+
+Run:
+
+```bash
+uv run python -m unittest -v tests.test_dci_benchmark_instances
+uv run python tools/check_docs.py
+VERIFY_ROOT="$(mktemp -d)"
+uv run asterion-dci benchmark lock \
+  --instance dci.qa.bamboogle.github-sample50@1.0.0 \
+  --output "$VERIFY_ROOT/bamboogle-lock.json"
+uv run asterion-dci benchmark plan \
+  --instance dci.qa.bamboogle.github-sample50@1.0.0 \
+  --all-cases \
+  --capability-source-lock "$VERIFY_ROOT/bamboogle-lock.json"
+```
+
+Expected: tests and docs pass; plan reports `case_limit: 50`; no Agent, Judge,
+network, dataset-body, or corpus-body operation runs.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add \
+  tests/test_dci_benchmark_instances.py \
+  docs/status/DCI-BENCHMARK-INSTANCES.md
+git commit -m "docs: localize complete DCI benchmark runbooks"
+```
