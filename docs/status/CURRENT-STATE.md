@@ -5,8 +5,8 @@
 - Project: Asterion
 - Active branch: `feature/capability-protocol-foundation`
 - Theme: source-neutral capability packages and generic benchmark execution
-- Plans 1–4: implemented; final Plan 4 integration gates are the current boundary
-- Next action: review and integrate the completed branch
+- Runnable DCI closure Tasks 1–8: implemented through installed-wheel local verification
+- Next action: run provider-free final gates, external readiness, and at most one authorized Bamboogle case
 
 ## Current Architecture
 
@@ -35,23 +35,26 @@
 
 ## Execution Boundary
 
-- `asterion-dci benchmark plan` is implemented and provider-free.
-- The installed CLI has no execution authority. Run/resume require an embedding
-  host's fresh authorization, exact source selection, injected implementations,
-  executor, cancellation, and private evidence service.
+- `asterion-dci benchmark instances`, source locking, and planning are
+  implemented and provider-free.
+- The installed product host supports explicitly authorized run/resume for the
+  provider-free local fixture and bounded Bamboogle instance. It injects exact
+  implementations, cancellation, and private evidence only after authority.
 - Credentials, provider settings, datasets, corpora, paths, private environment,
   and optional amount remain operator-owned and outside portable/public values.
 - A monetary amount is not a generic authorization requirement.
-- Full datasets and paper reproduction require separate finite-budget
-  governance and were not run during this migration.
+- Real Bamboogle binds the pinned upstream Agent/prompt/Judge contracts, defaults
+  to one case, and permits a finite 50-case plan. The 50-case run and paper
+  reproduction require separate finite-budget governance and were not run.
 - Archive and registry source forms remain deferred pending a separate security
   and lifecycle design.
 
 ## Verification State
 
-- Task-level tests and reviews for Plans 1–3 and Plan 4 Tasks 1–7 are complete.
-- Plan 4 Task 8 adds permanent ownership, portable built-in, active-document,
-  wheel inventory, privacy, and source-form boundary assertions.
+- The installed-wheel subprocess test executes and resumes all 15 local fixture
+  tasks using only installed resources: `Verified-local`.
+- The Bamboogle path has fake Agent/Judge E2E verification, but real external
+  verification remains `Not rerun` pending readiness.
 - A passing command is required before any final state is labelled Verified.
   Provider-free checks never establish paper-score reproduction.
 
@@ -61,6 +64,7 @@
 - `docs/status/RESUME-NEXT-SESSION.md` — current handoff
 - `docs/status/JOURNAL.md` — append-only event history
 - `docs/status/DECISIONS.md` — active architecture decisions
+- `docs/status/DCI-BENCHMARK-INSTANCES.md` — exact instance backlog
 - `docs/superpowers/plans/2026-07-27-dci-capability-package-migration.md`
 - `docs/architecture/benchmark-subsystem.md`
 - `docs/architecture/composable-packages.md`
@@ -73,7 +77,7 @@
 
 1. Read this file and `RESUME-NEXT-SESSION.md`.
 2. Run `git status --short` and `git log --oneline -10`.
-3. Confirm the final Task 8 commit and named gates before integration.
-4. Treat all external execution as unauthorized unless the operator supplies a
-   new explicit authorization and required private services.
+3. Run Task 9 provider-free gates before external readiness.
+4. Execute at most the explicitly authorized one-case Bamboogle run when every
+   private readiness category passes.
 5. Never promote bounded or provider-free evidence to full-paper reproduction.

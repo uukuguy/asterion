@@ -100,36 +100,49 @@ amount to authorize a benchmark. An optional amount may be supplied as private
 DCI operator configuration, but it is never serialized into a manifest, plan,
 or public result and never grants execution authority.
 
-DCI exposes three exact suites through the generic benchmark subsystem:
-`dci.github@1.0.0` (12 tasks), `dci.paper-main@1.0.0` (13 tasks), and
-`dci.all@1.0.0` (15 tasks). The application adapter fixes the application to
-`dci.complete-application@1.0.0`. Planning is provider-free:
+DCI exposes an immutable instance catalog over the generic benchmark
+subsystem. List it and select an exact version:
+
+The underlying exact suites remain `dci.github@1.0.0`,
+`dci.paper-main@1.0.0`, and `dci.all@1.0.0`; product instances bind those
+suites to an exact application, task selection, executor, and finite range.
 
 ```bash
-uv run asterion-dci benchmark plan --case-limit 1
+uv run asterion-dci benchmark instances --json
+uv run asterion-dci benchmark lock \
+  --instance dci.local-fixture@1.0.0 \
+  --output "$OPERATOR_SELECTED_SOURCE_LOCK"
+uv run asterion-dci benchmark plan \
+  --instance dci.local-fixture@1.0.0 \
+  --capability-source-lock "$OPERATOR_SELECTED_SOURCE_LOCK"
 ```
 
-Planning creates no evidence, loads no capability implementation provider,
-performs no Agent/Judge work, and runs no dataset. `--case-limit 1` applies to
-each task in suite order; it is not paper-score reproduction.
+Listing, locking, and planning create no evidence, load no capability
+implementation provider, perform no Agent/Judge work, and run no dataset. The
+default range is one case per task. `--all-cases` only resolves the finite
+catalog range; it is not authority to execute that range.
 
-Execution and resume require an embedding operator host to supply explicit
-authorization, exact source selection, implementations, executor, cancellation,
-and private evidence services. The generic command shape is:
+The product-owned installed host runs only after explicit authorization, exact
+source selection, and a private absolute evidence root:
 
 ```bash
 uv run asterion-dci benchmark run \
+  --instance dci.local-fixture@1.0.0 \
   --case-limit 1 \
   --capability-source-lock "$OPERATOR_SELECTED_SOURCE_LOCK" \
   --evidence-root "$OPERATOR_SELECTED_PRIVATE_EVIDENCE_ROOT" \
   --execute
 ```
 
-The plain installed CLI deliberately has no execution authority. No credential,
-path, existing output, cached evidence, or prior plan grants authority. A host
-that authorizes execution writes immutable private evidence and exposes only
-body-free public task/run results. Resume additionally requires the compatible
-run ID. Full datasets and paper reproduction remain separately governed.
+Resume additionally requires the returned compatible run ID and the same
+instance, range, lock, and evidence root. `dci.local-fixture@1.0.0` is
+provider-free. Real instances use external data, model/network access, and an
+independent Judge; the default bounded range controls their cost. No credential,
+path, cached configuration, prior plan, or evidence grants execution authority.
+Full datasets and paper reproduction remain separately governed.
+
+See [the DCI operator guide](docs/OPERATOR-GUIDE.md) and
+[instance backlog](docs/status/DCI-BENCHMARK-INSTANCES.md).
 
 Use `make help` to see the same boundary beside every command group.
 

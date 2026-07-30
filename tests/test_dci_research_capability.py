@@ -195,13 +195,21 @@ class DciResearchCapabilityBoundaryTests(unittest.TestCase):
             SOURCE / "applications",
             SOURCE / "capabilities",
         )
-        source = "\n".join(
-            path.read_text()
+        offenders = tuple(
+            path.relative_to(SOURCE).as_posix()
             for root in roots
             if root.exists()
             for path in root.rglob("*.py")
+            if (
+                "from asterion.capabilities.dci.implementation.evaluation."
+                "benchmark import"
+            )
+            in path.read_text()
         )
-        self.assertNotIn("from asterion.capabilities.dci.implementation.evaluation.benchmark import", source)
+        self.assertEqual(
+            offenders,
+            ("applications/dci_agent_lite/benchmark_executor.py",),
+        )
 
     def test_package_runtime_artifact_event_accepts_only_canonical_keys_and_sha256(
         self,

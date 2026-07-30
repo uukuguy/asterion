@@ -1,54 +1,42 @@
-# Live Session Checkpoint
+# Recovered Session Checkpoint
 
-> Updated: 2026-07-29. Plan 4 implementation is complete on
-> `feature/capability-protocol-foundation`.
+> Updated: 2026-07-30. **Session remains active — the prior session missed a
+> final handoff.**
 
-## Outcome
+## TL;DR
 
-DCI is implemented as `dci@1.0.0`, one capability package consumed by the
-generic Asterion benchmark subsystem. It is not a generic framework dependency
-or a parallel benchmark architecture.
+- Plan 4 closed in `935b129`; DCI is a capability-package implementation of
+  Asterion's generic benchmark subsystem.
+- Local and bounded Bamboogle instances now have formal installed execution
+  hosts with explicit authorization, private evidence, cancellation, and resume.
+- The installed-wheel local closure and complete DCI instance backlog are
+  finished. The active goal is external readiness classification and final
+  verification gates.
 
-The package owns seven capability manifests, three exact benchmark suites,
-fifteen task bindings, its domain implementation, resources, and provider.
-The `asterion-dci` entry point is only an application adapter over the generic
-benchmark host.
+## Durable baseline
 
-DCI passed an external-first proof in a clean wheel environment using only the
-public SDK. Its built-in, installed-distribution, and explicit local-directory
-forms have equivalent payload identity, conformance, implementation bindings,
-plans, and public results. Equal candidates remain ambiguous without an exact
-source lock.
+- `dci@1.0.0` owns seven capabilities, three suites, fifteen task bindings,
+  implementation code, resources, and its provider.
+- Built-in, installed-distribution, and local-directory source forms passed
+  external-first equivalence and promotion checks.
+- `asterion-dci` wires its product-owned host only after explicit execution
+  arguments and authority; metadata-only commands remain provider-free.
+- The real Bamboogle path binds the pinned upstream profile and existing
+  Agent/Judge engine; fake dependency seams proved one operation and exact
+  resume without repeated operations.
 
-The obsolete `asterion.dci`, `asterion.capabilities.dci_research`, global
-launchers, task shell scripts, and legacy tests are absent. Generic framework
-packages do not import DCI.
+## Immediate next action
 
-## Plan 4 commits
+Execute Task 9 from the committed TDD plan in
+`docs/superpowers/plans/2026-07-30-dci-runnable-benchmark-closure.md`.
+Tasks 1-8 are implemented; run provider-free gates, prove the 50-case plan
+without executing it, then classify readiness and run at most one real case.
 
-- `9e5ca30` — migrate DCI manifest consumers to the portable payload.
-- `d97cb60` — harden portable DCI payload boundaries.
-- `bac48d3` — bind DCI benchmark tasks in package code.
-- `0abb75a` — move DCI implementation into its package.
-- `c720586` — make the DCI CLI an application adapter.
-- `61a966e` — remove global DCI benchmark launchers.
-- `dfddcb2` — prove DCI as an external capability package.
-- `1a3b162` — materialize DCI as an equivalent built-in source.
+## Ruled-out paths
 
-## Boundaries
-
-- Planning, acceptance, tests, checks, and promotion are provider-free.
-- Execution requires a fresh embedding-host authorization, an exact source
-  lock, injected implementations and services, cancellation, and private
-  evidence storage.
-- A monetary amount is optional private DCI operator configuration, not a
-  generic requirement or execution authority.
-- Full datasets and paper reproduction remain separately governed and were not
-  run.
-- Archive and registry source forms remain deferred pending a separate security
-  and lifecycle design.
-
-## Next action
-
-Review and integrate this branch. No Plan 4 implementation task remains after
-the final Task 8 gates and review pass.
+- Do not put credentials, paths, provider configuration, prompts, or mutable
+  state into portable package manifests.
+- Do not grant execution merely because configuration, data, a source lock, or
+  prior evidence exists.
+- Do not add a DCI task loop or runner outside the generic benchmark subsystem.
+- Do not claim a fixture run reproduces a paper or full dataset.

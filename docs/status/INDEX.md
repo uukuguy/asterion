@@ -17,6 +17,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `JOURNAL.md` | 🟢 active | Append-only event log. `/project-state journal "..."` appends. |
 | `RESUME-NEXT-SESSION.md` | 🟢 active | Session handoff baton. |
 | `CURRENT-STATE.md` | 🟢 active | Structural snapshot. |
+| `DCI-BENCHMARK-INSTANCES.md` | 🟢 active | DCI benchmark implementation and verification backlog. |
 | `DECISIONS.md` | 🟢 active | Indexed active architecture decisions and rationale. |
 | `INDEX.md` (this file) | 🟢 active | Discovery hub. |
 
