@@ -3,7 +3,7 @@
 ## Project Snapshot
 
 - Project: Asterion
-- Active branch: `feature/capability-protocol-foundation`
+- Active branch: `main`
 - Theme: source-neutral capability packages and generic benchmark execution
 - Runnable DCI closure Tasks 1–9: implemented; first real instance is verified end to end
 - Next action: implement the next exact instance from the DCI benchmark backlog
@@ -55,9 +55,11 @@
   tasks using only installed resources: `Verified-local`.
 - The Bamboogle path has fake Agent/Judge E2E verification, exact 50-case
   provider-free planning, and a real one-case `Verified-bounded` run.
-- Run `run-531b866dfb304dd9a65e7329a4436e65` completed one Agent operation,
-  one Judge operation, and one correct result. Exact resume completed in one
-  second with a single native evidence generation and no repeated work.
+- Main-workspace run `run-48217ad3214649dea9ff7e06c23d1625` completed one
+  Agent operation, one Judge operation, and one correct result. Exact resume
+  completed in zero seconds without adding evidence or repeating work.
+- `make check` and `make promotion-check` pass on integrated `main`. The
+  completed capability-protocol worktree and branch have been removed.
 - A passing command is required before any final state is labelled Verified.
   Provider-free checks never establish paper-score reproduction.
 

@@ -20,9 +20,11 @@
 - `asterion-dci` wires its product-owned host only after explicit execution
   arguments and authority; metadata-only commands remain provider-free.
 - The real Bamboogle path binds `asterion-safe/pi` to the existing Agent/Judge
-  engine. Formal run `run-531b866dfb304dd9a65e7329a4436e65` completed one
-  correct case; exact resume retained one native generation without repeating
-  Agent or Judge work.
+  engine. Main-workspace run `run-48217ad3214649dea9ff7e06c23d1625`
+  completed one correct case; exact resume took zero seconds and added no
+  evidence.
+- Integrated `main` passes `make check` and `make promotion-check`. The
+  completed capability-protocol worktree and branch no longer exist.
 
 ## Immediate next action
 
