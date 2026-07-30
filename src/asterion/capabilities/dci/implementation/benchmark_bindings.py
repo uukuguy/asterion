@@ -17,7 +17,14 @@ from asterion.capabilities.dci.implementation.operator_inputs import (
     DciBenchmarkOperatorInputs,
 )
 _DCI_PACKAGE = CapabilityPackageRef("dci", "1.0.0")
-_DCI_SUITES = frozenset(("dci.all", "dci.github", "dci.paper-main"))
+_DCI_SUITES = frozenset(
+    (
+        "dci.all",
+        "dci.github",
+        "dci.paper-main",
+        "dci.qa.bamboogle.github-sample50",
+    )
+)
 
 
 class DciBenchmarkBindingError(ValueError):
@@ -69,7 +76,7 @@ _TASK_CONTRACTS = (
 
 
 @dataclass(frozen=True, slots=True)
-class _DciBenchmarkInvocationPayload:
+class DciBenchmarkInvocationPayload:
     profile_id: str
     selection_variant: str
     dataset: Path = field(repr=False)
@@ -133,7 +140,7 @@ class _DciBenchmarkTaskImplementation:
                 contract.selection_variant,
                 f"limit-{request.case_limit}",
             ),
-            private_payload=_DciBenchmarkInvocationPayload(
+            private_payload=DciBenchmarkInvocationPayload(
                 profile_id=contract.profile_id,
                 selection_variant=contract.selection_variant,
                 dataset=dataset,
@@ -175,5 +182,6 @@ def create_benchmark_bindings(
 
 __all__ = (
     "DciBenchmarkBindingError",
+    "DciBenchmarkInvocationPayload",
     "create_benchmark_bindings",
 )

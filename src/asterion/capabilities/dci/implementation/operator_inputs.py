@@ -136,6 +136,25 @@ class DciBenchmarkOperatorInputs:
         )
 
 
+def create_local_fixture_operator_inputs(
+    private_root: Path,
+) -> DciBenchmarkOperatorInputs:
+    """Create deterministic descriptor-only inputs without reading external data."""
+
+    root = _absolute_path(private_root) / "fixture-inputs"
+    return DciBenchmarkOperatorInputs(
+        dataset_roots={
+            task_id: root / task_id / "dataset.jsonl"
+            for task_id in _RESOURCE_PATHS
+        },
+        corpus_roots={
+            task_id: root / task_id / "corpus"
+            for task_id in _RESOURCE_PATHS
+        },
+        private_environment={},
+    )
+
+
 def _snapshot_paths(values: Mapping[str, Path]) -> Mapping[str, Path]:
     if not isinstance(values, Mapping):
         raise DciBenchmarkOperatorInputError(
@@ -201,4 +220,5 @@ def _absolute_path(value: object) -> Path:
 __all__ = (
     "DciBenchmarkOperatorInputError",
     "DciBenchmarkOperatorInputs",
+    "create_local_fixture_operator_inputs",
 )

@@ -344,6 +344,52 @@ class TestDciApplicationAdapter(unittest.TestCase):
             ],
         )
 
+    def test_installed_local_execution_wires_formal_host_without_private_config(
+        self,
+    ) -> None:
+        host = cast(BenchmarkCommandHost, object())
+        calls: list[object] = []
+
+        def benchmark_main(argv, **kwargs):
+            calls.append((list(argv), kwargs["host"]))
+            return 0
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source_lock = root / "source-lock.json"
+            source_lock.write_text("{}\n", encoding="utf-8")
+            with (
+                patch(
+                    "asterion.applications.dci_agent_lite.cli.load_operator_config",
+                    side_effect=AssertionError("local config must not load"),
+                ),
+                patch(
+                    "asterion.applications.dci_agent_lite.benchmark_host.DciBenchmarkHost",
+                    return_value=host,
+                ) as host_type,
+            ):
+                code = main(
+                    [
+                        "benchmark",
+                        "run",
+                        "--instance",
+                        "dci.local-fixture@1.0.0",
+                        "--execute",
+                        "--capability-source-lock",
+                        str(source_lock),
+                        "--evidence-root",
+                        str(root / "evidence"),
+                    ],
+                    benchmark_main=benchmark_main,
+                    stdout=io.StringIO(),
+                    stderr=io.StringIO(),
+                )
+
+        self.assertEqual(code, 0)
+        host_type.assert_called_once()
+        self.assertIsNone(host_type.call_args.kwargs["operator_config"])
+        self.assertIs(cast(tuple[list[str], object], calls[0])[1], host)
+
     def test_unauthorized_run_never_loads_private_operator_config(self) -> None:
         calls: list[object] = []
 

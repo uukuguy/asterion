@@ -107,18 +107,38 @@ def main(
         selected_benchmark_host = benchmark_host
         if (
             selected_benchmark_host is None
-            and benchmark_host_factory is not None
             and _execution_host_ready(delegated_arguments)
         ):
             try:
-                selected_benchmark_host = benchmark_host_factory(
-                    load_operator_config(
-                        Path.cwd() if repo_root is None else repo_root,
-                        env_file=env_file,
-                        environment=environment,
-                        amount=amount,
+                if benchmark_host_factory is not None:
+                    selected_benchmark_host = benchmark_host_factory(
+                        load_operator_config(
+                            Path.cwd() if repo_root is None else repo_root,
+                            env_file=env_file,
+                            environment=environment,
+                            amount=amount,
+                        )
                     )
-                )
+                else:
+                    from asterion.applications.dci_agent_lite.benchmark_host import (
+                        DciBenchmarkHost,
+                    )
+
+                    config = (
+                        None
+                        if instance.executor_profile == "local-fixture"
+                        else load_operator_config(
+                            Path.cwd() if repo_root is None else repo_root,
+                            env_file=env_file,
+                            environment=environment,
+                            amount=amount,
+                        )
+                    )
+                    selected_benchmark_host = DciBenchmarkHost(
+                        instance=instance,
+                        operator_config=config,
+                        package_sources=benchmark_package_sources,
+                    )
             except Exception:
                 stderr.write("asterion-dci: command failed\n")
                 return 2
