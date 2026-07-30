@@ -22,6 +22,10 @@ from asterion.applications.dci_agent_lite.benchmark_instances import (
     resolve_case_limit,
     select_benchmark_instance,
 )
+from asterion.applications.dci_agent_lite.benchmark_source_lock import (
+    resolve_benchmark_source_lock,
+    write_benchmark_source_lock,
+)
 
 
 DCI_PROVIDER_ID = "dci-agent-lite"
@@ -52,6 +56,7 @@ def main(
     env_file: Path | None = None,
     environment: Mapping[str, str] | None = None,
     amount: Decimal | None = None,
+    benchmark_package_sources: Sequence[object] | None = None,
 ) -> int:
     """Apply exact DCI defaults and delegate to generic Asterion hosts."""
 
@@ -84,6 +89,13 @@ def main(
         if remainder and remainder[0] == "instances":
             return _list_benchmark_instances(
                 remainder[1:],
+                stdout=stdout,
+                stderr=stderr,
+            )
+        if remainder and remainder[0] == "lock":
+            return _create_benchmark_source_lock(
+                remainder,
+                package_sources=benchmark_package_sources,
                 stdout=stdout,
                 stderr=stderr,
             )
@@ -206,6 +218,45 @@ def _list_benchmark_instances(
                 f"{value['cost_class']}\n"
             )
     return 0
+
+
+def _create_benchmark_source_lock(
+    arguments: Sequence[str],
+    *,
+    package_sources: Sequence[object] | None,
+    stdout: TextIO,
+    stderr: TextIO,
+) -> int:
+    try:
+        selector, values = _take_option(list(arguments), "--instance")
+        output_value, values = _take_option(values, "--output")
+        if (
+            selector is None
+            or output_value is None
+            or values != ["lock"]
+            or "\x00" in output_value
+        ):
+            raise DciBenchmarkInstanceError("DCI benchmark lock is invalid")
+        instance = select_benchmark_instance(selector)
+        if instance.implementation_state != "implemented":
+            raise DciBenchmarkInstanceError("DCI benchmark instance is unavailable")
+        lock = resolve_benchmark_source_lock(
+            instance,
+            package_sources=package_sources,
+        )
+        write_benchmark_source_lock(lock, Path(output_value).expanduser())
+        stdout.write(
+            json.dumps(
+                {"instance": instance.selector, "locked": True},
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
+        return 0
+    except Exception:
+        stderr.write("asterion-dci: command failed\n")
+        return 2
 
 
 def _benchmark_selection(

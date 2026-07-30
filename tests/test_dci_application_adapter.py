@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import cast
+from unittest.mock import patch
 
 from asterion.applications.dci_agent_lite import provider
 from asterion.applications.dci_agent_lite.cli import (
@@ -28,6 +29,32 @@ ASSEMBLIES = (
 
 
 class TestDciApplicationAdapter(unittest.TestCase):
+    def test_benchmark_lock_is_metadata_only(self) -> None:
+        from tests.test_dci_benchmark_source_lock import RecordingSource
+
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "source-lock.json"
+            with patch(
+                "asterion.applications.dci_agent_lite.cli.load_operator_config",
+                side_effect=AssertionError("private config must not load"),
+            ):
+                code = main(
+                    [
+                        "benchmark",
+                        "lock",
+                        "--instance",
+                        "dci.local-fixture@1.0.0",
+                        "--output",
+                        str(output),
+                    ],
+                    benchmark_package_sources=(RecordingSource(),),
+                    stdout=io.StringIO(),
+                    stderr=io.StringIO(),
+                )
+
+            self.assertEqual(code, 0)
+            self.assertTrue(output.is_file())
+
     def test_provider_declares_exact_application_package_and_runtimes(self) -> None:
         installed = provider.create_provider()
         complete = next(
