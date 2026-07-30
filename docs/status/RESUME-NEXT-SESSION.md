@@ -9,7 +9,8 @@
 - Local and bounded Bamboogle instances now have formal installed execution
   hosts with explicit authorization, private evidence, cancellation, and resume.
 - The installed-wheel local closure and complete DCI instance backlog are
-  finished. The first real Bamboogle instance is `Verified-bounded`.
+  finished. The first real Bamboogle GitHub sample50 instance is
+  `Verified-full`.
 
 ## Durable baseline
 
@@ -20,9 +21,9 @@
 - `asterion-dci` wires its product-owned host only after explicit execution
   arguments and authority; metadata-only commands remain provider-free.
 - The real Bamboogle path binds `asterion-safe/pi` to the existing Agent/Judge
-  engine. Main-workspace run `run-48217ad3214649dea9ff7e06c23d1625`
-  completed one correct case; exact resume took zero seconds and added no
-  evidence.
+  engine. Main-workspace run `run-e8ea4a0db373482b9a849d8f8ace7790`
+  completed 50/50 cases with 41 correct and 82% accuracy; exact resume took
+  zero seconds and added no evidence or generation.
 - Integrated `main` passes `make check` and `make promotion-check`. The
   completed capability-protocol worktree and branch no longer exist.
 

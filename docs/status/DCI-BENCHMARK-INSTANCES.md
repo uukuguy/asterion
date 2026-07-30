@@ -19,7 +19,7 @@ benchmark 实例的实现清单、验证台账和运行手册。
 | `dci.bright.robotics@1.0.0` | `bright.robotics` | planned | Not rerun | — | 锁定有限范围并实现 |
 | `dci.local-fixture@1.0.0` | 15 个任务的框架夹具 | implemented | Verified-local | 每任务 1 个 | 维护安装包闭环 |
 | `dci.qa.2wikimultihopqa@1.0.0` | `qa.2wikimultihopqa` | planned | Not rerun | — | 锁定有限范围并实现 |
-| `dci.qa.bamboogle.github-sample50@1.0.0` | `qa.bamboogle.github-sample50` | implemented | Verified-bounded | 50 | 完成并验证 50 案例评估 |
+| `dci.qa.bamboogle.github-sample50@1.0.0` | `qa.bamboogle.github-sample50` | implemented | Verified-full | 50 | 维护完整 50 案例闭环 |
 | `dci.qa.bamboogle.paper-full125@1.0.0` | `qa.bamboogle.paper-full125` | planned | Not rerun | — | 单独设计论文完整评估授权 |
 | `dci.qa.hotpotqa@1.0.0` | `qa.hotpotqa` | planned | Not rerun | — | 锁定有限范围并实现 |
 | `dci.qa.musique@1.0.0` | `qa.musique` | planned | Not rerun | — | 锁定有限范围并实现 |
@@ -242,13 +242,17 @@ jq '{counts,accuracy}' "$DCI_FULL_SUMMARY"
 
 ### 已验证边界
 
-2026-07-30 的 main-workspace 运行
-`run-48217ad3214649dea9ff7e06c23d1625` 完成了 1 次 Agent、1 次 Judge，并得到
-1 个正确结果。精确 resume 耗时 0 秒且没有新增 evidence。provider-free 测试还覆盖
-了 50-case plan 和 fake Agent/Judge 端到端路径。
+2026-07-30 的 main-workspace 完整运行
+`run-e8ea4a0db373482b9a849d8f8ace7790` 完成全部 50 个案例：
 
-因此当前状态仍是 `Verified-bounded`。只有完整 50-case run 成功并核验
-`summary.json` 后，GitHub sample50 才能提升为 `Verified-full`。
+- 50/50 个案例完成独立 Judge；
+- 41/50 判定正确；
+- `accuracy.over_total` 和 `accuracy.over_judged` 均为 82%；
+- `failed_runs` 为 0；
+- 精确 resume 耗时 0 秒，新增 evidence 0 个，新增 generation 0 个。
+
+因此 GitHub sample50 当前为 `Verified-full`。该状态仅覆盖这个 50-case 实例；
+`dci.qa.bamboogle.paper-full125@1.0.0` 仍为 planned，不能据此声称复现论文完整结果。
 
 ## 故障排查
 

@@ -5,7 +5,7 @@
 - Project: Asterion
 - Active branch: `main`
 - Theme: source-neutral capability packages and generic benchmark execution
-- Runnable DCI closure Tasks 1–9: implemented; first real instance is verified end to end
+- Runnable DCI closure Tasks 1–9: implemented; first real instance is verified across all 50 cases
 - Next action: implement the next exact instance from the DCI benchmark backlog
 
 ## Current Architecture
@@ -44,8 +44,9 @@
   and optional amount remain operator-owned and outside portable/public values.
 - A monetary amount is not a generic authorization requirement.
 - Real Bamboogle binds the `asterion-safe/pi` Agent/prompt/Judge contracts,
-  defaults to one case, and permits a finite 50-case plan. The 50-case run and
-  paper reproduction require separate finite-budget governance and were not run.
+  defaults to one case, and permits a finite 50-case run. The complete
+  GitHub-sample50 run is verified; paper-full125 reproduction remains unimplemented
+  and requires separate finite-budget governance.
 - Archive and registry source forms remain deferred pending a separate security
   and lifecycle design.
 
@@ -54,10 +55,10 @@
 - The installed-wheel subprocess test executes and resumes all 15 local fixture
   tasks using only installed resources: `Verified-local`.
 - The Bamboogle path has fake Agent/Judge E2E verification, exact 50-case
-  provider-free planning, and a real one-case `Verified-bounded` run.
-- Main-workspace run `run-48217ad3214649dea9ff7e06c23d1625` completed one
-  Agent operation, one Judge operation, and one correct result. Exact resume
-  completed in zero seconds without adding evidence or repeating work.
+  provider-free planning, and a real full50 `Verified-full` run.
+- Main-workspace run `run-e8ea4a0db373482b9a849d8f8ace7790` completed all
+  50 cases with 50 judged, 41 correct, 82% accuracy, and zero failed runs.
+  Exact resume completed in zero seconds without adding evidence or generation.
 - `make check` and `make promotion-check` pass on integrated `main`. The
   completed capability-protocol worktree and branch have been removed.
 - A passing command is required before any final state is labelled Verified.

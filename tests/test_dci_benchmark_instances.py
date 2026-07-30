@@ -78,6 +78,14 @@ class TestDciBenchmarkInstances(unittest.TestCase):
         )
         self.assertIn("不产生原 DCI benchmark 评估分数", text)
         self.assertIn("尚未实现", text)
+        self.assertIn(
+            "| `dci.qa.bamboogle.github-sample50@1.0.0` "
+            "| `qa.bamboogle.github-sample50` | implemented "
+            "| Verified-full | 50 |",
+            text,
+        )
+        self.assertIn("41/50", text)
+        self.assertIn("82%", text)
         self.assertNotRegex(text, r"--run-id\s+run-[0-9a-f]{32}")
         self.assertNotRegex(
             text,
