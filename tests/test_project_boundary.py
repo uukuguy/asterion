@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import os
 import re
 import tempfile
 import unittest
@@ -141,22 +142,33 @@ def imported_names(tree: ast.AST) -> tuple[str, ...]:
 def identity_files(*, root: Path = PROJECT) -> tuple[Path, ...]:
     project_root = root.resolve()
     files: list[Path] = []
-    for path in project_root.rglob("*"):
-        relative = path.relative_to(project_root)
-        if (
-            not path.is_file()
-            or any(part in RECURSIVE_EXCLUDED_NAMES for part in relative.parts)
-            or relative == GENERATED_SDD_EVIDENCE_ROOT
-            or relative.is_relative_to(GENERATED_SDD_EVIDENCE_ROOT)
-            or relative in HISTORICAL_DOCUMENT_FILES
-            or any(
-                relative == root or relative.is_relative_to(root)
-                for root in HISTORICAL_DOCUMENT_ROOTS
+    for current, directories, filenames in os.walk(project_root):
+        current_path = Path(current)
+        directories[:] = sorted(
+            directory
+            for directory in directories
+            if directory not in RECURSIVE_EXCLUDED_NAMES
+            and (relative := (current_path / directory).relative_to(project_root))
+            != GENERATED_SDD_EVIDENCE_ROOT
+            and not relative.is_relative_to(GENERATED_SDD_EVIDENCE_ROOT)
+            and all(
+                relative != historical_root
+                and not relative.is_relative_to(historical_root)
+                for historical_root in HISTORICAL_DOCUMENT_ROOTS
             )
-            or (path.suffix not in TEXT_SUFFIXES and path.name not in TEXT_NAMES)
-        ):
-            continue
-        files.append(path)
+        )
+        for filename in filenames:
+            path = current_path / filename
+            relative = path.relative_to(project_root)
+            if (
+                relative in HISTORICAL_DOCUMENT_FILES
+                or (
+                    path.suffix not in TEXT_SUFFIXES
+                    and path.name not in TEXT_NAMES
+                )
+            ):
+                continue
+            files.append(path)
     return tuple(sorted(files))
 
 
