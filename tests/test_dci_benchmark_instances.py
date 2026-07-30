@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import io
 import json
+import tempfile
 import unittest
 from dataclasses import FrozenInstanceError
+from pathlib import Path
 
+from asterion.applications.dci_agent_lite.cli import main
 from asterion.applications.dci_agent_lite.benchmark_instances import (
     DciBenchmarkInstanceError,
     benchmark_instances,
@@ -112,6 +116,60 @@ class TestDciBenchmarkInstances(unittest.TestCase):
         self.assertNotIn("corpus", rendered)
         self.assertNotIn("credential", rendered)
         self.assertNotIn("prompt", repr(instance))
+
+    def test_bamboogle_default_and_all_case_plans_use_product_ranges(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            lock = Path(temp) / "source-lock.json"
+            self.assertEqual(
+                main(
+                    [
+                        "benchmark",
+                        "lock",
+                        "--instance",
+                        "dci.qa.bamboogle.github-sample50@1.0.0",
+                        "--output",
+                        str(lock),
+                    ],
+                    stdout=io.StringIO(),
+                    stderr=io.StringIO(),
+                ),
+                0,
+            )
+            default_stdout = io.StringIO()
+            default_stderr = io.StringIO()
+            default_code = main(
+                [
+                    "benchmark",
+                    "plan",
+                    "--instance",
+                    "dci.qa.bamboogle.github-sample50@1.0.0",
+                    "--capability-source-lock",
+                    str(lock),
+                ],
+                stdout=default_stdout,
+                stderr=default_stderr,
+            )
+
+            all_stdout = io.StringIO()
+            all_stderr = io.StringIO()
+            all_code = main(
+                [
+                    "benchmark",
+                    "plan",
+                    "--instance",
+                    "dci.qa.bamboogle.github-sample50@1.0.0",
+                    "--all-cases",
+                    "--capability-source-lock",
+                    str(lock),
+                ],
+                stdout=all_stdout,
+                stderr=all_stderr,
+            )
+
+            self.assertEqual(default_code, 0, default_stderr.getvalue())
+            self.assertEqual(json.loads(default_stdout.getvalue())["case_limit"], 1)
+            self.assertEqual(all_code, 0, all_stderr.getvalue())
+            self.assertEqual(json.loads(all_stdout.getvalue())["case_limit"], 50)
 
 
 if __name__ == "__main__":
