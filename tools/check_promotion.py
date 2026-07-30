@@ -212,6 +212,8 @@ ROOT_EXCLUDED_NAMES = frozenset(
         "pi",
         "pi-mono",
         "runs",
+        ".worktrees",
+        "worktrees",
     }
 )
 RECURSIVE_EXCLUDED_NAMES = frozenset(

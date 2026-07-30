@@ -76,6 +76,7 @@ class PromotionCheckTests(unittest.TestCase):
     def test_quick_copy_excludes_external_generated_and_cache_paths(self) -> None:
         excluded = (
             ".git",
+            ".worktrees",
             ".venv",
             ".env",
             "__pycache__",
@@ -83,6 +84,7 @@ class PromotionCheckTests(unittest.TestCase):
             ".ruff_cache",
             "node_modules",
             "target",
+            "worktrees",
             "dist",
             "outputs",
             "corpus",
