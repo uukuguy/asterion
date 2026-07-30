@@ -33,6 +33,7 @@ TEXT_NAMES = frozenset({"AGENTS.md", "Makefile", ".gitignore"})
 RECURSIVE_EXCLUDED_NAMES = frozenset(
     {
         ".git",
+        ".worktrees",
         ".mypy_cache",
         ".pytest_cache",
         ".ruff_cache",
@@ -40,9 +41,14 @@ RECURSIVE_EXCLUDED_NAMES = frozenset(
         ".venv",
         "__pycache__",
         "build",
+        "corpus",
+        "data",
         "dist",
         "node_modules",
+        "outputs",
+        "pi",
         "target",
+        "worktrees",
     }
 )
 HISTORICAL_DOCUMENT_ROOTS = (
@@ -249,6 +255,23 @@ class AsterionProjectBoundaryTests(unittest.TestCase):
             active.write_text("# Active protocol guide\n", encoding="utf-8")
 
             self.assertEqual(identity_files(root=root), (active,))
+
+    def test_identity_files_exclude_operator_owned_and_worktree_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            for name in (
+                ".worktrees",
+                "worktrees",
+                "pi",
+                "corpus",
+                "data",
+                "outputs",
+            ):
+                external = root / name / "external.md"
+                external.parent.mkdir(parents=True)
+                external.write_text("# External operator data\n", encoding="utf-8")
+
+            self.assertEqual(identity_files(root=root), ())
 
     def test_active_repository_surfaces_do_not_reference_old_protocol_ids(self) -> None:
         offenders: list[tuple[Path, str]] = []
