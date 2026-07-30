@@ -45,6 +45,23 @@ class TestDciApplicationAdapter(unittest.TestCase):
             complete.runtime_ids,
             ("claude-code.reference", "pi.reference"),
         )
+        local = next(
+            item
+            for item in installed.applications
+            if item.application_id == "dci.local-benchmark-application"
+        )
+        self.assertEqual(local.version, "1.0.0")
+        self.assertEqual(local.capability_packages, complete.capability_packages)
+        self.assertEqual(local.runtime_ids, complete.runtime_ids)
+
+    def test_distribution_indexes_local_benchmark_application(self) -> None:
+        value = (PROJECT / "pyproject.toml").read_text(encoding="utf-8")
+
+        self.assertIn(
+            '"dci.local-benchmark-application__1.0.0" = '
+            '"asterion.applications.dci_agent_lite:create_provider"',
+            value,
+        )
 
     def test_all_dci_assemblies_use_public_protocol_and_exact_package(self) -> None:
         for path in ASSEMBLIES:

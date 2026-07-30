@@ -28,6 +28,7 @@ dci-agent-lite = "asterion.applications.dci_agent_lite:create_provider"
 [project.entry-points."asterion.application_index"]
 "code.quality__1.0.0" = "asterion.applications.controlled_code:create_provider"
 "dci.complete-application__1.0.0" = "asterion.applications.dci_agent_lite:create_provider"
+"dci.local-benchmark-application__1.0.0" = "asterion.applications.dci_agent_lite:create_provider"
 "dci.research-capability__1.0.0" = "asterion.applications.dci_agent_lite:create_provider"
 
 [project.entry-points."asterion.host_services"]

@@ -285,11 +285,11 @@ class InstalledAcceptanceTests(unittest.TestCase):
         package_root = Path(str(resources.files("asterion"))).resolve()
 
         self.assertEqual(len(providers), 2)
-        self.assertEqual(len(applications), 3)
-        self.assertEqual(len(bound_assemblies), 5)
+        self.assertEqual(len(applications), 4)
+        self.assertEqual(len(bound_assemblies), 7)
         self.assertEqual(
             len(tuple((package_root / "applications").glob("*/assemblies/*.json"))),
-            6,
+            8,
         )
         self.assertEqual(
             len(
@@ -321,12 +321,12 @@ class InstalledAcceptanceTests(unittest.TestCase):
             {check.check_id: dict(check.counts) for check in result.checks},
             {
                 "application-providers": {"actual": 2, "expected": 2},
-                "bound-assemblies": {"actual": 5, "expected": 5},
+                "bound-assemblies": {"actual": 7, "expected": 7},
                 "capability-manifests": {"actual": 11, "expected": 11},
-                "composed-assemblies": {"actual": 5, "expected": 5},
+                "composed-assemblies": {"actual": 7, "expected": 7},
                 "context-profiles": {"actual": 5, "expected": 5},
-                "executable-assemblies": {"actual": 5, "expected": 5},
-                "packaged-assemblies": {"actual": 6, "expected": 6},
+                "executable-assemblies": {"actual": 7, "expected": 7},
+                "packaged-assemblies": {"actual": 8, "expected": 8},
                 "paper-benchmarks": {"actual": 13, "expected": 13},
                 "paper-scopes": {"actual": 16, "expected": 16},
                 "provider-requests": {"actual": 0, "expected": 0},
@@ -796,7 +796,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
                 for check in result.checks
                 if check.check_id == "packaged-assemblies"
             )
-            self.assertEqual(dict(packaged.counts)["actual"], 6)
+            self.assertEqual(dict(packaged.counts)["actual"], 8)
 
         with self.subTest(layer="bound"):
             installed = create_dci_provider()

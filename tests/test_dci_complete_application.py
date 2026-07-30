@@ -519,6 +519,8 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
         judge_bound = {
             "dci-complete-application-claude.json",
             "dci-complete-application-pi.json",
+            "dci-local-benchmark-application-claude.json",
+            "dci-local-benchmark-application-pi.json",
         }
         for assembly_path in sorted(ASSEMBLIES.glob("dci-*.json")):
             with self.subTest(assembly=assembly_path.name):

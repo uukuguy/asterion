@@ -334,6 +334,10 @@ class CapabilityPackageProtocolTests(unittest.TestCase):
                 BenchmarkSuiteRef("dci.all", "1.0.0"),
                 BenchmarkSuiteRef("dci.github", "1.0.0"),
                 BenchmarkSuiteRef("dci.paper-main", "1.0.0"),
+                BenchmarkSuiteRef(
+                    "dci.qa.bamboogle.github-sample50",
+                    "1.0.0",
+                ),
             ),
         )
         self.assertEqual(controlled_code.resources, ())

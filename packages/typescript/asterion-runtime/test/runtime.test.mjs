@@ -552,6 +552,8 @@ test("validates every checked-in reference assembly", async () => {
     "controlled-code-validation.json",
     "dci-complete-application-claude.json",
     "dci-complete-application-pi.json",
+    "dci-local-benchmark-application-claude.json",
+    "dci-local-benchmark-application-pi.json",
     "dci-local-research.json",
     "dci-research-capability-claude.json",
     "dci-research-capability.json",

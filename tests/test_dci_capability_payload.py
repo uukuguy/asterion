@@ -47,6 +47,9 @@ SUITE_TASKS = {
         "qa.nq",
         "qa.triviaqa",
     ),
+    "dci.qa.bamboogle.github-sample50": (
+        "qa.bamboogle.github-sample50",
+    ),
 }
 SUITE_TASKS["dci.all"] = tuple(
     sorted(set(SUITE_TASKS["dci.github"]) | set(SUITE_TASKS["dci.paper-main"]))
@@ -88,6 +91,10 @@ class TestDciCapabilityPayload(unittest.TestCase):
                 BenchmarkSuiteRef("dci.all", "1.0.0"),
                 BenchmarkSuiteRef("dci.github", "1.0.0"),
                 BenchmarkSuiteRef("dci.paper-main", "1.0.0"),
+                BenchmarkSuiteRef(
+                    "dci.qa.bamboogle.github-sample50",
+                    "1.0.0",
+                ),
             ),
         )
 
@@ -114,6 +121,10 @@ class TestDciCapabilityPayload(unittest.TestCase):
                 {"suite_id": "dci.all", "version": "1.0.0"},
                 {"suite_id": "dci.github", "version": "1.0.0"},
                 {"suite_id": "dci.paper-main", "version": "1.0.0"},
+                {
+                    "suite_id": "dci.qa.bamboogle.github-sample50",
+                    "version": "1.0.0",
+                },
             ],
         )
         for field, directory in (
@@ -141,7 +152,10 @@ class TestDciCapabilityPayload(unittest.TestCase):
                 suite = _load_json(
                     PAYLOAD_ROOT
                     / "benchmark-suites"
-                    / f"{suite_id.removeprefix('dci.')}.json"
+                    / (
+                        f"{suite_id.removeprefix('dci.').replace('.', '-')}"
+                        ".json"
+                    )
                 )
                 self.assertEqual(suite["protocol"], "asterion.benchmark-suite/v1")
                 self.assertEqual(suite["suite_id"], suite_id)

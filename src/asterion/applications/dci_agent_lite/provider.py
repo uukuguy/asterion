@@ -51,6 +51,18 @@ def create_provider() -> InstalledApplicationProvider:
                 capability_packages=(DCI_PACKAGE,),
                 runtime_ids=("claude-code.reference", "pi.reference"),
             ),
+            InstalledApplication(
+                application_id="dci.local-benchmark-application",
+                version="1.0.0",
+                assembly_paths=(
+                    application_root
+                    / "assemblies/dci-local-benchmark-application-claude.json",
+                    application_root
+                    / "assemblies/dci-local-benchmark-application-pi.json",
+                ),
+                capability_packages=(DCI_PACKAGE,),
+                runtime_ids=("claude-code.reference", "pi.reference"),
+            ),
         ),
         product=create_dci_product(
             repo_root=root,

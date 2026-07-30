@@ -108,6 +108,10 @@ expected = {
         'asterion.application-assembly/v1',
     'applications/dci_agent_lite/assemblies/dci-complete-application-pi.json':
         'asterion.application-assembly/v1',
+    'applications/dci_agent_lite/assemblies/dci-local-benchmark-application-claude.json':
+        'asterion.application-assembly/v1',
+    'applications/dci_agent_lite/assemblies/dci-local-benchmark-application-pi.json':
+        'asterion.application-assembly/v1',
     'applications/dci_agent_lite/assemblies/dci-local-research.json':
         'asterion.application-assembly/v1',
     'applications/dci_agent_lite/assemblies/dci-research-capability-claude.json':
@@ -131,6 +135,8 @@ expected = {
     'capabilities/dci/payload/benchmark-suites/github.json':
         'asterion.benchmark-suite/v1',
     'capabilities/dci/payload/benchmark-suites/paper-main.json':
+        'asterion.benchmark-suite/v1',
+    'capabilities/dci/payload/benchmark-suites/qa-bamboogle-github-sample50.json':
         'asterion.benchmark-suite/v1',
     'capabilities/dci/payload/capabilities/dci-analysis.json':
         'asterion.capability/v1',

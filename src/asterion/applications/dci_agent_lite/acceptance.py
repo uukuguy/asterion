@@ -47,6 +47,10 @@ _EXPECTED_PACKAGED_ASSEMBLIES = (
     "applications/dci_agent_lite/assemblies/"
     "dci-complete-application-claude.json",
     "applications/dci_agent_lite/assemblies/dci-complete-application-pi.json",
+    "applications/dci_agent_lite/assemblies/"
+    "dci-local-benchmark-application-claude.json",
+    "applications/dci_agent_lite/assemblies/"
+    "dci-local-benchmark-application-pi.json",
     "applications/dci_agent_lite/assemblies/dci-local-research.json",
     "applications/dci_agent_lite/assemblies/"
     "dci-research-capability-claude.json",
@@ -326,7 +330,7 @@ def installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
                     "bound-assemblies",
                     "Provider-bound assembly closure is valid",
                     actual=len(bound_assemblies),
-                    expected=5,
+                    expected=len(_EXPECTED_BOUND_ASSEMBLIES),
                     exact=bound_assemblies == _EXPECTED_BOUND_ASSEMBLIES,
                 ),
                 _acceptance_check(
@@ -339,7 +343,7 @@ def installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
                     "composed-assemblies",
                     "Resolved assembly composition closure is valid",
                     actual=len(composed_assemblies),
-                    expected=5,
+                    expected=len(_EXPECTED_BOUND_ASSEMBLIES),
                     exact=composed_assemblies
                     == _EXPECTED_BOUND_ASSEMBLIES,
                 ),
@@ -354,7 +358,7 @@ def installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
                     "executable-assemblies",
                     "Executable binding closure is valid",
                     actual=len(executable_assemblies),
-                    expected=5,
+                    expected=len(_EXPECTED_BOUND_ASSEMBLIES),
                     exact=executable_assemblies
                     == _EXPECTED_BOUND_ASSEMBLIES,
                 ),
@@ -362,7 +366,7 @@ def installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
                     "packaged-assemblies",
                     "Capabilityd assembly inventory is valid",
                     actual=len(packaged_assemblies),
-                    expected=6,
+                    expected=len(_EXPECTED_PACKAGED_ASSEMBLIES),
                     exact=packaged_assemblies
                     == _EXPECTED_PACKAGED_ASSEMBLIES,
                     unbound_resources=unbound_resources,
