@@ -7,6 +7,23 @@ operator entry point for every immutable DCI benchmark instance. Whenever an
 instance becomes executable, its inventory status and complete operating
 instructions must change together.
 
+## Language and terminology
+
+The instance inventory and all explanatory runbook prose are written in
+Chinese. Immutable identifiers, CLI commands, environment-variable names, JSON
+fields, file names, and literal status values remain unchanged so commands are
+safe to copy and public contracts stay exact.
+
+The document distinguishes three different outcomes:
+
+- `dci.local-fixture@1.0.0` is a provider-free framework closure fixture. It
+  does not produce an original DCI benchmark score.
+- A bounded one-case Bamboogle run verifies the real Agent/Judge capability
+  path, but it is not the complete fifty-case benchmark.
+- A complete `dci.qa.bamboogle.github-sample50@1.0.0` run selects all fifty
+  cases and publishes the aggregate result from `summary.json`. It still does
+  not reproduce `dci.qa.bamboogle.paper-full125@1.0.0`, which remains planned.
+
 ## Status and documentation invariant
 
 Each instance remains one row in the inventory.
@@ -60,6 +77,13 @@ cost-bearing run command. It states that `--execute` grants only the selected
 finite run and that prior configuration, readiness, locks, or evidence do not
 grant execution authority.
 
+The runbook provides separate copyable workflows for a one-case capability
+check and the complete fifty-case GitHub sample evaluation. The complete
+workflow uses `--all-cases` consistently for plan, run, and resume, states its
+finite maximum of fifty Agent and fifty Judge operations, and shows how to read
+aggregate counts and accuracy from the private `summary.json`. Documentation
+verification must not execute this cost-bearing workflow.
+
 The troubleshooting section explains:
 
 - relative lock or evidence paths are rejected;
@@ -80,4 +104,3 @@ Documentation verification includes:
 
 No Agent, Judge, network, or external dataset operation is needed to verify the
 documentation change. Real execution remains separately authorized.
-
