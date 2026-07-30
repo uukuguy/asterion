@@ -55,15 +55,29 @@ class TestDciBenchmarkInstances(unittest.TestCase):
 
         for selector in implemented:
             with self.subTest(selector=selector):
-                self.assertIn(f"## Runbook: `{selector}`", text)
+                self.assertIn(f"## 运行手册：`{selector}`", text)
         for selector in planned:
             with self.subTest(selector=selector):
-                self.assertNotIn(f"## Runbook: `{selector}`", text)
+                self.assertNotIn(f"## 运行手册：`{selector}`", text)
+        self.assertIn("# DCI Benchmark 实例", text)
+        self.assertIn("## 如何使用本文档", text)
+        self.assertIn("### 完整 50 案例评估", text)
         self.assertIn('export DCI_RUN_ROOT="$PWD/outputs/manual/', text)
+        self.assertIn(
+            'export DCI_FULL_RUN_ROOT="$PWD/outputs/manual/',
+            text,
+        )
         self.assertIn(
             'export DCI_RUN_ID="$(jq -er \'.run_id\' "$DCI_RUN_RESULT")"',
             text,
         )
+        self.assertGreaterEqual(text.count("--all-cases"), 4)
+        self.assertIn(
+            "jq '{counts,accuracy}' \"$DCI_FULL_SUMMARY\"",
+            text,
+        )
+        self.assertIn("不产生原 DCI benchmark 评估分数", text)
+        self.assertIn("尚未实现", text)
         self.assertNotRegex(text, r"--run-id\s+run-[0-9a-f]{32}")
         self.assertNotRegex(
             text,

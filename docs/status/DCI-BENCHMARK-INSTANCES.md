@@ -1,70 +1,63 @@
-# DCI Benchmark Instances
+# DCI Benchmark 实例
 
-This is the implementation and verification backlog for every immutable DCI
-benchmark instance exposed by `asterion-dci benchmark instances --json`.
-Implementation and verification are independent: code existence never implies
-that an external benchmark was rerun.
+本文档是 `asterion-dci benchmark instances --json` 所公开的全部不可变 DCI
+benchmark 实例的实现清单、验证台账和运行手册。
 
-Verification is closed to `Not rerun`, `Verified-local`, `External-limited`,
-`Verified-bounded`, and `Verified-full`.
+“已经实现”和“已经完成评估”是两个不同状态：存在代码和执行入口，不代表已经运行完整
+外部 benchmark。验证状态只使用 `Not rerun`、`Verified-local`、
+`External-limited`、`Verified-bounded` 和 `Verified-full`。
 
-| Instance | Task | Implementation | Verification | Full count | Next gate |
+| 实例 | 任务 | 实现状态 | 验证状态 | 完整案例数 | 下一道门 |
 |---|---|---|---|---:|---|
-| `dci.bcplus.level3@1.0.0` | `bcplus.level3` | planned | Not rerun | — | lock finite range and implement |
-| `dci.bcplus.main@1.0.0` | `bcplus.main` | planned | Not rerun | — | lock finite range and implement |
-| `dci.beir.arguana@1.0.0` | `beir.arguana` | planned | Not rerun | — | lock finite range and implement |
-| `dci.beir.scifact@1.0.0` | `beir.scifact` | planned | Not rerun | — | lock finite range and implement |
-| `dci.bright.biology@1.0.0` | `bright.biology` | planned | Not rerun | — | lock finite range and implement |
-| `dci.bright.earth-science@1.0.0` | `bright.earth-science` | planned | Not rerun | — | lock finite range and implement |
-| `dci.bright.economics@1.0.0` | `bright.economics` | planned | Not rerun | — | lock finite range and implement |
-| `dci.bright.robotics@1.0.0` | `bright.robotics` | planned | Not rerun | — | lock finite range and implement |
-| `dci.local-fixture@1.0.0` | 15-task fixture | implemented | Verified-local | 1/task | maintain installed-wheel closure |
-| `dci.qa.2wikimultihopqa@1.0.0` | `qa.2wikimultihopqa` | planned | Not rerun | — | lock finite range and implement |
-| `dci.qa.bamboogle.github-sample50@1.0.0` | `qa.bamboogle.github-sample50` | implemented | Verified-bounded | 50 | extend only under an explicit finite case limit |
-| `dci.qa.bamboogle.paper-full125@1.0.0` | `qa.bamboogle.paper-full125` | planned | Not rerun | — | separate paper-full authorization design |
-| `dci.qa.hotpotqa@1.0.0` | `qa.hotpotqa` | planned | Not rerun | — | lock finite range and implement |
-| `dci.qa.musique@1.0.0` | `qa.musique` | planned | Not rerun | — | lock finite range and implement |
-| `dci.qa.nq@1.0.0` | `qa.nq` | planned | Not rerun | — | lock finite range and implement |
-| `dci.qa.triviaqa@1.0.0` | `qa.triviaqa` | planned | Not rerun | — | lock finite range and implement |
+| `dci.bcplus.level3@1.0.0` | `bcplus.level3` | planned | Not rerun | — | 锁定有限范围并实现 |
+| `dci.bcplus.main@1.0.0` | `bcplus.main` | planned | Not rerun | — | 锁定有限范围并实现 |
+| `dci.beir.arguana@1.0.0` | `beir.arguana` | planned | Not rerun | — | 锁定有限范围并实现 |
+| `dci.beir.scifact@1.0.0` | `beir.scifact` | planned | Not rerun | — | 锁定有限范围并实现 |
+| `dci.bright.biology@1.0.0` | `bright.biology` | planned | Not rerun | — | 锁定有限范围并实现 |
+| `dci.bright.earth-science@1.0.0` | `bright.earth-science` | planned | Not rerun | — | 锁定有限范围并实现 |
+| `dci.bright.economics@1.0.0` | `bright.economics` | planned | Not rerun | — | 锁定有限范围并实现 |
+| `dci.bright.robotics@1.0.0` | `bright.robotics` | planned | Not rerun | — | 锁定有限范围并实现 |
+| `dci.local-fixture@1.0.0` | 15 个任务的框架夹具 | implemented | Verified-local | 每任务 1 个 | 维护安装包闭环 |
+| `dci.qa.2wikimultihopqa@1.0.0` | `qa.2wikimultihopqa` | planned | Not rerun | — | 锁定有限范围并实现 |
+| `dci.qa.bamboogle.github-sample50@1.0.0` | `qa.bamboogle.github-sample50` | implemented | Verified-bounded | 50 | 完成并验证 50 案例评估 |
+| `dci.qa.bamboogle.paper-full125@1.0.0` | `qa.bamboogle.paper-full125` | planned | Not rerun | — | 单独设计论文完整评估授权 |
+| `dci.qa.hotpotqa@1.0.0` | `qa.hotpotqa` | planned | Not rerun | — | 锁定有限范围并实现 |
+| `dci.qa.musique@1.0.0` | `qa.musique` | planned | Not rerun | — | 锁定有限范围并实现 |
+| `dci.qa.nq@1.0.0` | `qa.nq` | planned | Not rerun | — | 锁定有限范围并实现 |
+| `dci.qa.triviaqa@1.0.0` | `qa.triviaqa` | planned | Not rerun | — | 锁定有限范围并实现 |
 
-## How to use this document
+## 如何使用本文档
 
-Only instances marked `implemented` are executable. Each implemented row must
-have a matching runbook below. A `planned` row is a real catalog identity, but
-its implementation and operating contract are incomplete; do not attempt to
-run it.
+只有标记为 `implemented` 的实例可以执行。每个 implemented 实例必须在下方拥有
+同名运行手册。`planned` 行表示实例身份已经登记，但实现和运行契约尚未实现，不能执行。
 
-Run all commands from the Asterion repository root. Each runbook creates
-absolute lock and evidence paths beneath `"$PWD/outputs/manual"`. A new run
-creates a new evidence root and returns a new run ID. Resume must use that ID
-with the same instance, case range, source lock, and evidence root.
+所有命令都从 Asterion 仓库根目录运行。运行手册在 `"$PWD/outputs/manual"` 下创建
+绝对的 lock 和 evidence 路径。每次新运行使用新的 evidence root，并返回新的 run ID。
+resume 必须继续使用同一个实例、案例范围、source lock 和 evidence root。
 
-Lock and plan are metadata-only and perform zero Agent and Judge operations. A
-command containing `--execute` grants only that explicitly selected finite run.
-For a real instance it may access the models, network, dataset, and corpus named
-by the runbook.
+lock 和 plan 仅处理元数据，不执行 Agent 或 Judge。包含 `--execute` 的命令才授予
+这一次有限运行的执行权限。真实实例可能访问该手册列明的模型、网络、数据集和 corpus。
 
-## Runbook: `dci.local-fixture@1.0.0`
+## 运行手册：`dci.local-fixture@1.0.0`
 
-### Purpose and boundary
+### 作用和边界
 
-This provider-free fixture proves that the installed DCI capability package,
-generic Asterion benchmark planner/runner, all fifteen task bindings, private
-evidence, and compatible resume form one executable loop. It does not measure a
-research model and does not access an Agent, Judge, network, external dataset,
-or external corpus.
+`dci.local-fixture@1.0.0` 是 provider-free 的框架闭环夹具，不产生原 DCI benchmark 评估分数。
+它验证安装后的 DCI 能力包、Asterion 通用 benchmark
+planner/runner、15 个任务 binding、私有 evidence 和 resume 是否能够完整串联。
 
-- Application: `dci.local-benchmark-application@1.0.0`
-- Suite: `dci.all@1.0.0`
-- Tasks: all fifteen DCI task bindings
-- Range: one fixture case per task
-- Cost class: provider-free
-- Expected result: fifteen completed tasks and zero provider operations
+它不访问 Agent、Judge、网络、外部数据集或外部 corpus，也不衡量研究模型能力。
 
-### Lock, plan, run, and resume
+- Application：`dci.local-benchmark-application@1.0.0`
+- Suite：`dci.all@1.0.0`
+- 任务：全部 15 个 DCI task binding
+- 范围：每个任务运行 1 个 fixture case
+- 成本类别：provider-free
+- 预期结果：15 个任务全部 `completed`，provider 操作数为 0
 
-The timestamp gives each new run a distinct operator-owned directory. All paths
-passed to Asterion are absolute.
+### lock、plan、run 和 resume
+
+时间戳为每次运行创建独立目录。传给 Asterion 的路径都是绝对路径。
 
 ```bash
 export DCI_RUN_ROOT="$PWD/outputs/manual/dci-local-fixture-$(date +%Y%m%d-%H%M%S)"
@@ -100,70 +93,62 @@ uv run asterion-dci benchmark resume \
   --execute
 ```
 
-The public result must report `status: completed`. Private run state is under
-`"$DCI_EVIDENCE_ROOT/runs/$DCI_RUN_ID"`; task outputs are under
-`"$DCI_EVIDENCE_ROOT/outputs/$DCI_RUN_ID"`. Resume returns the completed result
-without repeating task execution.
+公开结果应为 `status: completed`。私有运行状态位于
+`"$DCI_EVIDENCE_ROOT/runs/$DCI_RUN_ID"`，任务输出位于
+`"$DCI_EVIDENCE_ROOT/outputs/$DCI_RUN_ID"`。resume 复用已经完成的 evidence，
+不会重复执行任务。
 
-### Verified boundary
+### 已验证边界
 
-`Verified-local` is established by:
+`Verified-local` 由以下安装包闭环测试建立：
 
 ```bash
 uv run python -m unittest -v tests.test_asterion_dci_benchmark_installed
 ```
 
-That test builds and installs the wheel in isolation, executes all fifteen
-fixture tasks through the installed `asterion-dci` entry point, and resumes the
-exact run without repeated work.
+该测试在隔离环境中构建并安装 wheel，通过安装后的 `asterion-dci` 执行全部 15 个
+fixture 任务，然后 resume 同一运行且不重复工作。
 
-## Runbook: `dci.qa.bamboogle.github-sample50@1.0.0`
+## 运行手册：`dci.qa.bamboogle.github-sample50@1.0.0`
 
-### Purpose and boundary
+### 作用和边界
 
-Bamboogle is the first real DCI benchmark instance. It evaluates a research
-Agent on one exact QA task against the GitHub sample of fifty cases, then sends
-the answer to an independent Judge. Asterion binds the portable DCI package to
-operator-owned resources only after preflight and explicit execution
-authorization.
+这是第一个真实 DCI benchmark 实例。它在 Bamboogle GitHub sample 的 50 个案例上
+运行研究 Agent，并将每个答案交给独立 Judge。Asterion 只在 preflight 通过且收到
+显式执行授权后，才把可移植 DCI 能力包绑定到 operator-owned 资源。
 
-- Application: `dci.complete-application@1.0.0`
-- Suite: `dci.qa.bamboogle.github-sample50@1.0.0`
-- Task: `qa.bamboogle.github-sample50`
-- Default range: one case
-- Finite catalog: fifty cases
-- Agent: Pi using the configured research model and DCI prompt contract
-- Judge: independently configured Judge model
-- External dependencies: Pi checkout, Agent authentication, Judge credential,
-  Bamboogle dataset, corpus, and network access
-- Cost class: one bounded Agent operation plus one bounded Judge operation per
-  selected case
+- Application：`dci.complete-application@1.0.0`
+- Suite：`dci.qa.bamboogle.github-sample50@1.0.0`
+- 任务：`qa.bamboogle.github-sample50`
+- 默认范围：1 个案例，仅用于有限能力验证
+- 完整范围：50 个案例
+- Agent：Pi，使用已配置的研究模型和 DCI prompt 契约
+- Judge：独立配置的 Judge 模型
+- 外部依赖：Pi checkout、Agent authentication、Judge credential、Bamboogle
+  数据集、corpus 和网络
+- 单案例成本：最多 1 次 Agent 操作和 1 次 Judge 操作
+- 完整评估成本：最多 50 次 Agent 操作和 50 次 Judge 操作
 
-The commands below deliberately select one case. Do not substitute
-`--all-cases` in the run command without a separate explicit finite-budget
-authorization.
+### preflight
 
-### Preflight
-
-Populate `.env` from the operator template and configure the external resource
-paths and credentials. Preflight checks readiness only; it performs no Agent or
-Judge operation and does not grant execution authority.
+先根据 operator template 配置 `.env` 中的外部资源路径和 credentials。
+preflight 只检查 readiness，不调用 Agent 或 Judge，也不授予执行权限。
 
 ```bash
 uv run asterion-dci preflight --env-file "$PWD/.env"
 ```
 
-Every category must report `PASS` before execution. Process environment values
-take precedence over `.env`; if authentication unexpectedly fails, inspect
-inherited variables such as `DEEPSEEK_API_KEY`.
+所有类别都必须为 `PASS`。进程环境变量优先于 `.env`；如果认证结果异常，应检查
+继承的 `DEEPSEEK_API_KEY` 等变量。
 
-### Lock and bounded plan
+### 单案例能力验证
 
-These commands create an exact package lock and a one-case public plan without
-accessing the model, Judge, dataset body, or corpus body.
+这一流程只验证真实 Agent/Judge 执行路径，不能代表完整 Bamboogle sample50 结果。
+lock 和 plan 不访问模型、Judge、数据集正文或 corpus 正文；run 最多执行 1 次 Agent
+和 1 次 Judge。
 
 ```bash
-export DCI_RUN_ROOT="$PWD/outputs/manual/dci-bamboogle-$(date +%Y%m%d-%H%M%S)"
+export DCI_RUN_ROOT="$PWD/outputs/manual/dci-bamboogle-case1-$(date +%Y%m%d-%H%M%S)"
 export DCI_SOURCE_LOCK="$DCI_RUN_ROOT/source-lock.json"
 export DCI_EVIDENCE_ROOT="$DCI_RUN_ROOT/evidence"
 export DCI_RUN_RESULT="$DCI_RUN_ROOT/run-result.json"
@@ -177,21 +162,7 @@ uv run asterion-dci benchmark plan \
   --instance dci.qa.bamboogle.github-sample50@1.0.0 \
   --case-limit 1 \
   --capability-source-lock "$DCI_SOURCE_LOCK"
-```
 
-The plan must identify the exact application, suite, task, package digest, and
-`case_limit: 1`. To inspect the finite catalog without executing it, replace
-`--case-limit 1` in the plan command with `--all-cases`; the resulting public
-plan has `case_limit: 50`.
-
-### Authorized one-case run and exact resume
-
-The run command performs one real Agent operation and one real Judge operation.
-It writes private evidence beneath the selected absolute evidence root. `tee`
-retains the public result so the exact new run ID can be extracted rather than
-copied from historical evidence.
-
-```bash
 uv run asterion-dci benchmark run \
   --instance dci.qa.bamboogle.github-sample50@1.0.0 \
   --case-limit 1 \
@@ -210,33 +181,82 @@ uv run asterion-dci benchmark resume \
   --execute
 ```
 
-The public run result must report one completed task with `case_count: 1`.
-Private run state is under `"$DCI_EVIDENCE_ROOT/runs/$DCI_RUN_ID"` and native
-task evidence is under `"$DCI_EVIDENCE_ROOT/outputs/$DCI_RUN_ID"`. Resume must
-use the same run ID, evidence root, lock, instance, and case limit; a completed
-resume reuses evidence instead of repeating Agent or Judge work.
+公开结果应报告 1 个 `completed` 任务和 `case_count: 1`。它只建立
+`Verified-bounded`，不建立完整 50 案例评估结果。
 
-### Verified boundary
+### 完整 50 案例评估
 
-On 2026-07-30, main-workspace run
-`run-48217ad3214649dea9ff7e06c23d1625` completed one Agent operation, one Judge
-operation, and one correct result. Exact resume completed in zero seconds and
-added no evidence. Provider-free tests also cover the fifty-case plan and fake
-Agent/Judge end-to-end behavior.
+下面才是完整执行 `dci.qa.bamboogle.github-sample50@1.0.0` 并获得该实例聚合评估
+结果的流程。`--all-cases` 在 plan、run 和 resume 中都解析为确定的 50 案例范围。
+`--execute` 明确授权最多 50 次 Agent 和 50 次 Judge 操作，因此会产生模型费用并
+访问网络、数据集和 corpus。
 
-This establishes `Verified-bounded`. It does not establish a fifty-case score,
-the 125-case paper result, or paper-score reproduction.
+```bash
+export DCI_FULL_RUN_ROOT="$PWD/outputs/manual/dci-bamboogle-full50-$(date +%Y%m%d-%H%M%S)"
+export DCI_FULL_SOURCE_LOCK="$DCI_FULL_RUN_ROOT/source-lock.json"
+export DCI_FULL_EVIDENCE_ROOT="$DCI_FULL_RUN_ROOT/evidence"
+export DCI_FULL_RUN_RESULT="$DCI_FULL_RUN_ROOT/run-result.json"
+mkdir -p "$DCI_FULL_RUN_ROOT"
 
-## Troubleshooting
+uv run asterion-dci benchmark lock \
+  --instance dci.qa.bamboogle.github-sample50@1.0.0 \
+  --output "$DCI_FULL_SOURCE_LOCK"
 
-- `benchmark source lock is invalid`: pass a quoted absolute path such as
-  `"$PWD/outputs/manual/.../source-lock.json"`, not a bare relative
-  `FRESH_LOCK`.
-- Resume cannot find or match a run: use the run ID and evidence root produced
-  by the same `run` command. A historical run ID cannot resume inside a new
-  empty evidence root.
-- Provider authentication unexpectedly fails: inspect inherited process
-  variables because they override values loaded from `.env`.
-- A planned instance is rejected: its catalog identity exists, but its
-  implementation is not executable yet. Implement and promote it together with
-  its runbook before attempting lock, plan, or run.
+uv run asterion-dci benchmark plan \
+  --instance dci.qa.bamboogle.github-sample50@1.0.0 \
+  --all-cases \
+  --capability-source-lock "$DCI_FULL_SOURCE_LOCK"
+
+uv run asterion-dci benchmark run \
+  --instance dci.qa.bamboogle.github-sample50@1.0.0 \
+  --all-cases \
+  --capability-source-lock "$DCI_FULL_SOURCE_LOCK" \
+  --evidence-root "$DCI_FULL_EVIDENCE_ROOT" \
+  --execute | tee "$DCI_FULL_RUN_RESULT"
+
+export DCI_FULL_RUN_ID="$(jq -er '.run_id' "$DCI_FULL_RUN_RESULT")"
+
+uv run asterion-dci benchmark resume \
+  --instance dci.qa.bamboogle.github-sample50@1.0.0 \
+  --run-id "$DCI_FULL_RUN_ID" \
+  --all-cases \
+  --capability-source-lock "$DCI_FULL_SOURCE_LOCK" \
+  --evidence-root "$DCI_FULL_EVIDENCE_ROOT" \
+  --execute
+
+export DCI_FULL_SUMMARY="$DCI_FULL_EVIDENCE_ROOT/outputs/$DCI_FULL_RUN_ID/qa.bamboogle.github-sample50/summary.json"
+jq '{counts,accuracy}' "$DCI_FULL_SUMMARY"
+```
+
+成功的 run 应报告 `case_count: 50`。`summary.json` 中：
+
+- `counts.total` 应为 50；
+- `counts.judged` 是成功完成独立 Judge 的案例数；
+- `counts.correct` 是 Judge 判定正确的案例数；
+- `accuracy.over_total` 是完整 50 案例准确率；
+- `accuracy.over_judged` 是已完成 Judge 案例中的准确率。
+
+这会产生 GitHub sample50 实例的原 DCI 评估格式和聚合结果，但仍不是论文完整结果。
+`dci.qa.bamboogle.paper-full125@1.0.0` 尚未实现，因此当前不能声称得到原论文的
+125-case 结果或完成 paper-score reproduction。
+
+### 已验证边界
+
+2026-07-30 的 main-workspace 运行
+`run-48217ad3214649dea9ff7e06c23d1625` 完成了 1 次 Agent、1 次 Judge，并得到
+1 个正确结果。精确 resume 耗时 0 秒且没有新增 evidence。provider-free 测试还覆盖
+了 50-case plan 和 fake Agent/Judge 端到端路径。
+
+因此当前状态仍是 `Verified-bounded`。只有完整 50-case run 成功并核验
+`summary.json` 后，GitHub sample50 才能提升为 `Verified-full`。
+
+## 故障排查
+
+- `benchmark source lock is invalid`：必须传入带引号的绝对路径，例如
+  `"$PWD/outputs/manual/.../source-lock.json"`，不能使用裸的相对路径
+  `FRESH_LOCK`。
+- resume 找不到或无法匹配运行：必须使用同一次 `run` 产生的 run ID 和 evidence
+  root。历史 run ID 不能在新的空 evidence root 中恢复。
+- provider 认证异常：检查继承的进程环境变量，因为它们会覆盖 `.env` 中的值。
+- planned 实例被拒绝：实例身份虽然存在，但实现尚未实现。必须同时完成实现和运行
+  手册并将其提升为 implemented 后，才能执行 lock、plan 或 run。
