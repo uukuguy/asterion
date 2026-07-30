@@ -60,5 +60,6 @@ IDs. Full benchmark and paper reproduction runs require a separate explicit
 finite-budget authorization; cached configuration, a source lock, readiness,
 or prior evidence never grants that authority.
 
-See [the instance backlog](status/DCI-BENCHMARK-INSTANCES.md) for the exact
-implementation and verification state.
+See [the instance inventory and executable
+runbooks](status/DCI-BENCHMARK-INSTANCES.md) for the exact implementation,
+operating procedure, and verification state.

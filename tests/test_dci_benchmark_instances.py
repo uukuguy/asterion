@@ -35,9 +35,41 @@ EXPECTED_SELECTORS = (
     "dci.qa.nq@1.0.0",
     "dci.qa.triviaqa@1.0.0",
 )
+PROJECT = Path(__file__).resolve().parents[1]
+RUNBOOK = PROJECT / "docs/status/DCI-BENCHMARK-INSTANCES.md"
 
 
 class TestDciBenchmarkInstances(unittest.TestCase):
+    def test_instance_runbooks_match_implemented_catalog_entries(self) -> None:
+        text = RUNBOOK.read_text(encoding="utf-8")
+        implemented = {
+            instance.selector
+            for instance in benchmark_instances()
+            if instance.implementation_state == "implemented"
+        }
+        planned = {
+            instance.selector
+            for instance in benchmark_instances()
+            if instance.implementation_state == "planned"
+        }
+
+        for selector in implemented:
+            with self.subTest(selector=selector):
+                self.assertIn(f"## Runbook: `{selector}`", text)
+        for selector in planned:
+            with self.subTest(selector=selector):
+                self.assertNotIn(f"## Runbook: `{selector}`", text)
+        self.assertIn('export DCI_RUN_ROOT="$PWD/outputs/manual/', text)
+        self.assertIn(
+            'export DCI_RUN_ID="$(jq -er \'.run_id\' "$DCI_RUN_RESULT")"',
+            text,
+        )
+        self.assertNotRegex(text, r"--run-id\s+run-[0-9a-f]{32}")
+        self.assertNotRegex(
+            text,
+            r"--(?:capability-source-lock|evidence-root)\s+FRESH_",
+        )
+
     def test_catalog_is_canonical_immutable_and_complete(self) -> None:
         instances = benchmark_instances()
 

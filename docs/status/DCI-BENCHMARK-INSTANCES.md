@@ -27,58 +27,216 @@ Verification is closed to `Not rerun`, `Verified-local`, `External-limited`,
 | `dci.qa.nq@1.0.0` | `qa.nq` | planned | Not rerun | — | lock finite range and implement |
 | `dci.qa.triviaqa@1.0.0` | `qa.triviaqa` | planned | Not rerun | — | lock finite range and implement |
 
-## Verification evidence
+## How to use this document
 
-`Verified-local` for `dci.local-fixture@1.0.0` is established by:
+Only instances marked `implemented` are executable. Each implemented row must
+have a matching runbook below. A `planned` row is a real catalog identity, but
+its implementation and operating contract are incomplete; do not attempt to
+run it.
+
+Run all commands from the Asterion repository root. Each runbook creates
+absolute lock and evidence paths beneath `"$PWD/outputs/manual"`. A new run
+creates a new evidence root and returns a new run ID. Resume must use that ID
+with the same instance, case range, source lock, and evidence root.
+
+Lock and plan are metadata-only and perform zero Agent and Judge operations. A
+command containing `--execute` grants only that explicitly selected finite run.
+For a real instance it may access the models, network, dataset, and corpus named
+by the runbook.
+
+## Runbook: `dci.local-fixture@1.0.0`
+
+### Purpose and boundary
+
+This provider-free fixture proves that the installed DCI capability package,
+generic Asterion benchmark planner/runner, all fifteen task bindings, private
+evidence, and compatible resume form one executable loop. It does not measure a
+research model and does not access an Agent, Judge, network, external dataset,
+or external corpus.
+
+- Application: `dci.local-benchmark-application@1.0.0`
+- Suite: `dci.all@1.0.0`
+- Tasks: all fifteen DCI task bindings
+- Range: one fixture case per task
+- Cost class: provider-free
+- Expected result: fifteen completed tasks and zero provider operations
+
+### Lock, plan, run, and resume
+
+The timestamp gives each new run a distinct operator-owned directory. All paths
+passed to Asterion are absolute.
+
+```bash
+export DCI_RUN_ROOT="$PWD/outputs/manual/dci-local-fixture-$(date +%Y%m%d-%H%M%S)"
+export DCI_SOURCE_LOCK="$DCI_RUN_ROOT/source-lock.json"
+export DCI_EVIDENCE_ROOT="$DCI_RUN_ROOT/evidence"
+export DCI_RUN_RESULT="$DCI_RUN_ROOT/run-result.json"
+mkdir -p "$DCI_RUN_ROOT"
+
+uv run asterion-dci benchmark lock \
+  --instance dci.local-fixture@1.0.0 \
+  --output "$DCI_SOURCE_LOCK"
+
+uv run asterion-dci benchmark plan \
+  --instance dci.local-fixture@1.0.0 \
+  --case-limit 1 \
+  --capability-source-lock "$DCI_SOURCE_LOCK"
+
+uv run asterion-dci benchmark run \
+  --instance dci.local-fixture@1.0.0 \
+  --case-limit 1 \
+  --capability-source-lock "$DCI_SOURCE_LOCK" \
+  --evidence-root "$DCI_EVIDENCE_ROOT" \
+  --execute | tee "$DCI_RUN_RESULT"
+
+export DCI_RUN_ID="$(jq -er '.run_id' "$DCI_RUN_RESULT")"
+
+uv run asterion-dci benchmark resume \
+  --instance dci.local-fixture@1.0.0 \
+  --run-id "$DCI_RUN_ID" \
+  --case-limit 1 \
+  --capability-source-lock "$DCI_SOURCE_LOCK" \
+  --evidence-root "$DCI_EVIDENCE_ROOT" \
+  --execute
+```
+
+The public result must report `status: completed`. Private run state is under
+`"$DCI_EVIDENCE_ROOT/runs/$DCI_RUN_ID"`; task outputs are under
+`"$DCI_EVIDENCE_ROOT/outputs/$DCI_RUN_ID"`. Resume returns the completed result
+without repeating task execution.
+
+### Verified boundary
+
+`Verified-local` is established by:
 
 ```bash
 uv run python -m unittest -v tests.test_asterion_dci_benchmark_installed
 ```
 
-That test builds the wheel, installs it into an isolated environment, invokes
-the installed `asterion-dci` entry point, executes all 15 fixture tasks, and
-resumes the exact run without repeated work. It performs zero Agent and zero
-Judge operations and uses no external benchmark data.
+That test builds and installs the wheel in isolation, executes all fifteen
+fixture tasks through the installed `asterion-dci` entry point, and resumes the
+exact run without repeated work.
 
-The Bamboogle implementation has provider-free and fake-dependency test
-coverage. On 2026-07-30, the exact 50-case plan succeeded without execution:
+## Runbook: `dci.qa.bamboogle.github-sample50@1.0.0`
+
+### Purpose and boundary
+
+Bamboogle is the first real DCI benchmark instance. It evaluates a research
+Agent on one exact QA task against the GitHub sample of fifty cases, then sends
+the answer to an independent Judge. Asterion binds the portable DCI package to
+operator-owned resources only after preflight and explicit execution
+authorization.
+
+- Application: `dci.complete-application@1.0.0`
+- Suite: `dci.qa.bamboogle.github-sample50@1.0.0`
+- Task: `qa.bamboogle.github-sample50`
+- Default range: one case
+- Finite catalog: fifty cases
+- Agent: Pi using the configured research model and DCI prompt contract
+- Judge: independently configured Judge model
+- External dependencies: Pi checkout, Agent authentication, Judge credential,
+  Bamboogle dataset, corpus, and network access
+- Cost class: one bounded Agent operation plus one bounded Judge operation per
+  selected case
+
+The commands below deliberately select one case. Do not substitute
+`--all-cases` in the run command without a separate explicit finite-budget
+authorization.
+
+### Preflight
+
+Populate `.env` from the operator template and configure the external resource
+paths and credentials. Preflight checks readiness only; it performs no Agent or
+Judge operation and does not grant execution authority.
 
 ```bash
-uv run asterion-dci benchmark lock \
-  --instance dci.qa.bamboogle.github-sample50@1.0.0 \
-  --output FRESH_LOCK
-uv run asterion-dci benchmark plan \
-  --instance dci.qa.bamboogle.github-sample50@1.0.0 \
-  --all-cases \
-  --capability-source-lock FRESH_LOCK
+uv run asterion-dci preflight --env-file "$PWD/.env"
 ```
 
-The public plan selected the exact Bamboogle suite/task with `case_limit: 50`.
-Planning created no execution evidence and performed zero Agent or Judge
-operations.
+Every category must report `PASS` before execution. Process environment values
+take precedence over `.env`; if authentication unexpectedly fails, inspect
+inherited variables such as `DEEPSEEK_API_KEY`.
 
-After the operator supplied the external Pi checkout, corpus, dataset, saved
-Agent authentication, and Judge credential, every preflight category passed.
-The following separately authorized one-case commands then completed:
+### Lock and bounded plan
+
+These commands create an exact package lock and a one-case public plan without
+accessing the model, Judge, dataset body, or corpus body.
+
+```bash
+export DCI_RUN_ROOT="$PWD/outputs/manual/dci-bamboogle-$(date +%Y%m%d-%H%M%S)"
+export DCI_SOURCE_LOCK="$DCI_RUN_ROOT/source-lock.json"
+export DCI_EVIDENCE_ROOT="$DCI_RUN_ROOT/evidence"
+export DCI_RUN_RESULT="$DCI_RUN_ROOT/run-result.json"
+mkdir -p "$DCI_RUN_ROOT"
+
+uv run asterion-dci benchmark lock \
+  --instance dci.qa.bamboogle.github-sample50@1.0.0 \
+  --output "$DCI_SOURCE_LOCK"
+
+uv run asterion-dci benchmark plan \
+  --instance dci.qa.bamboogle.github-sample50@1.0.0 \
+  --case-limit 1 \
+  --capability-source-lock "$DCI_SOURCE_LOCK"
+```
+
+The plan must identify the exact application, suite, task, package digest, and
+`case_limit: 1`. To inspect the finite catalog without executing it, replace
+`--case-limit 1` in the plan command with `--all-cases`; the resulting public
+plan has `case_limit: 50`.
+
+### Authorized one-case run and exact resume
+
+The run command performs one real Agent operation and one real Judge operation.
+It writes private evidence beneath the selected absolute evidence root. `tee`
+retains the public result so the exact new run ID can be extracted rather than
+copied from historical evidence.
 
 ```bash
 uv run asterion-dci benchmark run \
   --instance dci.qa.bamboogle.github-sample50@1.0.0 \
   --case-limit 1 \
-  --capability-source-lock FRESH_LOCK \
-  --evidence-root FRESH_EVIDENCE \
-  --execute
+  --capability-source-lock "$DCI_SOURCE_LOCK" \
+  --evidence-root "$DCI_EVIDENCE_ROOT" \
+  --execute | tee "$DCI_RUN_RESULT"
+
+export DCI_RUN_ID="$(jq -er '.run_id' "$DCI_RUN_RESULT")"
+
 uv run asterion-dci benchmark resume \
   --instance dci.qa.bamboogle.github-sample50@1.0.0 \
-  --run-id run-531b866dfb304dd9a65e7329a4436e65 \
+  --run-id "$DCI_RUN_ID" \
   --case-limit 1 \
-  --capability-source-lock FRESH_LOCK \
-  --evidence-root FRESH_EVIDENCE \
+  --capability-source-lock "$DCI_SOURCE_LOCK" \
+  --evidence-root "$DCI_EVIDENCE_ROOT" \
   --execute
 ```
 
-The initial command completed one real Agent operation and one real Judge
-operation with one correct result. Resume returned the same completed run in
-one second, retained a single native evidence generation, and did not repeat
-either operation. This establishes `Verified-bounded`; the 50-case benchmark
-and paper-score reproduction were not executed.
+The public run result must report one completed task with `case_count: 1`.
+Private run state is under `"$DCI_EVIDENCE_ROOT/runs/$DCI_RUN_ID"` and native
+task evidence is under `"$DCI_EVIDENCE_ROOT/outputs/$DCI_RUN_ID"`. Resume must
+use the same run ID, evidence root, lock, instance, and case limit; a completed
+resume reuses evidence instead of repeating Agent or Judge work.
+
+### Verified boundary
+
+On 2026-07-30, main-workspace run
+`run-48217ad3214649dea9ff7e06c23d1625` completed one Agent operation, one Judge
+operation, and one correct result. Exact resume completed in zero seconds and
+added no evidence. Provider-free tests also cover the fifty-case plan and fake
+Agent/Judge end-to-end behavior.
+
+This establishes `Verified-bounded`. It does not establish a fifty-case score,
+the 125-case paper result, or paper-score reproduction.
+
+## Troubleshooting
+
+- `benchmark source lock is invalid`: pass a quoted absolute path such as
+  `"$PWD/outputs/manual/.../source-lock.json"`, not a bare relative
+  `FRESH_LOCK`.
+- Resume cannot find or match a run: use the run ID and evidence root produced
+  by the same `run` command. A historical run ID cannot resume inside a new
+  empty evidence root.
+- Provider authentication unexpectedly fails: inspect inherited process
+  variables because they override values loaded from `.env`.
+- A planned instance is rejected: its catalog identity exists, but its
+  implementation is not executable yet. Implement and promote it together with
+  its runbook before attempting lock, plan, or run.
