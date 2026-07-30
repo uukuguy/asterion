@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from asterion.applications.dci_agent_lite.benchmark_host import (
     DciBenchmarkHost,
@@ -16,6 +17,7 @@ from asterion.applications.dci_agent_lite.benchmark_source_lock import (
     resolve_benchmark_source_lock,
     write_benchmark_source_lock,
 )
+from asterion.applications.dci_agent_lite.operator_config import load_operator_config
 from asterion.benchmarks import BenchmarkTaskRequest
 from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
 
@@ -167,6 +169,36 @@ class DciBenchmarkHostTests(unittest.TestCase):
                 host.load_selected_providers(payloads, authorization)
 
         self.assertEqual(source.provider_loads, 0)
+
+    def test_real_host_selects_runnable_asterion_safe_agent_and_judge(self) -> None:
+        instance = select_benchmark_instance(
+            "dci.qa.bamboogle.github-sample50@1.0.0"
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            config = load_operator_config(
+                root,
+                environment={"DEEPSEEK_API_KEY": "PRIVATE-JUDGE-KEY"},
+            )
+            sentinel = object()
+            with patch(
+                "asterion.applications.dci_agent_lite.benchmark_host.RealDciBenchmarkExecutor",
+                return_value=sentinel,
+            ) as executor:
+                selected = DciBenchmarkHost(
+                    instance=instance,
+                    operator_config=config,
+                )._default_executor()
+
+        self.assertIs(selected, sentinel)
+        arguments = executor.call_args.kwargs
+        self.assertEqual(arguments["experiment_profile"], "asterion-safe/pi")
+        self.assertEqual(arguments["max_turns"], 100)
+        self.assertEqual(arguments["runtime_options"].runtime, "pi")
+        self.assertEqual(arguments["runtime_options"].provider, "openai-codex")
+        self.assertEqual(arguments["runtime_options"].model, "gpt-5.6-luna")
+        self.assertEqual(arguments["runtime_options"].tools, "read,bash")
+        self.assertEqual(arguments["judge_config"].api_key, "PRIVATE-JUDGE-KEY")
 
 
 if __name__ == "__main__":

@@ -151,8 +151,9 @@ make promotion-check
 gate repeats provider-free validation from a temporary standalone copy.
 
 Full-dataset and paper-score execution remains **Not rerun** and requires
-separate authorization plus a finite budget. A one-case run remains
-**External-limited** and must never be promoted to published-score evidence.
+separate authorization plus a finite budget. The passing one-case Bamboogle
+run is **Verified-bounded** and must never be promoted to published-score
+evidence.
 
 ## Troubleshooting without weakening evidence
 

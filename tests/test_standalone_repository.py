@@ -478,7 +478,7 @@ class StandaloneRepositoryTests(unittest.TestCase):
             "benchmark run",
             "--execute",
             "private evidence",
-            "External-limited",
+            "Verified-bounded",
         )
         for document in public_documents:
             text = document.read_text(encoding="utf-8")

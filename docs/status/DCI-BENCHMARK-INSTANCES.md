@@ -20,7 +20,7 @@ Verification is closed to `Not rerun`, `Verified-local`, `External-limited`,
 | `dci.bright.robotics@1.0.0` | `bright.robotics` | planned | Not rerun | — | lock finite range and implement |
 | `dci.local-fixture@1.0.0` | 15-task fixture | implemented | Verified-local | 1/task | maintain installed-wheel closure |
 | `dci.qa.2wikimultihopqa@1.0.0` | `qa.2wikimultihopqa` | planned | Not rerun | — | lock finite range and implement |
-| `dci.qa.bamboogle.github-sample50@1.0.0` | `qa.bamboogle.github-sample50` | implemented | External-limited | 50 | provision Pi checkout/CLI, operator environment, and basic resources |
+| `dci.qa.bamboogle.github-sample50@1.0.0` | `qa.bamboogle.github-sample50` | implemented | Verified-bounded | 50 | extend only under an explicit finite case limit |
 | `dci.qa.bamboogle.paper-full125@1.0.0` | `qa.bamboogle.paper-full125` | planned | Not rerun | — | separate paper-full authorization design |
 | `dci.qa.hotpotqa@1.0.0` | `qa.hotpotqa` | planned | Not rerun | — | lock finite range and implement |
 | `dci.qa.musique@1.0.0` | `qa.musique` | planned | Not rerun | — | lock finite range and implement |
@@ -57,12 +57,9 @@ The public plan selected the exact Bamboogle suite/task with `case_limit: 50`.
 Planning created no execution evidence and performed zero Agent or Judge
 operations.
 
-`uv run asterion-dci preflight` then reported these body-free categories:
-Agent authentication, Agent selection, Judge, and Node passed; the Pi checkout,
-built Pi CLI, operator environment, and basic resources were unavailable.
-Verification is therefore `External-limited`. Selected execution cases were
-zero, provider operations were zero, and external data/network were not used.
-The following authorized commands were deliberately not run:
+After the operator supplied the external Pi checkout, corpus, dataset, saved
+Agent authentication, and Judge credential, every preflight category passed.
+The following separately authorized one-case commands then completed:
 
 ```bash
 uv run asterion-dci benchmark run \
@@ -73,11 +70,15 @@ uv run asterion-dci benchmark run \
   --execute
 uv run asterion-dci benchmark resume \
   --instance dci.qa.bamboogle.github-sample50@1.0.0 \
-  --run-id RETURNED_RUN_ID \
+  --run-id run-531b866dfb304dd9a65e7329a4436e65 \
   --case-limit 1 \
   --capability-source-lock FRESH_LOCK \
   --evidence-root FRESH_EVIDENCE \
   --execute
 ```
 
-The 50-case benchmark was not executed.
+The initial command completed one real Agent operation and one real Judge
+operation with one correct result. Resume returned the same completed run in
+one second, retained a single native evidence generation, and did not repeat
+either operation. This establishes `Verified-bounded`; the 50-case benchmark
+and paper-score reproduction were not executed.

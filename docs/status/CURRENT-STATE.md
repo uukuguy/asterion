@@ -5,8 +5,8 @@
 - Project: Asterion
 - Active branch: `feature/capability-protocol-foundation`
 - Theme: source-neutral capability packages and generic benchmark execution
-- Runnable DCI closure Tasks 1–9: implemented with honest external-readiness classification
-- Next action: provision the missing external prerequisites, then rerun exactly one authorized Bamboogle case
+- Runnable DCI closure Tasks 1–9: implemented; first real instance is verified end to end
+- Next action: implement the next exact instance from the DCI benchmark backlog
 
 ## Current Architecture
 
@@ -43,9 +43,9 @@
 - Credentials, provider settings, datasets, corpora, paths, private environment,
   and optional amount remain operator-owned and outside portable/public values.
 - A monetary amount is not a generic authorization requirement.
-- Real Bamboogle binds the pinned upstream Agent/prompt/Judge contracts, defaults
-  to one case, and permits a finite 50-case plan. The 50-case run and paper
-  reproduction require separate finite-budget governance and were not run.
+- Real Bamboogle binds the `asterion-safe/pi` Agent/prompt/Judge contracts,
+  defaults to one case, and permits a finite 50-case plan. The 50-case run and
+  paper reproduction require separate finite-budget governance and were not run.
 - Archive and registry source forms remain deferred pending a separate security
   and lifecycle design.
 
@@ -53,12 +53,11 @@
 
 - The installed-wheel subprocess test executes and resumes all 15 local fixture
   tasks using only installed resources: `Verified-local`.
-- The Bamboogle path has fake Agent/Judge E2E verification and exact 50-case
-  provider-free planning. Real external verification is `External-limited`:
-  Pi checkout/CLI, operator environment, and basic resources were unavailable.
-- The readiness check performed zero provider operations and used no external
-  data or network. Neither the authorized one-case run nor the 50-case run was
-  executed.
+- The Bamboogle path has fake Agent/Judge E2E verification, exact 50-case
+  provider-free planning, and a real one-case `Verified-bounded` run.
+- Run `run-531b866dfb304dd9a65e7329a4436e65` completed one Agent operation,
+  one Judge operation, and one correct result. Exact resume completed in one
+  second with a single native evidence generation and no repeated work.
 - A passing command is required before any final state is labelled Verified.
   Provider-free checks never establish paper-score reproduction.
 
@@ -81,9 +80,7 @@
 
 1. Read this file and `RESUME-NEXT-SESSION.md`.
 2. Run `git status --short` and `git log --oneline -10`.
-3. Provision the pinned Pi checkout/CLI, operator environment, and basic
-   resources without placing private values in repository state.
-4. Rerun provider-free gates and preflight, then execute at most the explicitly
-   authorized one-case Bamboogle run when every private readiness category
-   passes.
+3. Keep private resources and credentials outside repository state.
+4. Select and implement the next exact instance from
+   `DCI-BENCHMARK-INSTANCES.md`, preserving finite execution limits.
 5. Never promote bounded or provider-free evidence to full-paper reproduction.

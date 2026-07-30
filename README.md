@@ -92,8 +92,8 @@ distribution.
 - `basic` performs bounded Agent/Judge work when correctly configured.
 - `complete` includes the bounded provider-backed path plus acceptance.
 - Full datasets, paper-score reproduction, and publication require separate
-  governance. The bounded execution interface is **External-limited** and does
-  not make `paper_full_executable=false` true.
+  governance. A passing bounded run is **Verified-bounded** only and does not
+  make `paper_full_executable=false` true.
 
 Authorization is explicit and host-owned; Asterion does not require a monetary
 amount to authorize a benchmark. An optional amount may be supplied as private

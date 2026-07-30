@@ -121,17 +121,68 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
         self.assertEqual(request.mode, "qa")
         self.assertEqual(
             request.profile,
-            "upstream-github/271f37e71f053bf0c99c05ce6d2fb53b841d922e/pi",
+            "asterion-safe/pi",
         )
         self.assertEqual(request.corpus, root / "corpus")
         self.assertEqual(request.max_concurrency, 1)
-        self.assertEqual(request.max_turns, 300)
+        self.assertEqual(request.max_turns, 100)
         self.assertEqual(request.resume_policy, "compatible")
         self.assertEqual(
             tuple(event.status for event in progress),
             ("task.real.started", "task.real.completed"),
         )
         self.assertNotIn("SENTINEL-SECRET", repr(result))
+
+    def test_uses_explicit_upstream_profile_and_turn_limit(self) -> None:
+        calls = []
+
+        async def runner(request, *, paths):
+            calls.append((request, paths))
+            return BenchmarkResult(
+                output_root=request.output_root,
+                counts={"total": 1, "correct": 1, "failed": 0},
+            )
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            result = RealDciBenchmarkExecutor(
+                paths=_paths(root),
+                runtime_options=DciRuntimeOptions(
+                    runtime="pi",
+                    provider="openai-codex",
+                    model="gpt-5.6-luna",
+                ),
+                judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
+                experiment_profile=(
+                    "upstream-github/"
+                    "271f37e71f053bf0c99c05ce6d2fb53b841d922e/pi"
+                ),
+                max_turns=300,
+                benchmark_runner=runner,
+                readiness_probe=lambda *_args: None,
+            ).execute(
+                _invocation(root),
+                cancellation=MutableCancellation(),
+                on_progress=lambda _event: None,
+            )
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(
+            calls[0][0].profile,
+            "upstream-github/271f37e71f053bf0c99c05ce6d2fb53b841d922e/pi",
+        )
+        self.assertEqual(calls[0][0].max_turns, 300)
+
+    def test_rejects_profile_without_a_native_executor(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            with self.assertRaises(DciBenchmarkExecutorError):
+                RealDciBenchmarkExecutor(
+                    paths=_paths(root),
+                    runtime_options=DciRuntimeOptions(runtime="claude-code"),
+                    judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
+                    experiment_profile="asterion-safe/claude-subscription",
+                )
 
     def test_rejects_wrong_contract_before_runner(self) -> None:
         cases = (

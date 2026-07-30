@@ -37,9 +37,14 @@ from asterion.runtime.host import CancellationSignal
 _BAMBOOGLE_TASK = "qa.bamboogle.github-sample50"
 _BAMBOOGLE_PROFILE = "qa.bamboogle"
 _BAMBOOGLE_SELECTION = "github-sample50"
+_DEFAULT_EXPERIMENT_PROFILE = "asterion-safe/pi"
 _UPSTREAM_EXPERIMENT_PROFILE = (
     "upstream-github/271f37e71f053bf0c99c05ce6d2fb53b841d922e/pi"
 )
+_EXPERIMENT_PROFILES = {
+    _DEFAULT_EXPERIMENT_PROFILE,
+    _UPSTREAM_EXPERIMENT_PROFILE,
+}
 
 
 class DciBenchmarkExecutorError(ValueError):
@@ -117,6 +122,8 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
         paths: DciPaths,
         runtime_options: DciRuntimeOptions,
         judge_config: JudgeConfig,
+        experiment_profile: str = _DEFAULT_EXPERIMENT_PROFILE,
+        max_turns: int = 100,
         benchmark_runner: Callable[..., Any] = run_benchmark_async,
         readiness_probe: Callable[..., None] | None = None,
     ) -> None:
@@ -124,6 +131,9 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
             not isinstance(paths, DciPaths)
             or not isinstance(runtime_options, DciRuntimeOptions)
             or not isinstance(judge_config, JudgeConfig)
+            or experiment_profile not in _EXPERIMENT_PROFILES
+            or type(max_turns) is not int
+            or max_turns < 1
             or not callable(benchmark_runner)
             or readiness_probe is not None
             and not callable(readiness_probe)
@@ -132,6 +142,8 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
         self._paths = paths
         self._runtime_options = runtime_options
         self._judge_config = judge_config
+        self._experiment_profile = experiment_profile
+        self._max_turns = max_turns
         self._benchmark_runner = benchmark_runner
         self._readiness_probe = (
             _default_readiness_probe if readiness_probe is None else readiness_probe
@@ -162,10 +174,10 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 runtime_options=self._runtime_options,
                 limit=payload.case_limit,
                 mode="qa",
-                profile=_UPSTREAM_EXPERIMENT_PROFILE,
+                profile=self._experiment_profile,
                 corpus=payload.corpus,
                 max_concurrency=1,
-                max_turns=300,
+                max_turns=self._max_turns,
                 resume_policy="compatible",
             )
             on_progress(

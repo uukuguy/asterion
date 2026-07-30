@@ -9,8 +9,7 @@
 - Local and bounded Bamboogle instances now have formal installed execution
   hosts with explicit authorization, private evidence, cancellation, and resume.
 - The installed-wheel local closure and complete DCI instance backlog are
-  finished. Task 9 closed honestly as `External-limited` after final
-  provider-free gates and readiness classification.
+  finished. The first real Bamboogle instance is `Verified-bounded`.
 
 ## Durable baseline
 
@@ -20,22 +19,17 @@
   external-first equivalence and promotion checks.
 - `asterion-dci` wires its product-owned host only after explicit execution
   arguments and authority; metadata-only commands remain provider-free.
-- The real Bamboogle path binds the pinned upstream profile and existing
-  Agent/Judge engine; fake dependency seams proved one operation and exact
-  resume without repeated operations.
+- The real Bamboogle path binds `asterion-safe/pi` to the existing Agent/Judge
+  engine. Formal run `run-531b866dfb304dd9a65e7329a4436e65` completed one
+  correct case; exact resume retained one native generation without repeating
+  Agent or Judge work.
 
 ## Immediate next action
 
-Provision the pinned Pi checkout and built CLI, operator environment, and basic
-resources. Then rerun `uv run asterion-dci preflight`. Only when every category
-passes, create a fresh source lock and evidence root and execute the separately
-authorized one-case Bamboogle run/resume. Do not execute the 50-case plan.
-
-Task 9 proved the exact `case_limit: 50` plan and ran all provider-free gates.
-Preflight passed Agent authentication/selection, Judge, and Node, but failed the
-Pi checkout, built Pi CLI, operator environment, and basic-resource categories.
-No execution evidence, provider operation, external data access, or network
-operation occurred.
+Select the next exact instance from `DCI-BENCHMARK-INSTANCES.md` and implement
+it through the same generic benchmark host. Keep each real verification
+separately authorized and finitely bounded. Do not execute the 50-case
+Bamboogle plan without new authority.
 
 ## Ruled-out paths
 

@@ -351,29 +351,17 @@ class DciBenchmarkHost:
                 ),
                 runtime_options=resolve_dci_runtime_options(
                     {
-                        "provider": "openai",
-                        "model": "gpt-5.4-nano",
+                        "runtime": "pi",
+                        "provider": "openai-codex",
+                        "model": "gpt-5.6-luna",
                         "tools": "read,bash",
                         "runtime_context_level": "level3",
-                        "thinking_level": "high",
-                        "node_max_old_space_size_mb": 8192,
                     },
                     environment=environment,
                 ),
-                judge_config=JudgeConfig(
-                    base_url="https://api.openai.com/v1",
-                    api="responses",
-                    model="gpt-5.4-nano",
-                    thinking="disabled",
-                    api_key_env="OPENAI_API_KEY",
-                    api_key=environment.get(
-                        "DCI_EVAL_JUDGE_API_KEY",
-                        environment.get(
-                            "ASTERION_DCI_JUDGE_API_KEY",
-                            environment.get("OPENAI_API_KEY", ""),
-                        ),
-                    ).strip(),
-                ),
+                judge_config=JudgeConfig.from_environment(environment),
+                experiment_profile="asterion-safe/pi",
+                max_turns=100,
             )
         _fail()
 

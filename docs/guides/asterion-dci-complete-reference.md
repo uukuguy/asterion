@@ -131,8 +131,9 @@ reference，不包含 prompt、answer、corpus text、provider payload、raw out
 benchmark plan/run 隐式授权。金额只是可选 operator metadata；`amount=None` 合法，
 既不提示用户输入也不阻塞 plan 或执行。
 
-有界 execution interface 的状态是 **External-limited**。它不能把有限 case 结果提升为
-完整论文复现或已发表分数验证。provider-free 验证使用：
+有界 execution interface 在真实 Agent/Judge 命令通过后可以标记为
+**Verified-bounded**。它不能把有限 case 结果提升为完整论文复现或已发表分数验证。
+provider-free 验证使用：
 
 ```bash
 make test
