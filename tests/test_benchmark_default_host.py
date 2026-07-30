@@ -2,14 +2,60 @@ from __future__ import annotations
 
 import io
 import json
+import ast
+from pathlib import Path
 import unittest
 from unittest import mock
 
 from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
+from asterion.benchmarks import (
+    ApplicationRef,
+    InstalledBenchmarkResolution,
+    resolve_installed_benchmark,
+)
+from asterion.capability_packages import CapabilityPackageRef
 from asterion.cli import main as asterion_main
 
 
 class DefaultBenchmarkHostTests(unittest.TestCase):
+    def test_resolution_owns_metadata_only_payload_snapshot(self) -> None:
+        resolution = resolve_installed_benchmark(
+            application_ref=ApplicationRef("code.quality", "1.0.0"),
+        )
+
+        self.assertIsInstance(resolution, InstalledBenchmarkResolution)
+        self.assertEqual(
+            resolution.application.application_id,
+            "code.quality",
+        )
+        self.assertEqual(
+            tuple(package.package_ref for package in resolution.packages),
+            (CapabilityPackageRef("controlled-code", "1.0.0"),),
+        )
+        package = resolution.packages[0]
+        self.assertEqual(package.implementations, ())
+        self.assertEqual(package.benchmark_bindings, ())
+        self.assertTrue(package.catalog_roots[0].is_dir())
+
+    def test_generic_resolution_module_has_no_dci_dependency(self) -> None:
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "src/asterion/benchmarks/host.py"
+        )
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        imports = {
+            node.module or ""
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+        }
+        self.assertFalse(
+            any(
+                name.startswith("asterion.capabilities.dci")
+                or name.startswith("asterion.applications.dci_agent_lite")
+                for name in imports
+            )
+        )
+
     def test_installed_cli_plans_builtin_suite_without_execution_authority(self) -> None:
         stdout = io.StringIO()
         stderr = io.StringIO()

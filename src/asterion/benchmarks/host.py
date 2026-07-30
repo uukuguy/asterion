@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
 import tempfile
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NoReturn
 
@@ -52,23 +54,62 @@ class BenchmarkHostError(ValueError):
     """Raised when host-owned benchmark metadata cannot be resolved safely."""
 
 
-def create_installed_benchmark_plan(
+class _MaterializedBenchmarkRoot:
+    __slots__ = ("path",)
+
+    def __init__(self) -> None:
+        self.path: Path | None = Path(
+            tempfile.mkdtemp(prefix="asterion-benchmark-resolution-")
+        ).resolve(strict=True)
+
+    def cleanup(self) -> None:
+        path = self.path
+        self.path = None
+        if path is not None:
+            shutil.rmtree(path, ignore_errors=True)
+
+    def __del__(self) -> None:
+        self.cleanup()
+
+
+@dataclass(frozen=True, slots=True)
+class InstalledBenchmarkResolution:
+    """Selected application and metadata-only package snapshots."""
+
+    application: InstalledApplication
+    packages: tuple[InstalledCapabilityPackage, ...]
+    _materialization: object = field(repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        packages = tuple(self.packages)
+        if (
+            not isinstance(self.application, InstalledApplication)
+            or not packages
+            or not all(
+                isinstance(package, InstalledCapabilityPackage)
+                and not package.implementations
+                and not package.benchmark_bindings
+                for package in packages
+            )
+        ):
+            _fail()
+        object.__setattr__(self, "packages", packages)
+
+
+def resolve_installed_benchmark(
     *,
     application_ref: ApplicationRef,
-    suite_ref: BenchmarkSuiteRef,
-    case_limit: int | None,
     source_lock_path: Path | None = None,
     application_index_entry_points: Iterable[object] | None = None,
     application_entry_points: Iterable[object] | None = None,
     runtime_factories: RuntimeFactoryRegistry | None = None,
     package_sources: Sequence[CapabilityPackageSource] | None = None,
-) -> ResolvedBenchmarkPlan:
-    """Create a typed plan without loading capability implementation providers."""
+) -> InstalledBenchmarkResolution:
+    """Resolve one installed application over retained metadata snapshots."""
 
+    materialization: _MaterializedBenchmarkRoot | None = None
     try:
-        if not isinstance(application_ref, ApplicationRef) or not isinstance(
-            suite_ref, BenchmarkSuiteRef
-        ):
+        if not isinstance(application_ref, ApplicationRef):
             _fail()
         provider_id = select_application_provider_id(
             application_ref,
@@ -88,39 +129,82 @@ def create_installed_benchmark_plan(
         )
         source_lock = _read_source_lock(source_lock_path)
         sources = _package_sources(package_sources)
-        with tempfile.TemporaryDirectory(prefix="asterion-benchmark-plan-") as temp:
-            packages = _metadata_packages(
-                metadata_application,
-                sources=sources,
-                source_lock=source_lock,
-                materialization_root=Path(temp),
-            )
-            provider = compose_installed_provider(
-                metadata_provider,
-                runtime_factories=(
-                    default_runtime_factory_registry()
-                    if runtime_factories is None
-                    else runtime_factories
-                ),
-                installed_packages=packages,
-            )
-            application = select_installed_application(
-                provider,
-                ApplicationSelector(
-                    application_id=application_ref.application_id,
-                    version=application_ref.version,
-                ),
-            )
-            return create_benchmark_plan(
-                BenchmarkPlanRequest(
-                    application_ref=application_ref,
-                    suite_ref=suite_ref,
-                    case_limit=case_limit,
-                    execute=False,
-                ),
-                application,
-                packages,
-            )
+        materialization = _MaterializedBenchmarkRoot()
+        assert materialization.path is not None
+        packages = _metadata_packages(
+            metadata_application,
+            sources=sources,
+            source_lock=source_lock,
+            materialization_root=materialization.path,
+        )
+        provider = compose_installed_provider(
+            metadata_provider,
+            runtime_factories=(
+                default_runtime_factory_registry()
+                if runtime_factories is None
+                else runtime_factories
+            ),
+            installed_packages=packages,
+        )
+        application = select_installed_application(
+            provider,
+            ApplicationSelector(
+                application_id=application_ref.application_id,
+                version=application_ref.version,
+            ),
+        )
+        resolution = InstalledBenchmarkResolution(
+            application=application,
+            packages=packages,
+            _materialization=materialization,
+        )
+        materialization = None
+        return resolution
+    except BenchmarkHostError:
+        raise
+    except Exception:
+        _fail()
+    finally:
+        if materialization is not None:
+            materialization.cleanup()
+
+
+def create_installed_benchmark_plan(
+    *,
+    application_ref: ApplicationRef,
+    suite_ref: BenchmarkSuiteRef,
+    case_limit: int | None,
+    source_lock_path: Path | None = None,
+    application_index_entry_points: Iterable[object] | None = None,
+    application_entry_points: Iterable[object] | None = None,
+    runtime_factories: RuntimeFactoryRegistry | None = None,
+    package_sources: Sequence[CapabilityPackageSource] | None = None,
+) -> ResolvedBenchmarkPlan:
+    """Create a typed plan without loading capability implementation providers."""
+
+    try:
+        if not isinstance(application_ref, ApplicationRef) or not isinstance(
+            suite_ref, BenchmarkSuiteRef
+        ):
+            _fail()
+        resolution = resolve_installed_benchmark(
+            application_ref=application_ref,
+            source_lock_path=source_lock_path,
+            application_index_entry_points=application_index_entry_points,
+            application_entry_points=application_entry_points,
+            runtime_factories=runtime_factories,
+            package_sources=package_sources,
+        )
+        return create_benchmark_plan(
+            BenchmarkPlanRequest(
+                application_ref=application_ref,
+                suite_ref=suite_ref,
+                case_limit=case_limit,
+                execute=False,
+            ),
+            resolution.application,
+            resolution.packages,
+        )
     except BenchmarkHostError:
         raise
     except Exception:
@@ -288,5 +372,7 @@ def _fail() -> NoReturn:
 
 __all__ = (
     "BenchmarkHostError",
+    "InstalledBenchmarkResolution",
     "create_installed_benchmark_plan",
+    "resolve_installed_benchmark",
 )

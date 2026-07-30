@@ -13,6 +13,12 @@ from asterion.benchmarks.execution import (
     BenchmarkRunner,
     BenchmarkTaskExecutor,
 )
+from asterion.benchmarks.host import (
+    BenchmarkHostError,
+    InstalledBenchmarkResolution,
+    create_installed_benchmark_plan,
+    resolve_installed_benchmark,
+)
 from asterion.benchmarks.model import (
     ApplicationRef,
     BenchmarkModelError,
@@ -51,6 +57,7 @@ __all__ = (
     "BenchmarkEvidenceError",
     "BenchmarkEvidenceStore",
     "BenchmarkExecutionError",
+    "BenchmarkHostError",
     "BenchmarkProcessError",
     "BenchmarkModelError",
     "BenchmarkExecutionAuthorization",
@@ -71,8 +78,11 @@ __all__ = (
     "ResolvedCapability",
     "create_benchmark_plan",
     "LocalPrivateBenchmarkEvidenceStore",
+    "InstalledBenchmarkResolution",
+    "create_installed_benchmark_plan",
     "public_plan_dict",
     "render_benchmark_plan",
     "resolve_benchmark_suite",
     "resolve_benchmark_tasks",
+    "resolve_installed_benchmark",
 )
