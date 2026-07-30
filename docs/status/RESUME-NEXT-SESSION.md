@@ -1,7 +1,6 @@
 # Recovered Session Checkpoint
 
-> Updated: 2026-07-30. **Session remains active — the prior session missed a
-> final handoff.**
+> Updated: 2026-07-30.
 
 ## TL;DR
 
@@ -10,8 +9,8 @@
 - Local and bounded Bamboogle instances now have formal installed execution
   hosts with explicit authorization, private evidence, cancellation, and resume.
 - The installed-wheel local closure and complete DCI instance backlog are
-  finished. The active goal is external readiness classification and final
-  verification gates.
+  finished. Task 9 closed honestly as `External-limited` after final
+  provider-free gates and readiness classification.
 
 ## Durable baseline
 
@@ -27,10 +26,16 @@
 
 ## Immediate next action
 
-Execute Task 9 from the committed TDD plan in
-`docs/superpowers/plans/2026-07-30-dci-runnable-benchmark-closure.md`.
-Tasks 1-8 are implemented; run provider-free gates, prove the 50-case plan
-without executing it, then classify readiness and run at most one real case.
+Provision the pinned Pi checkout and built CLI, operator environment, and basic
+resources. Then rerun `uv run asterion-dci preflight`. Only when every category
+passes, create a fresh source lock and evidence root and execute the separately
+authorized one-case Bamboogle run/resume. Do not execute the 50-case plan.
+
+Task 9 proved the exact `case_limit: 50` plan and ran all provider-free gates.
+Preflight passed Agent authentication/selection, Judge, and Node, but failed the
+Pi checkout, built Pi CLI, operator environment, and basic-resource categories.
+No execution evidence, provider operation, external data access, or network
+operation occurred.
 
 ## Ruled-out paths
 

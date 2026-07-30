@@ -5,8 +5,8 @@
 - Project: Asterion
 - Active branch: `feature/capability-protocol-foundation`
 - Theme: source-neutral capability packages and generic benchmark execution
-- Runnable DCI closure Tasks 1–8: implemented through installed-wheel local verification
-- Next action: run provider-free final gates, external readiness, and at most one authorized Bamboogle case
+- Runnable DCI closure Tasks 1–9: implemented with honest external-readiness classification
+- Next action: provision the missing external prerequisites, then rerun exactly one authorized Bamboogle case
 
 ## Current Architecture
 
@@ -53,8 +53,12 @@
 
 - The installed-wheel subprocess test executes and resumes all 15 local fixture
   tasks using only installed resources: `Verified-local`.
-- The Bamboogle path has fake Agent/Judge E2E verification, but real external
-  verification remains `Not rerun` pending readiness.
+- The Bamboogle path has fake Agent/Judge E2E verification and exact 50-case
+  provider-free planning. Real external verification is `External-limited`:
+  Pi checkout/CLI, operator environment, and basic resources were unavailable.
+- The readiness check performed zero provider operations and used no external
+  data or network. Neither the authorized one-case run nor the 50-case run was
+  executed.
 - A passing command is required before any final state is labelled Verified.
   Provider-free checks never establish paper-score reproduction.
 
@@ -77,7 +81,9 @@
 
 1. Read this file and `RESUME-NEXT-SESSION.md`.
 2. Run `git status --short` and `git log --oneline -10`.
-3. Run Task 9 provider-free gates before external readiness.
-4. Execute at most the explicitly authorized one-case Bamboogle run when every
-   private readiness category passes.
+3. Provision the pinned Pi checkout/CLI, operator environment, and basic
+   resources without placing private values in repository state.
+4. Rerun provider-free gates and preflight, then execute at most the explicitly
+   authorized one-case Bamboogle run when every private readiness category
+   passes.
 5. Never promote bounded or provider-free evidence to full-paper reproduction.
