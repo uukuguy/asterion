@@ -750,7 +750,7 @@ BenchmarkRequest(
     runtime_options=runtime_options,
     limit=payload.case_limit,
     mode="qa",
-    profile=payload.profile_id,
+    profile="upstream-github/271f37e71f053bf0c99c05ce6d2fb53b841d922e/pi",
     corpus=payload.corpus,
     max_concurrency=1,
     resume_policy="compatible",
@@ -759,6 +759,9 @@ BenchmarkRequest(
 
 The executor accepts only task `qa.bamboogle.github-sample50`, profile
 `qa.bamboogle`, selection `github-sample50`, and `1 <= case_limit <= 50`.
+Here `qa.bamboogle` is the historical batch-profile identity; it must not be
+passed as an experiment prompt profile. The GitHub sample instance binds the
+exact pinned upstream experiment profile shown above.
 It maps existing `BenchmarkResult.counts` to one generic task result without
 exposing answers or raw artifacts.
 

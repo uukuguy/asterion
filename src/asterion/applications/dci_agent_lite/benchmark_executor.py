@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
+import os
+import stat
 from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 from asterion.benchmarks import (
     BenchmarkProgressEvent,
@@ -13,7 +19,27 @@ from asterion.benchmarks import (
 from asterion.capabilities.dci.implementation.benchmark_bindings import (
     DciBenchmarkInvocationPayload,
 )
+from asterion.capabilities.dci.implementation.config import (
+    DciPaths,
+    DciRuntimeOptions,
+)
+from asterion.capabilities.dci.implementation.evaluation.benchmark import (
+    BenchmarkRequest,
+    BenchmarkResult,
+    run_benchmark_async,
+)
+from asterion.capabilities.dci.implementation.evaluation.judge import JudgeConfig
+from asterion.capabilities.dci.implementation.runtime.pi_rpc import (
+    resolve_node_bin,
+)
 from asterion.runtime.host import CancellationSignal
+
+_BAMBOOGLE_TASK = "qa.bamboogle.github-sample50"
+_BAMBOOGLE_PROFILE = "qa.bamboogle"
+_BAMBOOGLE_SELECTION = "github-sample50"
+_UPSTREAM_EXPERIMENT_PROFILE = (
+    "upstream-github/271f37e71f053bf0c99c05ce6d2fb53b841d922e/pi"
+)
 
 
 class DciBenchmarkExecutorError(ValueError):
@@ -82,6 +108,269 @@ class LocalDciBenchmarkExecutor(BenchmarkTaskExecutor):
             _fail()
 
 
+class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
+    """Translate one bounded real DCI task into the existing Agent/Judge engine."""
+
+    def __init__(
+        self,
+        *,
+        paths: DciPaths,
+        runtime_options: DciRuntimeOptions,
+        judge_config: JudgeConfig,
+        benchmark_runner: Callable[..., Any] = run_benchmark_async,
+        readiness_probe: Callable[..., None] | None = None,
+    ) -> None:
+        if (
+            not isinstance(paths, DciPaths)
+            or not isinstance(runtime_options, DciRuntimeOptions)
+            or not isinstance(judge_config, JudgeConfig)
+            or not callable(benchmark_runner)
+            or readiness_probe is not None
+            and not callable(readiness_probe)
+        ):
+            _fail()
+        self._paths = paths
+        self._runtime_options = runtime_options
+        self._judge_config = judge_config
+        self._benchmark_runner = benchmark_runner
+        self._readiness_probe = (
+            _default_readiness_probe if readiness_probe is None else readiness_probe
+        )
+
+    def execute(
+        self,
+        invocation: BenchmarkTaskInvocation,
+        *,
+        cancellation: CancellationSignal,
+        on_progress: Callable[[BenchmarkProgressEvent], None],
+    ) -> BenchmarkTaskResult:
+        try:
+            payload = _real_payload(invocation, cancellation, on_progress)
+            self._readiness_probe(
+                payload,
+                self._paths,
+                self._runtime_options,
+                self._judge_config,
+            )
+            if cancellation.cancelled:
+                return _cancelled(invocation.task_id)
+            request = BenchmarkRequest(
+                dataset=payload.dataset,
+                output_root=payload.output_directory,
+                cwd=self._paths.repo_root,
+                judge_config=self._judge_config,
+                runtime_options=self._runtime_options,
+                limit=payload.case_limit,
+                mode="qa",
+                profile=_UPSTREAM_EXPERIMENT_PROFILE,
+                corpus=payload.corpus,
+                max_concurrency=1,
+                max_turns=300,
+                resume_policy="compatible",
+            )
+            on_progress(
+                BenchmarkProgressEvent(
+                    sequence=1,
+                    status="task.real.started",
+                    task_id=invocation.task_id,
+                )
+            )
+            if cancellation.cancelled:
+                return _cancelled(invocation.task_id)
+            native = asyncio.run(
+                _run_cancellable(
+                    self._benchmark_runner,
+                    request,
+                    paths=self._paths,
+                    cancellation=cancellation,
+                )
+            )
+            if native is None:
+                return _cancelled(invocation.task_id)
+            if not isinstance(native, BenchmarkResult):
+                _fail()
+            total = native.counts.get("total")
+            failed = native.counts.get("failed")
+            if (
+                type(total) is not int
+                or type(failed) is not int
+                or total != payload.case_limit
+                or failed != 0
+            ):
+                return BenchmarkTaskResult(
+                    task_id=invocation.task_id,
+                    status="failed",
+                    case_count=total if type(total) is int and total >= 0 else 0,
+                )
+            on_progress(
+                BenchmarkProgressEvent(
+                    sequence=2,
+                    status="task.real.completed",
+                    task_id=invocation.task_id,
+                )
+            )
+            return BenchmarkTaskResult(
+                task_id=invocation.task_id,
+                status="completed",
+                case_count=total,
+                artifact_ids=(f"{invocation.task_id}.native-result",),
+            )
+        except DciBenchmarkExecutorError:
+            raise
+        except asyncio.CancelledError:
+            return _cancelled(
+                invocation.task_id
+                if isinstance(invocation, BenchmarkTaskInvocation)
+                else _BAMBOOGLE_TASK
+            )
+        except Exception:
+            _fail()
+
+
+def _real_payload(
+    invocation: object,
+    cancellation: object,
+    on_progress: object,
+) -> DciBenchmarkInvocationPayload:
+    if (
+        not isinstance(invocation, BenchmarkTaskInvocation)
+        or invocation.task_id != _BAMBOOGLE_TASK
+        or invocation.binding_id != _BAMBOOGLE_TASK
+        or not isinstance(invocation.private_payload, DciBenchmarkInvocationPayload)
+        or not callable(on_progress)
+        or not hasattr(cancellation, "cancelled")
+    ):
+        _fail()
+    payload = invocation.private_payload
+    if (
+        payload.profile_id != _BAMBOOGLE_PROFILE
+        or payload.selection_variant != _BAMBOOGLE_SELECTION
+        or type(payload.case_limit) is not int
+        or not 1 <= payload.case_limit <= 50
+        or payload.max_concurrency != 1
+        or payload.resume_policy != "compatible"
+        or payload.runtime_context_level not in {None, "level3"}
+        or not all(
+            path.is_absolute()
+            for path in (
+                payload.dataset,
+                payload.corpus,
+                payload.output_directory,
+            )
+        )
+    ):
+        _fail()
+    return payload
+
+
+async def _run_cancellable(
+    runner: Callable[..., Any],
+    request: BenchmarkRequest,
+    *,
+    paths: DciPaths,
+    cancellation: CancellationSignal,
+) -> BenchmarkResult | None:
+    async def invoke() -> BenchmarkResult:
+        value = runner(request, paths=paths)
+        if inspect.isawaitable(value):
+            value = await value
+        return value
+
+    async def wait_for_cancel() -> None:
+        while not cancellation.cancelled:
+            await asyncio.sleep(0.01)
+
+    task = asyncio.create_task(invoke())
+    watcher = asyncio.create_task(wait_for_cancel())
+    done, _pending = await asyncio.wait(
+        (task, watcher),
+        return_when=asyncio.FIRST_COMPLETED,
+    )
+    if watcher in done:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        return None
+    watcher.cancel()
+    await asyncio.gather(watcher, return_exceptions=True)
+    return task.result()
+
+
+def _default_readiness_probe(
+    payload: DciBenchmarkInvocationPayload,
+    paths: DciPaths,
+    runtime_options: DciRuntimeOptions,
+    judge_config: JudgeConfig,
+) -> None:
+    if (
+        not _regular_nonsymlink(payload.dataset)
+        or not _directory_nonsymlink(payload.corpus)
+        or _bounded_jsonl_count(payload.dataset, payload.case_limit)
+        < payload.case_limit
+        or not judge_config.api_key
+        or not runtime_options.provider
+        or not runtime_options.model
+        or not _directory_nonsymlink(paths.pi.repo_dir)
+        or not _directory_nonsymlink(paths.pi.package_dir)
+        or not _regular_nonsymlink(paths.pi.package_dir / "package.json")
+        or not _regular_nonsymlink(paths.pi.package_dir / "dist" / "cli.js")
+        or not _directory_nonsymlink(paths.pi.agent_dir)
+        or not (
+            _regular_nonsymlink(paths.pi.agent_dir / "auth.json")
+            or bool(payload.private_environment.get("OPENAI_API_KEY", "").strip())
+        )
+    ):
+        _fail()
+    resolve_node_bin(payload.private_environment)
+
+
+def _bounded_jsonl_count(path: Path, required: int) -> int:
+    count = 0
+    with path.open("rb") as stream:
+        for line in stream:
+            if line.strip():
+                count += 1
+                if count >= required:
+                    break
+    return count
+
+
+def _regular_nonsymlink(path: Path) -> bool:
+    if _has_symlink_component(path):
+        return False
+    try:
+        mode = os.lstat(path).st_mode
+    except OSError:
+        return False
+    return stat.S_ISREG(mode) and not stat.S_ISLNK(mode)
+
+
+def _directory_nonsymlink(path: Path) -> bool:
+    if _has_symlink_component(path):
+        return False
+    try:
+        mode = os.lstat(path).st_mode
+    except OSError:
+        return False
+    return stat.S_ISDIR(mode) and not stat.S_ISLNK(mode)
+
+
+def _has_symlink_component(path: Path) -> bool:
+    current = Path(path.anchor)
+    for component in path.parts[1:]:
+        current /= component
+        if current.is_symlink():
+            return True
+    return False
+
+
+def _cancelled(task_id: str) -> BenchmarkTaskResult:
+    return BenchmarkTaskResult(
+        task_id=task_id,
+        status="cancelled",
+        case_count=0,
+    )
+
+
 def _fail() -> None:
     raise DciBenchmarkExecutorError("DCI benchmark execution is invalid") from None
 
@@ -89,4 +378,5 @@ def _fail() -> None:
 __all__ = (
     "DciBenchmarkExecutorError",
     "LocalDciBenchmarkExecutor",
+    "RealDciBenchmarkExecutor",
 )

@@ -13,6 +13,7 @@ import urllib.parse
 import urllib.request
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -118,7 +119,10 @@ def build_safe_judge_request(
     """Build Asterion's configurable strict JSON execution request."""
 
     return _build_safe_judge_request(
-        config, question=question, gold_answer=gold_answer, predicted_answer=predicted_answer
+        config,
+        question=question,
+        gold_answer=gold_answer,
+        predicted_answer=predicted_answer,
     )
 
 
@@ -134,15 +138,23 @@ def build_judge_request_for_contract(
 
     if contract_id == PAPER_JUDGE_CONTRACT:
         return build_paper_judge_request(
-            question=question, gold_answer=gold_answer, predicted_answer=predicted_answer
+            question=question,
+            gold_answer=gold_answer,
+            predicted_answer=predicted_answer,
         )
     if contract_id == UPSTREAM_JUDGE_CONTRACT:
         return build_upstream_judge_request(
-            config, question=question, gold_answer=gold_answer, predicted_answer=predicted_answer
+            config,
+            question=question,
+            gold_answer=gold_answer,
+            predicted_answer=predicted_answer,
         )
     if contract_id == ASTERION_SAFE_JUDGE_CONTRACT:
         return build_safe_judge_request(
-            config, question=question, gold_answer=gold_answer, predicted_answer=predicted_answer
+            config,
+            question=question,
+            gold_answer=gold_answer,
+            predicted_answer=predicted_answer,
         )
     raise DciJudgeError("DCI Judge contract is invalid")
 
@@ -242,9 +254,13 @@ def parse_judge_response_for_contract(
     """Dispatch response parsing by the declared contract identity."""
 
     if contract_id == PAPER_JUDGE_CONTRACT:
-        return parse_paper_judge_response(response, request_fingerprint=request_fingerprint)
+        return parse_paper_judge_response(
+            response, request_fingerprint=request_fingerprint
+        )
     if contract_id == UPSTREAM_JUDGE_CONTRACT:
-        return parse_upstream_judge_response(response, request_fingerprint=request_fingerprint)
+        return parse_upstream_judge_response(
+            response, request_fingerprint=request_fingerprint
+        )
     if contract_id == ASTERION_SAFE_JUDGE_CONTRACT:
         return parse_safe_judge_response(
             response, request_fingerprint=request_fingerprint, api=api
@@ -318,26 +334,61 @@ class JudgeConfig:
     def from_env(cls) -> "JudgeConfig":
         """Load shared judge settings with Asterion compatibility aliases."""
 
-        api_key_env = _judge_env("API_KEY_ENV", DEFAULT_JUDGE_API_KEY_ENV)
+        return cls.from_environment(os.environ)
+
+    @classmethod
+    def from_environment(cls, environment: Mapping[str, str]) -> "JudgeConfig":
+        """Load judge settings from one explicit private environment snapshot."""
+
+        selected = dict(environment)
+
+        def value(name: str, default: str) -> str:
+            return selected.get(
+                f"DCI_EVAL_JUDGE_{name}",
+                selected.get(f"ASTERION_DCI_JUDGE_{name}", default),
+            )
+
+        def integer(name: str, default: int) -> int:
+            try:
+                return int(value(name, str(default)))
+            except ValueError as error:
+                raise ValueError(f"DCI_EVAL_JUDGE_{name} must be an integer") from error
+
+        def number(name: str, default: float) -> float:
+            try:
+                parsed = float(value(name, str(default)))
+            except ValueError as error:
+                raise ValueError(f"DCI_EVAL_JUDGE_{name} must be a number") from error
+            if not math.isfinite(parsed):
+                raise ValueError(f"DCI_EVAL_JUDGE_{name} must be a finite number")
+            return parsed
+
+        def boolean(name: str, default: bool) -> bool:
+            parsed = value(name, str(default)).strip().lower()
+            if parsed in {"1", "true", "yes", "on"}:
+                return True
+            if parsed in {"0", "false", "no", "off"}:
+                return False
+            raise ValueError(f"DCI_EVAL_JUDGE_{name} must be a boolean")
+
+        api_key_env = value("API_KEY_ENV", DEFAULT_JUDGE_API_KEY_ENV)
         return cls(
-            base_url=_judge_env("BASE_URL", DEFAULT_JUDGE_BASE_URL),
-            api=_judge_env("API", DEFAULT_JUDGE_API),
-            model=_judge_env("MODEL", DEFAULT_JUDGE_MODEL),
-            timeout_seconds=_judge_env_int("TIMEOUT_SECONDS", 120),
-            max_output_tokens=_judge_env_int("MAX_OUTPUT_TOKENS", 1024),
-            json_mode=_judge_env_bool("JSON_MODE", True),
-            strict_json_schema=_judge_env_bool("STRICT_JSON_SCHEMA", False),
-            responses_store=_judge_env_bool("RESPONSES_STORE", False),
-            thinking=_judge_env("THINKING", DEFAULT_JUDGE_THINKING),
-            input_price_per_1m=_judge_env_float("INPUT_PRICE_PER_1M", 0.0),
-            cached_input_price_per_1m=_judge_env_float(
-                "CACHED_INPUT_PRICE_PER_1M", 0.0
-            ),
-            output_price_per_1m=_judge_env_float("OUTPUT_PRICE_PER_1M", 0.0),
+            base_url=value("BASE_URL", DEFAULT_JUDGE_BASE_URL),
+            api=value("API", DEFAULT_JUDGE_API),
+            model=value("MODEL", DEFAULT_JUDGE_MODEL),
+            timeout_seconds=integer("TIMEOUT_SECONDS", 120),
+            max_output_tokens=integer("MAX_OUTPUT_TOKENS", 1024),
+            json_mode=boolean("JSON_MODE", True),
+            strict_json_schema=boolean("STRICT_JSON_SCHEMA", False),
+            responses_store=boolean("RESPONSES_STORE", False),
+            thinking=value("THINKING", DEFAULT_JUDGE_THINKING),
+            input_price_per_1m=number("INPUT_PRICE_PER_1M", 0.0),
+            cached_input_price_per_1m=number("CACHED_INPUT_PRICE_PER_1M", 0.0),
+            output_price_per_1m=number("OUTPUT_PRICE_PER_1M", 0.0),
             api_key_env=api_key_env,
-            api_key=os.environ.get("DCI_EVAL_JUDGE_API_KEY", "").strip()
-            or os.environ.get("ASTERION_DCI_JUDGE_API_KEY", "").strip()
-            or os.environ.get(api_key_env, "").strip(),
+            api_key=selected.get("DCI_EVAL_JUDGE_API_KEY", "").strip()
+            or selected.get("ASTERION_DCI_JUDGE_API_KEY", "").strip()
+            or selected.get(api_key_env, "").strip(),
         )
 
     @property
@@ -495,7 +546,11 @@ def judge_prompt_contract_sha256(
         input_messages = request["input"]
         assert isinstance(input_messages, list)
         return hashlib.sha256(
-            (str(input_messages[0]["content"]) + "\n\n" + str(input_messages[1]["content"])).encode("utf-8")
+            (
+                str(input_messages[0]["content"])
+                + "\n\n"
+                + str(input_messages[1]["content"])
+            ).encode("utf-8")
         ).hexdigest()
     return _canonical_json_sha256(
         build_judge_request_for_contract(

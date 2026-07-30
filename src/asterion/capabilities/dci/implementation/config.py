@@ -49,7 +49,9 @@ class ConfigLayers:
     def from_repo(
         cls, repo_root: Path, process_environment: Mapping[str, str] | None = None
     ) -> "ConfigLayers":
-        process = dict(os.environ if process_environment is None else process_environment)
+        process = dict(
+            os.environ if process_environment is None else process_environment
+        )
         loaded = dotenv_values(Path(repo_root) / ".env")
         dotenv = {key: value for key, value in loaded.items() if value is not None}
         return cls(
@@ -162,7 +164,10 @@ def resolve_dci_paths(
     root = Path(repo_root).resolve()
     configured_environment = os.environ if environment is None else environment
     pi_dir = _configured_path_shared(
-        "DCI_PI_DIR", "ASTERION_DCI_PI_DIR", root / "pi", root=root,
+        "DCI_PI_DIR",
+        "ASTERION_DCI_PI_DIR",
+        root / "pi",
+        root=root,
         environment=configured_environment,
     )
     package_dir = _configured_path_shared(
@@ -180,7 +185,10 @@ def resolve_dci_paths(
         environment=configured_environment,
     )
     output_root = _configured_output_path(
-        "ASTERION_DCI_OUTPUT_ROOT", root / "outputs" / "asterion-dci-runs", root=root
+        "ASTERION_DCI_OUTPUT_ROOT",
+        root / "outputs" / "asterion-dci-runs",
+        root=root,
+        environment=configured_environment,
     )
     return DciPaths(
         repo_root=root,
@@ -195,18 +203,23 @@ def resolve_dci_paths(
 
 def resolve_dci_runtime_options(
     overrides: Mapping[str, object] | None = None,
+    *,
+    environment: Mapping[str, str] | None = None,
 ) -> DciRuntimeOptions:
     """Resolve shared DCI runtime defaults with explicit values taking priority."""
 
     values = {} if overrides is None else dict(overrides)
-    from asterion.capabilities.dci.implementation.research.context_profiles import resolve_context_profile
+    from asterion.capabilities.dci.implementation.research.context_profiles import (
+        resolve_context_profile,
+    )
 
     if "runtime_context_level" in values and "context_profile" not in values:
         values["context_profile"] = values["runtime_context_level"]
-    resolved = resolve_asterion_runtime(values, ConfigLayers(os.environ, {}))
-    context_profile = resolve_context_profile(
-        resolved.context_profile
+    resolved = resolve_asterion_runtime(
+        values,
+        ConfigLayers(os.environ if environment is None else environment, {}),
     )
+    context_profile = resolve_context_profile(resolved.context_profile)
     return DciRuntimeOptions(
         runtime=resolved.runtime,
         provider=resolved.provider,
@@ -217,7 +230,10 @@ def resolve_dci_runtime_options(
         thinking_level=resolved.thinking_level,
         node_max_old_space_size_mb=_optional_positive_int(
             _override_or_env(
-                values, "node_max_old_space_size_mb", "DCI_NODE_MAX_OLD_SPACE_SIZE_MB"
+                values,
+                "node_max_old_space_size_mb",
+                "DCI_NODE_MAX_OLD_SPACE_SIZE_MB",
+                environment=environment,
             )
         ),
         keep_session=bool(values.get("keep_session", False)),
@@ -298,7 +314,9 @@ def resolve_asterion_runtime(
         else:
             raise ValueError("Claude Code runtime/provider pair is unsupported")
 
-    from asterion.capabilities.dci.implementation.research.context_profiles import resolve_context_profile
+    from asterion.capabilities.dci.implementation.research.context_profiles import (
+        resolve_context_profile,
+    )
 
     raw_context_profile = values["context_profile"]
     context_profile = (
@@ -357,17 +375,25 @@ def _override_or_env(
     key: str,
     environment_name: str,
     default: object = None,
+    *,
+    environment: Mapping[str, str] | None = None,
 ) -> object:
     if key in values:
         return values[key]
-    return os.environ.get(environment_name, default)
+    selected = os.environ if environment is None else environment
+    return selected.get(environment_name, default)
 
 
 def _resolve_runtime(value: object) -> str:
     normalized = str(value).strip().lower()
     if normalized in {"", "pi", "pi.reference", "pi-ref", "pi_reference"}:
         return "pi"
-    if normalized in {"claude-code", "claude-code.reference", "claude_code", "claudecode"}:
+    if normalized in {
+        "claude-code",
+        "claude-code.reference",
+        "claude_code",
+        "claudecode",
+    }:
         return "claude-code"
     raise ValueError("DCI runtime is unsupported")
 
@@ -406,10 +432,17 @@ def _configured_path(name: str, default: Path, *, root: Path) -> Path:
     return path.resolve()
 
 
-def _configured_output_path(name: str, default: Path, *, root: Path) -> Path:
+def _configured_output_path(
+    name: str,
+    default: Path,
+    *,
+    root: Path,
+    environment: Mapping[str, str] | None = None,
+) -> Path:
     """Resolve destination syntax without following security-relevant symlinks."""
 
-    value = os.environ.get(name, "").strip()
+    selected = os.environ if environment is None else environment
+    value = selected.get(name, "").strip()
     path = Path(value).expanduser() if value else default
     if not path.is_absolute():
         path = root / path

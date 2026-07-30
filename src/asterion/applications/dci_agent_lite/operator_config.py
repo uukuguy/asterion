@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
+import os
 from pathlib import Path
 from types import MappingProxyType
 
@@ -15,13 +16,11 @@ from asterion.capabilities.dci.implementation.operator_inputs import (
 )
 
 
-_PRIVATE_PREFIXES = ("ASTERION_DCI_", "DCI_")
-
-
 @dataclass(frozen=True, slots=True)
 class DciOperatorConfig:
     """Private inputs and host options resolved by the DCI application."""
 
+    repo_root: Path = field(repr=False)
     benchmark_inputs: DciBenchmarkOperatorInputs = field(repr=False)
     host_service_options: Mapping[str, Mapping[str, str]] = field(repr=False)
 
@@ -30,9 +29,7 @@ class DciOperatorConfig:
 
         return {
             "amount_configured": self.benchmark_inputs.amount is not None,
-            "benchmark_task_count": len(
-                self.benchmark_inputs.dataset_roots
-            ),
+            "benchmark_task_count": len(self.benchmark_inputs.dataset_roots),
             "host_service_ids": sorted(self.host_service_options),
         }
 
@@ -58,13 +55,9 @@ def load_operator_config(
         if env_path.is_file()
         else {}
     )
-    process = {} if environment is None else dict(environment)
+    process = dict(os.environ if environment is None else environment)
     merged = {**dotenv, **process}
-    private_environment = {
-        key: value
-        for key, value in merged.items()
-        if key.startswith(_PRIVATE_PREFIXES)
-    }
+    private_environment = dict(merged)
     selected_root = (
         resource_root
         if resource_root is not None
@@ -84,13 +77,10 @@ def load_operator_config(
         relative_to=root,
     )
     return DciOperatorConfig(
+        repo_root=root,
         benchmark_inputs=benchmark_inputs,
         host_service_options=MappingProxyType(
-            {
-                "corpus.local-root": MappingProxyType(
-                    {"root": str(corpus_root)}
-                )
-            }
+            {"corpus.local-root": MappingProxyType({"root": str(corpus_root)})}
         ),
     )
 

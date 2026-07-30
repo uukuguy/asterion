@@ -49,7 +49,13 @@ from asterion.capabilities.dci.implementation.operator_inputs import (
 )
 from asterion.applications.dci_agent_lite.benchmark_executor import (
     LocalDciBenchmarkExecutor,
+    RealDciBenchmarkExecutor,
 )
+from asterion.capabilities.dci.implementation.config import (
+    resolve_dci_paths,
+    resolve_dci_runtime_options,
+)
+from asterion.capabilities.dci.implementation.evaluation.judge import JudgeConfig
 from asterion.runtime.host import CancellationSignal
 
 
@@ -99,9 +105,7 @@ class DciBenchmarkHost:
         )
         self._authorizer = DciBenchmarkExecutionAuthorizer(instance)
         self._draft_plan: ResolvedBenchmarkPlan | None = None
-        self._cancellation = (
-            _NeverCancelled() if cancellation is None else cancellation
-        )
+        self._cancellation = _NeverCancelled() if cancellation is None else cancellation
         self._executor_factory = executor_factory
 
     def discover_metadata(
@@ -123,10 +127,10 @@ class DciBenchmarkHost:
         metadata: object,
         source_lock: object,
     ) -> object:
-        if (
-            metadata != (self._instance.application_ref, self._instance.suite_ref)
-            or not isinstance(source_lock, Path)
-        ):
+        if metadata != (
+            self._instance.application_ref,
+            self._instance.suite_ref,
+        ) or not isinstance(source_lock, Path):
             _fail()
         return _DciResolvedSelection(
             resolution=resolve_installed_benchmark(
@@ -166,8 +170,7 @@ class DciBenchmarkHost:
                 _fail()
             if execute:
                 if (
-                    type(authorization)
-                    is not DciBenchmarkExecutionAuthorization
+                    type(authorization) is not DciBenchmarkExecutionAuthorization
                     or resume_run_id != authorization.resume_run_id
                 ):
                     _fail()
@@ -310,11 +313,11 @@ class DciBenchmarkHost:
             )
             runner = BenchmarkRunner(
                 output_directory_factory=lambda selected_plan, task: (
-                    evidence_root
-                    / "outputs"
-                    / selected_plan.run_id
-                    / task.task.task_id
+                    evidence_root / "outputs" / selected_plan.run_id / task.task.task_id
                 )
+            )
+            selected_binding_ids = frozenset(
+                task.task.binding_id for task in plan.tasks
             )
             return runner.run(
                 plan,
@@ -322,6 +325,7 @@ class DciBenchmarkHost:
                     binding
                     for package in providers.packages
                     for binding in package.benchmark_bindings
+                    if binding.binding_id in selected_binding_ids
                 ),
                 executor=executor,
                 evidence=LocalPrivateBenchmarkEvidenceStore(evidence_root),
@@ -335,6 +339,42 @@ class DciBenchmarkHost:
     def _default_executor(self) -> BenchmarkTaskExecutor:
         if self._instance.executor_profile == "local-fixture":
             return LocalDciBenchmarkExecutor()
+        if self._instance.executor_profile == "real-agent-judge":
+            config = self._operator_config
+            if config is None:
+                _fail()
+            environment = config.benchmark_inputs.private_environment
+            return RealDciBenchmarkExecutor(
+                paths=resolve_dci_paths(
+                    config.repo_root,
+                    environment=environment,
+                ),
+                runtime_options=resolve_dci_runtime_options(
+                    {
+                        "provider": "openai",
+                        "model": "gpt-5.4-nano",
+                        "tools": "read,bash",
+                        "runtime_context_level": "level3",
+                        "thinking_level": "high",
+                        "node_max_old_space_size_mb": 8192,
+                    },
+                    environment=environment,
+                ),
+                judge_config=JudgeConfig(
+                    base_url="https://api.openai.com/v1",
+                    api="responses",
+                    model="gpt-5.4-nano",
+                    thinking="disabled",
+                    api_key_env="OPENAI_API_KEY",
+                    api_key=environment.get(
+                        "DCI_EVAL_JUDGE_API_KEY",
+                        environment.get(
+                            "ASTERION_DCI_JUDGE_API_KEY",
+                            environment.get("OPENAI_API_KEY", ""),
+                        ),
+                    ).strip(),
+                ),
+            )
         _fail()
 
     def _operator_inputs(
@@ -344,9 +384,7 @@ class DciBenchmarkHost:
         if type(authorization) is not DciBenchmarkExecutionAuthorization:
             _fail()
         if self._instance.executor_profile == "local-fixture":
-            return create_local_fixture_operator_inputs(
-                authorization.evidence_root
-            )
+            return create_local_fixture_operator_inputs(authorization.evidence_root)
         if self._operator_config is None:
             _fail()
         return self._operator_config.benchmark_inputs
@@ -386,9 +424,7 @@ class DciBenchmarkHost:
         selected = resolve_capability_source(
             metadata_package.package_ref,
             tuple(record[2] for record in records),
-            CapabilitySourceLock(
-                entries=self._draft_plan.package_locks[0].entries
-            )
+            CapabilitySourceLock(entries=self._draft_plan.package_locks[0].entries)
             if self._draft_plan is not None
             else None,
         )

@@ -1,0 +1,310 @@
+from __future__ import annotations
+
+import asyncio
+import tempfile
+import threading
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from asterion.applications.dci_agent_lite.benchmark_executor import (
+    DciBenchmarkExecutorError,
+    RealDciBenchmarkExecutor,
+)
+from asterion.benchmarks import BenchmarkTaskInvocation
+from asterion.capabilities.dci.implementation.benchmark_bindings import (
+    DciBenchmarkInvocationPayload,
+)
+from asterion.capabilities.dci.implementation.config import (
+    DciPaths,
+    DciPiPaths,
+    DciRuntimeOptions,
+)
+from asterion.capabilities.dci.implementation.evaluation.benchmark import (
+    BenchmarkResult,
+)
+from asterion.capabilities.dci.implementation.evaluation.judge import JudgeConfig
+
+
+class MutableCancellation:
+    def __init__(self) -> None:
+        self.cancelled = False
+
+
+def _paths(root: Path) -> DciPaths:
+    return DciPaths(
+        repo_root=root,
+        pi=DciPiPaths(
+            repo_dir=root / "pi",
+            package_dir=root / "pi" / "packages" / "coding-agent",
+            agent_dir=root / "agent",
+        ),
+        output_root=root / "native-output",
+    )
+
+
+def _invocation(root: Path, **changes: object) -> BenchmarkTaskInvocation:
+    values = {
+        "profile_id": "qa.bamboogle",
+        "selection_variant": "github-sample50",
+        "dataset": root / "dataset.jsonl",
+        "corpus": root / "corpus",
+        "output_directory": root / "output",
+        "private_environment": {"DCI_TOKEN": "SENTINEL-SECRET"},
+        "amount": None,
+        "case_limit": 1,
+        "max_concurrency": 1,
+        "resume_policy": "compatible",
+        "runtime_context_level": "level3",
+    }
+    values.update(changes)
+    return BenchmarkTaskInvocation(
+        task_id="qa.bamboogle.github-sample50",
+        binding_id="qa.bamboogle.github-sample50",
+        public_arguments=("qa.bamboogle", "github-sample50", "limit-1"),
+        private_payload=DciBenchmarkInvocationPayload(**values),
+    )
+
+
+class RealDciBenchmarkExecutorTests(unittest.TestCase):
+    def test_translates_bounded_bamboogle_into_existing_engine(self) -> None:
+        calls = []
+
+        async def runner(request, *, paths):
+            calls.append((request, paths))
+            return BenchmarkResult(
+                output_root=request.output_root,
+                counts={"total": 1, "completed": 1, "failed": 0},
+            )
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            (root / "dataset.jsonl").write_text(
+                '{"id":"one","query":"PRIVATE","answer":"PRIVATE"}\n',
+                encoding="utf-8",
+            )
+            (root / "corpus").mkdir()
+            runtime = DciRuntimeOptions(
+                tools="read,bash",
+                runtime_context_level="level3",
+                thinking_level="high",
+            )
+            judge = JudgeConfig(api_key="PRIVATE-JUDGE-KEY")
+            progress = []
+            result = RealDciBenchmarkExecutor(
+                paths=_paths(root),
+                runtime_options=runtime,
+                judge_config=judge,
+                benchmark_runner=runner,
+                readiness_probe=lambda *_args: None,
+            ).execute(
+                _invocation(root),
+                cancellation=MutableCancellation(),
+                on_progress=progress.append,
+            )
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.case_count, 1)
+        self.assertEqual(
+            result.artifact_ids,
+            ("qa.bamboogle.github-sample50.native-result",),
+        )
+        self.assertEqual(len(calls), 1)
+        request, selected_paths = calls[0]
+        self.assertEqual(selected_paths, _paths(root))
+        self.assertEqual(request.dataset, root / "dataset.jsonl")
+        self.assertEqual(request.output_root, root / "output")
+        self.assertEqual(request.cwd, root)
+        self.assertIs(request.judge_config, judge)
+        self.assertIs(request.runtime_options, runtime)
+        self.assertEqual(request.limit, 1)
+        self.assertEqual(request.mode, "qa")
+        self.assertEqual(
+            request.profile,
+            "upstream-github/271f37e71f053bf0c99c05ce6d2fb53b841d922e/pi",
+        )
+        self.assertEqual(request.corpus, root / "corpus")
+        self.assertEqual(request.max_concurrency, 1)
+        self.assertEqual(request.max_turns, 300)
+        self.assertEqual(request.resume_policy, "compatible")
+        self.assertEqual(
+            tuple(event.status for event in progress),
+            ("task.real.started", "task.real.completed"),
+        )
+        self.assertNotIn("SENTINEL-SECRET", repr(result))
+
+    def test_rejects_wrong_contract_before_runner(self) -> None:
+        cases = (
+            {"profile_id": "qa.other"},
+            {"selection_variant": "paper-full125"},
+            {"case_limit": 51},
+            {"case_limit": 0},
+            {"max_concurrency": 2},
+            {"resume_policy": "fresh"},
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            for changes in cases:
+                with self.subTest(changes=changes):
+                    with self.assertRaises(DciBenchmarkExecutorError):
+                        RealDciBenchmarkExecutor(
+                            paths=_paths(root),
+                            runtime_options=DciRuntimeOptions(),
+                            judge_config=JudgeConfig(api_key="key"),
+                            benchmark_runner=lambda *_args, **_kwargs: self.fail(
+                                "runner called"
+                            ),
+                            readiness_probe=lambda *_args: None,
+                        ).execute(
+                            _invocation(root, **changes),
+                            cancellation=MutableCancellation(),
+                            on_progress=lambda _event: None,
+                        )
+
+    def test_cancellation_cancels_and_drains_async_engine(self) -> None:
+        started = threading.Event()
+        drained = threading.Event()
+
+        async def runner(_request, *, paths):
+            del paths
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                drained.set()
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            (root / "dataset.jsonl").write_text("{}\n", encoding="utf-8")
+            (root / "corpus").mkdir()
+            cancellation = MutableCancellation()
+
+            def cancel() -> None:
+                self.assertTrue(started.wait(2))
+                cancellation.cancelled = True
+
+            thread = threading.Thread(target=cancel)
+            thread.start()
+            result = RealDciBenchmarkExecutor(
+                paths=_paths(root),
+                runtime_options=DciRuntimeOptions(),
+                judge_config=JudgeConfig(api_key="key"),
+                benchmark_runner=runner,
+                readiness_probe=lambda *_args: None,
+            ).execute(
+                _invocation(root),
+                cancellation=cancellation,
+                on_progress=lambda _event: None,
+            )
+            thread.join(2)
+
+        self.assertEqual(result.status, "cancelled")
+        self.assertEqual(result.case_count, 0)
+        self.assertTrue(drained.is_set())
+
+    def test_default_preflight_checks_resources_agent_and_judge(self) -> None:
+        async def runner(request, *, paths):
+            del paths
+            return BenchmarkResult(
+                output_root=request.output_root,
+                counts={"total": 1, "correct": 1, "failed": 0},
+            )
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            paths = _paths(root)
+            (root / "dataset.jsonl").write_text("{}\n", encoding="utf-8")
+            (root / "corpus").mkdir()
+            paths.pi.package_dir.mkdir(parents=True)
+            (paths.pi.package_dir / "package.json").write_text("{}\n", encoding="utf-8")
+            (paths.pi.package_dir / "dist").mkdir()
+            (paths.pi.package_dir / "dist" / "cli.js").write_text(
+                "fixture\n", encoding="utf-8"
+            )
+            paths.pi.agent_dir.mkdir()
+            (paths.pi.agent_dir / "auth.json").write_text("{}\n", encoding="utf-8")
+            executor = RealDciBenchmarkExecutor(
+                paths=paths,
+                runtime_options=DciRuntimeOptions(
+                    provider="openai",
+                    model="gpt-5.4-nano",
+                ),
+                judge_config=JudgeConfig(api_key="judge-key"),
+                benchmark_runner=runner,
+            )
+            with patch(
+                "asterion.applications.dci_agent_lite.benchmark_executor.resolve_node_bin",
+                return_value="/fixture/node",
+            ):
+                ready = executor.execute(
+                    _invocation(root),
+                    cancellation=MutableCancellation(),
+                    on_progress=lambda _event: None,
+                )
+
+                (root / "dataset.jsonl").write_text("", encoding="utf-8")
+                with self.assertRaises(DciBenchmarkExecutorError):
+                    executor.execute(
+                        _invocation(root),
+                        cancellation=MutableCancellation(),
+                        on_progress=lambda _event: None,
+                    )
+                (root / "dataset.jsonl").write_text("{}\n", encoding="utf-8")
+
+                (paths.pi.package_dir / "dist" / "cli.js").unlink()
+                with self.assertRaises(DciBenchmarkExecutorError):
+                    executor.execute(
+                        _invocation(root),
+                        cancellation=MutableCancellation(),
+                        on_progress=lambda _event: None,
+                    )
+
+                (paths.pi.package_dir / "dist" / "cli.js").write_text(
+                    "fixture\n", encoding="utf-8"
+                )
+                no_judge = RealDciBenchmarkExecutor(
+                    paths=paths,
+                    runtime_options=DciRuntimeOptions(
+                        provider="openai",
+                        model="gpt-5.4-nano",
+                    ),
+                    judge_config=JudgeConfig(),
+                    benchmark_runner=runner,
+                )
+                with self.assertRaises(DciBenchmarkExecutorError):
+                    no_judge.execute(
+                        _invocation(root),
+                        cancellation=MutableCancellation(),
+                        on_progress=lambda _event: None,
+                    )
+
+        self.assertEqual(ready.status, "completed")
+
+    def test_default_preflight_rejects_symlink_dataset_and_corpus(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            target = root / "target.jsonl"
+            target.write_text("{}\n", encoding="utf-8")
+            (root / "dataset.jsonl").symlink_to(target)
+            real_corpus = root / "real-corpus"
+            real_corpus.mkdir()
+            (root / "corpus").symlink_to(real_corpus, target_is_directory=True)
+            executor = RealDciBenchmarkExecutor(
+                paths=_paths(root),
+                runtime_options=DciRuntimeOptions(
+                    provider="openai",
+                    model="gpt-5.4-nano",
+                ),
+                judge_config=JudgeConfig(api_key="judge-key"),
+                benchmark_runner=lambda *_args, **_kwargs: self.fail("runner called"),
+            )
+            with self.assertRaises(DciBenchmarkExecutorError):
+                executor.execute(
+                    _invocation(root),
+                    cancellation=MutableCancellation(),
+                    on_progress=lambda _event: None,
+                )
+
+
+if __name__ == "__main__":
+    unittest.main()
