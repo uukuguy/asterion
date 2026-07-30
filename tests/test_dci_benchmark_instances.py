@@ -1,0 +1,118 @@
+from __future__ import annotations
+
+import json
+import unittest
+from dataclasses import FrozenInstanceError
+
+from asterion.applications.dci_agent_lite.benchmark_instances import (
+    DciBenchmarkInstanceError,
+    benchmark_instances,
+    public_instance_dict,
+    resolve_case_limit,
+    select_benchmark_instance,
+)
+
+
+EXPECTED_SELECTORS = (
+    "dci.bcplus.level3@1.0.0",
+    "dci.bcplus.main@1.0.0",
+    "dci.beir.arguana@1.0.0",
+    "dci.beir.scifact@1.0.0",
+    "dci.bright.biology@1.0.0",
+    "dci.bright.earth-science@1.0.0",
+    "dci.bright.economics@1.0.0",
+    "dci.bright.robotics@1.0.0",
+    "dci.local-fixture@1.0.0",
+    "dci.qa.2wikimultihopqa@1.0.0",
+    "dci.qa.bamboogle.github-sample50@1.0.0",
+    "dci.qa.bamboogle.paper-full125@1.0.0",
+    "dci.qa.hotpotqa@1.0.0",
+    "dci.qa.musique@1.0.0",
+    "dci.qa.nq@1.0.0",
+    "dci.qa.triviaqa@1.0.0",
+)
+
+
+class TestDciBenchmarkInstances(unittest.TestCase):
+    def test_catalog_is_canonical_immutable_and_complete(self) -> None:
+        instances = benchmark_instances()
+
+        self.assertEqual(
+            tuple(instance.selector for instance in instances),
+            EXPECTED_SELECTORS,
+        )
+        self.assertEqual(len({instance.selector for instance in instances}), 16)
+        with self.assertRaises(FrozenInstanceError):
+            instances[0].version = "2.0.0"  # type: ignore[misc]
+
+    def test_local_and_bamboogle_are_the_only_implemented_instances(self) -> None:
+        implemented = tuple(
+            instance.selector
+            for instance in benchmark_instances()
+            if instance.implementation_state == "implemented"
+        )
+
+        self.assertEqual(
+            implemented,
+            (
+                "dci.local-fixture@1.0.0",
+                "dci.qa.bamboogle.github-sample50@1.0.0",
+            ),
+        )
+        local = select_benchmark_instance("dci.local-fixture@1.0.0")
+        self.assertEqual(local.application_ref.selector, "dci.local-benchmark-application@1.0.0")
+        self.assertEqual(local.suite_ref.suite_id, "dci.all")
+        self.assertEqual(len(local.task_ids), 15)
+        self.assertEqual(local.executor_profile, "local-fixture")
+
+    def test_bamboogle_resolves_default_bounded_and_all_case_ranges(self) -> None:
+        instance = select_benchmark_instance(
+            "dci.qa.bamboogle.github-sample50@1.0.0"
+        )
+
+        self.assertEqual(resolve_case_limit(instance, case_limit=None, all_cases=False), 1)
+        self.assertEqual(resolve_case_limit(instance, case_limit=7, all_cases=False), 7)
+        self.assertEqual(resolve_case_limit(instance, case_limit=None, all_cases=True), 50)
+        self.assertEqual(instance.task_ids, ("qa.bamboogle.github-sample50",))
+
+    def test_invalid_selection_and_ranges_fail_closed(self) -> None:
+        instance = select_benchmark_instance("dci.local-fixture@1.0.0")
+        for selector in (
+            "",
+            "dci.local-fixture",
+            "dci.local-fixture@2.0.0",
+            "dci.unknown@1.0.0",
+        ):
+            with self.subTest(selector=selector), self.assertRaises(
+                DciBenchmarkInstanceError
+            ):
+                select_benchmark_instance(selector)
+        for case_limit, all_cases in ((0, False), (-1, False), (True, False), (1, True)):
+            with self.subTest(case_limit=case_limit, all_cases=all_cases), self.assertRaises(
+                DciBenchmarkInstanceError
+            ):
+                resolve_case_limit(
+                    instance,
+                    case_limit=case_limit,
+                    all_cases=all_cases,
+                )
+        with self.assertRaises(DciBenchmarkInstanceError):
+            resolve_case_limit(instance, case_limit=None, all_cases=True)
+
+    def test_public_projection_is_body_free(self) -> None:
+        sentinel = "secret-prompt-answer-private-path"
+        instance = select_benchmark_instance(
+            "dci.qa.bamboogle.github-sample50@1.0.0"
+        )
+
+        rendered = json.dumps(public_instance_dict(instance), sort_keys=True)
+
+        self.assertNotIn(sentinel, rendered)
+        self.assertNotIn("dataset", rendered)
+        self.assertNotIn("corpus", rendered)
+        self.assertNotIn("credential", rendered)
+        self.assertNotIn("prompt", repr(instance))
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import json
 from collections.abc import Callable, Mapping, Sequence
 from decimal import Decimal
 from pathlib import Path
@@ -12,6 +13,14 @@ from asterion.benchmarks.cli import BenchmarkCommandHost
 from asterion.applications.dci_agent_lite.operator_config import (
     DciOperatorConfig,
     load_operator_config,
+)
+from asterion.applications.dci_agent_lite.benchmark_instances import (
+    DciBenchmarkInstance,
+    DciBenchmarkInstanceError,
+    benchmark_instances,
+    public_instance_dict,
+    resolve_case_limit,
+    select_benchmark_instance,
 )
 
 
@@ -72,16 +81,22 @@ def main(
         return 0
     command, *remainder = arguments
     if command == "benchmark":
-        if _has_option(remainder, "--application") or _has_option(
-            remainder, "--suite"
-        ):
+        if remainder and remainder[0] == "instances":
+            return _list_benchmark_instances(
+                remainder[1:],
+                stdout=stdout,
+                stderr=stderr,
+            )
+        try:
+            instance, delegated_arguments = _benchmark_selection(remainder)
+        except DciBenchmarkInstanceError:
             stderr.write("asterion-dci: command failed\n")
             return 2
         selected_benchmark_host = benchmark_host
         if (
             selected_benchmark_host is None
             and benchmark_host_factory is not None
-            and _execution_host_ready(remainder)
+            and _execution_host_ready(delegated_arguments)
         ):
             try:
                 selected_benchmark_host = benchmark_host_factory(
@@ -97,12 +112,12 @@ def main(
                 return 2
         return benchmark_host_main(
             [
-                *remainder[:1],
+                *delegated_arguments[:1],
                 "--application",
-                DCI_APPLICATION_SELECTOR,
+                instance.application_ref.selector,
                 "--suite",
-                DCI_BENCHMARK_SUITE_SELECTOR,
-                *remainder[1:],
+                f"{instance.suite_ref.suite_id}@{instance.suite_ref.version}",
+                *delegated_arguments[1:],
             ],
             host=selected_benchmark_host,
             stdout=stdout,
@@ -163,6 +178,100 @@ def _runtime(arguments: list[str]) -> tuple[str | None, list[str]]:
 
 def _has_option(arguments: Sequence[str], option: str) -> bool:
     return any(value == option or value.startswith(option + "=") for value in arguments)
+
+
+def _list_benchmark_instances(
+    arguments: Sequence[str],
+    *,
+    stdout: TextIO,
+    stderr: TextIO,
+) -> int:
+    if tuple(arguments) not in {(), ("--json",)}:
+        stderr.write("asterion-dci: command failed\n")
+        return 2
+    values = tuple(public_instance_dict(instance) for instance in benchmark_instances())
+    if arguments:
+        stdout.write(
+            json.dumps(
+                values,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
+    else:
+        for value in values:
+            stdout.write(
+                f"{value['instance']}\t{value['implementation_state']}\t"
+                f"{value['cost_class']}\n"
+            )
+    return 0
+
+
+def _benchmark_selection(
+    arguments: Sequence[str],
+) -> tuple[DciBenchmarkInstance, list[str]]:
+    values = list(arguments)
+    if (
+        not values
+        or values[0] not in {"plan", "run", "resume"}
+        or _has_option(values, "--application")
+        or _has_option(values, "--suite")
+    ):
+        raise DciBenchmarkInstanceError("DCI benchmark command is invalid")
+    selector, values = _take_option(values, "--instance")
+    if selector is None:
+        raise DciBenchmarkInstanceError("DCI benchmark instance is required")
+    instance = select_benchmark_instance(selector)
+    if instance.implementation_state != "implemented":
+        raise DciBenchmarkInstanceError("DCI benchmark instance is unavailable")
+    case_limit_value, values = _take_option(values, "--case-limit")
+    all_cases = values.count("--all-cases")
+    if all_cases > 1:
+        raise DciBenchmarkInstanceError("DCI benchmark case range is invalid")
+    values = [value for value in values if value != "--all-cases"]
+    try:
+        case_limit = (
+            None if case_limit_value is None else int(case_limit_value, 10)
+        )
+    except ValueError:
+        raise DciBenchmarkInstanceError(
+            "DCI benchmark case range is invalid"
+        ) from None
+    resolved_limit = resolve_case_limit(
+        instance,
+        case_limit=case_limit,
+        all_cases=all_cases == 1,
+    )
+    return instance, [values[0], "--case-limit", str(resolved_limit), *values[1:]]
+
+
+def _take_option(
+    arguments: list[str],
+    option: str,
+) -> tuple[str | None, list[str]]:
+    matches = [
+        index
+        for index, value in enumerate(arguments)
+        if value == option or value.startswith(option + "=")
+    ]
+    if len(matches) > 1:
+        raise DciBenchmarkInstanceError("DCI benchmark arguments are invalid")
+    if not matches:
+        return None, arguments
+    index = matches[0]
+    value = arguments[index]
+    if value.startswith(option + "="):
+        selected = value.removeprefix(option + "=")
+        remainder = [*arguments[:index], *arguments[index + 1 :]]
+    else:
+        if index + 1 >= len(arguments) or arguments[index + 1].startswith("--"):
+            raise DciBenchmarkInstanceError("DCI benchmark arguments are invalid")
+        selected = arguments[index + 1]
+        remainder = [*arguments[:index], *arguments[index + 2 :]]
+    if not selected:
+        raise DciBenchmarkInstanceError("DCI benchmark arguments are invalid")
+    return selected, remainder
 
 
 def _execution_host_ready(arguments: Sequence[str]) -> bool:

@@ -11,7 +11,6 @@ from typing import cast
 from asterion.applications.dci_agent_lite import provider
 from asterion.applications.dci_agent_lite.cli import (
     DCI_APPLICATION_SELECTOR,
-    DCI_BENCHMARK_SUITE_SELECTOR,
     main,
 )
 from asterion.applications.dci_agent_lite.operator_config import (
@@ -106,7 +105,14 @@ class TestDciApplicationAdapter(unittest.TestCase):
             return 0
 
         code = main(
-            ["benchmark", "plan", "--case-limit", "2"],
+            [
+                "benchmark",
+                "plan",
+                "--instance",
+                "dci.qa.bamboogle.github-sample50@1.0.0",
+                "--case-limit",
+                "2",
+            ],
             benchmark_main=benchmark_main,
             stdout=io.StringIO(),
             stderr=io.StringIO(),
@@ -119,19 +125,107 @@ class TestDciApplicationAdapter(unittest.TestCase):
                 [
                     "plan",
                     "--application",
-                    DCI_APPLICATION_SELECTOR,
+                    "dci.complete-application@1.0.0",
                     "--suite",
-                    DCI_BENCHMARK_SUITE_SELECTOR,
+                    "dci.qa.bamboogle.github-sample50@1.0.0",
                     "--case-limit",
                     "2",
                 ]
             ],
         )
 
+    def test_benchmark_instances_lists_public_catalog_as_json(self) -> None:
+        stdout = io.StringIO()
+
+        code = main(
+            ["benchmark", "instances", "--json"],
+            stdout=stdout,
+            stderr=io.StringIO(),
+        )
+
+        self.assertEqual(code, 0)
+        values = json.loads(stdout.getvalue())
+        self.assertEqual(len(values), 16)
+        self.assertEqual(values[0]["instance"], "dci.bcplus.level3@1.0.0")
+        self.assertEqual(
+            tuple(
+                value["instance"]
+                for value in values
+                if value["implementation_state"] == "implemented"
+            ),
+            (
+                "dci.local-fixture@1.0.0",
+                "dci.qa.bamboogle.github-sample50@1.0.0",
+            ),
+        )
+
+    def test_benchmark_plan_defaults_to_one_case(self) -> None:
+        calls: list[list[str]] = []
+
+        def benchmark_main(argv, **kwargs):
+            del kwargs
+            calls.append(list(argv))
+            return 0
+
+        code = main(
+            [
+                "benchmark",
+                "plan",
+                "--instance",
+                "dci.local-fixture@1.0.0",
+            ],
+            benchmark_main=benchmark_main,
+            stdout=io.StringIO(),
+            stderr=io.StringIO(),
+        )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            calls,
+            [[
+                "plan",
+                "--application",
+                "dci.local-benchmark-application@1.0.0",
+                "--suite",
+                "dci.all@1.0.0",
+                "--case-limit",
+                "1",
+            ]],
+        )
+
+    def test_benchmark_all_cases_resolves_finite_count(self) -> None:
+        calls: list[list[str]] = []
+
+        def benchmark_main(argv, **kwargs):
+            del kwargs
+            calls.append(list(argv))
+            return 0
+
+        code = main(
+            [
+                "benchmark",
+                "plan",
+                "--instance",
+                "dci.qa.bamboogle.github-sample50@1.0.0",
+                "--all-cases",
+            ],
+            benchmark_main=benchmark_main,
+            stdout=io.StringIO(),
+            stderr=io.StringIO(),
+        )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(calls[0][-2:], ["--case-limit", "50"])
+
     def test_benchmark_execution_keeps_generic_explicit_authorization(self) -> None:
         stderr = io.StringIO()
         code = main(
-            ["benchmark", "run"],
+            [
+                "benchmark",
+                "run",
+                "--instance",
+                "dci.local-fixture@1.0.0",
+            ],
             stdout=io.StringIO(),
             stderr=stderr,
         )
@@ -160,6 +254,8 @@ class TestDciApplicationAdapter(unittest.TestCase):
                 [
                     "benchmark",
                     "run",
+                    "--instance",
+                    "dci.qa.bamboogle.github-sample50@1.0.0",
                     "--execute",
                     "--capability-source-lock",
                     str(source_lock),
@@ -191,9 +287,11 @@ class TestDciApplicationAdapter(unittest.TestCase):
             [
                 "run",
                 "--application",
-                DCI_APPLICATION_SELECTOR,
+                "dci.complete-application@1.0.0",
                 "--suite",
-                DCI_BENCHMARK_SUITE_SELECTOR,
+                "dci.qa.bamboogle.github-sample50@1.0.0",
+                "--case-limit",
+                "1",
                 "--execute",
                 "--capability-source-lock",
                 str(source_lock),
@@ -211,7 +309,12 @@ class TestDciApplicationAdapter(unittest.TestCase):
 
         stderr = io.StringIO()
         code = main(
-            ["benchmark", "run"],
+            [
+                "benchmark",
+                "run",
+                "--instance",
+                "dci.local-fixture@1.0.0",
+            ],
             benchmark_host_factory=host_factory,
             stdout=io.StringIO(),
             stderr=stderr,
