@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NoReturn
@@ -18,11 +18,14 @@ from asterion.applications.dci_agent_lite.operator_config import DciOperatorConf
 from asterion.benchmarks import (
     ApplicationRef,
     BenchmarkExecutionAuthorization,
+    BenchmarkRunner,
+    BenchmarkTaskExecutor,
     BenchmarkPlanRequest,
     BenchmarkRunResult,
     InstalledBenchmarkResolution,
     ResolvedBenchmarkPlan,
     create_benchmark_plan,
+    LocalPrivateBenchmarkEvidenceStore,
     resolve_installed_benchmark,
 )
 from asterion.capability_packages import (
@@ -44,6 +47,10 @@ from asterion.capabilities.dci.implementation.operator_inputs import (
     DciBenchmarkOperatorInputs,
     create_local_fixture_operator_inputs,
 )
+from asterion.applications.dci_agent_lite.benchmark_executor import (
+    LocalDciBenchmarkExecutor,
+)
+from asterion.runtime.host import CancellationSignal
 
 
 class DciBenchmarkHostError(ValueError):
@@ -74,6 +81,10 @@ class DciBenchmarkHost:
         instance: DciBenchmarkInstance,
         operator_config: DciOperatorConfig | None,
         package_sources: Sequence[CapabilityPackageSource] | None = None,
+        cancellation: CancellationSignal | None = None,
+        executor_factory: (
+            Callable[[DciBenchmarkInstance], BenchmarkTaskExecutor] | None
+        ) = None,
     ) -> None:
         if (
             not isinstance(instance, DciBenchmarkInstance)
@@ -88,6 +99,10 @@ class DciBenchmarkHost:
         )
         self._authorizer = DciBenchmarkExecutionAuthorizer(instance)
         self._draft_plan: ResolvedBenchmarkPlan | None = None
+        self._cancellation = (
+            _NeverCancelled() if cancellation is None else cancellation
+        )
+        self._executor_factory = executor_factory
 
     def discover_metadata(
         self,
@@ -256,7 +271,70 @@ class DciBenchmarkHost:
         *,
         evidence_root: Path,
     ) -> BenchmarkRunResult:
-        del plan, providers, evidence_root
+        try:
+            if (
+                not isinstance(plan, ResolvedBenchmarkPlan)
+                or not isinstance(providers, DciLoadedBenchmarkProviders)
+                or not isinstance(evidence_root, Path)
+                or not evidence_root.is_absolute()
+                or plan.application_ref != self._instance.application_ref
+                or plan.suite.suite_ref != self._instance.suite_ref
+                or tuple(
+                    lock
+                    for package in providers.packages
+                    for lock in (
+                        CapabilitySourceLock(
+                            entries=(
+                                next(
+                                    entry
+                                    for source_lock in plan.package_locks
+                                    for entry in source_lock.entries
+                                    if entry.package_ref == package.package_ref
+                                ),
+                            )
+                        ),
+                    )
+                )
+                != plan.package_locks
+            ):
+                _fail()
+            self._authorizer.authorize_run(
+                providers.authorization,
+                run_id=plan.run_id,
+                evidence_root=evidence_root,
+            )
+            executor = (
+                self._executor_factory(self._instance)
+                if self._executor_factory is not None
+                else self._default_executor()
+            )
+            runner = BenchmarkRunner(
+                output_directory_factory=lambda selected_plan, task: (
+                    evidence_root
+                    / "outputs"
+                    / selected_plan.run_id
+                    / task.task.task_id
+                )
+            )
+            return runner.run(
+                plan,
+                implementations=tuple(
+                    binding
+                    for package in providers.packages
+                    for binding in package.benchmark_bindings
+                ),
+                executor=executor,
+                evidence=LocalPrivateBenchmarkEvidenceStore(evidence_root),
+                cancellation=self._cancellation,
+            )
+        except DciBenchmarkHostError:
+            raise
+        except Exception:
+            _fail()
+
+    def _default_executor(self) -> BenchmarkTaskExecutor:
+        if self._instance.executor_profile == "local-fixture":
+            return LocalDciBenchmarkExecutor()
         _fail()
 
     def _operator_inputs(
@@ -369,6 +447,12 @@ class DciBenchmarkHost:
 
 def _fail() -> NoReturn:
     raise DciBenchmarkHostError("DCI benchmark host is invalid") from None
+
+
+class _NeverCancelled:
+    @property
+    def cancelled(self) -> bool:
+        return False
 
 
 __all__ = (

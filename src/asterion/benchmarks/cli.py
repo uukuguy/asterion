@@ -181,7 +181,7 @@ def main(
         result = _host_call(
             lambda: command_host.run(plan, providers, evidence_root=evidence_root)
         )
-        stdout.write(_result_json(result) + "\n")
+        stdout.write(_result_json(result, run_id=plan.run_id) + "\n")
         if result.status == "cancelled":
             return 130
         return 0 if result.status == "completed" else 1
@@ -461,11 +461,16 @@ def _resume_run_id(command: str, value: str | None) -> str | None:
     return value
 
 
-def _result_json(result: BenchmarkRunResult) -> str:
-    if not isinstance(result, BenchmarkRunResult):
+def _result_json(result: BenchmarkRunResult, *, run_id: str) -> str:
+    if (
+        not isinstance(result, BenchmarkRunResult)
+        or type(run_id) is not str
+        or _RUN_ID.fullmatch(run_id) is None
+    ):
         _fail("benchmark result is invalid")
     return json.dumps(
         {
+            "run_id": run_id,
             "status": result.status,
             "tasks": [
                 {
