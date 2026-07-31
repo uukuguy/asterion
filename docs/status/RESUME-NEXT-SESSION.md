@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-31 20:15. **Session remains active — not a final handoff.**
+> Updated: 2026-07-31 21:04. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -14,10 +14,12 @@
   nDCG@10 0.4178, about $4.46, run `run-e9575e75038647269134b72c4da70502`.
 - QA 2WikiMultiHopQA completed its actual 50/12,576 run and resume verification:
   80% (40/50), about $1.89, run `run-9d46b77d0fd84f408a20bc329b7f7032`.
+- QA HotpotQA completed its actual 50/7,405 run and resume verification:
+  76% (38/50), about $2.22, run `run-9d38318832304246bd46f3c19fe459eb`.
 
 ## Immediate next action
 
-1. Implement QA HotpotQA with test-first contract, payload, binding,
+1. Implement QA Musique with test-first contract, payload, binding,
    Chinese runbook, and focused verification.
 2. Run exactly 50/total, then resume the returned run ID and verify the native
    generation count is unchanged before publishing its result.
