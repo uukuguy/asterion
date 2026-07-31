@@ -407,3 +407,4 @@
 - Constrained QA runtime to read and grep after TriviaQA corpus-scan timeout
 - Constrained QA corpus tools to prevent unbounded scans [e109274]
 - QA TriviaQA completed 50/11,313: 92% (46/50), $1.10, zero failed; resume added no generation
+- Published QA TriviaQA bounded result and closed all 50-case instances [113193b]

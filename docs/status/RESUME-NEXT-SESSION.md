@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-31 22:52. **Session remains active — not a final handoff.**
+> Updated: 2026-07-31 23:00. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -23,10 +23,9 @@
 
 ## Immediate next action
 
-1. Implement QA TriviaQA with test-first contract, payload, binding, Chinese
-   runbook, and focused verification.
-2. Run exactly 50/total, then resume the returned run ID and verify the native
-   generation count is unchanged before publishing its result.
+1. All real DCI instances have completed their `50/total` run and resume
+   verification; TriviaQA is 92% (46/50), run `run-8b0d0b9ca0654f0c9b0863906a54755d`.
+2. Do not start a full-data run without a new explicit decision and budget.
 3. Continue the remaining QA instances in the same order; do not start any
    full-data run until every real instance has a 50/total closure.
 
