@@ -383,3 +383,5 @@
 - 17:10 Bright Economics completed 50/103: nDCG@10 0.3717, $4.11, zero failed; resume added no generation
 - 17:11 Published Bright Economics verified bounded result and resume evidence [89b730f]
 - 17:15 Implemented Bright Robotics executable 50/101 contract after test-first validation
+- 17:17 Published Bright Robotics runnable contract, payload, tests, and Chinese runbook [cae21ad]
+- 17:35 Bright Robotics completed 50/101: nDCG@10 0.4178, $4.46, zero failed; resume added no generation
