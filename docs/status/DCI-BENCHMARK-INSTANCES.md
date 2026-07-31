@@ -20,7 +20,7 @@ benchmark 实例的实现清单、验证台账和运行手册。
 | `dci.local-fixture@1.0.0` | implemented / Verified-local | 15×1 | 无评分 | 无模型；安装包测试 | 维护闭环 |
 | `dci.qa.2wikimultihopqa@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.qa.bamboogle.github-sample50@1.0.0` | implemented / Verified-full | 50/50 | 82%（41/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $2.20；`run-e8ea4…7790` | 维护闭环 |
-| `dci.qa.bamboogle.paper-full125@1.0.0` | implemented / Not rerun | 0/125 | — | 数据、语料和执行入口已就绪；尚无模型调用 | 先运行 50/125 阶段性结果 |
+| `dci.qa.bamboogle.paper-full125@1.0.0` | implemented / Verified-bounded | 50/125 | 复用上一行的同一次 41/50 运行 | 50 条输入逐行一致；不新增模型调用、成本或 evidence | 运行余下 75 题形成 125/125 |
 | `dci.qa.hotpotqa@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.qa.musique@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.qa.nq@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
@@ -263,16 +263,17 @@ jq '{counts,accuracy}' "$DCI_FULL_SUMMARY"
 
 ## 运行手册：`dci.qa.bamboogle.paper-full125@1.0.0`
 
-这是同一 Bamboogle 数据的完整 125 题实例。50 题公开样本是这 125 题的子集；它们
-共享本地 `corpus/wiki_corpus`。此实例已可执行，但尚未进行任何模型调用，因此没有分数、
-成本或 evidence。
+这是同一 Bamboogle 数据的完整 125 题实例。50 题公开样本是这 125 题的严格子集：本地
+逐行规范化比对确认 50 条记录全部一致（题目和标准答案均相同）。它们共享本地
+`corpus/wiki_corpus`，所以已验证 sample50 的结果可作为本实例的阶段性结果。
 
 - Application：`dci.complete-application@1.0.0`
 - Suite：`dci.qa.bamboogle.paper-full125@1.0.0`
-- 阶段性结果：50/125；完整结果：125/125
-- Agent 和 Judge：由 `.env` / 进程环境的 operator 配置决定，实际身份必须记录在运行结果中
+- 阶段性覆盖：50/125；它引用上方 sample50 行的同一次 `41/50、82%` 运行，
+  不重复记录分数、模型、成本或 evidence
+- 完整结果：125/125，尚未运行；不以 50/125 声称论文完整分数
 
-先获得 50/125 阶段性结果：
+50/125 已有上述可复用的已验证结果，无需重跑。后续完整运行使用：
 
 ```bash
 export DCI_125_ROOT="$PWD/outputs/manual/dci-bamboogle-125-$(date +%Y%m%d-%H%M%S)"
@@ -287,7 +288,7 @@ uv run asterion-dci benchmark lock \
 
 uv run asterion-dci benchmark run \
   --instance dci.qa.bamboogle.paper-full125@1.0.0 \
-  --case-limit 50 \
+  --all-cases \
   --capability-source-lock "$DCI_125_LOCK" \
   --evidence-root "$DCI_125_EVIDENCE" \
   --execute | tee "$DCI_125_RESULT"
@@ -297,9 +298,8 @@ export DCI_125_SUMMARY="$DCI_125_EVIDENCE/outputs/$DCI_125_RUN_ID/qa.bamboogle.p
 jq '{counts,accuracy,totals,reproduction_totals}' "$DCI_125_SUMMARY"
 ```
 
-要运行完整 125/125，只把 `--case-limit 50` 改为 `--all-cases`；resume 时必须保留同一
-run ID、范围、lock 和 evidence root。完整运行的结果才可以标为 `Verified-full`；50/125
-只能标为 `Verified-bounded`。
+resume 时必须保留同一 run ID、范围、lock 和 evidence root。完整运行的结果才可以标为
+`Verified-full`；50/125 只能标为 `Verified-bounded`。
 
 ## 故障排查
 
