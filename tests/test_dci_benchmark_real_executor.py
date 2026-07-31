@@ -345,6 +345,7 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
         self.assertEqual(result.status, "completed")
         self.assertEqual(result.case_count, 50)
         self.assertEqual(calls[0][0].mode, "ir")
+        self.assertEqual(calls[0][0].dataset_profile, "bright.biology")
         self.assertEqual(calls[0][0].max_turns, 300)
         self.assertEqual(calls[0][0].max_concurrency, 10)
         self.assertEqual(calls[0][0].max_native_attempts, 3)

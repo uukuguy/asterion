@@ -1056,6 +1056,12 @@ def _prepare(
                 resolve_paper_experiment_scope(paper_scope).dataset_id
             )
             paper_dataset_benchmark = candidate
+        elif request.dataset_profile is not None and request.dataset_profile.startswith(
+            "bright."
+        ):
+            paper_dataset_benchmark = resolve_paper_benchmark(
+                request.dataset_profile
+            )
         if (
             paper_dataset_benchmark is not None
             and paper_dataset_benchmark.dataset_id.startswith("bright.")

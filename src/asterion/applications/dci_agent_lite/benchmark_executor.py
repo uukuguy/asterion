@@ -200,7 +200,7 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 profile=self._experiment_profile,
                 dataset_profile=(
                     invocation.task_id
-                    if invocation.task_id.startswith("beir.")
+                    if invocation.task_id in _REAL_TASK_MODES
                     else None
                 ),
                 corpus=payload.corpus,
