@@ -340,3 +340,4 @@
 - 00:00 Made Bamboogle full125 executable and documented 50/125 result reporting [52e10c7]
 - 12:35 Added executable BC+ Level 3 50-case path and Chinese runbook [03536cb]
 - 12:43 Restored BC+ Level 3's 300-turn execution budget for comparable results [cab34e0]
+- 12:48 Restored BC+ Level 3's ten-way concurrency for normal 50-case execution [bc89245]
