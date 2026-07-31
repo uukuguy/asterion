@@ -36,11 +36,13 @@ from asterion.runtime.host import CancellationSignal
 
 _REAL_TASK_CONTRACTS = {
     "bcplus.level3": ("bcplus.level3", "github-level3", 830),
+    "bcplus.main": ("bcplus.openai", "main", 830),
     "qa.bamboogle.github-sample50": ("qa.bamboogle", "github-sample50", 50),
     "qa.bamboogle.paper-full125": ("qa.bamboogle", "paper-full125", 125),
 }
 _REAL_TASK_EXECUTION = {
     "bcplus.level3": (300, 10),
+    "bcplus.main": (100, 10),
 }
 _DEFAULT_EXPERIMENT_PROFILE = "asterion-safe/pi"
 _UPSTREAM_EXPERIMENT_PROFILE = (

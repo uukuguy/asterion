@@ -98,7 +98,7 @@ class TestDciBenchmarkInstances(unittest.TestCase):
         with self.assertRaises(FrozenInstanceError):
             instances[0].version = "2.0.0"  # type: ignore[misc]
 
-    def test_local_bamboogle_and_bcplus_are_the_implemented_instances(self) -> None:
+    def test_local_bamboogle_and_bcplus_instances_are_implemented(self) -> None:
         implemented = tuple(
             instance.selector
             for instance in benchmark_instances()
@@ -109,6 +109,7 @@ class TestDciBenchmarkInstances(unittest.TestCase):
             implemented,
             (
                 "dci.bcplus.level3@1.0.0",
+                "dci.bcplus.main@1.0.0",
                 "dci.local-fixture@1.0.0",
                 "dci.qa.bamboogle@1.0.0",
             ),
@@ -152,6 +153,14 @@ class TestDciBenchmarkInstances(unittest.TestCase):
         self.assertEqual(resolve_case_limit(instance, case_limit=50, all_cases=False), 50)
         self.assertEqual(resolve_case_limit(instance, case_limit=None, all_cases=True), 830)
         self.assertEqual(instance.task_ids, ("bcplus.level3",))
+
+    def test_bcplus_main_is_implemented_with_bounded_and_full_ranges(self) -> None:
+        instance = select_benchmark_instance("dci.bcplus.main@1.0.0")
+
+        self.assertEqual(instance.implementation_state, "implemented")
+        self.assertEqual(resolve_case_limit(instance, case_limit=50, all_cases=False), 50)
+        self.assertEqual(resolve_case_limit(instance, case_limit=None, all_cases=True), 830)
+        self.assertEqual(instance.task_ids, ("bcplus.main",))
 
     def test_invalid_selection_and_ranges_fail_closed(self) -> None:
         instance = select_benchmark_instance("dci.local-fixture@1.0.0")

@@ -21,6 +21,7 @@ _DCI_SUITES = frozenset(
     (
         "dci.all",
         "dci.bcplus.level3",
+        "dci.bcplus.main",
         "dci.github",
         "dci.paper-main",
         "dci.qa.bamboogle.github-sample50",

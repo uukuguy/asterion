@@ -348,3 +348,5 @@
 - 13:16 Set DCI order: every instance closes 50 cases before any full-data evaluation
 - 13:16 Published and verified the all-instances 50-case-before-full evaluation order [e69e076]
 - 13:16 BC+ Level 3 completed 50/830: 17 correct, 34%, zero failures; resume reused all native generations
+- 13:16 Published BC+ Level 3 verified 50/830 result and resume evidence [94f898d]
+- 13:16 Added executable BC+ Main suite, 50/830 contract, and Chinese runbook
