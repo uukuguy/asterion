@@ -19,7 +19,7 @@ benchmark 实例的实现清单、验证台账和运行手册。
 | `dci.bright.robotics@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.local-fixture@1.0.0` | implemented / Verified-local | 15×1 | 无评分 | 无模型；安装包测试 | 维护闭环 |
 | `dci.qa.2wikimultihopqa@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
-| `dci.qa.bamboogle@1.0.0` | implemented / Verified-bounded | 50/125 | 82%（41/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $2.20；`run-e8ea4…7790` | 运行余下 75 题形成 125/125 |
+| `dci.qa.bamboogle@1.0.0` | implemented / Verified-bounded | 50/125 | 82%（41/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $2.20；`run-e8ea4…7790` | 等待所有实例的 50 条版本完成后，再统一决定全量 |
 | `dci.qa.hotpotqa@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.qa.musique@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.qa.nq@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
@@ -39,10 +39,10 @@ lock 和 plan 仅处理元数据，不执行 Agent 或 Judge。包含 `--execute
 
 ## 阶段性结果规则
 
-每个真实实例必须实现完整数据范围；但可以先运行 `min(50, 完整案例数)` 个案例，作为
-当前版本的阶段性结果。该结果必须写成“已跑/总量”，例如 `50/125`，并同步记录 Agent、
-Judge、分数、成本和 evidence 路径。它不能被称为完整结果、论文复现结果，或与完整数据
-分数直接比较。
+每个真实实例必须实现完整数据范围；当前执行策略是先逐一完成每个实例的
+`min(50, 完整案例数)` 真实运行、评分与 resume 验证，再考虑启动任一实例的全量数据。
+阶段性结果必须写成“已跑/总量”，例如 `50/125`，并同步记录 Agent、Judge、分数、成本和
+evidence 路径。它不能被称为完整结果、论文复现结果，或与完整数据分数直接比较。
 
 ## 运行手册：`dci.local-fixture@1.0.0`
 
