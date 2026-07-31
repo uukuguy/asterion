@@ -346,3 +346,5 @@
 - 13:16 Started BC+ Level 3 authorized 50/830 run; checkpoint records active private evidence execution
 - 13:16 Recorded active BC+ execution checkpoint for safe recovery [58ff439]
 - 13:16 Set DCI order: every instance closes 50 cases before any full-data evaluation
+- 13:16 Published and verified the all-instances 50-case-before-full evaluation order [e69e076]
+- 13:16 BC+ Level 3 completed 50/830: 17 correct, 34%, zero failures; resume reused all native generations

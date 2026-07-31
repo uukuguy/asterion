@@ -9,7 +9,7 @@ benchmark 实例的实现清单、验证台账和运行手册。
 
 | 实例 | 实现/验证 | 已跑/总量 | 结果 | 核心配置与证据 | 下一道门 |
 |---|---|---:|---|---|---|
-| `dci.bcplus.level3@1.0.0` | implemented / Not rerun | 50/830（执行中） | — | 已接入真实 Agent/Judge、数据集和 corpus；本轮 evidence 正在生成 | 完成当前 50 条并记录聚合结果 |
+| `dci.bcplus.level3@1.0.0` | implemented / Verified-bounded | 50/830 | 34%（17/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $4.29；`run-480faa…65ff`；resume 未新增生成 | 实现并完成 `dci.bcplus.main@1.0.0` 的 50 条版本 |
 | `dci.bcplus.main@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.beir.arguana@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.beir.scifact@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
@@ -281,6 +281,17 @@ jq '{counts,accuracy}' "$DCI_SUMMARY"
 resume 必须复用同一个 run ID、范围、source lock 和 evidence root。运行成功后，将
 `summary.json` 的聚合计数、准确率、模型、Judge、成本和 evidence 路径填写到上方表格。
 在 50 条完成前，本实例不标为 `Verified-bounded`。
+
+### 已验证的 50/830 结果
+
+本次真实执行使用 `gpt-5.6-luna` 作为 Agent、`deepseek-v4-flash` 作为 Judge，完成
+50 个案例的 Agent 运行与独立判分：17 个正确、33 个不正确或未判为正确、0 个失败，
+准确率为 34%。总 Agent 成本约为 $4.29；Judge 成本为 $0。
+
+运行 ID 为 `run-480faaa833b84c84a766284b8e7865ff`。随后以完全相同的实例、50 条
+范围、source lock 与 evidence root 执行 `benchmark resume`，结果仍为 completed，且
+native-generation 目录数量保持 50，证明 resume 没有重新调用 Agent 或 Judge。该结果为
+`Verified-bounded`，不是 830 条完整结果，也不是原论文分数。
 
 ## 故障排查
 

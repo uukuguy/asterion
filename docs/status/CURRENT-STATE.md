@@ -5,7 +5,7 @@
 - Project: Asterion
 - Active branch: `main`
 - Theme: source-neutral capability packages and generic benchmark execution
-- Runnable DCI closure Tasks 1–9: implemented; first real instance is verified across all 50 cases
+- Runnable DCI closure Tasks 1–9: implemented; Bamboogle and BC+ Level 3 have verified 50-case results
 - Next action: implement the next exact instance from the DCI benchmark backlog
 
 ## Current Architecture
@@ -38,8 +38,9 @@
 - `asterion-dci benchmark instances`, source locking, and planning are
   implemented and provider-free.
 - The installed product host supports explicitly authorized run/resume for the
-  provider-free local fixture and bounded Bamboogle instance. It injects exact
-  implementations, cancellation, and private evidence only after authority.
+  provider-free local fixture and bounded Bamboogle and BC+ Level 3 instances.
+  It injects exact implementations, cancellation, and private evidence only
+  after authority.
 - Credentials, provider settings, datasets, corpora, paths, private environment,
   and optional amount remain operator-owned and outside portable/public values.
 - A monetary amount is not a generic authorization requirement.
@@ -59,6 +60,9 @@
 - Main-workspace run `run-e8ea4a0db373482b9a849d8f8ace7790` completed all
   50 cases with 50 judged, 41 correct, 82% accuracy, and zero failed runs.
   Exact resume completed in zero seconds without adding evidence or generation.
+- BC+ Level 3 run `run-480faaa833b84c84a766284b8e7865ff` completed 50/830
+  cases with 17 correct, 34% accuracy, and zero failed runs. Exact resume
+  reused all 50 native generations without additional Agent or Judge calls.
 - `make check` and `make promotion-check` pass on integrated `main`. The
   completed capability-protocol worktree and branch have been removed.
 - A passing command is required before any final state is labelled Verified.
