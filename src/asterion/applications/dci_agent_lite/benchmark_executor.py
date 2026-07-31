@@ -39,8 +39,8 @@ _REAL_TASK_CONTRACTS = {
     "qa.bamboogle.github-sample50": ("qa.bamboogle", "github-sample50", 50),
     "qa.bamboogle.paper-full125": ("qa.bamboogle", "paper-full125", 125),
 }
-_REAL_TASK_MAX_TURNS = {
-    "bcplus.level3": 300,
+_REAL_TASK_EXECUTION = {
+    "bcplus.level3": (300, 10),
 }
 _DEFAULT_EXPERIMENT_PROFILE = "asterion-safe/pi"
 _UPSTREAM_EXPERIMENT_PROFILE = (
@@ -171,6 +171,10 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
             )
             if cancellation.cancelled:
                 return _cancelled(invocation.task_id)
+            max_turns, max_concurrency = _REAL_TASK_EXECUTION.get(
+                invocation.task_id,
+                (self._max_turns, 1),
+            )
             request = BenchmarkRequest(
                 dataset=payload.dataset,
                 output_root=payload.output_directory,
@@ -181,11 +185,8 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 mode="qa",
                 profile=self._experiment_profile,
                 corpus=payload.corpus,
-                max_concurrency=1,
-                max_turns=_REAL_TASK_MAX_TURNS.get(
-                    invocation.task_id,
-                    self._max_turns,
-                ),
+                max_concurrency=max_concurrency,
+                max_turns=max_turns,
                 resume_policy="compatible",
             )
             on_progress(

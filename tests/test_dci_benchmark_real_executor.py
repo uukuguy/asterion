@@ -203,6 +203,7 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
         self.assertEqual(result.artifact_ids, ("bcplus.level3.native-result",))
         self.assertEqual(calls[0][0].limit, 50)
         self.assertEqual(calls[0][0].max_turns, 300)
+        self.assertEqual(calls[0][0].max_concurrency, 10)
 
     def test_uses_explicit_upstream_profile_and_turn_limit(self) -> None:
         calls = []
