@@ -43,6 +43,7 @@ _REAL_TASK_CONTRACTS = {
     "bright.earth-science": ("bright.earth-science", "main", 116),
     "bright.economics": ("bright.economics", "main", 103),
     "bright.robotics": ("bright.robotics", "main", 101),
+    "qa.2wikimultihopqa": ("qa.2wikimultihopqa", "main", 12576),
     "qa.bamboogle.github-sample50": ("qa.bamboogle", "github-sample50", 50),
     "qa.bamboogle.paper-full125": ("qa.bamboogle", "paper-full125", 125),
 }

@@ -30,6 +30,7 @@ _DCI_SUITES = frozenset(
         "dci.bright.robotics",
         "dci.github",
         "dci.paper-main",
+        "dci.qa.2wikimultihopqa",
         "dci.qa.bamboogle.github-sample50",
         "dci.qa.bamboogle.paper-full125",
     )

@@ -26,6 +26,7 @@ SUITE_TASKS = {
     "dci.bright.earth-science": ("bright.earth-science",),
     "dci.bright.economics": ("bright.economics",),
     "dci.bright.robotics": ("bright.robotics",),
+    "dci.qa.2wikimultihopqa": ("qa.2wikimultihopqa",),
     "dci.github": (
         "bcplus.level3",
         "bcplus.main",
@@ -110,6 +111,7 @@ class TestDciCapabilityPayload(unittest.TestCase):
                 BenchmarkSuiteRef("dci.bright.robotics", "1.0.0"),
                 BenchmarkSuiteRef("dci.github", "1.0.0"),
                 BenchmarkSuiteRef("dci.paper-main", "1.0.0"),
+                BenchmarkSuiteRef("dci.qa.2wikimultihopqa", "1.0.0"),
                 BenchmarkSuiteRef(
                     "dci.qa.bamboogle.github-sample50",
                     "1.0.0",
@@ -152,6 +154,7 @@ class TestDciCapabilityPayload(unittest.TestCase):
                 {"suite_id": "dci.bright.robotics", "version": "1.0.0"},
                 {"suite_id": "dci.github", "version": "1.0.0"},
                 {"suite_id": "dci.paper-main", "version": "1.0.0"},
+                {"suite_id": "dci.qa.2wikimultihopqa", "version": "1.0.0"},
                 {
                     "suite_id": "dci.qa.bamboogle.github-sample50",
                     "version": "1.0.0",
