@@ -20,7 +20,7 @@ benchmark 实例的实现清单、验证台账和运行手册。
 | `dci.local-fixture@1.0.0` | implemented / Verified-local | 15×1 | 无评分 | 无模型；安装包测试 | 维护闭环 |
 | `dci.qa.2wikimultihopqa@1.0.0` | implemented / Verified-bounded | 50/12,576 | 80%（40/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $1.89；`run-9d46b7…7032`；resume 未新增生成 | 实现并完成 `dci.qa.hotpotqa@1.0.0` 的 50 条版本 |
 | `dci.qa.bamboogle@1.0.0` | implemented / Verified-bounded | 50/125 | 82%（41/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $2.20；`run-e8ea4…7790` | 等待所有实例的 50 条版本完成后，再统一决定全量 |
-| `dci.qa.hotpotqa@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
+| `dci.qa.hotpotqa@1.0.0` | implemented / Not rerun | — | — | 已接入真实 QA Agent、Judge、7,405 条数据集和 wiki corpus | 通过 preflight 后完成 50/7,405 真实运行与 resume |
 | `dci.qa.musique@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.qa.nq@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.qa.triviaqa@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
@@ -496,6 +496,29 @@ env -u DEEPSEEK_API_KEY ASTERION_DCI_RESOURCE_ROOT="$PWD" uv run asterion-dci be
 操作，成本为 `$1.88782`（台账显示约 $1.89）。首次运行后共有 50 条 native generation；
 resume 后仍为 50，未发起新生成。此为 50/12,576 的有界结果，不是完整 12,576 条结果，
 也不能与原论文完整分数直接等同。
+
+## 运行手册：`dci.qa.hotpotqa@1.0.0`
+
+这是 HotpotQA 的真实 QA 实例，总量 7,405 条；当前先运行 50 条。它由 Agent 给出答案，
+并由 Judge 按 answer correctness 聚合评分。每条最多 100 个 Agent 回合、单路执行；单条
+原生执行失败即 fail closed。
+
+```bash
+env -u DEEPSEEK_API_KEY ASTERION_DCI_RESOURCE_ROOT="$PWD" uv run asterion-dci preflight --env-file "$PWD/.env"
+export DCI_RUN_ROOT="$PWD/outputs/manual/dci-qa-hotpotqa-stage50-$(date +%Y%m%d-%H%M%S)"
+export DCI_SOURCE_LOCK="$DCI_RUN_ROOT/source-lock.json"
+export DCI_EVIDENCE_ROOT="$DCI_RUN_ROOT/evidence"
+export DCI_RUN_RESULT="$DCI_RUN_ROOT/run-result.json"
+mkdir -p "$DCI_RUN_ROOT"
+ASTERION_DCI_RESOURCE_ROOT="$PWD" uv run asterion-dci benchmark lock --instance dci.qa.hotpotqa@1.0.0 --output "$DCI_SOURCE_LOCK"
+ASTERION_DCI_RESOURCE_ROOT="$PWD" uv run asterion-dci benchmark plan --instance dci.qa.hotpotqa@1.0.0 --case-limit 50 --capability-source-lock "$DCI_SOURCE_LOCK"
+env -u DEEPSEEK_API_KEY ASTERION_DCI_RESOURCE_ROOT="$PWD" uv run asterion-dci benchmark run --instance dci.qa.hotpotqa@1.0.0 --case-limit 50 --capability-source-lock "$DCI_SOURCE_LOCK" --evidence-root "$DCI_EVIDENCE_ROOT" --execute | tee "$DCI_RUN_RESULT"
+export DCI_RUN_ID="$(jq -er '.run_id' "$DCI_RUN_RESULT")"
+env -u DEEPSEEK_API_KEY ASTERION_DCI_RESOURCE_ROOT="$PWD" uv run asterion-dci benchmark resume --instance dci.qa.hotpotqa@1.0.0 --run-id "$DCI_RUN_ID" --case-limit 50 --capability-source-lock "$DCI_SOURCE_LOCK" --evidence-root "$DCI_EVIDENCE_ROOT" --execute
+```
+
+只有 run 和 resume 都成功，且 resume 不新增 generation，才能标为 `Verified-bounded`；台账
+必须记录 `50/7,405`、正确率、成本和 run ID。
 
 ## 运行手册：`dci.bright.earth-science@1.0.0`
 

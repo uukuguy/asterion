@@ -33,6 +33,7 @@ _DCI_SUITES = frozenset(
         "dci.qa.2wikimultihopqa",
         "dci.qa.bamboogle.github-sample50",
         "dci.qa.bamboogle.paper-full125",
+        "dci.qa.hotpotqa",
     )
 )
 

@@ -27,6 +27,7 @@ SUITE_TASKS = {
     "dci.bright.economics": ("bright.economics",),
     "dci.bright.robotics": ("bright.robotics",),
     "dci.qa.2wikimultihopqa": ("qa.2wikimultihopqa",),
+    "dci.qa.hotpotqa": ("qa.hotpotqa",),
     "dci.github": (
         "bcplus.level3",
         "bcplus.main",
@@ -120,6 +121,7 @@ class TestDciCapabilityPayload(unittest.TestCase):
                     "dci.qa.bamboogle.paper-full125",
                     "1.0.0",
                 ),
+                BenchmarkSuiteRef("dci.qa.hotpotqa", "1.0.0"),
             ),
         )
 
@@ -163,6 +165,7 @@ class TestDciCapabilityPayload(unittest.TestCase):
                     "suite_id": "dci.qa.bamboogle.paper-full125",
                     "version": "1.0.0",
                 },
+                {"suite_id": "dci.qa.hotpotqa", "version": "1.0.0"},
             ],
         )
         for field, directory in (
