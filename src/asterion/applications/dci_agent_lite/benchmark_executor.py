@@ -41,6 +41,7 @@ _REAL_TASK_CONTRACTS = {
     "beir.scifact": ("beir.scifact", "paper-main", 300),
     "bright.biology": ("bright.biology", "main", 103),
     "bright.earth-science": ("bright.earth-science", "main", 116),
+    "bright.economics": ("bright.economics", "main", 103),
     "qa.bamboogle.github-sample50": ("qa.bamboogle", "github-sample50", 50),
     "qa.bamboogle.paper-full125": ("qa.bamboogle", "paper-full125", 125),
 }
@@ -51,17 +52,20 @@ _REAL_TASK_EXECUTION = {
     "beir.scifact": (300, 10),
     "bright.biology": (300, 10),
     "bright.earth-science": (300, 10),
+    "bright.economics": (300, 10),
 }
 _REAL_TASK_NATIVE_ATTEMPTS = {
     "beir.scifact": 3,
     "bright.biology": 3,
     "bright.earth-science": 3,
+    "bright.economics": 3,
 }
 _REAL_TASK_MODES = {
     "beir.arguana": "ir",
     "beir.scifact": "ir",
     "bright.biology": "ir",
     "bright.earth-science": "ir",
+    "bright.economics": "ir",
 }
 _DEFAULT_EXPERIMENT_PROFILE = "asterion-safe/pi"
 _UPSTREAM_EXPERIMENT_PROFILE = (

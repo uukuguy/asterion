@@ -26,6 +26,7 @@ _DCI_SUITES = frozenset(
         "dci.beir.scifact",
         "dci.bright.biology",
         "dci.bright.earth-science",
+        "dci.bright.economics",
         "dci.github",
         "dci.paper-main",
         "dci.qa.bamboogle.github-sample50",
