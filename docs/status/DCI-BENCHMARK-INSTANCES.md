@@ -10,7 +10,7 @@ benchmark 实例的实现清单、验证台账和运行手册。
 | 实例 | 实现/验证 | 已跑/总量 | 结果 | 核心配置与证据 | 下一道门 |
 |---|---|---:|---|---|---|
 | `dci.bcplus.level3@1.0.0` | implemented / Verified-bounded | 50/830 | 34%（17/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $4.29；`run-480faa…65ff`；resume 未新增生成 | 实现并完成 `dci.bcplus.main@1.0.0` 的 50 条版本 |
-| `dci.bcplus.main@1.0.0` | implemented / Not rerun | — | — | 已接入真实 Agent/Judge、830 条数据集和 corpus | 通过 preflight 后完成 50/830 真实运行与 resume |
+| `dci.bcplus.main@1.0.0` | implemented / Verified-bounded | 50/830 | 28%（14/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $4.69；`run-9bc4c4…ceb4`；resume 未新增生成 | 实现并完成下一个实例的 50 条版本 |
 | `dci.beir.arguana@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.beir.scifact@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.bright.biology@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
@@ -353,6 +353,17 @@ env -u DEEPSEEK_API_KEY uv run asterion-dci benchmark resume \
 `run` 成功后必须显示一个 completed 的 `bcplus.main` 任务，且 `case_count` 为 50。
 resume 必须复用同一实例、范围、source lock 和 evidence root，且不得新增 generation。
 只有这两步均成功，才把本实例提升为 `Verified-bounded` 并把分数、成本和 run ID 填入表格。
+
+### 已验证的 50/830 结果
+
+本次真实执行使用 `gpt-5.6-luna` 作为 Agent、`deepseek-v4-flash` 作为 Judge。50 个
+案例都完成 Agent 运行和独立判分：14 个正确、36 个不正确或未判为正确、0 个失败，准确率
+为 28%。Agent 总成本约为 $4.69；Judge 成本为 $0。
+
+运行 ID 为 `run-9bc4c4ec92f44ee8bab0fda79c01ceb4`。随后以相同实例、范围、source lock
+和 evidence root 执行 `benchmark resume`，仍返回 completed，且 native-generation 目录
+数量保持 50。因此 resume 没有重新调用 Agent 或 Judge。该结果是 `Verified-bounded`，不
+是 830 条完整结果，也不是原论文分数。
 
 ## 故障排查
 

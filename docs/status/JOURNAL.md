@@ -350,3 +350,5 @@
 - 13:16 BC+ Level 3 completed 50/830: 17 correct, 34%, zero failures; resume reused all native generations
 - 13:16 Published BC+ Level 3 verified 50/830 result and resume evidence [94f898d]
 - 13:16 Added executable BC+ Main suite, 50/830 contract, and Chinese runbook
+- 13:16 Published executable BC+ Main 50-case benchmark contract [1d3265e]
+- 13:16 BC+ Main completed 50/830: 14 correct, 28%, zero failures; resume reused all native generations
