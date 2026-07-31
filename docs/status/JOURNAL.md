@@ -375,3 +375,5 @@
 - 15:46 Implemented executable Bright Earth Science 50/116 contract after test-first validation
 - 15:47 Published Bright Earth Science runnable contract, payload, tests, and Chinese runbook [5d36652]
 - 16:32 Identified Bright CRLF queries invalidating native evidence; canonicalized BRIGHT query line endings before execution
+- 16:34 Canonicalized Bright query newlines to prevent invalid native evidence [c3b9d3e]
+- 16:55 Bright Earth Science completed 50/116: nDCG@10 0.4014, $3.46, zero failed; resume added no generation
