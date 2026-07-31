@@ -23,7 +23,7 @@ benchmark 实例的实现清单、验证台账和运行手册。
 | `dci.qa.hotpotqa@1.0.0` | implemented / Verified-bounded | 50/7,405 | 76%（38/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $2.22；`run-9d3831…59eb`；resume 未新增生成 | 实现并完成 `dci.qa.musique@1.0.0` 的 50 条版本 |
 | `dci.qa.musique@1.0.0` | implemented / Verified-bounded | 50/2,417 | 44%（22/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $2.64；`run-4d89eb…ccfa`；resume 未新增生成 | 实现并完成 `dci.qa.nq@1.0.0` 的 50 条版本 |
 | `dci.qa.nq@1.0.0` | implemented / Verified-bounded | 50/3,610 | 72%（36/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $1.74；`run-dde54b…c23d`；resume 未新增生成 | 实现并完成 `dci.qa.triviaqa@1.0.0` 的 50 条版本 |
-| `dci.qa.triviaqa@1.0.0` | implemented / Not rerun | — | — | 已接入真实 QA Agent、Judge、11,313 条数据集和 wiki corpus | 通过 preflight 后完成 50/11,313 真实运行与 resume |
+| `dci.qa.triviaqa@1.0.0` | implemented / Verified-bounded | 50/11,313 | 92%（46/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $1.10；`run-8b0d0b…755d`；resume 未新增生成 | 所有真实实例已完成 50 条版本 |
 
 ## 如何使用本文档
 
@@ -515,6 +515,14 @@ env -u DEEPSEEK_API_KEY ASTERION_DCI_RESOURCE_ROOT="$PWD" uv run asterion-dci be
 export DCI_RUN_ID="$(jq -er '.run_id' "$DCI_RUN_RESULT")"
 env -u DEEPSEEK_API_KEY ASTERION_DCI_RESOURCE_ROOT="$PWD" uv run asterion-dci benchmark resume --instance dci.qa.triviaqa@1.0.0 --run-id "$DCI_RUN_ID" --case-limit 50 --capability-source-lock "$DCI_SOURCE_LOCK" --evidence-root "$DCI_EVIDENCE_ROOT" --execute
 ```
+
+### 已验证的 50/11,313 结果
+
+本次真实运行的 run ID 为 `run-8b0d0b9ca0654f0c9b0863906a54755d`：50 条全部完成、无失败，
+Judge 判定正确 46 条，正确率为 `92%`。共执行 50 次 Agent 操作、50 次 Judge 操作，成本为
+`$1.0974634`（台账显示约 $1.10）。首次运行后共有 50 条 native generation；resume 后仍为
+50，未发起新生成。此为 50/11,313 的有界结果，不是完整 11,313 条结果，也不能与原论文完整
+分数直接等同。
 
 ## 运行手册：`dci.qa.hotpotqa@1.0.0`
 

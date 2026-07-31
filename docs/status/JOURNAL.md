@@ -405,3 +405,5 @@
 - Implemented QA TriviaQA executable 50/11,313 contract after test-first validation
 - Published QA TriviaQA runnable contract and payload [468f2f3]
 - Constrained QA runtime to read and grep after TriviaQA corpus-scan timeout
+- Constrained QA corpus tools to prevent unbounded scans [e109274]
+- QA TriviaQA completed 50/11,313: 92% (46/50), $1.10, zero failed; resume added no generation
