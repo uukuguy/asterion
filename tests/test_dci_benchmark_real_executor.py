@@ -281,6 +281,44 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
         self.assertEqual(calls[0][0].max_concurrency, 10)
         self.assertEqual(calls[0][0].max_native_attempts, 2)
 
+    def test_translates_bounded_scifact_into_ir_engine(self) -> None:
+        calls = []
+
+        async def runner(request, *, paths):
+            calls.append((request, paths))
+            return BenchmarkResult(
+                output_root=request.output_root,
+                counts={"total": 50, "completed": 50, "failed": 0},
+            )
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            result = RealDciBenchmarkExecutor(
+                paths=_paths(root),
+                runtime_options=DciRuntimeOptions(),
+                judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
+                benchmark_runner=runner,
+                readiness_probe=lambda *_args: None,
+            ).execute(
+                _invocation(
+                    root,
+                    task_id="beir.scifact",
+                    profile_id="beir.scifact",
+                    selection_variant="paper-main",
+                    case_limit=50,
+                ),
+                cancellation=MutableCancellation(),
+                on_progress=lambda _event: None,
+            )
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.case_count, 50)
+        self.assertEqual(calls[0][0].mode, "ir")
+        self.assertEqual(calls[0][0].dataset_profile, "beir.scifact")
+        self.assertEqual(calls[0][0].max_turns, 300)
+        self.assertEqual(calls[0][0].max_concurrency, 10)
+        self.assertEqual(calls[0][0].max_native_attempts, 2)
+
     def test_uses_explicit_upstream_profile_and_turn_limit(self) -> None:
         calls = []
 

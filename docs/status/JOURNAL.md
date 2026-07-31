@@ -363,3 +363,4 @@
 - 15:02 Retained failed evidence before bounded fresh-generation retry [963bb1b]
 - 15:05 Validated native evidence per row before aggregate publication [c45c5bd]
 - 15:10 ArguAna completed 50/1406: nDCG@10 0.5493, $2.75, zero failed; resume added no generation
+- 15:11 Published verified ArguAna bounded result and resume evidence [fef20af]

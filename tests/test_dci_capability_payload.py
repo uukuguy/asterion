@@ -21,6 +21,7 @@ SUITE_TASKS = {
     "dci.bcplus.level3": ("bcplus.level3",),
     "dci.bcplus.main": ("bcplus.main",),
     "dci.beir.arguana": ("beir.arguana",),
+    "dci.beir.scifact": ("beir.scifact",),
     "dci.github": (
         "bcplus.level3",
         "bcplus.main",
@@ -98,6 +99,7 @@ class TestDciCapabilityPayload(unittest.TestCase):
                 BenchmarkSuiteRef("dci.bcplus.level3", "1.0.0"),
                 BenchmarkSuiteRef("dci.bcplus.main", "1.0.0"),
                 BenchmarkSuiteRef("dci.beir.arguana", "1.0.0"),
+                BenchmarkSuiteRef("dci.beir.scifact", "1.0.0"),
                 BenchmarkSuiteRef("dci.github", "1.0.0"),
                 BenchmarkSuiteRef("dci.paper-main", "1.0.0"),
                 BenchmarkSuiteRef(
@@ -135,6 +137,7 @@ class TestDciCapabilityPayload(unittest.TestCase):
                 {"suite_id": "dci.bcplus.level3", "version": "1.0.0"},
                 {"suite_id": "dci.bcplus.main", "version": "1.0.0"},
                 {"suite_id": "dci.beir.arguana", "version": "1.0.0"},
+                {"suite_id": "dci.beir.scifact", "version": "1.0.0"},
                 {"suite_id": "dci.github", "version": "1.0.0"},
                 {"suite_id": "dci.paper-main", "version": "1.0.0"},
                 {

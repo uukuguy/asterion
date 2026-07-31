@@ -38,6 +38,7 @@ _REAL_TASK_CONTRACTS = {
     "bcplus.level3": ("bcplus.level3", "github-level3", 830),
     "bcplus.main": ("bcplus.openai", "main", 830),
     "beir.arguana": ("beir.arguana", "paper-main", 1406),
+    "beir.scifact": ("beir.scifact", "paper-main", 300),
     "qa.bamboogle.github-sample50": ("qa.bamboogle", "github-sample50", 50),
     "qa.bamboogle.paper-full125": ("qa.bamboogle", "paper-full125", 125),
 }
@@ -45,8 +46,9 @@ _REAL_TASK_EXECUTION = {
     "bcplus.level3": (300, 10),
     "bcplus.main": (100, 10),
     "beir.arguana": (300, 10),
+    "beir.scifact": (300, 10),
 }
-_REAL_TASK_MODES = {"beir.arguana": "ir"}
+_REAL_TASK_MODES = {"beir.arguana": "ir", "beir.scifact": "ir"}
 _DEFAULT_EXPERIMENT_PROFILE = "asterion-safe/pi"
 _UPSTREAM_EXPERIMENT_PROFILE = (
     "upstream-github/271f37e71f053bf0c99c05ce6d2fb53b841d922e/pi"
@@ -190,8 +192,8 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 mode=_REAL_TASK_MODES.get(invocation.task_id, "qa"),
                 profile=self._experiment_profile,
                 dataset_profile=(
-                    "beir.arguana"
-                    if invocation.task_id == "beir.arguana"
+                    invocation.task_id
+                    if invocation.task_id in _REAL_TASK_MODES
                     else None
                 ),
                 corpus=payload.corpus,

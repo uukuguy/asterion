@@ -23,6 +23,7 @@ _DCI_SUITES = frozenset(
         "dci.bcplus.level3",
         "dci.bcplus.main",
         "dci.beir.arguana",
+        "dci.beir.scifact",
         "dci.github",
         "dci.paper-main",
         "dci.qa.bamboogle.github-sample50",
