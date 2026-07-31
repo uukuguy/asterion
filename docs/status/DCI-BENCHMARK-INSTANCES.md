@@ -21,7 +21,7 @@ benchmark 实例的实现清单、验证台账和运行手册。
 | `dci.qa.2wikimultihopqa@1.0.0` | implemented / Verified-bounded | 50/12,576 | 80%（40/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $1.89；`run-9d46b7…7032`；resume 未新增生成 | 实现并完成 `dci.qa.hotpotqa@1.0.0` 的 50 条版本 |
 | `dci.qa.bamboogle@1.0.0` | implemented / Verified-bounded | 50/125 | 82%（41/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $2.20；`run-e8ea4…7790` | 等待所有实例的 50 条版本完成后，再统一决定全量 |
 | `dci.qa.hotpotqa@1.0.0` | implemented / Verified-bounded | 50/7,405 | 76%（38/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $2.22；`run-9d3831…59eb`；resume 未新增生成 | 实现并完成 `dci.qa.musique@1.0.0` 的 50 条版本 |
-| `dci.qa.musique@1.0.0` | implemented / Not rerun | — | — | 已接入真实 QA Agent、Judge、2,417 条数据集和 wiki corpus | 通过 preflight 后完成 50/2,417 真实运行与 resume |
+| `dci.qa.musique@1.0.0` | implemented / Verified-bounded | 50/2,417 | 44%（22/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $2.64；`run-4d89eb…ccfa`；resume 未新增生成 | 实现并完成 `dci.qa.nq@1.0.0` 的 50 条版本 |
 | `dci.qa.nq@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.qa.triviaqa@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 
@@ -550,6 +550,14 @@ env -u DEEPSEEK_API_KEY ASTERION_DCI_RESOURCE_ROOT="$PWD" uv run asterion-dci be
 
 只有 run 和 resume 都成功，且 resume 不新增 generation，才能标为 `Verified-bounded`；台账
 必须记录 `50/2,417`、正确率、成本和 run ID。
+
+### 已验证的 50/2,417 结果
+
+本次真实运行的 run ID 为 `run-4d89eb351de14ba4a7ed7a988331ccfa`：50 条全部完成、
+无失败，Judge 判定正确 22 条，正确率为 `44%`。共执行 50 次 Agent 操作、50 次 Judge
+操作，成本为 `$2.6381642`（台账显示约 $2.64）。首次运行后共有 50 条 native generation；
+resume 后仍为 50，未发起新生成。此为 50/2,417 的有界结果，不是完整 2,417 条结果，
+也不能与原论文完整分数直接等同。
 
 ## 运行手册：`dci.bright.earth-science@1.0.0`
 
