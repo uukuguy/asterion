@@ -25,6 +25,7 @@ SUITE_TASKS = {
     "dci.bright.biology": ("bright.biology",),
     "dci.bright.earth-science": ("bright.earth-science",),
     "dci.bright.economics": ("bright.economics",),
+    "dci.bright.robotics": ("bright.robotics",),
     "dci.github": (
         "bcplus.level3",
         "bcplus.main",
@@ -106,6 +107,7 @@ class TestDciCapabilityPayload(unittest.TestCase):
                 BenchmarkSuiteRef("dci.bright.biology", "1.0.0"),
                 BenchmarkSuiteRef("dci.bright.earth-science", "1.0.0"),
                 BenchmarkSuiteRef("dci.bright.economics", "1.0.0"),
+                BenchmarkSuiteRef("dci.bright.robotics", "1.0.0"),
                 BenchmarkSuiteRef("dci.github", "1.0.0"),
                 BenchmarkSuiteRef("dci.paper-main", "1.0.0"),
                 BenchmarkSuiteRef(
@@ -147,6 +149,7 @@ class TestDciCapabilityPayload(unittest.TestCase):
                 {"suite_id": "dci.bright.biology", "version": "1.0.0"},
                 {"suite_id": "dci.bright.earth-science", "version": "1.0.0"},
                 {"suite_id": "dci.bright.economics", "version": "1.0.0"},
+                {"suite_id": "dci.bright.robotics", "version": "1.0.0"},
                 {"suite_id": "dci.github", "version": "1.0.0"},
                 {"suite_id": "dci.paper-main", "version": "1.0.0"},
                 {
