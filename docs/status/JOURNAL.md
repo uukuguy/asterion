@@ -361,3 +361,5 @@
 - 14:57 Added bounded native recovery for transient Agent failures [920953a]
 - 15:00 Identified level3 failures without resumable sessions; retry must retain evidence and start a new generation
 - 15:02 Retained failed evidence before bounded fresh-generation retry [963bb1b]
+- 15:05 Validated native evidence per row before aggregate publication [c45c5bd]
+- 15:10 ArguAna completed 50/1406: nDCG@10 0.5493, $2.75, zero failed; resume added no generation
