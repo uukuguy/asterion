@@ -338,3 +338,4 @@
 - 23:36 Recorded full50 82% result so Bamboogle verification reflects complete executed evidence [caca48b]
 - 00:00 Defined progressive instance results so bounded scores remain traceable without blocking full executability [ed97a74]
 - 00:00 Made Bamboogle full125 executable and documented 50/125 result reporting [52e10c7]
+- 12:35 Added executable BC+ Level 3 50-case path and Chinese runbook [03536cb]
