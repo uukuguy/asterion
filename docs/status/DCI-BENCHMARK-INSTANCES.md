@@ -12,7 +12,7 @@ benchmark 实例的实现清单、验证台账和运行手册。
 | `dci.bcplus.level3@1.0.0` | implemented / Verified-bounded | 50/830 | 34%（17/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $4.29；`run-480faa…65ff`；resume 未新增生成 | 实现并完成 `dci.bcplus.main@1.0.0` 的 50 条版本 |
 | `dci.bcplus.main@1.0.0` | implemented / Verified-bounded | 50/830 | 28%（14/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $4.69；`run-9bc4c4…ceb4`；resume 未新增生成 | 实现并完成下一个实例的 50 条版本 |
 | `dci.beir.arguana@1.0.0` | implemented / Verified-bounded | 50/1406 | nDCG@10 = 0.5493 | `gpt-5.6-luna`；无 Judge；约 $2.75；`run-009492…1d24`；resume 未新增生成 | 实现并完成 `dci.beir.scifact@1.0.0` 的 50 条版本 |
-| `dci.beir.scifact@1.0.0` | implemented / Not rerun | — | — | 已接入真实 IR Agent、300 条数据集和 corpus | 通过 preflight 后完成 50/300 真实运行与 resume |
+| `dci.beir.scifact@1.0.0` | implemented / Verified-bounded | 50/300 | nDCG@10 = 0.7579 | `gpt-5.6-luna`；无 Judge；约 $2.46；`run-ec81e1…687e`；resume 未新增生成 | 实现并完成下一个实例的 50 条版本 |
 | `dci.bright.biology@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.bright.earth-science@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.bright.economics@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
@@ -356,6 +356,18 @@ env -u DEEPSEEK_API_KEY ASTERION_DCI_RESOURCE_ROOT="$PWD" uv run asterion-dci be
 
 只有 run 和 resume 都成功，且 resume 不新增 generation，才能标为 `Verified-bounded`；台账
 必须记录 `50/300`、nDCG@10、成本和 run ID。
+
+### 已验证的 50/300 结果
+
+本次真实运行使用 `gpt-5.6-luna` 生成检索结果，不使用 Judge，完成 50/300 条，全部
+完成、0 失败。binary deduplicated nDCG@10 为 `0.7579`（约 75.79%）；Agent 成本约
+为 $2.46。期间有 6 条出现原生瞬态问题，在后续 generation 完成，因此共有 56 个 native
+generation、但仍只有 50 个评测案例和 50 次计入评测的 Agent 操作。
+
+运行 ID 为 `run-ec81e1d47d6f4188b1d0e1691f51687e`。随后以相同实例、范围、source
+lock 和 evidence root 执行 `benchmark resume`，结果仍为 completed，native generation
+数量保持 56，证明 resume 没有新调用 Agent。该结果为 `Verified-bounded`，不是 300 条
+完整结果，也不是原论文分数。
 
 ## 运行手册：`dci.bcplus.main@1.0.0`
 

@@ -365,3 +365,5 @@
 - 15:10 ArguAna completed 50/1406: nDCG@10 0.5493, $2.75, zero failed; resume added no generation
 - 15:11 Published verified ArguAna bounded result and resume evidence [fef20af]
 - 15:16 Published executable SciFact 50/300 IR benchmark contract [f27c55e]
+- 15:20 Extended SciFact recovery to three bounded Agent attempts [8a85dda]
+- 15:24 SciFact completed 50/300: nDCG@10 0.7579, $2.46, zero failed; resume added no generation
