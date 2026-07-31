@@ -18,6 +18,7 @@ PAYLOAD_ROOT = (
 )
 PACKAGE_REF = CapabilityPackageRef("dci", "1.0.0")
 SUITE_TASKS = {
+    "dci.bcplus.level3": ("bcplus.level3",),
     "dci.github": (
         "bcplus.level3",
         "bcplus.main",
@@ -92,6 +93,7 @@ class TestDciCapabilityPayload(unittest.TestCase):
             payload.manifest.benchmark_suites,
             (
                 BenchmarkSuiteRef("dci.all", "1.0.0"),
+                BenchmarkSuiteRef("dci.bcplus.level3", "1.0.0"),
                 BenchmarkSuiteRef("dci.github", "1.0.0"),
                 BenchmarkSuiteRef("dci.paper-main", "1.0.0"),
                 BenchmarkSuiteRef(
@@ -126,6 +128,7 @@ class TestDciCapabilityPayload(unittest.TestCase):
             descriptor["benchmark_suites"],
             [
                 {"suite_id": "dci.all", "version": "1.0.0"},
+                {"suite_id": "dci.bcplus.level3", "version": "1.0.0"},
                 {"suite_id": "dci.github", "version": "1.0.0"},
                 {"suite_id": "dci.paper-main", "version": "1.0.0"},
                 {

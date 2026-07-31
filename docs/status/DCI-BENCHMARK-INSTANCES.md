@@ -9,7 +9,7 @@ benchmark 实例的实现清单、验证台账和运行手册。
 
 | 实例 | 实现/验证 | 已跑/总量 | 结果 | 核心配置与证据 | 下一道门 |
 |---|---|---:|---|---|---|
-| `dci.bcplus.level3@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
+| `dci.bcplus.level3@1.0.0` | implemented / Not rerun | 50/830（执行中） | — | 已接入真实 Agent/Judge、数据集和 corpus；本轮 evidence 正在生成 | 完成当前 50 条并记录聚合结果 |
 | `dci.bcplus.main@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.beir.arguana@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.beir.scifact@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
@@ -115,25 +115,25 @@ uv run python -m unittest -v tests.test_asterion_dci_benchmark_installed
 该测试在隔离环境中构建并安装 wheel，通过安装后的 `asterion-dci` 执行全部 15 个
 fixture 任务，然后 resume 同一运行且不重复工作。
 
-## 历史运行证据：Bamboogle 前 50 条
+## 运行手册：`dci.qa.bamboogle@1.0.0`
 
 ### 作用和边界
 
-这是第一个真实 DCI benchmark 实例。它在 Bamboogle GitHub sample 的 50 个案例上
-运行研究 Agent，并将每个答案交给独立 Judge。Asterion 只在 preflight 通过且收到
-显式执行授权后，才把可移植 DCI 能力包绑定到 operator-owned 资源。
+这是第一个真实 DCI benchmark 实例。总量为 125 条；当前版本先处理前 50 条，运行研究
+Agent，并将每个答案交给独立 Judge。Asterion 只在 preflight 通过且收到显式执行授权后，
+才把 DCI 能力包绑定到 operator-owned 资源。
 
 - Application：`dci.complete-application@1.0.0`
-- Suite：`dci.qa.bamboogle.github-sample50@1.0.0`
-- 任务：`qa.bamboogle.github-sample50`
+- Suite：`dci.qa.bamboogle.paper-full125@1.0.0`
+- 任务：`qa.bamboogle.paper-full125`
 - 默认范围：1 个案例，仅用于有限能力验证
-- 完整范围：50 个案例
+- 完整范围：125 个案例
 - Agent：Pi，使用已配置的研究模型和 DCI prompt 契约
 - Judge：独立配置的 Judge 模型
 - 外部依赖：Pi checkout、Agent authentication、Judge credential、Bamboogle
   数据集、corpus 和网络
 - 单案例成本：最多 1 次 Agent 操作和 1 次 Judge 操作
-- 完整评估成本：最多 50 次 Agent 操作和 50 次 Judge 操作
+- 当前阶段成本上限：最多 50 次 Agent 操作和 50 次 Judge 操作
 
 ### preflight
 
@@ -147,31 +147,30 @@ uv run asterion-dci preflight --env-file "$PWD/.env"
 所有类别都必须为 `PASS`。进程环境变量优先于 `.env`；如果认证结果异常，应检查
 继承的 `DEEPSEEK_API_KEY` 等变量。
 
-### 单案例能力验证
+### 当前 50 条阶段性评估
 
-这一流程只验证真实 Agent/Judge 执行路径，不能代表完整 Bamboogle sample50 结果。
-lock 和 plan 不访问模型、Judge、数据集正文或 corpus 正文；run 最多执行 1 次 Agent
-和 1 次 Judge。
+这条命令处理 125 条中的前 50 条，得到当前版本的阶段性结果。lock 和 plan 不访问模型、
+Judge、数据集正文或 corpus 正文；run 最多执行 50 次 Agent 和 50 次 Judge。
 
 ```bash
-export DCI_RUN_ROOT="$PWD/outputs/manual/dci-bamboogle-case1-$(date +%Y%m%d-%H%M%S)"
+export DCI_RUN_ROOT="$PWD/outputs/manual/dci-bamboogle-stage50-$(date +%Y%m%d-%H%M%S)"
 export DCI_SOURCE_LOCK="$DCI_RUN_ROOT/source-lock.json"
 export DCI_EVIDENCE_ROOT="$DCI_RUN_ROOT/evidence"
 export DCI_RUN_RESULT="$DCI_RUN_ROOT/run-result.json"
 mkdir -p "$DCI_RUN_ROOT"
 
 uv run asterion-dci benchmark lock \
-  --instance dci.qa.bamboogle.github-sample50@1.0.0 \
+  --instance dci.qa.bamboogle@1.0.0 \
   --output "$DCI_SOURCE_LOCK"
 
 uv run asterion-dci benchmark plan \
-  --instance dci.qa.bamboogle.github-sample50@1.0.0 \
-  --case-limit 1 \
+  --instance dci.qa.bamboogle@1.0.0 \
+  --case-limit 50 \
   --capability-source-lock "$DCI_SOURCE_LOCK"
 
 uv run asterion-dci benchmark run \
-  --instance dci.qa.bamboogle.github-sample50@1.0.0 \
-  --case-limit 1 \
+  --instance dci.qa.bamboogle@1.0.0 \
+  --case-limit 50 \
   --capability-source-lock "$DCI_SOURCE_LOCK" \
   --evidence-root "$DCI_EVIDENCE_ROOT" \
   --execute | tee "$DCI_RUN_RESULT"
@@ -179,72 +178,16 @@ uv run asterion-dci benchmark run \
 export DCI_RUN_ID="$(jq -er '.run_id' "$DCI_RUN_RESULT")"
 
 uv run asterion-dci benchmark resume \
-  --instance dci.qa.bamboogle.github-sample50@1.0.0 \
+  --instance dci.qa.bamboogle@1.0.0 \
   --run-id "$DCI_RUN_ID" \
-  --case-limit 1 \
+  --case-limit 50 \
   --capability-source-lock "$DCI_SOURCE_LOCK" \
   --evidence-root "$DCI_EVIDENCE_ROOT" \
   --execute
 ```
 
-公开结果应报告 1 个 `completed` 任务和 `case_count: 1`。它只建立
-`Verified-bounded`，不建立完整 50 案例评估结果。
-
-### 完整 50 案例评估
-
-下面才是完整执行 `dci.qa.bamboogle.github-sample50@1.0.0` 并获得该实例聚合评估
-结果的流程。`--all-cases` 在 plan、run 和 resume 中都解析为确定的 50 案例范围。
-`--execute` 明确授权最多 50 次 Agent 和 50 次 Judge 操作，因此会产生模型费用并
-访问网络、数据集和 corpus。
-
-```bash
-export DCI_FULL_RUN_ROOT="$PWD/outputs/manual/dci-bamboogle-full50-$(date +%Y%m%d-%H%M%S)"
-export DCI_FULL_SOURCE_LOCK="$DCI_FULL_RUN_ROOT/source-lock.json"
-export DCI_FULL_EVIDENCE_ROOT="$DCI_FULL_RUN_ROOT/evidence"
-export DCI_FULL_RUN_RESULT="$DCI_FULL_RUN_ROOT/run-result.json"
-mkdir -p "$DCI_FULL_RUN_ROOT"
-
-uv run asterion-dci benchmark lock \
-  --instance dci.qa.bamboogle.github-sample50@1.0.0 \
-  --output "$DCI_FULL_SOURCE_LOCK"
-
-uv run asterion-dci benchmark plan \
-  --instance dci.qa.bamboogle.github-sample50@1.0.0 \
-  --all-cases \
-  --capability-source-lock "$DCI_FULL_SOURCE_LOCK"
-
-uv run asterion-dci benchmark run \
-  --instance dci.qa.bamboogle.github-sample50@1.0.0 \
-  --all-cases \
-  --capability-source-lock "$DCI_FULL_SOURCE_LOCK" \
-  --evidence-root "$DCI_FULL_EVIDENCE_ROOT" \
-  --execute | tee "$DCI_FULL_RUN_RESULT"
-
-export DCI_FULL_RUN_ID="$(jq -er '.run_id' "$DCI_FULL_RUN_RESULT")"
-
-uv run asterion-dci benchmark resume \
-  --instance dci.qa.bamboogle.github-sample50@1.0.0 \
-  --run-id "$DCI_FULL_RUN_ID" \
-  --all-cases \
-  --capability-source-lock "$DCI_FULL_SOURCE_LOCK" \
-  --evidence-root "$DCI_FULL_EVIDENCE_ROOT" \
-  --execute
-
-export DCI_FULL_SUMMARY="$DCI_FULL_EVIDENCE_ROOT/outputs/$DCI_FULL_RUN_ID/qa.bamboogle.github-sample50/summary.json"
-jq '{counts,accuracy}' "$DCI_FULL_SUMMARY"
-```
-
-成功的 run 应报告 `case_count: 50`。`summary.json` 中：
-
-- `counts.total` 应为 50；
-- `counts.judged` 是成功完成独立 Judge 的案例数；
-- `counts.correct` 是 Judge 判定正确的案例数；
-- `accuracy.over_total` 是完整 50 案例准确率；
-- `accuracy.over_judged` 是已完成 Judge 案例中的准确率。
-
-这会产生 GitHub sample50 实例的原 DCI 评估格式和聚合结果，但仍不是论文完整结果。
-完整 125 题实例现已可执行；在其真实运行完成前，当前仍不能声称得到原论文的 125-case
-结果或完成 paper-score reproduction。
+公开结果应报告一个 `completed` 任务和 `case_count: 50`。它建立
+`Verified-bounded`，不代表 125 条完整评估。
 
 ### 已验证边界
 
@@ -257,22 +200,8 @@ jq '{counts,accuracy}' "$DCI_FULL_SUMMARY"
 - `failed_runs` 为 0；
 - 精确 resume 耗时 0 秒，新增 evidence 0 个，新增 generation 0 个。
 
-因此 GitHub sample50 当前为 `Verified-full`。该状态仅覆盖这个 50-case 实例；
-它不能替代尚未运行的 full125 实例或原论文复现结果。
-
-## 运行手册：`dci.qa.bamboogle@1.0.0`
-
-这是同一 Bamboogle 数据的完整 125 题实例。50 题公开样本是这 125 题的严格子集：本地
-逐行规范化比对确认 50 条记录全部一致（题目和标准答案均相同）。它们共享本地
-`corpus/wiki_corpus`，所以已验证 sample50 的结果可作为本实例的阶段性结果。
-
-- Application：`dci.complete-application@1.0.0`
-- Suite：`dci.qa.bamboogle.paper-full125@1.0.0`
-- 阶段性覆盖：50/125；它引用上方 sample50 行的同一次 `41/50、82%` 运行，
-  不重复记录分数、模型、成本或 evidence
-- 完整结果：125/125，尚未运行；不以 50/125 声称论文完整分数
-
-50/125 已有上述可复用的已验证结果，无需重跑。后续完整运行使用：
+这项 50/125 的阶段性结果为 `Verified-bounded`；它不能替代完整的 125 条结果或论文复现。
+只有在所有实例的 50 条版本都完成后，才择机运行完整范围。届时使用：
 
 ```bash
 export DCI_125_ROOT="$PWD/outputs/manual/dci-bamboogle-125-$(date +%Y%m%d-%H%M%S)"
@@ -300,6 +229,58 @@ jq '{counts,accuracy,totals,reproduction_totals}' "$DCI_125_SUMMARY"
 resume 时必须保留同一 run ID、范围、lock 和 evidence root。完整运行的结果才可以标为
 `Verified-full`；50/125 只能标为 `Verified-bounded`。
 
+## 运行手册：`dci.bcplus.level3@1.0.0`
+
+### 作用和边界
+
+这是 BrowseComp-Plus Level 3 的真实 DCI 实例，总量 830 条。当前版本只运行前 50 条；
+每条由研究 Agent 作答，再由独立 Judge 聚合评分。它使用 operator 配置的数据集、corpus、
+Pi、模型认证和网络；模型调用会产生费用。
+
+- Application：`dci.complete-application@1.0.0`
+- Suite：`dci.bcplus.level3@1.0.0`
+- 任务：`bcplus.level3`
+- 当前范围：50/830
+- 完整范围：830 条（当前不执行）
+
+### 当前 50 条阶段性评估
+
+先执行 preflight。它只检查外部资源是否就绪，不调用 Agent 或 Judge。
+
+```bash
+uv run asterion-dci preflight --env-file "$PWD/.env"
+
+export DCI_RUN_ROOT="$PWD/outputs/manual/dci-bcplus-level3-stage50-$(date +%Y%m%d-%H%M%S)"
+export DCI_SOURCE_LOCK="$DCI_RUN_ROOT/source-lock.json"
+export DCI_EVIDENCE_ROOT="$DCI_RUN_ROOT/evidence"
+export DCI_RUN_RESULT="$DCI_RUN_ROOT/run-result.json"
+mkdir -p "$DCI_RUN_ROOT"
+
+uv run asterion-dci benchmark lock \
+  --instance dci.bcplus.level3@1.0.0 \
+  --output "$DCI_SOURCE_LOCK"
+
+uv run asterion-dci benchmark plan \
+  --instance dci.bcplus.level3@1.0.0 \
+  --case-limit 50 \
+  --capability-source-lock "$DCI_SOURCE_LOCK"
+
+uv run asterion-dci benchmark run \
+  --instance dci.bcplus.level3@1.0.0 \
+  --case-limit 50 \
+  --capability-source-lock "$DCI_SOURCE_LOCK" \
+  --evidence-root "$DCI_EVIDENCE_ROOT" \
+  --execute | tee "$DCI_RUN_RESULT"
+
+export DCI_RUN_ID="$(jq -er '.run_id' "$DCI_RUN_RESULT")"
+export DCI_SUMMARY="$DCI_EVIDENCE_ROOT/outputs/$DCI_RUN_ID/bcplus.level3/summary.json"
+jq '{counts,accuracy}' "$DCI_SUMMARY"
+```
+
+resume 必须复用同一个 run ID、范围、source lock 和 evidence root。运行成功后，将
+`summary.json` 的聚合计数、准确率、模型、Judge、成本和 evidence 路径填写到上方表格。
+在 50 条完成前，本实例不标为 `Verified-bounded`。
+
 ## 故障排查
 
 - `benchmark source lock is invalid`：必须传入带引号的绝对路径，例如
@@ -307,6 +288,8 @@ resume 时必须保留同一 run ID、范围、lock 和 evidence root。完整�
   `FRESH_LOCK`。
 - resume 找不到或无法匹配运行：必须使用同一次 `run` 产生的 run ID 和 evidence
   root。历史 run ID 不能在新的空 evidence root 中恢复。
-- provider 认证异常：检查继承的进程环境变量，因为它们会覆盖 `.env` 中的值。
+- Judge 返回 401：继承的进程环境变量会覆盖 `.env`。确认项目 `.env` 中的 key
+  有效后，以 `env -u DEEPSEEK_API_KEY uv run asterion-dci …` 清除陈旧继承值再运行；
+  不要把 key 写入命令行或日志。
 - planned 实例被拒绝：实例身份虽然存在，但实现尚未实现。必须同时完成实现和运行
   手册并将其提升为 implemented 后，才能执行 lock、plan 或 run。

@@ -60,21 +60,13 @@ class TestDciBenchmarkInstances(unittest.TestCase):
                 self.assertNotIn(f"## 运行手册：`{selector}`", text)
         self.assertIn("# DCI Benchmark 实例", text)
         self.assertIn("## 如何使用本文档", text)
-        self.assertIn("### 完整 50 案例评估", text)
+        self.assertIn("### 当前 50 条阶段性评估", text)
         self.assertIn('export DCI_RUN_ROOT="$PWD/outputs/manual/', text)
-        self.assertIn(
-            'export DCI_FULL_RUN_ROOT="$PWD/outputs/manual/',
-            text,
-        )
         self.assertIn(
             'export DCI_RUN_ID="$(jq -er \'.run_id\' "$DCI_RUN_RESULT")"',
             text,
         )
-        self.assertGreaterEqual(text.count("--all-cases"), 4)
-        self.assertIn(
-            "jq '{counts,accuracy}' \"$DCI_FULL_SUMMARY\"",
-            text,
-        )
+        self.assertGreaterEqual(text.count("--all-cases"), 1)
         self.assertIn("不产生原 DCI benchmark 评估分数", text)
         self.assertIn("尚未实现", text)
         self.assertIn(
@@ -86,7 +78,7 @@ class TestDciBenchmarkInstances(unittest.TestCase):
             "## 运行手册：`dci.qa.bamboogle@1.0.0`",
             text,
         )
-        self.assertIn("阶段性覆盖：50/125", text)
+        self.assertIn("50/125 的阶段性结果", text)
         self.assertIn("41/50", text)
         self.assertIn("82%", text)
         self.assertNotRegex(text, r"--run-id\s+run-[0-9a-f]{32}")
@@ -106,7 +98,7 @@ class TestDciBenchmarkInstances(unittest.TestCase):
         with self.assertRaises(FrozenInstanceError):
             instances[0].version = "2.0.0"  # type: ignore[misc]
 
-    def test_local_and_bamboogle_are_the_implemented_instances(self) -> None:
+    def test_local_bamboogle_and_bcplus_are_the_implemented_instances(self) -> None:
         implemented = tuple(
             instance.selector
             for instance in benchmark_instances()
@@ -116,6 +108,7 @@ class TestDciBenchmarkInstances(unittest.TestCase):
         self.assertEqual(
             implemented,
             (
+                "dci.bcplus.level3@1.0.0",
                 "dci.local-fixture@1.0.0",
                 "dci.qa.bamboogle@1.0.0",
             ),
@@ -151,6 +144,14 @@ class TestDciBenchmarkInstances(unittest.TestCase):
             125,
         )
         self.assertEqual(instance.task_ids, ("qa.bamboogle.paper-full125",))
+
+    def test_bcplus_level3_is_implemented_with_bounded_and_full_ranges(self) -> None:
+        instance = select_benchmark_instance("dci.bcplus.level3@1.0.0")
+
+        self.assertEqual(instance.implementation_state, "implemented")
+        self.assertEqual(resolve_case_limit(instance, case_limit=50, all_cases=False), 50)
+        self.assertEqual(resolve_case_limit(instance, case_limit=None, all_cases=True), 830)
+        self.assertEqual(instance.task_ids, ("bcplus.level3",))
 
     def test_invalid_selection_and_ranges_fail_closed(self) -> None:
         instance = select_benchmark_instance("dci.local-fixture@1.0.0")

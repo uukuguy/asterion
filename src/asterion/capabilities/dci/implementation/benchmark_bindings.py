@@ -20,6 +20,7 @@ _DCI_PACKAGE = CapabilityPackageRef("dci", "1.0.0")
 _DCI_SUITES = frozenset(
     (
         "dci.all",
+        "dci.bcplus.level3",
         "dci.github",
         "dci.paper-main",
         "dci.qa.bamboogle.github-sample50",

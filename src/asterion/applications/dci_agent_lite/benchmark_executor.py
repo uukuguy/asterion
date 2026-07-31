@@ -34,10 +34,10 @@ from asterion.capabilities.dci.implementation.runtime.pi_rpc import (
 )
 from asterion.runtime.host import CancellationSignal
 
-_BAMBOOGLE_PROFILE = "qa.bamboogle"
-_BAMBOOGLE_CONTRACTS = {
-    "qa.bamboogle.github-sample50": ("github-sample50", 50),
-    "qa.bamboogle.paper-full125": ("paper-full125", 125),
+_REAL_TASK_CONTRACTS = {
+    "bcplus.level3": ("bcplus.level3", "github-level3", 830),
+    "qa.bamboogle.github-sample50": ("qa.bamboogle", "github-sample50", 50),
+    "qa.bamboogle.paper-full125": ("qa.bamboogle", "paper-full125", 125),
 }
 _DEFAULT_EXPERIMENT_PROFILE = "asterion-safe/pi"
 _UPSTREAM_EXPERIMENT_PROFILE = (
@@ -247,7 +247,7 @@ def _real_payload(
     on_progress: object,
 ) -> DciBenchmarkInvocationPayload:
     task_id = invocation.task_id if isinstance(invocation, BenchmarkTaskInvocation) else None
-    contract = _BAMBOOGLE_CONTRACTS.get(task_id)
+    contract = _REAL_TASK_CONTRACTS.get(task_id)
     if (
         not isinstance(invocation, BenchmarkTaskInvocation)
         or contract is None
@@ -258,9 +258,9 @@ def _real_payload(
     ):
         _fail()
     payload = invocation.private_payload
-    selection_variant, max_case_limit = contract
+    profile_id, selection_variant, max_case_limit = contract
     if (
-        payload.profile_id != _BAMBOOGLE_PROFILE
+        payload.profile_id != profile_id
         or payload.selection_variant != selection_variant
         or type(payload.case_limit) is not int
         or not 1 <= payload.case_limit <= max_case_limit
