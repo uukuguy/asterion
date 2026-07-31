@@ -1,44 +1,51 @@
-# Recovered Session Checkpoint
+# Live Session Checkpoint
 
-> Updated: 2026-07-30.
+> Updated: 2026-07-31 13:16. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- Plan 4 closed in `935b129`; DCI is a capability-package implementation of
-  Asterion's generic benchmark subsystem.
-- Local and bounded Bamboogle instances now have formal installed execution
-  hosts with explicit authorization, private evidence, cancellation, and resume.
-- The installed-wheel local closure and complete DCI instance backlog are
-  finished. The first real Bamboogle GitHub sample50 instance is
-  `Verified-full`.
+- Bamboogle is the unified 125-case instance; its historical bounded result is
+  41/50 (82%).
+- BC+ Level 3 now has an exact product instance, payload suite, executor
+  contract, tests, and a Chinese runbook.
+- Its authorized 50/830 real run is in progress under a fresh source lock and
+  private evidence root; 28 cases have completed with no failed runs.
 
 ## Durable baseline
 
-- `dci@1.0.0` owns seven capabilities, three suites, fifteen task bindings,
-  implementation code, resources, and its provider.
-- Built-in, installed-distribution, and local-directory source forms passed
-  external-first equivalence and promotion checks.
-- `asterion-dci` wires its product-owned host only after explicit execution
-  arguments and authority; metadata-only commands remain provider-free.
-- The real Bamboogle path binds `asterion-safe/pi` to the existing Agent/Judge
-  engine. Main-workspace run `run-e8ea4a0db373482b9a849d8f8ace7790`
-  completed 50/50 cases with 41 correct and 82% accuracy; exact resume took
-  zero seconds and added no evidence or generation.
-- Integrated `main` passes `make check` and `make promotion-check`. The
-  completed capability-protocol worktree and branch no longer exist.
+- `dci@1.0.0` provides generic benchmark composition; DCI instances bind exact
+  suites and implementations without framework code importing DCI products.
+- The BC+ Level 3 executor preserves its established 300-turn, ten-concurrent
+  profile. Aggregation retains native evidence and maps concurrent results by
+  query identity.
+- The active run invokes `env -u DEEPSEEK_API_KEY` so the `.env` judge
+  credential is used instead of a conflicting inherited shell variable.
 
 ## Immediate next action
 
-Select the next exact instance from `DCI-BENCHMARK-INSTANCES.md` and implement
-it through the same generic benchmark host. Keep each real verification
-separately authorized and finitely bounded. Do not execute the 50-case
-Bamboogle plan without new authority.
+1. Wait for the active BC+ Level 3 run to finish all 50 cases, inspect only
+   aggregate evidence, then verify its exact resume reuses evidence.
+2. Publish the verified 50/830 result in `DCI-BENCHMARK-INSTANCES.md`, commit
+   and journal it.
+3. Implement and run the next instance, `dci.bcplus.main@1.0.0`, with the same
+   50-case closure before proceeding to later instances.
 
 ## Ruled-out paths
 
-- Do not put credentials, paths, provider configuration, prompts, or mutable
-  state into portable package manifests.
-- Do not grant execution merely because configuration, data, a source lock, or
-  prior evidence exists.
-- Do not add a DCI task loop or runner outside the generic benchmark subsystem.
-- Do not claim a fixture run reproduces a paper or full dataset.
+- Do not treat earlier BC+ evidence roots as results: they stopped on
+  credential, turn-budget, concurrency, or evidence-publication defects.
+- Do not create separate public sample/full instances: an instance has its
+  published total; a bounded result is reported as `50/total`.
+- Do not inspect or expose prompts, answers, corpus content, raw model output,
+  credentials, or private paths in public documentation.
+
+## Active command
+
+```bash
+env -u DEEPSEEK_API_KEY uv run asterion-dci benchmark run \
+  --instance dci.bcplus.level3@1.0.0 \
+  --case-limit 50 \
+  --capability-source-lock "$PWD/outputs/asterion-dci-bcplus-level3-stage50-final-closed-20260731/source-lock.json" \
+  --evidence-root "$PWD/outputs/asterion-dci-bcplus-level3-stage50-final-closed-20260731/evidence" \
+  --execute
+```

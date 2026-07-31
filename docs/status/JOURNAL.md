@@ -343,3 +343,4 @@
 - 12:48 Restored BC+ Level 3's ten-way concurrency for normal 50-case execution [bc89245]
 - 13:08 Retained native evidence through aggregation so multi-case runs do not cancel [f8ade72]
 - 13:18 Fixed out-of-order concurrent evidence mapping so digest publication stays valid [cd4873e]
+- 13:16 Started BC+ Level 3 authorized 50/830 run; checkpoint records active private evidence execution
