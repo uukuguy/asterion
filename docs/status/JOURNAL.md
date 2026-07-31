@@ -354,3 +354,5 @@
 - 13:16 BC+ Main completed 50/830: 14 correct, 28%, zero failures; resume reused all native generations
 - 13:16 Published BC+ Main verified 50/830 result and resume evidence [c1012a6]
 - 13:16 Added executable ArguAna IR suite, nDCG@10 contract, and 50/1406 Chinese runbook
+- 13:16 Published executable ArguAna 50-case IR benchmark contract [88e4632]
+- 13:16 Separated IR dataset selection from Agent prompt profile to restore ArguAna fixed-ID validation

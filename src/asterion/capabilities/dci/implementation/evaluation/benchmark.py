@@ -166,6 +166,7 @@ class BenchmarkRequest:
     limit: int | None = None
     mode: str = "qa"
     profile: str | None = None
+    dataset_profile: str | None = None
     corpus: Path | None = None
     corpus_hint: str | None = None
     max_concurrency: int = 1
@@ -1044,7 +1045,7 @@ def _prepare(
         beir_scope = {
             "beir.arguana": "beir.arguana.main.random50",
             "beir.scifact": "beir.scifact.main.random50",
-        }.get(request.profile)
+        }.get(request.dataset_profile)
         paper_dataset_benchmark = None
         if paper_scope is not None:
             candidate = resolve_paper_benchmark(

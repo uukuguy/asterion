@@ -189,6 +189,11 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 limit=payload.case_limit,
                 mode=_REAL_TASK_MODES.get(invocation.task_id, "qa"),
                 profile=self._experiment_profile,
+                dataset_profile=(
+                    "beir.arguana"
+                    if invocation.task_id == "beir.arguana"
+                    else None
+                ),
                 corpus=payload.corpus,
                 max_concurrency=max_concurrency,
                 max_turns=max_turns,
