@@ -367,3 +367,4 @@
 - 15:16 Published executable SciFact 50/300 IR benchmark contract [f27c55e]
 - 15:20 Extended SciFact recovery to three bounded Agent attempts [8a85dda]
 - 15:24 SciFact completed 50/300: nDCG@10 0.7579, $2.46, zero failed; resume added no generation
+- 15:25 Published verified SciFact bounded result and resume evidence [6c49862]
