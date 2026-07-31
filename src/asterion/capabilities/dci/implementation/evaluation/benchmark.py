@@ -1531,7 +1531,7 @@ async def _run_row(
                     )
                     return reused
             finally:
-                native.close()
+                pass
 
         if request.resume_policy == "reuse":
             result = _failed_result(
@@ -1708,7 +1708,7 @@ async def _run_row(
             )
             return result
         finally:
-            native_authority.close()
+            pass
     except asyncio.CancelledError:
         generation, available, evidence_fingerprint = _terminal_native_evidence(
             authority, request, paths

@@ -141,9 +141,9 @@ def _recorded_agent(paths, request, **kwargs) -> DciRunResult:
 
 
 class DciBenchmarkBamboogleE2ETests(unittest.TestCase):
-    def test_host_runs_one_real_engine_case_and_resume_reuses_evidence(self) -> None:
+    def test_host_runs_two_real_engine_cases_and_resume_reuses_evidence(self) -> None:
         sentinel = "PRIVATE-QUESTION-SENTINEL"
-        instance = select_benchmark_instance("dci.qa.bamboogle.github-sample50@1.0.0")
+        instance = select_benchmark_instance("dci.qa.bamboogle@1.0.0")
         agent_errors = []
 
         def agent(*args, **kwargs):
@@ -184,19 +184,20 @@ class DciBenchmarkBamboogleE2ETests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
             resources = root / "resources"
-            dataset = (
-                resources / "data" / "dci-bench" / "data" / "bamboogle" / "test.jsonl"
-            )
+            dataset = resources / "paper-full" / "data" / "bamboogle" / "test-125.jsonl"
             dataset.parent.mkdir(parents=True)
             dataset.write_text(
-                json.dumps(
-                    {
-                        "query_id": "q-1",
-                        "query": sentinel,
-                        "answer": "PRIVATE-GOLD",
-                    }
-                )
-                + "\n",
+                "".join(
+                    json.dumps(
+                        {
+                            "query_id": f"q-{index}",
+                            "query": sentinel,
+                            "answer": "PRIVATE-GOLD",
+                        }
+                    )
+                    + "\n"
+                    for index in (1, 2)
+                ),
                 encoding="utf-8",
             )
             (resources / "corpus" / "wiki_corpus").mkdir(parents=True)
@@ -251,7 +252,7 @@ class DciBenchmarkBamboogleE2ETests(unittest.TestCase):
                     resolved,
                     application_ref=instance.application_ref,
                     suite_ref=instance.suite_ref,
-                    case_limit=1,
+                    case_limit=2,
                     execute=False,
                     authorization=None,
                     resume_run_id=None,
@@ -259,7 +260,7 @@ class DciBenchmarkBamboogleE2ETests(unittest.TestCase):
                 authorization = host.authorize_execution(
                     application_ref=instance.application_ref,
                     suite_ref=instance.suite_ref,
-                    case_limit=1,
+                    case_limit=2,
                     evidence_root=evidence_root,
                     resume_run_id=resume_run_id,
                 )
@@ -267,7 +268,7 @@ class DciBenchmarkBamboogleE2ETests(unittest.TestCase):
                     resolved,
                     application_ref=instance.application_ref,
                     suite_ref=instance.suite_ref,
-                    case_limit=1,
+                    case_limit=2,
                     execute=True,
                     authorization=authorization,
                     resume_run_id=resume_run_id,
@@ -308,8 +309,8 @@ class DciBenchmarkBamboogleE2ETests(unittest.TestCase):
         )
         self.assertEqual(second.status, "completed")
         self.assertEqual(second_plan.run_id, first_plan.run_id)
-        self.assertEqual(agent_calls.call_count, 1)
-        self.assertEqual(judge_calls.call_count, 1)
+        self.assertEqual(agent_calls.call_count, 2)
+        self.assertEqual(judge_calls.call_count, 2)
         self.assertNotIn(sentinel, generic_evidence)
         self.assertNotIn("PRIVATE-JUDGE-KEY", generic_evidence)
         self.assertNotIn("PRIVATE-AGENT-ANSWER", generic_evidence)
