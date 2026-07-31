@@ -171,6 +171,7 @@ class BenchmarkRequest:
     corpus_hint: str | None = None
     max_concurrency: int = 1
     max_turns: int | None = None
+    max_native_attempts: int = 1
     system_prompt_file: Path | None = None
     append_system_prompt_file: Path | None = None
     conversation_features: DciConversationFeatures | None = None
@@ -913,6 +914,7 @@ def _prepare(
     for value, label in (
         (request.max_concurrency, "concurrency"),
         (request.max_turns, "max turns"),
+        (request.max_native_attempts, "native attempt limit"),
     ):
         if value is not None and (
             isinstance(value, bool) or not isinstance(value, int) or value < 1
@@ -926,6 +928,8 @@ def _prepare(
         raise DciBenchmarkError("DCI benchmark limit is invalid")
     if request.resume_policy not in {"compatible", "fresh", "reuse"}:
         raise DciBenchmarkError("DCI benchmark resume policy is invalid")
+    if request.max_native_attempts not in {1, 2}:
+        raise DciBenchmarkError("DCI benchmark native attempt limit is invalid")
     if request.figures and not request.analysis:
         raise DciBenchmarkError("DCI benchmark figures require analysis")
     ranking_metric_contract = _metric_contract_for_request(request)
@@ -1255,6 +1259,7 @@ def _prepare(
         ),
         "max_concurrency": request.max_concurrency,
         "max_turns": request.max_turns,
+        "max_native_attempts": request.max_native_attempts,
         "analysis": request.analysis,
         "figures": request.figures,
         "judge": judge,
@@ -1617,9 +1622,9 @@ async def _run_row(
                         ),
                         final_answer_recovery=prompt_contract.final_answer_recovery,
                     )
-                agent_started_at = _utc_now()
-                agent_reservation = _reserve_authorized_operation(request, "agent")
-                try:
+                for native_attempt in range(request.max_native_attempts):
+                    agent_started_at = agent_started_at or _utc_now()
+                    agent_reservation = _reserve_authorized_operation(request, "agent")
                     try:
                         agent_operation_performed = True
                         await _run_pi_async(
@@ -1643,11 +1648,30 @@ async def _run_row(
                             _reconcile_authorized_operation(
                                 request, agent_reservation, actual_cost
                             )
+                        break
+                    except DciRunError:
+                        _fail_authorized_operation(request, agent_reservation)
+                        native_state = _native_state(native_authority, native_dir)
+                        if (
+                            native_attempt + 1 >= request.max_native_attempts
+                            or native_state not in {"failed", "incomplete", "running"}
+                        ):
+                            raise
+                        native_request = replace(
+                            resume_request_from_output_dir(
+                                native_dir,
+                                extra_args=request.runtime_options.extra_args,
+                                _directory_fd=native_authority.fd,
+                            ),
+                            final_answer_recovery=(
+                                prompt_contract.final_answer_recovery
+                            ),
+                        )
                     except BaseException:
                         _fail_authorized_operation(request, agent_reservation)
                         raise
-                finally:
-                    agent_finished_at = _utc_now()
+                    finally:
+                        agent_finished_at = _utc_now()
             result: dict[str, object] = {
                 "schema": "asterion.dci.batch-result/v1",
                 "query_id": row.query_id,
@@ -2154,7 +2178,8 @@ def _validate_config_document(
         "schema", "run_id", "product", "dataset", "mode", "profile",
         "corpus_identity", "corpus_contract", "corpus_content_identity",
         "corpus_hint", "runtime_contract", "context_contract", "cwd", "runtime",
-        "conversation_features", "max_concurrency", "max_turns", "analysis",
+        "conversation_features", "max_concurrency", "max_turns",
+        "max_native_attempts", "analysis",
         "figures", "judge", "judge_configuration_fingerprint",
         "ranking_metric_contract",
         "paper_ir_duplicate_handling_assumption",

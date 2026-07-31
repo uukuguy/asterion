@@ -279,6 +279,7 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
         self.assertEqual(calls[0][0].dataset_profile, "beir.arguana")
         self.assertEqual(calls[0][0].max_turns, 300)
         self.assertEqual(calls[0][0].max_concurrency, 10)
+        self.assertEqual(calls[0][0].max_native_attempts, 2)
 
     def test_uses_explicit_upstream_profile_and_turn_limit(self) -> None:
         calls = []

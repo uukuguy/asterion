@@ -62,7 +62,11 @@ from asterion.capabilities.dci.implementation.reproduction.provenance import (
     dci_complete_implementation_identity,
 )
 from asterion.capabilities.dci.implementation.reproduction.reproduction import load_run_manifest, validate_run_manifest
-from asterion.capabilities.dci.implementation.runtime.run import DciRunResult, run_pi_research as _real_run_pi_research
+from asterion.capabilities.dci.implementation.runtime.run import (
+    DciRunError,
+    DciRunResult,
+    run_pi_research as _real_run_pi_research,
+)
 from asterion.runtime.host import RunEvent
 
 
@@ -165,6 +169,12 @@ class _FixtureClient:
 
     def stop(self) -> None:
         pass
+
+
+class _FailingFixtureClient(_FixtureClient):
+    def prompt_and_wait(self, _message: str, *, on_event, **_kwargs: object) -> str:
+        on_event({"type": "agent_start"})
+        raise RuntimeError("transient fixture failure")
 
 
 class _CostedFixtureClient(_FixtureClient):
@@ -2155,6 +2165,48 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
             self.assertEqual(run.call_count, 1)
             self.assertTrue((result.output_root / "summary.json").is_file())
             self.assertEqual(result.counts["correct"], 1)
+
+    def test_bounded_native_attempts_resume_a_transient_agent_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            request = replace(_request(root), max_native_attempts=2)
+            attempts = 0
+
+            def fail_then_resume(
+                _paths: object, native_request: object, **kwargs: object
+            ) -> DciRunResult:
+                nonlocal attempts
+                attempts += 1
+                client = (
+                    _FailingFixtureClient if attempts == 1 else _FixtureClient
+                )
+                with patch(
+                    "asterion.capabilities.dci.implementation.runtime.run.PiRpcClient",
+                    client,
+                ):
+                    return _real_run_pi_research(
+                        resolve_dci_paths(Path(native_request.cwd)),
+                        native_request,
+                        **kwargs,
+                    )
+
+            with patch(
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research",
+                side_effect=fail_then_resume,
+            ) as run, patch(
+                "asterion.capabilities.dci.implementation.evaluation.evaluation.judge_answer_sync",
+                return_value=_verdict(request.judge_config),
+            ):
+                result = run_benchmark(request, paths=resolve_dci_paths(root))
+
+            self.assertEqual(run.call_count, 2)
+            self.assertEqual(result.counts["correct"], 1)
+            self.assertEqual(result.counts["failed"], 0)
+            state = json.loads(
+                (request.output_root / "q-1" / "native-generation-0001" / "state.json").read_text()
+            )
+            self.assertEqual(state["status"], "completed")
+            self.assertEqual(state["resume_count"], 1)
 
     def test_existing_successful_result_skips_run_and_evaluation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

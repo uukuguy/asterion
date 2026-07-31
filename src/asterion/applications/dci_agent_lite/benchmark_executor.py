@@ -197,6 +197,7 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 corpus=payload.corpus,
                 max_concurrency=max_concurrency,
                 max_turns=max_turns,
+                max_native_attempts=2,
                 resume_policy="compatible",
             )
             on_progress(

@@ -356,3 +356,5 @@
 - 13:16 Added executable ArguAna IR suite, nDCG@10 contract, and 50/1406 Chinese runbook
 - 13:16 Published executable ArguAna 50-case IR benchmark contract [88e4632]
 - 13:16 Separated IR dataset selection from Agent prompt profile to restore ArguAna fixed-ID validation
+- 13:16 Published separate IR dataset-profile binding after ArguAna startup diagnosis [8a31434]
+- 13:16 Added bounded DCI-native recovery for a transient Agent failure; each real row has at most two native attempts
