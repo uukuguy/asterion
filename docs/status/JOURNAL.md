@@ -368,3 +368,6 @@
 - 15:20 Extended SciFact recovery to three bounded Agent attempts [8a85dda]
 - 15:24 SciFact completed 50/300: nDCG@10 0.7579, $2.46, zero failed; resume added no generation
 - 15:25 Published verified SciFact bounded result and resume evidence [6c49862]
+- 15:30 Published executable Bright Biology 50/103 IR benchmark contract [abc54a8]
+- 15:34 Routed Bright task identity to strict BRIGHT dataset parsing [7835eb3]
+- 15:40 Bright Biology completed 50/103: nDCG@10 0.6339, $3.92, zero failed; resume added no generation
