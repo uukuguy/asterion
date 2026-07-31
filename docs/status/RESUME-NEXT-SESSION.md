@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-31 22:00. **Session remains active — not a final handoff.**
+> Updated: 2026-07-31 22:52. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -18,11 +18,13 @@
   76% (38/50), about $2.22, run `run-9d38318832304246bd46f3c19fe459eb`.
 - QA Musique completed its actual 50/2,417 run and resume verification:
   44% (22/50), about $2.64, run `run-4d89eb351de14ba4a7ed7a988331ccfa`.
+- QA Natural Questions completed its actual 50/3,610 run and resume verification:
+  72% (36/50), about $1.74, run `run-dde54b4fef884efc84bece74a327c23d`.
 
 ## Immediate next action
 
-1. Implement QA Natural Questions with test-first contract, payload,
-   binding, Chinese runbook, and focused verification.
+1. Implement QA TriviaQA with test-first contract, payload, binding, Chinese
+   runbook, and focused verification.
 2. Run exactly 50/total, then resume the returned run ID and verify the native
    generation count is unchanged before publishing its result.
 3. Continue the remaining QA instances in the same order; do not start any
