@@ -45,6 +45,7 @@ _REAL_TASK_CONTRACTS = {
     "bright.robotics": ("bright.robotics", "main", 101),
     "qa.2wikimultihopqa": ("qa.2wikimultihopqa", "main", 12576),
     "qa.hotpotqa": ("qa.hotpotqa", "main", 7405),
+    "qa.musique": ("qa.musique", "main", 2417),
     "qa.bamboogle.github-sample50": ("qa.bamboogle", "github-sample50", 50),
     "qa.bamboogle.paper-full125": ("qa.bamboogle", "paper-full125", 125),
 }

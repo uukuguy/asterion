@@ -28,6 +28,7 @@ SUITE_TASKS = {
     "dci.bright.robotics": ("bright.robotics",),
     "dci.qa.2wikimultihopqa": ("qa.2wikimultihopqa",),
     "dci.qa.hotpotqa": ("qa.hotpotqa",),
+    "dci.qa.musique": ("qa.musique",),
     "dci.github": (
         "bcplus.level3",
         "bcplus.main",
@@ -122,6 +123,7 @@ class TestDciCapabilityPayload(unittest.TestCase):
                     "1.0.0",
                 ),
                 BenchmarkSuiteRef("dci.qa.hotpotqa", "1.0.0"),
+                BenchmarkSuiteRef("dci.qa.musique", "1.0.0"),
             ),
         )
 
@@ -166,6 +168,7 @@ class TestDciCapabilityPayload(unittest.TestCase):
                     "version": "1.0.0",
                 },
                 {"suite_id": "dci.qa.hotpotqa", "version": "1.0.0"},
+                {"suite_id": "dci.qa.musique", "version": "1.0.0"},
             ],
         )
         for field, directory in (

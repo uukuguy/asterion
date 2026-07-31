@@ -120,6 +120,7 @@ class TestDciBenchmarkInstances(unittest.TestCase):
                 "dci.qa.2wikimultihopqa@1.0.0",
                 "dci.qa.bamboogle@1.0.0",
                 "dci.qa.hotpotqa@1.0.0",
+                "dci.qa.musique@1.0.0",
             ),
         )
         local = select_benchmark_instance("dci.local-fixture@1.0.0")
@@ -233,6 +234,14 @@ class TestDciBenchmarkInstances(unittest.TestCase):
         self.assertEqual(resolve_case_limit(instance, case_limit=50, all_cases=False), 50)
         self.assertEqual(resolve_case_limit(instance, case_limit=None, all_cases=True), 7405)
         self.assertEqual(instance.task_ids, ("qa.hotpotqa",))
+
+    def test_musique_is_implemented_with_bounded_and_full_ranges(self) -> None:
+        instance = select_benchmark_instance("dci.qa.musique@1.0.0")
+
+        self.assertEqual(instance.implementation_state, "implemented")
+        self.assertEqual(resolve_case_limit(instance, case_limit=50, all_cases=False), 50)
+        self.assertEqual(resolve_case_limit(instance, case_limit=None, all_cases=True), 2417)
+        self.assertEqual(instance.task_ids, ("qa.musique",))
 
     def test_invalid_selection_and_ranges_fail_closed(self) -> None:
         instance = select_benchmark_instance("dci.local-fixture@1.0.0")
