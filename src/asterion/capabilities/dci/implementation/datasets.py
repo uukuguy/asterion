@@ -386,6 +386,7 @@ def load_bright_benchmark_rows_bytes(
             else:
                 raise DatasetError("DCI BRIGHT query ID is invalid")
             query = _require_nonempty_string(value["query"], field="query")
+            query = query.replace("\r\n", "\n").replace("\r", "\n")
             for field in ("answer", "id", "reasoning"):
                 _require_nonempty_string(value[field], field=field)
             for field in ("excluded_ids", "gold_ids_long"):

@@ -1,33 +1,35 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-31 14:57. **Session remains active — not a final handoff.**
+> Updated: 2026-07-31 15:50. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- 50-case completion order remains fixed: Bamboogle, BC+ Level 3 and BC+ Main
-  are verified; ArguAna is the active fourth instance.
-- `963bb1b` adds one bounded DCI-native recovery attempt: resumable runs reuse
-  their native generation; a nonresumable run retains its failed evidence and
-  starts one fresh generation. The generic benchmark runner remains unchanged.
-- The prior live ArguAna attempt exposed this level3 session condition and is
-  discarded. A fresh 50/1406 run must finish and resume before promotion.
+- Every real DCI instance must first close a scored, resumed `min(50, total)` run.
+- Bamboogle, BC+ Level 3/Main, BEIR ArguAna/SciFact, and Bright Biology are
+  `Verified-bounded`; their results are in `DCI-BENCHMARK-INSTANCES.md`.
+- Bright Earth Science is implemented in commit `5d36652`; its real 50/116 run
+  is live under `outputs/asterion-dci-bright-earth-science-stage50-20260731-rerun`.
 
-## Verified baseline
+## Live run
 
-- Bamboogle: 41/50 (82%).
-- BC+ Level 3: 17/50 (34%).
-- BC+ Main: 14/50 (28%).
+- Process: `asterion-dci benchmark run` for `dci.bright.earth-science@1.0.0`.
+- Lock and evidence root are in the live-run directory above.
+- At checkpoint, nine completed native evidence records exist and no failure is
+  recorded. Do not call a second `run`.
 
 ## Immediate next action
 
-1. Poll the live ArguAna run using aggregate evidence statuses only.
-2. If all 50 complete, run exact `benchmark resume`, check no generation was
-   added, record nDCG@10/cost/run ID in the Chinese instance list, and commit.
-3. Continue with the next listed DCI instance only after ArguAna is verified.
+1. Poll aggregate evidence statuses only; never expose raw benchmark material.
+2. When all 50 complete, get summary nDCG@10/cost/run ID, run exact resume,
+   verify native-generation count is unchanged, then update the Chinese table
+   and runbook and commit.
+3. Only then implement and run Bright Economics 50/103 with the same test-first
+   and payload/Chinese-runbook closure.
 
 ## Ruled-out paths
 
-- Do not reuse the earlier ArguAna evidence roots: they either selected an old
-  external resource root or ended with terminal task failures before recovery.
-- Do not report raw prompts, corpus, answers, model output, credentials, or
+- Do not introduce public sample/full duplicate instances; report `50/total`.
+- Do not publish raw prompts, corpus, answers, model output, credentials, or
   private paths.
+- Do not infer data totals: use the paper benchmark inventory (Earth Science is
+  116).

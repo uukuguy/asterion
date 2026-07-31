@@ -373,3 +373,5 @@
 - 15:40 Bright Biology completed 50/103: nDCG@10 0.6339, $3.92, zero failed; resume added no generation
 - 15:41 Published Bright Biology bounded result for reproducible 50/103 reporting [5d966e0]
 - 15:46 Implemented executable Bright Earth Science 50/116 contract after test-first validation
+- 15:47 Published Bright Earth Science runnable contract, payload, tests, and Chinese runbook [5d36652]
+- 16:32 Identified Bright CRLF queries invalidating native evidence; canonicalized BRIGHT query line endings before execution
