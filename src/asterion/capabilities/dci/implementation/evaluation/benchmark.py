@@ -1613,6 +1613,7 @@ async def _run_row(
                     append_system_prompt_file=request.append_system_prompt_file,
                     conversation_features=request.conversation_features,
                 )
+                fresh_native_request = native_request
                 if native_state in {"failed", "incomplete", "running"}:
                     native_request = replace(
                         resume_request_from_output_dir(
@@ -1657,16 +1658,23 @@ async def _run_row(
                             or native_state not in {"failed", "incomplete", "running"}
                         ):
                             raise
-                        native_request = replace(
-                            resume_request_from_output_dir(
-                                native_dir,
-                                extra_args=request.runtime_options.extra_args,
-                                _directory_fd=native_authority.fd,
-                            ),
-                            final_answer_recovery=(
-                                prompt_contract.final_answer_recovery
-                            ),
-                        )
+                        try:
+                            native_request = replace(
+                                resume_request_from_output_dir(
+                                    native_dir,
+                                    extra_args=request.runtime_options.extra_args,
+                                    _directory_fd=native_authority.fd,
+                                ),
+                                final_answer_recovery=(
+                                    prompt_contract.final_answer_recovery
+                                ),
+                            )
+                        except DciRunError:
+                            generation = _next_generation(query)
+                            native_authority = query.open_query(generation)
+                            authority.bind_native(native_authority, generation)
+                            native_dir = lock.path / row.query_id / generation
+                            native_request = fresh_native_request
                     except BaseException:
                         _fail_authorized_operation(request, agent_reservation)
                         raise

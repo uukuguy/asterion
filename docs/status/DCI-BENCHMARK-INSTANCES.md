@@ -298,8 +298,9 @@ native-generation 目录数量保持 50，证明 resume 没有重新调用 Agent
 这是 BEIR ArguAna 的真实 IR 实例，总量 1406 条；当前先执行 50 条。它由 Agent 生成
 检索结果，并以 binary deduplicated nDCG@10 聚合评分，不使用 QA 答案正确率。每条最多
 300 个 Agent 回合，最多 10 路并发。若原生 Agent 留下可验证的 failed/incomplete/running
-证据，DCI 只在同一 native generation 内恢复一次，因此 50 条运行最多产生 100 次 Agent
-尝试；不可恢复的失败仍会 fail closed。完整 1406 条在所有实例的 50 条版本完成前不执行。
+证据，DCI 只恢复一次：有可恢复会话时复用同一 native generation；否则保留失败证据并新建
+一代。50 条运行最多产生 100 次 Agent 尝试；第二次仍失败则 fail closed。完整 1406 条在
+所有实例的 50 条版本完成前不执行。
 
 ```bash
 env -u DEEPSEEK_API_KEY ASTERION_DCI_RESOURCE_ROOT="$PWD" uv run asterion-dci preflight --env-file "$PWD/.env"

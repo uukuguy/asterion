@@ -358,3 +358,5 @@
 - 13:16 Separated IR dataset selection from Agent prompt profile to restore ArguAna fixed-ID validation
 - 13:16 Published separate IR dataset-profile binding after ArguAna startup diagnosis [8a31434]
 - 13:16 Added bounded DCI-native recovery for a transient Agent failure; each real row has at most two native attempts
+- 14:57 Added bounded native recovery for transient Agent failures [920953a]
+- 15:00 Identified level3 failures without resumable sessions; retry must retain evidence and start a new generation

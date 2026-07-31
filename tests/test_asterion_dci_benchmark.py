@@ -2208,6 +2208,49 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
             self.assertEqual(state["status"], "completed")
             self.assertEqual(state["resume_count"], 1)
 
+    def test_bounded_native_attempts_start_fresh_generation_when_resume_is_invalid(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            request = replace(_request(root), max_native_attempts=2)
+            attempts = 0
+
+            def fail_then_restart(
+                _paths: object, native_request: object, **kwargs: object
+            ) -> DciRunResult:
+                nonlocal attempts
+                attempts += 1
+                client = (
+                    _FailingFixtureClient if attempts == 1 else _FixtureClient
+                )
+                with patch(
+                    "asterion.capabilities.dci.implementation.runtime.run.PiRpcClient",
+                    client,
+                ):
+                    return _real_run_pi_research(
+                        resolve_dci_paths(Path(native_request.cwd)),
+                        native_request,
+                        **kwargs,
+                    )
+
+            with patch(
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research",
+                side_effect=fail_then_restart,
+            ) as run, patch(
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.resume_request_from_output_dir",
+                side_effect=DciRunError("resume unavailable"),
+            ), patch(
+                "asterion.capabilities.dci.implementation.evaluation.evaluation.judge_answer_sync",
+                return_value=_verdict(request.judge_config),
+            ):
+                result = run_benchmark(request, paths=resolve_dci_paths(root))
+
+            self.assertEqual(run.call_count, 2)
+            self.assertEqual(result.counts["correct"], 1)
+            first = request.output_root / "q-1" / "native-generation-0001" / "state.json"
+            second = request.output_root / "q-1" / "native-generation-0002" / "state.json"
+            self.assertEqual(json.loads(first.read_text())["status"], "failed")
+            self.assertEqual(json.loads(second.read_text())["status"], "completed")
+
     def test_existing_successful_result_skips_run_and_evaluation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory).resolve()

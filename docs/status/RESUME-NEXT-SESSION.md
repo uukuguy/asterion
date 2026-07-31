@@ -1,34 +1,34 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-31 13:16. **Session remains active — not a final handoff.**
+> Updated: 2026-07-31 14:57. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- The DCI evaluation order is fixed: each real instance completes its 50-case
-  result and exact resume before any full-data evaluation is considered.
-- Bamboogle is verified at 41/50 (82%); BC+ Level 3 is verified at 17/50
-  (34%); BC+ Main is verified at 14/50 (28%). All have zero failed runs and
-  no-regeneration resume closure.
-- The next unimplemented instance is `dci.beir.arguana@1.0.0`.
+- 50-case completion order remains fixed: Bamboogle, BC+ Level 3 and BC+ Main
+  are verified; ArguAna is the active fourth instance.
+- `920953a` adds one bounded DCI-native recovery attempt for a failed,
+  incomplete, or running native Agent generation. The generic benchmark runner
+  remains unchanged and does not retry.
+- A clean ArguAna 50/1406 run is live in the current worktree with the local
+  resource root explicitly selected. It must finish and resume without a new
+  native generation before documentation is promoted.
 
-## Durable baseline
+## Verified baseline
 
-- `dci.bcplus.main@1.0.0` uses suite `dci.bcplus.main@1.0.0`, task
-  `bcplus.main`, the established 100-turn / ten-concurrent profile, and the
-  real Agent/Judge engine.
-- Its run `run-9bc4c4ec92f44ee8bab0fda79c01ceb4` completed 50/830 with 14
-  correct, 28% accuracy, and 0 failures. Resume reused all 50 generations.
+- Bamboogle: 41/50 (82%).
+- BC+ Level 3: 17/50 (34%).
+- BC+ Main: 14/50 (28%).
 
 ## Immediate next action
 
-1. Verify and commit the BC+ Main result documentation.
-2. Implement `dci.beir.arguana@1.0.0` through an exact IR task contract,
-   suite, runbook, tests, and 50-case real execution/resume closure.
+1. Poll the live ArguAna run using aggregate evidence statuses only.
+2. If all 50 complete, run exact `benchmark resume`, check no generation was
+   added, record nDCG@10/cost/run ID in the Chinese instance list, and commit.
+3. Continue with the next listed DCI instance only after ArguAna is verified.
 
 ## Ruled-out paths
 
-- Do not use shell-background or `nohup` for benchmark runs here: the command
-  host reaps them when the short shell exits. Use a controlled live run.
-- Do not label either 50/830 result as a full benchmark or paper reproduction.
-- Do not publish prompts, answers, corpus text, raw model output, credentials,
-  or private filesystem paths.
+- Do not reuse the earlier ArguAna evidence roots: they either selected an old
+  external resource root or ended with terminal task failures before recovery.
+- Do not report raw prompts, corpus, answers, model output, credentials, or
+  private paths.
