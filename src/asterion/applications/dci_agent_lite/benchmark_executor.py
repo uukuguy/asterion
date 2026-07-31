@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import os
 import stat
+from dataclasses import replace
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -214,7 +215,7 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 output_root=payload.output_directory,
                 cwd=self._paths.repo_root,
                 judge_config=self._judge_config,
-                runtime_options=self._runtime_options,
+                runtime_options=replace(self._runtime_options, tools="read,grep"),
                 limit=payload.case_limit,
                 mode=_REAL_TASK_MODES.get(invocation.task_id, "qa"),
                 profile=self._experiment_profile,

@@ -151,7 +151,7 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
         self.assertEqual(request.output_root, root / "output")
         self.assertEqual(request.cwd, root)
         self.assertIs(request.judge_config, judge)
-        self.assertIs(request.runtime_options, runtime)
+        self.assertEqual(request.runtime_options.tools, "read,grep")
         self.assertEqual(request.limit, 1)
         self.assertEqual(request.mode, "qa")
         self.assertEqual(
