@@ -1,30 +1,24 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-31 15:50. **Session remains active — not a final handoff.**
+> Updated: 2026-07-31 17:10. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
 - Every real DCI instance must first close a scored, resumed `min(50, total)` run.
-- Bamboogle, BC+ Level 3/Main, BEIR ArguAna/SciFact, and Bright Biology are
-  `Verified-bounded`; their results are in `DCI-BENCHMARK-INSTANCES.md`.
-- Bright Earth Science is implemented in commit `5d36652`; its real 50/116 run
-  is live under `outputs/asterion-dci-bright-earth-science-stage50-20260731-rerun`.
-
-## Live run
-
-- Process: `asterion-dci benchmark run` for `dci.bright.earth-science@1.0.0`.
-- Lock and evidence root are in the live-run directory above.
-- At checkpoint, nine completed native evidence records exist and no failure is
-  recorded. Do not call a second `run`.
+- Bamboogle, BC+ Level 3/Main, BEIR ArguAna/SciFact, Bright Biology/Earth
+  Science, and Bright Economics are `Verified-bounded`; their results are in
+  `DCI-BENCHMARK-INSTANCES.md`.
+- Bright Economics has completed its actual 50/103 run and resume verification:
+  nDCG@10 0.3717, about $4.11, run `run-63742304e39c4d4a852d1bc4b27174f9`.
 
 ## Immediate next action
 
-1. Poll aggregate evidence statuses only; never expose raw benchmark material.
-2. When all 50 complete, get summary nDCG@10/cost/run ID, run exact resume,
-   verify native-generation count is unchanged, then update the Chinese table
-   and runbook and commit.
-3. Only then implement and run Bright Economics 50/103 with the same test-first
-   and payload/Chinese-runbook closure.
+1. Implement Bright Robotics (101 total) with test-first contract, payload,
+   binding, Chinese runbook, and focused verification.
+2. Run exactly 50/101, then resume the returned run ID and verify the native
+   generation count is unchanged before publishing its result.
+3. Continue the remaining QA instances in the same order; do not start any
+   full-data run until every real instance has a 50/total closure.
 
 ## Ruled-out paths
 

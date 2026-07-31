@@ -15,8 +15,8 @@ benchmark 实例的实现清单、验证台账和运行手册。
 | `dci.beir.scifact@1.0.0` | implemented / Verified-bounded | 50/300 | nDCG@10 = 0.7579 | `gpt-5.6-luna`；无 Judge；约 $2.46；`run-ec81e1…687e`；resume 未新增生成 | 实现并完成下一个实例的 50 条版本 |
 | `dci.bright.biology@1.0.0` | implemented / Verified-bounded | 50/103 | nDCG@10 = 0.6339 | `gpt-5.6-luna`；无 Judge；约 $3.92；`run-9ae14d…0b0c`；resume 未新增生成 | 实现并完成 `dci.bright.earth-science@1.0.0` 的 50 条版本 |
 | `dci.bright.earth-science@1.0.0` | implemented / Verified-bounded | 50/116 | nDCG@10 = 0.4014 | `gpt-5.6-luna`；无 Judge；约 $3.46；`run-d607f6…9814`；resume 未新增生成 | 实现并完成 `dci.bright.economics@1.0.0` 的 50 条版本 |
-| `dci.bright.economics@1.0.0` | implemented / Not rerun | — | — | 已接入真实 IR Agent、103 条数据集和 economics corpus | 通过 preflight 后完成 50/103 真实运行与 resume |
-| `dci.bright.robotics@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
+| `dci.bright.economics@1.0.0` | implemented / Verified-bounded | 50/103 | nDCG@10 = 0.3717 | `gpt-5.6-luna`；无 Judge；约 $4.11；`run-637423…74f9`；resume 未新增生成 | 实现并完成 `dci.bright.robotics@1.0.0` 的 50 条版本 |
+| `dci.bright.robotics@1.0.0` | planned / Not rerun | — | — | — | 实现并完成 50/101 真实运行与 resume |
 | `dci.local-fixture@1.0.0` | implemented / Verified-local | 15×1 | 无评分 | 无模型；安装包测试 | 维护闭环 |
 | `dci.qa.2wikimultihopqa@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.qa.bamboogle@1.0.0` | implemented / Verified-bounded | 50/125 | 82%（41/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $2.20；`run-e8ea4…7790` | 等待所有实例的 50 条版本完成后，再统一决定全量 |
@@ -426,6 +426,14 @@ env -u DEEPSEEK_API_KEY ASTERION_DCI_RESOURCE_ROOT="$PWD" uv run asterion-dci be
 
 只有 run 和 resume 都成功，且 resume 不新增 generation，才能标为 `Verified-bounded`；台账
 必须记录 `50/103`、nDCG@10、成本和 run ID。
+
+### 已验证的 50/103 结果
+
+本次真实运行的 run ID 为 `run-63742304e39c4d4a852d1bc4b27174f9`：50 条全部完成、
+无失败，nDCG@10 为 `0.37165142180029237`（台账显示为 0.3717）。共执行 50 次 Agent
+操作、0 次 Judge 操作，成本为 `$4.1091958`（台账显示约 $4.11）。首次运行后共有 50 条
+native generation；resume 后仍为 50，未发起新生成。此为 50/103 的有界结果，不是完整
+103 条结果，也不能与原论文完整分数直接等同。
 
 ## 运行手册：`dci.bright.earth-science@1.0.0`
 
