@@ -50,6 +50,9 @@ SUITE_TASKS = {
     "dci.qa.bamboogle.github-sample50": (
         "qa.bamboogle.github-sample50",
     ),
+    "dci.qa.bamboogle.paper-full125": (
+        "qa.bamboogle.paper-full125",
+    ),
 }
 SUITE_TASKS["dci.all"] = tuple(
     sorted(set(SUITE_TASKS["dci.github"]) | set(SUITE_TASKS["dci.paper-main"]))
@@ -95,6 +98,10 @@ class TestDciCapabilityPayload(unittest.TestCase):
                     "dci.qa.bamboogle.github-sample50",
                     "1.0.0",
                 ),
+                BenchmarkSuiteRef(
+                    "dci.qa.bamboogle.paper-full125",
+                    "1.0.0",
+                ),
             ),
         )
 
@@ -123,6 +130,10 @@ class TestDciCapabilityPayload(unittest.TestCase):
                 {"suite_id": "dci.paper-main", "version": "1.0.0"},
                 {
                     "suite_id": "dci.qa.bamboogle.github-sample50",
+                    "version": "1.0.0",
+                },
+                {
+                    "suite_id": "dci.qa.bamboogle.paper-full125",
                     "version": "1.0.0",
                 },
             ],

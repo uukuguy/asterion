@@ -23,6 +23,7 @@ _DCI_SUITES = frozenset(
         "dci.github",
         "dci.paper-main",
         "dci.qa.bamboogle.github-sample50",
+        "dci.qa.bamboogle.paper-full125",
     )
 )
 

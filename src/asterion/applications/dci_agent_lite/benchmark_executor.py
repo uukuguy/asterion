@@ -34,9 +34,11 @@ from asterion.capabilities.dci.implementation.runtime.pi_rpc import (
 )
 from asterion.runtime.host import CancellationSignal
 
-_BAMBOOGLE_TASK = "qa.bamboogle.github-sample50"
 _BAMBOOGLE_PROFILE = "qa.bamboogle"
-_BAMBOOGLE_SELECTION = "github-sample50"
+_BAMBOOGLE_CONTRACTS = {
+    "qa.bamboogle.github-sample50": ("github-sample50", 50),
+    "qa.bamboogle.paper-full125": ("paper-full125", 125),
+}
 _DEFAULT_EXPERIMENT_PROFILE = "asterion-safe/pi"
 _UPSTREAM_EXPERIMENT_PROFILE = (
     "upstream-github/271f37e71f053bf0c99c05ce6d2fb53b841d922e/pi"
@@ -233,7 +235,7 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
             return _cancelled(
                 invocation.task_id
                 if isinstance(invocation, BenchmarkTaskInvocation)
-                else _BAMBOOGLE_TASK
+                else "qa.bamboogle.github-sample50"
             )
         except Exception:
             _fail()
@@ -244,21 +246,24 @@ def _real_payload(
     cancellation: object,
     on_progress: object,
 ) -> DciBenchmarkInvocationPayload:
+    task_id = invocation.task_id if isinstance(invocation, BenchmarkTaskInvocation) else None
+    contract = _BAMBOOGLE_CONTRACTS.get(task_id)
     if (
         not isinstance(invocation, BenchmarkTaskInvocation)
-        or invocation.task_id != _BAMBOOGLE_TASK
-        or invocation.binding_id != _BAMBOOGLE_TASK
+        or contract is None
+        or invocation.binding_id != invocation.task_id
         or not isinstance(invocation.private_payload, DciBenchmarkInvocationPayload)
         or not callable(on_progress)
         or not hasattr(cancellation, "cancelled")
     ):
         _fail()
     payload = invocation.private_payload
+    selection_variant, max_case_limit = contract
     if (
         payload.profile_id != _BAMBOOGLE_PROFILE
-        or payload.selection_variant != _BAMBOOGLE_SELECTION
+        or payload.selection_variant != selection_variant
         or type(payload.case_limit) is not int
-        or not 1 <= payload.case_limit <= 50
+        or not 1 <= payload.case_limit <= max_case_limit
         or payload.max_concurrency != 1
         or payload.resume_policy != "compatible"
         or payload.runtime_context_level not in {None, "level3"}

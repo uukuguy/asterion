@@ -7,24 +7,24 @@ benchmark 实例的实现清单、验证台账和运行手册。
 外部 benchmark。验证状态只使用 `Not rerun`、`Verified-local`、
 `External-limited`、`Verified-bounded` 和 `Verified-full`。
 
-| 实例 | 任务 | 实现状态 | 验证状态 | 完整案例数 | 下一道门 |
-|---|---|---|---|---:|---|
-| `dci.bcplus.level3@1.0.0` | `bcplus.level3` | planned | Not rerun | — | 锁定有限范围并实现 |
-| `dci.bcplus.main@1.0.0` | `bcplus.main` | planned | Not rerun | — | 锁定有限范围并实现 |
-| `dci.beir.arguana@1.0.0` | `beir.arguana` | planned | Not rerun | — | 锁定有限范围并实现 |
-| `dci.beir.scifact@1.0.0` | `beir.scifact` | planned | Not rerun | — | 锁定有限范围并实现 |
-| `dci.bright.biology@1.0.0` | `bright.biology` | planned | Not rerun | — | 锁定有限范围并实现 |
-| `dci.bright.earth-science@1.0.0` | `bright.earth-science` | planned | Not rerun | — | 锁定有限范围并实现 |
-| `dci.bright.economics@1.0.0` | `bright.economics` | planned | Not rerun | — | 锁定有限范围并实现 |
-| `dci.bright.robotics@1.0.0` | `bright.robotics` | planned | Not rerun | — | 锁定有限范围并实现 |
-| `dci.local-fixture@1.0.0` | 15 个任务的框架夹具 | implemented | Verified-local | 每任务 1 个 | 维护安装包闭环 |
-| `dci.qa.2wikimultihopqa@1.0.0` | `qa.2wikimultihopqa` | planned | Not rerun | — | 锁定有限范围并实现 |
-| `dci.qa.bamboogle.github-sample50@1.0.0` | `qa.bamboogle.github-sample50` | implemented | Verified-full | 50 | 维护完整 50 案例闭环 |
-| `dci.qa.bamboogle.paper-full125@1.0.0` | `qa.bamboogle.paper-full125` | planned | Not rerun | — | 单独设计论文完整评估授权 |
-| `dci.qa.hotpotqa@1.0.0` | `qa.hotpotqa` | planned | Not rerun | — | 锁定有限范围并实现 |
-| `dci.qa.musique@1.0.0` | `qa.musique` | planned | Not rerun | — | 锁定有限范围并实现 |
-| `dci.qa.nq@1.0.0` | `qa.nq` | planned | Not rerun | — | 锁定有限范围并实现 |
-| `dci.qa.triviaqa@1.0.0` | `qa.triviaqa` | planned | Not rerun | — | 锁定有限范围并实现 |
+| 实例 | 实现/验证 | 已跑/总量 | 结果 | 核心配置与证据 | 下一道门 |
+|---|---|---:|---|---|---|
+| `dci.bcplus.level3@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
+| `dci.bcplus.main@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
+| `dci.beir.arguana@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
+| `dci.beir.scifact@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
+| `dci.bright.biology@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
+| `dci.bright.earth-science@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
+| `dci.bright.economics@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
+| `dci.bright.robotics@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
+| `dci.local-fixture@1.0.0` | implemented / Verified-local | 15×1 | 无评分 | 无模型；安装包测试 | 维护闭环 |
+| `dci.qa.2wikimultihopqa@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
+| `dci.qa.bamboogle.github-sample50@1.0.0` | implemented / Verified-full | 50/50 | 82%（41/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $2.20；`run-e8ea4…7790` | 维护闭环 |
+| `dci.qa.bamboogle.paper-full125@1.0.0` | implemented / Not rerun | 0/125 | — | 数据、语料和执行入口已就绪；尚无模型调用 | 先运行 50/125 阶段性结果 |
+| `dci.qa.hotpotqa@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
+| `dci.qa.musique@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
+| `dci.qa.nq@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
+| `dci.qa.triviaqa@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 
 ## 如何使用本文档
 
@@ -37,6 +37,13 @@ resume 必须继续使用同一个实例、案例范围、source lock 和 eviden
 
 lock 和 plan 仅处理元数据，不执行 Agent 或 Judge。包含 `--execute` 的命令才授予
 这一次有限运行的执行权限。真实实例可能访问该手册列明的模型、网络、数据集和 corpus。
+
+## 阶段性结果规则
+
+每个真实实例必须实现完整数据范围；但可以先运行 `min(50, 完整案例数)` 个案例，作为
+当前版本的阶段性结果。该结果必须写成“已跑/总量”，例如 `50/125`，并同步记录 Agent、
+Judge、分数、成本和 evidence 路径。它不能被称为完整结果、论文复现结果，或与完整数据
+分数直接比较。
 
 ## 运行手册：`dci.local-fixture@1.0.0`
 
@@ -237,8 +244,8 @@ jq '{counts,accuracy}' "$DCI_FULL_SUMMARY"
 - `accuracy.over_judged` 是已完成 Judge 案例中的准确率。
 
 这会产生 GitHub sample50 实例的原 DCI 评估格式和聚合结果，但仍不是论文完整结果。
-`dci.qa.bamboogle.paper-full125@1.0.0` 尚未实现，因此当前不能声称得到原论文的
-125-case 结果或完成 paper-score reproduction。
+完整 125 题实例现已可执行；在其真实运行完成前，当前仍不能声称得到原论文的 125-case
+结果或完成 paper-score reproduction。
 
 ### 已验证边界
 
@@ -252,7 +259,47 @@ jq '{counts,accuracy}' "$DCI_FULL_SUMMARY"
 - 精确 resume 耗时 0 秒，新增 evidence 0 个，新增 generation 0 个。
 
 因此 GitHub sample50 当前为 `Verified-full`。该状态仅覆盖这个 50-case 实例；
-`dci.qa.bamboogle.paper-full125@1.0.0` 仍为 planned，不能据此声称复现论文完整结果。
+它不能替代尚未运行的 full125 实例或原论文复现结果。
+
+## 运行手册：`dci.qa.bamboogle.paper-full125@1.0.0`
+
+这是同一 Bamboogle 数据的完整 125 题实例。50 题公开样本是这 125 题的子集；它们
+共享本地 `corpus/wiki_corpus`。此实例已可执行，但尚未进行任何模型调用，因此没有分数、
+成本或 evidence。
+
+- Application：`dci.complete-application@1.0.0`
+- Suite：`dci.qa.bamboogle.paper-full125@1.0.0`
+- 阶段性结果：50/125；完整结果：125/125
+- Agent 和 Judge：由 `.env` / 进程环境的 operator 配置决定，实际身份必须记录在运行结果中
+
+先获得 50/125 阶段性结果：
+
+```bash
+export DCI_125_ROOT="$PWD/outputs/manual/dci-bamboogle-125-$(date +%Y%m%d-%H%M%S)"
+export DCI_125_LOCK="$DCI_125_ROOT/source-lock.json"
+export DCI_125_EVIDENCE="$DCI_125_ROOT/evidence"
+export DCI_125_RESULT="$DCI_125_ROOT/run-result.json"
+mkdir -p "$DCI_125_ROOT"
+
+uv run asterion-dci benchmark lock \
+  --instance dci.qa.bamboogle.paper-full125@1.0.0 \
+  --output "$DCI_125_LOCK"
+
+uv run asterion-dci benchmark run \
+  --instance dci.qa.bamboogle.paper-full125@1.0.0 \
+  --case-limit 50 \
+  --capability-source-lock "$DCI_125_LOCK" \
+  --evidence-root "$DCI_125_EVIDENCE" \
+  --execute | tee "$DCI_125_RESULT"
+
+export DCI_125_RUN_ID="$(jq -er '.run_id' "$DCI_125_RESULT")"
+export DCI_125_SUMMARY="$DCI_125_EVIDENCE/outputs/$DCI_125_RUN_ID/qa.bamboogle.paper-full125/summary.json"
+jq '{counts,accuracy,totals,reproduction_totals}' "$DCI_125_SUMMARY"
+```
+
+要运行完整 125/125，只把 `--case-limit 50` 改为 `--all-cases`；resume 时必须保留同一
+run ID、范围、lock 和 evidence root。完整运行的结果才可以标为 `Verified-full`；50/125
+只能标为 `Verified-bounded`。
 
 ## 故障排查
 

@@ -44,6 +44,8 @@ def _paths(root: Path) -> DciPaths:
 
 
 def _invocation(root: Path, **changes: object) -> BenchmarkTaskInvocation:
+    task_id = changes.pop("task_id", "qa.bamboogle.github-sample50")
+    binding_id = changes.pop("binding_id", task_id)
     values = {
         "profile_id": "qa.bamboogle",
         "selection_variant": "github-sample50",
@@ -59,14 +61,47 @@ def _invocation(root: Path, **changes: object) -> BenchmarkTaskInvocation:
     }
     values.update(changes)
     return BenchmarkTaskInvocation(
-        task_id="qa.bamboogle.github-sample50",
-        binding_id="qa.bamboogle.github-sample50",
+        task_id=task_id,
+        binding_id=binding_id,
         public_arguments=("qa.bamboogle", "github-sample50", "limit-1"),
         private_payload=DciBenchmarkInvocationPayload(**values),
     )
 
 
 class RealDciBenchmarkExecutorTests(unittest.TestCase):
+    def test_executes_paper_full125_contract(self) -> None:
+        calls = []
+
+        async def runner(request, *, paths):
+            calls.append((request, paths))
+            return BenchmarkResult(
+                output_root=request.output_root,
+                counts={"total": 125, "completed": 125, "failed": 0},
+            )
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            result = RealDciBenchmarkExecutor(
+                paths=_paths(root),
+                runtime_options=DciRuntimeOptions(),
+                judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
+                benchmark_runner=runner,
+                readiness_probe=lambda *_args: None,
+            ).execute(
+                _invocation(
+                    root,
+                    task_id="qa.bamboogle.paper-full125",
+                    selection_variant="paper-full125",
+                    case_limit=125,
+                ),
+                cancellation=MutableCancellation(),
+                on_progress=lambda _event: None,
+            )
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(result.case_count, 125)
+        self.assertEqual(calls[0][0].limit, 125)
+
     def test_translates_bounded_bamboogle_into_existing_engine(self) -> None:
         calls = []
 

@@ -126,9 +126,17 @@ _INSTANCES = tuple(
             *(
                 _real_instance(
                     task_id,
-                    implemented=task_id == "qa.bamboogle.github-sample50",
+                    implemented=task_id
+                    in {
+                        "qa.bamboogle.github-sample50",
+                        "qa.bamboogle.paper-full125",
+                    },
                     all_case_count=(
-                        50 if task_id == "qa.bamboogle.github-sample50" else None
+                        50
+                        if task_id == "qa.bamboogle.github-sample50"
+                        else 125
+                        if task_id == "qa.bamboogle.paper-full125"
+                        else None
                     ),
                 )
                 for task_id in _ALL_TASKS

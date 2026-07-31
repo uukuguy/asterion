@@ -80,10 +80,15 @@ class TestDciBenchmarkInstances(unittest.TestCase):
         self.assertIn("尚未实现", text)
         self.assertIn(
             "| `dci.qa.bamboogle.github-sample50@1.0.0` "
-            "| `qa.bamboogle.github-sample50` | implemented "
-            "| Verified-full | 50 |",
+            "| implemented / Verified-full | 50/50 | 82%（41/50） |",
             text,
         )
+        self.assertIn(
+            "| `dci.qa.bamboogle.paper-full125@1.0.0` "
+            "| implemented / Not rerun | 0/125 |",
+            text,
+        )
+        self.assertIn("阶段性结果：50/125", text)
         self.assertIn("41/50", text)
         self.assertIn("82%", text)
         self.assertNotRegex(text, r"--run-id\s+run-[0-9a-f]{32}")
@@ -103,7 +108,7 @@ class TestDciBenchmarkInstances(unittest.TestCase):
         with self.assertRaises(FrozenInstanceError):
             instances[0].version = "2.0.0"  # type: ignore[misc]
 
-    def test_local_and_bamboogle_are_the_only_implemented_instances(self) -> None:
+    def test_local_and_bamboogle_variants_are_the_implemented_instances(self) -> None:
         implemented = tuple(
             instance.selector
             for instance in benchmark_instances()
@@ -115,6 +120,7 @@ class TestDciBenchmarkInstances(unittest.TestCase):
             (
                 "dci.local-fixture@1.0.0",
                 "dci.qa.bamboogle.github-sample50@1.0.0",
+                "dci.qa.bamboogle.paper-full125@1.0.0",
             ),
         )
         local = select_benchmark_instance("dci.local-fixture@1.0.0")
@@ -132,6 +138,22 @@ class TestDciBenchmarkInstances(unittest.TestCase):
         self.assertEqual(resolve_case_limit(instance, case_limit=7, all_cases=False), 7)
         self.assertEqual(resolve_case_limit(instance, case_limit=None, all_cases=True), 50)
         self.assertEqual(instance.task_ids, ("qa.bamboogle.github-sample50",))
+
+    def test_paper_full125_is_implemented_with_bounded_and_full_ranges(self) -> None:
+        instance = select_benchmark_instance(
+            "dci.qa.bamboogle.paper-full125@1.0.0"
+        )
+
+        self.assertEqual(instance.implementation_state, "implemented")
+        self.assertEqual(
+            resolve_case_limit(instance, case_limit=50, all_cases=False),
+            50,
+        )
+        self.assertEqual(
+            resolve_case_limit(instance, case_limit=None, all_cases=True),
+            125,
+        )
+        self.assertEqual(instance.task_ids, ("qa.bamboogle.paper-full125",))
 
     def test_invalid_selection_and_ranges_fail_closed(self) -> None:
         instance = select_benchmark_instance("dci.local-fixture@1.0.0")
