@@ -197,6 +197,18 @@ _INSTANCES = tuple(
                 cost_class="agent-judge-bounded",
                 implementation_state="implemented",
             ),
+            DciBenchmarkInstance(
+                instance_id="dci.bright.earth-science",
+                version="1.0.0",
+                application_ref=ApplicationRef("dci.complete-application", "1.0.0"),
+                suite_ref=BenchmarkSuiteRef("dci.bright.earth-science", "1.0.0"),
+                task_ids=("bright.earth-science",),
+                executor_profile="real-agent-judge",
+                default_case_limit=1,
+                all_case_count=116,
+                cost_class="agent-judge-bounded",
+                implementation_state="implemented",
+            ),
             *(
                 _real_instance(
                     task_id,
@@ -211,6 +223,7 @@ _INSTANCES = tuple(
                     "beir.arguana",
                     "beir.scifact",
                     "bright.biology",
+                    "bright.earth-science",
                     "qa.bamboogle.github-sample50",
                     "qa.bamboogle.paper-full125",
                 }
