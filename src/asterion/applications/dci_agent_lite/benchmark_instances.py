@@ -277,6 +277,14 @@ _INSTANCES = tuple(
                 default_case_limit=1, all_case_count=3610,
                 cost_class="agent-judge-bounded", implementation_state="implemented",
             ),
+            DciBenchmarkInstance(
+                instance_id="dci.qa.triviaqa", version="1.0.0",
+                application_ref=ApplicationRef("dci.complete-application", "1.0.0"),
+                suite_ref=BenchmarkSuiteRef("dci.qa.triviaqa", "1.0.0"),
+                task_ids=("qa.triviaqa",), executor_profile="real-agent-judge",
+                default_case_limit=1, all_case_count=11313,
+                cost_class="agent-judge-bounded", implementation_state="implemented",
+            ),
             *(
                 _real_instance(
                     task_id,
@@ -298,6 +306,7 @@ _INSTANCES = tuple(
                     "qa.hotpotqa",
                     "qa.musique",
                     "qa.nq",
+                    "qa.triviaqa",
                     "qa.bamboogle.github-sample50",
                     "qa.bamboogle.paper-full125",
                 }

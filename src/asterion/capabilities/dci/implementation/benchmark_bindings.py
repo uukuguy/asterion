@@ -36,6 +36,7 @@ _DCI_SUITES = frozenset(
         "dci.qa.hotpotqa",
         "dci.qa.musique",
         "dci.qa.nq",
+        "dci.qa.triviaqa",
     )
 )
 

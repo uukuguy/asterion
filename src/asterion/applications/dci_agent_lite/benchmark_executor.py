@@ -47,6 +47,7 @@ _REAL_TASK_CONTRACTS = {
     "qa.hotpotqa": ("qa.hotpotqa", "main", 7405),
     "qa.musique": ("qa.musique", "main", 2417),
     "qa.nq": ("qa.nq", "main", 3610),
+    "qa.triviaqa": ("qa.triviaqa", "main", 11313),
     "qa.bamboogle.github-sample50": ("qa.bamboogle", "github-sample50", 50),
     "qa.bamboogle.paper-full125": ("qa.bamboogle", "paper-full125", 125),
 }
