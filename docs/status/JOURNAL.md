@@ -387,3 +387,5 @@
 - 17:35 Bright Robotics completed 50/101: nDCG@10 0.4178, $4.46, zero failed; resume added no generation
 - 17:36 Published Bright Robotics verified bounded result and resume evidence [7dc2dfa]
 - 17:40 Implemented QA 2WikiMultiHopQA executable 50/12,576 contract after test-first validation
+- 17:41 Published QA 2WikiMultiHopQA runnable contract, payload, tests, and Chinese runbook [6cf8e55]
+- 20:15 QA 2WikiMultiHopQA completed 50/12,576: 80% (40/50), $1.89, zero failed; resume added no generation
