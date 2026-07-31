@@ -337,3 +337,4 @@
 - 22:38 Localized runbooks and exposed full50 evaluation so fixtures cannot masquerade as benchmark results [9333a25]
 - 23:36 Recorded full50 82% result so Bamboogle verification reflects complete executed evidence [caca48b]
 - 00:00 Defined progressive instance results so bounded scores remain traceable without blocking full executability [ed97a74]
+- 00:00 Made Bamboogle full125 executable and documented 50/125 result reporting [52e10c7]
