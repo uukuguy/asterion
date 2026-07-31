@@ -123,23 +123,32 @@ _INSTANCES = tuple(
                 cost_class="provider-free",
                 implementation_state="implemented",
             ),
+            DciBenchmarkInstance(
+                instance_id="dci.qa.bamboogle",
+                version="1.0.0",
+                application_ref=ApplicationRef("dci.complete-application", "1.0.0"),
+                suite_ref=BenchmarkSuiteRef(
+                    "dci.qa.bamboogle.paper-full125", "1.0.0"
+                ),
+                task_ids=("qa.bamboogle.paper-full125",),
+                executor_profile="real-agent-judge",
+                default_case_limit=1,
+                all_case_count=125,
+                cost_class="agent-judge-bounded",
+                implementation_state="implemented",
+            ),
             *(
                 _real_instance(
                     task_id,
-                    implemented=task_id
-                    in {
-                        "qa.bamboogle.github-sample50",
-                        "qa.bamboogle.paper-full125",
-                    },
-                    all_case_count=(
-                        50
-                        if task_id == "qa.bamboogle.github-sample50"
-                        else 125
-                        if task_id == "qa.bamboogle.paper-full125"
-                        else None
-                    ),
+                    implemented=False,
+                    all_case_count=None,
                 )
                 for task_id in _ALL_TASKS
+                if task_id
+                not in {
+                    "qa.bamboogle.github-sample50",
+                    "qa.bamboogle.paper-full125",
+                }
             ),
         ),
         key=lambda instance: instance.selector,

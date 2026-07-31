@@ -588,7 +588,7 @@ def _authorize_paper_execution_before_inputs(
         paper_scope is not None
         and authorization is None
         and type(request.limit) is int
-        and request.limit == 1
+        and 1 <= request.limit <= 50
         and request.experiment_scope_id is None
     )
     if authorization is None:
@@ -994,7 +994,7 @@ def _prepare(
         paper_scope is not None
         and request.full_execution_authorization is None
         and type(request.limit) is int
-        and request.limit == 1
+        and 1 <= request.limit <= 50
         and request.experiment_scope_id is None
     )
     if (
@@ -1077,7 +1077,7 @@ def _prepare(
     bounded_paper_selection = (
         request.full_execution_authorization is None
         and type(request.limit) is int
-        and request.limit == 1
+        and 1 <= request.limit <= 50
         and request.experiment_scope_id is None
         and (paper_scope is not None or source_scope is not None)
     )
@@ -1298,7 +1298,7 @@ def _prepare(
         selection = {
             "schema": "asterion.dci.selection/v1",
             "execution_class": "paper-bounded",
-            "id": "limit-1",
+            "id": f"limit-{request.limit}",
             "paper_scope": paper_scope,
             "selected_rows": len(rows),
             "full_dataset": False,

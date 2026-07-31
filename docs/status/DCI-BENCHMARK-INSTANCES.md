@@ -19,8 +19,7 @@ benchmark 实例的实现清单、验证台账和运行手册。
 | `dci.bright.robotics@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.local-fixture@1.0.0` | implemented / Verified-local | 15×1 | 无评分 | 无模型；安装包测试 | 维护闭环 |
 | `dci.qa.2wikimultihopqa@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
-| `dci.qa.bamboogle.github-sample50@1.0.0` | implemented / Verified-full | 50/50 | 82%（41/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $2.20；`run-e8ea4…7790` | 维护闭环 |
-| `dci.qa.bamboogle.paper-full125@1.0.0` | implemented / Verified-bounded | 50/125 | 复用上一行的同一次 41/50 运行 | 50 条输入逐行一致；不新增模型调用、成本或 evidence | 运行余下 75 题形成 125/125 |
+| `dci.qa.bamboogle@1.0.0` | implemented / Verified-bounded | 50/125 | 82%（41/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $2.20；`run-e8ea4…7790` | 运行余下 75 题形成 125/125 |
 | `dci.qa.hotpotqa@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.qa.musique@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.qa.nq@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
@@ -116,7 +115,7 @@ uv run python -m unittest -v tests.test_asterion_dci_benchmark_installed
 该测试在隔离环境中构建并安装 wheel，通过安装后的 `asterion-dci` 执行全部 15 个
 fixture 任务，然后 resume 同一运行且不重复工作。
 
-## 运行手册：`dci.qa.bamboogle.github-sample50@1.0.0`
+## 历史运行证据：Bamboogle 前 50 条
 
 ### 作用和边界
 
@@ -261,7 +260,7 @@ jq '{counts,accuracy}' "$DCI_FULL_SUMMARY"
 因此 GitHub sample50 当前为 `Verified-full`。该状态仅覆盖这个 50-case 实例；
 它不能替代尚未运行的 full125 实例或原论文复现结果。
 
-## 运行手册：`dci.qa.bamboogle.paper-full125@1.0.0`
+## 运行手册：`dci.qa.bamboogle@1.0.0`
 
 这是同一 Bamboogle 数据的完整 125 题实例。50 题公开样本是这 125 题的严格子集：本地
 逐行规范化比对确认 50 条记录全部一致（题目和标准答案均相同）。它们共享本地
@@ -283,11 +282,11 @@ export DCI_125_RESULT="$DCI_125_ROOT/run-result.json"
 mkdir -p "$DCI_125_ROOT"
 
 uv run asterion-dci benchmark lock \
-  --instance dci.qa.bamboogle.paper-full125@1.0.0 \
+  --instance dci.qa.bamboogle@1.0.0 \
   --output "$DCI_125_LOCK"
 
 uv run asterion-dci benchmark run \
-  --instance dci.qa.bamboogle.paper-full125@1.0.0 \
+  --instance dci.qa.bamboogle@1.0.0 \
   --all-cases \
   --capability-source-lock "$DCI_125_LOCK" \
   --evidence-root "$DCI_125_EVIDENCE" \

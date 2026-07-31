@@ -28,8 +28,7 @@ EXPECTED_SELECTORS = (
     "dci.bright.robotics@1.0.0",
     "dci.local-fixture@1.0.0",
     "dci.qa.2wikimultihopqa@1.0.0",
-    "dci.qa.bamboogle.github-sample50@1.0.0",
-    "dci.qa.bamboogle.paper-full125@1.0.0",
+    "dci.qa.bamboogle@1.0.0",
     "dci.qa.hotpotqa@1.0.0",
     "dci.qa.musique@1.0.0",
     "dci.qa.nq@1.0.0",
@@ -79,16 +78,15 @@ class TestDciBenchmarkInstances(unittest.TestCase):
         self.assertIn("不产生原 DCI benchmark 评估分数", text)
         self.assertIn("尚未实现", text)
         self.assertIn(
-            "| `dci.qa.bamboogle.github-sample50@1.0.0` "
-            "| implemented / Verified-full | 50/50 | 82%（41/50） |",
+            "| `dci.qa.bamboogle@1.0.0` "
+            "| implemented / Verified-bounded | 50/125 | 82%（41/50） |",
             text,
         )
         self.assertIn(
-            "| `dci.qa.bamboogle.paper-full125@1.0.0` "
-            "| implemented / Not rerun | 0/125 |",
+            "## 运行手册：`dci.qa.bamboogle@1.0.0`",
             text,
         )
-        self.assertIn("阶段性结果：50/125", text)
+        self.assertIn("阶段性覆盖：50/125", text)
         self.assertIn("41/50", text)
         self.assertIn("82%", text)
         self.assertNotRegex(text, r"--run-id\s+run-[0-9a-f]{32}")
@@ -104,11 +102,11 @@ class TestDciBenchmarkInstances(unittest.TestCase):
             tuple(instance.selector for instance in instances),
             EXPECTED_SELECTORS,
         )
-        self.assertEqual(len({instance.selector for instance in instances}), 16)
+        self.assertEqual(len({instance.selector for instance in instances}), 15)
         with self.assertRaises(FrozenInstanceError):
             instances[0].version = "2.0.0"  # type: ignore[misc]
 
-    def test_local_and_bamboogle_variants_are_the_implemented_instances(self) -> None:
+    def test_local_and_bamboogle_are_the_implemented_instances(self) -> None:
         implemented = tuple(
             instance.selector
             for instance in benchmark_instances()
@@ -119,8 +117,7 @@ class TestDciBenchmarkInstances(unittest.TestCase):
             implemented,
             (
                 "dci.local-fixture@1.0.0",
-                "dci.qa.bamboogle.github-sample50@1.0.0",
-                "dci.qa.bamboogle.paper-full125@1.0.0",
+                "dci.qa.bamboogle@1.0.0",
             ),
         )
         local = select_benchmark_instance("dci.local-fixture@1.0.0")
@@ -131,17 +128,17 @@ class TestDciBenchmarkInstances(unittest.TestCase):
 
     def test_bamboogle_resolves_default_bounded_and_all_case_ranges(self) -> None:
         instance = select_benchmark_instance(
-            "dci.qa.bamboogle.github-sample50@1.0.0"
+            "dci.qa.bamboogle@1.0.0"
         )
 
         self.assertEqual(resolve_case_limit(instance, case_limit=None, all_cases=False), 1)
         self.assertEqual(resolve_case_limit(instance, case_limit=7, all_cases=False), 7)
-        self.assertEqual(resolve_case_limit(instance, case_limit=None, all_cases=True), 50)
-        self.assertEqual(instance.task_ids, ("qa.bamboogle.github-sample50",))
+        self.assertEqual(resolve_case_limit(instance, case_limit=None, all_cases=True), 125)
+        self.assertEqual(instance.task_ids, ("qa.bamboogle.paper-full125",))
 
     def test_paper_full125_is_implemented_with_bounded_and_full_ranges(self) -> None:
         instance = select_benchmark_instance(
-            "dci.qa.bamboogle.paper-full125@1.0.0"
+            "dci.qa.bamboogle@1.0.0"
         )
 
         self.assertEqual(instance.implementation_state, "implemented")
@@ -182,7 +179,7 @@ class TestDciBenchmarkInstances(unittest.TestCase):
     def test_public_projection_is_body_free(self) -> None:
         sentinel = "secret-prompt-answer-private-path"
         instance = select_benchmark_instance(
-            "dci.qa.bamboogle.github-sample50@1.0.0"
+            "dci.qa.bamboogle@1.0.0"
         )
 
         rendered = json.dumps(public_instance_dict(instance), sort_keys=True)
@@ -202,7 +199,7 @@ class TestDciBenchmarkInstances(unittest.TestCase):
                         "benchmark",
                         "lock",
                         "--instance",
-                        "dci.qa.bamboogle.github-sample50@1.0.0",
+                        "dci.qa.bamboogle@1.0.0",
                         "--output",
                         str(lock),
                     ],
@@ -218,7 +215,7 @@ class TestDciBenchmarkInstances(unittest.TestCase):
                     "benchmark",
                     "plan",
                     "--instance",
-                    "dci.qa.bamboogle.github-sample50@1.0.0",
+                    "dci.qa.bamboogle@1.0.0",
                     "--capability-source-lock",
                     str(lock),
                 ],
@@ -233,7 +230,7 @@ class TestDciBenchmarkInstances(unittest.TestCase):
                     "benchmark",
                     "plan",
                     "--instance",
-                    "dci.qa.bamboogle.github-sample50@1.0.0",
+                    "dci.qa.bamboogle@1.0.0",
                     "--all-cases",
                     "--capability-source-lock",
                     str(lock),
@@ -245,7 +242,7 @@ class TestDciBenchmarkInstances(unittest.TestCase):
             self.assertEqual(default_code, 0, default_stderr.getvalue())
             self.assertEqual(json.loads(default_stdout.getvalue())["case_limit"], 1)
             self.assertEqual(all_code, 0, all_stderr.getvalue())
-            self.assertEqual(json.loads(all_stdout.getvalue())["case_limit"], 50)
+            self.assertEqual(json.loads(all_stdout.getvalue())["case_limit"], 125)
 
 
 if __name__ == "__main__":
