@@ -2194,6 +2194,9 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 "asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research",
                 side_effect=fail_then_resume,
             ) as run, patch(
+                "asterion.capabilities.dci.implementation.evaluation.benchmark._validate_completed_agent_evidence",
+                return_value=0.0,
+            ), patch(
                 "asterion.capabilities.dci.implementation.evaluation.evaluation.judge_answer_sync",
                 return_value=_verdict(request.judge_config),
             ):
@@ -2236,6 +2239,9 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                 "asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research",
                 side_effect=fail_then_restart,
             ) as run, patch(
+                "asterion.capabilities.dci.implementation.evaluation.benchmark._validated_agent_cost",
+                return_value=0.0,
+            ), patch(
                 "asterion.capabilities.dci.implementation.evaluation.benchmark.resume_request_from_output_dir",
                 side_effect=DciRunError("resume unavailable"),
             ), patch(
@@ -2250,6 +2256,29 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
             second = request.output_root / "q-1" / "native-generation-0002" / "state.json"
             self.assertEqual(json.loads(first.read_text())["status"], "failed")
             self.assertEqual(json.loads(second.read_text())["status"], "completed")
+
+    def test_bounded_native_attempts_retry_invalid_completed_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            request = replace(_request(root), max_native_attempts=2)
+
+            with patch(
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research",
+                side_effect=_recorded_run,
+            ) as run, patch(
+                "asterion.capabilities.dci.implementation.evaluation.benchmark._validate_completed_agent_evidence",
+                side_effect=(DciBenchmarkError("invalid native evidence"), 0.0),
+            ), patch(
+                "asterion.capabilities.dci.implementation.evaluation.evaluation.judge_answer_sync",
+                return_value=_verdict(request.judge_config),
+            ):
+                result = run_benchmark(request, paths=resolve_dci_paths(root))
+
+            self.assertEqual(run.call_count, 2)
+            self.assertEqual(result.counts["correct"], 1)
+            self.assertTrue(
+                (request.output_root / "q-1" / "native-generation-0002" / "state.json").is_file()
+            )
 
     def test_existing_successful_result_skips_run_and_evaluation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

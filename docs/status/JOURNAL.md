@@ -360,3 +360,4 @@
 - 13:16 Added bounded DCI-native recovery for a transient Agent failure; each real row has at most two native attempts
 - 14:57 Added bounded native recovery for transient Agent failures [920953a]
 - 15:00 Identified level3 failures without resumable sessions; retry must retain evidence and start a new generation
+- 15:02 Retained failed evidence before bounded fresh-generation retry [963bb1b]

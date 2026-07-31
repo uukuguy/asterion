@@ -6,12 +6,11 @@
 
 - 50-case completion order remains fixed: Bamboogle, BC+ Level 3 and BC+ Main
   are verified; ArguAna is the active fourth instance.
-- `920953a` adds one bounded DCI-native recovery attempt for a failed,
-  incomplete, or running native Agent generation. The generic benchmark runner
-  remains unchanged and does not retry.
-- A clean ArguAna 50/1406 run is live in the current worktree with the local
-  resource root explicitly selected. It must finish and resume without a new
-  native generation before documentation is promoted.
+- `963bb1b` adds one bounded DCI-native recovery attempt: resumable runs reuse
+  their native generation; a nonresumable run retains its failed evidence and
+  starts one fresh generation. The generic benchmark runner remains unchanged.
+- The prior live ArguAna attempt exposed this level3 session condition and is
+  discarded. A fresh 50/1406 run must finish and resume before promotion.
 
 ## Verified baseline
 

@@ -1641,6 +1641,14 @@ async def _run_row(
                                 "append_system_prompt_file"
                             ),
                         )
+                        try:
+                            _validate_completed_agent_evidence(
+                                native_authority, native_dir
+                            )
+                        except DciBenchmarkError as error:
+                            raise DciRunError(
+                                "DCI Pi execution evidence is invalid"
+                            ) from error
                         if agent_reservation is not None:
                             actual_cost = _validated_agent_cost(
                                 native_authority, native_dir
@@ -1653,28 +1661,38 @@ async def _run_row(
                     except DciRunError:
                         _fail_authorized_operation(request, agent_reservation)
                         native_state = _native_state(native_authority, native_dir)
-                        if (
-                            native_attempt + 1 >= request.max_native_attempts
-                            or native_state not in {"failed", "incomplete", "running"}
-                        ):
+                        if native_attempt + 1 >= request.max_native_attempts:
                             raise
-                        try:
-                            native_request = replace(
-                                resume_request_from_output_dir(
-                                    native_dir,
-                                    extra_args=request.runtime_options.extra_args,
-                                    _directory_fd=native_authority.fd,
-                                ),
-                                final_answer_recovery=(
-                                    prompt_contract.final_answer_recovery
-                                ),
-                            )
-                        except DciRunError:
+                        if native_state in {"failed", "incomplete", "running"}:
+                            try:
+                                native_request = replace(
+                                    resume_request_from_output_dir(
+                                        native_dir,
+                                        extra_args=request.runtime_options.extra_args,
+                                        _directory_fd=native_authority.fd,
+                                    ),
+                                    final_answer_recovery=(
+                                        prompt_contract.final_answer_recovery
+                                    ),
+                                )
+                                continue
+                            except DciRunError:
+                                pass
+                        if native_state in {
+                            "completed",
+                            "failed",
+                            "incomplete",
+                            "running",
+                            "malformed",
+                            "missing",
+                        }:
                             generation = _next_generation(query)
                             native_authority = query.open_query(generation)
                             authority.bind_native(native_authority, generation)
                             native_dir = lock.path / row.query_id / generation
                             native_request = fresh_native_request
+                            continue
+                        raise
                     except BaseException:
                         _fail_authorized_operation(request, agent_reservation)
                         raise
@@ -1868,6 +1886,24 @@ def _validated_agent_cost(native: _Directory, display_path: Path) -> float:
     except (DciArtifactError, OSError, TypeError, ValueError) as error:
         raise DciBenchmarkError(
             "DCI benchmark Agent cost evidence is invalid"
+        ) from error
+    finally:
+        if lock is not None:
+            lock.release()
+
+
+def _validate_completed_agent_evidence(
+    native: _Directory, display_path: Path
+) -> None:
+    lock: DciRunLock | None = None
+    try:
+        lock = DciRunLock.acquire_fd(native.fd, path=display_path, wait=True)
+        validate_completed_run_evidence(lock)
+    except DciBenchmarkError:
+        raise
+    except (DciArtifactError, OSError, TypeError, ValueError) as error:
+        raise DciBenchmarkError(
+            "DCI benchmark Agent evidence is invalid"
         ) from error
     finally:
         if lock is not None:
