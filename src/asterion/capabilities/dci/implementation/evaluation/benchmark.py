@@ -509,10 +509,18 @@ async def run_benchmark_async(
         )
         _publish_batch_state(lock, "cancelled", results)
         raise
-    except BaseException:
+    except BaseException as error:
         _cancel_request_authorization(request)
         if not batch_started:
             raise
+        lock.write_json(
+            "batch-error.json",
+            {
+                "schema": "asterion.dci.batch-error/v1",
+                "exception_type": type(error).__name__,
+                "message": str(error),
+            },
+        )
         for task in tasks:
             task.cancel()
         await _drain_tasks(tasks)
@@ -3199,7 +3207,10 @@ def _publish_aggregates(
         results=ordered,
         metrics=metrics,
         request=request,
-        authorities=authorities,
+        authorities={
+            rows[index].query_id: authority
+            for index, authority in authorities.items()
+        },
     )
     summary = aggregate_results(metrics)
     summary["reproduction_totals"] = reproduction_totals
@@ -3252,7 +3263,7 @@ def _publish_reproduction_evidence(
     results: list[dict[str, object]],
     metrics: list[dict[str, Any]],
     request: BenchmarkRequest,
-    authorities: dict[int, _RowAuthority],
+    authorities: Mapping[str, _RowAuthority],
 ) -> dict[str, object]:
     if len(results) > len(rows):
         raise DciBenchmarkError("DCI benchmark reproduction evidence is invalid")
@@ -3272,7 +3283,7 @@ def _publish_reproduction_evidence(
         "total_tokens": 0,
         "cost_usd": 0.0,
     }
-    for index, result in enumerate(results):
+    for result in results:
         query_id = str(result.get("query_id"))
         metric = metric_by_id.get(query_id)
         if metric is None:
@@ -3284,7 +3295,8 @@ def _publish_reproduction_evidence(
                 }
             else:
                 metric = {}
-        if index not in authorities:
+        query = authorities.get(query_id)
+        if query is None:
             raise DciBenchmarkError("DCI benchmark reproduction evidence is invalid")
         agent = metric.get("agent_usage")
         judge = metric.get("judge_usage")
@@ -3340,8 +3352,7 @@ def _publish_reproduction_evidence(
             },
             "cost_usd": current_cost,
         }
-        query = authorities[index].query
-        query.write_json("reproduction-evidence.json", evidence)
+        query.query.write_json("reproduction-evidence.json", evidence)
         totals["agent_operations"] += agent_operations
         totals["judge_operations"] += judge_operations
         totals["input_tokens"] += input_tokens
