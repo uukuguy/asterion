@@ -110,6 +110,7 @@ class TestDciBenchmarkInstances(unittest.TestCase):
             (
                 "dci.bcplus.level3@1.0.0",
                 "dci.bcplus.main@1.0.0",
+                "dci.beir.arguana@1.0.0",
                 "dci.local-fixture@1.0.0",
                 "dci.qa.bamboogle@1.0.0",
             ),
@@ -161,6 +162,14 @@ class TestDciBenchmarkInstances(unittest.TestCase):
         self.assertEqual(resolve_case_limit(instance, case_limit=50, all_cases=False), 50)
         self.assertEqual(resolve_case_limit(instance, case_limit=None, all_cases=True), 830)
         self.assertEqual(instance.task_ids, ("bcplus.main",))
+
+    def test_beir_arguana_is_implemented_with_bounded_and_full_ranges(self) -> None:
+        instance = select_benchmark_instance("dci.beir.arguana@1.0.0")
+
+        self.assertEqual(instance.implementation_state, "implemented")
+        self.assertEqual(resolve_case_limit(instance, case_limit=50, all_cases=False), 50)
+        self.assertEqual(resolve_case_limit(instance, case_limit=None, all_cases=True), 1406)
+        self.assertEqual(instance.task_ids, ("beir.arguana",))
 
     def test_invalid_selection_and_ranges_fail_closed(self) -> None:
         instance = select_benchmark_instance("dci.local-fixture@1.0.0")

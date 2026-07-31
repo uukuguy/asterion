@@ -11,7 +11,7 @@ benchmark 实例的实现清单、验证台账和运行手册。
 |---|---|---:|---|---|---|
 | `dci.bcplus.level3@1.0.0` | implemented / Verified-bounded | 50/830 | 34%（17/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $4.29；`run-480faa…65ff`；resume 未新增生成 | 实现并完成 `dci.bcplus.main@1.0.0` 的 50 条版本 |
 | `dci.bcplus.main@1.0.0` | implemented / Verified-bounded | 50/830 | 28%（14/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $4.69；`run-9bc4c4…ceb4`；resume 未新增生成 | 实现并完成下一个实例的 50 条版本 |
-| `dci.beir.arguana@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
+| `dci.beir.arguana@1.0.0` | implemented / Not rerun | — | — | 已接入真实 IR Agent/Judge、1406 条数据集和 corpus | 通过 preflight 后完成 50/1406 真实运行与 resume |
 | `dci.beir.scifact@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.bright.biology@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
 | `dci.bright.earth-science@1.0.0` | planned / Not rerun | — | — | — | 实现并先运行最多 50 个 |
@@ -292,6 +292,32 @@ resume 必须复用同一个 run ID、范围、source lock 和 evidence root。�
 范围、source lock 与 evidence root 执行 `benchmark resume`，结果仍为 completed，且
 native-generation 目录数量保持 50，证明 resume 没有重新调用 Agent 或 Judge。该结果为
 `Verified-bounded`，不是 830 条完整结果，也不是原论文分数。
+
+## 运行手册：`dci.beir.arguana@1.0.0`
+
+这是 BEIR ArguAna 的真实 IR 实例，总量 1406 条；当前先执行 50 条。它由 Agent 生成
+检索结果，并以 binary deduplicated nDCG@10 聚合评分，不使用 QA 答案正确率。每条最多
+300 个 Agent 回合，最多 10 路并发；完整 1406 条在所有实例的 50 条版本完成前不执行。
+
+```bash
+env -u DEEPSEEK_API_KEY uv run asterion-dci preflight --env-file "$PWD/.env"
+
+export DCI_RUN_ROOT="$PWD/outputs/manual/dci-beir-arguana-stage50-$(date +%Y%m%d-%H%M%S)"
+export DCI_SOURCE_LOCK="$DCI_RUN_ROOT/source-lock.json"
+export DCI_EVIDENCE_ROOT="$DCI_RUN_ROOT/evidence"
+export DCI_RUN_RESULT="$DCI_RUN_ROOT/run-result.json"
+mkdir -p "$DCI_RUN_ROOT"
+
+uv run asterion-dci benchmark lock --instance dci.beir.arguana@1.0.0 --output "$DCI_SOURCE_LOCK"
+uv run asterion-dci benchmark plan --instance dci.beir.arguana@1.0.0 --case-limit 50 --capability-source-lock "$DCI_SOURCE_LOCK"
+env -u DEEPSEEK_API_KEY uv run asterion-dci benchmark run --instance dci.beir.arguana@1.0.0 --case-limit 50 --capability-source-lock "$DCI_SOURCE_LOCK" --evidence-root "$DCI_EVIDENCE_ROOT" --execute | tee "$DCI_RUN_RESULT"
+
+export DCI_RUN_ID="$(jq -er '.run_id' "$DCI_RUN_RESULT")"
+env -u DEEPSEEK_API_KEY uv run asterion-dci benchmark resume --instance dci.beir.arguana@1.0.0 --run-id "$DCI_RUN_ID" --case-limit 50 --capability-source-lock "$DCI_SOURCE_LOCK" --evidence-root "$DCI_EVIDENCE_ROOT" --execute
+```
+
+只有 run 和 resume 都成功，且 resume 不新增 generation，才能标为 `Verified-bounded`；台账
+必须记录 `50/1406`、nDCG@10、成本和 run ID。
 
 ## 运行手册：`dci.bcplus.main@1.0.0`
 

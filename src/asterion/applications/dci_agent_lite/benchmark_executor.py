@@ -37,13 +37,16 @@ from asterion.runtime.host import CancellationSignal
 _REAL_TASK_CONTRACTS = {
     "bcplus.level3": ("bcplus.level3", "github-level3", 830),
     "bcplus.main": ("bcplus.openai", "main", 830),
+    "beir.arguana": ("beir.arguana", "paper-main", 1406),
     "qa.bamboogle.github-sample50": ("qa.bamboogle", "github-sample50", 50),
     "qa.bamboogle.paper-full125": ("qa.bamboogle", "paper-full125", 125),
 }
 _REAL_TASK_EXECUTION = {
     "bcplus.level3": (300, 10),
     "bcplus.main": (100, 10),
+    "beir.arguana": (300, 10),
 }
+_REAL_TASK_MODES = {"beir.arguana": "ir"}
 _DEFAULT_EXPERIMENT_PROFILE = "asterion-safe/pi"
 _UPSTREAM_EXPERIMENT_PROFILE = (
     "upstream-github/271f37e71f053bf0c99c05ce6d2fb53b841d922e/pi"
@@ -184,7 +187,7 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 judge_config=self._judge_config,
                 runtime_options=self._runtime_options,
                 limit=payload.case_limit,
-                mode="qa",
+                mode=_REAL_TASK_MODES.get(invocation.task_id, "qa"),
                 profile=self._experiment_profile,
                 corpus=payload.corpus,
                 max_concurrency=max_concurrency,
