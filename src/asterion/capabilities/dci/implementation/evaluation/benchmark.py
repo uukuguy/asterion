@@ -928,7 +928,7 @@ def _prepare(
         raise DciBenchmarkError("DCI benchmark limit is invalid")
     if request.resume_policy not in {"compatible", "fresh", "reuse"}:
         raise DciBenchmarkError("DCI benchmark resume policy is invalid")
-    if request.max_native_attempts not in {1, 2}:
+    if request.max_native_attempts not in {1, 2, 3}:
         raise DciBenchmarkError("DCI benchmark native attempt limit is invalid")
     if request.figures and not request.analysis:
         raise DciBenchmarkError("DCI benchmark figures require analysis")

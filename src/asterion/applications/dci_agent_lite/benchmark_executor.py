@@ -48,6 +48,7 @@ _REAL_TASK_EXECUTION = {
     "beir.arguana": (300, 10),
     "beir.scifact": (300, 10),
 }
+_REAL_TASK_NATIVE_ATTEMPTS = {"beir.scifact": 3}
 _REAL_TASK_MODES = {"beir.arguana": "ir", "beir.scifact": "ir"}
 _DEFAULT_EXPERIMENT_PROFILE = "asterion-safe/pi"
 _UPSTREAM_EXPERIMENT_PROFILE = (
@@ -199,7 +200,9 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 corpus=payload.corpus,
                 max_concurrency=max_concurrency,
                 max_turns=max_turns,
-                max_native_attempts=2,
+                max_native_attempts=_REAL_TASK_NATIVE_ATTEMPTS.get(
+                    invocation.task_id, 2
+                ),
                 resume_policy="compatible",
             )
             on_progress(

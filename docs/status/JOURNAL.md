@@ -364,3 +364,4 @@
 - 15:05 Validated native evidence per row before aggregate publication [c45c5bd]
 - 15:10 ArguAna completed 50/1406: nDCG@10 0.5493, $2.75, zero failed; resume added no generation
 - 15:11 Published verified ArguAna bounded result and resume evidence [fef20af]
+- 15:16 Published executable SciFact 50/300 IR benchmark contract [f27c55e]

@@ -338,7 +338,7 @@ lock 和 evidence root 执行 `benchmark resume`，结果仍为 completed，nati
 
 这是 BEIR SciFact 的真实 IR 实例，总量 300 条；当前执行论文选定的 50 条。它由 Agent
 生成检索结果，并按 binary deduplicated nDCG@10 聚合评分，不使用 Judge。每条最多 300
-个 Agent 回合、最多 10 路并发；失败时至多再尝试一次，第二次仍失败即 fail closed。
+个 Agent 回合、最多 10 路并发；失败时至多再尝试两次，第三次仍失败即 fail closed。
 
 ```bash
 env -u DEEPSEEK_API_KEY ASTERION_DCI_RESOURCE_ROOT="$PWD" uv run asterion-dci preflight --env-file "$PWD/.env"
