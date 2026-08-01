@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import re
 from collections.abc import Iterable, Mapping
@@ -21,6 +22,34 @@ def _digest(value: object) -> str:
     if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
         raise WorkflowEvidenceError("workflow evidence digest is invalid")
     return value
+
+
+def _graph_digest(graph: Mapping[str, object]) -> str:
+    return hashlib.sha256(
+        json.dumps(graph, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def validate_workflow_evidence(evidence: Mapping[str, object]) -> None:
+    """Reject evidence whose identity, safe shape, or integrity digest is invalid."""
+
+    if not isinstance(evidence, Mapping):
+        raise WorkflowEvidenceError("workflow evidence must be an object")
+    graph = dict(evidence)
+    graph_sha256 = _digest(graph.pop("graph_sha256", None))
+    if graph.get("schema") != "asterion.workflow-evidence/v1":
+        raise WorkflowEvidenceError("workflow evidence schema is invalid")
+    if not isinstance(graph.get("run_id"), str) or not graph["run_id"]:
+        raise WorkflowEvidenceError("workflow evidence run identity is invalid")
+    _digest(graph.get("input_digest"))
+    if graph.get("terminal_status") not in {"completed", "cancelled", "failed"}:
+        raise WorkflowEvidenceError("workflow evidence terminal status is invalid")
+    if not isinstance(graph.get("tools"), list) or not isinstance(graph.get("artifacts"), list):
+        raise WorkflowEvidenceError("workflow evidence collections are invalid")
+    if not isinstance(graph.get("usage"), Mapping):
+        raise WorkflowEvidenceError("workflow evidence usage is invalid")
+    if not hmac.compare_digest(graph_sha256, _graph_digest(graph)):
+        raise WorkflowEvidenceError("workflow evidence digest mismatches")
 
 
 def collect_workflow_evidence(
@@ -97,7 +126,5 @@ def collect_workflow_evidence(
         "usage": usage,
         "artifacts": sorted(artifacts, key=lambda artifact: artifact["artifact_id"]),
     }
-    graph["graph_sha256"] = hashlib.sha256(
-        json.dumps(graph, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
+    graph["graph_sha256"] = _graph_digest(graph)
     return graph

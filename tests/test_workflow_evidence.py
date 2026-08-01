@@ -6,7 +6,11 @@ import hashlib
 import json
 import unittest
 
-from asterion.workflow_evidence import WorkflowEvidenceError, collect_workflow_evidence
+from asterion.workflow_evidence import (
+    WorkflowEvidenceError,
+    collect_workflow_evidence,
+    validate_workflow_evidence,
+)
 
 
 def _digest(value: str) -> str:
@@ -114,6 +118,32 @@ class TestWorkflowEvidence(unittest.TestCase):
 
         self.assertEqual(first["graph_sha256"], second["graph_sha256"])
         self.assertEqual(first["terminal_status"], "cancelled")
+
+    def test_rejects_tampered_workflow_evidence(self) -> None:
+        graph = collect_workflow_evidence(
+            (
+                {
+                    "protocol": "asterion.agent-runtime/v1",
+                    "run_id": "run-3",
+                    "sequence": 1,
+                    "type": "run.started",
+                    "payload": {"capabilities": []},
+                },
+                {
+                    "protocol": "asterion.agent-runtime/v1",
+                    "run_id": "run-3",
+                    "sequence": 2,
+                    "type": "run.completed",
+                    "payload": {"status": "completed"},
+                },
+            ),
+            input_digest=_digest("input"),
+        )
+
+        validate_workflow_evidence(graph)
+        graph["terminal_status"] = "failed"
+        with self.assertRaises(WorkflowEvidenceError):
+            validate_workflow_evidence(graph)
 
     def test_rejects_artifact_digest_mismatch(self) -> None:
         events = (
