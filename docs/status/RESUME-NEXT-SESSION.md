@@ -1,38 +1,23 @@
 # Live Session Checkpoint
 
-> Updated: 2026-07-31 23:00. **Session remains active — not a final handoff.**
+> Updated: 2026-08-01 11:55. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- Every real DCI instance must first close a scored, resumed `min(50, total)` run.
-- Bamboogle, BC+ Level 3/Main, BEIR ArguAna/SciFact, Bright Biology/Earth
-  Science, and Bright Economics are `Verified-bounded`; their results are in
-  `DCI-BENCHMARK-INSTANCES.md`.
-- Bright Economics has completed its actual 50/103 run and resume verification:
-  nDCG@10 0.3717, about $4.11, run `run-63742304e39c4d4a852d1bc4b27174f9`.
-- Bright Robotics completed its actual 50/101 run and resume verification:
-  nDCG@10 0.4178, about $4.46, run `run-e9575e75038647269134b72c4da70502`.
-- QA 2WikiMultiHopQA completed its actual 50/12,576 run and resume verification:
-  80% (40/50), about $1.89, run `run-9d46b77d0fd84f408a20bc329b7f7032`.
-- QA HotpotQA completed its actual 50/7,405 run and resume verification:
-  76% (38/50), about $2.22, run `run-9d38318832304246bd46f3c19fe459eb`.
-- QA Musique completed its actual 50/2,417 run and resume verification:
-  44% (22/50), about $2.64, run `run-4d89eb351de14ba4a7ed7a988331ccfa`.
-- QA Natural Questions completed its actual 50/3,610 run and resume verification:
-  72% (36/50), about $1.74, run `run-dde54b4fef884efc84bece74a327c23d`.
+- All real DCI instances have completed their 50/total execution and compatible-resume verification.
+- `db8713c` adds the explicit total-budget authorization required by paper-scoped full executions.
+- Bright Biology's authorized 103/103 run is active under run ID `run-86fde416b0ea42b69a6f7876e3386443` with a $54 total budget.
+- It runs serially only because concurrent Pi calls demonstrably fail; no case, model path, or evaluation rule is reduced.
 
 ## Immediate next action
 
-1. All real DCI instances have completed their `50/total` run and resume
-   verification; TriviaQA is 92% (46/50), run `run-8b0d0b9ca0654f0c9b0863906a54755d`.
-2. Do not start a full-data run without a new explicit decision and budget.
-3. Continue the remaining QA instances in the same order; do not start any
-   full-data run until every real instance has a 50/total closure.
+1. Monitor the Bright Biology run to terminal completion; inspect its summary and execute compatible resume.
+2. Record score, cost, duration, and paper-reference comparison in `docs/status/DCI-BENCHMARK-INSTANCES.md`.
+3. Continue the approved recommended verification package only after this first full closure is verified.
 
 ## Ruled-out paths
 
-- Do not introduce public sample/full duplicate instances; report `50/total`.
-- Do not publish raw prompts, corpus, answers, model output, credentials, or
-  private paths.
-- Do not infer data totals: use the paper benchmark inventory (Earth Science is
-  116).
+- Do not use a sample/full duplicate public instance; report bounded work as `50/total`.
+- Do not invoke a paper-scoped full run without `--max-cost-usd`; it is the explicit finite authorization.
+- Do not reintroduce Pi parallelism until its native runtime failures are resolved.
+- Do not publish prompts, corpus text, answers, model output, credentials, or private paths.

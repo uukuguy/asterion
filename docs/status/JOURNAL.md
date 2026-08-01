@@ -413,3 +413,5 @@
 - Added coverage-qualified score comparisons for meaningful paper reference [e88c056]
 - Estimated full benchmark budgets and prioritized small full-validation packages [2632386]
 - Saved recoverable recommended full-validation execution plan after authorization failure [8af69d9]
+- 11:55 Full benchmarks receive total-budget authorization; fixes pre-case rejection [db8713c]
+- 12:00 Bright Biology 103-case authorized run active; serial Pi execution remains failure-free

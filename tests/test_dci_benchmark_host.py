@@ -121,7 +121,7 @@ class DciBenchmarkHostTests(unittest.TestCase):
 
     def test_real_host_requires_private_config_before_provider_loading(self) -> None:
         instance = select_benchmark_instance(
-            "dci.qa.bamboogle.github-sample50@1.0.0"
+            "dci.qa.bamboogle@1.0.0"
         )
         source = RecordingBuiltinSource()
         with tempfile.TemporaryDirectory() as temp:
@@ -172,7 +172,7 @@ class DciBenchmarkHostTests(unittest.TestCase):
 
     def test_real_host_selects_runnable_asterion_safe_agent_and_judge(self) -> None:
         instance = select_benchmark_instance(
-            "dci.qa.bamboogle.github-sample50@1.0.0"
+            "dci.qa.bamboogle@1.0.0"
         )
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()

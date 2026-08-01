@@ -332,12 +332,29 @@ class CapabilityPackageProtocolTests(unittest.TestCase):
             dci.benchmark_suites,
             (
                 BenchmarkSuiteRef("dci.all", "1.0.0"),
+                BenchmarkSuiteRef("dci.bcplus.level3", "1.0.0"),
+                BenchmarkSuiteRef("dci.bcplus.main", "1.0.0"),
+                BenchmarkSuiteRef("dci.beir.arguana", "1.0.0"),
+                BenchmarkSuiteRef("dci.beir.scifact", "1.0.0"),
+                BenchmarkSuiteRef("dci.bright.biology", "1.0.0"),
+                BenchmarkSuiteRef("dci.bright.earth-science", "1.0.0"),
+                BenchmarkSuiteRef("dci.bright.economics", "1.0.0"),
+                BenchmarkSuiteRef("dci.bright.robotics", "1.0.0"),
                 BenchmarkSuiteRef("dci.github", "1.0.0"),
                 BenchmarkSuiteRef("dci.paper-main", "1.0.0"),
+                BenchmarkSuiteRef("dci.qa.2wikimultihopqa", "1.0.0"),
                 BenchmarkSuiteRef(
                     "dci.qa.bamboogle.github-sample50",
                     "1.0.0",
                 ),
+                BenchmarkSuiteRef(
+                    "dci.qa.bamboogle.paper-full125",
+                    "1.0.0",
+                ),
+                BenchmarkSuiteRef("dci.qa.hotpotqa", "1.0.0"),
+                BenchmarkSuiteRef("dci.qa.musique", "1.0.0"),
+                BenchmarkSuiteRef("dci.qa.nq", "1.0.0"),
+                BenchmarkSuiteRef("dci.qa.triviaqa", "1.0.0"),
             ),
         )
         self.assertEqual(controlled_code.resources, ())

@@ -176,7 +176,7 @@ class DciExternalDistributionTests(unittest.TestCase):
                     "payload_sha256": materialized.payload_sha256,
                     "provider_imported_during_discovery": False,
                     "source_id": "dci.python-distribution",
-                    "suites": 4,
+                    "suites": 18,
                     "task_count": 12,
                 },
             )

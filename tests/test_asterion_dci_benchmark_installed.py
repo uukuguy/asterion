@@ -166,7 +166,7 @@ class InstalledDciBenchmarkTests(unittest.TestCase):
                 environment,
             )
 
-        self.assertEqual(len(instances), 16)
+        self.assertEqual(len(instances), 15)
         self.assertEqual(locked, {"instance": INSTANCE, "locked": True})
         self.assertEqual(plan["application"], "dci.local-benchmark-application@1.0.0")
         self.assertEqual(plan["suite"], "dci.all@1.0.0")

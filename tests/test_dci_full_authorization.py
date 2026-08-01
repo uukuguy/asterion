@@ -2260,6 +2260,11 @@ class AuthorizedBenchmarkBudgetTests(unittest.TestCase):
         )
         stack.enter_context(
             patch(
+                "asterion.capabilities.dci.implementation.evaluation.benchmark._validate_completed_agent_evidence"
+            )
+        )
+        stack.enter_context(
+            patch(
                 "asterion.capabilities.dci.implementation.evaluation.benchmark._validated_agent_cost",
                 side_effect=agent_cost,
             )
