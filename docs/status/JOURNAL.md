@@ -429,3 +429,4 @@
 - 18:07 Added scope-gated evidence comparison so unmatched workflow runs cannot yield misleading deltas [95d4d0f]
 - 18:10 Added evidence-only diagnosis so observed deltas remain distinct from unproven causes [dfac027]
 - 18:13 Added non-executing optimization proposals so workflow changes require operator authorization [6c61d16]
+- 18:18 Corrected IR tool analysis to report nDCG evidence instead of misleading QA accuracy [509af33]

@@ -232,13 +232,17 @@ Agent，并将每个答案交给独立 Judge。Asterion 只在 preflight 通过�
 
 先根据 operator template 配置 `.env` 中的外部资源路径和 credentials。
 preflight 只检查 readiness，不调用 Agent 或 Judge，也不授予执行权限。
+这份完整 125 条数据与其 corpus 位于本工作区，运行前必须固定资源根，避免继承到只含
+50 条样本的外部基线目录。
 
 ```bash
+export ASTERION_DCI_RESOURCE_ROOT="$PWD"
 uv run asterion-dci preflight --env-file "$PWD/.env"
 ```
 
-所有类别都必须为 `PASS`。进程环境变量优先于 `.env`；如果认证结果异常，应检查
-继承的 `DEEPSEEK_API_KEY` 等变量。
+所有类别都必须为 `PASS`。这里的 Judge `PASS` 仅表示模型选择和非空凭据已经配置，
+不会向远端发送题目来验证凭据是否被接受；正式运行的第一条 Judge 请求才会完成该验证。
+进程环境变量优先于 `.env`；如果认证结果异常，应检查继承的 `DEEPSEEK_API_KEY` 等变量。
 
 ### 当前 50 条阶段性评估
 

@@ -1200,7 +1200,7 @@ class DciProductVerifier:
             ),
             _readiness_check(
                 "judge",
-                "Judge selection and authentication are available",
+                "Judge selection and credential are configured",
                 "Set DCI_EVAL_JUDGE_MODEL, DCI_EVAL_JUDGE_API_KEY_ENV, and the named credential",
                 judge_ready,
             ),

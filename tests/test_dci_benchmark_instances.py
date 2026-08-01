@@ -81,6 +81,10 @@ class TestDciBenchmarkInstances(unittest.TestCase):
         self.assertIn("50/125 的阶段性结果", text)
         self.assertIn("41/50", text)
         self.assertIn("82%", text)
+        bamboogle_section = text.split(
+            "## 运行手册：`dci.qa.bamboogle@1.0.0`", 1
+        )[1].split("## 运行手册：`dci.bcplus.level3@1.0.0`", 1)[0]
+        self.assertIn('export ASTERION_DCI_RESOURCE_ROOT="$PWD"', bamboogle_section)
         self.assertNotRegex(text, r"--run-id\s+run-[0-9a-f]{32}")
         self.assertNotRegex(
             text,
