@@ -330,10 +330,11 @@ def _authorize_full_request(
     _raw, binding = read_paper_benchmark_dataset(payload.dataset, benchmark)
     profile = resolve_experiment_profile(_DEFAULT_EXPERIMENT_PROFILE)
     judge_operations = payload.case_limit if request.mode == "qa" else 1
-    operation_limit = float(payload.amount) / max(
-        10,
-        request.max_concurrency * (2 if request.mode == "qa" else 1),
-    )
+    # The finite authorization budget is enforced cumulatively by the
+    # authority.  Do not split it into an artificial per-operation cap: a
+    # single legitimate agent or judge call must not make an otherwise funded
+    # benchmark impossible to complete.
+    operation_limit = float(payload.amount)
     authority = authorize_full_execution(
         profile=profile,
         scope_ids=(scope_id,),
