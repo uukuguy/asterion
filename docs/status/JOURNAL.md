@@ -430,3 +430,4 @@
 - 18:10 Added evidence-only diagnosis so observed deltas remain distinct from unproven causes [dfac027]
 - 18:13 Added non-executing optimization proposals so workflow changes require operator authorization [6c61d16]
 - 18:18 Corrected IR tool analysis to report nDCG evidence instead of misleading QA accuracy [509af33]
+- 18:28 Fixed Bamboogle resource-root instructions so full125 resolves its canonical local dataset [e8fc620]

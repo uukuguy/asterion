@@ -50,6 +50,7 @@ from asterion.capabilities.dci.implementation.operator_inputs import (
 from asterion.applications.dci_agent_lite.benchmark_executor import (
     LocalDciBenchmarkExecutor,
     RealDciBenchmarkExecutor,
+    verify_judge_connectivity,
 )
 from asterion.capabilities.dci.implementation.config import (
     resolve_dci_paths,
@@ -362,6 +363,7 @@ class DciBenchmarkHost:
                 judge_config=JudgeConfig.from_environment(environment),
                 experiment_profile="asterion-safe/pi",
                 max_turns=100,
+                judge_connectivity_probe=verify_judge_connectivity,
             )
         _fail()
 

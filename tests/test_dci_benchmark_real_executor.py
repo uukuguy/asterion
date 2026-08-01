@@ -70,6 +70,35 @@ def _invocation(root: Path, **changes: object) -> BenchmarkTaskInvocation:
 
 
 class RealDciBenchmarkExecutorTests(unittest.TestCase):
+    def test_rejects_judge_connectivity_before_starting_agent_work(self) -> None:
+        calls = []
+
+        async def runner(request, *, paths):
+            del request, paths
+            calls.append("started")
+            self.fail("runner must not start before Judge connectivity succeeds")
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            result = RealDciBenchmarkExecutor(
+                paths=_paths(root),
+                runtime_options=DciRuntimeOptions(),
+                judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
+                benchmark_runner=runner,
+                readiness_probe=lambda *_args: None,
+                judge_connectivity_probe=lambda _config: (_ for _ in ()).throw(
+                    RuntimeError("rejected")
+                ),
+            )
+            with self.assertRaises(DciBenchmarkExecutorError):
+                result.execute(
+                    _invocation(root),
+                    cancellation=MutableCancellation(),
+                    on_progress=lambda _event: None,
+                )
+
+        self.assertEqual(calls, [])
+
     def test_executes_paper_full125_contract(self) -> None:
         calls = []
 

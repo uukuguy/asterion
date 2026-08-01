@@ -6,6 +6,8 @@ import asyncio
 import inspect
 import os
 import stat
+import urllib.error
+import urllib.request
 from dataclasses import replace
 from collections.abc import Callable
 from pathlib import Path
@@ -184,6 +186,7 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
         max_turns: int = 100,
         benchmark_runner: Callable[..., Any] = run_benchmark_async,
         readiness_probe: Callable[..., None] | None = None,
+        judge_connectivity_probe: Callable[[JudgeConfig], None] | None = None,
     ) -> None:
         if (
             not isinstance(paths, DciPaths)
@@ -195,6 +198,8 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
             or not callable(benchmark_runner)
             or readiness_probe is not None
             and not callable(readiness_probe)
+            or judge_connectivity_probe is not None
+            and not callable(judge_connectivity_probe)
         ):
             _fail()
         self._paths = paths
@@ -206,6 +211,7 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
         self._readiness_probe = (
             _default_readiness_probe if readiness_probe is None else readiness_probe
         )
+        self._judge_connectivity_probe = judge_connectivity_probe
 
     def execute(
         self,
@@ -222,6 +228,8 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 self._runtime_options,
                 self._judge_config,
             )
+            if self._judge_connectivity_probe is not None:
+                self._judge_connectivity_probe(self._judge_config)
             if cancellation.cancelled:
                 return _cancelled(invocation.task_id)
             max_turns, max_concurrency = _REAL_TASK_EXECUTION.get(
@@ -460,6 +468,23 @@ def _default_readiness_probe(
     ):
         _fail()
     resolve_node_bin(payload.private_environment)
+
+
+def verify_judge_connectivity(config: JudgeConfig) -> None:
+    """Verify configured Judge credentials without sending benchmark content."""
+
+    if not isinstance(config, JudgeConfig) or not config.api_key:
+        _fail()
+    request = urllib.request.Request(
+        config.base_url.rstrip("/") + "/models",
+        headers={"Authorization": f"Bearer {config.api_key}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=min(config.timeout_seconds, 15)) as response:
+            if response.status < 200 or response.status >= 300:
+                _fail()
+    except (OSError, ValueError, urllib.error.HTTPError):
+        _fail()
 
 
 def _bounded_jsonl_count(path: Path, required: int) -> int:
