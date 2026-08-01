@@ -330,11 +330,13 @@ def _authorize_full_request(
     _raw, binding = read_paper_benchmark_dataset(payload.dataset, benchmark)
     profile = resolve_experiment_profile(_DEFAULT_EXPERIMENT_PROFILE)
     judge_operations = payload.case_limit if request.mode == "qa" else 1
-    # The finite authorization budget is enforced cumulatively by the
-    # authority.  Do not split it into an artificial per-operation cap: a
-    # single legitimate agent or judge call must not make an otherwise funded
-    # benchmark impossible to complete.
-    operation_limit = float(payload.amount)
+    # The authorization ledger reserves an operation's full upper bound before
+    # it starts, then replaces that reservation with its actual spend.  A
+    # per-operation bound equal to the total envelope therefore makes a
+    # sequential batch fail after its first case, even when that case was
+    # inexpensive.  Ten reservation slots preserve the finite total budget
+    # while leaving normal DeepSeek/Pi operations ample headroom.
+    operation_limit = float(payload.amount) / 10
     authority = authorize_full_execution(
         profile=profile,
         scope_ids=(scope_id,),

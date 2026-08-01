@@ -108,11 +108,11 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
         self.assertIsNotNone(calls[0][0].full_execution_authorization)
         self.assertEqual(
             calls[0][0].full_execution_authorization.max_agent_cost_per_operation_usd,
-            10.0,
+            1.0,
         )
         self.assertEqual(
             calls[0][0].full_execution_authorization.max_judge_cost_per_operation_usd,
-            10.0,
+            1.0,
         )
         self.assertEqual(
             calls[0][0].experiment_scope_id,
