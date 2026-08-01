@@ -427,3 +427,4 @@
 - 18:02 Added deterministic evidence fingerprints so comparisons can detect changed workflow records [0df3f91]
 - 18:04 Added evidence integrity validation so assessment rejects altered workflow records [7470d9b]
 - 18:07 Added scope-gated evidence comparison so unmatched workflow runs cannot yield misleading deltas [95d4d0f]
+- 18:10 Added evidence-only diagnosis so observed deltas remain distinct from unproven causes [dfac027]

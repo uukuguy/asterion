@@ -176,6 +176,45 @@ def diagnose_workflow_comparison(comparison: Mapping[str, object]) -> dict[str, 
     return graph
 
 
+def _validate_workflow_diagnosis(diagnosis: Mapping[str, object]) -> None:
+    if not isinstance(diagnosis, Mapping):
+        raise WorkflowEvidenceError("workflow optimization diagnosis is invalid")
+    graph = dict(diagnosis)
+    diagnosis_sha256 = _digest(graph.pop("diagnosis_sha256", None))
+    if graph.get("schema") != "asterion.workflow-diagnosis/v1":
+        raise WorkflowEvidenceError("workflow optimization diagnosis schema is invalid")
+    if graph.get("state") not in {"ready", "not-comparable"}:
+        raise WorkflowEvidenceError("workflow optimization diagnosis state is invalid")
+    if not all(isinstance(graph.get(name), list) for name in ("observations", "hypotheses", "missing_evidence")):
+        raise WorkflowEvidenceError("workflow optimization diagnosis collections are invalid")
+    if not hmac.compare_digest(diagnosis_sha256, _graph_digest(graph)):
+        raise WorkflowEvidenceError("workflow optimization diagnosis digest mismatches")
+
+
+def create_optimization_proposal(
+    diagnosis: Mapping[str, object], *, change_digest: str
+) -> dict[str, object]:
+    """Create a non-executing change request from comparable evidence only.
+
+    A proposal intentionally carries no command, configuration, prompt, or
+    authority.  A host must perform a separate explicit authorization step.
+    """
+
+    _validate_workflow_diagnosis(diagnosis)
+    if diagnosis["state"] != "ready":
+        raise WorkflowEvidenceError("workflow optimization requires comparable evidence")
+    graph: dict[str, object] = {
+        "schema": "asterion.workflow-optimization-proposal/v1",
+        "status": "proposed",
+        "diagnosis_sha256": diagnosis["diagnosis_sha256"],
+        "change_sha256": _digest(change_digest),
+        "requires_operator_authorization": True,
+        "execution_authorized": False,
+    }
+    graph["proposal_sha256"] = _graph_digest(graph)
+    return graph
+
+
 def collect_workflow_evidence(
     events: Iterable[Mapping[str, object]],
     *,
