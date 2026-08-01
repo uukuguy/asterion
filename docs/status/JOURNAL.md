@@ -434,3 +434,7 @@
 - 18:32 Added content-free Judge connectivity checks to prevent Agent work with rejected credentials [2029427]
 - 18:35 Limited Judge connectivity checks to QA so IR benchmarks remain Judge-independent [3c82ed8]
 - 18:50 Planned runtime-bound workflow observation so framework evidence reflects real calls [ef93eb3]
+- 18:55 Recorded verified SciFact 300/300 closure and no-key resume evidence [7b0633f]
+- 19:05 Added runtime-bound safe observation so evidence reflects real executions [600c70a]
+- 19:10 Added explicit immutable observation bundles for operator-owned evidence [5577ff4]
+- 19:15 Enabled opt-in CLI workflow evidence export for usable framework observations [e39602a]

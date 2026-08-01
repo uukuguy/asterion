@@ -1,5 +1,19 @@
 # Asterion CLI
 
+## 应用运行证据
+
+`asterion run` 默认只输出既有的公开结果。需要观察真实 runtime 调用时，操作员可显式
+指定一个尚不存在的 `workflow-evidence.json`：
+
+```bash
+asterion run --provider PROVIDER --application ID@VERSION \
+  --workflow-evidence-file /operator/evidence/workflow-evidence.json
+```
+
+该文件只保存已验证 runtime 流的身份、输入 digest、工具计数、token、artifact digest 和
+终态；不会保存输入内容、prompt、答案、工具参数/输出、URI、凭据或异常原文。目标必须是
+调用方已有目录中的新文件，不能覆盖既有文件。
+
 ## Benchmark
 
 `asterion benchmark` creates generic benchmark plans from installed application
