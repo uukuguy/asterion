@@ -228,7 +228,7 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 (self._max_turns, 1),
             )
             if payload.case_limit > 50:
-                max_concurrency = 1
+                max_concurrency = 2
             request = BenchmarkRequest(
                 dataset=payload.dataset,
                 output_root=payload.output_directory,

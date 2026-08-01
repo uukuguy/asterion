@@ -104,7 +104,7 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
         self.assertEqual(result.status, "completed")
         self.assertEqual(result.case_count, 125)
         self.assertEqual(calls[0][0].limit, 125)
-        self.assertEqual(calls[0][0].max_concurrency, 1)
+        self.assertEqual(calls[0][0].max_concurrency, 2)
         self.assertIsNotNone(calls[0][0].full_execution_authorization)
         self.assertEqual(
             calls[0][0].full_execution_authorization.max_agent_cost_per_operation_usd,
