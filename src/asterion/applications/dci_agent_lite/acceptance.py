@@ -80,6 +80,7 @@ _EXPECTED_PAPER_BENCHMARK_IDS = (
 _EXPECTED_PAPER_SCOPE_IDS = (
     "beir.arguana.main.random50",
     "beir.scifact.main.random50",
+    "beir.scifact.main.full",
     "bright.biology.main.full",
     "bright.earth-science.main.full",
     "bright.economics.main.full",
@@ -99,7 +100,7 @@ _EXPECTED_PAPER_BENCHMARK_SHA256 = (
     "bfe279f25452b37eab5ffd33f39e4ee405c2f9c8226c6456eea33c3d0c8191af"
 )
 _EXPECTED_PAPER_SCOPES_SHA256 = (
-    "316b58ca33390b19150fbd62d4c4806ca591eb64611eb12d93281a45d5d00140"
+    "862c8fc711962f507c1f57bec00b68028047f3cd51ac95818ed8f1868077be13"
 )
 
 
@@ -382,7 +383,7 @@ def installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
                     "paper-scopes",
                     "Paper scope identity closure is valid",
                     actual=len(scopes),
-                    expected=16,
+                    expected=17,
                     exact=scopes_exact,
                 ),
                 _acceptance_check(

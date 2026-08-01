@@ -36,6 +36,7 @@ _EXPECTED_DATASET_IDS = (
 _EXPECTED_SCOPE_IDS = (
     "beir.arguana.main.random50",
     "beir.scifact.main.random50",
+    "beir.scifact.main.full",
     "bright.biology.main.full",
     "bright.earth-science.main.full",
     "bright.economics.main.full",
@@ -687,7 +688,7 @@ def _scopes() -> Mapping[str, PaperExperimentScope]:
         fields=_SCOPE_FIELDS,
         schema_id=PAPER_EXPERIMENT_SCOPE_SCHEMA,
         collection="scopes",
-        count=17,
+        count=18,
         property_schemas=_SCOPE_PROPERTY_SCHEMAS,
     )
     payload = _load_resource(
@@ -744,7 +745,12 @@ def _scopes() -> Mapping[str, PaperExperimentScope]:
         )
         expected_origin = (
             "asterion-added"
-            if scope_id in {"beir.arguana.main.random50", "beir.scifact.main.random50"}
+            if scope_id
+            in {
+                "beir.arguana.main.random50",
+                "beir.scifact.main.random50",
+                "beir.scifact.main.full",
+            }
             else "unavailable"
             if scope_id
             in {

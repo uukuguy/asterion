@@ -34,6 +34,22 @@
       "selection_seed_status": "paper-unreported"
     },
     {
+      "scope_id": "beir.scifact.main.full",
+      "dataset_id": "beir.scifact",
+      "experiment": "main-results",
+      "source_family": "paper-reference",
+      "source_reference": "arxiv:2605.05242v1",
+      "launcher_origin": "asterion-added",
+      "selection_mode": "all",
+      "selection_kind": "full",
+      "selection_count": 300,
+      "selection_seed": null,
+      "selection_algorithm": "sorted-selected-id-manifest/v1",
+      "selected_ids_sha256": "3f8e5a58154d93c235227547585808269b4934440d0eee525ea0b1bc3ec79cf5",
+      "execution_class": "paper-full",
+      "selection_seed_status": "reported"
+    },
+    {
       "scope_id": "bright.biology.main.full",
       "dataset_id": "bright.biology",
       "experiment": "main-results",

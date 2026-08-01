@@ -6,7 +6,7 @@
   "required": ["schema", "scopes"],
   "properties": {
     "schema": {"const": "dci.paper-experiment-scopes/v1"},
-    "scopes": {"type": "array", "minItems": 17, "maxItems": 17, "items": {"$ref": "#/$defs/scope"}}
+    "scopes": {"type": "array", "minItems": 18, "maxItems": 18, "items": {"$ref": "#/$defs/scope"}}
   },
   "$defs": {
     "scope": {

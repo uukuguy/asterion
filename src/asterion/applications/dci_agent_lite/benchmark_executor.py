@@ -89,6 +89,7 @@ _REAL_TASK_MODES = {
 }
 _DEFAULT_EXPERIMENT_PROFILE = "asterion-safe/pi"
 _FULL_SCOPE_BY_TASK = {
+    "beir.scifact": "beir.scifact.main.full",
     "bright.biology": "bright.biology.main.full",
     "bright.earth-science": "bright.earth-science.main.full",
     "bright.economics": "bright.economics.main.full",

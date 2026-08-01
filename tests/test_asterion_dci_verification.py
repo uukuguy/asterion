@@ -176,7 +176,7 @@ class InstalledAcceptanceTests(unittest.TestCase):
         )
         self.assertTrue(all("launcher" not in item for item in benchmarks))
 
-        self.assertEqual(len(scopes), 17)
+        self.assertEqual(len(scopes), 18)
         self.assertTrue(
             all(
                 item["source_family"] == "paper-reference"
@@ -239,8 +239,8 @@ class InstalledAcceptanceTests(unittest.TestCase):
             select_and_verify_experiment_scope_ids,
         )
 
-        self.assertEqual(len(all_experiment_scope_ids()), 17)
-        self.assertEqual(len(paper_experiment_scope_ids()), 16)
+        self.assertEqual(len(all_experiment_scope_ids()), 18)
+        self.assertEqual(len(paper_experiment_scope_ids()), 17)
         self.assertNotIn(
             "qa.bamboogle.upstream.sample50", paper_experiment_scope_ids()
         )
@@ -328,7 +328,7 @@ class InstalledAcceptanceTests(unittest.TestCase):
                 "executable-assemblies": {"actual": 7, "expected": 7},
                 "packaged-assemblies": {"actual": 8, "expected": 8},
                 "paper-benchmarks": {"actual": 13, "expected": 13},
-                "paper-scopes": {"actual": 16, "expected": 16},
+                "paper-scopes": {"actual": 17, "expected": 17},
                 "provider-requests": {"actual": 0, "expected": 0},
             },
         )
@@ -907,14 +907,14 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
                 "resolve_paper_experiment_scope",
                 RuntimeError("scope resolver failed"),
                 "paper-scopes",
-                16,
+                17,
             ),
             (
                 "scope-checksum-failure",
                 "paper_experiment_scopes_sha256",
                 "invalid",
                 "paper-scopes",
-                16,
+                17,
             ),
         )
         for case, target, outcome, check_id, actual in cases:

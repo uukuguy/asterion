@@ -90,6 +90,7 @@ from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks impo
     require_af320_executable_scope,
     resolve_paper_benchmark,
     resolve_paper_experiment_scope,
+    select_and_verify_scope_ids,
 )
 from asterion.capabilities.dci.implementation.reproduction.provenance import dci_complete_implementation_identity
 from asterion.capabilities.dci.implementation.evaluation.analysis import (
@@ -1050,6 +1051,12 @@ def _prepare(
             "beir.arguana": "beir.arguana.main.random50",
             "beir.scifact": "beir.scifact.main.random50",
         }.get(request.dataset_profile)
+        if (
+            request.full_execution_authorization is not None
+            and request.experiment_scope_id is not None
+            and request.experiment_scope_id.startswith("beir.")
+        ):
+            beir_scope = request.experiment_scope_id
         paper_dataset_benchmark = None
         if paper_scope is not None:
             candidate = resolve_paper_benchmark(
@@ -1079,11 +1086,29 @@ def _prepare(
                 except DatasetError:
                     raise generic_error
         else:
-            rows = load_beir_benchmark_rows_bytes(dataset_raw, expected_count=50)
-            if tuple(sorted(row.query_id for row in rows)) != published_scope_selected_ids(
-                beir_scope
-            ):
-                raise DatasetError("DCI BEIR selected-ID manifest does not match")
+            beir_benchmark = resolve_paper_benchmark(
+                resolve_paper_experiment_scope(beir_scope).dataset_id
+            )
+            rows = load_beir_benchmark_rows_bytes(
+                dataset_raw,
+                expected_count=beir_benchmark.source_count,
+            )
+            scope = resolve_paper_experiment_scope(beir_scope)
+            selected_ids = tuple(sorted(row.query_id for row in rows))
+            if scope.selection_seed_status == "paper-unreported":
+                selected_ids = published_scope_selected_ids(beir_scope)
+                if not set(selected_ids).issubset(
+                    {row.query_id for row in rows}
+                ):
+                    raise DatasetError("DCI BEIR selected-ID manifest does not match")
+                rows = tuple(row for row in rows if row.query_id in set(selected_ids))
+            else:
+                try:
+                    select_and_verify_scope_ids(beir_scope, selected_ids)
+                except ValueError as error:
+                    raise DatasetError(
+                        "DCI BEIR selected-ID manifest does not match"
+                    ) from error
     except DatasetError as error:
         raise DciBenchmarkError("DCI benchmark dataset is invalid") from error
     source_scope = _paper_scope_for_rows(rows)
