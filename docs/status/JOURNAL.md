@@ -431,3 +431,4 @@
 - 18:13 Added non-executing optimization proposals so workflow changes require operator authorization [6c61d16]
 - 18:18 Corrected IR tool analysis to report nDCG evidence instead of misleading QA accuracy [509af33]
 - 18:28 Fixed Bamboogle resource-root instructions so full125 resolves its canonical local dataset [e8fc620]
+- 18:32 Added content-free Judge connectivity checks to prevent Agent work with rejected credentials [2029427]

@@ -228,7 +228,8 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 self._runtime_options,
                 self._judge_config,
             )
-            if self._judge_connectivity_probe is not None:
+            mode = _REAL_TASK_MODES.get(invocation.task_id, "qa")
+            if mode == "qa" and self._judge_connectivity_probe is not None:
                 self._judge_connectivity_probe(self._judge_config)
             if cancellation.cancelled:
                 return _cancelled(invocation.task_id)
@@ -245,7 +246,7 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 judge_config=self._judge_config,
                 runtime_options=replace(self._runtime_options, tools="read,grep"),
                 limit=payload.case_limit,
-                mode=_REAL_TASK_MODES.get(invocation.task_id, "qa"),
+                mode=mode,
                 profile=self._experiment_profile,
                 dataset_profile=(
                     invocation.task_id

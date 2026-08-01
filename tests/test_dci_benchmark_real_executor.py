@@ -99,6 +99,42 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
 
         self.assertEqual(calls, [])
 
+    def test_skips_judge_connectivity_for_ir_workflows(self) -> None:
+        calls = []
+
+        async def runner(request, *, paths):
+            del paths
+            calls.append(request)
+            return BenchmarkResult(
+                output_root=request.output_root,
+                counts={"total": 1, "completed": 1, "failed": 0},
+            )
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            rejected = []
+            result = RealDciBenchmarkExecutor(
+                paths=_paths(root),
+                runtime_options=DciRuntimeOptions(),
+                judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
+                benchmark_runner=runner,
+                readiness_probe=lambda *_args: None,
+                judge_connectivity_probe=lambda _config: rejected.append(True),
+            ).execute(
+                _invocation(
+                    root,
+                    task_id="beir.scifact",
+                    profile_id="beir.scifact",
+                    selection_variant="paper-main",
+                ),
+                cancellation=MutableCancellation(),
+                on_progress=lambda _event: None,
+            )
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(rejected, [])
+
     def test_executes_paper_full125_contract(self) -> None:
         calls = []
 
