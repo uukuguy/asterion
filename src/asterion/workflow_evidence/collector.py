@@ -30,6 +30,14 @@ def _graph_digest(graph: Mapping[str, object]) -> str:
     ).hexdigest()
 
 
+def _canonical_digest(value: object, *, error: str) -> str:
+    try:
+        rendered = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError) as exc:
+        raise WorkflowEvidenceError(error) from exc
+    return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+
+
 def validate_workflow_evidence(evidence: Mapping[str, object]) -> None:
     """Reject evidence whose identity, safe shape, or integrity digest is invalid."""
 
@@ -50,6 +58,63 @@ def validate_workflow_evidence(evidence: Mapping[str, object]) -> None:
         raise WorkflowEvidenceError("workflow evidence usage is invalid")
     if not hmac.compare_digest(graph_sha256, _graph_digest(graph)):
         raise WorkflowEvidenceError("workflow evidence digest mismatches")
+
+
+def compare_workflow_evidence(
+    baseline: Mapping[str, object],
+    candidate: Mapping[str, object],
+    *,
+    baseline_scope: Mapping[str, object],
+    candidate_scope: Mapping[str, object],
+) -> dict[str, object]:
+    """Compare two verified workflow summaries only when their scopes match.
+
+    Scope content is never returned.  Its digest makes a comparison auditable
+    while preventing public reports from exposing case identities or settings.
+    """
+
+    validate_workflow_evidence(baseline)
+    validate_workflow_evidence(candidate)
+    baseline_scope_sha256 = _canonical_digest(
+        baseline_scope, error="workflow comparison baseline scope is invalid"
+    )
+    candidate_scope_sha256 = _canonical_digest(
+        candidate_scope, error="workflow comparison candidate scope is invalid"
+    )
+    common = {
+        "schema": "asterion.workflow-comparison/v1",
+        "baseline_graph_sha256": baseline["graph_sha256"],
+        "candidate_graph_sha256": candidate["graph_sha256"],
+    }
+    if not hmac.compare_digest(baseline_scope_sha256, candidate_scope_sha256):
+        return {
+            **common,
+            "status": "not-comparable",
+            "reasons": ["scope-identity-mismatch"],
+            "baseline_scope_sha256": baseline_scope_sha256,
+            "candidate_scope_sha256": candidate_scope_sha256,
+        }
+
+    baseline_usage = baseline["usage"]
+    candidate_usage = candidate["usage"]
+    assert isinstance(baseline_usage, Mapping)
+    assert isinstance(candidate_usage, Mapping)
+    usage_delta: dict[str, int] = {}
+    for name in ("input_tokens", "output_tokens"):
+        before = baseline_usage.get(name)
+        after = candidate_usage.get(name)
+        if isinstance(before, bool) or not isinstance(before, int) or before < 0:
+            raise WorkflowEvidenceError("workflow comparison baseline usage is invalid")
+        if isinstance(after, bool) or not isinstance(after, int) or after < 0:
+            raise WorkflowEvidenceError("workflow comparison candidate usage is invalid")
+        usage_delta[name] = after - before
+    return {
+        **common,
+        "status": "comparable",
+        "scope_sha256": baseline_scope_sha256,
+        "terminal_status_changed": baseline["terminal_status"] != candidate["terminal_status"],
+        "usage_delta": usage_delta,
+    }
 
 
 def collect_workflow_evidence(
