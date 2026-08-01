@@ -12,7 +12,7 @@ benchmark 实例的实现清单、验证台账和运行手册。
 | `dci.bcplus.level3@1.0.0` | implemented / Verified-bounded | 50/830 | 34%（17/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $4.29；`run-480faa…65ff`；resume 未新增生成 | 实现并完成 `dci.bcplus.main@1.0.0` 的 50 条版本 |
 | `dci.bcplus.main@1.0.0` | implemented / Verified-bounded | 50/830 | 28%（14/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $4.69；`run-9bc4c4…ceb4`；resume 未新增生成 | 实现并完成下一个实例的 50 条版本 |
 | `dci.beir.arguana@1.0.0` | implemented / Verified-bounded | 50/1406 | nDCG@10 = 0.5493 | `gpt-5.6-luna`；无 Judge；约 $2.75；`run-009492…1d24`；resume 未新增生成 | 实现并完成 `dci.beir.scifact@1.0.0` 的 50 条版本 |
-| `dci.beir.scifact@1.0.0` | implemented / 正在执行全量 | 50/300 已验证；300 条运行中 | 阶段 nDCG@10 = 0.7579 | `gpt-5.6-luna`；无 Judge；官方 BEIR 300 条输入已接通；全量运行 `run-6639…79dc` 正在双并发执行 | 不以阶段结果替代全量结果 |
+| `dci.beir.scifact@1.0.0` | implemented / Verified-full | 300/300 | nDCG@10 = 0.7524 | `gpt-5.6-luna`；无 Judge；$14.9801；`run-6639…79dc`；0 失败、无密钥 resume 已验证 | 全量结果与论文参照见下表 |
 | `dci.bright.biology@1.0.0` | implemented / Verified-full | 103/103 | nDCG@10 = 0.4456 | `gpt-5.6-luna`；无 Judge；$5.6353；`run-86fde4…6443`；无密钥 resume 已验证 | 全量结果与论文参照见下表 |
 | `dci.bright.earth-science@1.0.0` | implemented / Verified-full | 116/116 | nDCG@10 = 0.4382 | `gpt-5.6-luna`；无 Judge；$6.4950；`run-f19b7f…eef0`；无密钥 resume 已验证 | 全量结果与论文参照见下表 |
 | `dci.bright.economics@1.0.0` | implemented / Verified-full | 103/103 | nDCG@10 = 0.3097 | `gpt-5.6-luna`；无 Judge；$6.8860；0 失败；无密钥 resume 已验证 | 全量结果与论文参照见下表 |
@@ -26,7 +26,8 @@ benchmark 实例的实现清单、验证台账和运行手册。
 | `dci.qa.triviaqa@1.0.0` | implemented / Verified-bounded | 50/11,313 | 92%（46/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $1.10；`run-8b0d0b…755d`；resume 未新增生成 | 所有真实实例已完成 50 条版本 |
 
 表中最后一列仅保留当时的实施顺序，**不是待办或下一步**。所有真实实例的 50 条阶段已经完成；
-用户已批准推荐核验包全量运行，当前已完成 Bright 四项，并正在执行 SciFact。
+用户已批准推荐核验包全量运行；Bright 四项和 SciFact 已完成。Bamboogle 仍需远端接受
+Judge 凭据后，才能在新 evidence root 中完成其 125 条闭环。
 
 ## 推荐核验包的全量执行台账
 
@@ -40,7 +41,7 @@ Bamboogle 125、SciFact 300。这里的“全量”严格指该实例的全部�
 | Bright Economics | 103/103 | 0.3097 | 0.4680 | −0.1583 | $6.8860 | 已完成；0 失败、无密钥 resume 已验证 |
 | Bright Robotics | 101/101 | 0.3367 | 0.5680 | −0.2313 | $7.2845 | 已完成；0 失败、无密钥 resume 已验证 |
 | Bamboogle | 0/125 有效评分 | — | 80.0% | — | $0.0161 Agent 已计 | Judge 远端返回 HTTP 401；不是并发、数据或预算限制；需有效 `DEEPSEEK_API_KEY` 后新根重跑 |
-| BEIR SciFact | 运行中 / 300 | — | 0.7570 | — | 终态后记录 | 官方 BEIR test qrels 300 条已接通；无 Judge；双并发执行中 |
+| BEIR SciFact | 300/300 | 0.7524 | 0.7570 | −0.0046 | $14.9801 | 已完成；0 失败、无 Judge、无密钥 resume 已验证 |
 
 前四项与论文相差较大，但不能写成“论文复现失败”：论文登记的配置、模型、工具、语料处理
 与当前 Asterion `gpt-5.6-luna` 配置不相同。全量覆盖说明聚合与数据范围正确；它不让不同配置的
@@ -58,7 +59,7 @@ Bamboogle 125、SciFact 300。这里的“全量”严格指该实例的全部�
 | BC+ Level 3 | 34.0%，50/830（6.0%） | 80.0% | −46.0 个百分点 | 低覆盖；强烈异常信号，不能量化偏差 |
 | BC+ Main | 28.0%，50/830（6.0%） | 80.0% | −52.0 个百分点 | 低覆盖；强烈异常信号，不能量化偏差 |
 | BEIR ArguAna | 0.5493，50/1,406（3.6%） | 0.8530 | −0.3037 | 低覆盖；需全量复核 |
-| BEIR SciFact | 0.7579，50/300（16.7%） | 0.7570 | +0.0009 | 中低覆盖；方向上接近 |
+| BEIR SciFact | 0.7524，300/300（100%） | 0.7570 | −0.0046 | 全量；相差 0.46 个百分点，配置不同，方向上接近 |
 | Bright Biology | 0.4456，103/103（100%） | 0.7710 | −0.3254 | 全量；配置不同，偏低值得后续诊断 |
 | Bright Earth Science | 0.4382，116/116（100%） | 0.6900 | −0.2518 | 全量；配置不同，偏低值得后续诊断 |
 | Bright Economics | 0.3097，103/103（100%） | 0.4680 | −0.1583 | 全量；配置不同，偏低值得后续诊断 |
@@ -465,6 +466,18 @@ generation、但仍只有 50 个评测案例和 50 次计入评测的 Agent 操�
 lock 和 evidence root 执行 `benchmark resume`，结果仍为 completed，native generation
 数量保持 56，证明 resume 没有新调用 Agent。该结果为 `Verified-bounded`，不是 300 条
 完整结果，也不是原论文分数。
+
+### 已验证的全量 300/300 结果
+
+全量运行 ID 为 `run-6639f380eb0c4e8ab7632c6bf05979dc`。它在官方 BEIR SciFact test
+qrels 的全部 300 条案例上完成，0 失败；binary deduplicated nDCG@10 为 `0.7524`，Agent
+实际成本为 `$14.9801`。仓库登记的论文参照为 `0.7570`，表面差值为 `−0.0046`（0.46 个
+百分点）。这证明当前实例的数据选择、聚合和完整运行链路可用；模型、提示和检索细节并未
+与论文逐项对齐，因此该差值不是论文复现结论。
+
+随后使用同一实例、全量范围、source lock 和 evidence root 执行 `benchmark resume`，返回
+`completed` 和 `case_count: 300`，没有重新调用 Agent。最终 evidence 中有 300 份案例结果，
+没有 batch error 文件，故状态为 `Verified-full`。
 
 ## 运行手册：`dci.bright.biology@1.0.0`
 
