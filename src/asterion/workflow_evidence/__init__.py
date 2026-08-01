@@ -4,6 +4,7 @@ from asterion.workflow_evidence.collector import (
     WorkflowEvidenceError,
     compare_workflow_evidence,
     collect_workflow_evidence,
+    diagnose_workflow_comparison,
     validate_workflow_evidence,
 )
 
@@ -11,5 +12,6 @@ __all__ = [
     "WorkflowEvidenceError",
     "compare_workflow_evidence",
     "collect_workflow_evidence",
+    "diagnose_workflow_comparison",
     "validate_workflow_evidence",
 ]

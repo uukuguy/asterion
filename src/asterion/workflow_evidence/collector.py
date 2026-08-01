@@ -117,6 +117,65 @@ def compare_workflow_evidence(
     }
 
 
+def diagnose_workflow_comparison(comparison: Mapping[str, object]) -> dict[str, object]:
+    """Project verified comparison facts into non-causal diagnostic observations.
+
+    This deliberately produces no hypotheses.  Product adapters may add
+    explicitly labelled hypotheses after joining their private domain evidence.
+    """
+
+    if not isinstance(comparison, Mapping) or comparison.get("schema") != (
+        "asterion.workflow-comparison/v1"
+    ):
+        raise WorkflowEvidenceError("workflow diagnosis comparison is invalid")
+    status = comparison.get("status")
+    if status == "not-comparable":
+        reasons = comparison.get("reasons")
+        if reasons != ["scope-identity-mismatch"]:
+            raise WorkflowEvidenceError("workflow diagnosis comparison reason is invalid")
+        graph: dict[str, object] = {
+            "schema": "asterion.workflow-diagnosis/v1",
+            "state": "not-comparable",
+            "observations": [],
+            "hypotheses": [],
+            "missing_evidence": ["matching-scope"],
+        }
+    elif status == "comparable":
+        for name in (
+            "baseline_graph_sha256",
+            "candidate_graph_sha256",
+            "scope_sha256",
+        ):
+            _digest(comparison.get(name))
+        terminal_status_changed = comparison.get("terminal_status_changed")
+        usage_delta = comparison.get("usage_delta")
+        if not isinstance(terminal_status_changed, bool) or not isinstance(usage_delta, Mapping):
+            raise WorkflowEvidenceError("workflow diagnosis comparison fields are invalid")
+        observations: list[dict[str, object]] = []
+        for name, kind in (
+            ("input_tokens", "input-tokens-delta"),
+            ("output_tokens", "output-tokens-delta"),
+        ):
+            value = usage_delta.get(name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise WorkflowEvidenceError("workflow diagnosis usage delta is invalid")
+            if value:
+                observations.append({"kind": kind, "value": value})
+        if terminal_status_changed:
+            observations.append({"kind": "terminal-status-changed", "value": True})
+        graph = {
+            "schema": "asterion.workflow-diagnosis/v1",
+            "state": "ready",
+            "observations": observations,
+            "hypotheses": [],
+            "missing_evidence": [],
+        }
+    else:
+        raise WorkflowEvidenceError("workflow diagnosis comparison status is invalid")
+    graph["diagnosis_sha256"] = _graph_digest(graph)
+    return graph
+
+
 def collect_workflow_evidence(
     events: Iterable[Mapping[str, object]],
     *,

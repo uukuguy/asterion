@@ -426,3 +426,4 @@
 - 17:59 Added content-safe generic runtime evidence collector for universal workflow observation [476af1d]
 - 18:02 Added deterministic evidence fingerprints so comparisons can detect changed workflow records [0df3f91]
 - 18:04 Added evidence integrity validation so assessment rejects altered workflow records [7470d9b]
+- 18:07 Added scope-gated evidence comparison so unmatched workflow runs cannot yield misleading deltas [95d4d0f]
