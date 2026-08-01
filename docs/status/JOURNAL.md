@@ -408,3 +408,7 @@
 - Constrained QA corpus tools to prevent unbounded scans [e109274]
 - QA TriviaQA completed 50/11,313: 92% (46/50), $1.10, zero failed; resume added no generation
 - Published QA TriviaQA bounded result and closed all 50-case instances [113193b]
+- Checkpointed completed bounded benchmark phase [3897543]
+- Added paper-score references to expose bounded-run deviations [a1bf093]
+- Added coverage-qualified score comparisons for meaningful paper reference [e88c056]
+- Estimated full benchmark budgets and prioritized small full-validation packages [2632386]
