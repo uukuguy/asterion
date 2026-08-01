@@ -7,7 +7,7 @@ benchmark 实例的实现清单、验证台账和运行手册。
 外部 benchmark。验证状态只使用 `Not rerun`、`Verified-local`、
 `External-limited`、`Verified-bounded` 和 `Verified-full`。
 
-| 实例 | 实现/验证 | 已跑/总量 | 结果 | 核心配置与证据 | 下一道门 |
+| 实例 | 实现/验证 | 已跑/总量 | 结果 | 核心配置与证据 | 历史推进记录 |
 |---|---|---:|---|---|---|
 | `dci.bcplus.level3@1.0.0` | implemented / Verified-bounded | 50/830 | 34%（17/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $4.29；`run-480faa…65ff`；resume 未新增生成 | 实现并完成 `dci.bcplus.main@1.0.0` 的 50 条版本 |
 | `dci.bcplus.main@1.0.0` | implemented / Verified-bounded | 50/830 | 28%（14/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $4.69；`run-9bc4c4…ceb4`；resume 未新增生成 | 实现并完成下一个实例的 50 条版本 |
@@ -24,6 +24,35 @@ benchmark 实例的实现清单、验证台账和运行手册。
 | `dci.qa.musique@1.0.0` | implemented / Verified-bounded | 50/2,417 | 44%（22/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $2.64；`run-4d89eb…ccfa`；resume 未新增生成 | 实现并完成 `dci.qa.nq@1.0.0` 的 50 条版本 |
 | `dci.qa.nq@1.0.0` | implemented / Verified-bounded | 50/3,610 | 72%（36/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $1.74；`run-dde54b…c23d`；resume 未新增生成 | 实现并完成 `dci.qa.triviaqa@1.0.0` 的 50 条版本 |
 | `dci.qa.triviaqa@1.0.0` | implemented / Verified-bounded | 50/11,313 | 92%（46/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $1.10；`run-8b0d0b…755d`；resume 未新增生成 | 所有真实实例已完成 50 条版本 |
+
+表中最后一列仅保留当时的实施顺序，**不是待办或下一步**。所有真实实例的 50 条阶段已经完成；
+下一步只有在另行批准预算后才是全量运行。
+
+## 与论文记录的分数参照
+
+下表的“论文参照”来自仓库固化的论文主结果登记（`DCI-Agent-CC`，全量数据）；Asterion
+结果则是不同模型配置下的 50 条有界运行。因此差值只用于发现需要复核的偏差，**不能**当作
+论文复现结论或实现正确性的充分证明。
+
+| 实例 | Asterion 50/总量 | 论文参照（全量） | 表面差值 |
+|---|---:|---:|---:|
+| BC+ Level 3 | 34.0% | 80.0% | −46.0 个百分点 |
+| BC+ Main | 28.0% | 80.0% | −52.0 个百分点 |
+| BEIR ArguAna | 0.5493 | 0.8530 | −0.3037 |
+| BEIR SciFact | 0.7579 | 0.7570 | +0.0009 |
+| Bright Biology | 0.6339 | 0.7710 | −0.1371 |
+| Bright Earth Science | 0.4014 | 0.6900 | −0.2886 |
+| Bright Economics | 0.3717 | 0.4680 | −0.0963 |
+| Bright Robotics | 0.4178 | 0.5680 | −0.1502 |
+| 2WikiMultiHopQA | 80.0% | 82.0% | −2.0 个百分点 |
+| Bamboogle | 82.0% | 80.0% | +2.0 个百分点 |
+| HotpotQA | 76.0% | 88.0% | −12.0 个百分点 |
+| MuSiQue | 44.0% | 74.0% | −30.0 个百分点 |
+| Natural Questions | 72.0% | 78.0% | −6.0 个百分点 |
+| TriviaQA | 92.0% | 96.0% | −4.0 个百分点 |
+
+因此目前可确认的是执行闭环正确；尚不能声称论文分数已复现。偏差较大的实例应在全量、与论文
+一致的模型和配置预算获批后复核。
 
 ## 如何使用本文档
 
