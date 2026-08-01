@@ -412,3 +412,4 @@
 - Added paper-score references to expose bounded-run deviations [a1bf093]
 - Added coverage-qualified score comparisons for meaningful paper reference [e88c056]
 - Estimated full benchmark budgets and prioritized small full-validation packages [2632386]
+- Saved recoverable recommended full-validation execution plan after authorization failure [8af69d9]

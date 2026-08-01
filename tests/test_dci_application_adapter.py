@@ -153,7 +153,7 @@ class TestDciApplicationAdapter(unittest.TestCase):
                 "benchmark",
                 "plan",
                 "--instance",
-                "dci.qa.bamboogle.github-sample50@1.0.0",
+                "dci.qa.bamboogle@1.0.0",
                 "--case-limit",
                 "2",
             ],
@@ -171,7 +171,7 @@ class TestDciApplicationAdapter(unittest.TestCase):
                     "--application",
                     "dci.complete-application@1.0.0",
                     "--suite",
-                    "dci.qa.bamboogle.github-sample50@1.0.0",
+                    "dci.qa.bamboogle.paper-full125@1.0.0",
                     "--case-limit",
                     "2",
                 ]
@@ -189,7 +189,7 @@ class TestDciApplicationAdapter(unittest.TestCase):
 
         self.assertEqual(code, 0)
         values = json.loads(stdout.getvalue())
-        self.assertEqual(len(values), 16)
+        self.assertEqual(len(values), 15)
         self.assertEqual(values[0]["instance"], "dci.bcplus.level3@1.0.0")
         self.assertEqual(
             tuple(
@@ -197,10 +197,11 @@ class TestDciApplicationAdapter(unittest.TestCase):
                 for value in values
                 if value["implementation_state"] == "implemented"
             ),
-            (
-                "dci.local-fixture@1.0.0",
-                "dci.qa.bamboogle.github-sample50@1.0.0",
-            ),
+            tuple(value["instance"] for value in values),
+        )
+        self.assertIn(
+            "dci.qa.bamboogle@1.0.0",
+            tuple(value["instance"] for value in values),
         )
 
     def test_benchmark_plan_defaults_to_one_case(self) -> None:
@@ -250,7 +251,7 @@ class TestDciApplicationAdapter(unittest.TestCase):
                 "benchmark",
                 "plan",
                 "--instance",
-                "dci.qa.bamboogle.github-sample50@1.0.0",
+                "dci.qa.bamboogle@1.0.0",
                 "--all-cases",
             ],
             benchmark_main=benchmark_main,
@@ -259,7 +260,7 @@ class TestDciApplicationAdapter(unittest.TestCase):
         )
 
         self.assertEqual(code, 0)
-        self.assertEqual(calls[0][-2:], ["--case-limit", "50"])
+        self.assertEqual(calls[0][-2:], ["--case-limit", "125"])
 
     def test_benchmark_execution_keeps_generic_explicit_authorization(self) -> None:
         stderr = io.StringIO()
@@ -299,7 +300,7 @@ class TestDciApplicationAdapter(unittest.TestCase):
                     "benchmark",
                     "run",
                     "--instance",
-                    "dci.qa.bamboogle.github-sample50@1.0.0",
+                    "dci.qa.bamboogle@1.0.0",
                     "--execute",
                     "--capability-source-lock",
                     str(source_lock),
@@ -333,7 +334,7 @@ class TestDciApplicationAdapter(unittest.TestCase):
                 "--application",
                 "dci.complete-application@1.0.0",
                 "--suite",
-                "dci.qa.bamboogle.github-sample50@1.0.0",
+                "dci.qa.bamboogle.paper-full125@1.0.0",
                 "--case-limit",
                 "1",
                 "--execute",

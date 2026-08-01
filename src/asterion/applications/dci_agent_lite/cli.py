@@ -86,6 +86,7 @@ def main(
         return 0
     command, *remainder = arguments
     if command == "benchmark":
+        benchmark_amount = amount
         if remainder and remainder[0] == "instances":
             return _list_benchmark_instances(
                 remainder[1:],
@@ -100,6 +101,10 @@ def main(
                 stderr=stderr,
             )
         try:
+            budget_value, remainder = _take_option(remainder, "--max-cost-usd")
+            benchmark_amount = amount if budget_value is None else Decimal(budget_value)
+            if benchmark_amount is not None and benchmark_amount <= 0:
+                raise ValueError
             instance, delegated_arguments = _benchmark_selection(remainder)
         except DciBenchmarkInstanceError:
             stderr.write("asterion-dci: command failed\n")
@@ -116,7 +121,7 @@ def main(
                             Path.cwd() if repo_root is None else repo_root,
                             env_file=env_file,
                             environment=environment,
-                            amount=amount,
+                            amount=benchmark_amount,
                         )
                     )
                 else:
@@ -131,7 +136,7 @@ def main(
                             Path.cwd() if repo_root is None else repo_root,
                             env_file=env_file,
                             environment=environment,
-                            amount=amount,
+                            amount=benchmark_amount,
                         )
                     )
                     selected_benchmark_host = DciBenchmarkHost(

@@ -4,6 +4,7 @@ import asyncio
 import tempfile
 import threading
 import unittest
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
 
@@ -81,6 +82,7 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
+            (root / "dataset.jsonl").write_text("{}\n", encoding="utf-8")
             result = RealDciBenchmarkExecutor(
                 paths=_paths(root),
                 runtime_options=DciRuntimeOptions(),
@@ -93,6 +95,7 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
                     task_id="qa.bamboogle.paper-full125",
                     selection_variant="paper-full125",
                     case_limit=125,
+                    amount=Decimal("10"),
                 ),
                 cancellation=MutableCancellation(),
                 on_progress=lambda _event: None,
@@ -101,6 +104,12 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
         self.assertEqual(result.status, "completed")
         self.assertEqual(result.case_count, 125)
         self.assertEqual(calls[0][0].limit, 125)
+        self.assertEqual(calls[0][0].max_concurrency, 1)
+        self.assertIsNotNone(calls[0][0].full_execution_authorization)
+        self.assertEqual(
+            calls[0][0].experiment_scope_id,
+            "qa.bamboogle.main.full",
+        )
 
     def test_translates_bounded_bamboogle_into_existing_engine(self) -> None:
         calls = []

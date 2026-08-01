@@ -30,6 +30,16 @@ from asterion.capabilities.dci.implementation.evaluation.benchmark import (
     run_benchmark_async,
 )
 from asterion.capabilities.dci.implementation.evaluation.judge import JudgeConfig
+from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import (
+    read_paper_benchmark_dataset,
+    resolve_paper_benchmark,
+    resolve_paper_experiment_scope,
+)
+from asterion.capabilities.dci.implementation.research.experiment_profiles import (
+    authorize_full_execution,
+    authorized_scope_output_root,
+    resolve_experiment_profile,
+)
 from asterion.capabilities.dci.implementation.runtime.pi_rpc import (
     resolve_node_bin,
 )
@@ -78,6 +88,13 @@ _REAL_TASK_MODES = {
     "bright.robotics": "ir",
 }
 _DEFAULT_EXPERIMENT_PROFILE = "asterion-safe/pi"
+_FULL_SCOPE_BY_TASK = {
+    "bright.biology": "bright.biology.main.full",
+    "bright.earth-science": "bright.earth-science.main.full",
+    "bright.economics": "bright.economics.main.full",
+    "bright.robotics": "bright.robotics.main.full",
+    "qa.bamboogle.paper-full125": "qa.bamboogle.main.full",
+}
 _UPSTREAM_EXPERIMENT_PROFILE = (
     "upstream-github/271f37e71f053bf0c99c05ce6d2fb53b841d922e/pi"
 )
@@ -210,6 +227,8 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 invocation.task_id,
                 (self._max_turns, 1),
             )
+            if payload.case_limit > 50:
+                max_concurrency = 1
             request = BenchmarkRequest(
                 dataset=payload.dataset,
                 output_root=payload.output_directory,
@@ -232,6 +251,7 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 ),
                 resume_policy="compatible",
             )
+            request = _authorize_full_request(request, payload, invocation.task_id)
             on_progress(
                 BenchmarkProgressEvent(
                     sequence=1,
@@ -289,6 +309,54 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
             )
         except Exception:
             _fail()
+
+
+def _authorize_full_request(
+    request: BenchmarkRequest,
+    payload: DciBenchmarkInvocationPayload,
+    task_id: str,
+) -> BenchmarkRequest:
+    """Issue one in-process, budget-bound capability for supported full scopes."""
+
+    scope_id = _FULL_SCOPE_BY_TASK.get(task_id)
+    if scope_id is None or payload.case_limit <= 50:
+        return request
+    if payload.amount is None or payload.amount <= 0:
+        _fail()
+    scope = resolve_paper_experiment_scope(scope_id)
+    if payload.case_limit != scope.selection_count:
+        _fail()
+    benchmark = resolve_paper_benchmark(scope.dataset_id)
+    _raw, binding = read_paper_benchmark_dataset(payload.dataset, benchmark)
+    profile = resolve_experiment_profile(_DEFAULT_EXPERIMENT_PROFILE)
+    judge_operations = payload.case_limit if request.mode == "qa" else 1
+    operation_limit = float(payload.amount) / max(
+        10,
+        request.max_concurrency * (2 if request.mode == "qa" else 1),
+    )
+    authority = authorize_full_execution(
+        profile=profile,
+        scope_ids=(scope_id,),
+        dataset_input_bindings=(binding,),
+        bounded_selected_ids_sha256=(scope.selected_ids_sha256,),
+        selected_query_counts=(payload.case_limit,),
+        planned_agent_operations=payload.case_limit,
+        planned_judge_operations=(payload.case_limit if request.mode == "qa" else 0),
+        output_root=payload.output_directory.parent / "authorized-full",
+        max_agent_operations=payload.case_limit,
+        max_judge_operations=judge_operations,
+        max_cost_usd=float(payload.amount),
+        max_agent_cost_per_operation_usd=operation_limit,
+        max_judge_cost_per_operation_usd=operation_limit,
+        invocation_authorized=True,
+    )
+    return replace(
+        request,
+        output_root=authorized_scope_output_root(authority, scope_id),
+        full_execution_authorization=authority,
+        experiment_scope_id=scope_id,
+        dataset_input_binding=binding,
+    )
 
 
 def _real_payload(
