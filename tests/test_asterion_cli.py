@@ -277,6 +277,19 @@ class AsterionCliTests(unittest.TestCase):
             ["model=fixture-model", "empty="],
         )
 
+    def test_run_parser_accepts_explicit_workflow_evidence_file(self) -> None:
+        args = _parser().parse_args(
+            [
+                "run",
+                "--provider",
+                "fixture",
+                "--workflow-evidence-file",
+                "workflow-evidence.json",
+            ]
+        )
+
+        self.assertEqual(args.workflow_evidence_file, "workflow-evidence.json")
+
     def test_run_parser_accepts_repeatable_exact_host_options(self) -> None:
         args = _parser().parse_args(
             [
@@ -1604,7 +1617,43 @@ class AsterionCliTests(unittest.TestCase):
         )
         self.assertNotIn("SECRET-INPUT", stdout.getvalue())
         self.assertNotIn("SECRET-RUNTIME-DELTA", stdout.getvalue())
-        self.assertNotIn("SECRET-INPUT", stderr.getvalue())
+
+    def test_run_writes_opt_in_safe_workflow_evidence(self) -> None:
+        runtime = DciPiFixtureRuntime()
+        registry = RuntimeFactoryRegistry((
+            RuntimeFactoryBinding(
+                runtime_id="claude-code.reference",
+                capabilities=("filesystem.read", "shell"),
+                factory=fail_if_unselected_runtime_is_created,
+            ),
+            RuntimeFactoryBinding(
+                runtime_id="pi.reference",
+                capabilities=("filesystem.read", "shell"),
+                factory=lambda context: runtime,
+            ),
+        ))
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "workflow-evidence.json"
+            code = main(
+                [
+                    "run", "--provider", "dci-agent-lite", "--runtime", "pi.reference",
+                    "--application", "dci.research-capability@1.0.0",
+                    "--workflow-evidence-file", str(target), *dci_host_arguments(),
+                    "--input", "SECRET-INPUT",
+                ],
+                entry_points=(FakeEntryPoint(name="dci-agent-lite", factory=create_dci_provider),),
+                host_service_entry_points=(dci_host_entry(),),
+                runtime_factories=registry,
+                capability_packages=(transitional_dci_package(),),
+                stdout=io.StringIO(), stderr=io.StringIO(),
+            )
+            self.assertEqual(code, 0)
+            rendered = target.read_text(encoding="utf-8")
+        bundle = json.loads(rendered)
+        self.assertEqual(bundle["schema"], "asterion.workflow-observation-bundle/v1")
+        self.assertEqual(bundle["records"][0]["run_id"], "asterion-run")
+        self.assertNotIn("SECRET-INPUT", rendered)
+        self.assertNotIn("SECRET-RUNTIME-DELTA", rendered)
 
     def test_bundled_dci_pi_application_emits_one_body_free_json_object(self) -> None:
         runtime = DciPiFixtureRuntime()

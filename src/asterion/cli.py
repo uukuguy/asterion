@@ -53,6 +53,10 @@ from asterion.runtime.factory import (
     RuntimeFactoryRegistry,
 )
 from asterion.runtime.defaults import default_runtime_factory_registry
+from asterion.workflow_evidence import (
+    ObservedRuntimeClient,
+    write_workflow_observation_bundle,
+)
 from asterion.services.managed_controlled_executor import (
     ManagedControlledExecutor,
     OperatorExecutorConfig,
@@ -310,14 +314,24 @@ async def _run(
         )
         runtime = runtime_binding.factory(context)
         input_text = args.input if args.input is not None else stdin.read()
+        observed_runtime = (
+            ObservedRuntimeClient(runtime)
+            if args.workflow_evidence_file is not None
+            else None
+        )
         result = await run_composed_application(
             plan,
             implementations=application.implementations,
-            runtime=runtime,
+            runtime=observed_runtime or runtime,
             run_id=args.run_id,
             input_text=input_text,
             host_services=host_services,
         )
+        if observed_runtime is not None:
+            write_workflow_observation_bundle(
+                Path(args.workflow_evidence_file),
+                observed_runtime.records + observed_runtime.failed_attempts,
+            )
     stdout.write(json.dumps(project_public_value(result.__dict__), sort_keys=True) + "\n")
     return 0
 
@@ -453,6 +467,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--run-id", default="asterion-run")
     run.add_argument("--input")
+    run.add_argument("--workflow-evidence-file")
     run.add_argument("--application")
     run.add_argument("--assembly")
     run.add_argument(
