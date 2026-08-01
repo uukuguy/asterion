@@ -9,6 +9,7 @@ from asterion.workflow_evidence.collector import (
     validate_workflow_evidence,
 )
 from asterion.workflow_evidence.runtime import ObservedRuntimeClient
+from asterion.workflow_evidence.storage import write_workflow_observation_bundle
 
 __all__ = [
     "WorkflowEvidenceError",
@@ -18,4 +19,5 @@ __all__ = [
     "ObservedRuntimeClient",
     "diagnose_workflow_comparison",
     "validate_workflow_evidence",
+    "write_workflow_observation_bundle",
 ]
