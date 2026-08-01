@@ -438,3 +438,5 @@
 - 19:05 Added runtime-bound safe observation so evidence reflects real executions [600c70a]
 - 19:10 Added explicit immutable observation bundles for operator-owned evidence [5577ff4]
 - 19:15 Enabled opt-in CLI workflow evidence export for usable framework observations [e39602a]
+- 19:18 Documented explicit CLI evidence export for safe operator adoption [5a20cfb]
+- 21:18 Completed Bamboogle full 125/125 run: 81.6%, $3.3553, zero failed; same-run resume returned completed without new cases
