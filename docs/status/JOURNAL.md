@@ -421,3 +421,4 @@
 - 12:20 Corrected reservation semantics so inexpensive full-run cases no longer exhaust the total envelope [ad8e1f3]
 - 13:00 Enabled two-way full runs after a real concurrent probe verified complete evidence [05bac75]
 - 17:25 Authorized SciFact's verified 300-query scope so full execution cannot silently fall back to 50 [00a69f7]
+- 17:40 Recorded completed Bright full runs and remaining recommended-pack blockers for recoverable execution [973a9b0]
