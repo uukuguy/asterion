@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from collections.abc import Iterable, Mapping
 
@@ -83,7 +85,7 @@ def collect_workflow_evidence(
 
     if terminal_status is None:
         raise WorkflowEvidenceError("workflow evidence terminal status is missing")
-    return {
+    graph: dict[str, object] = {
         "schema": "asterion.workflow-evidence/v1",
         "run_id": stream[0].run_id,
         "input_digest": input_digest,
@@ -95,3 +97,7 @@ def collect_workflow_evidence(
         "usage": usage,
         "artifacts": sorted(artifacts, key=lambda artifact: artifact["artifact_id"]),
     }
+    graph["graph_sha256"] = hashlib.sha256(
+        json.dumps(graph, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return graph

@@ -423,3 +423,4 @@
 - 17:25 Authorized SciFact's verified 300-query scope so full execution cannot silently fall back to 50 [00a69f7]
 - 17:40 Recorded completed Bright full runs and remaining recommended-pack blockers for recoverable execution [973a9b0]
 - 17:57 Defined generic workflow evidence and controlled optimization architecture; Bright is its first acceptance adapter [65f5a28]
+- 17:59 Added content-safe generic runtime evidence collector for universal workflow observation [476af1d]
