@@ -486,10 +486,20 @@ def compute_detailed_analysis(*, results: Sequence[Mapping[str, Any]], rows: Seq
         calls = sum(row["tool_counts"].get(tool, 0.0) for row in records)
         duration = sum(row["tool_durations"].get(tool, 0.0) for row in records)
         errors = sum(float(((result.get("tool_metrics") or {}).get("by_tool") or {}).get(tool, {}).get("error_count", 0) or 0) for result in results)
-        correct = sum(row.get("is_correct") is True for row in used)
+        qa_used = [row for row in used if isinstance(row.get("is_correct"), bool)]
+        correct = sum(row.get("is_correct") is True for row in qa_used)
+        ir_scores = [
+            float(value)
+            for row in used
+            if (value := _number(row.get("ndcg_at_10"))) is not None
+        ]
         tool_summary[tool] = {
             "queries_used": len(used), "queries_used_rate": len(used) / len(records) if records else 0.0,
-            "correct_when_used": correct, "accuracy_when_used": correct / len(used) if used else None,
+            "qa_evaluated_queries_when_used": len(qa_used),
+            "correct_when_used": correct if qa_used else None,
+            "accuracy_when_used": correct / len(qa_used) if qa_used else None,
+            "ir_evaluated_queries_when_used": len(ir_scores),
+            "mean_ndcg_at_10_when_used": sum(ir_scores) / len(ir_scores) if ir_scores else None,
             "total_calls": calls, "avg_calls_per_query": calls / len(records) if records else 0.0,
             "avg_calls_when_used": calls / len(used) if used else None,
             "total_duration_seconds": duration, "avg_duration_per_call_seconds": duration / calls if calls else None,
