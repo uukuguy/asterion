@@ -415,3 +415,9 @@
 - Saved recoverable recommended full-validation execution plan after authorization failure [8af69d9]
 - 11:55 Full benchmarks receive total-budget authorization; fixes pre-case rejection [db8713c]
 - 12:00 Bright Biology 103-case authorized run active; serial Pi execution remains failure-free
+- 12:07 Aligned obsolete closure tests; restored full provider-free gate [1bfbff0]
+- 12:07 Provider-free `make check` passed: 842 Python tests plus cross-language gates
+- 12:13 Kept total authorization available per operation; prevents artificial full-run rejection [d390a8a]
+- 12:20 Corrected reservation semantics so inexpensive full-run cases no longer exhaust the total envelope [ad8e1f3]
+- 13:00 Enabled two-way full runs after a real concurrent probe verified complete evidence [05bac75]
+- 17:25 Authorized SciFact's verified 300-query scope so full execution cannot silently fall back to 50 [00a69f7]
