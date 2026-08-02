@@ -184,6 +184,8 @@ class _RuntimePathlightProjection:
         self._root_span_id: str | None = None
         self._context_span_id: str | None = None
         self._tool_spans: dict[str, tuple[str, str | None]] = {}
+        self._tool_component_context_span_id: str | None = None
+        self._completed_tool_span_ids: list[str] = []
         self._native_tool_span_ids: dict[str, str] = {}
         self._native_model_span_ids: dict[int, str] = {}
         self._started_ns: dict[str, int] = {}
@@ -231,9 +233,7 @@ class _RuntimePathlightProjection:
     def project(
         self,
         request: RunRequest,
-        observations: list[
-            tuple[Mapping[str, object], int | None, int | None]
-        ],
+        observations: list[tuple[Mapping[str, object], int | None, int | None]],
         *,
         evidence: Mapping[str, object],
         native_observation: RuntimeObservationBatch | None,
@@ -258,9 +258,7 @@ class _RuntimePathlightProjection:
             timestamp_ns=invocation_started_ns,
         )
         if native_observation is not None:
-            self._batch_missing_evidence = bool(
-                native_observation.missing_evidence
-            )
+            self._batch_missing_evidence = bool(native_observation.missing_evidence)
             self._project_native(native_observation, observations)
         for event, observed_started_ns, observed_ended_ns in observations:
             payload = event["payload"]
@@ -308,9 +306,7 @@ class _RuntimePathlightProjection:
     def _project_native(
         self,
         observation: RuntimeObservationBatch,
-        observations: list[
-            tuple[Mapping[str, object], int | None, int | None]
-        ],
+        observations: list[tuple[Mapping[str, object], int | None, int | None]],
     ) -> None:
         self._context_span_id = None
         self._native_tool_span_ids = {
@@ -331,7 +327,13 @@ class _RuntimePathlightProjection:
             )
             for call in observation.model_calls
         }
-        projected_tools: set[str] = set()
+        tool_components = _tool_projection_components(observations)
+        component_by_call = {
+            call_sha256: component_index
+            for component_index, component in enumerate(tool_components)
+            for call_sha256 in component
+        }
+        component_cursor = 0
         frame_span_ids: dict[str, str] = {}
         for frame in observation.frames:
             source_calls = tuple(
@@ -341,17 +343,20 @@ class _RuntimePathlightProjection:
                     if segment.source_call_sha256 is not None
                 )
             )
-            pending_source_calls = tuple(
-                call_sha256
+            required_component_indexes = tuple(
+                component_by_call[call_sha256]
                 for call_sha256 in source_calls
-                if call_sha256 not in projected_tools
+                if component_by_call[call_sha256] >= component_cursor
             )
-            self._project_native_tools(
-                observation,
-                pending_source_calls,
-                observations,
-            )
-            projected_tools.update(pending_source_calls)
+            if required_component_indexes:
+                required_cursor = max(required_component_indexes) + 1
+                while component_cursor < required_cursor:
+                    self._project_native_tools(
+                        observation,
+                        tool_components[component_cursor],
+                        observations,
+                    )
+                    component_cursor += 1
             frame_calls = tuple(
                 call
                 for call in observation.model_calls
@@ -365,10 +370,7 @@ class _RuntimePathlightProjection:
                     "missing_evidence": (
                         "context-frame" in observation.missing_evidence
                         or "context-segment" in observation.missing_evidence
-                        or any(
-                            segment.missing_evidence
-                            for segment in frame.segments
-                        )
+                        or any(segment.missing_evidence for segment in frame.segments)
                     ),
                 },
                 links=self._links_to(
@@ -428,16 +430,13 @@ class _RuntimePathlightProjection:
                     observation,
                 )
 
-        remaining_tools = tuple(
-            tool.call_sha256
-            for tool in observation.tools
-            if tool.call_sha256 not in projected_tools
-        )
-        self._project_native_tools(
-            observation,
-            remaining_tools,
-            observations,
-        )
+        while component_cursor < len(tool_components):
+            self._project_native_tools(
+                observation,
+                tool_components[component_cursor],
+                observations,
+            )
+            component_cursor += 1
 
     def _project_native_model_call(
         self,
@@ -502,9 +501,7 @@ class _RuntimePathlightProjection:
         self,
         observation: RuntimeObservationBatch,
         call_sha256s: tuple[str, ...],
-        observations: list[
-            tuple[Mapping[str, object], int | None, int | None]
-        ],
+        observations: list[tuple[Mapping[str, object], int | None, int | None]],
     ) -> None:
         selected = set(call_sha256s)
         if not selected:
@@ -556,11 +553,7 @@ class _RuntimePathlightProjection:
                 **({"failure_class": "cancelled"} if status == "cancelled" else {}),
                 "input_tokens": self._input_tokens,
                 "output_tokens": self._output_tokens,
-                **(
-                    {"missing_evidence": True}
-                    if self._batch_missing_evidence
-                    else {}
-                ),
+                **({"missing_evidence": True} if self._batch_missing_evidence else {}),
             },
             timestamp_ns=runtime_ended_ns,
         )
@@ -572,9 +565,13 @@ class _RuntimePathlightProjection:
         native_observation: RuntimeObservationBatch | None,
         timestamp_ns: int | None,
     ) -> None:
-        context_span_id = self._context_span_id
         if native_observation is None:
-            self._close_context(timestamp_ns=timestamp_ns)
+            if not self._tool_spans:
+                self._tool_component_context_span_id = self._context_span_id
+                self._close_context(timestamp_ns=timestamp_ns)
+            context_span_id = self._tool_component_context_span_id
+        else:
+            context_span_id = self._context_span_id
         call_id = str(payload["call_id"])
         native_tool = (
             next(
@@ -641,11 +638,18 @@ class _RuntimePathlightProjection:
             timestamp_ns=timestamp_ns,
         )
         if span_id is not None and native_span_id is None:
-            self._context_span_id = self._start_context(
-                {"missing_evidence": True},
-                links=self._link_to(span_id, "derived-from"),
-                timestamp_ns=timestamp_ns,
-            )
+            self._completed_tool_span_ids.append(span_id)
+            if not self._tool_spans:
+                self._context_span_id = self._start_context(
+                    {"missing_evidence": True},
+                    links=self._links_to(
+                        self._completed_tool_span_ids,
+                        "derived-from",
+                    ),
+                    timestamp_ns=timestamp_ns,
+                )
+                self._completed_tool_span_ids.clear()
+                self._tool_component_context_span_id = None
 
     def _project_artifact(
         self,
@@ -794,7 +798,9 @@ class _RuntimePathlightProjection:
         self._trace_id = None
         self._events.clear()
 
-    def _link_to(self, span_id: str | None, relation: str) -> tuple[Mapping[str, str], ...]:
+    def _link_to(
+        self, span_id: str | None, relation: str
+    ) -> tuple[Mapping[str, str], ...]:
         if self._trace_id is None or span_id is None:
             return ()
         return (
@@ -838,8 +844,7 @@ def _canonical_digest(value: object) -> str:
 
 def _opaque_digest_id(digest: str) -> str:
     return (
-        f"{digest[:8]}-{digest[8:12]}-4{digest[13:16]}-"
-        f"8{digest[17:20]}-{digest[20:32]}"
+        f"{digest[:8]}-{digest[8:12]}-4{digest[13:16]}-8{digest[17:20]}-{digest[20:32]}"
     )
 
 
@@ -885,6 +890,40 @@ def _reserved_span_id(
     )
 
 
+def _tool_projection_components(
+    observations: list[tuple[Mapping[str, object], int | None, int | None]],
+) -> tuple[tuple[str, ...], ...]:
+    components: list[tuple[str, ...]] = []
+    active: set[str] = set()
+    component: list[str] = []
+    for event, _observed_started_ns, _observed_ended_ns in observations:
+        event_type = event["type"]
+        if event_type not in {"tool.call", "tool.result"}:
+            continue
+        payload = event["payload"]
+        if not isinstance(payload, Mapping):
+            raise ValueError("Pathlight tool projection payload is invalid")
+        call_id = payload["call_id"]
+        if type(call_id) is not str:
+            raise ValueError("Pathlight tool projection identity is invalid")
+        call_sha256 = _text_digest(call_id)
+        if event_type == "tool.call":
+            if call_sha256 in active:
+                raise ValueError("Pathlight tool projection identity is duplicated")
+            active.add(call_sha256)
+            component.append(call_sha256)
+        else:
+            if call_sha256 not in active:
+                raise ValueError("Pathlight tool projection result is unmatched")
+            active.remove(call_sha256)
+            if not active:
+                components.append(tuple(component))
+                component = []
+    if active:
+        raise ValueError("Pathlight tool projection is incomplete")
+    return tuple(components)
+
+
 def _reraise_process_control(error: BaseException) -> None:
     if isinstance(error, (KeyboardInterrupt, SystemExit)):
         raise error
@@ -908,7 +947,9 @@ def _content_summary(value: object) -> dict[str, str | int | bool]:
     """Return a canonical digest/length pair, or explicitly missing evidence."""
 
     try:
-        content = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        content = json.dumps(value, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
     except (TypeError, ValueError):
         return {"missing_evidence": True}
     return {

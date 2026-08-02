@@ -211,6 +211,10 @@ class RichRejectingRecorder:
     def active_span_id(self) -> str | None:
         return self._recorder.active_span_id
 
+    @property
+    def event_count(self) -> int:
+        return self._recorder.event_count
+
     def record(self, event: TraceEvent) -> None:
         self._recorder.record(event)
 
@@ -504,6 +508,7 @@ def _two_tool_flow(
     *,
     overlap: bool,
     reverse_segments: bool,
+    split_frames: bool = False,
 ) -> tuple[RuntimeObservationBatch, tuple[tuple[str, dict[str, object]], ...]]:
     tool_specs = (
         ("SENTINEL_CALL_A", "private.tool.a", "A"),
@@ -547,21 +552,36 @@ def _two_tool_flow(
         ),
     )
     segment_specs = tuple(reversed(tool_specs)) if reverse_segments else tool_specs
-    second_frame = ContextFrameObservation(
-        frame_index=2,
-        segments=tuple(
-            ContextSegmentSummary(
-                segment_index=index,
-                role="tool-result",
-                structure_kind="tool-result",
-                content_sha256=tools_by_call[_digest(call_id)].result_sha256,
-                content_length=tools_by_call[_digest(call_id)].result_length,
-                source_call_sha256=_digest(call_id),
-                missing_evidence=False,
-            )
-            for index, (call_id, _name, _label) in enumerate(segment_specs)
-        ),
+
+    def tool_result_frame(
+        frame_index: int,
+        specs: tuple[tuple[str, str, str], ...],
+    ) -> ContextFrameObservation:
+        return ContextFrameObservation(
+            frame_index=frame_index,
+            segments=tuple(
+                ContextSegmentSummary(
+                    segment_index=index,
+                    role="tool-result",
+                    structure_kind="tool-result",
+                    content_sha256=tools_by_call[_digest(call_id)].result_sha256,
+                    content_length=tools_by_call[_digest(call_id)].result_length,
+                    source_call_sha256=_digest(call_id),
+                    missing_evidence=False,
+                )
+                for index, (call_id, _name, _label) in enumerate(specs)
+            ),
+        )
+
+    result_frames = (
+        tuple(
+            tool_result_frame(index, (spec,))
+            for index, spec in enumerate(segment_specs, start=2)
+        )
+        if split_frames
+        else (tool_result_frame(2, segment_specs),)
     )
+    frames = (first_frame, *result_frames)
     calls = tuple(
         ModelCallObservation(
             request_index=index,
@@ -575,11 +595,11 @@ def _two_tool_flow(
             status="completed",
             boundary_observed=True,
         )
-        for index, frame in ((1, first_frame), (2, second_frame))
+        for index, frame in enumerate(frames, start=1)
     )
     batch = RuntimeObservationBatch.build(
         run_sha256=_digest("native-run"),
-        frames=(first_frame, second_frame),
+        frames=frames,
         model_calls=calls,
         tools=tools,
     )
@@ -649,7 +669,8 @@ def _segment_indexes(graph: Mapping[str, object]) -> list[object]:
     return [
         attributes["segment_index"]
         for event in _started_events(graph)
-        if "segment_index" in (attributes := cast(Mapping[str, object], event["attributes"]))
+        if "segment_index"
+        in (attributes := cast(Mapping[str, object], event["attributes"]))
     ]
 
 
@@ -659,11 +680,105 @@ def _relations(graph: Mapping[str, object]) -> list[object]:
 
 
 def _context_frames(graph: Mapping[str, object]) -> list[Mapping[str, object]]:
-    return [event for event in _started_events(graph) if event["kind"] == "context-frame"]
+    return [
+        event for event in _started_events(graph) if event["kind"] == "context-frame"
+    ]
 
 
 class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
-    async def test_reverse_context_tool_results_preserve_public_tool_order(self) -> None:
+    async def test_cross_frame_overlapping_tools_publish_one_public_component(
+        self,
+    ) -> None:
+        batch, events = _two_tool_flow(
+            overlap=True,
+            reverse_segments=False,
+            split_frames=True,
+        )
+        recorder = MemoryPathlightRecorder(TRACE_ID)
+        observed = ObservedRuntimeClient(
+            ObservedFixtureRuntime(batch.to_mapping(), events),
+            pathlight=recorder,
+            monotonic_ns=IncrementingClock(),
+        )
+
+        _ = [event async for event in observed.run(_request())]
+        self.assertGreater(recorder.event_count, 0)
+        graph = recorder.snapshot()
+        trace_events = cast(list[Mapping[str, object]], graph["events"])
+        tool_events = [event for event in trace_events if event["kind"] == "tool-call"]
+        tool_starts = [event for event in tool_events if event["status"] == "started"]
+        tool_terminals = [
+            event for event in tool_events if event["status"] != "started"
+        ]
+        tool_spans = {
+            event["attributes"]["call_id"]: event["span_id"] for event in tool_starts
+        }
+        result_segments = [
+            event
+            for event in _started_events(graph)
+            if event["attributes"].get("segment_role") == "tool-result"
+        ]
+
+        self.assertEqual(_kinds(graph).count("model-call"), 3)
+        self.assertEqual(
+            [event["attributes"]["call_id"] for event in tool_starts],
+            [_digest("SENTINEL_CALL_A"), _digest("SENTINEL_CALL_B")],
+        )
+        self.assertEqual(
+            [event["span_id"] for event in tool_terminals],
+            [event["span_id"] for event in tool_starts],
+        )
+        self.assertLess(tool_starts[1]["sequence"], tool_terminals[0]["sequence"])
+        self.assertEqual(
+            [
+                next(
+                    link["span_id"]
+                    for link in segment["links"]
+                    if link["relation"] == "produced-by"
+                )
+                for segment in result_segments
+            ],
+            [
+                tool_spans[_digest("SENTINEL_CALL_A")],
+                tool_spans[_digest("SENTINEL_CALL_B")],
+            ],
+        )
+
+    async def test_rejected_cross_frame_overlap_emits_complete_fallback(self) -> None:
+        batch, events = _two_tool_flow(
+            overlap=True,
+            reverse_segments=False,
+            split_frames=True,
+        )
+        recorder = RichRejectingRecorder()
+        observed = ObservedRuntimeClient(
+            ObservedFixtureRuntime(batch.to_mapping(), events),
+            pathlight=recorder,
+            monotonic_ns=IncrementingClock(),
+        )
+
+        _ = [event async for event in observed.run(_request())]
+        self.assertGreater(recorder.event_count, 0)
+        graph = recorder.snapshot()
+        trace_events = cast(list[Mapping[str, object]], graph["events"])
+
+        self.assertEqual(recorder.record_many_calls, 2)
+        self.assertNotIn("model-call", _kinds(graph))
+        self.assertEqual(_kinds(graph).count("tool-call"), 2)
+        self.assertEqual(
+            sum(event["status"] == "started" for event in trace_events),
+            sum(event["status"] != "started" for event in trace_events),
+        )
+        self.assertTrue(
+            any(
+                event["attributes"].get("missing_evidence") is True
+                for event in _context_frames(graph)
+            )
+        )
+
+    async def test_reverse_context_tool_results_preserve_public_tool_order(
+        self,
+    ) -> None:
         batch, events = _two_tool_flow(overlap=False, reverse_segments=True)
         runtime = ObservedFixtureRuntime(batch.to_mapping(), events)
         recorder = MemoryPathlightRecorder(TRACE_ID)
@@ -728,7 +843,9 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(_kinds(graph).count("model-call"), 2)
         self.assertLess(first["sequence"], second["sequence"])
-        self.assertLess(second["sequence"], tool_terminals[first["span_id"]]["sequence"])
+        self.assertLess(
+            second["sequence"], tool_terminals[first["span_id"]]["sequence"]
+        )
         self.assertLess(
             tool_terminals[first["span_id"]]["sequence"],
             tool_terminals[second["span_id"]]["sequence"],
@@ -756,7 +873,9 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("model-call", _kinds(graph))
         self.assertTrue(_context_frames(graph)[0]["attributes"]["missing_evidence"])
 
-    async def test_native_missing_facts_are_explicit_on_runtime_frame_and_model(self) -> None:
+    async def test_native_missing_facts_are_explicit_on_runtime_frame_and_model(
+        self,
+    ) -> None:
         runtime = ObservedFixtureRuntime(
             _missing_batch().to_mapping(),
             (
@@ -775,8 +894,7 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
         frame_start = next(
             event
             for event in starts
-            if event["kind"] == "context-frame"
-            and "frame_index" in event["attributes"]
+            if event["kind"] == "context-frame" and "frame_index" in event["attributes"]
         )
 
         self.assertTrue(runtime_start["attributes"]["missing_evidence"])
@@ -784,7 +902,9 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(model_start["attributes"]["missing_evidence"])
         self.assertFalse(model_start["attributes"]["boundary_observed"])
 
-    async def test_hostile_base_throwables_at_optional_boundaries_fall_back(self) -> None:
+    async def test_hostile_base_throwables_at_optional_boundaries_fall_back(
+        self,
+    ) -> None:
         cases = (
             (BasePropertyExplodingRuntime(), MemoryPathlightRecorder(TRACE_ID)),
             (
@@ -813,7 +933,10 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 runtime,
                 pathlight=MemoryPathlightRecorder(TRACE_ID),
             )
-            with self.subTest(error=type(error).__name__), self.assertRaises(type(error)):
+            with (
+                self.subTest(error=type(error).__name__),
+                self.assertRaises(type(error)),
+            ):
                 _ = [event async for event in observed.run(_request())]
 
     async def test_unknown_native_timestamps_are_missing_without_zero_duration_claims(
@@ -845,7 +968,9 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
             all("duration_ns" in event["attributes"] for event in observed_terminals)
         )
 
-    async def test_native_projection_is_deterministic_for_same_trace_and_clock(self) -> None:
+    async def test_native_projection_is_deterministic_for_same_trace_and_clock(
+        self,
+    ) -> None:
         graphs: list[Mapping[str, object]] = []
         for _ in range(2):
             runtime = ObservedFixtureRuntime(_batch().to_mapping())
@@ -861,7 +986,9 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(graphs[0], graphs[1])
         self.assertEqual(graphs[0]["trace_sha256"], graphs[1]["trace_sha256"])
 
-    async def test_two_frame_native_flow_is_interleaved_with_forward_relations(self) -> None:
+    async def test_two_frame_native_flow_is_interleaved_with_forward_relations(
+        self,
+    ) -> None:
         runtime = ObservedFixtureRuntime(_two_frame_batch().to_mapping())
         recorder = MemoryPathlightRecorder(TRACE_ID)
         observed = ObservedRuntimeClient(
@@ -1115,7 +1242,9 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
                     event["timestamp_ns"] - starts[event["span_id"]]["timestamp_ns"],
                 )
 
-    async def test_runtime_trace_has_safe_identity_timing_tokens_and_artifact(self) -> None:
+    async def test_runtime_trace_has_safe_identity_timing_tokens_and_artifact(
+        self,
+    ) -> None:
         recorder = MemoryPathlightRecorder(TRACE_ID)
         observed = ObservedRuntimeClient(
             CompletedRuntime(),
@@ -1135,7 +1264,9 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
         graph = recorder.snapshot()
         events = cast(list[Mapping[str, object]], graph["events"])
-        starts = {item["span_id"]: item for item in events if item["status"] == "started"}
+        starts = {
+            item["span_id"]: item for item in events if item["status"] == "started"
+        }
         runtime_start = next(
             item
             for item in events
@@ -1185,7 +1316,9 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_projection_composes_with_open_lifecycle_trace(self) -> None:
         recorder = MemoryPathlightRecorder(TRACE_ID)
         recorder.record(TraceEvent.start(TRACE_ID, ROOT_SPAN_ID, None, 1, "task"))
-        recorder.record(TraceEvent.start(TRACE_ID, PLAN_SPAN_ID, ROOT_SPAN_ID, 2, "plan"))
+        recorder.record(
+            TraceEvent.start(TRACE_ID, PLAN_SPAN_ID, ROOT_SPAN_ID, 2, "plan")
+        )
         recorder.record(
             TraceEvent.start(TRACE_ID, CAPABILITY_SPAN_ID, PLAN_SPAN_ID, 3, "task")
         )
@@ -1204,9 +1337,13 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
             )
         )
         recorder.record(
-            TraceEvent.complete(TRACE_ID, PLAN_SPAN_ID, recorder.next_sequence, kind="plan")
+            TraceEvent.complete(
+                TRACE_ID, PLAN_SPAN_ID, recorder.next_sequence, kind="plan"
+            )
         )
-        recorder.record(TraceEvent.complete(TRACE_ID, ROOT_SPAN_ID, recorder.next_sequence))
+        recorder.record(
+            TraceEvent.complete(TRACE_ID, ROOT_SPAN_ID, recorder.next_sequence)
+        )
 
         self.assertEqual(events[-1].type, "run.completed")
         graph = recorder.snapshot()
@@ -1217,7 +1354,9 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(runtime_start["parent_span_id"], CAPABILITY_SPAN_ID)
 
-    async def test_observed_runtime_links_tool_result_to_next_context_frame(self) -> None:
+    async def test_observed_runtime_links_tool_result_to_next_context_frame(
+        self,
+    ) -> None:
         recorder = MemoryPathlightRecorder(TRACE_ID)
         observed = ObservedRuntimeClient(ToolRuntime(), pathlight=recorder)
 
@@ -1228,19 +1367,24 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
             )
         ]
 
-        self.assertEqual([event.type for event in events], [
-            "run.started",
-            "tool.call",
-            "tool.result",
-            "run.completed",
-        ])
+        self.assertEqual(
+            [event.type for event in events],
+            [
+                "run.started",
+                "tool.call",
+                "tool.result",
+                "run.completed",
+            ],
+        )
         graph = recorder.snapshot()
         tool_result = next(
             item
             for item in graph["events"]
             if item["kind"] == "tool-call" and item["status"] == "completed"
         )
-        self.assertIn("derived-from", [link["relation"] for link in tool_result["links"]])
+        self.assertIn(
+            "derived-from", [link["relation"] for link in tool_result["links"]]
+        )
         next_context = next(
             item
             for item in graph["events"]
@@ -1248,13 +1392,17 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
             and item["status"] == "started"
             and any(link["span_id"] == tool_result["span_id"] for link in item["links"])
         )
-        self.assertIn("derived-from", [link["relation"] for link in next_context["links"]])
+        self.assertIn(
+            "derived-from", [link["relation"] for link in next_context["links"]]
+        )
         self.assertNotIn("model-call", [item["kind"] for item in graph["events"]])
         self.assertTrue(next_context["attributes"]["missing_evidence"])
         self.assertNotIn("SENTINEL_SECRET", repr(graph))
         self.assertNotIn("SENTINEL_PRIVATE", repr(graph))
 
-    async def test_runtime_pathlight_projection_handles_safe_terminal_matrix(self) -> None:
+    async def test_runtime_pathlight_projection_handles_safe_terminal_matrix(
+        self,
+    ) -> None:
         cases = {
             "tool-error": (
                 (
@@ -1320,7 +1468,9 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 ]
 
                 self.assertEqual(events, runtime.yielded)
-                self.assertTrue(all(left is right for left, right in zip(events, runtime.yielded)))
+                self.assertTrue(
+                    all(left is right for left, right in zip(events, runtime.yielded))
+                )
                 graph = recorder.snapshot()
                 root_terminal = graph["events"][-1]
                 self.assertEqual(root_terminal["kind"], "runtime")
@@ -1339,8 +1489,7 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
                     usage = next(
                         item
                         for item in graph["events"]
-                        if item["kind"] == "runtime"
-                        and item["status"] == "completed"
+                        if item["kind"] == "runtime" and item["status"] == "completed"
                     )
                     self.assertEqual(usage["attributes"]["input_tokens"], 3)
                     self.assertEqual(usage["attributes"]["output_tokens"], 5)
@@ -1388,7 +1537,9 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
 
                 self.assertEqual(recorder.event_count, 0)
 
-    async def test_records_a_validated_runtime_stream_without_input_or_uri(self) -> None:
+    async def test_records_a_validated_runtime_stream_without_input_or_uri(
+        self,
+    ) -> None:
         observed = ObservedRuntimeClient(CompletedRuntime())
 
         events = [
@@ -1424,15 +1575,20 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
             ]
 
         self.assertEqual(observed.records, ())
-        self.assertEqual(observed.failed_attempts, (
-            {
-                "schema": "asterion.workflow-observation/v1",
-                "run_id": "run-2",
-                "input_digest": hashlib.sha256(b"SENTINEL_SECRET_INPUT").hexdigest(),
-                "status": "failed",
-                "failure_class": "runtime-invocation-failed",
-            },
-        ))
+        self.assertEqual(
+            observed.failed_attempts,
+            (
+                {
+                    "schema": "asterion.workflow-observation/v1",
+                    "run_id": "run-2",
+                    "input_digest": hashlib.sha256(
+                        b"SENTINEL_SECRET_INPUT"
+                    ).hexdigest(),
+                    "status": "failed",
+                    "failure_class": "runtime-invocation-failed",
+                },
+            ),
+        )
         self.assertNotIn(
             "SENTINEL_PRIVATE_FAILURE",
             json.dumps([dict(item) for item in observed.failed_attempts]),
