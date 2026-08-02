@@ -9,15 +9,20 @@
 `blocked-by-coverage`；即使未来五项都达到 10/10，它也只会变成“可申请单独
 授权”，不会自动获得执行权限。
 
-已完成 provider-free `prepare` 的计划摘要为
-`e845f41bb1fa7e81857f12244cc5053393df861bc7b25e815dfb4a5126f00e90`。
-该摘要只证明计划已准备，不代表已有 authorization，也不代表实验已执行。
+配置绑定前生成的计划
+`e845f41bb1fa7e81857f12244cc5053393df861bc7b25e815dfb4a5126f00e90`
+已经废止，不得授权或执行。重新完成 provider-free `prepare` 后，当前计划摘要为
+`75689698a526d66735b67fa9d8df91f15e92187d230feb5066dc80c15213f202`，并绑定
+执行配置摘要
+`1bd1d4e218984b9ae567bca23710e9b772477e3240a78aa7106f867d13171fa2`。
+这些摘要只证明计划已准备，不代表已有 authorization，也不代表实验已执行。
 
 已准备的有限边界固定为五个数据集、每项 10 例、最多 50 次 Agent 操作、
 0 次 Judge 操作、5,000,000 微美元，并在第二次基础设施失败后、第三项启动前
 停止。运营者在创建独立的 0600 authorization 前，必须逐项核对 plan 中的
 `plan_sha256`、`proposal_sha256`、`scope_sha256`、`variant_sha256`、
-`registry_set_sha256`、`source_lock_sha256`、五项 `registry_sha256`，以及上述
+`registry_set_sha256`、`source_lock_sha256`、`execution_config_sha256`、五项
+`registry_sha256`，以及上述
 操作数、成本和停止线。Authorization 必须回填相同摘要与限制，包含独立的
 `operator_approval_sha256`，并明确写入 `execution_authorized=true`；配置、缓存
 和旧 evidence 都不能代替本次授权。

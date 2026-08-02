@@ -24,9 +24,14 @@ only through in-process dependency injection; it has no raw-artifact flag or
 reader and does not invent an artifact contract before real immutable evidence
 exists.
 
-The provider-free `prepare` step produced plan digest
-`e845f41bb1fa7e81857f12244cc5053393df861bc7b25e815dfb4a5126f00e90`.
-This is prepared-plan evidence only.
+The pre-execution-configuration plan digest
+`e845f41bb1fa7e81857f12244cc5053393df861bc7b25e815dfb4a5126f00e90`
+is obsolete and must not be authorized or executed. A new provider-free
+`prepare` produced plan digest
+`75689698a526d66735b67fa9d8df91f15e92187d230feb5066dc80c15213f202`,
+bound to execution configuration digest
+`1bd1d4e218984b9ae567bca23710e9b772477e3240a78aa7106f867d13171fa2`.
+These are prepared-plan evidence only.
 
 ## External execution status
 
@@ -39,12 +44,14 @@ Before a finite run, the operator must verify that a private 0600 authorization
 matches the prepared plan's exact:
 
 - `plan_sha256` (currently
-  `e845f41bb1fa7e81857f12244cc5053393df861bc7b25e815dfb4a5126f00e90`)
+  `75689698a526d66735b67fa9d8df91f15e92187d230feb5066dc80c15213f202`)
 - `proposal_sha256`
 - `scope_sha256`
 - `variant_sha256`
 - `registry_set_sha256`
 - `source_lock_sha256`
+- `execution_config_sha256` (currently
+  `1bd1d4e218984b9ae567bca23710e9b772477e3240a78aa7106f867d13171fa2`)
 - all five `registry_sha256` values
 - 50 Agent operations and zero Judge operations
 - 5,000,000-microusd ceiling
