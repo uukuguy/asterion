@@ -8,7 +8,11 @@ import unittest
 from pathlib import Path
 
 from asterion.pathlight import TraceEvent, TraceGraph
-from asterion.workflow_evidence import write_workflow_observation_bundle
+from asterion.workflow_evidence import (
+    WorkflowEvidenceError,
+    read_workflow_observation_bundle,
+    write_workflow_observation_bundle,
+)
 
 
 def _completed_record() -> dict[str, object]:
@@ -39,7 +43,102 @@ def _completed_pathlight_trace(
     ).to_mapping()
 
 
+def _mutated_bundle_path(root: Path, mutation: str) -> Path:
+    path = root / "workflow-evidence.json"
+    trace = _completed_pathlight_trace()
+    write_workflow_observation_bundle(path, (_completed_record(),), pathlight_traces=(trace,))
+    if mutation == "symlink":
+        target = root / "source.json"
+        path.rename(target)
+        path.symlink_to(target)
+        return path
+    if mutation == "corrupted-json":
+        path.write_text("{", encoding="utf-8")
+        return path
+
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if mutation == "bundle-digest":
+        document["bundle_sha256"] = "0" * 64
+    elif mutation == "trace-digest":
+        document["pathlight_traces"][0]["trace_sha256"] = "0" * 64
+    elif mutation == "duplicate-run":
+        document["records"].append(document["records"][0])
+        document["bundle_sha256"] = hashlib.sha256(
+            json.dumps(
+                {
+                    "schema": document["schema"],
+                    "records": document["records"],
+                    "pathlight_traces": document["pathlight_traces"],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+    elif mutation == "duplicate-trace":
+        document["pathlight_traces"].append(document["pathlight_traces"][0])
+        document["bundle_sha256"] = hashlib.sha256(
+            json.dumps(
+                {
+                    "schema": document["schema"],
+                    "records": document["records"],
+                    "pathlight_traces": document["pathlight_traces"],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+    elif mutation == "unknown-field":
+        document["private_sentinel"] = "SECRET-WORKFLOW-EVIDENCE"
+    else:
+        raise AssertionError(f"unknown mutation: {mutation}")
+    path.write_text(json.dumps(document), encoding="utf-8")
+    return path
+
+
 class WorkflowEvidenceStorageTests(unittest.TestCase):
+    def test_reads_written_bundle_as_immutable_validated_value(self) -> None:
+        trace = _completed_pathlight_trace()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "workflow-evidence.json"
+            write_workflow_observation_bundle(
+                path,
+                (_completed_record(),),
+                pathlight_traces=(trace,),
+            )
+
+            bundle = read_workflow_observation_bundle(path)
+
+            self.assertEqual(
+                bundle.bundle_sha256,
+                json.loads(path.read_text(encoding="utf-8"))["bundle_sha256"],
+            )
+            self.assertEqual(
+                bundle.pathlight_traces[0]["trace_sha256"],
+                trace["trace_sha256"],
+            )
+            with self.assertRaises(TypeError):
+                bundle.pathlight_traces[0]["trace_id"] = "mutated"  # type: ignore[index]
+            self.assertIsInstance(bundle.pathlight_traces[0]["events"], tuple)
+            with self.assertRaises(TypeError):
+                bundle.records[0]["usage"]["input_tokens"] = 1  # type: ignore[index]
+
+    def test_reader_rejects_invalid_or_tampered_bundle(self) -> None:
+        mutations = (
+            "symlink",
+            "corrupted-json",
+            "bundle-digest",
+            "trace-digest",
+            "duplicate-run",
+            "duplicate-trace",
+            "unknown-field",
+        )
+        for mutation in mutations:
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                with self.assertRaises(WorkflowEvidenceError):
+                    read_workflow_observation_bundle(
+                        _mutated_bundle_path(Path(directory), mutation)
+                    )
+
     def test_writes_canonical_observation_bundle_to_explicit_new_file(self) -> None:
         record = _completed_record()
         with tempfile.TemporaryDirectory() as directory:

@@ -3,16 +3,28 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 
 from asterion.pathlight import PathlightError, validate_trace_graph
 from asterion.workflow_evidence.collector import (
     WorkflowEvidenceError,
     validate_workflow_evidence,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowObservationBundle:
+    """A verified, immutable workflow observation bundle."""
+
+    records: tuple[Mapping[str, object], ...]
+    pathlight_traces: tuple[Mapping[str, object], ...]
+    bundle_sha256: str
 
 
 def _digest(value: object) -> str:
@@ -46,6 +58,94 @@ def _validate_failure_observation(record: Mapping[str, object]) -> None:
         "runtime-cancelled",
     }:
         raise WorkflowEvidenceError("workflow observation failure class is invalid")
+
+
+def read_workflow_observation_bundle(path: Path) -> WorkflowObservationBundle:
+    """Read one canonical observation bundle into a validated immutable value."""
+
+    if path.name != "workflow-evidence.json" or path.is_symlink() or not path.is_file():
+        raise WorkflowEvidenceError("workflow observation source is invalid")
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise WorkflowEvidenceError("workflow observation source is invalid") from error
+    return _validate_and_freeze_bundle(document)
+
+
+def _validate_and_freeze_bundle(document: object) -> WorkflowObservationBundle:
+    if not isinstance(document, Mapping) or set(document) != {
+        "schema",
+        "records",
+        "pathlight_traces",
+        "bundle_sha256",
+    }:
+        raise WorkflowEvidenceError("workflow observation bundle is invalid")
+    if document["schema"] != "asterion.workflow-observation-bundle/v1":
+        raise WorkflowEvidenceError("workflow observation bundle schema is invalid")
+    records = document["records"]
+    pathlight_traces = document["pathlight_traces"]
+    if not isinstance(records, list) or not isinstance(pathlight_traces, list):
+        raise WorkflowEvidenceError("workflow observation bundle collections are invalid")
+    bundle_sha256 = _digest(document["bundle_sha256"])
+    expected_bundle_sha256 = hashlib.sha256(
+        json.dumps(
+            {
+                "schema": document["schema"],
+                "records": records,
+                "pathlight_traces": pathlight_traces,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    if not hmac.compare_digest(bundle_sha256, expected_bundle_sha256):
+        raise WorkflowEvidenceError("workflow observation bundle digest mismatches")
+
+    seen_run_ids: set[str] = set()
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise WorkflowEvidenceError("workflow observation record is invalid")
+        if record.get("schema") == "asterion.workflow-evidence/v1":
+            validate_workflow_evidence(record)
+        else:
+            _validate_failure_observation(record)
+        run_id = record["run_id"]
+        assert isinstance(run_id, str)
+        if run_id in seen_run_ids:
+            raise WorkflowEvidenceError("workflow observation run identity is duplicated")
+        seen_run_ids.add(run_id)
+
+    seen_trace_ids: set[str] = set()
+    for trace in pathlight_traces:
+        if not isinstance(trace, Mapping):
+            raise WorkflowEvidenceError("Pathlight trace is invalid")
+        try:
+            validate_trace_graph(trace)
+        except PathlightError:
+            raise WorkflowEvidenceError("Pathlight trace is invalid") from None
+        trace_id = trace["trace_id"]
+        assert isinstance(trace_id, str)
+        if trace_id in seen_trace_ids:
+            raise WorkflowEvidenceError("Pathlight trace identity is duplicated")
+        seen_trace_ids.add(trace_id)
+
+    return WorkflowObservationBundle(
+        records=tuple(_freeze_mapping(record) for record in records),
+        pathlight_traces=tuple(_freeze_mapping(trace) for trace in pathlight_traces),
+        bundle_sha256=bundle_sha256,
+    )
+
+
+def _freeze_mapping(value: Mapping[str, object]) -> Mapping[str, object]:
+    return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+
+
+def _freeze(value: object) -> object:
+    if isinstance(value, Mapping):
+        return _freeze_mapping(value)
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze(item) for item in value)
+    return value
 
 
 def write_workflow_observation_bundle(
