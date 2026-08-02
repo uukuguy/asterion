@@ -48,7 +48,9 @@ _SAFE_RELATIONS = frozenset(
     {"caused-next", "consumed-by", "derived-from", "evidence-for", "produced-by", "related-to"}
 )
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_IDENTITY = re.compile(r"^[a-z][a-z0-9]*(?:[._:-][a-z0-9]+)*$")
+_OPAQUE_ID = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
 
 _DIGEST_ATTRIBUTES = frozenset(
     {"content_sha256", "evidence_ref", "policy_sha256", "scope_sha256", "coverage_sha256"}
@@ -140,12 +142,12 @@ class PathlightError(ValueError):
     """Raised when a Pathlight trace is unsafe or violates its contract."""
 
 
-def _is_identifier(value: object) -> bool:
-    return type(value) is str and _IDENTITY.fullmatch(value) is not None
+def _is_opaque_id(value: object) -> bool:
+    return type(value) is str and _OPAQUE_ID.fullmatch(value) is not None
 
 
-def _require_identifier(value: object, *, field_name: str) -> str:
-    if not _is_identifier(value):
+def _require_opaque_id(value: object, *, field_name: str) -> str:
+    if not _is_opaque_id(value):
         raise PathlightError(f"Pathlight {field_name} is invalid")
     assert isinstance(value, str)
     return value
@@ -203,8 +205,8 @@ def _freeze_links(links: Sequence[Mapping[str, str]]) -> tuple[Mapping[str, str]
         span_id = link.get("span_id")
         if relation not in _SAFE_RELATIONS:
             raise PathlightError("Pathlight event link relation is invalid")
-        _require_identifier(trace_id, field_name="link trace identity")
-        _require_identifier(span_id, field_name="link span identity")
+        _require_opaque_id(trace_id, field_name="link trace identity")
+        _require_opaque_id(span_id, field_name="link span identity")
         assert isinstance(relation, str)
         assert isinstance(trace_id, str)
         assert isinstance(span_id, str)
@@ -234,10 +236,10 @@ class TraceEvent:
     timestamp_ns: int = 0
 
     def __post_init__(self) -> None:
-        _require_identifier(self.trace_id, field_name="trace identity")
-        _require_identifier(self.span_id, field_name="span identity")
+        _require_opaque_id(self.trace_id, field_name="trace identity")
+        _require_opaque_id(self.span_id, field_name="span identity")
         if self.parent_span_id is not None:
-            _require_identifier(self.parent_span_id, field_name="parent span identity")
+            _require_opaque_id(self.parent_span_id, field_name="parent span identity")
         if type(self.sequence) is not int or self.sequence < 1:
             raise PathlightError("Pathlight event sequence is invalid")
         if self.kind not in SAFE_KINDS:
@@ -333,7 +335,7 @@ class TraceGraph:
     events: tuple[TraceEvent, ...]
 
     def __post_init__(self) -> None:
-        _require_identifier(self.trace_id, field_name="trace identity")
+        _require_opaque_id(self.trace_id, field_name="trace identity")
         events = tuple(self.events)
         if not all(isinstance(event, TraceEvent) for event in events):
             raise PathlightError("Pathlight graph events are invalid")
@@ -444,7 +446,7 @@ def _graph_without_digest(graph: Mapping[str, object], *, allow_digest: bool) ->
         raise PathlightError("Pathlight graph fields are invalid")
     if graph.get("schema") != TRACE_SCHEMA:
         raise PathlightError("Pathlight graph schema is invalid")
-    trace_id = _require_identifier(graph.get("trace_id"), field_name="trace identity")
+    trace_id = _require_opaque_id(graph.get("trace_id"), field_name="trace identity")
     events_value = graph.get("events")
     if not isinstance(events_value, list):
         raise PathlightError("Pathlight graph events are invalid")

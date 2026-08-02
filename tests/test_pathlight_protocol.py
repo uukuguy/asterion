@@ -14,6 +14,17 @@ from asterion.pathlight import (
 )
 
 
+def opaque_id(number: int) -> str:
+    return f"00000000-0000-4000-8000-{number:012x}"
+
+
+TRACE_ID = opaque_id(1)
+OTHER_TRACE_ID = opaque_id(2)
+ROOT_SPAN_ID = opaque_id(3)
+CHILD_SPAN_ID = opaque_id(4)
+MISSING_SPAN_ID = opaque_id(5)
+
+
 class PathlightProtocolTests(unittest.TestCase):
     STRING_ATTRIBUTE_VALUES = {
         "artifact_id": "a" * 64,
@@ -36,11 +47,11 @@ class PathlightProtocolTests(unittest.TestCase):
 
     def complete_graph(self) -> TraceGraph:
         return TraceGraph.build(
-            trace_id="trace-1",
+            trace_id=TRACE_ID,
             events=(
                 TraceEvent.start(
-                    "trace-1",
-                    "root",
+                    TRACE_ID,
+                    ROOT_SPAN_ID,
                     None,
                     1,
                     "task",
@@ -48,9 +59,9 @@ class PathlightProtocolTests(unittest.TestCase):
                     timestamp_ns=10,
                 ),
                 TraceEvent.start(
-                    "trace-1",
-                    "child",
-                    "root",
+                    TRACE_ID,
+                    CHILD_SPAN_ID,
+                    ROOT_SPAN_ID,
                     2,
                     "tool-call",
                     attributes={
@@ -60,25 +71,25 @@ class PathlightProtocolTests(unittest.TestCase):
                     links=(
                         {
                             "relation": "caused-next",
-                            "trace_id": "trace-1",
-                            "span_id": "root",
+                            "trace_id": TRACE_ID,
+                            "span_id": ROOT_SPAN_ID,
                         },
                     ),
                     timestamp_ns=20,
                 ),
                 TraceEvent.complete(
-                    "trace-1", "child", 3, kind="tool-call", timestamp_ns=30
+                    TRACE_ID, CHILD_SPAN_ID, 3, kind="tool-call", timestamp_ns=30
                 ),
-                TraceEvent.complete("trace-1", "root", 4, timestamp_ns=40),
+                TraceEvent.complete(TRACE_ID, ROOT_SPAN_ID, 4, timestamp_ns=40),
             ),
         )
 
     def test_trace_graph_preserves_context_flow_without_text(self) -> None:
         graph = TraceGraph.build(
-            trace_id="trace-1",
+            trace_id=TRACE_ID,
             events=(
-                TraceEvent.start("trace-1", "root", None, 1, "task"),
-                TraceEvent.complete("trace-1", "root", 2),
+                TraceEvent.start(TRACE_ID, ROOT_SPAN_ID, None, 1, "task"),
+                TraceEvent.complete(TRACE_ID, ROOT_SPAN_ID, 2),
             ),
         )
 
@@ -91,8 +102,8 @@ class PathlightProtocolTests(unittest.TestCase):
     def test_rejects_noncontiguous_sequence_and_unknown_parent(self) -> None:
         with self.assertRaises(PathlightError):
             TraceGraph.build(
-                "trace-1",
-                (TraceEvent.start("trace-1", "x", "missing", 2, "task"),),
+                TRACE_ID,
+                (TraceEvent.start(TRACE_ID, opaque_id(6), MISSING_SPAN_ID, 2, "task"),),
             )
 
     def test_canonical_mapping_has_a_stable_digest(self) -> None:
@@ -114,22 +125,22 @@ class PathlightProtocolTests(unittest.TestCase):
         attributes = {"content_length": 1}
         link = {
             "relation": "related-to",
-            "trace_id": "trace-1",
-            "span_id": "root",
+            "trace_id": TRACE_ID,
+            "span_id": ROOT_SPAN_ID,
         }
         event = TraceEvent.start(
-            "trace-1", "root", None, 1, "task", attributes=attributes, links=(link,)
+            TRACE_ID, ROOT_SPAN_ID, None, 1, "task", attributes=attributes, links=(link,)
         )
         attributes["content_length"] = 99
         link["span_id"] = "changed"
         graph = TraceGraph.build(
-            "trace-1", (event, TraceEvent.complete("trace-1", "root", 2))
+            TRACE_ID, (event, TraceEvent.complete(TRACE_ID, ROOT_SPAN_ID, 2))
         )
 
         payload = graph.to_mapping()
 
         self.assertEqual(payload["events"][0]["attributes"]["content_length"], 1)
-        self.assertEqual(payload["events"][0]["links"][0]["span_id"], "root")
+        self.assertEqual(payload["events"][0]["links"][0]["span_id"], ROOT_SPAN_ID)
         with self.assertRaises(TypeError):
             event.attributes["content_length"] = 2  # type: ignore[index]
 
@@ -143,14 +154,14 @@ class PathlightProtocolTests(unittest.TestCase):
             "bool-length": {"content_length": True},
         }.items():
             with self.subTest(name=name), self.assertRaises(PathlightError):
-                TraceEvent.start("trace-1", "root", None, 1, "task", attributes=attributes)
+                TraceEvent.start(TRACE_ID, ROOT_SPAN_ID, None, 1, "task", attributes=attributes)
 
     def test_rejects_private_content_for_every_string_attribute(self) -> None:
         for key in self.STRING_ATTRIBUTE_VALUES:
             with self.subTest(key=key), self.assertRaises(PathlightError):
                 TraceEvent.start(
-                    "trace-1",
-                    "root",
+                    TRACE_ID,
+                    ROOT_SPAN_ID,
                     None,
                     1,
                     "task",
@@ -161,75 +172,124 @@ class PathlightProtocolTests(unittest.TestCase):
         for key, value in self.STRING_ATTRIBUTE_VALUES.items():
             with self.subTest(key=key):
                 event = TraceEvent.start(
-                    "trace-1", "root", None, 1, "task", attributes={key: value}
+                    TRACE_ID, ROOT_SPAN_ID, None, 1, "task", attributes={key: value}
                 )
                 self.assertEqual(event.attributes[key], value)
+
+    def test_rejects_private_content_for_every_core_identifier(self) -> None:
+        cases = {
+            "trace-id": {
+                "trace_id": "sentinel-private-content",
+                "span_id": ROOT_SPAN_ID,
+                "parent_span_id": None,
+                "links": (),
+            },
+            "span-id": {
+                "trace_id": TRACE_ID,
+                "span_id": "sentinel-private-content",
+                "parent_span_id": None,
+                "links": (),
+            },
+            "parent-span-id": {
+                "trace_id": TRACE_ID,
+                "span_id": CHILD_SPAN_ID,
+                "parent_span_id": "sentinel-private-content",
+                "links": (),
+            },
+            "link-trace-id": {
+                "trace_id": TRACE_ID,
+                "span_id": ROOT_SPAN_ID,
+                "parent_span_id": None,
+                "links": (
+                    {
+                        "relation": "related-to",
+                        "trace_id": "sentinel-private-content",
+                        "span_id": ROOT_SPAN_ID,
+                    },
+                ),
+            },
+            "link-span-id": {
+                "trace_id": TRACE_ID,
+                "span_id": ROOT_SPAN_ID,
+                "parent_span_id": None,
+                "links": (
+                    {
+                        "relation": "related-to",
+                        "trace_id": TRACE_ID,
+                        "span_id": "sentinel-private-content",
+                    },
+                ),
+            },
+        }
+        for name, values in cases.items():
+            with self.subTest(name=name), self.assertRaises(PathlightError):
+                TraceEvent.start(sequence=1, kind="task", **values)
 
     def test_rejects_malformed_identity_parentage_lifecycle_and_sequences(self) -> None:
         cases = {
             "trace-mismatch": (
-                TraceEvent.start("other-trace", "root", None, 1, "task"),
-                TraceEvent.complete("other-trace", "root", 2),
+                TraceEvent.start(OTHER_TRACE_ID, ROOT_SPAN_ID, None, 1, "task"),
+                TraceEvent.complete(OTHER_TRACE_ID, ROOT_SPAN_ID, 2),
             ),
             "missing-root": (
-                TraceEvent.start("trace-1", "child", "missing", 1, "task"),
-                TraceEvent.complete("trace-1", "child", 2),
+                TraceEvent.start(TRACE_ID, CHILD_SPAN_ID, MISSING_SPAN_ID, 1, "task"),
+                TraceEvent.complete(TRACE_ID, CHILD_SPAN_ID, 2),
             ),
             "second-root": (
-                TraceEvent.start("trace-1", "one", None, 1, "task"),
-                TraceEvent.start("trace-1", "two", None, 2, "task"),
-                TraceEvent.complete("trace-1", "one", 3),
-                TraceEvent.complete("trace-1", "two", 4),
+                TraceEvent.start(TRACE_ID, opaque_id(6), None, 1, "task"),
+                TraceEvent.start(TRACE_ID, opaque_id(7), None, 2, "task"),
+                TraceEvent.complete(TRACE_ID, opaque_id(6), 3),
+                TraceEvent.complete(TRACE_ID, opaque_id(7), 4),
             ),
             "duplicate-start": (
-                TraceEvent.start("trace-1", "root", None, 1, "task"),
-                TraceEvent.start("trace-1", "root", None, 2, "task"),
-                TraceEvent.complete("trace-1", "root", 3),
+                TraceEvent.start(TRACE_ID, ROOT_SPAN_ID, None, 1, "task"),
+                TraceEvent.start(TRACE_ID, ROOT_SPAN_ID, None, 2, "task"),
+                TraceEvent.complete(TRACE_ID, ROOT_SPAN_ID, 3),
             ),
             "unmatched-terminal": (
-                TraceEvent.complete("trace-1", "root", 1),
+                TraceEvent.complete(TRACE_ID, ROOT_SPAN_ID, 1),
             ),
-            "open-span": (TraceEvent.start("trace-1", "root", None, 1, "task"),),
+            "open-span": (TraceEvent.start(TRACE_ID, ROOT_SPAN_ID, None, 1, "task"),),
             "parent-terminates-before-child": (
-                TraceEvent.start("trace-1", "root", None, 1, "task"),
-                TraceEvent.start("trace-1", "child", "root", 2, "task"),
-                TraceEvent.complete("trace-1", "root", 3),
-                TraceEvent.complete("trace-1", "child", 4),
+                TraceEvent.start(TRACE_ID, ROOT_SPAN_ID, None, 1, "task"),
+                TraceEvent.start(TRACE_ID, CHILD_SPAN_ID, ROOT_SPAN_ID, 2, "task"),
+                TraceEvent.complete(TRACE_ID, ROOT_SPAN_ID, 3),
+                TraceEvent.complete(TRACE_ID, CHILD_SPAN_ID, 4),
             ),
             "sequence-gap": (
-                TraceEvent.start("trace-1", "root", None, 1, "task"),
-                TraceEvent.complete("trace-1", "root", 3),
+                TraceEvent.start(TRACE_ID, ROOT_SPAN_ID, None, 1, "task"),
+                TraceEvent.complete(TRACE_ID, ROOT_SPAN_ID, 3),
             ),
             "sequence-out-of-order": (
-                TraceEvent.start("trace-1", "root", None, 2, "task"),
-                TraceEvent.complete("trace-1", "root", 1),
+                TraceEvent.start(TRACE_ID, ROOT_SPAN_ID, None, 2, "task"),
+                TraceEvent.complete(TRACE_ID, ROOT_SPAN_ID, 1),
             ),
         }
         for name, events in cases.items():
             with self.subTest(name=name), self.assertRaises(PathlightError):
-                TraceGraph.build("trace-1", events)
+                TraceGraph.build(TRACE_ID, events)
 
     def test_rejects_cross_trace_link_and_unknown_link_target(self) -> None:
         for name, link in {
             "cross-trace": {
                 "relation": "derived-from",
-                "trace_id": "other-trace",
-                "span_id": "root",
+                "trace_id": OTHER_TRACE_ID,
+                "span_id": ROOT_SPAN_ID,
             },
             "unknown-target": {
                 "relation": "derived-from",
-                "trace_id": "trace-1",
-                "span_id": "missing",
+                "trace_id": TRACE_ID,
+                "span_id": MISSING_SPAN_ID,
             },
         }.items():
             with self.subTest(name=name), self.assertRaises(PathlightError):
                 TraceGraph.build(
-                    "trace-1",
+                    TRACE_ID,
                     (
                         TraceEvent.start(
-                            "trace-1", "root", None, 1, "task", links=(link,)
+                            TRACE_ID, ROOT_SPAN_ID, None, 1, "task", links=(link,)
                         ),
-                        TraceEvent.complete("trace-1", "root", 2),
+                        TraceEvent.complete(TRACE_ID, ROOT_SPAN_ID, 2),
                     ),
                 )
 
@@ -244,7 +304,7 @@ class PathlightProtocolTests(unittest.TestCase):
                     *payload["events"][1:],
                 ],
             },
-            "digest-mismatch": {**payload, "trace_id": "trace-2"},
+            "digest-mismatch": {**payload, "trace_id": OTHER_TRACE_ID},
         }
         for name, malformed in cases.items():
             with self.subTest(name=name), self.assertRaises(PathlightError):
