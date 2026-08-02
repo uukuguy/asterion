@@ -38,6 +38,7 @@ class ObservedRuntimeClient:
         self._monotonic_ns = (
             monotonic_ns if monotonic_ns is not None else time.monotonic_ns
         )
+        self._last_timestamp_ns: int | None = None
         self._records: list[Mapping[str, object]] = []
         self._failed_attempts: list[Mapping[str, object]] = []
 
@@ -125,6 +126,9 @@ class ObservedRuntimeClient:
         if type(value) is not int or value <= 0:
             self._pathlight = None
             return None
+        if self._last_timestamp_ns is not None and value <= self._last_timestamp_ns:
+            value = self._last_timestamp_ns + 1
+        self._last_timestamp_ns = value
         return value
 
 
@@ -148,6 +152,7 @@ class _RuntimePathlightProjection:
         self._context_span_id: str | None = None
         self._tool_spans: dict[str, tuple[str, str | None]] = {}
         self._started_ns: dict[str, int] = {}
+        self._events: list[TraceEvent] = []
         self._input_tokens = 0
         self._output_tokens = 0
 
@@ -239,6 +244,7 @@ class _RuntimePathlightProjection:
                     },
                     timestamp_ns=invocation_ended_ns,
                 )
+        self._publish()
 
     def complete(
         self,
@@ -391,7 +397,7 @@ class _RuntimePathlightProjection:
             self._disable()
             return None
         self._sequence = sequence
-        self._record(event)
+        self._events.append(event)
         if self._trace_id is not None:
             self._started_ns[span_id] = timestamp_ns
         return span_id
@@ -430,19 +436,22 @@ class _RuntimePathlightProjection:
             self._disable()
             return
         self._sequence = sequence
-        self._record(event)
+        self._events.append(event)
         self._started_ns.pop(span_id, None)
 
-    def _record(self, event: TraceEvent) -> None:
-        assert self._recorder is not None
+    def _publish(self) -> None:
+        if self._recorder is None or self._trace_id is None:
+            return
         try:
-            self._recorder.record(event)
+            for event in self._events:
+                self._recorder.record(event)
         except Exception:
             self._disable()
 
     def _disable(self) -> None:
         self._recorder = None
         self._trace_id = None
+        self._events.clear()
 
     def _link_to(self, span_id: str | None, relation: str) -> tuple[Mapping[str, str], ...]:
         if self._trace_id is None or span_id is None:

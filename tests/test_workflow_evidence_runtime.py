@@ -5,11 +5,14 @@ import json
 import unittest
 from collections.abc import AsyncIterator
 from collections.abc import Mapping
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import cast
 
 from asterion.pathlight import MemoryPathlightRecorder, TraceEvent
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 from asterion.workflow_evidence import ObservedRuntimeClient
+from asterion.workflow_evidence.storage import write_workflow_observation_bundle
 
 
 TRACE_ID = "00000000-0000-4000-8000-000000000001"
@@ -134,7 +137,66 @@ class IncrementingClock:
         return value
 
 
+class RepeatedClock:
+    def __init__(self, value: int = 1_000) -> None:
+        self.value = value
+
+    def __call__(self) -> int:
+        return self.value
+
+
 class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_repeated_clock_values_keep_runtime_projection_complete(self) -> None:
+        runtime = CompletedRuntime()
+        recorder = MemoryPathlightRecorder(TRACE_ID)
+        observed = ObservedRuntimeClient(
+            runtime,
+            pathlight=recorder,
+            monotonic_ns=RepeatedClock(),
+        )
+
+        events = [
+            event
+            async for event in observed.run(
+                RunRequest(run_id="run-1", input_text="SENTINEL_SECRET_INPUT")
+            )
+        ]
+
+        self.assertEqual(
+            [event.type for event in events],
+            [
+                "run.started",
+                "artifact.created",
+                "usage.reported",
+                "run.completed",
+            ],
+        )
+        self.assertEqual(len(observed.records), 1)
+        graph = recorder.snapshot()
+        with TemporaryDirectory() as temporary_directory:
+            target = Path(temporary_directory) / "workflow-evidence.json"
+            write_workflow_observation_bundle(
+                target,
+                observed.records,
+                pathlight_traces=(graph,),
+            )
+            exported = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(exported["pathlight_traces"][0]["trace_id"], TRACE_ID)
+        trace_events = cast(list[Mapping[str, object]], graph["events"])
+        starts = {
+            event["span_id"]: event
+            for event in trace_events
+            if event["status"] == "started"
+        }
+        for event in trace_events:
+            if event["status"] != "started":
+                attributes = cast(Mapping[str, object], event["attributes"])
+                self.assertGreater(attributes["duration_ns"], 0)
+                self.assertEqual(
+                    attributes["duration_ns"],
+                    event["timestamp_ns"] - starts[event["span_id"]]["timestamp_ns"],
+                )
+
     async def test_runtime_trace_has_safe_identity_timing_tokens_and_artifact(self) -> None:
         recorder = MemoryPathlightRecorder(TRACE_ID)
         observed = ObservedRuntimeClient(
