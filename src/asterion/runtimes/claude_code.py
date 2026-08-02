@@ -12,6 +12,7 @@ import threading
 import time
 from asyncio import CancelledError
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -33,6 +34,11 @@ from asterion.runtime.host import (
     RunRequest,
     RuntimeManifest,
 )
+from asterion.pathlight.runtime_observation import (
+    RuntimeObservationBatch,
+    validate_runtime_observation_batch,
+)
+from asterion.runtimes.claude_observation import ClaudeObservationBuilder
 from asterion.runtime.working_directory import (
     ProcessDirectoryAuthority,
     bind_process_working_directory,
@@ -84,6 +90,7 @@ class ClaudeCodeRuntimeClient:
         self._context_profile = context_profile
         self._run_process = run_process
         self._completed_runs: dict[str, Path] = {}
+        self._pathlight_observations: dict[str, dict[str, object]] = {}
 
     @property
     def manifest(self) -> RuntimeManifest:
@@ -96,6 +103,21 @@ class ClaudeCodeRuntimeClient:
         """Return private evidence only for a completed run owned by this client."""
 
         return self._completed_runs.get(run_id)
+
+    def pathlight_runtime_observation(
+        self, run_id: str
+    ) -> Mapping[str, object] | None:
+        """Return a copied safe observation for one completed, owned run."""
+
+        if type(run_id) is not str or run_id not in self._completed_runs:
+            return None
+        mapping = self._pathlight_observations.get(run_id)
+        if mapping is None:
+            return None
+        try:
+            return deepcopy(validate_runtime_observation_batch(mapping).to_mapping())
+        except Exception:
+            return None
 
     async def run(
         self,
@@ -159,8 +181,20 @@ class ClaudeCodeRuntimeClient:
                 validate_event_stream(mappings)
                 if mappings[-1]["type"] != "run.completed":
                     raise ProtocolError("Claude Code runtime execution failed")
+                try:
+                    observation = _collect_pathlight_observation(
+                        output_dir=output_dir,
+                        input_text=request.input_text,
+                        run_id=request.run_id,
+                    )
+                except Exception:
+                    observation = None
                 if self._evidence_root is not None:
                     self._completed_runs[request.run_id] = output_dir
+                    if observation is not None:
+                        self._pathlight_observations[request.run_id] = (
+                            observation.to_mapping()
+                        )
             finally:
                 if temporary is not None:
                     temporary.cleanup()
@@ -189,6 +223,29 @@ async def _drain_cancelled_process(work: asyncio.Task[object]) -> None:
         work.result()
     except BaseException:
         pass
+
+
+def _collect_pathlight_observation(
+    *, output_dir: Path, input_text: str, run_id: str
+) -> RuntimeObservationBatch | None:
+    """Project private raw events into a non-authoritative safe side channel."""
+
+    try:
+        builder = ClaudeObservationBuilder()
+        builder.record_host_input(input_text)
+        for timestamp_ns, line in enumerate(
+            (output_dir / "raw-events.jsonl").read_text().splitlines()
+        ):
+            if not line:
+                continue
+            event = json.loads(line)
+            if isinstance(event, Mapping):
+                builder.consume(event, timestamp_ns)
+        return validate_runtime_observation_batch(builder.complete(run_id).to_mapping())
+    except Exception:
+        # This optional projection must not affect Claude's stream, terminal
+        # event, cancellation behavior, or private evidence artifacts.
+        return None
 
 
 def build_claude_command(

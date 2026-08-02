@@ -9,7 +9,7 @@ import tempfile
 import unittest
 import asyncio
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from asterion.runtime.host import RunRequest
 from asterion.runtime.protocol import validate_event_stream
@@ -227,6 +227,86 @@ class ClaudeCodeRuntimeClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(policy["runtime_cwd"], str(Path(directory).resolve()))
             self.assertTrue(all(stat.S_IMODE(path.stat().st_mode) == 0o600 for path in run_dir.iterdir()))
             self.assertEqual(events[-1].type, "run.completed")
+
+    async def test_completed_run_exposes_only_an_incomplete_safe_claude_observation(
+        self,
+    ) -> None:
+        fixture = Path(__file__).parent / "fixtures/claude_code/valid-tool.jsonl"
+        process = Mock(
+            return_value=subprocess.CompletedProcess([], 0, fixture.read_text(), "")
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = ClaudeCodeRuntimeClient(
+                executable="claude",
+                cwd=Path(directory),
+                environment={},
+                evidence_root=Path(directory) / "private",
+                run_process=process,
+            )
+
+            events = [
+                event
+                async for event in runtime.run(
+                    RunRequest("pathlight-private-run", "SENTINEL_PROMPT")
+                )
+            ]
+            observed = runtime.pathlight_runtime_observation("pathlight-private-run")
+
+            self.assertEqual(events[-1].type, "run.completed")
+            self.assertIsNotNone(observed)
+            assert observed is not None
+            calls = observed["model_calls"]
+            frames = observed["frames"]
+            assert isinstance(calls, list)
+            assert isinstance(frames, list)
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(len(frames), 2)
+            self.assertTrue(all(call["boundary_observed"] is False for call in calls))
+            self.assertIn("model-request-boundary", observed["missing_evidence"])
+            self.assertEqual(frames[-1]["segments"][-1]["role"], "tool-result")
+            rendered = json.dumps(observed)
+            for sentinel in (
+                "SENTINEL_PROMPT",
+                "corpus.txt",
+                "Evidence line",
+                "Answer — corpus.txt",
+            ):
+                self.assertNotIn(sentinel, rendered)
+            observed["frames"].clear()
+            next_observed = runtime.pathlight_runtime_observation("pathlight-private-run")
+            assert next_observed is not None
+            self.assertEqual(len(next_observed["frames"]), 2)
+            self.assertIsNone(runtime.pathlight_runtime_observation("other-run"))
+
+    async def test_observation_failure_does_not_change_claude_completion_or_evidence(
+        self,
+    ) -> None:
+        process = Mock(
+            return_value=subprocess.CompletedProcess([], 0, FIXTURE.read_text(), "")
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = ClaudeCodeRuntimeClient(
+                executable="claude",
+                cwd=Path(directory),
+                environment={},
+                evidence_root=Path(directory) / "private",
+                run_process=process,
+            )
+
+            with patch(
+                "asterion.runtimes.claude_code._collect_pathlight_observation",
+                side_effect=RuntimeError("private observation failure"),
+            ):
+                events = [
+                    event
+                    async for event in runtime.run(
+                        RunRequest("observation-failure", "question")
+                    )
+                ]
+
+            self.assertEqual(events[-1].type, "run.completed")
+            self.assertIsNotNone(runtime.completed_run_dir("observation-failure"))
+            self.assertIsNone(runtime.pathlight_runtime_observation("observation-failure"))
 
     async def test_profile_max_turns_reaches_command_and_runtime_policy(self) -> None:
         process = Mock(
