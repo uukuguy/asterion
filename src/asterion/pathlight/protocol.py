@@ -53,21 +53,65 @@ _IDENTITY = re.compile(r"^[a-z][a-z0-9]*(?:[._:-][a-z0-9]+)*$")
 _DIGEST_ATTRIBUTES = frozenset(
     {"content_sha256", "evidence_ref", "policy_sha256", "scope_sha256", "coverage_sha256"}
 )
-_IDENTITY_ATTRIBUTES = frozenset(
+_OPAQUE_ID_ATTRIBUTES = frozenset(
     {
         "artifact_id",
         "call_id",
         "component_id",
-        "failure_class",
         "metric_contract_id",
-        "metric_name",
         "model_id",
         "runtime_id",
-        "structure_kind",
         "tool_id",
-        "unit",
     }
 )
+_TRUSTED_STRING_ATTRIBUTE_VALUES = {
+    "failure_class": frozenset(
+        {
+            "authorization",
+            "cancelled",
+            "capability-execution-failed",
+            "configuration",
+            "evaluation",
+            "model-refusal",
+            "network",
+            "parsing",
+            "rate-limit",
+            "timeout",
+            "tool-protocol",
+            "unknown",
+        }
+    ),
+    "metric_name": frozenset(
+        {
+            "artifact-count",
+            "content-length",
+            "cost-microunits",
+            "coverage",
+            "duration-ns",
+            "error-count",
+            "evaluation-score",
+            "failure-rate",
+            "input-tokens",
+            "output-tokens",
+            "success-rate",
+            "tool-call-count",
+        }
+    ),
+    "structure_kind": frozenset(
+        {
+            "artifact",
+            "context-frame",
+            "metadata",
+            "missing-evidence",
+            "model-request",
+            "model-response",
+            "output",
+            "tool-arguments",
+            "tool-result",
+        }
+    ),
+    "unit": frozenset({"boolean", "bytes", "count", "microunits", "nanoseconds", "ratio", "tokens"}),
+}
 _NONNEGATIVE_INT_ATTRIBUTES = frozenset(
     {
         "attempt",
@@ -82,7 +126,8 @@ _INTEGER_ATTRIBUTES = frozenset({"metric_value"})
 _BOOLEAN_ATTRIBUTES = frozenset({"is_error", "missing_evidence"})
 _SAFE_ATTRIBUTE_KEYS = (
     _DIGEST_ATTRIBUTES
-    | _IDENTITY_ATTRIBUTES
+    | _OPAQUE_ID_ATTRIBUTES
+    | frozenset(_TRUSTED_STRING_ATTRIBUTE_VALUES)
     | _NONNEGATIVE_INT_ATTRIBUTES
     | _INTEGER_ATTRIBUTES
     | _BOOLEAN_ATTRIBUTES
@@ -127,8 +172,14 @@ def _freeze_attributes(attributes: Mapping[str, SafeAttributeValue]) -> Mapping[
     for key, value in values.items():
         if key in _DIGEST_ATTRIBUTES:
             _require_digest(value, field_name=f"attribute {key}")
-        elif key in _IDENTITY_ATTRIBUTES:
-            _require_identifier(value, field_name=f"attribute {key}")
+        elif key in _OPAQUE_ID_ATTRIBUTES:
+            _require_digest(value, field_name=f"attribute {key}")
+        elif key in _TRUSTED_STRING_ATTRIBUTE_VALUES:
+            if (
+                type(value) is not str
+                or value not in _TRUSTED_STRING_ATTRIBUTE_VALUES[key]
+            ):
+                raise PathlightError(f"Pathlight attribute {key} is invalid")
         elif key in _NONNEGATIVE_INT_ATTRIBUTES:
             _require_nonnegative_int(value, field_name=f"attribute {key}")
         elif key in _INTEGER_ATTRIBUTES:

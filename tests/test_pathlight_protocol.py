@@ -15,6 +15,25 @@ from asterion.pathlight import (
 
 
 class PathlightProtocolTests(unittest.TestCase):
+    STRING_ATTRIBUTE_VALUES = {
+        "artifact_id": "a" * 64,
+        "call_id": "a" * 64,
+        "component_id": "a" * 64,
+        "content_sha256": "a" * 64,
+        "coverage_sha256": "a" * 64,
+        "evidence_ref": "a" * 64,
+        "failure_class": "unknown",
+        "metric_contract_id": "a" * 64,
+        "metric_name": "input-tokens",
+        "model_id": "a" * 64,
+        "policy_sha256": "a" * 64,
+        "runtime_id": "a" * 64,
+        "scope_sha256": "a" * 64,
+        "structure_kind": "context-frame",
+        "tool_id": "a" * 64,
+        "unit": "count",
+    }
+
     def complete_graph(self) -> TraceGraph:
         return TraceGraph.build(
             trace_id="trace-1",
@@ -25,7 +44,7 @@ class PathlightProtocolTests(unittest.TestCase):
                     None,
                     1,
                     "task",
-                    attributes={"component_id": "example.runner"},
+                    attributes={"component_id": "a" * 64},
                     timestamp_ns=10,
                 ),
                 TraceEvent.start(
@@ -125,6 +144,26 @@ class PathlightProtocolTests(unittest.TestCase):
         }.items():
             with self.subTest(name=name), self.assertRaises(PathlightError):
                 TraceEvent.start("trace-1", "root", None, 1, "task", attributes=attributes)
+
+    def test_rejects_private_content_for_every_string_attribute(self) -> None:
+        for key in self.STRING_ATTRIBUTE_VALUES:
+            with self.subTest(key=key), self.assertRaises(PathlightError):
+                TraceEvent.start(
+                    "trace-1",
+                    "root",
+                    None,
+                    1,
+                    "task",
+                    attributes={key: "sentinel-private-content"},
+                )
+
+    def test_accepts_only_trusted_public_string_attribute_values(self) -> None:
+        for key, value in self.STRING_ATTRIBUTE_VALUES.items():
+            with self.subTest(key=key):
+                event = TraceEvent.start(
+                    "trace-1", "root", None, 1, "task", attributes={key: value}
+                )
+                self.assertEqual(event.attributes[key], value)
 
     def test_rejects_malformed_identity_parentage_lifecycle_and_sequences(self) -> None:
         cases = {
