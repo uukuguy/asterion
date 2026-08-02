@@ -2,17 +2,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import tempfile
 import unittest
 from collections.abc import ItemsView, Iterator, Mapping
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
 from asterion.pathlight import PathlightError
+from asterion.pathlight.evaluation import EvaluationRecord
 from asterion.pathlight.experiment import (
     CaseTrial,
     DatasetSnapshot,
     EvaluatorContract,
     ExperimentPlan,
+    ExperimentBundle,
+    ExperimentCatalog,
     SubjectRef,
     Variant,
     validate_case_trial,
@@ -21,6 +26,8 @@ from asterion.pathlight.experiment import (
     validate_experiment_plan,
     validate_subject_ref,
     validate_variant,
+    read_experiment_bundle,
+    write_experiment_bundle,
 )
 
 
@@ -67,6 +74,79 @@ class PathlightExperimentTests(unittest.TestCase):
         self.assertIsNone(error.__cause__)
         self.assertIsNone(error.__context__)
         self.assertNotIn(_HOSTILE_SENTINEL, repr(error))
+
+    def _complete_bundle_values(
+        self,
+    ) -> tuple[
+        DatasetSnapshot, EvaluatorContract, Variant, ExperimentPlan, CaseTrial, EvaluationRecord
+    ]:
+        dataset = DatasetSnapshot(_digest("dataset-contract"), _digest("dataset"), 1, "1.0.0")
+        evaluator = EvaluatorContract(
+            _digest("metric"), "rule", _digest("implementation"), _digest("input"),
+            _digest("output"), _digest("failure"), "1.0.0",
+        )
+        variant = Variant(*(_digest(name) for name in (
+            "assembly", "packages", "implementation", "runtime", "model", "tools",
+            "prompt", "policy", "change",
+        )))
+        plan = ExperimentPlan(
+            dataset.dataset_snapshot_sha256, _digest("scope"), variant.variant_sha256, (),
+            _digest("assignment"), (evaluator.evaluator_contract_sha256,), _digest("budget"),
+            _digest("stop"),
+        )
+        evaluation = EvaluationRecord(
+            _digest("trace"), evaluator.metric_contract_sha256, dataset.dataset_snapshot_sha256,
+            plan.scope_sha256, 1, 1, 1, "recovered",
+        )
+        trial = CaseTrial(
+            plan.experiment_plan_sha256, _digest("case"), variant.variant_sha256,
+            evaluation.trace_sha256, (evaluation.evaluation_sha256,), "recovered", (),
+        )
+        return dataset, evaluator, variant, plan, trial, evaluation
+
+    def test_bundle_requires_complete_exact_reference_closure(self) -> None:
+        dataset, evaluator, variant, plan, trial, evaluation = self._complete_bundle_values()
+        bundle = ExperimentBundle.build(
+            datasets=(dataset,), evaluators=(evaluator,), variants=(variant,), plans=(plan,),
+            trials=(trial,), evaluations=(evaluation,),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "pathlight-experiment.json"
+            write_experiment_bundle(bundle, target)
+            loaded = read_experiment_bundle(target)
+        self.assertEqual(loaded, bundle)
+        self.assertEqual(loaded.bundle_sha256, bundle.bundle_sha256)
+
+    def test_bundle_rejects_unresolved_trial_evaluation(self) -> None:
+        dataset, evaluator, variant, plan, trial, evaluation = self._complete_bundle_values()
+        with self.assertRaises(PathlightError):
+            ExperimentBundle.build(
+                datasets=(dataset,), evaluators=(evaluator,), variants=(variant,), plans=(plan,),
+                trials=(replace(trial, evaluation_sha256s=("0" * 64,)),),
+                evaluations=(evaluation,),
+            )
+
+    def test_catalog_returns_deterministic_read_only_plan_and_trial_projections(self) -> None:
+        dataset, evaluator, variant, plan, trial, evaluation = self._complete_bundle_values()
+        bundle = ExperimentBundle.build(
+            datasets=(dataset,), evaluators=(evaluator,), variants=(variant,), plans=(plan,),
+            trials=(trial,), evaluations=(evaluation,),
+        )
+        catalog = ExperimentCatalog.build((bundle,))
+
+        self.assertEqual(catalog.show_plan(plan.experiment_plan_sha256)["experiment_plan_sha256"], plan.experiment_plan_sha256)
+        rows = catalog.list_trials(plan.experiment_plan_sha256, evidence_state="recovered")
+        self.assertEqual(rows[0]["case_trial_sha256"], trial.case_trial_sha256)
+        with self.assertRaises(TypeError):
+            rows[0]["case_trial_sha256"] = "x"  # type: ignore[index]
+
+        supplied_plans = {plan.experiment_plan_sha256: plan}
+        direct_catalog = ExperimentCatalog(supplied_plans, {})
+        supplied_plans.clear()
+        self.assertEqual(
+            direct_catalog.show_plan(plan.experiment_plan_sha256)["experiment_plan_sha256"],
+            plan.experiment_plan_sha256,
+        )
 
     def test_builds_digest_only_case_trial_lineage(self) -> None:
         dataset = DatasetSnapshot(

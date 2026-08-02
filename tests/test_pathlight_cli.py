@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from asterion.cli import main
 from asterion.pathlight import (
@@ -14,6 +15,15 @@ from asterion.pathlight import (
     TraceEvent,
     TraceGraph,
     write_evaluation_bundle,
+)
+from asterion.pathlight.experiment import (
+    CaseTrial,
+    DatasetSnapshot,
+    EvaluatorContract,
+    ExperimentBundle,
+    ExperimentPlan,
+    Variant,
+    write_experiment_bundle,
 )
 from asterion.workflow_evidence import write_workflow_observation_bundle
 
@@ -57,7 +67,99 @@ def _evaluation(value_microunits: int) -> tuple[MetricContract, EvaluationRecord
     )
 
 
+def _experiment_bundle() -> ExperimentBundle:
+    dataset = DatasetSnapshot(_digest("dataset-contract"), _digest("dataset"), 1, "1.0.0")
+    evaluator = EvaluatorContract(
+        _digest("metric"), "rule", _digest("implementation"), _digest("input"),
+        _digest("output"), _digest("failure"), "1.0.0",
+    )
+    variant = Variant(*(_digest(name) for name in (
+        "assembly", "packages", "implementation", "runtime", "model", "tools",
+        "prompt", "policy", "change",
+    )))
+    plan = ExperimentPlan(
+        dataset.dataset_snapshot_sha256, _digest("scope"), variant.variant_sha256, (),
+        _digest("assignment"), (evaluator.evaluator_contract_sha256,), _digest("budget"),
+        _digest("stop"),
+    )
+    evaluation = EvaluationRecord(
+        _digest("trace"), evaluator.metric_contract_sha256, dataset.dataset_snapshot_sha256,
+        plan.scope_sha256, 1, 1, 1, "recovered",
+    )
+    trial = CaseTrial(
+        plan.experiment_plan_sha256, _digest("case"), variant.variant_sha256,
+        evaluation.trace_sha256, (evaluation.evaluation_sha256,), "recovered", (),
+    )
+    return ExperimentBundle.build(
+        datasets=(dataset,), evaluators=(evaluator,), variants=(variant,), plans=(plan,),
+        trials=(trial,), evaluations=(evaluation,),
+    )
+
+
 class PathlightCliTests(unittest.TestCase):
+    def test_experiment_show_and_trials_are_provider_free_canonical_json(self) -> None:
+        bundle = _experiment_bundle()
+        plan = bundle.plans[0]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "pathlight-experiment.json"
+            write_experiment_bundle(bundle, path)
+            stdout = io.StringIO()
+            code = main(
+                [
+                    "pathlight", "experiment", "show", "--experiment-file", str(path),
+                    "--experiment-sha256", plan.experiment_plan_sha256,
+                ],
+                entry_points=(FailIfLoadedEntryPoint(),), stdout=stdout,
+            )
+            self.assertEqual(code, 0)
+            show = json.loads(stdout.getvalue())
+            self.assertEqual(show["experiment_plan_sha256"], plan.experiment_plan_sha256)
+            self.assertEqual(stdout.getvalue(), json.dumps(show, sort_keys=True, separators=(",", ":")) + "\n")
+            stdout = io.StringIO()
+            code = main(
+                [
+                    "pathlight", "experiment", "trials", "--experiment-file", str(path),
+                    "--experiment-sha256", plan.experiment_plan_sha256,
+                    "--evidence-state", "recovered",
+                ],
+                stdout=stdout,
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(stdout.getvalue())[0]["evidence_state"], "recovered")
+
+    def test_experiment_cli_redacts_private_values_in_invalid_requests(self) -> None:
+        stderr = io.StringIO()
+
+        code = main(
+            [
+                "pathlight", "experiment", "show", "--experiment-file",
+                "SENTINEL_PRIVATE_PATH_AND_PROMPT", "--experiment-sha256", "invalid",
+            ],
+            stderr=stderr,
+        )
+
+        self.assertEqual(code, 2)
+        self.assertEqual(stderr.getvalue(), "asterion pathlight: request is invalid\n")
+        self.assertNotIn("SENTINEL_PRIVATE_PATH_AND_PROMPT", stderr.getvalue())
+
+    def test_experiment_cli_normalizes_hostile_reader_exceptions(self) -> None:
+        stderr = io.StringIO()
+        with patch(
+            "asterion.cli_pathlight.read_experiment_bundle",
+            side_effect=RuntimeError("SENTINEL_PRIVATE_HOSTILE_EXCEPTION"),
+        ):
+            code = main(
+                [
+                    "pathlight", "experiment", "show", "--experiment-file",
+                    "/private/pathlight-experiment.json", "--experiment-sha256", "0" * 64,
+                ],
+                stderr=stderr,
+            )
+
+        self.assertEqual(code, 2)
+        self.assertEqual(stderr.getvalue(), "asterion pathlight: request is invalid\n")
+        self.assertNotIn("SENTINEL_PRIVATE_HOSTILE_EXCEPTION", stderr.getvalue())
     def test_pathlight_routes_without_loading_application_providers(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             bundle = Path(directory).resolve() / "workflow-evidence.json"

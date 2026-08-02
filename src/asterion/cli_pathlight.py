@@ -15,6 +15,7 @@ from asterion.pathlight import (
     TraceFilter,
     read_evaluation_bundle,
 )
+from asterion.pathlight.experiment import ExperimentCatalog, read_experiment_bundle
 from asterion.workflow_evidence import read_workflow_observation_bundle
 
 
@@ -44,7 +45,7 @@ def main(
         result = _execute(args)
         stdout.write(json.dumps(_json_copy(result), sort_keys=True, separators=(",", ":")) + "\n")
         return 0
-    except (argparse.ArgumentError, SystemExit, ValueError, OSError, UnicodeError, json.JSONDecodeError):
+    except Exception:
         stderr.write(_ERROR)
         return 2
 
@@ -76,6 +77,14 @@ def _execute(args: argparse.Namespace) -> object:
         return _catalog_from_evaluations(args.evaluation_file).compare_evaluation_ids(
             args.baseline, args.candidate
         )
+    if args.command == "experiment":
+        catalog = _catalog_from_experiment(args.experiment_file)
+        if args.experiment_command == "show":
+            return catalog.show_plan(args.experiment_sha256)
+        if args.experiment_command == "trials":
+            return catalog.list_trials(
+                args.experiment_sha256, evidence_state=args.evidence_state
+            )
     raise ValueError("invalid pathlight command")
 
 
@@ -94,6 +103,11 @@ def _catalog_from_evaluations(values: Sequence[str]) -> PathlightCatalog:
         tuple(record for bundle in bundles for record in bundle.evaluations),
         tuple(contract for bundle in bundles for contract in bundle.metric_contracts),
     )
+
+
+def _catalog_from_experiment(value: str) -> ExperimentCatalog:
+    path = _absolute_canonical_paths((value,), "pathlight-experiment.json")[0]
+    return ExperimentCatalog.build((read_experiment_bundle(path),))
 
 
 def _absolute_canonical_paths(values: Sequence[str], filename: str) -> tuple[Path, ...]:
@@ -158,6 +172,18 @@ def _parser() -> argparse.ArgumentParser:
     _add_evaluation_file(compare)
     compare.add_argument("--baseline", required=True)
     compare.add_argument("--candidate", required=True)
+
+    experiment = commands.add_parser("experiment", add_help=False)
+    experiment_commands = experiment.add_subparsers(
+        dest="experiment_command", required=True, parser_class=_Parser
+    )
+    experiment_show = experiment_commands.add_parser("show", add_help=False)
+    _add_experiment_file(experiment_show)
+    experiment_show.add_argument("--experiment-sha256", required=True)
+    experiment_trials = experiment_commands.add_parser("trials", add_help=False)
+    _add_experiment_file(experiment_trials)
+    experiment_trials.add_argument("--experiment-sha256", required=True)
+    experiment_trials.add_argument("--evidence-state")
     return parser
 
 
@@ -167,3 +193,7 @@ def _add_evidence_file(parser: argparse.ArgumentParser) -> None:
 
 def _add_evaluation_file(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--evaluation-file", action="append", required=True)
+
+
+def _add_experiment_file(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--experiment-file", required=True)
