@@ -705,7 +705,7 @@ asterion-dci pathlight diagnose \
   --output-root /ABS/EXPLICIT/DIAGNOSIS/ROOT
 ```
 
-`recover` 从 ExperimentBundle 中提取同一组 evaluation records，分别写 `pathlight-dci-recovery.json`、`pathlight-experiment.json` 和 `pathlight-evaluations.json`；`diagnose` 写 `pathlight-diagnosis.json` 和 `pathlight-dci-diagnosis.zh-CN.md`。output root 必须由调用者显式指定且为 operator-owned directory；允许目录已存在，但所有目标文件必须尚不存在，内部文件均 `0600`。stdout 只返回 dataset digest、case count 和 output bundle digest，不返回路径。任何错误固定为 `asterion-dci: command failed`。
+`recover` 从 ExperimentBundle 中提取同一组 evaluation records，分别写 `pathlight-dci-recovery.json`、`pathlight-experiment.json` 和 `pathlight-evaluations.json`；`diagnose` 必须同时读取每个 root 的三份文件，从 recovery 重算 ExperimentBundle/EvaluationBundle 并逐 digest 核对后，才写 `pathlight-diagnosis.json` 和 `pathlight-dci-diagnosis.zh-CN.md`。output root 必须由调用者显式指定且为 mode `0700` 的 operator-owned directory；允许目录已存在，但所有目标文件必须尚不存在，内部文件均 `0600`。stdout 只返回 dataset digest、case count 和 output bundle digest，不返回路径。任何错误固定为 `asterion-dci: command failed`。
 
 - [ ] **Step 4: 用六项真实 leaf 前台执行 recovery 和 diagnose**
 
@@ -726,7 +726,7 @@ Bamboogle           125/125  accuracy 0.8160000000 paper 0.800
 
 - [ ] **Step 5: 发布安全中文报告并更新台账**
 
-从生成的 safe Markdown 复制固定公开部分到 `docs/status/PATHLIGHT-DCI-DIAGNOSIS.md`，同步 `docs/status/INDEX.md`。`DCI-BENCHMARK-INSTANCES.md` 增加报告链接、诊断状态和两个 proposal 摘要，不复制 operator path、case ID 或私有内容。
+从生成的 safe Markdown 复制固定公开部分到 `docs/status/PATHLIGHT-DCI-DIAGNOSIS.md`，同步 `docs/status/INDEX.md`。中文报告必须逐项显示分数、样本数、论文 reference/gap、corpus file count、zero-score rate、median tokens/tool calls/wall/tool/read/grep time、tool errors、read/grep/tool time share、question-word median、resolution `0/N`，并显示 Bright 四项与 SciFact 的 component digest 相同/不同；不得跨 dataset 汇总 score-derived 指标。`DCI-BENCHMARK-INSTANCES.md` 增加报告链接、诊断状态和两个 proposal 摘要，不复制 operator path、case ID、provider/model/config 值或私有内容。
 
 - [ ] **Step 6: 验证并提交**
 
