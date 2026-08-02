@@ -9,10 +9,39 @@ from pathlib import Path
 from asterion.capabilities.dci.implementation.research.trajectory_resolution import (
     _parse_gold_manifest,
     validate_gold_manifest_bytes,
+    validate_public_resolution_summary,
 )
 
 
 class DciCoverageOnlyTrajectoryTests(unittest.TestCase):
+    def test_legacy_span_bearing_public_summary_remains_compatible(self) -> None:
+        summary = {
+            "schema": "dci.trajectory-resolution-summary/v1",
+            "identity_sha256": "a" * 64,
+            "dataset_id": "legacy.dataset",
+            "query_id": "legacy-query",
+            "metrics": {
+                "coverage": {"any": 0.0, "mean": 0.0, "all": 0.0},
+                "localization": {
+                    "value": None,
+                    "matched_gold_count": 0,
+                    "unavailable_reason": "evidence-spans-unavailable",
+                },
+                "retained_coverage": {
+                    "value": None,
+                    "unavailable_reason": "final-context-unavailable",
+                },
+            },
+            "counts": {
+                "gold_documents": 1,
+                "surfaced_gold_documents": 0,
+                "tool_observations": 0,
+                "alignments": 0,
+            },
+        }
+
+        self.assertEqual(validate_public_resolution_summary(summary), summary)
+
     def test_coverage_manifest_validates_without_inventing_evidence_spans(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             corpus = Path(directory) / "corpus"

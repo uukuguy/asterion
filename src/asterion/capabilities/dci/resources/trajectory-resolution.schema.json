@@ -27,6 +27,7 @@
             "final_model_context": {"$ref": "#/$defs/snapshot"},
             "gold_manifest": {"$ref": "#/$defs/snapshot"},
             "dataset_query_sha256": {"$ref": "#/$defs/sha256"},
+            "coverage_query_sha256": {"$ref": "#/$defs/sha256"},
             "derived_resolution_sha256": {"$ref": "#/$defs/sha256"},
             "protocol_event_stream": {"$ref": "#/$defs/snapshot"},
             "protocol_request": {"$ref": "#/$defs/snapshot"},

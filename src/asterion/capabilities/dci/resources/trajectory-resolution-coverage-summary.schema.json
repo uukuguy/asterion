@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dci.trajectory-resolution-coverage-summary/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "identity_sha256", "dataset_id", "query_sha256", "metrics", "counts"],
+  "properties": {
+    "schema": {"const": "dci.trajectory-resolution-coverage-summary/v1"},
+    "identity_sha256": {"$ref": "#/$defs/sha256"},
+    "dataset_id": {"$ref": "#/$defs/public_id"},
+    "query_sha256": {"$ref": "#/$defs/sha256"},
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["coverage", "localization", "retained_coverage"],
+      "properties": {
+        "coverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["any", "mean", "all"],
+          "properties": {
+            "any": {"$ref": "#/$defs/unit"},
+            "mean": {"$ref": "#/$defs/unit"},
+            "all": {"$ref": "#/$defs/unit"}
+          }
+        },
+        "localization": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["value", "matched_gold_count", "unavailable_reason"],
+          "properties": {
+            "value": {"type": "null"},
+            "matched_gold_count": {"const": 0},
+            "unavailable_reason": {"const": "evidence-spans-unavailable"}
+          }
+        },
+        "retained_coverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["value", "unavailable_reason"],
+          "properties": {
+            "value": {"oneOf": [{"$ref": "#/$defs/unit"}, {"type": "null"}]},
+            "unavailable_reason": {"enum": [null, "final-context-unavailable"]}
+          }
+        }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gold_documents", "surfaced_gold_documents", "tool_observations", "alignments"],
+      "properties": {
+        "gold_documents": {"type": "integer", "minimum": 1},
+        "surfaced_gold_documents": {"type": "integer", "minimum": 0},
+        "tool_observations": {"type": "integer", "minimum": 0},
+        "alignments": {"type": "integer", "minimum": 0}
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "public_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$"},
+    "unit": {"type": "number", "minimum": 0, "maximum": 1}
+  }
+}

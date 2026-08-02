@@ -6,9 +6,10 @@ import io
 import json
 import tempfile
 import unittest
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterable, Mapping
 from contextlib import contextmanager
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 from asterion.assembly.protocol import resolve_assembly
@@ -135,6 +136,7 @@ DCI_PACKAGED_RESOURCE_CLOSURE = {
     "capabilities/dci/resources/reproduction-target.schema.json",
     "capabilities/dci/resources/reproduction-targets.json",
     "capabilities/dci/resources/trajectory-resolution.schema.json",
+    "capabilities/dci/resources/trajectory-resolution-coverage-summary.schema.json",
 }
 
 
@@ -260,7 +262,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
             if name.endswith(".py")
         }
         self.assertEqual(declared, reachable)
-        self.assertEqual(len(DCI_COMPLETE_IMPLEMENTATION_RESOURCES), 71)
+        self.assertEqual(len(DCI_COMPLETE_IMPLEMENTATION_RESOURCES), 72)
 
     def test_transitive_identity_contains_explicit_packaged_resource_closure(
         self,
@@ -466,7 +468,10 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
             DCI_COMPLETE_IMPLEMENTATION_RESOURCES
             + (DCI_COMPLETE_IMPLEMENTATION_RESOURCES[-1],),
             DCI_COMPLETE_IMPLEMENTATION_RESOURCES + ("dci/../judge.py",),
-            (*DCI_COMPLETE_IMPLEMENTATION_RESOURCES[:-1], ["capabilities/dci/implementation/evaluation/judge.py"]),
+            (
+                *DCI_COMPLETE_IMPLEMENTATION_RESOURCES[:-1],
+                ["capabilities/dci/implementation/evaluation/judge.py"],
+            ),
         )
         for names in invalid_names:
             with self.subTest(names=names), self.assertRaisesRegex(
@@ -474,7 +479,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
             ):
                 dci_complete_implementation_identity(
                     resource_reader=resources.__getitem__,
-                    resource_names=names,
+                    resource_names=cast(Iterable[str], names),
                 )
 
         def missing(_name: str) -> bytes:
@@ -491,11 +496,14 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
         )
         self.assertNotIn("SENTINEL", str(raised.exception))
 
+        def invalid_reader(_name: str) -> bytes:
+            return cast(bytes, bytearray(b"not exact bytes"))
+
         with self.assertRaisesRegex(
             ValueError, "^DCI implementation resource closure is unavailable$"
         ):
             dci_complete_implementation_identity(
-                resource_reader=lambda _name: bytearray(b"not exact bytes"),
+                resource_reader=invalid_reader,
                 resource_names=DCI_COMPLETE_IMPLEMENTATION_RESOURCES,
             )
 
@@ -585,11 +593,14 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
             with self.subTest(runtime_id=runtime_id):
                 resolved = plan(runtime_id)
                 self.assertEqual(resolved.runtime_capabilities, ("filesystem.read",))
-                required = {
-                    capability
-                    for manifest in resolved.capability_manifests
-                    for capability in manifest["requires_capabilities"]
-                }
+                required: set[str] = set()
+                for manifest in resolved.capability_manifests:
+                    required_capabilities = manifest["requires_capabilities"]
+                    if type(required_capabilities) is not tuple or any(
+                        type(value) is not str for value in required_capabilities
+                    ):
+                        self.fail("resolved capabilities are not canonical")
+                    required.update(cast(tuple[str, ...], required_capabilities))
                 self.assertNotIn("shell", required)
                 self.assertFalse(
                     required
@@ -1064,7 +1075,9 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(stopped.is_set())
 
     async def test_evaluation_binds_only_the_opaque_judge_identity(self) -> None:
-        async def evaluate_with(identity: dict[str, object], directory: Path):
+        async def evaluate_with(
+            identity: dict[str, object], directory: Path
+        ) -> str:
             directory.mkdir()
             stage_data = DciInProcessArtifactPayload(
                 private_value={
@@ -1103,9 +1116,15 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
                     host_services=_host_services(_JudgeService(identity)),
                 )
             )
-            return result.artifacts[0]["value"]["judge_identity_sha256"]
+            value = result.artifacts[0]["value"]
+            if not isinstance(value, Mapping):
+                self.fail("evaluation artifact value is not an object")
+            judge_identity_sha256 = value["judge_identity_sha256"]
+            if type(judge_identity_sha256) is not str:
+                self.fail("judge identity is not a digest")
+            return judge_identity_sha256
 
-        baseline = {
+        baseline: dict[str, object] = {
             "schema": "asterion.dci.answer-judge-identity/v1",
             "adapter_id": "dci.openai-compatible",
             "config_sha256": "1" * 64,
@@ -1269,14 +1288,17 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(judge.calls[0]["predicted_answer"], "PRIVATE ANSWER")
         self.assertEqual(tuple(event["type"] for event in result.events), EVENTS)
         self.assertEqual(tuple(item["media_type"] for item in result.artifacts), ARTIFACTS)
-        self.assertEqual(
-            {
-                item["value"].get("implementation_sha256")
-                for item in result.artifacts
-            },
-            {complete_application_identity()},
-        )
-        self.assertEqual(result.artifacts[-1]["value"]["total"], 1)
+        implementation_ids: set[object] = set()
+        for item in result.artifacts:
+            value = item["value"]
+            if not isinstance(value, Mapping):
+                self.fail("application artifact value is not an object")
+            implementation_ids.add(value.get("implementation_sha256"))
+        self.assertEqual(implementation_ids, {complete_application_identity()})
+        final_value = result.artifacts[-1]["value"]
+        if not isinstance(final_value, Mapping):
+            self.fail("final artifact value is not an object")
+        self.assertEqual(final_value["total"], 1)
         self.assertNotIn("PRIVATE", repr(result))
         projected = project_public_value(result.__dict__)
         rendered = json.dumps(projected, sort_keys=True)

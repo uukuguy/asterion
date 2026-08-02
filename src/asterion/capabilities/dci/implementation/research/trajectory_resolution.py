@@ -1070,6 +1070,8 @@ def analyze_trajectory_resolution(
     dataset_id, query_id, documents, corpus_snapshots = _parse_gold_manifest(
         manifest_data, corpus_dir
     )
+    manifest_schema = _json_object(manifest_data, label="gold manifest")["schema"]
+    coverage_only = manifest_schema == "dci.retrieval-coverage-manifest/v1"
     observations, tool_snapshots = _externalized_observations(run_dir, events)
     alignments = _align(observations, documents, config)
     retained_alignments = _retained_alignments(latest, documents)
@@ -1211,6 +1213,12 @@ def analyze_trajectory_resolution(
         "protocol_request": _snapshot_identity(request_snapshot),
         "run_id": run_id,
     }
+    if coverage_only:
+        from asterion.capabilities.dci.implementation.pathlight.coverage import (
+            coverage_query_sha256,
+        )
+
+        identity_inputs["coverage_query_sha256"] = coverage_query_sha256(query_id)
     identity_sha256 = _sha256(_canonical_json_bytes(identity_inputs))
     evidence: dict[str, Any] = {
         "schema": "dci.trajectory-resolution/v1",
@@ -1275,7 +1283,13 @@ def _valid_analysis_configuration(value: object) -> bool:
 
 def _validated_public_fields(
     evidence: object,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+) -> tuple[
+    dict[str, Any],
+    dict[str, Any],
+    dict[str, Any],
+    dict[str, Any],
+    str | None,
+]:
     if (
         type(evidence) is not dict
         or set(evidence)
@@ -1324,7 +1338,7 @@ def _validated_public_fields(
     ):
         raise TrajectoryResolutionError("DCI trajectory resolution evidence is invalid")
     inputs = identity["inputs"]
-    expected_input_keys = {
+    base_input_keys = {
         "analysis_configuration",
         "analysis_configuration_sha256",
         "attempt",
@@ -1341,12 +1355,32 @@ def _validated_public_fields(
         "recorder_event_stream",
         "run_id",
     }
+    input_keys = set(inputs)
+    coverage_only = input_keys == base_input_keys | {"coverage_query_sha256"}
+    if frozenset(input_keys) not in {
+        frozenset(base_input_keys),
+        frozenset(base_input_keys | {"coverage_query_sha256"}),
+    }:
+        raise TrajectoryResolutionError("DCI public resolution identity is invalid")
     dataset_id = _safe_public_id(dataset.get("dataset_id"))
     query_id = _safe_public_id(dataset.get("query_id"))
+    coverage_query_digest = inputs.get("coverage_query_sha256")
+    if coverage_only:
+        from asterion.capabilities.dci.implementation.pathlight.coverage import (
+            coverage_query_sha256,
+        )
+
+        if (
+            type(coverage_query_digest) is not str
+            or _SHA256.fullmatch(coverage_query_digest) is None
+            or coverage_query_digest != coverage_query_sha256(query_id)
+        ):
+            raise TrajectoryResolutionError("DCI public resolution identity is invalid")
+    else:
+        coverage_query_digest = None
     manifest_identity = inputs.get("gold_manifest")
     if (
-        set(inputs) != expected_input_keys
-        or run.get("run_id") != inputs.get("run_id")
+        run.get("run_id") != inputs.get("run_id")
         or run.get("attempt") != inputs.get("attempt")
         or type(run.get("run_id")) is not str
         or not run["run_id"]
@@ -1435,7 +1469,9 @@ def _validated_public_fields(
     value = localization.get("value")
     reason = localization.get("unavailable_reason")
     unavailable_localization = reason == "evidence-spans-unavailable" or (
-        reason == "no-surfaced-gold" and surfaced_count == 0
+        not coverage_only
+        and reason == "no-surfaced-gold"
+        and surfaced_count == 0
     )
     if matched_count:
         expected = sum(item["value"] for item in per_document) / matched_count
@@ -1460,13 +1496,15 @@ def _validated_public_fields(
         or retained_reason is not None
     ):
         raise TrajectoryResolutionError("DCI retained coverage evidence is invalid")
-    return identity, dataset, metrics, counts
+    return identity, dataset, metrics, counts, coverage_query_digest
 
 
 def public_resolution_projection(evidence: object) -> dict[str, Any]:
     """Return the body-free aggregate projection of one private artifact."""
 
-    identity, dataset, metrics, counts = _validated_public_fields(evidence)
+    identity, dataset, metrics, counts, coverage_query_digest = (
+        _validated_public_fields(evidence)
+    )
     coverage = metrics["coverage"]
     localization = metrics["localization"]
     retained = metrics["retained_coverage"]
@@ -1486,11 +1524,14 @@ def public_resolution_projection(evidence: object) -> dict[str, Any]:
             "unavailable_reason": retained.get("unavailable_reason"),
         },
     }
-    return {
-        "schema": "dci.trajectory-resolution-summary/v1",
+    result: dict[str, Any] = {
+        "schema": (
+            "dci.trajectory-resolution-summary/v1"
+            if coverage_query_digest is None
+            else "dci.trajectory-resolution-coverage-summary/v1"
+        ),
         "identity_sha256": identity["sha256"],
         "dataset_id": dataset.get("dataset_id"),
-        "query_id": dataset.get("query_id"),
         "metrics": public_metrics,
         "counts": {
             "gold_documents": counts.get("gold_documents"),
@@ -1499,6 +1540,11 @@ def public_resolution_projection(evidence: object) -> dict[str, Any]:
             "alignments": counts.get("alignments"),
         },
     }
+    if coverage_query_digest is None:
+        result["query_id"] = dataset.get("query_id")
+    else:
+        result["query_sha256"] = coverage_query_digest
+    return result
 
 
 def validate_public_resolution_summary(summary: object) -> dict[str, Any]:
@@ -1506,15 +1552,45 @@ def validate_public_resolution_summary(summary: object) -> dict[str, Any]:
 
     if (
         type(summary) is not dict
-        or set(summary)
-        != {"schema", "identity_sha256", "dataset_id", "query_id", "metrics", "counts"}
-        or summary.get("schema") != "dci.trajectory-resolution-summary/v1"
         or type(summary.get("identity_sha256")) is not str
         or _SHA256.fullmatch(summary["identity_sha256"]) is None
     ):
         raise TrajectoryResolutionError("DCI public resolution summary is invalid")
+    summary_schema = summary.get("schema")
+    if summary_schema == "dci.trajectory-resolution-summary/v1":
+        if set(summary) != {
+            "schema",
+            "identity_sha256",
+            "dataset_id",
+            "query_id",
+            "metrics",
+            "counts",
+        }:
+            raise TrajectoryResolutionError("DCI public resolution summary is invalid")
+        query_field = "query_id"
+        query_identity = _safe_public_id(summary.get(query_field))
+        coverage_only = False
+    elif summary_schema == "dci.trajectory-resolution-coverage-summary/v1":
+        if (
+            set(summary)
+            != {
+                "schema",
+                "identity_sha256",
+                "dataset_id",
+                "query_sha256",
+                "metrics",
+                "counts",
+            }
+            or type(summary.get("query_sha256")) is not str
+            or _SHA256.fullmatch(summary["query_sha256"]) is None
+        ):
+            raise TrajectoryResolutionError("DCI public resolution summary is invalid")
+        query_field = "query_sha256"
+        query_identity = summary[query_field]
+        coverage_only = True
+    else:
+        raise TrajectoryResolutionError("DCI public resolution summary is invalid")
     dataset_id = _safe_public_id(summary.get("dataset_id"))
-    query_id = _safe_public_id(summary.get("query_id"))
     metrics = summary.get("metrics")
     counts = summary.get("counts")
     if (
@@ -1565,7 +1641,9 @@ def validate_public_resolution_summary(summary: object) -> dict[str, Any]:
     localization_value = localization.get("value")
     localization_reason = localization.get("unavailable_reason")
     unavailable_localization = localization_reason == "evidence-spans-unavailable" or (
-        localization_reason == "no-surfaced-gold" and surfaced_count == 0
+        not coverage_only
+        and localization_reason == "no-surfaced-gold"
+        and surfaced_count == 0
     )
     if matched_count:
         _finite_unit_float(localization_value)
@@ -1582,11 +1660,10 @@ def validate_public_resolution_summary(summary: object) -> dict[str, Any]:
         _finite_unit_float(retained_value)
         if retained_reason is not None:
             raise TrajectoryResolutionError("DCI public resolution summary is invalid")
-    return {
-        "schema": "dci.trajectory-resolution-summary/v1",
+    result: dict[str, Any] = {
+        "schema": summary_schema,
         "identity_sha256": summary["identity_sha256"],
         "dataset_id": dataset_id,
-        "query_id": query_id,
         "metrics": {
             "coverage": {"any": any_value, "mean": mean_value, "all": all_value},
             "localization": {
@@ -1606,3 +1683,5 @@ def validate_public_resolution_summary(summary: object) -> dict[str, Any]:
             "alignments": alignment_count,
         },
     }
+    result[query_field] = query_identity
+    return result

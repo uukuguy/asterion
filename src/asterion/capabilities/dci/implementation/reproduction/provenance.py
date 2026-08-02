@@ -81,6 +81,7 @@ DCI_COMPLETE_IMPLEMENTATION_RESOURCES: tuple[str, ...] = tuple(sorted((
     "capabilities/dci/resources/reproduction-target.schema.json",
     "capabilities/dci/resources/reproduction-targets.json",
     "capabilities/dci/resources/trajectory-resolution.schema.json",
+    "capabilities/dci/resources/trajectory-resolution-coverage-summary.schema.json",
     "capabilities/dci/implementation/runtime/run.py",
     "capabilities/dci/implementation/services.py",
     "capabilities/dci/implementation/research/trajectory_resolution.py",

@@ -2,13 +2,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import stat
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from asterion.capabilities.dci.implementation.pathlight import coverage as coverage_module
 from asterion.capabilities.dci.implementation.pathlight.coverage import (
+    DciCoverageError,
     analyze_coverage_run,
+    coverage_query_sha256,
     prepare_coverage_registry,
     validate_coverage_manifest_bytes,
     validate_coverage_registry_bytes,
@@ -19,9 +25,114 @@ from asterion.capabilities.dci.implementation.evaluation.artifacts import (
     DciRunRecorder,
 )
 from asterion.capabilities.dci.implementation.runtime.run import DciRunRequest
+from asterion.capabilities.dci.implementation.research.trajectory_resolution import (
+    TrajectoryAnalysisConfig,
+    analyze_trajectory_resolution,
+    public_resolution_projection,
+    validate_public_resolution_summary,
+)
 
 
 class DciPathlightCoverageRegistryTests(unittest.TestCase):
+    def test_atomic_publish_does_not_replace_concurrently_created_directory(self) -> None:
+        publisher = getattr(coverage_module, "_publish_directory_no_replace", None)
+        self.assertIsNotNone(publisher, "atomic no-replace publish primitive is missing")
+        assert callable(publisher)
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            staging = parent / ".coverage.staging-fixture"
+            destination = parent / "coverage"
+            staging.mkdir(mode=0o700)
+            (staging / "registry.json").write_text("staged", encoding="utf-8")
+            create = threading.Event()
+            created = threading.Event()
+
+            def create_hostile_destination() -> None:
+                create.wait()
+                destination.mkdir(mode=0o700)
+                (destination / "hostile.txt").write_text("hostile", encoding="utf-8")
+                created.set()
+
+            worker = threading.Thread(target=create_hostile_destination)
+            worker.start()
+            parent_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                create.set()
+                self.assertTrue(created.wait(timeout=5))
+                with self.assertRaises(DciCoverageError):
+                    publisher(parent_fd, staging.name, destination.name)
+            finally:
+                os.close(parent_fd)
+                worker.join(timeout=5)
+
+            self.assertEqual(
+                (destination / "hostile.txt").read_text(encoding="utf-8"), "hostile"
+            )
+            self.assertTrue((staging / "registry.json").is_file())
+
+    def test_registry_publish_race_preserves_hostile_target_and_cleans_staging(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dataset = root / "dataset.jsonl"
+            dataset.write_text(
+                json.dumps(
+                    {"query_id": "q-1", "query": "query", "gold_ids": ["doc.txt"]}
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            corpus = root / "corpus"
+            corpus.mkdir()
+            (corpus / "doc.txt").write_text("body\n", encoding="utf-8")
+            output = root / "coverage"
+            real_publisher = getattr(
+                coverage_module, "_publish_directory_no_replace", None
+            )
+
+            def create_destination_then_publish(
+                parent_fd: int, staging_name: str, output_name: str
+            ) -> None:
+                os.mkdir(output_name, 0o700, dir_fd=parent_fd)
+                target_fd = os.open(
+                    output_name, os.O_RDONLY | os.O_DIRECTORY, dir_fd=parent_fd
+                )
+                try:
+                    hostile_fd = os.open(
+                        "hostile.txt",
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                        0o600,
+                        dir_fd=target_fd,
+                    )
+                    os.write(hostile_fd, b"hostile")
+                    os.close(hostile_fd)
+                finally:
+                    os.close(target_fd)
+                if not callable(real_publisher):
+                    raise AssertionError("atomic publisher is missing")
+                real_publisher(parent_fd, staging_name, output_name)
+
+            with patch.object(
+                coverage_module,
+                "_publish_directory_no_replace",
+                side_effect=create_destination_then_publish,
+                create=True,
+            ):
+                with self.assertRaises(DciCoverageError):
+                    prepare_coverage_registry(
+                        dataset_id="bright.biology",
+                        dataset_path=dataset,
+                        corpus_dir=corpus,
+                        selected_count=1,
+                        output_root=output,
+                    )
+
+            self.assertEqual(
+                (output / "hostile.txt").read_text(encoding="utf-8"), "hostile"
+            )
+            self.assertFalse(
+                any(path.name.startswith(".coverage.staging-") for path in root.iterdir())
+            )
+
     def test_registry_binds_source_order_rows_without_evidence_spans(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -54,6 +165,10 @@ class DciPathlightCoverageRegistryTests(unittest.TestCase):
             )
 
             self.assertEqual(registry.selected_count, 10)
+            self.assertEqual(
+                registry.manifests[0].query_sha256,
+                coverage_query_sha256("q-0"),
+            )
             self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o700)
             self.assertEqual(
                 [entry.query_sha256 for entry in registry.manifests],
@@ -93,7 +208,11 @@ class DciPathlightCoverageRegistryTests(unittest.TestCase):
             root = Path(directory).resolve()
             corpus = root / "corpus"
             corpus.mkdir()
-            bodies = {"doc-a.txt": "alpha evidence\n", "doc-b.txt": "beta evidence\n"}
+            query_id = "QUERY_SENTINEL_6"
+            bodies = {
+                "DOCUMENT_SENTINEL_A.txt": "alpha evidence\n",
+                "DOCUMENT_SENTINEL_B.txt": "beta evidence\n",
+            }
             for name, body in bodies.items():
                 (corpus / name).write_text(body, encoding="utf-8")
             manifest = root / "manifest.json"
@@ -102,7 +221,7 @@ class DciPathlightCoverageRegistryTests(unittest.TestCase):
                     {
                         "schema": "dci.retrieval-coverage-manifest/v1",
                         "dataset_id": "bright.biology",
-                        "query_id": "q-1",
+                        "query_id": query_id,
                         "documents": [
                             {
                                 "id": name,
@@ -146,7 +265,7 @@ class DciPathlightCoverageRegistryTests(unittest.TestCase):
                         "type": "tool_execution_start",
                         "toolCallId": "call-1",
                         "toolName": "read",
-                        "args": {"path": "doc-a.txt"},
+                        "args": {"path": "DOCUMENT_SENTINEL_A.txt"},
                     }
                 )
                 recorder.record_event(
@@ -154,16 +273,18 @@ class DciPathlightCoverageRegistryTests(unittest.TestCase):
                         "type": "tool_execution_end",
                         "toolCallId": "call-1",
                         "toolName": "read",
-                        "args": {"path": "doc-a.txt"},
+                        "args": {"path": "DOCUMENT_SENTINEL_A.txt"},
                         "isError": False,
-                        "result": bodies["doc-a.txt"],
+                        "result": bodies["DOCUMENT_SENTINEL_A.txt"],
                     }
                 )
                 tool_message = {
                     "role": "toolResult",
                     "toolCallId": "call-1",
                     "toolName": "read",
-                    "content": [{"type": "text", "text": bodies["doc-a.txt"]}],
+                    "content": [
+                        {"type": "text", "text": bodies["DOCUMENT_SENTINEL_A.txt"]}
+                    ],
                     "isError": False,
                 }
                 recorder.record_event({"type": "message_end", "message": tool_message})
@@ -173,7 +294,10 @@ class DciPathlightCoverageRegistryTests(unittest.TestCase):
                         "requestIndex": 1,
                         "model": None,
                         "runtimeContextManagement": None,
-                        "messages": [tool_message, {"role": "user", "content": "doc-a.txt"}],
+                        "messages": [
+                            tool_message,
+                            {"role": "user", "content": "DOCUMENT_SENTINEL_A.txt"},
+                        ],
                         "payload": {},
                     }
                 )
@@ -189,6 +313,41 @@ class DciPathlightCoverageRegistryTests(unittest.TestCase):
             self.assertEqual(record.retained_coverage_microunits, 500_000)
             self.assertIsNone(record.localization_microunits)
             self.assertEqual(record.evidence_state, "observed")
+
+            manifest_mapping = json.loads(manifest.read_text(encoding="utf-8"))
+            evidence = analyze_trajectory_resolution(
+                run_dir=run,
+                attempt=1,
+                corpus_dir=corpus,
+                config=TrajectoryAnalysisConfig(segment_characters=4096),
+                gold_manifest_bytes=(
+                    json.dumps(manifest_mapping, sort_keys=True, separators=(",", ":"))
+                    + "\n"
+                ).encode(),
+            )
+            public = public_resolution_projection(evidence)
+            validated = validate_public_resolution_summary(public)
+            serialized = json.dumps(validated, sort_keys=True)
+
+            self.assertEqual(
+                public["schema"], "dci.trajectory-resolution-coverage-summary/v1"
+            )
+            self.assertEqual(
+                set(public),
+                {
+                    "schema",
+                    "identity_sha256",
+                    "dataset_id",
+                    "query_sha256",
+                    "metrics",
+                    "counts",
+                },
+            )
+            self.assertEqual(record.query_sha256, public["query_sha256"])
+            for sentinel in (query_id, *bodies, *bodies.values()):
+                with self.subTest(sentinel=sentinel):
+                    self.assertNotIn(sentinel, serialized)
+                    self.assertNotIn(sentinel, repr(record))
 
 
 if __name__ == "__main__":  # pragma: no cover

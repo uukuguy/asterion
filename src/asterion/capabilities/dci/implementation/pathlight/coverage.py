@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import json
 import os
 import re
 import secrets
 import stat
+import sys
 import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -164,6 +166,12 @@ def _canonical_bytes(value: object) -> bytes:
 
 def _canonical_sha256(value: object) -> str:
     return hashlib.sha256(_canonical_bytes(value)).hexdigest()
+
+
+def coverage_query_sha256(query_id: str) -> str:
+    """Return the one canonical query digest shared by registry and analysis."""
+
+    return _canonical_sha256(_safe_identity(query_id))
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -580,6 +588,69 @@ def _staging_root(output_root: Path) -> tuple[int, int, str]:
         raise
 
 
+def _publish_directory_no_replace(
+    parent_fd: int, staging_name: str, output_name: str
+) -> None:
+    """Atomically publish a staged directory without replacing any destination."""
+
+    try:
+        if (
+            type(parent_fd) is not int
+            or parent_fd < 0
+            or type(staging_name) is not str
+            or type(output_name) is not str
+            or "/" in staging_name
+            or "/" in output_name
+            or staging_name in {"", ".", ".."}
+            or output_name in {"", ".", ".."}
+        ):
+            raise ValueError
+        library = ctypes.CDLL(None, use_errno=True)
+        encoded_staging = os.fsencode(staging_name)
+        encoded_output = os.fsencode(output_name)
+        if sys.platform == "darwin":
+            rename = library.renameatx_np
+            rename.argtypes = (
+                ctypes.c_int,
+                ctypes.c_char_p,
+                ctypes.c_int,
+                ctypes.c_char_p,
+                ctypes.c_uint,
+            )
+            rename.restype = ctypes.c_int
+            result = rename(
+                parent_fd,
+                encoded_staging,
+                parent_fd,
+                encoded_output,
+                0x00000004,  # RENAME_EXCL
+            )
+        elif sys.platform.startswith("linux"):
+            rename = library.renameat2
+            rename.argtypes = (
+                ctypes.c_int,
+                ctypes.c_char_p,
+                ctypes.c_int,
+                ctypes.c_char_p,
+                ctypes.c_uint,
+            )
+            rename.restype = ctypes.c_int
+            result = rename(
+                parent_fd,
+                encoded_staging,
+                parent_fd,
+                encoded_output,
+                0x00000001,  # RENAME_NOREPLACE
+            )
+        else:
+            raise OSError("atomic no-replace directory publication is unsupported")
+        if result != 0:
+            error_number = ctypes.get_errno()
+            raise OSError(error_number, os.strerror(error_number))
+    except Exception:
+        raise DciCoverageError("DCI coverage output publication failed") from None
+
+
 def _remove_staging(parent_fd: int, staging_fd: int, staging_name: str) -> None:
     try:
         for name in os.listdir(staging_fd):
@@ -631,7 +702,7 @@ def prepare_coverage_registry(
         refs: list[DciCoverageManifestRef] = []
         encoded_manifests: list[tuple[str, bytes]] = []
         for row in selected:
-            query_sha256 = _canonical_sha256(row.query_id)
+            query_sha256 = coverage_query_sha256(row.query_id)
             manifest = {
                 "schema": _MANIFEST_SCHEMA,
                 "dataset_id": dataset_id,
@@ -676,13 +747,7 @@ def prepare_coverage_registry(
         os.close(staging_fd)
         staging_fd = -1
         output_name = Path(output_root).absolute().name
-        try:
-            os.stat(output_name, dir_fd=parent_fd, follow_symlinks=False)
-        except FileNotFoundError:
-            pass
-        else:
-            raise DciCoverageError("DCI coverage output already exists")
-        os.rename(staging_name, output_name, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        _publish_directory_no_replace(parent_fd, staging_name, output_name)
         staging_name = ""
         os.fsync(parent_fd)
     except DciCoverageError:
@@ -722,6 +787,7 @@ def analyze_coverage_run(
     from asterion.capabilities.dci.implementation.research.trajectory_resolution import (
         TrajectoryAnalysisConfig,
         analyze_trajectory_resolution,
+        public_resolution_projection,
     )
 
     try:
@@ -746,6 +812,7 @@ def analyze_coverage_run(
         else:
             raise DciCoverageError("DCI coverage manifest is invalid")
         evidence = analyze_trajectory_resolution(**arguments)  # type: ignore[arg-type]
+        public = public_resolution_projection(evidence)
         dataset = evidence["dataset"]
         metrics = evidence["metrics"]
         coverage = metrics["coverage"]["mean"]
@@ -756,11 +823,14 @@ def analyze_coverage_run(
             or type(dataset.get("dataset_id")) is not str
             or type(dataset.get("query_id")) is not str
             or type(coverage) is not float
+            or public.get("schema")
+            != "dci.trajectory-resolution-coverage-summary/v1"
+            or type(public.get("query_sha256")) is not str
         ):
             raise DciCoverageError("DCI coverage evidence is invalid")
         return DciCoverageRecord(
             dataset_id=dataset["dataset_id"],
-            query_sha256=_canonical_sha256(dataset["query_id"]),
+            query_sha256=public["query_sha256"],
             coverage_microunits=_microunits(coverage),
             retained_coverage_microunits=(
                 None if retained is None else _microunits(retained)
@@ -789,6 +859,7 @@ __all__ = (
     "DciCoverageRecord",
     "DciCoverageRegistry",
     "analyze_coverage_run",
+    "coverage_query_sha256",
     "prepare_coverage_registry",
     "validate_coverage_manifest_bytes",
     "validate_coverage_registry_bytes",

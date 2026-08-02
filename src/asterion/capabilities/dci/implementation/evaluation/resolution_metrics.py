@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from enum import Enum
+from typing import cast
 
 
 class ResolutionMetricError(ValueError):
@@ -120,14 +121,14 @@ class LocalizationAggregate:
 def _validated_ids(values: object, *, allow_empty: bool) -> tuple[str, ...]:
     if type(values) not in {list, tuple}:
         raise ResolutionMetricError("DCI resolution document IDs are invalid")
-    ids = tuple(values)
+    ids = tuple(cast(list[object] | tuple[object, ...], values))
     if (
         (not allow_empty and not ids)
         or any(type(value) is not str or not value for value in ids)
         or len(ids) != len(set(ids))
     ):
         raise ResolutionMetricError("DCI resolution document IDs are invalid")
-    return tuple(sorted(ids))
+    return tuple(sorted(cast(tuple[str, ...], ids)))
 
 
 def gold_document_set(ids: object) -> GoldDocumentSet:
@@ -207,9 +208,10 @@ def aggregate_query_coverage(values: object) -> CoverageMetrics:
 
     if type(values) not in {list, tuple}:
         raise ResolutionMetricError("DCI query coverage aggregate is invalid")
-    metrics = tuple(values)
+    metrics = tuple(cast(list[object] | tuple[object, ...], values))
     if not metrics or any(type(value) is not CoverageMetrics for value in metrics):
         raise ResolutionMetricError("DCI query coverage aggregate is invalid")
+    metrics = cast(tuple[CoverageMetrics, ...], metrics)
     for value in metrics:
         _validate_coverage_metrics(value)
     count = len(metrics)
@@ -311,7 +313,12 @@ def best_document_localization(
     full = _positive_character_count(full_document_characters)
     if type(candidate_snippet_characters) not in {list, tuple}:
         raise ResolutionMetricError("DCI localization candidates are invalid")
-    candidates = tuple(candidate_snippet_characters) or (full,)
+    candidates = tuple(
+        cast(
+            list[object] | tuple[object, ...],
+            candidate_snippet_characters,
+        )
+    ) or (full,)
     scores = tuple(
         localization_candidate_score(value, full, segment_characters)
         for value in candidates
@@ -324,7 +331,7 @@ def query_localization(values: object) -> LocalizationAggregate:
 
     if type(values) not in {list, tuple}:
         raise ResolutionMetricError("DCI query localization input is invalid")
-    documents = tuple(values)
+    documents = tuple(cast(list[object] | tuple[object, ...], values))
     if not documents:
         return LocalizationAggregate(
             value=None,
@@ -332,6 +339,7 @@ def query_localization(values: object) -> LocalizationAggregate:
             per_document=(),
             unavailable_reason=LocalizationUnavailableReason.NO_SURFACED_GOLD,
         )
+    documents = cast(tuple[DocumentLocalization, ...], documents)
     _validate_document_localizations(documents, require_unique=True)
     documents = tuple(sorted(documents, key=lambda value: value.document_id))
     return LocalizationAggregate(
@@ -347,9 +355,10 @@ def aggregate_dataset_localization(values: object) -> LocalizationAggregate:
 
     if type(values) not in {list, tuple}:
         raise ResolutionMetricError("DCI dataset localization input is invalid")
-    queries = tuple(values)
+    queries = tuple(cast(list[object] | tuple[object, ...], values))
     if not queries or any(type(value) is not LocalizationAggregate for value in queries):
         raise ResolutionMetricError("DCI dataset localization input is invalid")
+    queries = cast(tuple[LocalizationAggregate, ...], queries)
     for query in queries:
         _validate_query_localization_aggregate(query)
     documents = tuple(
