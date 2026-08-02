@@ -38,6 +38,15 @@ from asterion.pathlight.protocol import (
     trace_graph_digest,
     validate_trace_graph,
 )
+from asterion.pathlight.runtime_observation import (
+    ContextFrameObservation,
+    ContextSegmentSummary,
+    ModelCallObservation,
+    RuntimeObservationBatch,
+    RuntimeObservationSource,
+    ToolCallObservation,
+    validate_runtime_observation_batch,
+)
 from asterion.pathlight.recorder import (
     NOOP_PATHLIGHT_RECORDER,
     MemoryPathlightRecorder,
@@ -66,6 +75,13 @@ __all__ = (
     "TraceGraph",
     "trace_graph_digest",
     "validate_trace_graph",
+    "ContextSegmentSummary",
+    "ContextFrameObservation",
+    "ModelCallObservation",
+    "ToolCallObservation",
+    "RuntimeObservationBatch",
+    "RuntimeObservationSource",
+    "validate_runtime_observation_batch",
     "MetricContract",
     "EvaluationRecord",
     "EvaluationComparison",
