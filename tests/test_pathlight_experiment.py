@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import stat
 import tempfile
 import unittest
 from collections.abc import ItemsView, Iterator, Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from asterion.pathlight import PathlightError
 from asterion.pathlight.evaluation import EvaluationRecord
@@ -32,6 +35,7 @@ from asterion.pathlight.experiment import (
 
 
 _HOSTILE_SENTINEL = "SENTINEL_PRIVATE_PATHLIGHT_EXPERIMENT"
+_MAX_BUNDLE_BYTES = 1_000_000
 
 
 def _digest(value: str) -> str:
@@ -111,11 +115,249 @@ class PathlightExperimentTests(unittest.TestCase):
             trials=(trial,), evaluations=(evaluation,),
         )
         with tempfile.TemporaryDirectory() as directory:
-            target = Path(directory) / "pathlight-experiment.json"
+            target = Path(directory).resolve() / "pathlight-experiment.json"
             write_experiment_bundle(bundle, target)
             loaded = read_experiment_bundle(target)
         self.assertEqual(loaded, bundle)
         self.assertEqual(loaded.bundle_sha256, bundle.bundle_sha256)
+
+    def test_writer_uses_descriptor_relative_nofollow_exclusive_create(self) -> None:
+        values = self._complete_bundle_values()
+        bundle = ExperimentBundle.build(
+            datasets=(values[0],), evaluators=(values[1],), variants=(values[2],),
+            plans=(values[3],), trials=(values[4],), evaluations=(values[5],),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / "pathlight-experiment.json"
+            original_open = os.open
+            final_calls: list[tuple[object, int, int | None]] = []
+
+            def recording_open(
+                name: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+                flags: int,
+                mode: int = 0o777,
+                *,
+                dir_fd: int | None = None,
+            ) -> int:
+                if name == "pathlight-experiment.json":
+                    final_calls.append((name, flags, dir_fd))
+                return original_open(name, flags, mode, dir_fd=dir_fd)
+
+            with patch("asterion.pathlight.experiment.os.open", side_effect=recording_open):
+                write_experiment_bundle(bundle, path)
+
+        self.assertEqual(len(final_calls), 1)
+        _, flags, dir_fd = final_calls[0]
+        self.assertIsNotNone(dir_fd)
+        self.assertEqual(flags & (os.O_WRONLY | os.O_CREAT | os.O_EXCL), os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+        self.assertEqual(flags & os.O_NOFOLLOW, os.O_NOFOLLOW)
+
+    def test_writer_rejects_symlink_ancestor_without_creating_target(self) -> None:
+        values = self._complete_bundle_values()
+        bundle = ExperimentBundle.build(
+            datasets=(values[0],), evaluators=(values[1],), variants=(values[2],),
+            plans=(values[3],), trials=(values[4],), evaluations=(values[5],),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            target = root / "target"
+            target.mkdir()
+            ancestor = root / "ancestor"
+            ancestor.symlink_to(target, target_is_directory=True)
+
+            with self.assertRaises(PathlightError):
+                write_experiment_bundle(bundle, ancestor / "pathlight-experiment.json")
+
+            self.assertFalse((target / "pathlight-experiment.json").exists())
+
+            replacement = root / "replacement.json"
+            replacement.write_text("replacement", encoding="utf-8")
+            final_link = root / "pathlight-experiment.json"
+            final_link.symlink_to(replacement)
+            with self.assertRaises(PathlightError):
+                write_experiment_bundle(bundle, final_link)
+            self.assertEqual(replacement.read_text(encoding="utf-8"), "replacement")
+
+    def test_writer_preserves_private_partial_file_and_path_replacement(self) -> None:
+        values = self._complete_bundle_values()
+        bundle = ExperimentBundle.build(
+            datasets=(values[0],), evaluators=(values[1],), variants=(values[2],),
+            plans=(values[3],), trials=(values[4],), evaluations=(values[5],),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            path = root / "pathlight-experiment.json"
+            original_write = os.write
+
+            def partial_then_fail(descriptor: int, data: bytes) -> int:
+                original_write(descriptor, data[:1])
+                raise OSError(f"{_HOSTILE_SENTINEL}: partial write")
+
+            with patch(
+                "asterion.pathlight.experiment.os.write", side_effect=partial_then_fail
+            ), self.assertRaises(PathlightError):
+                write_experiment_bundle(bundle, path)
+
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            with self.assertRaises(PathlightError):
+                read_experiment_bundle(path)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            path = root / "pathlight-experiment.json"
+            partial = root / "partial.json"
+            replacement = root / "replacement.json"
+            replacement.write_text("replacement", encoding="utf-8")
+
+            def replace_then_fail(descriptor: int, mode: int) -> None:
+                del descriptor, mode
+                path.rename(partial)
+                replacement.rename(path)
+                raise OSError(f"{_HOSTILE_SENTINEL}: chmod")
+
+            with patch(
+                "asterion.pathlight.experiment.os.fchmod", side_effect=replace_then_fail
+            ), patch("asterion.pathlight.experiment.os.unlink") as unlink, self.assertRaises(
+                PathlightError
+            ):
+                write_experiment_bundle(bundle, path)
+
+            unlink.assert_not_called()
+            self.assertEqual(path.read_text(encoding="utf-8"), "replacement")
+
+    def test_reader_rejects_symlinks_wrong_mode_nonregular_and_oversize(self) -> None:
+        values = self._complete_bundle_values()
+        bundle = ExperimentBundle.build(
+            datasets=(values[0],), evaluators=(values[1],), variants=(values[2],),
+            plans=(values[3],), trials=(values[4],), evaluations=(values[5],),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            target = root / "target"
+            target.mkdir()
+            target_file = target / "pathlight-experiment.json"
+            write_experiment_bundle(bundle, target_file)
+            final_link = root / "pathlight-experiment.json"
+            final_link.symlink_to(target_file)
+            with self.assertRaises(PathlightError):
+                read_experiment_bundle(final_link)
+            ancestor = root / "ancestor"
+            ancestor.symlink_to(target, target_is_directory=True)
+            with self.assertRaises(PathlightError):
+                read_experiment_bundle(ancestor / "pathlight-experiment.json")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            path = root / "pathlight-experiment.json"
+            write_experiment_bundle(bundle, path)
+            path.chmod(0o640)
+            with self.assertRaises(PathlightError):
+                read_experiment_bundle(path)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / "pathlight-experiment.json"
+            path.mkdir()
+            with self.assertRaises(PathlightError):
+                read_experiment_bundle(path)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / "pathlight-experiment.json"
+            path.write_bytes(b" " * (_MAX_BUNDLE_BYTES + 1))
+            path.chmod(0o600)
+            with self.assertRaises(PathlightError):
+                read_experiment_bundle(path)
+
+    def test_reader_bounds_post_stat_growth(self) -> None:
+        values = self._complete_bundle_values()
+        bundle = ExperimentBundle.build(
+            datasets=(values[0],), evaluators=(values[1],), variants=(values[2],),
+            plans=(values[3],), trials=(values[4],), evaluations=(values[5],),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / "pathlight-experiment.json"
+            write_experiment_bundle(bundle, path)
+            original_fstat = os.fstat
+            grew = False
+
+            def grow_after_stat(descriptor: int) -> os.stat_result:
+                nonlocal grew
+                result = original_fstat(descriptor)
+                if stat.S_ISREG(result.st_mode) and not grew:
+                    grew = True
+                    with path.open("ab") as destination:
+                        destination.write(b" " * (_MAX_BUNDLE_BYTES + 1))
+                return result
+
+            with patch(
+                "asterion.pathlight.experiment.os.fstat", side_effect=grow_after_stat
+            ), self.assertRaises(PathlightError):
+                read_experiment_bundle(path)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / "pathlight-experiment.json"
+            write_experiment_bundle(bundle, path)
+            original_fstat = os.fstat
+            calls = 0
+
+            def replace_identity_after_stat(descriptor: int) -> os.stat_result:
+                nonlocal calls
+                result = original_fstat(descriptor)
+                calls += 1
+                if calls == 2:
+                    values = list(result)
+                    values[1] = result.st_ino + 1
+                    return os.stat_result(values)
+                return result
+
+            with patch(
+                "asterion.pathlight.experiment.os.fstat",
+                side_effect=replace_identity_after_stat,
+            ), self.assertRaises(PathlightError):
+                read_experiment_bundle(path)
+
+    def test_reader_normalizes_unknown_digest_and_deep_json_failures(self) -> None:
+        values = self._complete_bundle_values()
+        bundle = ExperimentBundle.build(
+            datasets=(values[0],), evaluators=(values[1],), variants=(values[2],),
+            plans=(values[3],), trials=(values[4],), evaluations=(values[5],),
+        )
+        for mutation in ("unknown", "digest"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory).resolve() / "pathlight-experiment.json"
+                write_experiment_bundle(bundle, path)
+                document = json.loads(path.read_text(encoding="utf-8"))
+                if mutation == "unknown":
+                    document["unknown"] = _HOSTILE_SENTINEL
+                else:
+                    document["bundle_sha256"] = "0" * 64
+                path.write_text(json.dumps(document), encoding="utf-8")
+                with self.assertRaises(PathlightError) as raised:
+                    read_experiment_bundle(path)
+                self.assertPublicPathlightError(
+                    raised.exception, "Pathlight experiment bundle is invalid"
+                )
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / "pathlight-experiment.json"
+            path.write_text("[" * 2_000 + "]" * 2_000, encoding="utf-8")
+            path.chmod(0o600)
+            with self.assertRaises(PathlightError) as raised:
+                read_experiment_bundle(path)
+            self.assertPublicPathlightError(
+                raised.exception, "Pathlight experiment source is invalid"
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / "pathlight-experiment.json"
+            write_experiment_bundle(bundle, path)
+            with patch(
+                "asterion.pathlight.experiment.json.loads",
+                side_effect=RuntimeError(f"{_HOSTILE_SENTINEL}: json"),
+            ), self.assertRaises(PathlightError) as raised:
+                read_experiment_bundle(path)
+            self.assertPublicPathlightError(
+                raised.exception, "Pathlight experiment source is invalid"
+            )
 
     def test_bundle_rejects_unresolved_trial_evaluation(self) -> None:
         dataset, evaluator, variant, plan, trial, evaluation = self._complete_bundle_values()

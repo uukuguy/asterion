@@ -588,6 +588,15 @@ class ExperimentBundle:
     bundle_sha256: str
 
     def __post_init__(self) -> None:
+        values: tuple[
+            tuple[DatasetSnapshot, ...],
+            tuple[EvaluatorContract, ...],
+            tuple[Variant, ...],
+            tuple[ExperimentPlan, ...],
+            tuple[CaseTrial, ...],
+            tuple[EvaluationRecord, ...],
+        ] | None = None
+        valid = False
         try:
             values = _normalize_experiment_values(
                 self.datasets,
@@ -603,8 +612,11 @@ class ExperimentBundle:
             expected = _canonical_digest(_experiment_document(*values))
             if not hmac.compare_digest(supplied, expected):
                 raise ValueError
+            valid = True
         except Exception:
-            raise PathlightError("Pathlight experiment bundle is invalid") from None
+            pass
+        if values is None or not valid:
+            raise PathlightError("Pathlight experiment bundle is invalid")
         for field_name, value in zip(
             ("datasets", "evaluators", "variants", "plans", "trials", "evaluations"),
             values,
@@ -625,30 +637,42 @@ class ExperimentBundle:
     ) -> ExperimentBundle:
         """Build one canonical bundle after validating its exact reference closure."""
 
+        failure: PathlightError | None = None
         try:
             values = _normalize_experiment_values(
-                datasets, evaluators, variants, plans, trials, evaluations,
+                datasets,
+                evaluators,
+                variants,
+                plans,
+                trials,
+                evaluations,
                 require_sorted=False,
             )
             _validate_experiment_closure(*values)
             document = _experiment_document(*values)
             return cls(*values, _canonical_digest(document))
-        except PathlightError:
-            raise
+        except PathlightError as error:
+            failure = error
         except Exception:
-            raise PathlightError("Pathlight experiment bundle is invalid") from None
+            pass
+        if failure is not None:
+            raise failure
+        raise PathlightError("Pathlight experiment bundle is invalid")
 
     def to_mapping(self) -> dict[str, object]:
         """Return the complete canonical JSON-compatible bundle document."""
 
-        return {**_experiment_document(
-            self.datasets,
-            self.evaluators,
-            self.variants,
-            self.plans,
-            self.trials,
-            self.evaluations,
-        ), "bundle_sha256": self.bundle_sha256}
+        return {
+            **_experiment_document(
+                self.datasets,
+                self.evaluators,
+                self.variants,
+                self.plans,
+                self.trials,
+                self.evaluations,
+            ),
+            "bundle_sha256": self.bundle_sha256,
+        }
 
 
 def _is_sequence(value: object) -> bool:
@@ -683,23 +707,38 @@ def _normalize_experiment_values(
     ):
         raise ValueError
     normalized_datasets = _normalize_collection(
-        datasets, DatasetSnapshot, validate_dataset_snapshot, "dataset_snapshot_sha256", require_sorted
+        datasets,
+        DatasetSnapshot,
+        validate_dataset_snapshot,
+        "dataset_snapshot_sha256",
+        require_sorted,
     )
     normalized_evaluators = _normalize_collection(
-        evaluators, EvaluatorContract, validate_evaluator_contract,
-        "evaluator_contract_sha256", require_sorted,
+        evaluators,
+        EvaluatorContract,
+        validate_evaluator_contract,
+        "evaluator_contract_sha256",
+        require_sorted,
     )
     normalized_variants = _normalize_collection(
         variants, Variant, validate_variant, "variant_sha256", require_sorted
     )
     normalized_plans = _normalize_collection(
-        plans, ExperimentPlan, validate_experiment_plan, "experiment_plan_sha256", require_sorted
+        plans,
+        ExperimentPlan,
+        validate_experiment_plan,
+        "experiment_plan_sha256",
+        require_sorted,
     )
     normalized_trials = _normalize_collection(
         trials, CaseTrial, validate_case_trial, "case_trial_sha256", require_sorted
     )
     normalized_evaluations = _normalize_collection(
-        evaluations, EvaluationRecord, validate_evaluation_record, "evaluation_sha256", require_sorted
+        evaluations,
+        EvaluationRecord,
+        validate_evaluation_record,
+        "evaluation_sha256",
+        require_sorted,
     )
     return (
         cast(tuple[DatasetSnapshot, ...], normalized_datasets),
@@ -805,14 +844,12 @@ def _experiment_document(
 def write_experiment_bundle(bundle: ExperimentBundle, path: Path) -> None:
     """Exclusively write one private canonical experiment bundle."""
 
+    encoded: bytes | None = None
     try:
         if (
             type(bundle) is not ExperimentBundle
             or not isinstance(path, Path)
             or path.name != EXPERIMENT_BUNDLE_FILENAME
-            or not path.parent.is_dir()
-            or path.exists()
-            or path.is_symlink()
         ):
             raise ValueError
         verified = validate_experiment_bundle(bundle.to_mapping())
@@ -820,28 +857,39 @@ def write_experiment_bundle(bundle: ExperimentBundle, path: Path) -> None:
             verified.to_mapping(), sort_keys=True, separators=(",", ":")
         ).encode("utf-8")
     except Exception:
-        raise PathlightError("Pathlight experiment target is invalid") from None
+        pass
+    if encoded is None:
+        raise PathlightError("Pathlight experiment target is invalid")
+
+    directory_fd = -1
     descriptor = -1
-    failure: OSError | None = None
+    failure = False
     try:
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        directory_fd = _open_parent_directory(path)
+        nofollow = _nofollow_flag()
+        descriptor = os.open(
+            path.name,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow,
+            0o600,
+            dir_fd=directory_fd,
+        )
         os.fchmod(descriptor, 0o600)
-    except OSError as error:
-        failure = error
-    else:
-        try:
-            _write_all(descriptor, encoded)
-        except OSError as error:
-            failure = error
+        _write_all(descriptor, encoded)
+    except Exception:
+        failure = True
     finally:
         if descriptor >= 0:
             try:
                 os.close(descriptor)
-            except OSError as error:
-                if failure is None:
-                    failure = error
-    if failure is not None:
-        raise PathlightError("Pathlight experiment target is unavailable") from None
+            except Exception:
+                failure = True
+        if directory_fd >= 0:
+            try:
+                os.close(directory_fd)
+            except Exception:
+                failure = True
+    if failure:
+        raise PathlightError("Pathlight experiment target is unavailable")
 
 
 def _write_all(descriptor: int, encoded: bytes) -> None:
@@ -856,7 +904,14 @@ def _write_all(descriptor: int, encoded: bytes) -> None:
 def read_experiment_bundle(path: Path) -> ExperimentBundle:
     """Read one descriptor-verified private experiment bundle."""
 
-    if not isinstance(path, Path) or path.name != EXPERIMENT_BUNDLE_FILENAME:
+    valid_path = False
+    try:
+        valid_path = (
+            isinstance(path, Path) and path.name == EXPERIMENT_BUNDLE_FILENAME
+        )
+    except Exception:
+        pass
+    if not valid_path:
         raise PathlightError("Pathlight experiment source is invalid")
     document = _read_experiment_document(path)
     if not isinstance(document, Mapping):
@@ -867,76 +922,180 @@ def read_experiment_bundle(path: Path) -> ExperimentBundle:
 def _read_experiment_document(path: Path) -> object:
     directory_fd = -1
     source_fd = -1
+    failure = False
+    document: object | None = None
     try:
-        absolute = _absolute_descriptor_path(path)
-        nofollow = getattr(os, "O_NOFOLLOW", None)
-        if not isinstance(nofollow, int):
-            raise OSError("no-follow descriptor opening is unavailable")
-        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow
-        directory_fd = os.open(absolute.anchor, directory_flags)
-        for component in absolute.parts[1:-1]:
-            next_directory_fd = os.open(component, directory_flags, dir_fd=directory_fd)
-            os.close(directory_fd)
-            directory_fd = next_directory_fd
-        source_fd = os.open(path.name, os.O_RDONLY | nofollow, dir_fd=directory_fd)
-        source_stat = os.fstat(source_fd)
+        directory_fd = _open_parent_directory(path)
+        source_fd = os.open(
+            path.name,
+            os.O_RDONLY | _nofollow_flag(),
+            dir_fd=directory_fd,
+        )
+        before = os.fstat(source_fd)
         if (
-            not stat.S_ISREG(source_stat.st_mode)
-            or stat.S_IMODE(source_stat.st_mode) != 0o600
-            or source_stat.st_size > _MAX_EXPERIMENT_BUNDLE_BYTES
+            not stat.S_ISREG(before.st_mode)
+            or stat.S_IMODE(before.st_mode) != 0o600
+            or before.st_size > _MAX_EXPERIMENT_BUNDLE_BYTES
         ):
             raise OSError("Pathlight experiment source is unsafe")
-        with os.fdopen(source_fd, "rb") as source:
-            source_fd = -1
-            return json.loads(source.read().decode("utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        raise PathlightError("Pathlight experiment source is invalid") from None
+        encoded = _read_bounded(source_fd, _MAX_EXPERIMENT_BUNDLE_BYTES + 1)
+        after = os.fstat(source_fd)
+        if (
+            len(encoded) > _MAX_EXPERIMENT_BUNDLE_BYTES
+            or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)
+            or before.st_size != after.st_size
+            or after.st_size != len(encoded)
+        ):
+            raise OSError("Pathlight experiment source changed while reading")
+        document = json.loads(encoded.decode("utf-8"))
+    except Exception:
+        failure = True
     finally:
         if source_fd >= 0:
-            os.close(source_fd)
+            try:
+                os.close(source_fd)
+            except Exception:
+                failure = True
         if directory_fd >= 0:
-            os.close(directory_fd)
+            try:
+                os.close(directory_fd)
+            except Exception:
+                failure = True
+    if failure or document is None:
+        raise PathlightError("Pathlight experiment source is invalid")
+    return document
 
 
-def _absolute_descriptor_path(path: Path) -> Path:
-    """Preserve no-follow traversal while accepting macOS's system temp aliases."""
+def _nofollow_flag() -> int:
+    nofollow = getattr(os, "O_NOFOLLOW", None)
+    if not isinstance(nofollow, int):
+        raise OSError("no-follow descriptor opening is unavailable")
+    return nofollow
 
+
+def _open_parent_directory(path: Path) -> int:
     absolute = path.absolute()
-    if absolute.parts[1:2] in {("var",), ("tmp",)} and Path(
-        absolute.anchor, absolute.parts[1]
-    ).is_symlink():
-        return Path(absolute.anchor, absolute.parts[1]).resolve(strict=True).joinpath(
-            *absolute.parts[2:]
-        )
-    return absolute
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _nofollow_flag()
+    descriptor = -1
+    failure = False
+    try:
+        descriptor = os.open(absolute.anchor, flags)
+        for component in absolute.parts[1:-1]:
+            next_descriptor = os.open(component, flags, dir_fd=descriptor)
+            try:
+                os.close(descriptor)
+            except Exception:
+                try:
+                    os.close(next_descriptor)
+                except Exception:
+                    pass
+                raise
+            descriptor = next_descriptor
+    except BaseException as error:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except Exception:
+                pass
+            descriptor = -1
+        if not isinstance(error, Exception):
+            raise
+        failure = True
+    if failure:
+        raise OSError("Pathlight experiment parent is unavailable")
+    return descriptor
+
+
+def _read_bounded(descriptor: int, limit: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while total < limit:
+        chunk = os.read(descriptor, min(65_536, limit - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+    return b"".join(chunks)
 
 
 def validate_experiment_bundle(mapping: Mapping[str, object]) -> ExperimentBundle:
     """Validate one exact experiment-bundle document and its reference closure."""
 
+    bundle: ExperimentBundle | None = None
     try:
         if type(mapping) is not dict or set(mapping) != _EXPERIMENT_BUNDLE_FIELDS:
             raise ValueError
         if mapping["schema"] != EXPERIMENT_BUNDLE_SCHEMA:
             raise ValueError
-        raw_collections = tuple(mapping[name] for name in (
-            "datasets", "evaluators", "variants", "plans", "trials", "evaluations"
-        ))
+        raw_collections = tuple(
+            mapping[name]
+            for name in (
+                "datasets",
+                "evaluators",
+                "variants",
+                "plans",
+                "trials",
+                "evaluations",
+            )
+        )
         if any(type(value) is not list for value in raw_collections):
             raise ValueError
-        document = {key: value for key, value in mapping.items() if key != "bundle_sha256"}
+        document = {
+            key: value for key, value in mapping.items() if key != "bundle_sha256"
+        }
         supplied = _require_sha256(mapping["bundle_sha256"])
         if not hmac.compare_digest(supplied, _canonical_digest(document)):
             raise ValueError
-        datasets = tuple(validate_dataset_snapshot(_plain_mapping(item)) for item in raw_collections[0])
-        evaluators = tuple(validate_evaluator_contract(_plain_mapping(item)) for item in raw_collections[1])
-        variants = tuple(validate_variant(_plain_mapping(item)) for item in raw_collections[2])
-        plans = tuple(validate_experiment_plan(_tuple_fields(_plain_mapping(item), ("candidate_variant_sha256s", "evaluator_contract_sha256s"))) for item in raw_collections[3])
-        trials = tuple(validate_case_trial(_tuple_fields(_plain_mapping(item), ("evaluation_sha256s", "missing_evidence"))) for item in raw_collections[4])
-        evaluations = tuple(validate_evaluation_record(_plain_mapping(item)) for item in raw_collections[5])
-        return ExperimentBundle(datasets, evaluators, variants, plans, trials, evaluations, supplied)
+        datasets = tuple(
+            validate_dataset_snapshot(_plain_mapping(item))
+            for item in raw_collections[0]
+        )
+        evaluators = tuple(
+            validate_evaluator_contract(_plain_mapping(item))
+            for item in raw_collections[1]
+        )
+        variants = tuple(
+            validate_variant(_plain_mapping(item)) for item in raw_collections[2]
+        )
+        plans = tuple(
+            validate_experiment_plan(
+                _tuple_fields(
+                    _plain_mapping(item),
+                    (
+                        "candidate_variant_sha256s",
+                        "evaluator_contract_sha256s",
+                    ),
+                )
+            )
+            for item in raw_collections[3]
+        )
+        trials = tuple(
+            validate_case_trial(
+                _tuple_fields(
+                    _plain_mapping(item),
+                    ("evaluation_sha256s", "missing_evidence"),
+                )
+            )
+            for item in raw_collections[4]
+        )
+        evaluations = tuple(
+            validate_evaluation_record(_plain_mapping(item))
+            for item in raw_collections[5]
+        )
+        bundle = ExperimentBundle(
+            datasets,
+            evaluators,
+            variants,
+            plans,
+            trials,
+            evaluations,
+            supplied,
+        )
     except Exception:
-        raise PathlightError("Pathlight experiment bundle is invalid") from None
+        pass
+    if bundle is None:
+        raise PathlightError("Pathlight experiment bundle is invalid")
+    return bundle
 
 
 def _plain_mapping(value: object) -> Mapping[str, object]:
@@ -963,11 +1122,15 @@ class ExperimentCatalog:
     _trials: Mapping[str, CaseTrial]
 
     def __post_init__(self) -> None:
+        plans: dict[str, ExperimentPlan] | None = None
+        trials: dict[str, CaseTrial] | None = None
         try:
-            if not isinstance(self._plans, Mapping) or not isinstance(self._trials, Mapping):
+            if not isinstance(self._plans, Mapping) or not isinstance(
+                self._trials, Mapping
+            ):
                 raise ValueError
-            plans: dict[str, ExperimentPlan] = {}
-            trials: dict[str, CaseTrial] = {}
+            plans = {}
+            trials = {}
             for identity, plan in self._plans.items():
                 if type(identity) is not str or type(plan) is not ExperimentPlan:
                     raise ValueError
@@ -986,13 +1149,17 @@ class ExperimentCatalog:
                 ):
                     raise ValueError
                 trials[identity] = verified
-            object.__setattr__(self, "_plans", MappingProxyType(plans))
-            object.__setattr__(self, "_trials", MappingProxyType(trials))
         except Exception:
-            raise PathlightError("Pathlight experiment catalog is invalid") from None
+            plans = None
+            trials = None
+        if plans is None or trials is None:
+            raise PathlightError("Pathlight experiment catalog is invalid")
+        object.__setattr__(self, "_plans", MappingProxyType(plans))
+        object.__setattr__(self, "_trials", MappingProxyType(trials))
 
     @classmethod
     def build(cls, bundles: Sequence[ExperimentBundle]) -> ExperimentCatalog:
+        catalog: ExperimentCatalog | None = None
         try:
             if not _is_sequence(bundles):
                 raise ValueError
@@ -1010,9 +1177,12 @@ class ExperimentCatalog:
                     if trial.case_trial_sha256 in trials:
                         raise ValueError
                     trials[trial.case_trial_sha256] = trial
-            return cls(MappingProxyType(plans), MappingProxyType(trials))
+            catalog = cls(MappingProxyType(plans), MappingProxyType(trials))
         except Exception:
-            raise PathlightError("Pathlight experiment catalog is invalid") from None
+            pass
+        if catalog is None:
+            raise PathlightError("Pathlight experiment catalog is invalid")
+        return catalog
 
     def show_plan(self, experiment_plan_sha256: str) -> Mapping[str, object]:
         plan = self._plan(experiment_plan_sha256)
@@ -1023,17 +1193,30 @@ class ExperimentCatalog:
     ) -> tuple[Mapping[str, object], ...]:
         self._plan(experiment_plan_sha256)
         if evidence_state is not None:
-            _require_evidence_state(evidence_state)
+            valid_evidence_state = False
+            try:
+                _require_evidence_state(evidence_state)
+                valid_evidence_state = True
+            except Exception:
+                pass
+            if not valid_evidence_state:
+                raise PathlightError("Pathlight experiment evidence state is invalid")
         return tuple(
             MappingProxyType(trial.to_mapping())
-            for trial in sorted(self._trials.values(), key=lambda value: value.case_trial_sha256)
+            for trial in sorted(
+                self._trials.values(), key=lambda value: value.case_trial_sha256
+            )
             if trial.experiment_plan_sha256 == experiment_plan_sha256
             and (evidence_state is None or trial.evidence_state == evidence_state)
         )
 
     def _plan(self, experiment_plan_sha256: str) -> ExperimentPlan:
+        plan: ExperimentPlan | None = None
         try:
             identity = _require_sha256(experiment_plan_sha256)
-            return self._plans[identity]
+            plan = self._plans[identity]
         except (KeyError, ValueError):
-            raise PathlightError("Pathlight experiment plan identity is unknown") from None
+            pass
+        if plan is None:
+            raise PathlightError("Pathlight experiment plan identity is unknown")
+        return plan

@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import TypeVar
 from unittest.mock import patch
 
 from asterion.cli import main
@@ -29,6 +30,7 @@ from asterion.workflow_evidence import write_workflow_observation_bundle
 
 
 TRACE_ID = "00000000-0000-4000-8000-000000000001"
+_T = TypeVar("_T")
 
 
 class FailIfLoadedEntryPoint:
@@ -53,6 +55,10 @@ def _digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _ordered(values: tuple[_T, ...], *, reverse: bool) -> tuple[_T, ...]:
+    return tuple(reversed(values)) if reverse else values
+
+
 def _evaluation(value_microunits: int) -> tuple[MetricContract, EvaluationRecord]:
     contract = MetricContract("accuracy", "ratio", True, "1.0.0")
     return contract, EvaluationRecord(
@@ -67,66 +73,151 @@ def _evaluation(value_microunits: int) -> tuple[MetricContract, EvaluationRecord
     )
 
 
-def _experiment_bundle() -> ExperimentBundle:
+def _experiment_bundle(*, reverse: bool = False) -> ExperimentBundle:
     dataset = DatasetSnapshot(_digest("dataset-contract"), _digest("dataset"), 1, "1.0.0")
     evaluator = EvaluatorContract(
         _digest("metric"), "rule", _digest("implementation"), _digest("input"),
         _digest("output"), _digest("failure"), "1.0.0",
     )
-    variant = Variant(*(_digest(name) for name in (
-        "assembly", "packages", "implementation", "runtime", "model", "tools",
-        "prompt", "policy", "change",
-    )))
+    baseline = Variant(
+        *(
+            _digest(name)
+            for name in (
+                "assembly",
+                "packages",
+                "implementation",
+                "runtime",
+                "model",
+                "tools",
+                "prompt",
+                "policy",
+                "baseline-change",
+            )
+        )
+    )
+    candidate = Variant(
+        *(
+            _digest(name)
+            for name in (
+                "candidate-assembly",
+                "candidate-packages",
+                "candidate-implementation",
+                "candidate-runtime",
+                "candidate-model",
+                "candidate-tools",
+                "candidate-prompt",
+                "candidate-policy",
+                "candidate-change",
+            )
+        )
+    )
     plan = ExperimentPlan(
-        dataset.dataset_snapshot_sha256, _digest("scope"), variant.variant_sha256, (),
+        dataset.dataset_snapshot_sha256,
+        _digest("scope"),
+        baseline.variant_sha256,
+        (candidate.variant_sha256,),
         _digest("assignment"), (evaluator.evaluator_contract_sha256,), _digest("budget"),
         _digest("stop"),
     )
-    evaluation = EvaluationRecord(
-        _digest("trace"), evaluator.metric_contract_sha256, dataset.dataset_snapshot_sha256,
-        plan.scope_sha256, 1, 1, 1, "recovered",
+    baseline_evaluation = EvaluationRecord(
+        _digest("baseline-trace"),
+        evaluator.metric_contract_sha256,
+        dataset.dataset_snapshot_sha256,
+        plan.scope_sha256,
+        1,
+        1,
+        1,
+        "recovered",
     )
-    trial = CaseTrial(
-        plan.experiment_plan_sha256, _digest("case"), variant.variant_sha256,
-        evaluation.trace_sha256, (evaluation.evaluation_sha256,), "recovered", (),
+    candidate_evaluation = EvaluationRecord(
+        _digest("candidate-trace"),
+        evaluator.metric_contract_sha256,
+        dataset.dataset_snapshot_sha256,
+        plan.scope_sha256,
+        2,
+        1,
+        1,
+        "recovered",
     )
+    baseline_trial = CaseTrial(
+        plan.experiment_plan_sha256,
+        _digest("baseline-case"),
+        baseline.variant_sha256,
+        baseline_evaluation.trace_sha256,
+        (baseline_evaluation.evaluation_sha256,),
+        "recovered",
+        (),
+    )
+    candidate_trial = CaseTrial(
+        plan.experiment_plan_sha256,
+        _digest("candidate-case"),
+        candidate.variant_sha256,
+        candidate_evaluation.trace_sha256,
+        (candidate_evaluation.evaluation_sha256,),
+        "recovered",
+        (),
+    )
+
     return ExperimentBundle.build(
-        datasets=(dataset,), evaluators=(evaluator,), variants=(variant,), plans=(plan,),
-        trials=(trial,), evaluations=(evaluation,),
+        datasets=_ordered((dataset,), reverse=reverse),
+        evaluators=_ordered((evaluator,), reverse=reverse),
+        variants=_ordered((baseline, candidate), reverse=reverse),
+        plans=_ordered((plan,), reverse=reverse),
+        trials=_ordered((baseline_trial, candidate_trial), reverse=reverse),
+        evaluations=_ordered(
+            (baseline_evaluation, candidate_evaluation), reverse=reverse
+        ),
     )
 
 
 class PathlightCliTests(unittest.TestCase):
     def test_experiment_show_and_trials_are_provider_free_canonical_json(self) -> None:
         bundle = _experiment_bundle()
+        reversed_bundle = _experiment_bundle(reverse=True)
+        self.assertEqual(reversed_bundle, bundle)
         plan = bundle.plans[0]
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "pathlight-experiment.json"
-            write_experiment_bundle(bundle, path)
-            stdout = io.StringIO()
-            code = main(
-                [
-                    "pathlight", "experiment", "show", "--experiment-file", str(path),
-                    "--experiment-sha256", plan.experiment_plan_sha256,
-                ],
-                entry_points=(FailIfLoadedEntryPoint(),), stdout=stdout,
-            )
-            self.assertEqual(code, 0)
-            show = json.loads(stdout.getvalue())
-            self.assertEqual(show["experiment_plan_sha256"], plan.experiment_plan_sha256)
-            self.assertEqual(stdout.getvalue(), json.dumps(show, sort_keys=True, separators=(",", ":")) + "\n")
-            stdout = io.StringIO()
-            code = main(
-                [
-                    "pathlight", "experiment", "trials", "--experiment-file", str(path),
-                    "--experiment-sha256", plan.experiment_plan_sha256,
-                    "--evidence-state", "recovered",
-                ],
-                stdout=stdout,
-            )
+            root = Path(directory).resolve()
+            outputs: list[tuple[str, str]] = []
+            for name, source in (("forward", bundle), ("reversed", reversed_bundle)):
+                source_root = root / name
+                source_root.mkdir()
+                path = source_root / "pathlight-experiment.json"
+                write_experiment_bundle(source, path)
+                command_outputs: list[str] = []
+                for command in ("show", "trials"):
+                    stdout = io.StringIO()
+                    arguments = [
+                        "pathlight",
+                        "experiment",
+                        command,
+                        "--experiment-file",
+                        str(path),
+                        "--experiment-sha256",
+                        plan.experiment_plan_sha256,
+                    ]
+                    if command == "trials":
+                        arguments.extend(("--evidence-state", "recovered"))
+                    code = main(
+                        arguments,
+                        entry_points=(FailIfLoadedEntryPoint(),),
+                        stdout=stdout,
+                    )
+                    self.assertEqual(code, 0)
+                    payload = json.loads(stdout.getvalue())
+                    self.assertEqual(
+                        stdout.getvalue(),
+                        json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+                    )
+                    command_outputs.append(stdout.getvalue())
+                outputs.append((command_outputs[0], command_outputs[1]))
 
-        self.assertEqual(code, 0)
-        self.assertEqual(json.loads(stdout.getvalue())[0]["evidence_state"], "recovered")
+        self.assertEqual(outputs[0], outputs[1])
+        self.assertEqual(
+            json.loads(outputs[0][0])["experiment_plan_sha256"],
+            plan.experiment_plan_sha256,
+        )
+        self.assertEqual(len(json.loads(outputs[0][1])), 2)
 
     def test_experiment_cli_redacts_private_values_in_invalid_requests(self) -> None:
         stderr = io.StringIO()
@@ -160,6 +251,31 @@ class PathlightCliTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual(stderr.getvalue(), "asterion pathlight: request is invalid\n")
         self.assertNotIn("SENTINEL_PRIVATE_HOSTILE_EXCEPTION", stderr.getvalue())
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / "pathlight-experiment.json"
+            path.write_text("[" * 2_000 + "]" * 2_000, encoding="utf-8")
+            path.chmod(0o600)
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            code = main(
+                [
+                    "pathlight",
+                    "experiment",
+                    "show",
+                    "--experiment-file",
+                    str(path),
+                    "--experiment-sha256",
+                    "0" * 64,
+                ],
+                stdout=stdout,
+                stderr=stderr,
+            )
+
+        self.assertEqual(code, 2)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(stderr.getvalue(), "asterion pathlight: request is invalid\n")
+
     def test_pathlight_routes_without_loading_application_providers(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             bundle = Path(directory).resolve() / "workflow-evidence.json"
