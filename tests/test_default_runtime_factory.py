@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from asterion.runtime.factory import RuntimeFactoryContext
 from asterion.runtime.factory import RuntimeFactoryError
+from asterion.pathlight import NoopPathlightRecorder
 from asterion.runtime.defaults import _claude_provider_environment
 from asterion.runtime.host import RunRequest
 from asterion.runtime.working_directory import ProcessWorkingDirectory
@@ -32,6 +33,18 @@ class DirectoryAuthority:
 
 
 class DefaultRuntimeFactoryTests(unittest.TestCase):
+    def test_factory_context_defaults_to_noop_pathlight(self) -> None:
+        context = RuntimeFactoryContext(
+            provider_id="provider",
+            application_id="application",
+            application_version="1.0.0",
+            runtime_id="pi.reference",
+            assembly_path=Path("/assembly.json"),
+            options={},
+        )
+
+        self.assertIsInstance(context.pathlight, NoopPathlightRecorder)
+
     def test_runtime_factory_context_repr_redacts_all_operator_values(self) -> None:
         class SecretService:
             def __repr__(self) -> str:

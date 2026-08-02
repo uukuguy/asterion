@@ -8,6 +8,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 from asterion.immutable import RedactedImmutableMapping
+from asterion.pathlight.recorder import NOOP_PATHLIGHT_RECORDER, PathlightRecorder
 from asterion.runtime.host import AgentRuntimeClient, RuntimeManifest
 
 
@@ -24,6 +25,7 @@ class RuntimeFactoryContext:
     assembly_path: Path
     options: Mapping[str, str]
     host_services: Mapping[str, object] = field(default_factory=dict)
+    pathlight: PathlightRecorder = NOOP_PATHLIGHT_RECORDER
 
     def __post_init__(self) -> None:
         object.__setattr__(
