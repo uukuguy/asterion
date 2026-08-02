@@ -916,6 +916,194 @@ _COVERAGE_DATASET_IDS = frozenset(
         "bright.robotics",
     }
 )
+_COVERAGE_MAX_INPUT_BYTES = 1 << 30
+
+
+@dataclass(frozen=True, slots=True)
+class _CoverageInputSnapshot:
+    relative_path: str
+    data: bytes
+    sha256: str
+    device: int
+    inode: int
+    size: int
+    modified_ns: int
+
+
+def _coverage_nofollow() -> int:
+    value = getattr(os, "O_NOFOLLOW", None)
+    if type(value) is not int:
+        raise DciBenchmarkError("DCI benchmark coverage input is unsafe")
+    return value
+
+
+def _open_coverage_task_root(path: Path) -> tuple[int, tuple[int, int]]:
+    requested = canonical_input_identity(path)
+    absolute = requested
+    if len(requested.parts) > 1 and requested.parts[1] in {"var", "tmp"}:
+        system_alias = Path(os.path.realpath(os.sep + requested.parts[1]))
+        if system_alias in {Path("/private/var"), Path("/private/tmp")}:
+            absolute = system_alias.joinpath(*requested.parts[2:])
+    flags = (
+        os.O_RDONLY
+        | os.O_DIRECTORY
+        | _coverage_nofollow()
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    descriptor = -1
+    try:
+        descriptor = os.open(absolute.anchor, flags)
+        for component in absolute.parts[1:]:
+            next_descriptor = os.open(component, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = next_descriptor
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise DciBenchmarkError("DCI benchmark coverage input is unsafe")
+        return descriptor, (metadata.st_dev, metadata.st_ino)
+    except DciBenchmarkError:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise
+    except OSError as error:
+        if descriptor >= 0:
+            os.close(descriptor)
+        raise DciBenchmarkError(
+            "DCI benchmark coverage input is unsafe"
+        ) from error
+
+
+def _read_coverage_descriptor(descriptor: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = os.read(
+            descriptor,
+            min(65_536, _COVERAGE_MAX_INPUT_BYTES + 1 - total),
+        )
+        if not chunk:
+            return b"".join(chunks)
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > _COVERAGE_MAX_INPUT_BYTES:
+            raise DciBenchmarkError("DCI benchmark coverage input is unsafe")
+
+
+def _read_coverage_snapshot_at(
+    root_descriptor: int,
+    relative_path: str,
+) -> _CoverageInputSnapshot:
+    relative = PurePosixPath(relative_path)
+    if (
+        relative.is_absolute()
+        or relative.as_posix() != relative_path
+        or any(part in {"", ".", ".."} for part in relative.parts)
+    ):
+        raise DciBenchmarkError("DCI benchmark coverage input is unsafe")
+    directory_descriptor = root_descriptor
+    owned: list[int] = []
+    descriptor = -1
+    try:
+        directory_flags = (
+            os.O_RDONLY
+            | os.O_DIRECTORY
+            | _coverage_nofollow()
+            | getattr(os, "O_CLOEXEC", 0)
+        )
+        for component in relative.parts[:-1]:
+            next_descriptor = os.open(
+                component,
+                directory_flags,
+                dir_fd=directory_descriptor,
+            )
+            owned.append(next_descriptor)
+            directory_descriptor = next_descriptor
+        descriptor = os.open(
+            relative.parts[-1],
+            os.O_RDONLY
+            | os.O_NONBLOCK
+            | _coverage_nofollow()
+            | getattr(os, "O_CLOEXEC", 0),
+            dir_fd=directory_descriptor,
+        )
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise DciBenchmarkError("DCI benchmark coverage input is unsafe")
+        first = _read_coverage_descriptor(descriptor)
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        second = _read_coverage_descriptor(descriptor)
+        after = os.fstat(descriptor)
+        before_identity = (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+        )
+        if (
+            before_identity
+            != (
+                after.st_dev,
+                after.st_ino,
+                after.st_size,
+                after.st_mtime_ns,
+            )
+            or first != second
+            or len(first) != before.st_size
+        ):
+            raise DciBenchmarkError("DCI benchmark coverage input changed")
+        return _CoverageInputSnapshot(
+            relative_path=relative_path,
+            data=first,
+            sha256=hashlib.sha256(first).hexdigest(),
+            device=before.st_dev,
+            inode=before.st_ino,
+            size=before.st_size,
+            modified_ns=before.st_mtime_ns,
+        )
+    except DciBenchmarkError:
+        raise
+    except OSError as error:
+        raise DciBenchmarkError(
+            "DCI benchmark coverage input is unsafe"
+        ) from error
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        for owned_descriptor in reversed(owned):
+            os.close(owned_descriptor)
+
+
+def _validate_coverage_inputs_unchanged(
+    root_path: Path,
+    root_descriptor: int,
+    root_identity: tuple[int, int],
+    snapshots: tuple[_CoverageInputSnapshot, ...],
+) -> None:
+    try:
+        metadata = os.fstat(root_descriptor)
+    except OSError as error:
+        raise DciBenchmarkError(
+            "DCI benchmark coverage input is unsafe"
+        ) from error
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or (metadata.st_dev, metadata.st_ino) != root_identity
+    ):
+        raise DciBenchmarkError("DCI benchmark coverage input is unsafe")
+    for expected in snapshots:
+        if _read_coverage_snapshot_at(
+            root_descriptor,
+            expected.relative_path,
+        ) != expected:
+            raise DciBenchmarkError("DCI benchmark coverage input changed")
+    reopened = -1
+    try:
+        reopened, reopened_identity = _open_coverage_task_root(root_path)
+        if reopened_identity != root_identity:
+            raise DciBenchmarkError("DCI benchmark coverage input is unsafe")
+    finally:
+        if reopened >= 0:
+            os.close(reopened)
 
 
 def _coverage_manifest_paths(
@@ -934,65 +1122,94 @@ def _coverage_manifest_paths(
         or not features.externalize_tool_results
     ):
         raise DciBenchmarkError("DCI benchmark coverage registry is incompatible")
-    _reject_symlink_components(registry_path)
-    registry_raw = _read_input_snapshot(registry_path)
+    registry_path = canonical_input_identity(registry_path)
+    if registry_path.name != "registry.json":
+        raise DciBenchmarkError("DCI benchmark coverage registry is invalid")
+    root_path = registry_path.parent
+    root_descriptor, root_identity = _open_coverage_task_root(root_path)
+    bound_snapshots: list[_CoverageInputSnapshot] = []
     try:
-        registry = validate_coverage_registry_bytes(registry_raw)
-    except DciCoverageError as error:
-        raise DciBenchmarkError("DCI benchmark coverage registry is invalid") from error
-    selected_ids = tuple(row.query_id for row in rows)
-    if (
-        registry.dataset_id != request.dataset_profile
-        or registry.selected_count != len(rows)
-        or registry.selected_ids_sha256 != canonical_sha256(selected_ids)
-        or tuple(item.query_sha256 for item in registry.manifests)
-        != tuple(coverage_query_sha256(query_id) for query_id in selected_ids)
-    ):
-        raise DciBenchmarkError("DCI benchmark coverage registry is incompatible")
-    identities: dict[str, object] = {}
-    snapshots: dict[str, bytes] = {"coverage_registry": registry_raw}
-    for index, (row, reference) in enumerate(
-        zip(rows, registry.manifests, strict=True)
-    ):
-        relative = PurePosixPath(reference.relative_path)
-        manifest_path = registry_path.parent.joinpath(*relative.parts)
-        _reject_symlink_components(manifest_path)
-        manifest_raw = _read_input_snapshot(manifest_path)
-        if hashlib.sha256(manifest_raw).hexdigest() != reference.sha256:
-            raise DciBenchmarkError("DCI benchmark coverage registry is stale")
+        registry_snapshot = _read_coverage_snapshot_at(
+            root_descriptor,
+            "registry.json",
+        )
+        bound_snapshots.append(registry_snapshot)
+        registry_raw = registry_snapshot.data
         try:
-            dataset_id, query_id, gold_ids = validate_coverage_manifest_bytes(
-                manifest_raw,
-                corpus_dir=request.corpus,
-            )
+            registry = validate_coverage_registry_bytes(registry_raw)
         except DciCoverageError as error:
-            raise DciBenchmarkError("DCI benchmark coverage manifest is invalid") from error
+            raise DciBenchmarkError(
+                "DCI benchmark coverage registry is invalid"
+            ) from error
+        selected_ids = tuple(row.query_id for row in rows)
         if (
-            dataset_id != request.dataset_profile
-            or query_id != row.query_id
-            or row.gold_ids is None
-            or set(gold_ids) != set(row.gold_ids)
+            registry.dataset_id != request.dataset_profile
+            or registry.selected_count != len(rows)
+            or registry.selected_ids_sha256 != canonical_sha256(selected_ids)
+            or tuple(item.query_sha256 for item in registry.manifests)
+            != tuple(coverage_query_sha256(query_id) for query_id in selected_ids)
         ):
-            raise DciBenchmarkError("DCI benchmark coverage registry is incompatible")
-        snapshot_key = f"coverage_manifest_{index:04d}"
-        identities[row.query_id] = {
-            "query_sha256": reference.query_sha256,
-            "sha256": reference.sha256,
-            "snapshot_key": snapshot_key,
-        }
-        snapshots[snapshot_key] = manifest_raw
-    return (
-        {
-            "schema": "dci.retrieval-coverage-binding/v1",
-            "dataset_id": registry.dataset_id,
-            "registry": {
-                "relative_path": registry.relative_path,
-                "sha256": registry.sha256,
+            raise DciBenchmarkError(
+                "DCI benchmark coverage registry is incompatible"
+            )
+        identities: dict[str, object] = {}
+        snapshots: dict[str, bytes] = {"coverage_registry": registry_raw}
+        for index, (row, reference) in enumerate(
+            zip(rows, registry.manifests, strict=True)
+        ):
+            manifest_snapshot = _read_coverage_snapshot_at(
+                root_descriptor,
+                reference.relative_path,
+            )
+            bound_snapshots.append(manifest_snapshot)
+            manifest_raw = manifest_snapshot.data
+            if manifest_snapshot.sha256 != reference.sha256:
+                raise DciBenchmarkError("DCI benchmark coverage registry is stale")
+            try:
+                dataset_id, query_id, gold_ids = validate_coverage_manifest_bytes(
+                    manifest_raw,
+                    corpus_dir=request.corpus,
+                )
+            except DciCoverageError as error:
+                raise DciBenchmarkError(
+                    "DCI benchmark coverage manifest is invalid"
+                ) from error
+            if (
+                dataset_id != request.dataset_profile
+                or query_id != row.query_id
+                or row.gold_ids is None
+                or set(gold_ids) != set(row.gold_ids)
+            ):
+                raise DciBenchmarkError(
+                    "DCI benchmark coverage registry is incompatible"
+                )
+            snapshot_key = f"coverage_manifest_{index:04d}"
+            identities[row.query_id] = {
+                "query_sha256": reference.query_sha256,
+                "sha256": reference.sha256,
+                "snapshot_key": snapshot_key,
+            }
+            snapshots[snapshot_key] = manifest_raw
+        _validate_coverage_inputs_unchanged(
+            root_path,
+            root_descriptor,
+            root_identity,
+            tuple(bound_snapshots),
+        )
+        return (
+            {
+                "schema": "dci.retrieval-coverage-binding/v1",
+                "dataset_id": registry.dataset_id,
+                "registry": {
+                    "relative_path": registry.relative_path,
+                    "sha256": registry.sha256,
+                },
+                "manifests": identities,
             },
-            "manifests": identities,
-        },
-        snapshots,
-    )
+            snapshots,
+        )
+    finally:
+        os.close(root_descriptor)
 
 
 def _prepare(
@@ -2341,6 +2558,56 @@ def _valid_resolution_configuration(
     return assumptions is None
 
 
+def _valid_coverage_configuration(value: object) -> bool:
+    """Validate the closed, path-redacted coverage binding evidence."""
+
+    if not isinstance(value, dict) or set(value) != {
+        "schema",
+        "dataset_id",
+        "registry",
+        "manifests",
+    }:
+        return False
+    registry = value.get("registry")
+    manifests = value.get("manifests")
+    if (
+        value.get("schema") != "dci.retrieval-coverage-binding/v1"
+        or value.get("dataset_id") not in _COVERAGE_DATASET_IDS
+        or type(registry) is not dict
+        or set(registry) != {"relative_path", "sha256"}
+        or registry.get("relative_path") != "registry.json"
+        or re.fullmatch(r"[0-9a-f]{64}", str(registry.get("sha256"))) is None
+        or type(manifests) is not dict
+        or not manifests
+    ):
+        return False
+    snapshot_keys: set[str] = set()
+    for query_id, manifest in manifests.items():
+        if type(query_id) is not str or not query_id:
+            return False
+        try:
+            expected_query_sha256 = coverage_query_sha256(query_id)
+        except DciCoverageError:
+            return False
+        if (
+            type(manifest) is not dict
+            or set(manifest) != {"query_sha256", "sha256", "snapshot_key"}
+            or manifest.get("query_sha256") != expected_query_sha256
+            or re.fullmatch(r"[0-9a-f]{64}", str(manifest.get("sha256")))
+            is None
+            or type(manifest.get("snapshot_key")) is not str
+            or re.fullmatch(
+                r"coverage_manifest_[0-9]{4}", manifest["snapshot_key"]
+            )
+            is None
+        ):
+            return False
+        snapshot_keys.add(manifest["snapshot_key"])
+    return snapshot_keys == {
+        f"coverage_manifest_{index:04d}" for index in range(len(manifests))
+    }
+
+
 def _validate_config_document(
     value: dict[str, Any], *, expected_execution_class: str,
     allow_legacy_nonpaper: bool = False,
@@ -2368,6 +2635,7 @@ def _validate_config_document(
     }
     optional = {
         "resolution",
+        "coverage",
         "ablation",
         "paper_full_authorization",
         "selection",
@@ -2389,6 +2657,10 @@ def _validate_config_document(
                 profile_id=value.get("profile"),
                 runtime=value.get("runtime"),
             )
+        )
+        or (
+            "coverage" in value
+            and not _valid_coverage_configuration(value["coverage"])
         )
         or re.fullmatch(
             r"[0-9a-f]{64}", str(value.get("implementation_sha256"))

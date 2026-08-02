@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
 import tempfile
 import unittest
 from importlib import resources
@@ -2435,15 +2436,127 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
 
         rendered = json.dumps(config, sort_keys=True)
         self.assertNotIn(str(private_root), rendered)
+        coverage = cast(dict[str, object], config["coverage"])
+        coverage_registry = cast(dict[str, object], coverage["registry"])
         self.assertEqual(
-            config["coverage"]["registry"]["relative_path"],
+            coverage_registry["relative_path"],
             "registry.json",
         )
-        self.assertIn("coverage", items[0]["identity"])
+        identity = cast(dict[str, object], items[0]["identity"])
+        self.assertIn("coverage", identity)
         self.assertEqual(
             set(snapshots),
             {"coverage_registry", "coverage_manifest_0000"},
         )
+
+    def test_coverage_config_accepts_locked_reuse_and_rejects_extra_field(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            registry = _write_coverage_registry(
+                root / "coverage",
+                dataset_id="bright.biology",
+                selected_query_id="q-000",
+            )
+            request = replace(
+                _coverage_request(root),
+                coverage_registry=registry,
+            )
+            with patch(
+                "asterion.capabilities.dci.implementation.runtime.run.PiRpcClient",
+                _FixtureClient,
+            ):
+                run_benchmark(request, paths=resolve_dci_paths(root))
+
+            with patch(
+                "asterion.capabilities.dci.implementation.evaluation.benchmark._run_pi_async"
+            ) as agent:
+                run_benchmark(request, paths=resolve_dci_paths(root))
+            agent.assert_not_called()
+
+            config_path = request.output_root / "config.json"
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            config["coverage"]["registry"]["unexpected"] = True
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            with patch(
+                "asterion.capabilities.dci.implementation.evaluation.benchmark._run_pi_async"
+            ) as agent:
+                with self.assertRaisesRegex(
+                    DciBenchmarkError,
+                    "^DCI benchmark configuration evidence is invalid$",
+                ):
+                    run_benchmark(request, paths=resolve_dci_paths(root))
+            agent.assert_not_called()
+
+            config["coverage"]["registry"].pop("unexpected")
+            manifests = config["coverage"]["manifests"]
+            manifests["\x00"] = manifests.pop("q-000")
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            with patch(
+                "asterion.capabilities.dci.implementation.evaluation.benchmark._run_pi_async"
+            ) as agent:
+                with self.assertRaisesRegex(
+                    DciBenchmarkError,
+                    "^DCI benchmark configuration evidence is invalid$",
+                ):
+                    run_benchmark(request, paths=resolve_dci_paths(root))
+            agent.assert_not_called()
+
+    def test_coverage_manifest_ancestor_swap_fails_before_agent_execution(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            coverage_root = root / "coverage"
+            registry = _write_coverage_registry(
+                coverage_root,
+                dataset_id="bright.biology",
+                selected_query_id="q-000",
+            )
+            manifest = (
+                coverage_root
+                / "manifests"
+                / f"{coverage_query_sha256('q-000')}.json"
+            )
+            moved = root / "coverage-moved"
+            request = replace(
+                _coverage_request(root),
+                coverage_registry=registry,
+            )
+            real_open = os.open
+            swapped = False
+
+            def swap_ancestor_before_manifest_open(
+                path: str | bytes | Path,
+                flags: int,
+                mode: int = 0o777,
+                *,
+                dir_fd: int | None = None,
+            ) -> int:
+                nonlocal swapped
+                rendered = os.fspath(path)
+                if not swapped and (
+                    rendered == os.fspath(manifest)
+                    or rendered == manifest.name
+                ):
+                    coverage_root.rename(moved)
+                    coverage_root.symlink_to(moved, target_is_directory=True)
+                    swapped = True
+                return real_open(path, flags, mode, dir_fd=dir_fd)
+
+            with patch(
+                "asterion.capabilities.dci.implementation.evaluation.benchmark.os.open",
+                side_effect=swap_ancestor_before_manifest_open,
+            ), patch(
+                "asterion.capabilities.dci.implementation.evaluation.benchmark._run_pi_async"
+            ) as agent:
+                with self.assertRaisesRegex(
+                    DciBenchmarkError,
+                    "^DCI benchmark coverage input is unsafe$",
+                ):
+                    run_benchmark(request, paths=resolve_dci_paths(root))
+            agent.assert_not_called()
 
     def test_expected_output_identity_rejects_replacement_before_evidence_write(
         self,

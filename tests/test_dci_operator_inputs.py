@@ -67,6 +67,27 @@ class DciOperatorCoverageInputTests(unittest.TestCase):
             {},
         )
 
+    def test_coverage_root_keeps_lexical_symlink_for_nofollow_execution(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            real_root = root / "real-coverage"
+            real_root.mkdir()
+            linked_root = root / "linked-coverage"
+            linked_root.symlink_to(real_root, target_is_directory=True)
+            config = load_operator_config(
+                root,
+                environment={
+                    "ASTERION_DCI_COVERAGE_ROOT": str(linked_root),
+                },
+            )
+
+        self.assertEqual(
+            config.benchmark_inputs.coverage_registry_roots["bright.biology"],
+            linked_root / "bright.biology" / "registry.json",
+        )
+
     def test_binding_passes_only_the_exact_task_registry_in_private_payload(
         self,
     ) -> None:

@@ -82,10 +82,11 @@ def load_operator_config(
     )
     coverage_value = merged.get("ASTERION_DCI_COVERAGE_ROOT")
     if coverage_value is not None and coverage_value.strip():
-        coverage_root = _configured_path(
-            coverage_value,
-            default=root,
-            relative_to=root,
+        coverage_root = Path(coverage_value)
+        if not coverage_root.is_absolute():
+            coverage_root = root / coverage_root
+        coverage_root = Path(
+            os.path.abspath(os.path.normpath(coverage_root))
         )
         benchmark_inputs = DciBenchmarkOperatorInputs(
             dataset_roots=benchmark_inputs.dataset_roots,
