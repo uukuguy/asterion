@@ -296,31 +296,35 @@ def write_evaluation_bundle(path: Path, records: Sequence[EvaluationRecord]) -> 
     document["bundle_sha256"] = _canonical_digest(document)
     encoded = json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
     descriptor = -1
-    created_stat: os.stat_result | None = None
+    failure: OSError | None = None
     try:
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        created_stat = os.fstat(descriptor)
         os.fchmod(descriptor, 0o600)
-        with os.fdopen(descriptor, "wb") as output:
-            descriptor = -1
-            output.write(encoded)
     except OSError as error:
+        failure = error
+    else:
+        try:
+            _write_all(descriptor, encoded)
+        except OSError as error:
+            failure = error
+    finally:
         if descriptor >= 0:
-            os.close(descriptor)
-        if created_stat is not None:
-            _remove_created_target(path, created_stat)
-        raise PathlightError("Pathlight evaluation target is unavailable") from error
+            try:
+                os.close(descriptor)
+            except OSError as error:
+                if failure is None:
+                    failure = error
+    if failure is not None:
+        raise PathlightError("Pathlight evaluation target is unavailable") from failure
 
 
-def _remove_created_target(path: Path, created_stat: os.stat_result) -> None:
-    """Remove only the exact output inode created by this failed write."""
-
-    try:
-        current = os.stat(path, follow_symlinks=False)
-        if (current.st_dev, current.st_ino) == (created_stat.st_dev, created_stat.st_ino):
-            os.unlink(path)
-    except OSError:
-        pass
+def _write_all(descriptor: int, encoded: bytes) -> None:
+    remaining = memoryview(encoded)
+    while remaining:
+        written = os.write(descriptor, remaining)
+        if written <= 0:
+            raise OSError("Pathlight evaluation target write is incomplete")
+        remaining = remaining[written:]
 
 
 def read_evaluation_bundle(path: Path) -> EvaluationBundle:

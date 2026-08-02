@@ -231,7 +231,7 @@ class PathlightEvaluationTests(unittest.TestCase):
 
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
-    def test_writer_removes_output_when_mode_cannot_be_set(self) -> None:
+    def test_writer_retains_invalid_private_output_when_mode_cannot_be_set(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory).resolve() / "pathlight-evaluations.json"
             with patch(
@@ -239,7 +239,65 @@ class PathlightEvaluationTests(unittest.TestCase):
             ), self.assertRaises(PathlightError):
                 write_evaluation_bundle(path, (evaluation(),))
 
-            self.assertFalse(path.exists())
+            self.assertTrue(path.exists())
+            with self.assertRaises(PathlightError):
+                read_evaluation_bundle(path)
+
+    def test_writer_never_unlinks_a_replacement_after_a_mode_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            path = root / "pathlight-evaluations.json"
+            partial = root / "partial.json"
+            replacement = root / "replacement.json"
+            replacement.write_text("replacement", encoding="utf-8")
+
+            def replace_then_fail(descriptor: int, mode: int) -> None:
+                del descriptor, mode
+                path.rename(partial)
+                replacement.rename(path)
+                raise OSError("blocked")
+
+            with patch(
+                "asterion.pathlight.evaluation.os.fchmod", side_effect=replace_then_fail
+            ), patch("asterion.pathlight.evaluation.os.unlink") as unlink, self.assertRaises(
+                PathlightError
+            ):
+                write_evaluation_bundle(path, (evaluation(),))
+
+            unlink.assert_not_called()
+            self.assertEqual(path.read_text(encoding="utf-8"), "replacement")
+
+    def test_writer_normalizes_close_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / "pathlight-evaluations.json"
+            original_close = os.close
+
+            def close_then_fail(descriptor: int) -> None:
+                original_close(descriptor)
+                raise OSError("close failed")
+
+            with patch(
+                "asterion.pathlight.evaluation.os.close", side_effect=close_then_fail
+            ), self.assertRaises(PathlightError):
+                write_evaluation_bundle(path, (evaluation(),))
+
+    def test_partial_write_remains_private_and_is_rejected_by_reader(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / "pathlight-evaluations.json"
+            original_write = os.write
+
+            def write_partial_then_fail(descriptor: int, data: bytes) -> int:
+                original_write(descriptor, data[:1])
+                raise OSError("write failed")
+
+            with patch(
+                "asterion.pathlight.evaluation.os.write", side_effect=write_partial_then_fail
+            ), self.assertRaises(PathlightError):
+                write_evaluation_bundle(path, (evaluation(),))
+
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            with self.assertRaises(PathlightError):
+                read_evaluation_bundle(path)
 
     def test_bundle_rejects_a_noncanonical_digest(self) -> None:
         record = evaluation()
