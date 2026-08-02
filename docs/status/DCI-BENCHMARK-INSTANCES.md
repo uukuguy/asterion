@@ -31,6 +31,12 @@ benchmark 实例的实现清单、验证台账和运行手册。
 六项已完成 evidence 已经由 provider-free Pathlight 命令恢复、交叉验证并诊断；安全的数值观察、证据缺口和未获授权的两项最小实验提案见
 [Pathlight DCI 差分诊断](PATHLIGHT-DCI-DIAGNOSIS.md)。该诊断中的论文数值为 reference-only，不能作为完全复现或跨配置可比性的结论。
 
+Task 9 的 coverage 诊断合并与中文安全渲染已经完成 provider-free
+准备，但五项各 10 例的有限实验尚未执行，当前没有 observed coverage
+数值。检索查询分解仍被 coverage 门槛阻塞且未获授权。有限边界、需核对的
+plan/authorization 摘要字段及前台命令见上述诊断文档；只有独立的 0600
+authorization 才能启动该实验。
+
 ## 推荐核验包的全量执行台账
 
 推荐核验包共 848 条：Bright Biology 103、Earth Science 116、Economics 103、Robotics 101、

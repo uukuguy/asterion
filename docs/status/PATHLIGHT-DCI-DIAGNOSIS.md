@@ -2,6 +2,43 @@
 
 本报告由六项已完成 historical evidence 的 provider-free Pathlight 恢复与诊断生成。它只包含数值、摘要关系和预先固定的中文说明；不包含 operator 路径、案例标识、提示、答案、payload 或 provider/model/config 值。
 
+## Coverage 实验前置状态（尚未执行）
+
+50 条 coverage 实验目前**尚未执行**，因此本文没有 observed coverage
+数值，也没有把任何缺口写成已关闭。检索查询分解门槛仍为
+`blocked-by-coverage`；即使未来五项都达到 10/10，它也只会变成“可申请单独
+授权”，不会自动获得执行权限。
+
+已完成 provider-free `prepare` 的计划摘要为
+`e845f41bb1fa7e81857f12244cc5053393df861bc7b25e815dfb4a5126f00e90`。
+该摘要只证明计划已准备，不代表已有 authorization，也不代表实验已执行。
+
+已准备的有限边界固定为五个数据集、每项 10 例、最多 50 次 Agent 操作、
+0 次 Judge 操作、5,000,000 微美元，并在第二次基础设施失败后、第三项启动前
+停止。运营者在创建独立的 0600 authorization 前，必须逐项核对 plan 中的
+`plan_sha256`、`proposal_sha256`、`scope_sha256`、`variant_sha256`、
+`registry_set_sha256`、`source_lock_sha256`、五项 `registry_sha256`，以及上述
+操作数、成本和停止线。Authorization 必须回填相同摘要与限制，包含独立的
+`operator_approval_sha256`，并明确写入 `execution_authorized=true`；配置、缓存
+和旧 evidence 都不能代替本次授权。
+
+只有完成这些核对后，运营者才能从仓库根目录以前台方式执行以下有限命令：
+
+```bash
+env -i HOME="$HOME" PATH="$PATH" SHELL="$SHELL" zsh -lc '
+  set -a
+  source .env
+  set +a
+  uv run asterion-dci pathlight experiment execute \
+    --plan-file "$ASTERION_PATHLIGHT_COVERAGE_PLAN" \
+    --authorization-file "$ASTERION_PATHLIGHT_COVERAGE_AUTHORIZATION" \
+    --output-root "$ASTERION_PATHLIGHT_COVERAGE_OUTPUT"
+'
+```
+
+本次 provider-free 实现没有运行该命令，没有访问网络，也没有生成或推断任何
+coverage 结果。
+
 ## 已证实事实
 
 ### SciFact

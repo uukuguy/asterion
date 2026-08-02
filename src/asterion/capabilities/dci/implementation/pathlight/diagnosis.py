@@ -12,7 +12,7 @@ import hmac
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal
 
 from asterion.capabilities.dci.implementation.pathlight.conversion import (
@@ -158,6 +158,221 @@ def _median(values: tuple[int, ...]) -> int:
     if len(ordered) % 2:
         return ordered[middle]
     return ordered[middle - 1] + (ordered[middle] - ordered[middle - 1]) // 2
+
+
+@dataclass(frozen=True, slots=True)
+class DciCoverageDatasetObservation:
+    """One content-free coverage aggregate for an exact ten-query task."""
+
+    dataset_id: str
+    coverage_available_queries: int
+    coverage_total_queries: int
+    coverage_median_any_microunits: int | None
+    coverage_median_mean_microunits: int | None
+    coverage_median_all_microunits: int | None
+    retained_available_queries: int
+    retained_median_microunits: int | None
+    tool_observation_count: int
+    surfaced_gold_count: int
+    model_call_count: int
+    context_frame_count: int
+    missing_boundary_count: int
+    integrity_failure_count: int
+    evidence_sha256: str
+
+    def __post_init__(self) -> None:
+        metrics = (
+            self.coverage_median_any_microunits,
+            self.coverage_median_mean_microunits,
+            self.coverage_median_all_microunits,
+        )
+        try:
+            if (
+                type(self) is not DciCoverageDatasetObservation
+                or self.dataset_id not in _COVERAGE_DATASETS
+                or self.coverage_total_queries != 10
+                or not 0 <= _checked(self.coverage_available_queries) <= 10
+                or any(value is not None and _unit(value) != value for value in metrics)
+                or self.coverage_available_queries == 0
+                and any(value is not None for value in metrics)
+                or self.coverage_available_queries > 0
+                and any(value is None for value in metrics)
+                or not 0
+                <= _checked(self.retained_available_queries)
+                <= self.coverage_available_queries
+                or (self.retained_available_queries == 0)
+                != (self.retained_median_microunits is None)
+                or self.retained_median_microunits is not None
+                and _unit(self.retained_median_microunits)
+                != self.retained_median_microunits
+                or any(
+                    _checked(value) > _MAX_INT
+                    for value in (
+                        self.tool_observation_count,
+                        self.surfaced_gold_count,
+                        self.model_call_count,
+                        self.context_frame_count,
+                        self.missing_boundary_count,
+                    )
+                )
+                or not 0 <= _checked(self.integrity_failure_count) <= 10
+                or _sha256(self.evidence_sha256) != self.evidence_sha256
+            ):
+                raise ValueError
+        except Exception:
+            raise ValueError("invalid DCI coverage dataset observation") from None
+
+    def to_mapping(self) -> dict[str, object]:
+        return {
+            "dataset_id": self.dataset_id,
+            "coverage_available_queries": self.coverage_available_queries,
+            "coverage_total_queries": self.coverage_total_queries,
+            "coverage_median_any_microunits": self.coverage_median_any_microunits,
+            "coverage_median_mean_microunits": self.coverage_median_mean_microunits,
+            "coverage_median_all_microunits": self.coverage_median_all_microunits,
+            "retained_available_queries": self.retained_available_queries,
+            "retained_median_microunits": self.retained_median_microunits,
+            "tool_observation_count": self.tool_observation_count,
+            "surfaced_gold_count": self.surfaced_gold_count,
+            "model_call_count": self.model_call_count,
+            "context_frame_count": self.context_frame_count,
+            "missing_boundary_count": self.missing_boundary_count,
+            "integrity_failure_count": self.integrity_failure_count,
+            "evidence_sha256": self.evidence_sha256,
+        }
+
+
+def _copy_coverage_dataset(value: object) -> DciCoverageDatasetObservation:
+    if type(value) is not DciCoverageDatasetObservation:
+        raise ValueError
+    return DciCoverageDatasetObservation(
+        dataset_id=value.dataset_id,
+        coverage_available_queries=value.coverage_available_queries,
+        coverage_total_queries=value.coverage_total_queries,
+        coverage_median_any_microunits=value.coverage_median_any_microunits,
+        coverage_median_mean_microunits=value.coverage_median_mean_microunits,
+        coverage_median_all_microunits=value.coverage_median_all_microunits,
+        retained_available_queries=value.retained_available_queries,
+        retained_median_microunits=value.retained_median_microunits,
+        tool_observation_count=value.tool_observation_count,
+        surfaced_gold_count=value.surfaced_gold_count,
+        model_call_count=value.model_call_count,
+        context_frame_count=value.context_frame_count,
+        missing_boundary_count=value.missing_boundary_count,
+        integrity_failure_count=value.integrity_failure_count,
+        evidence_sha256=value.evidence_sha256,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class DciCoverageExperimentObservation:
+    """A body-free aggregate of the finite Task 8 coverage experiment."""
+
+    plan_sha256: str
+    proposal_sha256: str
+    scope_sha256: str
+    variant_sha256: str
+    registry_set_sha256: str
+    authorization_sha256: str
+    receipt_set_sha256: str
+    datasets: tuple[DciCoverageDatasetObservation, ...]
+    agent_operation_count: int
+    judge_operation_count: int
+    consumed_cost_microusd: int
+    infrastructure_failure_count: int
+    experiment_sha256: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        try:
+            datasets = tuple(_copy_coverage_dataset(item) for item in self.datasets)
+            if (
+                type(self) is not DciCoverageExperimentObservation
+                or type(self.datasets) is not tuple
+                or tuple(item.dataset_id for item in datasets) != _COVERAGE_DATASETS
+                or any(
+                    _sha256(value) != value
+                    for value in (
+                        self.plan_sha256,
+                        self.proposal_sha256,
+                        self.scope_sha256,
+                        self.variant_sha256,
+                        self.registry_set_sha256,
+                        self.authorization_sha256,
+                        self.receipt_set_sha256,
+                    )
+                )
+                or not _sum(
+                    tuple(item.coverage_available_queries for item in datasets)
+                )
+                <= _checked(self.agent_operation_count)
+                <= 50
+                or self.judge_operation_count != 0
+                or not 0 <= _checked(self.consumed_cost_microusd) <= 5_000_000
+                or not 0 <= _checked(self.infrastructure_failure_count) < 2
+            ):
+                raise ValueError
+            object.__setattr__(self, "datasets", datasets)
+            object.__setattr__(
+                self,
+                "experiment_sha256",
+                _digest("coverage-experiment", self._unsigned_mapping()),
+            )
+        except Exception:
+            raise ValueError("invalid DCI coverage experiment observation") from None
+
+    @property
+    def complete(self) -> bool:
+        return (
+            self.agent_operation_count == 50
+            and all(
+                item.coverage_available_queries == item.coverage_total_queries == 10
+                and item.integrity_failure_count == 0
+                for item in self.datasets
+            )
+        )
+
+    def _unsigned_mapping(self) -> dict[str, object]:
+        return {
+            "plan_sha256": self.plan_sha256,
+            "proposal_sha256": self.proposal_sha256,
+            "scope_sha256": self.scope_sha256,
+            "variant_sha256": self.variant_sha256,
+            "registry_set_sha256": self.registry_set_sha256,
+            "authorization_sha256": self.authorization_sha256,
+            "receipt_set_sha256": self.receipt_set_sha256,
+            "datasets": [item.to_mapping() for item in self.datasets],
+            "agent_operation_count": self.agent_operation_count,
+            "judge_operation_count": self.judge_operation_count,
+            "consumed_cost_microusd": self.consumed_cost_microusd,
+            "infrastructure_failure_count": self.infrastructure_failure_count,
+        }
+
+    def to_mapping(self) -> dict[str, object]:
+        return {**self._unsigned_mapping(), "experiment_sha256": self.experiment_sha256}
+
+
+def _copy_coverage_experiment(
+    value: object,
+) -> DciCoverageExperimentObservation:
+    if type(value) is not DciCoverageExperimentObservation:
+        raise ValueError
+    copied = DciCoverageExperimentObservation(
+        plan_sha256=value.plan_sha256,
+        proposal_sha256=value.proposal_sha256,
+        scope_sha256=value.scope_sha256,
+        variant_sha256=value.variant_sha256,
+        registry_set_sha256=value.registry_set_sha256,
+        authorization_sha256=value.authorization_sha256,
+        receipt_set_sha256=value.receipt_set_sha256,
+        datasets=tuple(_copy_coverage_dataset(item) for item in value.datasets),
+        agent_operation_count=value.agent_operation_count,
+        judge_operation_count=value.judge_operation_count,
+        consumed_cost_microusd=value.consumed_cost_microusd,
+        infrastructure_failure_count=value.infrastructure_failure_count,
+    )
+    if not hmac.compare_digest(copied.experiment_sha256, value.experiment_sha256):
+        raise ValueError
+    return copied
 
 
 @dataclass(frozen=True, slots=True)
@@ -355,6 +570,20 @@ class DciDatasetObservation:
     resolution_coverage_status: Literal["not-available"]
     aggregate_evaluation_sha256: str
     workflow_metrics: DciWorkflowMetrics
+    coverage_available_queries: int = 0
+    coverage_total_queries: int = 0
+    coverage_median_any_microunits: int | None = None
+    coverage_median_mean_microunits: int | None = None
+    coverage_median_all_microunits: int | None = None
+    retained_available_queries: int = 0
+    retained_median_microunits: int | None = None
+    tool_observation_count: int = 0
+    surfaced_gold_count: int = 0
+    model_call_count: int = 0
+    context_frame_count: int = 0
+    missing_boundary_count: int = 0
+    integrity_failure_count: int = 0
+    coverage_evidence_sha256: str | None = None
 
     def __post_init__(self) -> None:
         try:
@@ -384,12 +613,57 @@ class DciDatasetObservation:
                 or type(self.workflow_metrics) is not DciWorkflowMetrics
             ):
                 raise ValueError
+            coverage_values = (
+                self.coverage_median_any_microunits,
+                self.coverage_median_mean_microunits,
+                self.coverage_median_all_microunits,
+                self.retained_median_microunits,
+            )
+            if self.coverage_total_queries == 0:
+                if (
+                    self.coverage_available_queries != 0
+                    or any(value is not None for value in coverage_values)
+                    or any(
+                        value != 0
+                        for value in (
+                            self.retained_available_queries,
+                            self.tool_observation_count,
+                            self.surfaced_gold_count,
+                            self.model_call_count,
+                            self.context_frame_count,
+                            self.missing_boundary_count,
+                            self.integrity_failure_count,
+                        )
+                    )
+                    or self.coverage_evidence_sha256 is not None
+                ):
+                    raise ValueError
+            else:
+                coverage = DciCoverageDatasetObservation(
+                    dataset_id=self.dataset_id,
+                    coverage_available_queries=self.coverage_available_queries,
+                    coverage_total_queries=self.coverage_total_queries,
+                    coverage_median_any_microunits=self.coverage_median_any_microunits,
+                    coverage_median_mean_microunits=self.coverage_median_mean_microunits,
+                    coverage_median_all_microunits=self.coverage_median_all_microunits,
+                    retained_available_queries=self.retained_available_queries,
+                    retained_median_microunits=self.retained_median_microunits,
+                    tool_observation_count=self.tool_observation_count,
+                    surfaced_gold_count=self.surfaced_gold_count,
+                    model_call_count=self.model_call_count,
+                    context_frame_count=self.context_frame_count,
+                    missing_boundary_count=self.missing_boundary_count,
+                    integrity_failure_count=self.integrity_failure_count,
+                    evidence_sha256=str(self.coverage_evidence_sha256),
+                )
+                if coverage.dataset_id != self.dataset_id:
+                    raise ValueError
             object.__setattr__(self, "workflow_metrics", _copy_workflow_metrics(self.workflow_metrics))
         except Exception:
             raise ValueError("invalid DCI dataset observation") from None
 
     def to_mapping(self) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "dataset_id": self.dataset_id,
             "metric_name": self.metric_name,
             "selected_count": self.selected_count,
@@ -406,6 +680,24 @@ class DciDatasetObservation:
             "aggregate_evaluation_sha256": self.aggregate_evaluation_sha256,
             "workflow_metrics": self.workflow_metrics.to_mapping(),
         }
+        if self.coverage_total_queries:
+            value["coverage"] = {
+                "available_queries": self.coverage_available_queries,
+                "total_queries": self.coverage_total_queries,
+                "median_any_microunits": self.coverage_median_any_microunits,
+                "median_mean_microunits": self.coverage_median_mean_microunits,
+                "median_all_microunits": self.coverage_median_all_microunits,
+                "retained_available_queries": self.retained_available_queries,
+                "retained_median_microunits": self.retained_median_microunits,
+                "tool_observation_count": self.tool_observation_count,
+                "surfaced_gold_count": self.surfaced_gold_count,
+                "model_call_count": self.model_call_count,
+                "context_frame_count": self.context_frame_count,
+                "missing_boundary_count": self.missing_boundary_count,
+                "integrity_failure_count": self.integrity_failure_count,
+                "evidence_sha256": self.coverage_evidence_sha256,
+            }
+        return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -562,6 +854,10 @@ class DciDiagnosisReport:
     proposals: tuple[DciProposalSummary, ...]
     aggregate_workflow_metrics: DciAggregateWorkflowMetrics
     diagnosis_bundle: DiagnosisBundle
+    coverage_experiment: DciCoverageExperimentObservation | None = None
+    query_decomposition_gate: Literal[
+        "blocked-by-coverage", "ready-for-authorization"
+    ] = "blocked-by-coverage"
     report_sha256: str = field(init=False)
 
     def __post_init__(self) -> None:
@@ -582,6 +878,17 @@ class DciDiagnosisReport:
             components = tuple(_copy_component(item) for item in self.component_comparisons)
             findings = tuple(_copy_finding(item) for item in self.findings)
             proposals = tuple(_copy_proposal_summary(item) for item in self.proposals)
+            coverage_experiment = (
+                None
+                if self.coverage_experiment is None
+                else _copy_coverage_experiment(self.coverage_experiment)
+            )
+            expected_missing = _missing_codes(coverage_experiment)
+            expected_gate = (
+                "ready-for-authorization"
+                if coverage_experiment is not None and coverage_experiment.complete
+                else "blocked-by-coverage"
+            )
             aggregate_metrics = _copy_aggregate_workflow_metrics(
                 self.aggregate_workflow_metrics
             )
@@ -595,9 +902,17 @@ class DciDiagnosisReport:
                 ("observed", _digest("code", f"observed:{dataset_id}"))
                 for dataset_id in _DATASET_ORDER
             }
+            if coverage_experiment is not None:
+                expected_finding_codes.update(
+                    (
+                        "observed",
+                        _digest("code", f"observed:coverage:{dataset_id}"),
+                    )
+                    for dataset_id in _COVERAGE_DATASETS
+                )
             expected_finding_codes.update(
                 ("missing-evidence", _digest("code", f"missing:{code}"))
-                for code in _MISSING_CODES
+                for code in expected_missing
             )
             expected_finding_codes.update(
                 ("hypothesis", _digest("code", f"hypothesis:{code}"))
@@ -609,6 +924,17 @@ class DciDiagnosisReport:
             evaluation_ids = tuple(
                 item.aggregate_evaluation_sha256 for item in observations
             )
+            bundle_evaluation_ids = (
+                *evaluation_ids,
+                *(
+                    ()
+                    if coverage_experiment is None
+                    else tuple(
+                        item.evidence_sha256
+                        for item in coverage_experiment.datasets
+                    )
+                ),
+            )
             expected_findings = tuple(
                 sorted(
                     _findings(
@@ -617,6 +943,8 @@ class DciDiagnosisReport:
                             item.dataset_id: item.aggregate_evaluation_sha256
                             for item in observations
                         },
+                        expected_missing,
+                        coverage_experiment,
                     ),
                     key=lambda item: item.finding_sha256,
                 )
@@ -637,7 +965,7 @@ class DciDiagnosisReport:
                 or len({item.finding_sha256 for item in findings}) != len(findings)
                 or {(item.category, item.finding_code_sha256) for item in findings}
                 != expected_finding_codes
-                or self.missing_evidence != _MISSING_CODES
+                or self.missing_evidence != expected_missing
                 or any(type(code) is not str for code in self.missing_evidence)
                 or self.hypothesis_codes != _HYPOTHESIS_CODES
                 or any(type(code) is not str for code in self.hypothesis_codes)
@@ -645,8 +973,10 @@ class DciDiagnosisReport:
                 or proposals[1].prerequisite_proposal_sha256
                 != proposals[0].proposal_sha256
                 or findings != diagnosis_bundle.findings
-                or set(evaluation_ids) != set(diagnosis_bundle.evaluation_sha256s)
+                or set(bundle_evaluation_ids)
+                != set(diagnosis_bundle.evaluation_sha256s)
                 or len(diagnosis_bundle.evaluation_sha256s) != len(_DATASET_ORDER)
+                + (0 if coverage_experiment is None else len(_COVERAGE_DATASETS))
                 or len(diagnosis_bundle.experiment_bundle_sha256s)
                 != len(_DATASET_ORDER)
                 or {item.proposal_sha256 for item in proposals}
@@ -654,17 +984,20 @@ class DciDiagnosisReport:
                 or tuple(item.proposal_sha256 for item in proposals)
                 != tuple(item.proposal_sha256 for item in expected_bundle_proposals)
                 or set(diagnosis_bundle.proposals) != set(expected_bundle_proposals)
+                or self.query_decomposition_gate != expected_gate
             ):
                 raise ValueError
             normalized = (
                 observations,
                 components,
                 findings,
-                _MISSING_CODES,
+                expected_missing,
                 _HYPOTHESIS_CODES,
                 proposals,
                 aggregate_metrics,
                 diagnosis_bundle,
+                coverage_experiment,
+                expected_gate,
             )
             for name, value in zip(
                 (
@@ -676,6 +1009,8 @@ class DciDiagnosisReport:
                     "proposals",
                     "aggregate_workflow_metrics",
                     "diagnosis_bundle",
+                    "coverage_experiment",
+                    "query_decomposition_gate",
                 ),
                 normalized,
                 strict=True,
@@ -702,7 +1037,7 @@ class DciDiagnosisReport:
         return {item.dataset_id: item.reference_status for item in self.observations}
 
     def _unsigned_mapping(self) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "schema": "asterion.dci.pathlight-diagnosis-report/v1",
             "observations": [item.to_mapping() for item in self.observations],
             "component_comparisons": [item.to_mapping() for item in self.component_comparisons],
@@ -713,6 +1048,10 @@ class DciDiagnosisReport:
             "aggregate_workflow_metrics": self.aggregate_workflow_metrics.to_mapping(),
             "diagnosis_bundle": self.diagnosis_bundle.to_mapping(),
         }
+        if self.coverage_experiment is not None:
+            value["coverage_experiment"] = self.coverage_experiment.to_mapping()
+            value["query_decomposition_gate"] = self.query_decomposition_gate
+        return value
 
     def to_mapping(self) -> dict[str, object]:
         return {**self._unsigned_mapping(), "report_sha256": self.report_sha256}
@@ -749,6 +1088,20 @@ def _copy_observation(value: object) -> DciDatasetObservation:
         resolution_coverage_status=value.resolution_coverage_status,
         aggregate_evaluation_sha256=value.aggregate_evaluation_sha256,
         workflow_metrics=_copy_workflow_metrics(value.workflow_metrics),
+        coverage_available_queries=value.coverage_available_queries,
+        coverage_total_queries=value.coverage_total_queries,
+        coverage_median_any_microunits=value.coverage_median_any_microunits,
+        coverage_median_mean_microunits=value.coverage_median_mean_microunits,
+        coverage_median_all_microunits=value.coverage_median_all_microunits,
+        retained_available_queries=value.retained_available_queries,
+        retained_median_microunits=value.retained_median_microunits,
+        tool_observation_count=value.tool_observation_count,
+        surfaced_gold_count=value.surfaced_gold_count,
+        model_call_count=value.model_call_count,
+        context_frame_count=value.context_frame_count,
+        missing_boundary_count=value.missing_boundary_count,
+        integrity_failure_count=value.integrity_failure_count,
+        coverage_evidence_sha256=value.coverage_evidence_sha256,
     )
 
 
@@ -842,11 +1195,20 @@ def _copy_pathlight_proposal(value: object) -> Proposal:
     return canonical
 
 
-def diagnose_recommended_pack(runs: object) -> DciDiagnosisReport:
+def diagnose_recommended_pack(
+    runs: object,
+    *,
+    coverage_experiment: DciCoverageExperimentObservation | None = None,
+) -> DciDiagnosisReport:
     """Diagnose exactly the six fixed recovered DCI cohorts without execution."""
 
     result: DciDiagnosisReport | None = None
     try:
+        coverage = (
+            None
+            if coverage_experiment is None
+            else _copy_coverage_experiment(coverage_experiment)
+        )
         normalized = _validate_pack(runs)
         experiments = {dataset_id: recovered_run_to_experiment(run) for dataset_id, run in normalized.items()}
         references = {dataset_id: load_paper_reference(dataset_id) for dataset_id in _DATASET_ORDER}
@@ -854,29 +1216,87 @@ def diagnose_recommended_pack(runs: object) -> DciDiagnosisReport:
             _observation(dataset_id, normalized[dataset_id], experiments[dataset_id], references[dataset_id])
             for dataset_id in _DATASET_ORDER
         )
+        observations = _merge_coverage_observations(observations, coverage)
         aggregate_ids = {item.dataset_id: item.aggregate_evaluation_sha256 for item in observations}
-        findings = _findings(observations, aggregate_ids)
+        missing_evidence = _missing_codes(coverage)
+        findings = _findings(
+            observations,
+            aggregate_ids,
+            missing_evidence,
+            coverage,
+        )
         bundle, public_proposals = _diagnosis_bundle(
-            experiments, aggregate_ids, findings, normalized
+            experiments, aggregate_ids, findings, normalized, coverage
         )
         comparisons = _component_comparisons(normalized)
         result = DciDiagnosisReport(
             observations=observations,
             component_comparisons=comparisons,
             findings=tuple(sorted(findings, key=lambda item: item.finding_sha256)),
-            missing_evidence=_MISSING_CODES,
+            missing_evidence=missing_evidence,
             hypothesis_codes=_HYPOTHESIS_CODES,
             proposals=public_proposals,
             aggregate_workflow_metrics=_aggregate_workflow_metrics(
                 tuple(case for run in normalized.values() for case in run.cases)
             ),
             diagnosis_bundle=bundle,
+            coverage_experiment=coverage,
+            query_decomposition_gate=(
+                "ready-for-authorization"
+                if coverage is not None and coverage.complete
+                else "blocked-by-coverage"
+            ),
         )
     except Exception:
         pass
     if result is None:
         raise DciDiagnosisError(_ERROR) from None
     return result
+
+
+def _merge_coverage_observations(
+    observations: tuple[DciDatasetObservation, ...],
+    coverage: DciCoverageExperimentObservation | None,
+) -> tuple[DciDatasetObservation, ...]:
+    if coverage is None:
+        return observations
+    by_dataset = {item.dataset_id: item for item in coverage.datasets}
+    return tuple(
+        item
+        if item.dataset_id not in by_dataset
+        else replace(
+            item,
+            coverage_available_queries=by_dataset[
+                item.dataset_id
+            ].coverage_available_queries,
+            coverage_total_queries=by_dataset[item.dataset_id].coverage_total_queries,
+            coverage_median_any_microunits=by_dataset[
+                item.dataset_id
+            ].coverage_median_any_microunits,
+            coverage_median_mean_microunits=by_dataset[
+                item.dataset_id
+            ].coverage_median_mean_microunits,
+            coverage_median_all_microunits=by_dataset[
+                item.dataset_id
+            ].coverage_median_all_microunits,
+            retained_available_queries=by_dataset[
+                item.dataset_id
+            ].retained_available_queries,
+            retained_median_microunits=by_dataset[
+                item.dataset_id
+            ].retained_median_microunits,
+            tool_observation_count=by_dataset[item.dataset_id].tool_observation_count,
+            surfaced_gold_count=by_dataset[item.dataset_id].surfaced_gold_count,
+            model_call_count=by_dataset[item.dataset_id].model_call_count,
+            context_frame_count=by_dataset[item.dataset_id].context_frame_count,
+            missing_boundary_count=by_dataset[item.dataset_id].missing_boundary_count,
+            integrity_failure_count=by_dataset[
+                item.dataset_id
+            ].integrity_failure_count,
+            coverage_evidence_sha256=by_dataset[item.dataset_id].evidence_sha256,
+        )
+        for item in observations
+    )
 
 
 def _validate_pack(runs: object) -> dict[str, DciRecoveredRun]:
@@ -1058,23 +1478,59 @@ def _finding(category: str, code: str, evidence: tuple[str, ...], counter: tuple
     return Finding(category, _digest("subject", code), tuple(sorted(evidence)), tuple(sorted(counter)), "confirmed" if category == "observed" else ("unknown" if category in {"missing-evidence", "not-comparable"} else "medium"), _digest("code", code))  # type: ignore[arg-type]
 
 
-def _findings(observations: tuple[DciDatasetObservation, ...], aggregate_ids: dict[str, str]) -> tuple[Finding, ...]:
+def _missing_codes(
+    coverage: DciCoverageExperimentObservation | None,
+) -> tuple[str, ...]:
+    if coverage is not None and coverage.complete:
+        return tuple(code for code in _MISSING_CODES if code != "retrieval-coverage")
+    return _MISSING_CODES
+
+
+def _findings(
+    observations: tuple[DciDatasetObservation, ...],
+    aggregate_ids: dict[str, str],
+    missing_codes: tuple[str, ...],
+    coverage: DciCoverageExperimentObservation | None,
+) -> tuple[Finding, ...]:
     observed = tuple(_finding("observed", f"observed:{item.dataset_id}", (item.aggregate_evaluation_sha256,)) for item in observations)
+    coverage_observed = (
+        ()
+        if coverage is None
+        else tuple(
+            _finding(
+                "observed",
+                f"observed:coverage:{item.dataset_id}",
+                (item.evidence_sha256,),
+            )
+            for item in coverage.datasets
+        )
+    )
     by_code = {item.finding_code_sha256: item for item in observed}
     def observed_id(dataset_id: str) -> str:
         return by_code[_digest("code", f"observed:{dataset_id}")].finding_sha256
     missing = tuple(
         _finding("missing-evidence", f"missing:{code}", tuple(sorted(aggregate_ids.values())))
-        for code in _MISSING_CODES
+        for code in missing_codes
     )
+    missing_by_code = dict(zip(missing_codes, missing, strict=True))
     not_comparable = _finding("not-comparable", "not-comparable:paper-reference", (aggregate_ids["bright.biology"],))
+    coverage_finding_ids = (
+        ()
+        if coverage is None
+        else tuple(item.finding_sha256 for item in coverage_observed)
+    )
+    context_evidence = (
+        (missing_by_code["retrieval-coverage"].finding_sha256,)
+        if "retrieval-coverage" in missing_by_code
+        else coverage_finding_ids
+    )
     hypotheses = (
         _finding("hypothesis", "hypothesis:retrieval-scale-noise", (observed_id("bright.biology"), observed_id("bright.earth-science")), (not_comparable.finding_sha256,)),
-        _finding("hypothesis", "hypothesis:query-decomposition", (observed_id("bright.biology"), observed_id("beir.scifact")), (not_comparable.finding_sha256,)),
-        _finding("hypothesis", "hypothesis:context-retention", (observed_id("bright.biology"), missing[_MISSING_CODES.index("retrieval-coverage")].finding_sha256), (not_comparable.finding_sha256,)),
-        _finding("hypothesis", "hypothesis:paper-method-difference", (observed_id("bright.biology"), not_comparable.finding_sha256), (missing[_MISSING_CODES.index("sealed-config-digest")].finding_sha256,)),
+        _finding("hypothesis", "hypothesis:query-decomposition", (observed_id("bright.biology"), observed_id("beir.scifact"), *coverage_finding_ids), (not_comparable.finding_sha256,)),
+        _finding("hypothesis", "hypothesis:context-retention", (observed_id("bright.biology"), *context_evidence), (not_comparable.finding_sha256,)),
+        _finding("hypothesis", "hypothesis:paper-method-difference", (observed_id("bright.biology"), not_comparable.finding_sha256), (missing_by_code["sealed-config-digest"].finding_sha256,)),
     )
-    return (*observed, *missing, not_comparable, *hypotheses)
+    return (*observed, *coverage_observed, *missing, not_comparable, *hypotheses)
 
 
 def _diagnosis_bundle(
@@ -1082,6 +1538,7 @@ def _diagnosis_bundle(
     aggregate_ids: dict[str, str],
     findings: tuple[Finding, ...],
     runs: Mapping[str, DciRecoveredRun],
+    coverage_experiment: DciCoverageExperimentObservation | None,
 ) -> tuple[DiagnosisBundle, tuple[DciProposalSummary, ...]]:
     coverage_scope = _proposal_scope(runs, _COVERAGE_DATASETS, "coverage")
     query_scope = _proposal_scope(runs, _BRIGHT_DATASETS, "paired-bright")
@@ -1090,7 +1547,16 @@ def _diagnosis_bundle(
     )
     bundle = DiagnosisBundle.build(
         experiment_bundle_sha256s=tuple(experiments[key].bundle_sha256 for key in _DATASET_ORDER),
-        evaluation_sha256s=tuple(aggregate_ids.values()), findings=findings, proposals=(coverage, decomposition),
+        evaluation_sha256s=(
+            *tuple(aggregate_ids.values()),
+            *(
+                ()
+                if coverage_experiment is None
+                else tuple(
+                    item.evidence_sha256 for item in coverage_experiment.datasets
+                )
+            ),
+        ), findings=findings, proposals=(coverage, decomposition),
     )
     summaries = (
         DciProposalSummary(
@@ -1304,6 +1770,7 @@ def render_chinese_diagnosis(report: object) -> str:
         canonical = DciDiagnosisReport(
             report.observations, report.component_comparisons, report.findings, report.missing_evidence,
             report.hypothesis_codes, report.proposals, report.aggregate_workflow_metrics, report.diagnosis_bundle,
+            report.coverage_experiment, report.query_decomposition_gate,
         )
         if not hmac.compare_digest(canonical.report_sha256, supplied_digest):
             raise ValueError
@@ -1320,19 +1787,37 @@ def render_chinese_diagnosis(report: object) -> str:
                 f"- 工具错误：{metrics.total_tool_error_count}；时间占比：工具/墙钟 {metrics.tool_time_share_microunits} 微单位、read/工具 {metrics.read_time_share_microunits} 微单位、grep/工具 {metrics.grep_time_share_microunits} 微单位。",
                 "",
             ))
+            if item.coverage_total_queries:
+                lines.extend((
+                    f"- 覆盖观测：可用 {item.coverage_available_queries}/{item.coverage_total_queries}；any/mean/all 中位数 {item.coverage_median_any_microunits}/{item.coverage_median_mean_microunits}/{item.coverage_median_all_microunits} 微单位；保留覆盖可用 {item.retained_available_queries}、中位数 {item.retained_median_microunits} 微单位。",
+                    f"- 轨迹计数：工具观测 {item.tool_observation_count}；浮现 gold {item.surfaced_gold_count}；模型调用 {item.model_call_count}；上下文帧 {item.context_frame_count}；缺失边界 {item.missing_boundary_count}；完整性失败 {item.integrity_failure_count}。",
+                    "",
+                ))
         lines.extend(("## 组件摘要关系", ""))
         for item in canonical.component_comparisons:
             lines.append(
                 f"- {_CN_DATASETS[item.dataset_id]} 的{_CN_COMPONENTS[item.component]}组件摘要关系：相对 Bright 生物学{('相同' if item.relation_to_bright_biology == 'same' else '不同')}。"
             )
+        if canonical.coverage_experiment is not None:
+            lines.extend((
+                "",
+                "- 覆盖与历史分数之间仅为观测相关性，不证明因果关系。",
+            ))
         lines.extend(["", "## 待验证假设", ""])
         lines.extend(f"- {_CN_HYPOTHESES[code]}。" for code in canonical.hypothesis_codes)
         lines.extend([
             "", "## 反证与不可比较项", "",
             "- 论文数值仅作参考，当前变体不可视为完全可比；因此没有跨数据集汇总分数或分数导出指标。",
-            "- 缺少封存配置、封存分析、装配/包谱系、轨迹图谱与检索覆盖率，不能把差值归因于任一组件。",
-            "", "## 证据缺口", "",
         ])
+        if canonical.coverage_experiment is None:
+            lines.append(
+                "- 缺少封存配置、封存分析、装配/包谱系、轨迹图谱与检索覆盖率，不能把差值归因于任一组件。"
+            )
+        else:
+            lines.append(
+                "- 覆盖观测只关闭检索覆盖率缺口；其余证据缺口仍禁止把差值归因于任一组件。"
+            )
+        lines.extend(["", "## 证据缺口", ""])
         lines.extend(f"- {_CN_MISSING[code]}" for code in canonical.missing_evidence)
         lines.extend(["", "## 最小受控实验", ""])
         for item in canonical.proposals:
@@ -1341,9 +1826,20 @@ def render_chinese_diagnosis(report: object) -> str:
                     f"- {_CN_PROPOSALS[item.code]}：状态 proposed；最多 {item.agent_operation_cap} 次 Agent 操作，成本上限 {item.max_cost_microusd} 微美元，基础设施失败停止线 {item.infrastructure_failure_stop}；覆盖 {len(item.dataset_case_counts)} 个数据集、每项 10 例；需运营者授权，当前未授权。"
                 )
             else:
-                lines.append(
-                    f"- {_CN_PROPOSALS[item.code]}：状态 proposed；最多 {item.agent_operation_cap} 次 Agent 操作，成本上限 {item.max_cost_microusd} 微美元；前提为覆盖率观测；最小平均 nDCG 增益 {item.minimum_mean_ndcg_gain_microunits} 微单位，成本或时间增长上限 {item.maximum_cost_or_time_increase_microunits} 微单位；覆盖 {len(item.dataset_case_counts)} 个数据集、每项 10 例；需运营者授权，当前未授权。"
-                )
+                if canonical.coverage_experiment is None:
+                    lines.append(
+                        f"- {_CN_PROPOSALS[item.code]}：状态 proposed；最多 {item.agent_operation_cap} 次 Agent 操作，成本上限 {item.max_cost_microusd} 微美元；前提为覆盖率观测；最小平均 nDCG 增益 {item.minimum_mean_ndcg_gain_microunits} 微单位，成本或时间增长上限 {item.maximum_cost_or_time_increase_microunits} 微单位；覆盖 {len(item.dataset_case_counts)} 个数据集、每项 10 例；需运营者授权，当前未授权。"
+                    )
+                else:
+                    gate = (
+                        "覆盖观测已完整，可申请单独授权"
+                        if canonical.query_decomposition_gate
+                        == "ready-for-authorization"
+                        else "覆盖观测未完整，授权门槛阻塞"
+                    )
+                    lines.append(
+                        f"- {_CN_PROPOSALS[item.code]}：状态 proposed；{gate}；最多 {item.agent_operation_cap} 次 Agent 操作，成本上限 {item.max_cost_microusd} 微美元；前提为覆盖率观测；最小平均 nDCG 增益 {item.minimum_mean_ndcg_gain_microunits} 微单位，成本或时间增长上限 {item.maximum_cost_or_time_increase_microunits} 微单位；覆盖 {len(item.dataset_case_counts)} 个数据集、每项 10 例；需运营者授权，当前未授权。"
+                    )
         rendered = "\n".join(lines) + "\n"
     except Exception:
         pass

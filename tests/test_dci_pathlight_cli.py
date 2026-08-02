@@ -13,6 +13,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from asterion.applications.dci_agent_lite.cli import main
+from asterion.applications.dci_agent_lite.pathlight_cli import (
+    main as pathlight_main,
+)
 from asterion.capabilities.dci.implementation.pathlight.conversion import (
     recovered_run_to_evaluation_bundle,
     recovered_run_to_experiment,
@@ -23,7 +26,7 @@ from asterion.capabilities.dci.implementation.pathlight.recovery import (
 )
 from asterion.pathlight.evaluation import write_evaluation_bundle
 from asterion.pathlight.experiment import write_experiment_bundle
-from tests.test_dci_pathlight_diagnosis import _DATASETS, _run
+from tests.test_dci_pathlight_diagnosis import _DATASETS, _coverage_pack, _run
 
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "dci" / "pathlight-recovery"
@@ -169,6 +172,36 @@ class TestDciPathlightCli(unittest.TestCase):
             self.assertEqual(
                 main(arguments, stdout=io.StringIO(), stderr=io.StringIO()), 0
             )
+
+    def test_diagnose_accepts_only_injected_safe_coverage_aggregate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            recovery_roots = []
+            for index, dataset in enumerate(_DATASETS):
+                recovery_root = root / f"recovery-{index}"
+                _write_recovery_triad(recovery_root, _run(*dataset))
+                recovery_roots.append(recovery_root)
+            output = root / "diagnosis"
+            output.mkdir(mode=0o700)
+            arguments = ["diagnose"]
+            for recovery_root in recovery_roots:
+                arguments.extend(("--recovery-root", str(recovery_root)))
+            arguments.extend(("--output-root", str(output)))
+
+            code = pathlight_main(
+                arguments,
+                stdout=io.StringIO(),
+                stderr=io.StringIO(),
+                coverage_experiment=_coverage_pack(),
+            )
+
+            self.assertEqual(code, 0)
+            rendered = (
+                output / "pathlight-dci-diagnosis.zh-CN.md"
+            ).read_text(encoding="utf-8")
+            self.assertIn("覆盖观测", rendered)
+            self.assertIn("可申请单独授权", rendered)
+            self.assertNotIn("SENTINEL_PRIVATE", rendered)
 
     def test_recover_never_removes_a_racing_final_target_it_does_not_own(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

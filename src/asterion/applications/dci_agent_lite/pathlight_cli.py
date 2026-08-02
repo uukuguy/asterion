@@ -20,6 +20,7 @@ from asterion.capabilities.dci.implementation.pathlight.conversion import (
     recovered_run_to_experiment,
 )
 from asterion.capabilities.dci.implementation.pathlight.diagnosis import (
+    DciCoverageExperimentObservation,
     diagnose_recommended_pack,
     render_chinese_diagnosis,
 )
@@ -74,6 +75,7 @@ def main(
     environment: Mapping[str, str] | None = None,
     package_sources: Sequence[CapabilityPackageSource] | None = None,
     experiment_host_factory: Callable[..., BenchmarkCommandHost] | None = None,
+    coverage_experiment: DciCoverageExperimentObservation | None = None,
 ) -> int:
     """Run one fixed DCI Pathlight command without touching application providers."""
 
@@ -99,7 +101,9 @@ def main(
         if values[0] == "recover":
             output = _recover(values[1:])
         elif values[0] == "diagnose":
-            output = _diagnose(values[1:])
+            output = _diagnose(
+                values[1:], coverage_experiment=coverage_experiment
+            )
         else:
             raise ValueError
         stdout.write(json.dumps(output, sort_keys=True, separators=(",", ":")) + "\n")
@@ -160,7 +164,11 @@ def _recover(arguments: tuple[str, ...]) -> dict[str, object]:
     }
 
 
-def _diagnose(arguments: tuple[str, ...]) -> dict[str, object]:
+def _diagnose(
+    arguments: tuple[str, ...],
+    *,
+    coverage_experiment: DciCoverageExperimentObservation | None = None,
+) -> dict[str, object]:
     roots, output_root = _diagnose_arguments(arguments)
     targets = {
         "diagnosis": output_root / DIAGNOSIS_BUNDLE_FILENAME,
@@ -170,7 +178,9 @@ def _diagnose(arguments: tuple[str, ...]) -> dict[str, object]:
     recovered = tuple(_read_verified_recovery(root) for root in roots)
     if tuple(sorted(run.dataset_id for run in recovered)) != _TARGET_DATASET_IDS:
         raise ValueError
-    report = diagnose_recommended_pack(recovered)
+    report = diagnose_recommended_pack(
+        recovered, coverage_experiment=coverage_experiment
+    )
     markdown = render_chinese_diagnosis(report)
     staging_root = _create_staging_root(output_root)
     staging_targets = {

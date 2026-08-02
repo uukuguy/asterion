@@ -10,6 +10,8 @@ from typing import Literal
 
 from asterion.capabilities.dci.implementation.pathlight.diagnosis import (
     DciAggregateWorkflowMetrics,
+    DciCoverageDatasetObservation,
+    DciCoverageExperimentObservation,
     DciDatasetObservation,
     DciDiagnosisError,
     DciDiagnosisReport,
@@ -88,6 +90,60 @@ def _with_cases(
     )
 
 
+_COVERAGE_DATASET_IDS = (
+    "bright.biology",
+    "bright.earth-science",
+    "bright.economics",
+    "bright.robotics",
+    "beir.scifact",
+)
+
+
+def _coverage_pack(
+    *, available_queries: int = 10, integrity_failure_count: int = 0
+) -> DciCoverageExperimentObservation:
+    datasets = tuple(
+        DciCoverageDatasetObservation(
+            dataset_id=dataset_id,
+            coverage_available_queries=available_queries,
+            coverage_total_queries=10,
+            coverage_median_any_microunits=(
+                800_000 if available_queries else None
+            ),
+            coverage_median_mean_microunits=(
+                600_000 if available_queries else None
+            ),
+            coverage_median_all_microunits=(
+                400_000 if available_queries else None
+            ),
+            retained_available_queries=available_queries,
+            retained_median_microunits=(500_000 if available_queries else None),
+            tool_observation_count=available_queries * 4,
+            surfaced_gold_count=available_queries * 2,
+            model_call_count=available_queries,
+            context_frame_count=available_queries,
+            missing_boundary_count=0,
+            integrity_failure_count=integrity_failure_count,
+            evidence_sha256=_sha256(f"coverage:{dataset_id}"),
+        )
+        for dataset_id in _COVERAGE_DATASET_IDS
+    )
+    return DciCoverageExperimentObservation(
+        plan_sha256=_sha256("coverage-plan"),
+        proposal_sha256=_sha256("coverage-proposal"),
+        scope_sha256=_sha256("coverage-scope"),
+        variant_sha256=_sha256("coverage-variant"),
+        registry_set_sha256=_sha256("coverage-registry-set"),
+        authorization_sha256=_sha256("coverage-authorization"),
+        receipt_set_sha256=_sha256("coverage-receipts"),
+        datasets=datasets,
+        agent_operation_count=available_queries * len(datasets),
+        judge_operation_count=0,
+        consumed_cost_microusd=1_250_000,
+        infrastructure_failure_count=0,
+    )
+
+
 class _RecoveredRunSubclass(DciRecoveredRun):
     pass
 
@@ -122,6 +178,168 @@ class TestDciPathlightDiagnosis(unittest.TestCase):
 
     def _diagnose(self) -> DciDiagnosisReport:
         return diagnose_recommended_pack(self.six_runs)
+
+    def test_completed_coverage_replaces_only_missing_coverage_and_opens_gate(
+        self,
+    ) -> None:
+        report = diagnose_recommended_pack(
+            self.six_runs,
+            coverage_experiment=_coverage_pack(),
+        )
+
+        self.assertNotIn("retrieval-coverage", report.missing_evidence)
+        self.assertEqual(
+            report.missing_evidence,
+            (
+                "assembly-lineage",
+                "package-lineage",
+                "sealed-analysis-digest",
+                "sealed-config-digest",
+                "trace-graph",
+            ),
+        )
+        coverage = {
+            item.dataset_id: item
+            for item in report.observations
+            if item.dataset_id in _COVERAGE_DATASET_IDS
+        }
+        self.assertEqual(set(coverage), set(_COVERAGE_DATASET_IDS))
+        for item in coverage.values():
+            self.assertEqual(item.coverage_available_queries, 10)
+            self.assertEqual(item.coverage_total_queries, 10)
+            self.assertEqual(item.coverage_median_any_microunits, 800_000)
+            self.assertEqual(item.coverage_median_mean_microunits, 600_000)
+            self.assertEqual(item.coverage_median_all_microunits, 400_000)
+        self.assertEqual(
+            report.query_decomposition_gate,
+            "ready-for-authorization",
+        )
+        self.assertTrue(
+            all(not proposal.execution_authorized for proposal in report.proposals)
+        )
+
+    def test_partial_or_integrity_failed_coverage_keeps_gate_blocked(self) -> None:
+        for coverage in (
+            _coverage_pack(available_queries=9),
+            _coverage_pack(integrity_failure_count=1),
+        ):
+            with self.subTest(coverage=coverage.experiment_sha256):
+                report = diagnose_recommended_pack(
+                    self.six_runs,
+                    coverage_experiment=coverage,
+                )
+                self.assertIn("retrieval-coverage", report.missing_evidence)
+                self.assertEqual(
+                    report.query_decomposition_gate,
+                    "blocked-by-coverage",
+                )
+                self.assertTrue(
+                    all(
+                        not proposal.execution_authorized
+                        for proposal in report.proposals
+                    )
+                )
+
+    def test_completed_coverage_renderer_is_correlation_only_and_safe(self) -> None:
+        report = diagnose_recommended_pack(
+            self.six_runs,
+            coverage_experiment=_coverage_pack(),
+        )
+        rendered = render_chinese_diagnosis(report)
+
+        for value in (800_000, 600_000, 400_000, 500_000, 40, 20, 10):
+            self.assertIn(str(value), rendered)
+        self.assertIn("观测相关性", rendered)
+        self.assertIn("不证明因果关系", rendered)
+        self.assertIn("可申请单独授权", rendered)
+        self.assertIn("当前未授权", rendered)
+        for forbidden in (
+            "SENTINEL_PRIVATE",
+            "source:",
+            "item:",
+            "provider",
+            "model",
+        ):
+            self.assertNotIn(forbidden, rendered)
+
+    def test_coverage_aggregate_rejects_reordering_subclasses_and_tampering(
+        self,
+    ) -> None:
+        coverage = _coverage_pack()
+        with self.assertRaises(ValueError):
+            DciCoverageExperimentObservation(
+                plan_sha256=coverage.plan_sha256,
+                proposal_sha256=coverage.proposal_sha256,
+                scope_sha256=coverage.scope_sha256,
+                variant_sha256=coverage.variant_sha256,
+                registry_set_sha256=coverage.registry_set_sha256,
+                authorization_sha256=coverage.authorization_sha256,
+                receipt_set_sha256=coverage.receipt_set_sha256,
+                datasets=tuple(reversed(coverage.datasets)),
+                agent_operation_count=50,
+                judge_operation_count=0,
+                consumed_cost_microusd=coverage.consumed_cost_microusd,
+                infrastructure_failure_count=0,
+            )
+
+        class CoverageSubclass(DciCoverageDatasetObservation):
+            pass
+
+        first = coverage.datasets[0]
+        with self.assertRaises(ValueError):
+            CoverageSubclass(
+                dataset_id=first.dataset_id,
+                coverage_available_queries=first.coverage_available_queries,
+                coverage_total_queries=first.coverage_total_queries,
+                coverage_median_any_microunits=(
+                    first.coverage_median_any_microunits
+                ),
+                coverage_median_mean_microunits=(
+                    first.coverage_median_mean_microunits
+                ),
+                coverage_median_all_microunits=(
+                    first.coverage_median_all_microunits
+                ),
+                retained_available_queries=first.retained_available_queries,
+                retained_median_microunits=first.retained_median_microunits,
+                tool_observation_count=first.tool_observation_count,
+                surfaced_gold_count=first.surfaced_gold_count,
+                model_call_count=first.model_call_count,
+                context_frame_count=first.context_frame_count,
+                missing_boundary_count=first.missing_boundary_count,
+                integrity_failure_count=first.integrity_failure_count,
+                evidence_sha256=first.evidence_sha256,
+            )
+
+        with self.assertRaises(ValueError):
+            DciCoverageDatasetObservation(
+                dataset_id=first.dataset_id,
+                coverage_available_queries=first.coverage_available_queries,
+                coverage_total_queries=first.coverage_total_queries,
+                coverage_median_any_microunits=(
+                    first.coverage_median_any_microunits
+                ),
+                coverage_median_mean_microunits=(
+                    first.coverage_median_mean_microunits
+                ),
+                coverage_median_all_microunits=None,
+                retained_available_queries=first.retained_available_queries,
+                retained_median_microunits=first.retained_median_microunits,
+                tool_observation_count=first.tool_observation_count,
+                surfaced_gold_count=first.surfaced_gold_count,
+                model_call_count=first.model_call_count,
+                context_frame_count=first.context_frame_count,
+                missing_boundary_count=first.missing_boundary_count,
+                integrity_failure_count=first.integrity_failure_count,
+                evidence_sha256=first.evidence_sha256,
+            )
+
+        object.__setattr__(coverage, "experiment_sha256", "0" * 64)
+        with self.assertRaisesRegex(DciDiagnosisError, "^DCI diagnosis is invalid$"):
+            diagnose_recommended_pack(
+                self.six_runs,
+                coverage_experiment=coverage,
+            )
 
     def test_diagnosis_separates_observed_hypothesis_missing_and_reference_only(self) -> None:
         report = self._diagnose()
