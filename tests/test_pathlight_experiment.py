@@ -340,12 +340,27 @@ class PathlightExperimentTests(unittest.TestCase):
             plan.experiment_plan_sha256, _digest("dataset-item"), variant.variant_sha256,
             _digest("trace"), (_digest("evaluation"),), "recovered", (),
         )
+        alternative_values: dict[tuple[str, str], object] = {
+            ("SubjectRef", "subject_kind"): "span",
+            ("DatasetSnapshot", "total_count"): 2,
+            ("DatasetSnapshot", "snapshot_version"): "1.0.1",
+            ("EvaluatorContract", "evaluator_kind"): "human",
+            ("EvaluatorContract", "contract_version"): "1.0.1",
+            ("CaseTrial", "evidence_state"): "observed",
+            ("CaseTrial", "missing_evidence"): ("context-frames",),
+        }
         matrices: tuple[tuple[Any, str, tuple[str, ...]], ...] = (
-            (subject, "subject_ref_sha256", ("subject_sha256",)),
+            (subject, "subject_ref_sha256", ("subject_sha256", "subject_kind")),
             (
                 dataset,
                 "dataset_snapshot_sha256",
-                ("dataset_contract_sha256", "content_sha256", "parent_snapshot_sha256"),
+                (
+                    "dataset_contract_sha256",
+                    "content_sha256",
+                    "parent_snapshot_sha256",
+                    "total_count",
+                    "snapshot_version",
+                ),
             ),
             (
                 evaluator,
@@ -356,6 +371,8 @@ class PathlightExperimentTests(unittest.TestCase):
                     "input_contract_sha256",
                     "output_contract_sha256",
                     "failure_semantics_sha256",
+                    "evaluator_kind",
+                    "contract_version",
                 ),
             ),
             (
@@ -397,6 +414,8 @@ class PathlightExperimentTests(unittest.TestCase):
                     "variant_sha256",
                     "trace_sha256",
                     "evaluation_sha256s",
+                    "evidence_state",
+                    "missing_evidence",
                 ),
             ),
         )
@@ -405,11 +424,15 @@ class PathlightExperimentTests(unittest.TestCase):
             for input_field in input_fields:
                 with self.subTest(type=type(value).__name__, field=input_field):
                     current = getattr(value, input_field)
-                    replacement = (
-                        (_digest(f"changed-{input_field}"),)
-                        if type(current) is tuple
-                        else _digest(f"changed-{input_field}")
-                    )
+                    alternative_key = (type(value).__name__, input_field)
+                    if alternative_key in alternative_values:
+                        replacement = alternative_values[alternative_key]
+                    else:
+                        replacement = (
+                            (_digest(f"changed-{input_field}"),)
+                            if type(current) is tuple
+                            else _digest(f"changed-{input_field}")
+                        )
                     mutated = replace(value, **{input_field: replacement})
 
                     self.assertNotEqual(
