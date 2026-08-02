@@ -4,6 +4,7 @@ import hashlib
 import json
 import tempfile
 import unittest
+from collections.abc import Mapping
 from pathlib import Path
 
 from asterion.pathlight import (
@@ -139,32 +140,55 @@ class PathlightQueryTests(unittest.TestCase):
 
     def test_catalog_projections_are_deeply_immutable(self) -> None:
         catalog = PathlightCatalog.build((self.bundle_a,), (self.evaluation_a,))
+        trace = catalog.show_trace(TRACE_A)
+        events = trace["events"]
+        assert isinstance(trace, dict)
+        assert isinstance(events, tuple)
+        event = events[0]
+        assert isinstance(event, dict)
+        attributes = event["attributes"]
+        summary = catalog.list_traces()[0]
+        metric = catalog.query_metrics()[0]
+        assert isinstance(attributes, dict)
+        assert isinstance(summary, dict)
+        assert isinstance(metric, dict)
 
         with self.assertRaises(TypeError):
-            catalog.show_trace(TRACE_A)["trace_id"] = TRACE_B  # type: ignore[index]
+            trace["trace_id"] = TRACE_B
         with self.assertRaises(TypeError):
-            catalog.show_trace(TRACE_A)["events"][0]["attributes"][
-                "missing_evidence"
-            ] = False  # type: ignore[index]
+            attributes["missing_evidence"] = False
         with self.assertRaises(TypeError):
-            catalog.list_traces()[0]["event_count"] = 0  # type: ignore[index]
+            summary["event_count"] = 0
         with self.assertRaises(TypeError):
-            catalog.query_metrics()[0]["status"] = "missing"  # type: ignore[index]
+            metric["status"] = "missing"
 
     def test_return_value_mutation_cannot_change_catalog_internal_state(self) -> None:
         catalog = PathlightCatalog.build((self.bundle_a,), (self.evaluation_a,))
         original_trace_sha256 = catalog.show_trace(TRACE_A)["trace_sha256"]
         returned_trace = catalog.show_trace(TRACE_A)
-        returned_attributes = returned_trace["events"][1]["attributes"]
+        returned_events = returned_trace["events"]
         returned_metric = catalog.query_metrics()[0]
+        assert isinstance(returned_trace, dict)
+        assert isinstance(returned_events, tuple)
+        returned_event = returned_events[1]
+        assert isinstance(returned_event, dict)
+        returned_attributes = returned_event["attributes"]
+        assert isinstance(returned_attributes, dict)
+        assert isinstance(returned_metric, dict)
 
-        dict.__setitem__(returned_trace, "trace_sha256", "0" * 64)  # type: ignore[arg-type]
-        dict.__setitem__(returned_attributes, "missing_evidence", False)  # type: ignore[arg-type]
-        dict.__setitem__(returned_metric, "status", "missing")  # type: ignore[arg-type]
+        dict.__setitem__(returned_trace, "trace_sha256", "0" * 64)
+        dict.__setitem__(returned_attributes, "missing_evidence", False)
+        dict.__setitem__(returned_metric, "status", "missing")
 
         next_trace = catalog.show_trace(TRACE_A)
+        next_events = next_trace["events"]
+        assert isinstance(next_events, tuple)
+        next_event = next_events[1]
+        assert isinstance(next_event, Mapping)
+        next_attributes = next_event["attributes"]
+        assert isinstance(next_attributes, Mapping)
         self.assertEqual(next_trace["trace_sha256"], original_trace_sha256)
-        self.assertIs(next_trace["events"][1]["attributes"]["missing_evidence"], True)
+        self.assertIs(next_attributes["missing_evidence"], True)
         self.assertEqual(catalog.query_metrics()[0]["status"], "observed")
 
     def test_direct_catalog_construction_validates_and_copies_inputs(self) -> None:

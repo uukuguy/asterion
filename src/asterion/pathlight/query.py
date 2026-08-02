@@ -53,18 +53,35 @@ class _FrozenDict(dict[str, object]):
     def __init__(self, values: Mapping[str, object]) -> None:
         dict.__init__(self, values)
 
-    def _immutable(self, *args: object, **kwargs: object) -> None:
-        del args, kwargs
+    def __delitem__(self, key: str) -> None:
+        del key
         raise TypeError("Pathlight projection is immutable")
 
-    __delitem__ = _immutable
-    __ior__ = _immutable
-    __setitem__ = _immutable
-    clear = _immutable
-    pop = _immutable
-    popitem = _immutable
-    setdefault = _immutable
-    update = _immutable
+    def __ior__(self, value: object) -> _FrozenDict:
+        del value
+        raise TypeError("Pathlight projection is immutable")
+
+    def __setitem__(self, key: str, value: object) -> None:
+        del key, value
+        raise TypeError("Pathlight projection is immutable")
+
+    def clear(self) -> None:
+        raise TypeError("Pathlight projection is immutable")
+
+    def pop(self, key: str, default: object = None) -> object:
+        del key, default
+        raise TypeError("Pathlight projection is immutable")
+
+    def popitem(self) -> tuple[str, object]:
+        raise TypeError("Pathlight projection is immutable")
+
+    def setdefault(self, key: str, default: object = None) -> object:
+        del key, default
+        raise TypeError("Pathlight projection is immutable")
+
+    def update(self, *args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise TypeError("Pathlight projection is immutable")
 
 
 def _require_sha256(value: object, *, field_name: str) -> str:

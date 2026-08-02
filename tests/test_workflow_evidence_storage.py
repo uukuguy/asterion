@@ -245,9 +245,15 @@ class WorkflowEvidenceStorageTests(unittest.TestCase):
             bundle.records[0]["tools"],
             ({"tool_sha256": _text_digest("search"), "calls": 1, "errors": 0},),
         )
-        self.assertEqual(bundle.records[0]["usage"]["input_tokens"], 3)
+        usage = bundle.records[0]["usage"]
+        artifacts = bundle.records[0]["artifacts"]
+        assert isinstance(usage, Mapping)
+        assert isinstance(artifacts, tuple)
+        artifact = artifacts[0]
+        assert isinstance(artifact, Mapping)
+        self.assertEqual(usage["input_tokens"], 3)
         self.assertEqual(
-            bundle.records[0]["artifacts"][0]["artifact_id_sha256"],
+            artifact["artifact_id_sha256"],
             _text_digest("answer"),
         )
 
@@ -474,7 +480,11 @@ class WorkflowEvidenceStorageTests(unittest.TestCase):
 
     def test_rejects_tampered_pathlight_graph_before_creating_output(self) -> None:
         trace = _completed_pathlight_trace()
-        trace["events"][0]["attributes"] = {"content_length": 1}
+        events = trace["events"]
+        assert isinstance(events, list)
+        event = events[0]
+        assert isinstance(event, dict)
+        event["attributes"] = {"content_length": 1}
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "workflow-evidence.json"
 
