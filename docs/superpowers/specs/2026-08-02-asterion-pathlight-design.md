@@ -1,7 +1,7 @@
 # Asterion Pathlight 设计
 
 **日期：** 2026-08-02  
-**状态：** Core 已验证；查询、评估、诊断与 Opik 互操作待实现
+**状态：** Core 已验证；查询与评估已实现、阶段验证进行中；诊断、受控优化与 Opik 互操作待实现
 **名称：** Asterion Pathlight — 路径可观测、评估与受控优化
 
 ## 目标
@@ -141,6 +141,97 @@ Opik 是 Pathlight 的重要外部工具和可选工作台，但不是 Asterion 
   adapter 对接 Opik；不在 framework core 引入 Opik SDK、自动装饰器或不稳定 REST 依赖。
 - **受控优化。** Opik 的 prompt/模型优化、评估和实验分析只能产生 Pathlight Proposal 的建议。
   仍由 Asterion 的操作员审批、预算、停止条件、授权和取消链路决定是否执行。
+
+### 从 Opik 源码吸收的规范对象
+
+Opik 的关键价值不是单独的 trace 页面，而是把 dataset item、experiment item、trace、feedback
+score 和 optimization history 连成一个可回溯闭环。Pathlight 将该思想收敛为以下领域中立、内容
+寻址的对象；它们属于 Asterion 契约，不依赖 Opik ID 或 Opik SDK：
+
+- `SubjectRef`：以 `trace`、`span`、`thread`、`experiment` 或 `case-trial` 类型和内容摘要标识一个
+  可评价对象。它使指标既能评价最终任务，也能评价一次检索、工具调用或跨轮会话。
+- `DatasetSnapshot`：绑定 dataset schema、数据来源契约、内容摘要、总样本数和可选父快照。名称或
+  “latest” 标签不能作为比较依据；恢复旧版本产生新快照，不改写历史快照。
+- `EvaluatorContract`：绑定 Metric contract、评价器类别、实现摘要、版本、输入/输出结构和失败
+  语义。LLM Judge 的模型/策略只保存安全版本摘要，凭据和原始 prompt 仍在操作员私有层。
+- `ExperimentPlan`：绑定一个 DatasetSnapshot、确定的 case scope、一个基线 variant、若干候选
+  variant、case 分派策略、EvaluatorContract 集合、预算/停止条件摘要和授权引用。它描述获准的
+  实验，不自行授予执行权限。
+- `Variant`：记录 assembly、能力包、实现、runtime、模型、工具、prompt contract 和策略的精确
+  摘要，以及相对基线的最小变更摘要。真实 prompt 或 provider 配置不得进入该对象。
+- `CaseTrial`：将一个 dataset item digest、一个 Variant、一次 Trace 和逐项 Evaluation 一一
+  关联。聚合分数必须能下钻到 CaseTrial，不能只保留一个总分。
+- `TrialHistory`：不可变记录 baseline、round、candidate、随机种子、安全用量、成本、最佳值、
+  停止原因和失败分布。并行只影响调度，不得改变 case identity、排序或聚合结果。
+- `Decision`：以 `accepted`、`rejected` 或 `inconclusive` 记录候选相对基线的最终结论、阈值、
+  Finding/TrialHistory 摘要和操作员审批引用。分数持平、证据不足或不可比较时默认保留基线。
+
+因此完整主线为：
+
+```text
+DatasetSnapshot → ExperimentPlan → Variant → CaseTrial → Trace / Span
+                                              │              │
+                                              └── Evaluation ┘
+                                                       │
+                                              Finding → Proposal
+                                                       │
+                                      TrialHistory → Decision
+```
+
+### 反馈、在线评估和回归
+
+借鉴 Opik 将 feedback score 绑定 trace/span/experiment item 的方式，Pathlight Evaluation 增加
+`SubjectRef`、EvaluatorContract、来源类别（规则、人工、Judge、回收）和评价者安全摘要。同名
+分数只有在 metric、evaluator、dataset snapshot、scope 和 coverage 全部一致时才能聚合或比较。
+
+在线采样规则建模为版本化 `EvaluationPolicy`，记录选择条件、采样率、评价器、预算和停止条件。
+规则本身不授权模型调用；需要 Judge 时仍经过 Asterion 的显式 authority、成本上限、取消和审计
+链路。确认的失败可以生成 regression case 候选，但必须由操作员决定是否纳入新的 DatasetSnapshot。
+
+人工反馈保留 reviewer identity digest、来源、时间、冲突状态和被评价 SubjectRef。人工与自动
+Judge 的结果不能无来源地覆盖彼此；冲突形成 Finding，而不是静默选择最后写入值。
+
+### 查询与分析模型
+
+Pathlight 吸收 Opik 查询语言的可组合过滤思想，但不在核心中执行任意查询字符串。查询 API 使用
+版本化、字段白名单、类型安全的 filter AST，并只作用于默认安全层。第一阶段的精确 CLI filter
+保持不变；后续 AST 是其兼容扩展，可表达组件、状态、时间、metric、dataset、experiment、
+variant 和 failure category 的交并条件。未知字段、私有字段和不受支持的操作符 fail closed。
+
+### Opik 映射与双向信任边界
+
+映射是版本化 adapter，而不是两个系统共享数据库：
+
+| Pathlight 权威对象 | Opik 外部镜像 | 边界 |
+|---|---|---|
+| Trace / Span / Thread | trace / span / thread | 只导出安全摘要和稳定关联 |
+| DatasetSnapshot | dataset version | Opik 名称/标签不能替代本地内容摘要 |
+| ExperimentPlan / Variant | experiment metadata | Opik 可视化实验，不获得执行权限 |
+| CaseTrial | experiment item | 只链接 dataset item digest、trace 和安全结果 |
+| Evaluation | feedback score | 必须携带 metric/evaluator 映射版本与来源 |
+| TrialHistory | optimization run/trial | 作为外部分析镜像，不是本地决策记录 |
+| Proposal / Decision | optimization suggestion/result | 导入后先成为非权威候选 |
+
+导出单位为不可变 `ExportEnvelope`：包含本地对象摘要、schema/mapping 版本、事件类型、幂等键、
+安全 payload 摘要和队列序号。operator-owned exporter 在 runner 外消费持久队列，记录
+`ExportReceipt`、重试类别和最终状态；网络、401、限流、服务升级或部分写入都不得改变任务和
+本地 Evaluation 结果。相同幂等键重发不得产生第二份逻辑对象。
+
+反向导入仅接受 feedback、实验分析和优化建议，先验证 connector identity、mapping 版本、对象
+摘要、metric/evaluator 可解析性和重复事件，再保存为 `ExternalObservation` 或
+`ProposalCandidate`。它们在本地复核、显式批准和受控试验前没有执行或评价权威；Opik 删除、
+修改或重新标记对象也不能改写 Pathlight 已存在的不可变事实。
+
+### 明确不吸收的 Opik 机制
+
+- 不在 framework core 引入 Opik SDK、全局客户端、自动装饰器或隐式网络发送。
+- 不把原始 prompt/response、dataset item、工具参数/输出或其可逆编码放入默认 trace。
+- 不让 Opik prompt registry 成为 Asterion manifest 权威；Pathlight 只记录 prompt contract 和
+  私有内容摘要，真实内容仍由 operator-owned evidence 管理。
+- 不把 Opik 项目名、对象 UUID、可变标签或“latest”当作 Asterion 的规范身份。
+- 不允许外部 optimizer 直接修改能力包、assembly、runtime、模型、工具、prompt 或预算。
+- 不让 Opik Dashboard、在线规则或 Guardrails 服务绕过 Asterion host authority；Pathlight 只
+  观察并关联其结果。
 
 导出时只允许 Pathlight 默认安全层：opaque/digest identity、状态、时延、token/可信成本、失败
 分类、版本摘要、metric 和已授权的安全 evidence reference。prompt、answer、语料、工具/模型
