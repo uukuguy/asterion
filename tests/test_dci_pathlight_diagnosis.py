@@ -9,8 +9,10 @@ from dataclasses import replace
 from typing import Literal
 
 from asterion.capabilities.dci.implementation.pathlight.diagnosis import (
+    DciDatasetObservation,
     DciDiagnosisError,
     DciDiagnosisReport,
+    DciWorkflowMetrics,
     diagnose_recommended_pack,
     render_chinese_diagnosis,
 )
@@ -21,6 +23,7 @@ from asterion.capabilities.dci.implementation.pathlight.recovery import (
     DciRecoveredVariant,
 )
 from asterion.capabilities.dci.implementation.pathlight.recovery import _build_recovered_run
+from asterion.pathlight.diagnosis import Finding
 
 
 _DATASETS: tuple[tuple[str, Literal["ir", "qa"], Literal["ndcg-at-10", "accuracy"], int, int, int], ...] = (
@@ -81,6 +84,30 @@ class _RecoveredRunSubclass(DciRecoveredRun):
     pass
 
 
+class _HostileObservation(DciDatasetObservation):
+    method_called = False
+
+    def to_mapping(self) -> dict[str, object]:
+        type(self).method_called = True
+        raise RuntimeError("SENTINEL_HOSTILE_OBSERVATION")
+
+
+class _HostileMetrics(DciWorkflowMetrics):
+    method_called = False
+
+    def to_mapping(self) -> dict[str, int]:
+        type(self).method_called = True
+        raise RuntimeError("SENTINEL_HOSTILE_METRICS")
+
+
+class _HostileFinding(Finding):
+    method_called = False
+
+    def to_mapping(self) -> dict[str, object]:
+        type(self).method_called = True
+        raise RuntimeError("SENTINEL_HOSTILE_FINDING")
+
+
 class TestDciPathlightDiagnosis(unittest.TestCase):
     def setUp(self) -> None:
         self.six_runs = tuple(_run(*dataset) for dataset in _DATASETS)
@@ -128,6 +155,118 @@ class TestDciPathlightDiagnosis(unittest.TestCase):
         self.assertTrue(all(proposal.requires_operator_authorization for proposal in report.proposals))
         self.assertTrue(all(not proposal.execution_authorized for proposal in report.proposals))
 
+    def test_resolution_and_complete_read_grep_timing_metrics_are_explicit(self) -> None:
+        report = self._diagnose()
+        self.assertEqual(
+            tuple(item.resolution_available_queries for item in report.observations),
+            (0, 0, 0, 0, 0, 0),
+        )
+        biology = next(item for item in report.observations if item.dataset_id == "bright.biology")
+        self.assertEqual(biology.resolution_total_queries, 103)
+        self.assertEqual(biology.resolution_coverage_status, "not-available")
+        self.assertEqual(biology.workflow_metrics.median_read_time_ns, 11)
+        self.assertEqual(biology.workflow_metrics.median_grep_time_ns, 30)
+        self.assertEqual(biology.workflow_metrics.read_time_share_microunits, 264919)
+        self.assertEqual(biology.workflow_metrics.grep_time_share_microunits, 735080)
+        rendered = render_chinese_diagnosis(report)
+        for item in report.observations:
+            self.assertIn(f"覆盖可用 0/{item.selected_count}", rendered)
+
+    def test_renderer_rejects_self_consistent_forged_nested_values_without_leakage(self) -> None:
+        mutations: tuple[tuple[str, object], ...] = (
+            ("score_microunits", "SENTINEL_RENDER_LEAK"),
+            ("selected_count", True),
+            ("failed_count", -1),
+            ("corpus_file_count", 1 << 63),
+        )
+        for attribute, value in mutations:
+            with self.subTest(attribute=attribute):
+                report = self._diagnose()
+                object.__setattr__(report.observations[0], attribute, value)
+                object.__setattr__(report, "report_sha256", _report_digest(report))
+                self._assert_render_error(report)
+
+        report = self._diagnose()
+        object.__setattr__(report, "findings", tuple(reversed(report.findings)))
+        object.__setattr__(report, "report_sha256", _report_digest(report))
+        self._assert_render_error(report)
+
+        report = self._diagnose()
+        object.__setattr__(report.proposals[0], "proposal_sha256", "0" * 64)
+        object.__setattr__(report, "report_sha256", _report_digest(report))
+        self._assert_render_error(report)
+
+        report = self._diagnose()
+        object.__setattr__(report, "report_sha256", "0" * 64)
+        self._assert_render_error(report)
+
+    def test_renderer_rejects_malicious_subclasses_without_calling_methods(self) -> None:
+        report = self._diagnose()
+        source = report.observations[0]
+        hostile = object.__new__(_HostileObservation)
+        for field_name in source.__dataclass_fields__:
+            object.__setattr__(hostile, field_name, getattr(source, field_name))
+        _HostileObservation.method_called = False
+        object.__setattr__(report, "observations", (hostile, *report.observations[1:]))
+        self._assert_render_error(report)
+        self.assertFalse(_HostileObservation.method_called)
+
+        report = self._diagnose()
+        source_metrics = report.observations[0].workflow_metrics
+        hostile_metrics = object.__new__(_HostileMetrics)
+        for field_name in source_metrics.__dataclass_fields__:
+            object.__setattr__(hostile_metrics, field_name, getattr(source_metrics, field_name))
+        _HostileMetrics.method_called = False
+        object.__setattr__(report.observations[0], "workflow_metrics", hostile_metrics)
+        self._assert_render_error(report)
+        self.assertFalse(_HostileMetrics.method_called)
+
+        report = self._diagnose()
+        source_finding = report.diagnosis_bundle.findings[0]
+        hostile_finding = object.__new__(_HostileFinding)
+        for field_name in source_finding.__dataclass_fields__:
+            object.__setattr__(hostile_finding, field_name, getattr(source_finding, field_name))
+        _HostileFinding.method_called = False
+        object.__setattr__(
+            report.diagnosis_bundle,
+            "findings",
+            (hostile_finding, *report.diagnosis_bundle.findings[1:]),
+        )
+        self._assert_render_error(report)
+        self.assertFalse(_HostileFinding.method_called)
+
+    def test_report_models_reject_nonexact_or_out_of_range_values(self) -> None:
+        report = self._diagnose()
+        metrics = report.aggregate_workflow_metrics
+        invalid_metrics = (
+            ("zero_score_rate_microunits", True),
+            ("read_time_share_microunits", -1),
+            ("grep_time_share_microunits", 1_000_001),
+            ("median_read_time_ns", 1 << 63),
+        )
+        for attribute, value in invalid_metrics:
+            mapping: dict[str, object] = {}
+            mapping.update(metrics.to_mapping())
+            mapping[attribute] = value
+            with self.subTest(attribute=attribute), self.assertRaises(ValueError):
+                DciWorkflowMetrics(**mapping)  # type: ignore[arg-type]
+
+        with self.assertRaises(ValueError):
+            replace(report.observations[0], dataset_id="SENTINEL_UNKNOWN_DATASET")
+        with self.assertRaises(ValueError):
+            replace(report.component_comparisons[0], component="unknown")
+        with self.assertRaises(ValueError):
+            replace(report.proposals[0], max_cost_microusd=-1)
+        with self.assertRaises(ValueError):
+            replace(report, findings=tuple(reversed(report.findings)))
+
+    def _assert_render_error(self, report: DciDiagnosisReport) -> None:
+        with self.assertRaisesRegex(DciDiagnosisError, "^DCI diagnosis is invalid$") as raised:
+            render_chinese_diagnosis(report)
+        self.assertIsNone(raised.exception.__cause__)
+        self.assertIsNone(raised.exception.__context__)
+        self.assertNotIn("SENTINEL", repr(raised.exception))
+
     def test_fails_closed_for_wrong_pack_or_hostile_values(self) -> None:
         original = self.six_runs[0]
         subclass = _RecoveredRunSubclass(
@@ -161,6 +300,19 @@ class TestDciPathlightDiagnosis(unittest.TestCase):
 
 def _json(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _report_digest(report: DciDiagnosisReport) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            {
+                "domain": "asterion.dci.pathlight.diagnosis/report/v1",
+                "value": report._unsigned_mapping(),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 if __name__ == "__main__":

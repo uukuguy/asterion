@@ -8,7 +8,9 @@ text, paths, runtime configuration, or provider/model names.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Literal
@@ -24,12 +26,18 @@ from asterion.capabilities.dci.implementation.pathlight.recovery import (
     DciRecoveredVariant,
     validate_recovered_run,
 )
-from asterion.pathlight.diagnosis import DiagnosisBundle, Finding, Proposal
+from asterion.pathlight.diagnosis import (
+    DiagnosisBundle,
+    Finding,
+    Proposal,
+    validate_finding,
+)
 from asterion.pathlight.experiment import ExperimentBundle
 
 
 _ERROR = "DCI diagnosis is invalid"
 _MAX_INT = (1 << 63) - 1
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _REQUIRED: dict[str, tuple[Literal["ir", "qa"], Literal["ndcg-at-10", "accuracy"], int]] = {
     "beir.scifact": ("ir", "ndcg-at-10", 300),
     "bright.biology": ("ir", "ndcg-at-10", 103),
@@ -84,6 +92,25 @@ def _checked(value: object) -> int:
     return value
 
 
+def _unit(value: object) -> int:
+    value = _checked(value)
+    if value > 1_000_000:
+        raise ValueError
+    return value
+
+
+def _signed(value: object) -> int:
+    if type(value) is not int or value < -_MAX_INT or value > _MAX_INT:
+        raise ValueError
+    return value
+
+
+def _sha256(value: object) -> str:
+    if type(value) is not str or _SHA256.fullmatch(value) is None:
+        raise ValueError
+    return value
+
+
 def _sum(values: tuple[int, ...]) -> int:
     total = 0
     for value in values:
@@ -100,6 +127,15 @@ def _ratio_microunits(numerator: int, denominator: int) -> int:
     return numerator * 1_000_000 // denominator
 
 
+def _time_share_microunits(numerator: int, denominator: int) -> int:
+    numerator, denominator = _checked(numerator), _checked(denominator)
+    if denominator == 0:
+        if numerator != 0:
+            raise ValueError
+        return 0
+    return _ratio_microunits(numerator, denominator)
+
+
 def _median(values: tuple[int, ...]) -> int:
     """Return the lower integer midpoint (floor((a+b)/2)) for even samples."""
 
@@ -114,7 +150,7 @@ def _median(values: tuple[int, ...]) -> int:
 
 @dataclass(frozen=True, slots=True)
 class DciWorkflowMetrics:
-    """Integer-only aggregate metrics; even-sized medians round down."""
+    """Integer-only metrics; even medians round down and read/grep share tool time."""
 
     zero_score_rate_microunits: int
     median_agent_total_tokens: int
@@ -123,9 +159,62 @@ class DciWorkflowMetrics:
     median_tool_time_ns: int
     median_read_call_count: int
     median_grep_call_count: int
+    median_read_time_ns: int
+    median_grep_time_ns: int
     median_question_word_count: int
     total_tool_error_count: int
+    total_wall_time_ns: int
+    total_tool_time_ns: int
+    total_read_time_ns: int
+    total_grep_time_ns: int
     tool_time_share_microunits: int
+    read_time_share_microunits: int
+    grep_time_share_microunits: int
+
+    def __post_init__(self) -> None:
+        natural_fields = (
+            self.median_agent_total_tokens,
+            self.median_tool_call_count,
+            self.median_wall_time_ns,
+            self.median_tool_time_ns,
+            self.median_read_call_count,
+            self.median_grep_call_count,
+            self.median_read_time_ns,
+            self.median_grep_time_ns,
+            self.median_question_word_count,
+            self.total_tool_error_count,
+            self.total_wall_time_ns,
+            self.total_tool_time_ns,
+            self.total_read_time_ns,
+            self.total_grep_time_ns,
+        )
+        try:
+            if type(self) is not DciWorkflowMetrics:
+                raise ValueError
+            for value in natural_fields:
+                _checked(value)
+            for value in (
+                self.zero_score_rate_microunits,
+                self.tool_time_share_microunits,
+                self.read_time_share_microunits,
+                self.grep_time_share_microunits,
+            ):
+                _unit(value)
+            if (
+                self.total_wall_time_ns == 0
+                or self.total_tool_time_ns
+                != self.total_read_time_ns + self.total_grep_time_ns
+                or self.total_tool_time_ns > self.total_wall_time_ns
+                or self.tool_time_share_microunits
+                != _ratio_microunits(self.total_tool_time_ns, self.total_wall_time_ns)
+                or self.read_time_share_microunits
+                != _time_share_microunits(self.total_read_time_ns, self.total_tool_time_ns)
+                or self.grep_time_share_microunits
+                != _time_share_microunits(self.total_grep_time_ns, self.total_tool_time_ns)
+            ):
+                raise ValueError
+        except Exception:
+            raise ValueError("invalid DCI workflow metrics") from None
 
     def to_mapping(self) -> dict[str, int]:
         return {
@@ -136,9 +225,17 @@ class DciWorkflowMetrics:
             "median_tool_time_ns": self.median_tool_time_ns,
             "median_read_call_count": self.median_read_call_count,
             "median_grep_call_count": self.median_grep_call_count,
+            "median_read_time_ns": self.median_read_time_ns,
+            "median_grep_time_ns": self.median_grep_time_ns,
             "median_question_word_count": self.median_question_word_count,
             "total_tool_error_count": self.total_tool_error_count,
+            "total_wall_time_ns": self.total_wall_time_ns,
+            "total_tool_time_ns": self.total_tool_time_ns,
+            "total_read_time_ns": self.total_read_time_ns,
+            "total_grep_time_ns": self.total_grep_time_ns,
             "tool_time_share_microunits": self.tool_time_share_microunits,
+            "read_time_share_microunits": self.read_time_share_microunits,
+            "grep_time_share_microunits": self.grep_time_share_microunits,
         }
 
 
@@ -154,8 +251,43 @@ class DciDatasetObservation:
     reference_score_microunits: int
     reference_gap_microunits: int
     reference_status: Literal["reference-only"]
+    resolution_available_queries: int
+    resolution_total_queries: int
+    resolution_coverage_status: Literal["not-available"]
     aggregate_evaluation_sha256: str
     workflow_metrics: DciWorkflowMetrics
+
+    def __post_init__(self) -> None:
+        try:
+            expected = _REQUIRED.get(self.dataset_id) if type(self.dataset_id) is str else None
+            if (
+                type(self) is not DciDatasetObservation
+                or expected is None
+                or type(self.metric_name) is not str
+                or self.metric_name != expected[1]
+                or self.selected_count != expected[2]
+                or self.total_count != expected[2]
+                or _checked(self.failed_count) > self.total_count
+                or _checked(self.corpus_file_count) > _MAX_INT
+                or _unit(self.score_microunits) != self.score_microunits
+                or _unit(self.reference_score_microunits) != self.reference_score_microunits
+                or _signed(self.reference_gap_microunits)
+                != self.score_microunits - self.reference_score_microunits
+                or type(self.reference_status) is not str
+                or self.reference_status != "reference-only"
+                or _checked(self.resolution_available_queries) > self.selected_count
+                or self.resolution_available_queries != 0
+                or self.resolution_total_queries != self.selected_count
+                or type(self.resolution_coverage_status) is not str
+                or self.resolution_coverage_status != "not-available"
+                or _sha256(self.aggregate_evaluation_sha256)
+                != self.aggregate_evaluation_sha256
+                or type(self.workflow_metrics) is not DciWorkflowMetrics
+            ):
+                raise ValueError
+            object.__setattr__(self, "workflow_metrics", _copy_workflow_metrics(self.workflow_metrics))
+        except Exception:
+            raise ValueError("invalid DCI dataset observation") from None
 
     def to_mapping(self) -> dict[str, object]:
         return {
@@ -169,6 +301,9 @@ class DciDatasetObservation:
             "reference_score_microunits": self.reference_score_microunits,
             "reference_gap_microunits": self.reference_gap_microunits,
             "reference_status": self.reference_status,
+            "resolution_available_queries": self.resolution_available_queries,
+            "resolution_total_queries": self.resolution_total_queries,
+            "resolution_coverage_status": self.resolution_coverage_status,
             "aggregate_evaluation_sha256": self.aggregate_evaluation_sha256,
             "workflow_metrics": self.workflow_metrics.to_mapping(),
         }
@@ -179,6 +314,18 @@ class DciComponentComparison:
     dataset_id: str
     component: Literal["runtime", "model", "toolset", "prompt", "context", "metric"]
     relation_to_bright_biology: Literal["same", "different"]
+
+    def __post_init__(self) -> None:
+        if (
+            type(self) is not DciComponentComparison
+            or type(self.dataset_id) is not str
+            or self.dataset_id not in _REQUIRED
+            or type(self.component) is not str
+            or self.component not in _COMPONENTS
+            or type(self.relation_to_bright_biology) is not str
+            or self.relation_to_bright_biology not in {"same", "different"}
+        ):
+            raise ValueError("invalid DCI component comparison")
 
     def to_mapping(self) -> dict[str, str]:
         return {
@@ -202,6 +349,39 @@ class DciProposalSummary:
     prerequisite_proposal_sha256: str | None
     minimum_mean_ndcg_gain_microunits: int | None
     maximum_cost_or_time_increase_microunits: int | None
+
+    def __post_init__(self) -> None:
+        try:
+            if (
+                type(self) is not DciProposalSummary
+                or type(self.code) is not str
+                or self.code not in _PROPOSAL_CODES
+                or _sha256(self.proposal_sha256) != self.proposal_sha256
+                or self.requires_operator_authorization is not True
+                or self.execution_authorized is not False
+            ):
+                raise ValueError
+            _checked(self.agent_operation_cap)
+            _checked(self.max_cost_microusd)
+            if self.code == "coverage-instrumentation":
+                expected = (50, 5_000_000, 2, None, None, None)
+            else:
+                if self.prerequisite_proposal_sha256 is None:
+                    raise ValueError
+                _sha256(self.prerequisite_proposal_sha256)
+                expected = (80, 8_000_000, None, self.prerequisite_proposal_sha256, 50_000, 250_000)
+            actual = (
+                self.agent_operation_cap,
+                self.max_cost_microusd,
+                self.infrastructure_failure_stop,
+                self.prerequisite_proposal_sha256,
+                self.minimum_mean_ndcg_gain_microunits,
+                self.maximum_cost_or_time_increase_microunits,
+            )
+            if actual != expected:
+                raise ValueError
+        except Exception:
+            raise ValueError("invalid DCI proposal summary") from None
 
     def to_mapping(self) -> dict[str, object]:
         return {
@@ -231,15 +411,121 @@ class DciDiagnosisReport:
     report_sha256: str = field(init=False)
 
     def __post_init__(self) -> None:
-        if (
-            tuple(item.dataset_id for item in self.observations) != _DATASET_ORDER
-            or self.missing_evidence != tuple(sorted(self.missing_evidence))
-            or self.hypothesis_codes != _HYPOTHESIS_CODES
-            or tuple(item.code for item in self.proposals) != _PROPOSAL_CODES
-            or any(item.execution_authorized or not item.requires_operator_authorization for item in self.proposals)
-        ):
-            raise ValueError("invalid diagnosis report")
-        object.__setattr__(self, "report_sha256", _digest("report", self._unsigned_mapping()))
+        try:
+            if type(self) is not DciDiagnosisReport or any(
+                type(value) is not tuple
+                for value in (
+                    self.observations,
+                    self.component_comparisons,
+                    self.findings,
+                    self.missing_evidence,
+                    self.hypothesis_codes,
+                    self.proposals,
+                )
+            ):
+                raise ValueError
+            observations = tuple(_copy_observation(item) for item in self.observations)
+            components = tuple(_copy_component(item) for item in self.component_comparisons)
+            findings = tuple(_copy_finding(item) for item in self.findings)
+            proposals = tuple(_copy_proposal_summary(item) for item in self.proposals)
+            aggregate_metrics = _copy_workflow_metrics(self.aggregate_workflow_metrics)
+            diagnosis_bundle = _copy_diagnosis_bundle(self.diagnosis_bundle)
+            expected_components = tuple(
+                (dataset_id, component)
+                for dataset_id in _DATASET_ORDER
+                for component in _COMPONENTS
+            )
+            expected_finding_codes = {
+                ("observed", _digest("code", f"observed:{dataset_id}"))
+                for dataset_id in _DATASET_ORDER
+            }
+            expected_finding_codes.update(
+                ("missing-evidence", _digest("code", f"missing:{code}"))
+                for code in _MISSING_CODES
+            )
+            expected_finding_codes.update(
+                ("hypothesis", _digest("code", f"hypothesis:{code}"))
+                for code in _HYPOTHESIS_CODES
+            )
+            expected_finding_codes.add(
+                ("not-comparable", _digest("code", "not-comparable:paper-reference"))
+            )
+            evaluation_ids = tuple(
+                item.aggregate_evaluation_sha256 for item in observations
+            )
+            expected_findings = tuple(
+                sorted(
+                    _findings(
+                        observations,
+                        {
+                            item.dataset_id: item.aggregate_evaluation_sha256
+                            for item in observations
+                        },
+                    ),
+                    key=lambda item: item.finding_sha256,
+                )
+            )
+            expected_bundle_proposals = _fixed_pathlight_proposals(expected_findings)
+            if (
+                tuple(item.dataset_id for item in observations) != _DATASET_ORDER
+                or len(set(evaluation_ids)) != len(evaluation_ids)
+                or tuple((item.dataset_id, item.component) for item in components)
+                != expected_components
+                or len({(item.dataset_id, item.component) for item in components})
+                != len(components)
+                or findings
+                != tuple(sorted(findings, key=lambda item: item.finding_sha256))
+                or findings != expected_findings
+                or len({item.finding_sha256 for item in findings}) != len(findings)
+                or {(item.category, item.finding_code_sha256) for item in findings}
+                != expected_finding_codes
+                or self.missing_evidence != _MISSING_CODES
+                or any(type(code) is not str for code in self.missing_evidence)
+                or self.hypothesis_codes != _HYPOTHESIS_CODES
+                or any(type(code) is not str for code in self.hypothesis_codes)
+                or tuple(item.code for item in proposals) != _PROPOSAL_CODES
+                or proposals[1].prerequisite_proposal_sha256
+                != proposals[0].proposal_sha256
+                or findings != diagnosis_bundle.findings
+                or set(evaluation_ids) != set(diagnosis_bundle.evaluation_sha256s)
+                or len(diagnosis_bundle.evaluation_sha256s) != len(_DATASET_ORDER)
+                or len(diagnosis_bundle.experiment_bundle_sha256s)
+                != len(_DATASET_ORDER)
+                or {item.proposal_sha256 for item in proposals}
+                != {item.proposal_sha256 for item in diagnosis_bundle.proposals}
+                or tuple(item.proposal_sha256 for item in proposals)
+                != tuple(item.proposal_sha256 for item in expected_bundle_proposals)
+                or set(diagnosis_bundle.proposals) != set(expected_bundle_proposals)
+            ):
+                raise ValueError
+            normalized = (
+                observations,
+                components,
+                findings,
+                _MISSING_CODES,
+                _HYPOTHESIS_CODES,
+                proposals,
+                aggregate_metrics,
+                diagnosis_bundle,
+            )
+            for name, value in zip(
+                (
+                    "observations",
+                    "component_comparisons",
+                    "findings",
+                    "missing_evidence",
+                    "hypothesis_codes",
+                    "proposals",
+                    "aggregate_workflow_metrics",
+                    "diagnosis_bundle",
+                ),
+                normalized,
+                strict=True,
+            ):
+                object.__setattr__(self, name, value)
+            object.__setattr__(self, "report_sha256", _digest("report", self._unsigned_mapping()))
+        except Exception:
+            raise ValueError("invalid DCI diagnosis report") from None
 
     @property
     def dataset_count(self) -> int:
@@ -272,6 +558,118 @@ class DciDiagnosisReport:
 
     def to_mapping(self) -> dict[str, object]:
         return {**self._unsigned_mapping(), "report_sha256": self.report_sha256}
+
+
+def _copy_workflow_metrics(value: object) -> DciWorkflowMetrics:
+    if type(value) is not DciWorkflowMetrics:
+        raise ValueError
+    return DciWorkflowMetrics(**value.to_mapping())
+
+
+def _copy_observation(value: object) -> DciDatasetObservation:
+    if type(value) is not DciDatasetObservation:
+        raise ValueError
+    return DciDatasetObservation(
+        dataset_id=value.dataset_id,
+        metric_name=value.metric_name,
+        selected_count=value.selected_count,
+        total_count=value.total_count,
+        failed_count=value.failed_count,
+        corpus_file_count=value.corpus_file_count,
+        score_microunits=value.score_microunits,
+        reference_score_microunits=value.reference_score_microunits,
+        reference_gap_microunits=value.reference_gap_microunits,
+        reference_status=value.reference_status,
+        resolution_available_queries=value.resolution_available_queries,
+        resolution_total_queries=value.resolution_total_queries,
+        resolution_coverage_status=value.resolution_coverage_status,
+        aggregate_evaluation_sha256=value.aggregate_evaluation_sha256,
+        workflow_metrics=_copy_workflow_metrics(value.workflow_metrics),
+    )
+
+
+def _copy_component(value: object) -> DciComponentComparison:
+    if type(value) is not DciComponentComparison:
+        raise ValueError
+    return DciComponentComparison(
+        value.dataset_id, value.component, value.relation_to_bright_biology
+    )
+
+
+def _copy_proposal_summary(value: object) -> DciProposalSummary:
+    if type(value) is not DciProposalSummary:
+        raise ValueError
+    return DciProposalSummary(
+        value.code,
+        value.proposal_sha256,
+        value.requires_operator_authorization,
+        value.execution_authorized,
+        value.agent_operation_cap,
+        value.max_cost_microusd,
+        value.infrastructure_failure_stop,
+        value.prerequisite_proposal_sha256,
+        value.minimum_mean_ndcg_gain_microunits,
+        value.maximum_cost_or_time_increase_microunits,
+    )
+
+
+def _copy_finding(value: object) -> Finding:
+    if type(value) is not Finding:
+        raise ValueError
+    return validate_finding(value.to_mapping())
+
+
+def _copy_diagnosis_bundle(value: object) -> DiagnosisBundle:
+    if type(value) is not DiagnosisBundle:
+        raise ValueError
+    if any(
+        type(items) is not tuple
+        for items in (
+            value.experiment_bundle_sha256s,
+            value.evaluation_sha256s,
+            value.findings,
+            value.proposals,
+        )
+    ):
+        raise ValueError
+    experiment_ids = tuple(_sha256(item) for item in value.experiment_bundle_sha256s)
+    evaluation_ids = tuple(_sha256(item) for item in value.evaluation_sha256s)
+    findings = tuple(_copy_finding(item) for item in value.findings)
+    proposals = tuple(_copy_pathlight_proposal(item) for item in value.proposals)
+    canonical = DiagnosisBundle.build(
+        experiment_bundle_sha256s=experiment_ids,
+        evaluation_sha256s=evaluation_ids,
+        findings=findings,
+        proposals=proposals,
+    )
+    if (
+        experiment_ids != tuple(sorted(experiment_ids))
+        or evaluation_ids != tuple(sorted(evaluation_ids))
+        or findings != canonical.findings
+        or proposals != canonical.proposals
+        or not hmac.compare_digest(_sha256(value.bundle_sha256), canonical.bundle_sha256)
+    ):
+        raise ValueError
+    return canonical
+
+
+def _copy_pathlight_proposal(value: object) -> Proposal:
+    if type(value) is not Proposal:
+        raise ValueError
+    canonical = Proposal(
+        value.finding_sha256,
+        value.change_sha256,
+        value.scope_sha256,
+        value.success_criteria_sha256,
+        value.stop_criteria_sha256,
+        value.budget_sha256,
+        value.status,
+        value.requires_operator_authorization,
+        value.execution_authorized,
+    )
+    if not hmac.compare_digest(_sha256(value.proposal_sha256), canonical.proposal_sha256):
+        raise ValueError
+    return canonical
 
 
 def diagnose_recommended_pack(runs: object) -> DciDiagnosisReport:
@@ -379,10 +777,25 @@ def _observation(
     gap = run.metric_value_microunits - reference.value_microunits
     if gap < -_MAX_INT or gap > _MAX_INT:
         raise ValueError
+    resolution_available_queries = sum(
+        case.resolution_status == "available" for case in run.cases
+    )
     return DciDatasetObservation(
-        dataset_id, run.metric_name, run.selected_count, run.total_count, run.failed_count,
-        run.corpus_file_count, run.metric_value_microunits, reference.value_microunits, gap,
-        reference.comparison_status, aggregates[0].evaluation_sha256, _workflow_metrics(run.cases),
+        dataset_id=dataset_id,
+        metric_name=run.metric_name,
+        selected_count=run.selected_count,
+        total_count=run.total_count,
+        failed_count=run.failed_count,
+        corpus_file_count=run.corpus_file_count,
+        score_microunits=run.metric_value_microunits,
+        reference_score_microunits=reference.value_microunits,
+        reference_gap_microunits=gap,
+        reference_status=reference.comparison_status,
+        resolution_available_queries=resolution_available_queries,
+        resolution_total_queries=run.selected_count,
+        resolution_coverage_status="not-available",
+        aggregate_evaluation_sha256=aggregates[0].evaluation_sha256,
+        workflow_metrics=_workflow_metrics(run.cases),
     )
 
 
@@ -395,13 +808,27 @@ def _workflow_metrics(cases: tuple[DciRecoveredCase, ...]) -> DciWorkflowMetrics
     zero_count = sum(case.metric_value_microunits == 0 for case in cases)
     wall = _sum(values("wall_time_ns"))
     tool = _sum(values("tool_time_ns"))
+    read = _sum(values("read_time_ns"))
+    grep = _sum(values("grep_time_ns"))
     return DciWorkflowMetrics(
-        _ratio_microunits(zero_count, len(cases)),
-        _median(values("agent_total_tokens")), _median(values("tool_call_count")),
-        _median(values("wall_time_ns")), _median(values("tool_time_ns")),
-        _median(values("read_call_count")), _median(values("grep_call_count")),
-        _median(values("question_word_count")), _sum(values("tool_error_count")),
-        _ratio_microunits(tool, wall),
+        zero_score_rate_microunits=_ratio_microunits(zero_count, len(cases)),
+        median_agent_total_tokens=_median(values("agent_total_tokens")),
+        median_tool_call_count=_median(values("tool_call_count")),
+        median_wall_time_ns=_median(values("wall_time_ns")),
+        median_tool_time_ns=_median(values("tool_time_ns")),
+        median_read_call_count=_median(values("read_call_count")),
+        median_grep_call_count=_median(values("grep_call_count")),
+        median_read_time_ns=_median(values("read_time_ns")),
+        median_grep_time_ns=_median(values("grep_time_ns")),
+        median_question_word_count=_median(values("question_word_count")),
+        total_tool_error_count=_sum(values("tool_error_count")),
+        total_wall_time_ns=wall,
+        total_tool_time_ns=tool,
+        total_read_time_ns=read,
+        total_grep_time_ns=grep,
+        tool_time_share_microunits=_ratio_microunits(tool, wall),
+        read_time_share_microunits=_time_share_microunits(read, tool),
+        grep_time_share_microunits=_time_share_microunits(grep, tool),
     )
 
 
@@ -448,6 +875,19 @@ def _diagnosis_bundle(
     aggregate_ids: dict[str, str],
     findings: tuple[Finding, ...],
 ) -> tuple[DiagnosisBundle, tuple[DciProposalSummary, ...]]:
+    coverage, decomposition = _fixed_pathlight_proposals(findings)
+    bundle = DiagnosisBundle.build(
+        experiment_bundle_sha256s=tuple(experiments[key].bundle_sha256 for key in _DATASET_ORDER),
+        evaluation_sha256s=tuple(aggregate_ids.values()), findings=findings, proposals=(coverage, decomposition),
+    )
+    summaries = (
+        DciProposalSummary("coverage-instrumentation", coverage.proposal_sha256, True, False, 50, 5_000_000, 2, None, None, None),
+        DciProposalSummary("retrieval-query-decomposition", decomposition.proposal_sha256, True, False, 80, 8_000_000, None, coverage.proposal_sha256, 50_000, 250_000),
+    )
+    return bundle, summaries
+
+
+def _fixed_pathlight_proposals(findings: tuple[Finding, ...]) -> tuple[Proposal, Proposal]:
     hypothesis = {
         code: next(item for item in findings if item.finding_code_sha256 == _digest("code", f"hypothesis:{code}"))
         for code in _HYPOTHESIS_CODES
@@ -465,15 +905,7 @@ def _diagnosis_bundle(
         _digest("proposal-stop", "coverage-proposal-must-succeed"),
         _digest("proposal-budget", {"agent_operations": 80, "max_cost_microusd": 8_000_000}),
     )
-    bundle = DiagnosisBundle.build(
-        experiment_bundle_sha256s=tuple(experiments[key].bundle_sha256 for key in _DATASET_ORDER),
-        evaluation_sha256s=tuple(aggregate_ids.values()), findings=findings, proposals=(coverage, decomposition),
-    )
-    summaries = (
-        DciProposalSummary("coverage-instrumentation", coverage.proposal_sha256, True, False, 50, 5_000_000, 2, None, None, None),
-        DciProposalSummary("retrieval-query-decomposition", decomposition.proposal_sha256, True, False, 80, 8_000_000, None, coverage.proposal_sha256, 50_000, 250_000),
-    )
-    return bundle, summaries
+    return coverage, decomposition
 
 
 _CN_DATASETS = {
@@ -495,27 +927,30 @@ _CN_MISSING = {
 def render_chinese_diagnosis(report: object) -> str:
     """Render only fixed Chinese dictionaries plus safe numeric report fields."""
 
-    if type(report) is not DciDiagnosisReport:
-        raise DciDiagnosisError(_ERROR)
+    rendered: str | None = None
     try:
-        checked = DciDiagnosisReport(
+        if type(report) is not DciDiagnosisReport:
+            raise ValueError
+        supplied_digest = _sha256(report.report_sha256)
+        canonical = DciDiagnosisReport(
             report.observations, report.component_comparisons, report.findings, report.missing_evidence,
             report.hypothesis_codes, report.proposals, report.aggregate_workflow_metrics, report.diagnosis_bundle,
         )
-        if checked.report_sha256 != report.report_sha256:
+        if not hmac.compare_digest(canonical.report_sha256, supplied_digest):
             raise ValueError
         lines = ["# DCI 差分诊断", "", "## 已证实事实", ""]
-        for item in report.observations:
-            lines.append(f"- {_CN_DATASETS[item.dataset_id]}：{_CN_METRICS[item.metric_name]} {item.score_microunits} 微单位；样本 {item.selected_count}/{item.total_count}；论文差值 {item.reference_gap_microunits} 微单位（仅参考）。")
+        for item in canonical.observations:
+            lines.append(f"- {_CN_DATASETS[item.dataset_id]}：{_CN_METRICS[item.metric_name]} {item.score_microunits} 微单位；样本 {item.selected_count}/{item.total_count}；覆盖可用 {item.resolution_available_queries}/{item.resolution_total_queries}；论文差值 {item.reference_gap_microunits} 微单位（仅参考）。")
         lines.extend(["", "## 待验证假设", ""])
-        lines.extend(f"- {_CN_HYPOTHESES[code]}。" for code in report.hypothesis_codes)
+        lines.extend(f"- {_CN_HYPOTHESES[code]}。" for code in canonical.hypothesis_codes)
         lines.extend(["", "## 反证与不可比较项", "", "- 论文数值仅作参考，当前变体不可视为完全可比。", "", "## 证据缺口", ""])
-        lines.extend(f"- {_CN_MISSING[code]}" for code in report.missing_evidence)
+        lines.extend(f"- {_CN_MISSING[code]}" for code in canonical.missing_evidence)
         lines.extend(["", "## 最小受控实验", ""])
-        for item in report.proposals:
+        for item in canonical.proposals:
             lines.append(f"- {_CN_PROPOSALS[item.code]}：最多 {item.agent_operation_cap} 次 Agent 操作，成本上限 {item.max_cost_microusd} 微美元；需运营者授权，当前未授权。")
-        return "\n".join(lines) + "\n"
-    except DciDiagnosisError:
-        raise
+        rendered = "\n".join(lines) + "\n"
     except Exception:
+        pass
+    if rendered is None:
         raise DciDiagnosisError(_ERROR) from None
+    return rendered
