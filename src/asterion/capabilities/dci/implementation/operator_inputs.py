@@ -71,6 +71,15 @@ _RESOURCE_PATHS = {
         "corpus/wiki_corpus",
     ),
 }
+_COVERAGE_TASK_IDS = frozenset(
+    {
+        "beir.scifact",
+        "bright.biology",
+        "bright.earth-science",
+        "bright.economics",
+        "bright.robotics",
+    }
+)
 
 
 class DciBenchmarkOperatorInputError(ValueError):
@@ -84,6 +93,10 @@ class DciBenchmarkOperatorInputs:
     dataset_roots: Mapping[str, Path] = field(repr=False)
     corpus_roots: Mapping[str, Path] = field(repr=False)
     private_environment: Mapping[str, str] = field(repr=False)
+    coverage_registry_roots: Mapping[str, Path] = field(
+        default_factory=dict,
+        repr=False,
+    )
     amount: Decimal | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
@@ -101,6 +114,11 @@ class DciBenchmarkOperatorInputs:
             self,
             "private_environment",
             _snapshot_environment(self.private_environment),
+        )
+        object.__setattr__(
+            self,
+            "coverage_registry_roots",
+            _snapshot_coverage_paths(self.coverage_registry_roots),
         )
         if self.amount is not None and (
             type(self.amount) is not Decimal
@@ -203,6 +221,20 @@ def _snapshot_environment(values: Mapping[str, str]) -> Mapping[str, str]:
             "DCI benchmark operator input is invalid"
         )
     return MappingProxyType(snapshot)
+
+
+def _snapshot_coverage_paths(values: Mapping[str, Path]) -> Mapping[str, Path]:
+    snapshot = _snapshot_paths(values)
+    if any(
+        task_id not in _COVERAGE_TASK_IDS
+        or path.name != "registry.json"
+        or path.parent.name != task_id
+        for task_id, path in snapshot.items()
+    ):
+        raise DciBenchmarkOperatorInputError(
+            "DCI benchmark operator input is invalid"
+        )
+    return snapshot
 
 
 def _absolute_path(value: object) -> Path:

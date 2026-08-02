@@ -43,6 +43,9 @@ from asterion.capabilities.dci.implementation.evaluation.judge import (
     judge_prompt_contract_sha256,
     judge_request_shape_sha256,
 )
+from asterion.capabilities.dci.implementation.pathlight.coverage import (
+    coverage_query_sha256,
+)
 from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import (
     DatasetInputBinding,
     canonical_sha256,
@@ -2370,6 +2373,78 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
 
         run.assert_not_called()
 
+    def test_coverage_registry_mismatch_fails_before_agent_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            request = _coverage_request(root)
+            cases = (
+                (
+                    "dataset",
+                    _write_coverage_registry(
+                        root / "wrong-dataset",
+                        dataset_id="bright.robotics",
+                        selected_query_id="q-000",
+                    ),
+                ),
+                (
+                    "scope",
+                    _write_coverage_registry(
+                        root / "wrong-scope",
+                        dataset_id="bright.biology",
+                        selected_query_id="q-outside-scope",
+                    ),
+                ),
+            )
+            for label, registry in cases:
+                with self.subTest(mismatch=label):
+                    with patch(
+                        "asterion.capabilities.dci.implementation.evaluation.benchmark._run_pi_async"
+                    ) as agent:
+                        with self.assertRaisesRegex(
+                            DciBenchmarkError,
+                            "^DCI benchmark coverage registry is incompatible$",
+                        ):
+                            run_benchmark(
+                                replace(
+                                    request,
+                                    coverage_registry=registry,
+                                    output_root=root / f"out-{label}",
+                                ),
+                                paths=resolve_dci_paths(root),
+                            )
+                        agent.assert_not_called()
+
+    def test_valid_coverage_registry_binds_private_snapshots_without_path_leak(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            private_root = root / "PRIVATE_COVERAGE_SENTINEL"
+            registry = _write_coverage_registry(
+                private_root,
+                dataset_id="bright.biology",
+                selected_query_id="q-000",
+            )
+
+            _rows, _output, config, items, snapshots = _prepare(
+                replace(
+                    _coverage_request(root),
+                    coverage_registry=registry,
+                )
+            )
+
+        rendered = json.dumps(config, sort_keys=True)
+        self.assertNotIn(str(private_root), rendered)
+        self.assertEqual(
+            config["coverage"]["registry"]["relative_path"],
+            "registry.json",
+        )
+        self.assertIn("coverage", items[0]["identity"])
+        self.assertEqual(
+            set(snapshots),
+            {"coverage_registry", "coverage_manifest_0000"},
+        )
+
     def test_expected_output_identity_rejects_replacement_before_evidence_write(
         self,
     ) -> None:
@@ -2463,6 +2538,97 @@ def _resolution_request(root: Path, *, overlap: float) -> BenchmarkRequest:
         resolution_read_minimum_evidence_overlap=overlap,
         conversation_features=DciConversationFeatures(externalize_tool_results=True),
     )
+
+
+def _coverage_request(root: Path) -> BenchmarkRequest:
+    dataset = root / "bright-biology.jsonl"
+    dataset.write_text(
+        "".join(
+            json.dumps(
+                {
+                    "query_id": f"q-{index:03d}",
+                    "query": f"question {index}",
+                    "answer": "unused",
+                    "excluded_ids": [f"excluded-{index:03d}.txt"],
+                    "gold_ids": [f"doc-{index:03d}.txt"],
+                    "gold_ids_long": [f"doc-{index:03d}.txt"],
+                    "id": f"row-{index:03d}",
+                    "reasoning": "fixture",
+                }
+            )
+            + "\n"
+            for index in range(103)
+        ),
+        encoding="utf-8",
+    )
+    corpus = root / "corpus"
+    corpus.mkdir()
+    (corpus / "doc-000.txt").write_text("evidence\n", encoding="utf-8")
+    return BenchmarkRequest(
+        dataset=dataset,
+        output_root=root / "out",
+        cwd=root,
+        judge_config=JudgeConfig(api_key=None),
+        runtime_options=DciRuntimeOptions(provider=None, model=None),
+        limit=1,
+        mode="ir",
+        profile="asterion-safe/pi",
+        dataset_profile="bright.biology",
+        corpus=corpus,
+        conversation_features=DciConversationFeatures(
+            externalize_tool_results=True
+        ),
+        analysis=False,
+        figures=False,
+    )
+
+
+def _write_coverage_registry(
+    root: Path,
+    *,
+    dataset_id: str,
+    selected_query_id: str,
+) -> Path:
+    manifests = root / "manifests"
+    manifests.mkdir(parents=True)
+    query_id = "q-000"
+    query_sha256 = coverage_query_sha256(query_id)
+    body = "evidence\n"
+    manifest = {
+        "schema": "dci.retrieval-coverage-manifest/v1",
+        "dataset_id": dataset_id,
+        "query_id": query_id,
+        "documents": [
+            {
+                "id": "doc-000.txt",
+                "path": "doc-000.txt",
+                "sha256": hashlib.sha256(body.encode()).hexdigest(),
+            }
+        ],
+    }
+    manifest_bytes = (
+        json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode()
+    manifest_path = manifests / f"{query_sha256}.json"
+    manifest_path.write_bytes(manifest_bytes)
+    registry = {
+        "schema": "dci.retrieval-coverage-registry/v1",
+        "dataset_id": dataset_id,
+        "selected_ids_sha256": canonical_sha256((selected_query_id,)),
+        "manifests": [
+            {
+                "query_sha256": query_sha256,
+                "path": f"manifests/{query_sha256}.json",
+                "sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+            }
+        ],
+    }
+    registry_path = root / "registry.json"
+    registry_path.write_text(
+        json.dumps(registry, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    return registry_path
 
 
 def _result(output_dir: Path) -> DciRunResult:

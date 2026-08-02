@@ -11,7 +11,7 @@ import urllib.request
 from dataclasses import replace
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Never
 
 from asterion.benchmarks import (
     BenchmarkProgressEvent,
@@ -30,6 +30,9 @@ from asterion.capabilities.dci.implementation.evaluation.benchmark import (
     BenchmarkRequest,
     BenchmarkResult,
     run_benchmark_async,
+)
+from asterion.capabilities.dci.implementation.evaluation.artifacts import (
+    DciConversationFeatures,
 )
 from asterion.capabilities.dci.implementation.evaluation.judge import JudgeConfig
 from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import (
@@ -89,6 +92,15 @@ _REAL_TASK_MODES = {
     "bright.economics": "ir",
     "bright.robotics": "ir",
 }
+_COVERAGE_TASK_IDS = frozenset(
+    {
+        "beir.scifact",
+        "bright.biology",
+        "bright.earth-science",
+        "bright.economics",
+        "bright.robotics",
+    }
+)
 _DEFAULT_EXPERIMENT_PROFILE = "asterion-safe/pi"
 _FULL_SCOPE_BY_TASK = {
     "beir.scifact": "beir.scifact.main.full",
@@ -222,15 +234,25 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
     ) -> BenchmarkTaskResult:
         try:
             payload = _real_payload(invocation, cancellation, on_progress)
+            mode = _REAL_TASK_MODES.get(invocation.task_id, "qa")
+            coverage_registry = payload.coverage_registry
+            if coverage_registry is not None and (
+                mode != "ir" or invocation.task_id not in _COVERAGE_TASK_IDS
+            ):
+                _fail()
+            judge_config = (
+                JudgeConfig(api_key=None)
+                if coverage_registry is not None
+                else self._judge_config
+            )
             self._readiness_probe(
                 payload,
                 self._paths,
                 self._runtime_options,
-                self._judge_config,
+                judge_config,
             )
-            mode = _REAL_TASK_MODES.get(invocation.task_id, "qa")
             if mode == "qa" and self._judge_connectivity_probe is not None:
-                self._judge_connectivity_probe(self._judge_config)
+                self._judge_connectivity_probe(judge_config)
             if cancellation.cancelled:
                 return _cancelled(invocation.task_id)
             max_turns, max_concurrency = _REAL_TASK_EXECUTION.get(
@@ -243,7 +265,7 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 dataset=payload.dataset,
                 output_root=payload.output_directory,
                 cwd=self._paths.repo_root,
-                judge_config=self._judge_config,
+                judge_config=judge_config,
                 runtime_options=replace(self._runtime_options, tools="read,grep"),
                 limit=payload.case_limit,
                 mode=mode,
@@ -259,7 +281,13 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 max_native_attempts=_REAL_TASK_NATIVE_ATTEMPTS.get(
                     invocation.task_id, 2
                 ),
+                conversation_features=(
+                    DciConversationFeatures(externalize_tool_results=True)
+                    if coverage_registry is not None
+                    else None
+                ),
                 resume_policy="compatible",
+                coverage_registry=coverage_registry,
             )
             request = _authorize_full_request(request, payload, invocation.task_id)
             on_progress(
@@ -377,11 +405,12 @@ def _real_payload(
     cancellation: object,
     on_progress: object,
 ) -> DciBenchmarkInvocationPayload:
-    task_id = invocation.task_id if isinstance(invocation, BenchmarkTaskInvocation) else None
+    if not isinstance(invocation, BenchmarkTaskInvocation):
+        _fail()
+    task_id = invocation.task_id
     contract = _REAL_TASK_CONTRACTS.get(task_id)
     if (
-        not isinstance(invocation, BenchmarkTaskInvocation)
-        or contract is None
+        contract is None
         or invocation.binding_id != invocation.task_id
         or not isinstance(invocation.private_payload, DciBenchmarkInvocationPayload)
         or not callable(on_progress)
@@ -398,6 +427,11 @@ def _real_payload(
         or payload.max_concurrency != 1
         or payload.resume_policy != "compatible"
         or payload.runtime_context_level not in {None, "level3"}
+        or payload.coverage_registry is not None
+        and (
+            not isinstance(payload.coverage_registry, Path)
+            or not payload.coverage_registry.is_absolute()
+        )
         or not all(
             path.is_absolute()
             for path in (
@@ -454,7 +488,8 @@ def _default_readiness_probe(
         or not _directory_nonsymlink(payload.corpus)
         or _bounded_jsonl_count(payload.dataset, payload.case_limit)
         < payload.case_limit
-        or not judge_config.api_key
+        or payload.coverage_registry is None
+        and not judge_config.api_key
         or not runtime_options.provider
         or not runtime_options.model
         or not _directory_nonsymlink(paths.pi.repo_dir)
@@ -536,7 +571,7 @@ def _cancelled(task_id: str) -> BenchmarkTaskResult:
     )
 
 
-def _fail() -> None:
+def _fail() -> Never:
     raise DciBenchmarkExecutorError("DCI benchmark execution is invalid") from None
 
 

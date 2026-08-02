@@ -285,7 +285,7 @@ class JudgeConfig:
     cached_input_price_per_1m: float = 0.0
     output_price_per_1m: float = 0.0
     api_key_env: str = DEFAULT_JUDGE_API_KEY_ENV
-    api_key: str = field(default="", repr=False)
+    api_key: str | None = field(default="", repr=False)
 
     def __post_init__(self) -> None:
         base_url = self.base_url.strip().rstrip("/")

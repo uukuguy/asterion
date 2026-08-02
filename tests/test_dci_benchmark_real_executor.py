@@ -70,6 +70,96 @@ def _invocation(root: Path, **changes: object) -> BenchmarkTaskInvocation:
 
 
 class RealDciBenchmarkExecutorTests(unittest.TestCase):
+    def test_real_ir_executor_enables_exact_coverage_observation_without_judge(
+        self,
+    ) -> None:
+        calls = []
+
+        async def runner(request, *, paths):
+            del paths
+            calls.append(request)
+            return BenchmarkResult(
+                output_root=request.output_root,
+                counts={"total": 1, "completed": 1, "failed": 0},
+            )
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            registry = root / "coverage" / "bright.biology" / "registry.json"
+            result = RealDciBenchmarkExecutor(
+                paths=_paths(root),
+                runtime_options=DciRuntimeOptions(),
+                judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
+                benchmark_runner=runner,
+                readiness_probe=lambda *_args: None,
+                judge_connectivity_probe=lambda _config: self.fail(
+                    "coverage execution must not probe Judge connectivity"
+                ),
+            ).execute(
+                _invocation(
+                    root,
+                    task_id="bright.biology",
+                    profile_id="bright.biology",
+                    selection_variant="main",
+                    coverage_registry=registry,
+                ),
+                cancellation=MutableCancellation(),
+                on_progress=lambda _event: None,
+            )
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(len(calls), 1)
+        request = calls[0]
+        self.assertEqual(getattr(request, "coverage_registry", None), registry)
+        self.assertIsNotNone(request.conversation_features)
+        self.assertTrue(request.conversation_features.externalize_tool_results)
+        self.assertIsNone(request.judge_config.api_key)
+
+    def test_qa_or_non_coverage_ir_registry_fails_before_agent_execution(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            registry = root / "coverage" / "registry.json"
+            calls = []
+
+            async def runner(request, *, paths):
+                del paths
+                calls.append(request)
+                return BenchmarkResult(
+                    output_root=request.output_root,
+                    counts={"total": 1, "completed": 1, "failed": 0},
+                )
+
+            executor = RealDciBenchmarkExecutor(
+                paths=_paths(root),
+                runtime_options=DciRuntimeOptions(),
+                judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
+                benchmark_runner=runner,
+                readiness_probe=lambda *_args: None,
+            )
+            cases = (
+                _invocation(root, coverage_registry=registry),
+                _invocation(
+                    root,
+                    task_id="beir.arguana",
+                    profile_id="beir.arguana",
+                    selection_variant="paper-main",
+                    coverage_registry=registry,
+                ),
+            )
+            for invocation in cases:
+                with self.subTest(task_id=invocation.task_id), self.assertRaisesRegex(
+                    DciBenchmarkExecutorError,
+                    "^DCI benchmark execution is invalid$",
+                ):
+                    executor.execute(
+                        invocation,
+                        cancellation=MutableCancellation(),
+                        on_progress=lambda _event: None,
+                    )
+            self.assertEqual(calls, [])
+
     def test_rejects_judge_connectivity_before_starting_agent_work(self) -> None:
         calls = []
 

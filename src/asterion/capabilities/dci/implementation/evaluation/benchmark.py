@@ -11,7 +11,7 @@ import re
 import secrets
 import stat
 import threading
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
@@ -104,6 +104,12 @@ from asterion.capabilities.dci.implementation.evaluation.metrics import (
     UPSTREAM_LIST_NDCG_CONTRACT,
     compute_ir_ndcg,
 )
+from asterion.capabilities.dci.implementation.pathlight.coverage import (
+    DciCoverageError,
+    coverage_query_sha256,
+    validate_coverage_manifest_bytes,
+    validate_coverage_registry_bytes,
+)
 from asterion.capabilities.dci.implementation.research.trajectory_resolution import (
     TrajectoryAnalysisConfig,
     TrajectoryResolutionError,
@@ -188,6 +194,7 @@ class BenchmarkRequest:
     paper_ir_duplicate_handling: str | None = None
     dataset_input_binding: DatasetInputBinding | None = None
     expected_output_root_identity: tuple[int, int] | None = None
+    coverage_registry: Path | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -900,6 +907,94 @@ def _resolution_manifest_paths(
     )
 
 
+_COVERAGE_DATASET_IDS = frozenset(
+    {
+        "beir.scifact",
+        "bright.biology",
+        "bright.earth-science",
+        "bright.economics",
+        "bright.robotics",
+    }
+)
+
+
+def _coverage_manifest_paths(
+    request: BenchmarkRequest,
+    rows: tuple[BenchmarkRow, ...],
+) -> tuple[dict[str, object], dict[str, bytes]]:
+    registry_path = request.coverage_registry
+    if registry_path is None:
+        return {}, {}
+    features = request.conversation_features
+    if (
+        request.mode != "ir"
+        or request.dataset_profile not in _COVERAGE_DATASET_IDS
+        or request.corpus is None
+        or features is None
+        or not features.externalize_tool_results
+    ):
+        raise DciBenchmarkError("DCI benchmark coverage registry is incompatible")
+    _reject_symlink_components(registry_path)
+    registry_raw = _read_input_snapshot(registry_path)
+    try:
+        registry = validate_coverage_registry_bytes(registry_raw)
+    except DciCoverageError as error:
+        raise DciBenchmarkError("DCI benchmark coverage registry is invalid") from error
+    selected_ids = tuple(row.query_id for row in rows)
+    if (
+        registry.dataset_id != request.dataset_profile
+        or registry.selected_count != len(rows)
+        or registry.selected_ids_sha256 != canonical_sha256(selected_ids)
+        or tuple(item.query_sha256 for item in registry.manifests)
+        != tuple(coverage_query_sha256(query_id) for query_id in selected_ids)
+    ):
+        raise DciBenchmarkError("DCI benchmark coverage registry is incompatible")
+    identities: dict[str, object] = {}
+    snapshots: dict[str, bytes] = {"coverage_registry": registry_raw}
+    for index, (row, reference) in enumerate(
+        zip(rows, registry.manifests, strict=True)
+    ):
+        relative = PurePosixPath(reference.relative_path)
+        manifest_path = registry_path.parent.joinpath(*relative.parts)
+        _reject_symlink_components(manifest_path)
+        manifest_raw = _read_input_snapshot(manifest_path)
+        if hashlib.sha256(manifest_raw).hexdigest() != reference.sha256:
+            raise DciBenchmarkError("DCI benchmark coverage registry is stale")
+        try:
+            dataset_id, query_id, gold_ids = validate_coverage_manifest_bytes(
+                manifest_raw,
+                corpus_dir=request.corpus,
+            )
+        except DciCoverageError as error:
+            raise DciBenchmarkError("DCI benchmark coverage manifest is invalid") from error
+        if (
+            dataset_id != request.dataset_profile
+            or query_id != row.query_id
+            or row.gold_ids is None
+            or set(gold_ids) != set(row.gold_ids)
+        ):
+            raise DciBenchmarkError("DCI benchmark coverage registry is incompatible")
+        snapshot_key = f"coverage_manifest_{index:04d}"
+        identities[row.query_id] = {
+            "query_sha256": reference.query_sha256,
+            "sha256": reference.sha256,
+            "snapshot_key": snapshot_key,
+        }
+        snapshots[snapshot_key] = manifest_raw
+    return (
+        {
+            "schema": "dci.retrieval-coverage-binding/v1",
+            "dataset_id": registry.dataset_id,
+            "registry": {
+                "relative_path": registry.relative_path,
+                "sha256": registry.sha256,
+            },
+            "manifests": identities,
+        },
+        snapshots,
+    )
+
+
 def _prepare(
     request: BenchmarkRequest,
 ) -> tuple[
@@ -1195,6 +1290,7 @@ def _prepare(
     _resolution_paths, resolution_config, resolution_snapshots = (
         _resolution_manifest_paths(request, rows)
     )
+    coverage_config, coverage_snapshots = _coverage_manifest_paths(request, rows)
     output_root = Path(os.path.abspath(os.path.normpath(request.output_root)))
     _reject_symlink_components(output_root)
     if (
@@ -1254,6 +1350,7 @@ def _prepare(
     dataset_digest = hashlib.sha256(dataset_raw).hexdigest()
     snapshots: dict[str, bytes] = {}
     snapshots.update(resolution_snapshots)
+    snapshots.update(coverage_snapshots)
     prompt_resources: dict[str, object] = {}
     for name in ("system_prompt_file", "append_system_prompt_file"):
         path = getattr(request, name)
@@ -1384,6 +1481,8 @@ def _prepare(
     config["selection"] = selection
     if resolution_config:
         config["resolution"] = resolution_config
+    if coverage_config:
+        config["coverage"] = coverage_config
     if ablation_identity is not None:
         config["ablation"] = ablation_identity
     if paper_authorization_identity is not None:
@@ -1440,6 +1539,10 @@ def _prepare(
         }
         if resolution_config:
             identity["resolution"] = resolution_config.get("manifests", {}).get(
+                row.query_id
+            )
+        if coverage_config:
+            identity["coverage"] = coverage_config.get("manifests", {}).get(
                 row.query_id
             )
         if ablation_identity is not None:

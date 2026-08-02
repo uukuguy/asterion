@@ -16,6 +16,15 @@ from asterion.capabilities.dci.implementation.operator_inputs import (
 )
 
 
+_COVERAGE_TASK_IDS = (
+    "beir.scifact",
+    "bright.biology",
+    "bright.earth-science",
+    "bright.economics",
+    "bright.robotics",
+)
+
+
 @dataclass(frozen=True, slots=True)
 class DciOperatorConfig:
     """Private inputs and host options resolved by the DCI application."""
@@ -71,6 +80,23 @@ def load_operator_config(
         private_environment=private_environment,
         amount=amount,
     )
+    coverage_value = merged.get("ASTERION_DCI_COVERAGE_ROOT")
+    if coverage_value is not None and coverage_value.strip():
+        coverage_root = _configured_path(
+            coverage_value,
+            default=root,
+            relative_to=root,
+        )
+        benchmark_inputs = DciBenchmarkOperatorInputs(
+            dataset_roots=benchmark_inputs.dataset_roots,
+            corpus_roots=benchmark_inputs.corpus_roots,
+            private_environment=benchmark_inputs.private_environment,
+            coverage_registry_roots={
+                task_id: coverage_root / task_id / "registry.json"
+                for task_id in _COVERAGE_TASK_IDS
+            },
+            amount=benchmark_inputs.amount,
+        )
     corpus_root = _configured_path(
         merged.get("ASTERION_DCI_CORPUS_ROOT"),
         default=selected_root / "corpus",

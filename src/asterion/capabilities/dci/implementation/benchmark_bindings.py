@@ -102,6 +102,7 @@ class DciBenchmarkInvocationPayload:
     max_concurrency: int
     resume_policy: str
     runtime_context_level: str | None
+    coverage_registry: Path | None = field(default=None, repr=False)
 
 
 class _DciBenchmarkTaskImplementation:
@@ -166,6 +167,9 @@ class _DciBenchmarkTaskImplementation:
                 max_concurrency=1,
                 resume_policy="compatible",
                 runtime_context_level=contract.runtime_context_level,
+                coverage_registry=inputs.coverage_registry_roots.get(
+                    contract.task_id
+                ),
             ),
         )
 
