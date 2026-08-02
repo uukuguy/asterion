@@ -224,6 +224,18 @@ class RichRejectingRecorder:
         return self._recorder.snapshot()
 
 
+class HostileBoundary(BaseException):
+    pass
+
+
+class BaseRichRejectingRecorder(RichRejectingRecorder):
+    def record_many(self, events: tuple[TraceEvent, ...]) -> None:
+        self.record_many_calls += 1
+        if any(event.kind == "model-call" for event in events):
+            raise HostileBoundary("SENTINEL_BASE_PROJECTION")
+        self._recorder.record_many(events)
+
+
 class HostileObservationMapping(Mapping[str, object]):
     def __getitem__(self, key: str) -> object:
         del key
@@ -243,6 +255,47 @@ class PropertyExplodingRuntime(EventRuntime):
     @property
     def pathlight_runtime_observation(self) -> object:
         raise RuntimeError("SENTINEL_SOURCE_PROPERTY")
+
+
+class BasePropertyExplodingRuntime(EventRuntime):
+    def __init__(self) -> None:
+        super().__init__(_native_events())
+
+    @property
+    def pathlight_runtime_observation(self) -> object:
+        raise HostileBoundary("SENTINEL_BASE_SOURCE")
+
+
+class ControlPropertyExplodingRuntime(EventRuntime):
+    def __init__(self, error: BaseException) -> None:
+        super().__init__(_native_events())
+        self.error = error
+
+    @property
+    def pathlight_runtime_observation(self) -> object:
+        raise self.error
+
+
+class ForeignRunObservedRuntime(EventRuntime):
+    def __init__(self, observation: Mapping[str, object]) -> None:
+        super().__init__(_native_events())
+        self.observation = observation
+
+    async def run(
+        self,
+        request: RunRequest,
+        *,
+        signal: object | None = None,
+    ) -> AsyncIterator[RunEvent]:
+        del request, signal
+        for sequence, (event_type, payload) in enumerate(self.events, start=1):
+            event = RunEvent("foreign-stream-run", sequence, event_type, payload)
+            self.yielded.append(event)
+            yield event
+
+    def pathlight_runtime_observation(self, run_id: str) -> Mapping[str, object] | None:
+        del run_id
+        return self.observation
 
 
 def _digest(value: str) -> str:
@@ -351,6 +404,102 @@ def _batch(
     )
 
 
+def _missing_batch() -> RuntimeObservationBatch:
+    frame = ContextFrameObservation(
+        frame_index=1,
+        segments=(
+            ContextSegmentSummary(
+                segment_index=0,
+                role="unknown",
+                structure_kind="missing",
+                content_sha256=None,
+                content_length=None,
+                source_call_sha256=None,
+                missing_evidence=True,
+            ),
+        ),
+    )
+    call = ModelCallObservation(
+        request_index=1,
+        frame_sha256=frame.frame_sha256,
+        model_sha256=None,
+        request_sha256=None,
+        response_sha256=None,
+        response_length=None,
+        input_tokens=None,
+        output_tokens=None,
+        status="missing",
+        boundary_observed=False,
+    )
+    return RuntimeObservationBatch.build(
+        run_sha256=_digest("native-run"),
+        frames=(frame,),
+        model_calls=(call,),
+        tools=(),
+        missing_evidence=(
+            "context-segment",
+            "model-identity",
+            "model-request",
+            "model-request-boundary",
+            "model-response",
+            "token-usage",
+        ),
+    )
+
+
+def _two_frame_batch() -> RuntimeObservationBatch:
+    tool = _batch().tools[0]
+    first_frame = ContextFrameObservation(
+        frame_index=1,
+        segments=(
+            ContextSegmentSummary(
+                segment_index=0,
+                role="user",
+                structure_kind="message",
+                content_sha256=_digest("SENTINEL_FIRST_INPUT"),
+                content_length=len("SENTINEL_FIRST_INPUT"),
+                source_call_sha256=None,
+                missing_evidence=False,
+            ),
+        ),
+    )
+    second_frame = ContextFrameObservation(
+        frame_index=2,
+        segments=(
+            ContextSegmentSummary(
+                segment_index=0,
+                role="tool-result",
+                structure_kind="tool-result",
+                content_sha256=tool.result_sha256,
+                content_length=tool.result_length,
+                source_call_sha256=tool.call_sha256,
+                missing_evidence=False,
+            ),
+        ),
+    )
+    calls = tuple(
+        ModelCallObservation(
+            request_index=index,
+            frame_sha256=frame.frame_sha256,
+            model_sha256=_digest("private.model"),
+            request_sha256=_digest(f"SENTINEL_REQUEST_{index}"),
+            response_sha256=_digest(f"SENTINEL_RESPONSE_{index}"),
+            response_length=len(f"SENTINEL_RESPONSE_{index}"),
+            input_tokens=index,
+            output_tokens=index,
+            status="completed",
+            boundary_observed=True,
+        )
+        for index, frame in ((1, first_frame), (2, second_frame))
+    )
+    return RuntimeObservationBatch.build(
+        run_sha256=_digest("native-run"),
+        frames=(first_frame, second_frame),
+        model_calls=calls,
+        tools=(tool,),
+    )
+
+
 class ObservedFixtureRuntime(EventRuntime):
     def __init__(
         self,
@@ -392,6 +541,183 @@ def _context_frames(graph: Mapping[str, object]) -> list[Mapping[str, object]]:
 
 
 class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_foreign_public_stream_run_identity_forces_fallback(self) -> None:
+        runtime = ForeignRunObservedRuntime(_batch().to_mapping())
+        recorder = MemoryPathlightRecorder(TRACE_ID)
+        observed = ObservedRuntimeClient(runtime, pathlight=recorder)
+
+        yielded = [event async for event in observed.run(_request())]
+        graph = recorder.snapshot()
+
+        self.assertEqual(yielded, runtime.yielded)
+        self.assertEqual(observed.records[0]["run_id"], "foreign-stream-run")
+        self.assertNotIn("model-call", _kinds(graph))
+        self.assertTrue(_context_frames(graph)[0]["attributes"]["missing_evidence"])
+
+    async def test_native_missing_facts_are_explicit_on_runtime_frame_and_model(self) -> None:
+        runtime = ObservedFixtureRuntime(
+            _missing_batch().to_mapping(),
+            (
+                ("run.started", {"capabilities": []}),
+                ("run.completed", {"status": "completed"}),
+            ),
+        )
+        recorder = MemoryPathlightRecorder(TRACE_ID)
+        observed = ObservedRuntimeClient(runtime, pathlight=recorder)
+
+        _ = [event async for event in observed.run(_request())]
+        graph = recorder.snapshot()
+        starts = _started_events(graph)
+        runtime_start = next(event for event in starts if event["kind"] == "runtime")
+        model_start = next(event for event in starts if event["kind"] == "model-call")
+        frame_start = next(
+            event
+            for event in starts
+            if event["kind"] == "context-frame"
+            and "frame_index" in event["attributes"]
+        )
+
+        self.assertTrue(runtime_start["attributes"]["missing_evidence"])
+        self.assertTrue(frame_start["attributes"]["missing_evidence"])
+        self.assertTrue(model_start["attributes"]["missing_evidence"])
+        self.assertFalse(model_start["attributes"]["boundary_observed"])
+
+    async def test_hostile_base_throwables_at_optional_boundaries_fall_back(self) -> None:
+        cases = (
+            (BasePropertyExplodingRuntime(), MemoryPathlightRecorder(TRACE_ID)),
+            (
+                ObservedFixtureRuntime(_batch().to_mapping()),
+                BaseRichRejectingRecorder(),
+            ),
+        )
+        for runtime, recorder in cases:
+            with self.subTest(boundary=type(runtime).__name__):
+                observed = ObservedRuntimeClient(runtime, pathlight=recorder)
+
+                yielded = [event async for event in observed.run(_request())]
+                graph = recorder.snapshot()
+
+                self.assertEqual(yielded, runtime.yielded)
+                self.assertEqual(len(observed.records), 1)
+                self.assertNotIn("model-call", _kinds(graph))
+                self.assertNotIn("SENTINEL_BASE", repr(graph))
+
+    async def test_process_control_throwables_from_optional_source_are_not_swallowed(
+        self,
+    ) -> None:
+        for error in (KeyboardInterrupt(), SystemExit()):
+            runtime = ControlPropertyExplodingRuntime(error)
+            observed = ObservedRuntimeClient(
+                runtime,
+                pathlight=MemoryPathlightRecorder(TRACE_ID),
+            )
+            with self.subTest(error=type(error).__name__), self.assertRaises(type(error)):
+                _ = [event async for event in observed.run(_request())]
+
+    async def test_unknown_native_timestamps_are_missing_without_zero_duration_claims(
+        self,
+    ) -> None:
+        runtime = ObservedFixtureRuntime(_batch().to_mapping())
+        recorder = MemoryPathlightRecorder(TRACE_ID)
+        observed = ObservedRuntimeClient(
+            runtime,
+            pathlight=recorder,
+            monotonic_ns=IncrementingClock(),
+        )
+
+        _ = [event async for event in observed.run(_request())]
+        graph = recorder.snapshot()
+        events = cast(list[Mapping[str, object]], graph["events"])
+
+        for event in events:
+            if event["timestamp_ns"] == 0:
+                self.assertTrue(event["attributes"]["missing_evidence"])
+                self.assertNotIn("duration_ns", event["attributes"])
+        observed_terminals = [
+            event
+            for event in events
+            if event["status"] != "started" and event["timestamp_ns"] > 0
+        ]
+        self.assertTrue(observed_terminals)
+        self.assertTrue(
+            all("duration_ns" in event["attributes"] for event in observed_terminals)
+        )
+
+    async def test_native_projection_is_deterministic_for_same_trace_and_clock(self) -> None:
+        graphs: list[Mapping[str, object]] = []
+        for _ in range(2):
+            runtime = ObservedFixtureRuntime(_batch().to_mapping())
+            recorder = MemoryPathlightRecorder(TRACE_ID)
+            observed = ObservedRuntimeClient(
+                runtime,
+                pathlight=recorder,
+                monotonic_ns=IncrementingClock(),
+            )
+            _ = [event async for event in observed.run(_request())]
+            graphs.append(recorder.snapshot())
+
+        self.assertEqual(graphs[0], graphs[1])
+        self.assertEqual(graphs[0]["trace_sha256"], graphs[1]["trace_sha256"])
+
+    async def test_two_frame_native_flow_is_interleaved_with_forward_relations(self) -> None:
+        runtime = ObservedFixtureRuntime(_two_frame_batch().to_mapping())
+        recorder = MemoryPathlightRecorder(TRACE_ID)
+        observed = ObservedRuntimeClient(
+            runtime,
+            pathlight=recorder,
+            monotonic_ns=IncrementingClock(),
+        )
+
+        _ = [event async for event in observed.run(_request())]
+        graph = recorder.snapshot()
+        starts = _started_events(graph)
+        top_level = [
+            event
+            for event in starts
+            if event["kind"] == "runtime"
+            or event["parent_span_id"]
+            == next(item["span_id"] for item in starts if item["kind"] == "runtime")
+        ]
+
+        self.assertEqual(
+            [event["kind"] for event in top_level],
+            [
+                "runtime",
+                "context-frame",
+                "model-call",
+                "tool-call",
+                "context-frame",
+                "model-call",
+            ],
+        )
+        frames = [event for event in top_level if event["kind"] == "context-frame"]
+        models = [event for event in top_level if event["kind"] == "model-call"]
+        tool = next(event for event in top_level if event["kind"] == "tool-call")
+        consumed_link = next(
+            link for link in frames[0]["links"] if link["relation"] == "consumed-by"
+        )
+        self.assertEqual(consumed_link["span_id"], models[0]["span_id"])
+        self.assertIn(
+            frames[0]["span_id"],
+            [
+                link["span_id"]
+                for link in models[0]["links"]
+                if link["relation"] == "derived-from"
+            ],
+        )
+        tool_result_segment = next(
+            event
+            for event in starts
+            if event["attributes"].get("segment_role") == "tool-result"
+        )
+        produced_link = next(
+            link
+            for link in tool_result_segment["links"]
+            if link["relation"] == "produced-by"
+        )
+        self.assertEqual(produced_link["span_id"], tool["span_id"])
+        self.assertLess(tool["sequence"], tool_result_segment["sequence"])
+
     async def test_native_observation_projects_frame_segments_model_calls_and_tool_flow(
         self,
     ) -> None:
@@ -411,7 +737,7 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(_segment_indexes(graph), [0, 1, 2])
         self.assertIn("consumed-by", _relations(graph))
         self.assertIn("produced-by", _relations(graph))
-        self.assertFalse(
+        self.assertTrue(
             any(
                 event["attributes"].get("missing_evidence") is True
                 for event in _context_frames(graph)
