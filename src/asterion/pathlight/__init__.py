@@ -24,6 +24,7 @@ from asterion.pathlight.recorder import (
     NoopPathlightRecorder,
     PathlightRecorder,
 )
+from asterion.pathlight.query import MetricFilter, PathlightCatalog, TraceFilter
 
 __all__ = (
     "PathlightError",
@@ -43,4 +44,7 @@ __all__ = (
     "write_evaluation_bundle",
     "read_evaluation_bundle",
     "compare_evaluations",
+    "TraceFilter",
+    "MetricFilter",
+    "PathlightCatalog",
 )
