@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -167,6 +168,212 @@ class TestDciPathlightCli(unittest.TestCase):
 
             self.assertEqual(
                 main(arguments, stdout=io.StringIO(), stderr=io.StringIO()), 0
+            )
+
+    def test_recover_never_removes_a_racing_final_target_it_does_not_own(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            evidence = _private_fixture(root)
+            output = root / "output"
+            output.mkdir(mode=0o700)
+            third_party = b"third-party-recovery"
+
+            def race_then_fail(_bundle: object, path: Path) -> None:
+                publication_root = (
+                    path.parent.parent
+                    if path.parent.name.startswith(".pathlight-publish-")
+                    else path.parent
+                )
+                target = publication_root / "pathlight-dci-recovery.json"
+                if target.exists():
+                    target.unlink()
+                target.write_bytes(third_party)
+                target.chmod(0o600)
+                raise RuntimeError("SENTINEL_PRIVATE_PATH")
+
+            with patch(
+                "asterion.applications.dci_agent_lite.pathlight_cli.write_experiment_bundle",
+                side_effect=race_then_fail,
+            ):
+                code = main(
+                    [
+                        "pathlight", "recover", "--instance", "dci.bright.biology@1.0.0",
+                        "--evidence-root", str(evidence), "--output-root", str(output),
+                    ],
+                    stdout=io.StringIO(),
+                    stderr=io.StringIO(),
+                )
+            self.assertEqual(code, 2)
+            self.assertEqual(
+                (output / "pathlight-dci-recovery.json").read_bytes(), third_party
+            )
+            self.assertEqual(
+                tuple(path.name for path in output.iterdir()),
+                ("pathlight-dci-recovery.json",),
+            )
+
+    def test_diagnose_never_removes_a_racing_final_target_it_does_not_own(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            recovery_roots = []
+            for index, dataset in enumerate(_DATASETS):
+                recovery_root = root / f"recovery-{index}"
+                _write_recovery_triad(recovery_root, _run(*dataset))
+                recovery_roots.append(recovery_root)
+            output = root / "diagnosis"
+            output.mkdir(mode=0o700)
+            third_party = b"third-party-diagnosis"
+
+            def race_then_fail(path: Path, _encoded: bytes) -> None:
+                publication_root = (
+                    path.parent.parent
+                    if path.parent.name.startswith(".pathlight-publish-")
+                    else path.parent
+                )
+                target = publication_root / "pathlight-diagnosis.json"
+                if target.exists():
+                    target.unlink()
+                target.write_bytes(third_party)
+                target.chmod(0o600)
+                raise RuntimeError("SENTINEL_PRIVATE_PATH")
+
+            arguments = ["pathlight", "diagnose"]
+            for recovery_root in recovery_roots:
+                arguments.extend(("--recovery-root", str(recovery_root)))
+            arguments.extend(("--output-root", str(output)))
+            with patch(
+                "asterion.applications.dci_agent_lite.pathlight_cli.write_private_file",
+                side_effect=race_then_fail,
+            ):
+                code = main(
+                    arguments, stdout=io.StringIO(), stderr=io.StringIO()
+                )
+            self.assertEqual(code, 2)
+            self.assertEqual(
+                (output / "pathlight-diagnosis.json").read_bytes(), third_party
+            )
+            self.assertEqual(
+                tuple(path.name for path in output.iterdir()),
+                ("pathlight-diagnosis.json",),
+            )
+
+    def test_recover_publish_race_rolls_back_only_proven_command_inode(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            evidence = _private_fixture(root)
+            output = root / "output"
+            output.mkdir(mode=0o700)
+            third_party = b"third-party-experiment"
+            real_link = os.link
+            calls = 0
+
+            def racing_link(
+                source: str,
+                destination: str,
+                *,
+                src_dir_fd: int,
+                dst_dir_fd: int,
+                follow_symlinks: bool,
+            ) -> None:
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    descriptor = os.open(
+                        destination,
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                        0o600,
+                        dir_fd=dst_dir_fd,
+                    )
+                    try:
+                        os.write(descriptor, third_party)
+                    finally:
+                        os.close(descriptor)
+                real_link(
+                    source,
+                    destination,
+                    src_dir_fd=src_dir_fd,
+                    dst_dir_fd=dst_dir_fd,
+                    follow_symlinks=follow_symlinks,
+                )
+
+            with patch(
+                "asterion.applications.dci_agent_lite.pathlight_cli.os.link",
+                side_effect=racing_link,
+            ):
+                code = main(
+                    [
+                        "pathlight", "recover", "--instance", "dci.bright.biology@1.0.0",
+                        "--evidence-root", str(evidence), "--output-root", str(output),
+                    ],
+                    stdout=io.StringIO(),
+                    stderr=io.StringIO(),
+                )
+            self.assertEqual(code, 2)
+            self.assertFalse((output / "pathlight-dci-recovery.json").exists())
+            self.assertEqual(
+                (output / "pathlight-experiment.json").read_bytes(), third_party
+            )
+            self.assertFalse((output / "pathlight-evaluations.json").exists())
+
+    def test_diagnose_publish_race_rolls_back_only_proven_command_inode(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            recovery_roots = []
+            for index, dataset in enumerate(_DATASETS):
+                recovery_root = root / f"recovery-{index}"
+                _write_recovery_triad(recovery_root, _run(*dataset))
+                recovery_roots.append(recovery_root)
+            output = root / "diagnosis"
+            output.mkdir(mode=0o700)
+            third_party = b"third-party-markdown"
+            real_link = os.link
+            calls = 0
+
+            def racing_link(
+                source: str,
+                destination: str,
+                *,
+                src_dir_fd: int,
+                dst_dir_fd: int,
+                follow_symlinks: bool,
+            ) -> None:
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    descriptor = os.open(
+                        destination,
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                        0o600,
+                        dir_fd=dst_dir_fd,
+                    )
+                    try:
+                        os.write(descriptor, third_party)
+                    finally:
+                        os.close(descriptor)
+                real_link(
+                    source,
+                    destination,
+                    src_dir_fd=src_dir_fd,
+                    dst_dir_fd=dst_dir_fd,
+                    follow_symlinks=follow_symlinks,
+                )
+
+            arguments = ["pathlight", "diagnose"]
+            for recovery_root in recovery_roots:
+                arguments.extend(("--recovery-root", str(recovery_root)))
+            arguments.extend(("--output-root", str(output)))
+            with patch(
+                "asterion.applications.dci_agent_lite.pathlight_cli.os.link",
+                side_effect=racing_link,
+            ):
+                code = main(
+                    arguments, stdout=io.StringIO(), stderr=io.StringIO()
+                )
+            self.assertEqual(code, 2)
+            self.assertFalse((output / "pathlight-diagnosis.json").exists())
+            self.assertEqual(
+                (output / "pathlight-dci-diagnosis.zh-CN.md").read_bytes(),
+                third_party,
             )
 
 

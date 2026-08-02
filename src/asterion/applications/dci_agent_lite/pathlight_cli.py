@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 import stat
+import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TextIO
@@ -30,6 +31,7 @@ from asterion.capabilities.dci.implementation.pathlight.recovery import (
 from asterion.pathlight._private_file import read_private_file, write_private_file
 from asterion.pathlight.diagnosis import (
     DIAGNOSIS_BUNDLE_FILENAME,
+    read_diagnosis_bundle,
     write_diagnosis_bundle,
 )
 from asterion.pathlight.evaluation import (
@@ -94,14 +96,32 @@ def _recover(arguments: tuple[str, ...]) -> dict[str, object]:
     experiment = recovered_run_to_experiment(recovered)
     evaluations = recovered_run_to_evaluation_bundle(recovered)
     _require_experiment_evaluation_closure(experiment, evaluations)
+    staging_root = _create_staging_root(output_root)
+    staging_targets = _recovery_targets(staging_root)
+    failed = False
     try:
-        write_recovered_run(recovered, targets["recovery"])
-        write_experiment_bundle(experiment, targets["experiment"])
+        write_recovered_run(recovered, staging_targets["recovery"])
+        write_experiment_bundle(experiment, staging_targets["experiment"])
         write_evaluation_bundle(
-            targets["evaluations"], evaluations.evaluations, evaluations.metric_contracts
+            staging_targets["evaluations"],
+            evaluations.evaluations,
+            evaluations.metric_contracts,
+        )
+        _read_verified_recovery(staging_root)
+        _publish_staged_outputs(
+            output_root, staging_root, tuple(path.name for path in targets.values())
         )
     except BaseException:
-        _rollback_outputs(output_root, tuple(targets.values()))
+        failed = True
+    try:
+        _cleanup_staging(
+            output_root,
+            staging_root,
+            tuple(path.name for path in staging_targets.values()),
+        )
+    except BaseException:
+        failed = True
+    if failed:
         raise RuntimeError from None
     return {
         "case_count": recovered.selected_count,
@@ -122,11 +142,38 @@ def _diagnose(arguments: tuple[str, ...]) -> dict[str, object]:
         raise ValueError
     report = diagnose_recommended_pack(recovered)
     markdown = render_chinese_diagnosis(report)
+    staging_root = _create_staging_root(output_root)
+    staging_targets = {
+        "diagnosis": staging_root / DIAGNOSIS_BUNDLE_FILENAME,
+        "markdown": staging_root / _MARKDOWN_FILENAME,
+    }
+    failed = False
     try:
-        write_diagnosis_bundle(report.diagnosis_bundle, targets["diagnosis"])
-        write_private_file(targets["markdown"], markdown.encode("utf-8"))
+        write_diagnosis_bundle(report.diagnosis_bundle, staging_targets["diagnosis"])
+        write_private_file(staging_targets["markdown"], markdown.encode("utf-8"))
+        if (
+            read_diagnosis_bundle(staging_targets["diagnosis"])
+            != report.diagnosis_bundle
+            or not hmac.compare_digest(
+                read_private_file(staging_targets["markdown"], 1 << 20),
+                markdown.encode("utf-8"),
+            )
+        ):
+            raise ValueError
+        _publish_staged_outputs(
+            output_root, staging_root, tuple(path.name for path in targets.values())
+        )
     except BaseException:
-        _rollback_outputs(output_root, tuple(targets.values()))
+        failed = True
+    try:
+        _cleanup_staging(
+            output_root,
+            staging_root,
+            tuple(path.name for path in staging_targets.values()),
+        )
+    except BaseException:
+        failed = True
+    if failed:
         raise RuntimeError from None
     return {
         "case_count": report.total_case_count,
@@ -257,34 +304,84 @@ def _require_private_files(paths: Sequence[Path]) -> None:
             raise ValueError
 
 
-def _rollback_outputs(root: Path, targets: Sequence[Path]) -> None:
-    """Remove only this command's exact preflight-absent output names."""
+def _create_staging_root(root: Path) -> Path:
+    staging = Path(tempfile.mkdtemp(prefix=".pathlight-publish-", dir=root))
+    try:
+        staging.chmod(0o700)
+        return _operator_root(str(staging))
+    except BaseException:
+        try:
+            staging.rmdir()
+        except Exception:
+            pass
+        raise RuntimeError from None
 
+
+def _publish_staged_outputs(
+    root: Path, staging: Path, names: Sequence[str]
+) -> None:
+    root_descriptor = -1
+    staging_descriptor = -1
+    published: list[tuple[str, int, int]] = []
+    failed = False
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _nofollow_flag()
+        root_descriptor = os.open(root, flags)
+        staging_descriptor = os.open(staging, flags)
+        _verify_open_directory(root_descriptor, root)
+        _verify_open_directory(staging_descriptor, staging)
+        for name in names:
+            if type(name) is not str or not name or "/" in name:
+                raise OSError
+            source = os.stat(name, dir_fd=staging_descriptor, follow_symlinks=False)
+            if (
+                not stat.S_ISREG(source.st_mode)
+                or stat.S_IMODE(source.st_mode) != 0o600
+            ):
+                raise OSError
+            os.link(
+                name,
+                name,
+                src_dir_fd=staging_descriptor,
+                dst_dir_fd=root_descriptor,
+                follow_symlinks=False,
+            )
+            published.append((name, source.st_dev, source.st_ino))
+            target = os.stat(name, dir_fd=root_descriptor, follow_symlinks=False)
+            if (target.st_dev, target.st_ino) != (source.st_dev, source.st_ino):
+                raise OSError
+    except BaseException:
+        failed = True
+    finally:
+        for descriptor in (staging_descriptor, root_descriptor):
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except Exception:
+                    failed = True
+    if failed:
+        try:
+            _rollback_published(root, published)
+        except BaseException:
+            pass
+        raise RuntimeError from None
+
+
+def _rollback_published(root: Path, published: Sequence[tuple[str, int, int]]) -> None:
     descriptor = -1
     failed = False
     try:
         flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _nofollow_flag()
         descriptor = os.open(root, flags)
-        before = os.fstat(descriptor)
-        entry = os.stat(root, follow_symlinks=False)
-        if (
-            not stat.S_ISDIR(before.st_mode)
-            or stat.S_IMODE(before.st_mode) != 0o700
-            or before.st_uid != os.getuid()
-            or (before.st_dev, before.st_ino) != (entry.st_dev, entry.st_ino)
-        ):
-            raise OSError
-        for target in targets:
-            if not isinstance(target, Path) or target.parent != root or not target.name:
-                raise OSError
+        _verify_open_directory(descriptor, root)
+        for name, device, inode in published:
             try:
-                os.unlink(target.name, dir_fd=descriptor)
+                target = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
             except FileNotFoundError:
-                pass
-        after = os.fstat(descriptor)
-        if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
-            raise OSError
-    except Exception:
+                continue
+            if (target.st_dev, target.st_ino) == (device, inode):
+                os.unlink(name, dir_fd=descriptor)
+    except BaseException:
         failed = True
     finally:
         if descriptor >= 0:
@@ -294,6 +391,49 @@ def _rollback_outputs(root: Path, targets: Sequence[Path]) -> None:
                 failed = True
     if failed:
         raise RuntimeError from None
+
+
+def _cleanup_staging(root: Path, staging: Path, names: Sequence[str]) -> None:
+    root_descriptor = -1
+    staging_descriptor = -1
+    failed = False
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _nofollow_flag()
+        root_descriptor = os.open(root, flags)
+        staging_descriptor = os.open(staging.name, flags, dir_fd=root_descriptor)
+        _verify_open_directory(root_descriptor, root)
+        _verify_open_directory(staging_descriptor, staging)
+        for name in names:
+            if type(name) is not str or not name or "/" in name:
+                raise OSError
+            try:
+                os.unlink(name, dir_fd=staging_descriptor)
+            except FileNotFoundError:
+                pass
+        os.rmdir(staging.name, dir_fd=root_descriptor)
+    except BaseException:
+        failed = True
+    finally:
+        for descriptor in (staging_descriptor, root_descriptor):
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except Exception:
+                    failed = True
+    if failed:
+        raise RuntimeError from None
+
+
+def _verify_open_directory(descriptor: int, path: Path) -> None:
+    opened = os.fstat(descriptor)
+    entry = os.stat(path, follow_symlinks=False)
+    if (
+        not stat.S_ISDIR(opened.st_mode)
+        or stat.S_IMODE(opened.st_mode) != 0o700
+        or opened.st_uid != os.getuid()
+        or (opened.st_dev, opened.st_ino) != (entry.st_dev, entry.st_ino)
+    ):
+        raise OSError
 
 
 def _nofollow_flag() -> int:
