@@ -34,6 +34,7 @@ _MISSING_EVIDENCE = frozenset(
         "token-usage",
         "tool-arguments",
         "tool-boundary",
+        "tool-identity",
         "tool-result",
     }
 )
@@ -91,7 +92,7 @@ _BATCH_FIELDS = frozenset(
 
 
 def _invalid() -> NoReturn:
-    raise PathlightError("Pathlight runtime observation is invalid")
+    raise PathlightError("Pathlight runtime observation is invalid") from None
 
 
 def _canonical_digest(domain: str, value: Mapping[str, object]) -> str:
@@ -159,10 +160,14 @@ def _require_optional_content(
 def _copy_exact_dict(value: object, fields: frozenset[str]) -> dict[str, object]:
     if type(value) is not dict:
         _invalid()
-    copied = dict(cast(dict[str, object], value))
-    if set(copied) != fields or any(type(name) is not str for name in copied):
+    exact = cast(dict[object, object], value)
+    keys = tuple(exact.keys())
+    if any(type(name) is not str for name in keys):
         _invalid()
-    return copied
+    exact_keys = cast(tuple[str, ...], keys)
+    if len(exact_keys) != len(fields) or any(name not in fields for name in exact_keys):
+        _invalid()
+    return {name: exact[name] for name in exact_keys}
 
 
 def _copy_exact_list(value: object) -> list[object]:
@@ -197,6 +202,10 @@ class ContextSegmentSummary:
         _require_optional_content(self.content_sha256, self.content_length)
         _require_optional_digest(self.source_call_sha256)
         _require_bool(self.missing_evidence)
+        if (
+            self.content_sha256 is None or self.structure_kind == "missing"
+        ) and not self.missing_evidence:
+            _invalid()
         if self.source_call_sha256 is not None and (
             self.role != "tool-result" or self.structure_kind != "tool-result"
         ):
@@ -439,14 +448,51 @@ def _validate_batch_components(
         _invalid()
     if any(call.frame_sha256 not in frame_ids for call in model_calls):
         _invalid()
-    known_calls = frozenset(tool_calls)
-    if any(
-        segment.source_call_sha256 is not None
-        and segment.source_call_sha256 not in known_calls
-        for frame in frames
-        for segment in frame.segments
-    ):
+    tools_by_call = {tool.call_sha256: tool for tool in tools}
+    for frame in frames:
+        for segment in frame.segments:
+            if segment.source_call_sha256 is None:
+                continue
+            tool = tools_by_call.get(segment.source_call_sha256)
+            if tool is None or (
+                segment.content_sha256,
+                segment.content_length,
+            ) != (tool.result_sha256, tool.result_length):
+                _invalid()
+            if tool.result_sha256 is None and not segment.missing_evidence:
+                _invalid()
+    required_evidence = _required_missing_evidence(frames, model_calls, tools)
+    if not required_evidence.issubset(missing_evidence):
         _invalid()
+
+
+def _required_missing_evidence(
+    frames: tuple[ContextFrameObservation, ...],
+    model_calls: tuple[ModelCallObservation, ...],
+    tools: tuple[ToolCallObservation, ...],
+) -> frozenset[str]:
+    required: set[str] = set()
+    if any(segment.missing_evidence for frame in frames for segment in frame.segments):
+        required.add("context-segment")
+    for call in model_calls:
+        if call.model_sha256 is None:
+            required.add("model-identity")
+        if call.request_sha256 is None:
+            required.add("model-request")
+        if not call.boundary_observed:
+            required.add("model-request-boundary")
+        if call.response_sha256 is None:
+            required.add("model-response")
+        if call.input_tokens is None or call.output_tokens is None:
+            required.add("token-usage")
+    for tool in tools:
+        if tool.tool_sha256 is None:
+            required.add("tool-identity")
+        if tool.arguments_sha256 is None:
+            required.add("tool-arguments")
+        if tool.result_sha256 is None:
+            required.add("tool-result")
+    return frozenset(required)
 
 
 def _segment_from_mapping(value: object) -> ContextSegmentSummary:
@@ -525,7 +571,10 @@ def validate_runtime_observation_batch(mapping: Mapping[str, object]) -> Runtime
 
     try:
         raw = _copy_exact_dict(mapping, _BATCH_FIELDS)
-        if raw["schema"] != RUNTIME_OBSERVATION_SCHEMA:
+        if (
+            type(raw["schema"]) is not str
+            or raw["schema"] != RUNTIME_OBSERVATION_SCHEMA
+        ):
             _invalid()
         frames = tuple(_frame_from_mapping(item) for item in _copy_exact_list(raw["frames"]))
         model_calls = tuple(
@@ -544,9 +593,7 @@ def validate_runtime_observation_batch(mapping: Mapping[str, object]) -> Runtime
         if not hmac.compare_digest(supplied, batch.batch_sha256):
             _invalid()
         return batch
-    except PathlightError:
-        raise
-    except (KeyError, TypeError, ValueError):
+    except Exception:
         _invalid()
 
 
