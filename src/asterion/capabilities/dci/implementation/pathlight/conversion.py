@@ -19,7 +19,11 @@ from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks impo
     canonical_sha256,
     resolve_paper_benchmark,
 )
-from asterion.pathlight.evaluation import EvaluationRecord
+from asterion.pathlight.evaluation import (
+    EvaluationBundle,
+    EvaluationRecord,
+    MetricContract,
+)
 from asterion.pathlight.experiment import (
     CaseTrial,
     DatasetSnapshot,
@@ -185,6 +189,31 @@ def recovered_run_to_experiment(run: DciRecoveredRun) -> ExperimentBundle:
     return result
 
 
+def recovered_run_to_evaluation_bundle(run: DciRecoveredRun) -> EvaluationBundle:
+    """Build the exact metric registry and records emitted by the experiment closure."""
+
+    result: EvaluationBundle | None = None
+    try:
+        experiment = recovered_run_to_experiment(run)
+        contracts = (_metric_contract(_validated_conversion_run(run)),)
+        evaluations = tuple(sorted(experiment.evaluations, key=lambda item: item.evaluation_sha256))
+        document = {
+            "schema": "asterion.pathlight-evaluations/v1",
+            "metric_contracts": [contract.to_mapping() for contract in contracts],
+            "evaluations": [evaluation.to_mapping() for evaluation in evaluations],
+        }
+        result = EvaluationBundle(
+            contracts,
+            evaluations,
+            _canonical_evaluation_bundle_digest(document),
+        )
+    except Exception:
+        pass
+    if result is None:
+        raise DciConversionError("DCI Pathlight conversion is invalid") from None
+    return result
+
+
 def _validated_conversion_run(run: object) -> DciRecoveredRun:
     if (
         type(run) is not DciRecoveredRun
@@ -269,7 +298,7 @@ def _load_paper_reference(dataset_id: object) -> DciReferenceComparison:
 
 def _evaluator(run: DciRecoveredRun) -> EvaluatorContract:
     return EvaluatorContract(
-        metric_contract_sha256=_project("metric-contract/v1", run.variant.metric_contract_sha256),
+        metric_contract_sha256=_metric_contract(run).metric_contract_sha256,
         evaluator_kind="recovered",
         implementation_sha256=_project("evaluator-implementation/v1", run.variant.implementation_sha256),
         input_contract_sha256=_project("evaluator-input/v1", run.dataset_snapshot_sha256),
@@ -279,6 +308,21 @@ def _evaluator(run: DciRecoveredRun) -> EvaluatorContract:
         ),
         contract_version="1.0.0",
     )
+
+
+def _metric_contract(run: DciRecoveredRun) -> MetricContract:
+    return MetricContract(
+        metric_name=run.metric_name,
+        unit="microunits",
+        higher_is_better=True,
+        contract_version="1.0.0",
+    )
+
+
+def _canonical_evaluation_bundle_digest(document: dict[str, object]) -> str:
+    return hashlib.sha256(
+        json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 def _variant(run: DciRecoveredRun) -> Variant:

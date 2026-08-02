@@ -132,9 +132,11 @@ def _sum(values: tuple[int, ...]) -> int:
 
 def _ratio_microunits(numerator: int, denominator: int) -> int:
     numerator, denominator = _checked(numerator), _checked(denominator)
-    if denominator == 0 or numerator > denominator or numerator > _MAX_INT // 1_000_000:
+    if denominator == 0 or numerator > denominator:
         raise ValueError
-    return numerator * 1_000_000 // denominator
+    return (numerator // denominator) * 1_000_000 + (
+        (numerator % denominator) * 1_000_000 // denominator
+    )
 
 
 def _time_share_microunits(numerator: int, denominator: int) -> int:
@@ -923,7 +925,6 @@ def _validate_numeric_limits(run: DciRecoveredRun) -> None:
             _checked(value)
         if (
             case.wall_time_ns == 0
-            or case.tool_time_ns > case.wall_time_ns
             or case.resolution_status != "not-available"
             or case.resolution_coverage_microunits is not None
         ):
@@ -1278,6 +1279,14 @@ _CN_HYPOTHESES = {
     "context-retention": "上下文保留不可见", "paper-method-difference": "论文方法差异",
 }
 _CN_PROPOSALS = {"coverage-instrumentation": "覆盖率观测", "retrieval-query-decomposition": "检索查询分解"}
+_CN_COMPONENTS = {
+    "runtime": "运行时",
+    "model": "模型",
+    "toolset": "工具集",
+    "prompt": "提示契约",
+    "context": "上下文契约",
+    "metric": "度量契约",
+}
 _CN_MISSING = {
     "assembly-lineage": "装配谱系", "package-lineage": "包谱系", "retrieval-coverage": "检索覆盖率",
     "sealed-analysis-digest": "封存分析摘要", "sealed-config-digest": "封存配置摘要", "trace-graph": "轨迹图谱",
@@ -1300,14 +1309,41 @@ def render_chinese_diagnosis(report: object) -> str:
             raise ValueError
         lines = ["# DCI 差分诊断", "", "## 已证实事实", ""]
         for item in canonical.observations:
-            lines.append(f"- {_CN_DATASETS[item.dataset_id]}：{_CN_METRICS[item.metric_name]} {item.score_microunits} 微单位；样本 {item.selected_count}/{item.total_count}；覆盖可用 {item.resolution_available_queries}/{item.resolution_total_queries}；论文差值 {item.reference_gap_microunits} 微单位（仅参考）。")
+            metrics = item.workflow_metrics
+            lines.extend((
+                f"### {_CN_DATASETS[item.dataset_id]}",
+                "",
+                f"- 分数：{_CN_METRICS[item.metric_name]} {item.score_microunits} 微单位；样本 {item.selected_count}/{item.total_count}；失败 {item.failed_count}；语料文件 {item.corpus_file_count}。",
+                f"- 论文参照：{item.reference_score_microunits} 微单位；差值 {item.reference_gap_microunits} 微单位；状态：仅参考、不可作完全可比结论。",
+                f"- 零分率：{metrics.zero_score_rate_microunits} 微单位；覆盖可用 {item.resolution_available_queries}/{item.resolution_total_queries}；解析状态：不可用。",
+                f"- 中位数：tokens {metrics.median_agent_total_tokens}；工具调用 {metrics.median_tool_call_count}；墙钟 {metrics.median_wall_time_ns} ns；工具 {metrics.median_tool_time_ns} ns；read 调用 {metrics.median_read_call_count}；grep 调用 {metrics.median_grep_call_count}；read {metrics.median_read_time_ns} ns；grep {metrics.median_grep_time_ns} ns；问题词 {metrics.median_question_word_count}。",
+                f"- 工具错误：{metrics.total_tool_error_count}；时间占比：工具/墙钟 {metrics.tool_time_share_microunits} 微单位、read/工具 {metrics.read_time_share_microunits} 微单位、grep/工具 {metrics.grep_time_share_microunits} 微单位。",
+                "",
+            ))
+        lines.extend(("## 组件摘要关系", ""))
+        for item in canonical.component_comparisons:
+            lines.append(
+                f"- {_CN_DATASETS[item.dataset_id]} 的{_CN_COMPONENTS[item.component]}组件摘要关系：相对 Bright 生物学{('相同' if item.relation_to_bright_biology == 'same' else '不同')}。"
+            )
         lines.extend(["", "## 待验证假设", ""])
         lines.extend(f"- {_CN_HYPOTHESES[code]}。" for code in canonical.hypothesis_codes)
-        lines.extend(["", "## 反证与不可比较项", "", "- 论文数值仅作参考，当前变体不可视为完全可比。", "", "## 证据缺口", ""])
+        lines.extend([
+            "", "## 反证与不可比较项", "",
+            "- 论文数值仅作参考，当前变体不可视为完全可比；因此没有跨数据集汇总分数或分数导出指标。",
+            "- 缺少封存配置、封存分析、装配/包谱系、轨迹图谱与检索覆盖率，不能把差值归因于任一组件。",
+            "", "## 证据缺口", "",
+        ])
         lines.extend(f"- {_CN_MISSING[code]}" for code in canonical.missing_evidence)
         lines.extend(["", "## 最小受控实验", ""])
         for item in canonical.proposals:
-            lines.append(f"- {_CN_PROPOSALS[item.code]}：最多 {item.agent_operation_cap} 次 Agent 操作，成本上限 {item.max_cost_microusd} 微美元；需运营者授权，当前未授权。")
+            if item.code == "coverage-instrumentation":
+                lines.append(
+                    f"- {_CN_PROPOSALS[item.code]}：状态 proposed；最多 {item.agent_operation_cap} 次 Agent 操作，成本上限 {item.max_cost_microusd} 微美元，基础设施失败停止线 {item.infrastructure_failure_stop}；覆盖 {len(item.dataset_case_counts)} 个数据集、每项 10 例；需运营者授权，当前未授权。"
+                )
+            else:
+                lines.append(
+                    f"- {_CN_PROPOSALS[item.code]}：状态 proposed；最多 {item.agent_operation_cap} 次 Agent 操作，成本上限 {item.max_cost_microusd} 微美元；前提为覆盖率观测；最小平均 nDCG 增益 {item.minimum_mean_ndcg_gain_microunits} 微单位，成本或时间增长上限 {item.maximum_cost_or_time_increase_microunits} 微单位；覆盖 {len(item.dataset_case_counts)} 个数据集、每项 10 例；需运营者授权，当前未授权。"
+                )
         rendered = "\n".join(lines) + "\n"
     except Exception:
         pass

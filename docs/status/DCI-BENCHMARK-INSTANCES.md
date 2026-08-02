@@ -28,6 +28,9 @@ benchmark 实例的实现清单、验证台账和运行手册。
 表中最后一列仅保留当时的实施顺序，**不是待办或下一步**。所有真实实例的 50 条阶段已经完成；
 推荐核验包的 Bright 四项、SciFact 和 Bamboogle 全量运行均已完成。
 
+六项已完成 evidence 已经由 provider-free Pathlight 命令恢复、交叉验证并诊断；安全的数值观察、证据缺口和未获授权的两项最小实验提案见
+[Pathlight DCI 差分诊断](PATHLIGHT-DCI-DIAGNOSIS.md)。该诊断中的论文数值为 reference-only，不能作为完全复现或跨配置可比性的结论。
+
 ## 推荐核验包的全量执行台账
 
 推荐核验包共 848 条：Bright Biology 103、Earth Science 116、Economics 103、Robotics 101、

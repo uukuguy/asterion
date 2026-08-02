@@ -16,6 +16,7 @@ from unittest.mock import patch
 from asterion.capabilities.dci.implementation.pathlight.conversion import (
     DciConversionError,
     load_paper_reference,
+    recovered_run_to_evaluation_bundle,
     recovered_run_to_experiment,
 )
 from asterion.capabilities.dci.implementation.pathlight.recovery import (
@@ -163,6 +164,22 @@ class TestDciPathlightConversion(unittest.TestCase):
             )
             self.assertEqual(evaluation.trace_sha256, trial.trace_sha256)
             self.assertEqual(evaluation.scope_sha256, _case_scope(trial.dataset_item_sha256))
+
+    def test_evaluation_bundle_registers_exactly_the_experiment_metric_semantics(self) -> None:
+        experiment = recovered_run_to_experiment(self.recovered)
+        evaluations = recovered_run_to_evaluation_bundle(self.recovered)
+        self.assertEqual(
+            tuple(item.evaluation_sha256 for item in evaluations.evaluations),
+            tuple(sorted(item.evaluation_sha256 for item in experiment.evaluations)),
+        )
+        self.assertEqual(len(evaluations.metric_contracts), 1)
+        self.assertTrue(
+            all(
+                item.metric_contract_sha256
+                == evaluations.metric_contracts[0].metric_contract_sha256
+                for item in evaluations.evaluations
+            )
+        )
 
     def test_conversion_is_deterministic_for_direct_reversed_case_tuple(self) -> None:
         forward = recovered_run_to_experiment(self.recovered)

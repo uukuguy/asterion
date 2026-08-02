@@ -256,6 +256,29 @@ class TestDciPathlightRecovery(unittest.TestCase):
         self.assertEqual(recovered.metric_name, "accuracy")
         self.assertEqual(recovered.metric_value_microunits, 500_000)
 
+    def test_qa_recovery_does_not_require_an_ir_ranking_metric_contract(self) -> None:
+        with private_fixture() as root:
+            config = _load(root, "config.json")
+            config["mode"] = "qa"
+            config["ranking_metric_contract"] = None
+            _write(root, "config.json", config)
+            summary = _load(root, "summary.json")
+            summary.pop("ndcg_at_10")
+            summary["accuracy"] = {"over_total": 0.5}
+            _write(root, "summary.json", summary)
+            analysis = _load(root, "analysis.json")
+            for index, row in enumerate(analysis["per_query_metrics"]):
+                row.pop("ndcg_at_10")
+                row["is_correct"] = index == 1
+            _write(root, "analysis.json", analysis)
+            results = [json.loads(line) for line in (root / "results.jsonl").read_text(encoding="utf-8").splitlines()]
+            for row in results:
+                row["mode"] = "qa"
+            _write_results(root, results)
+            _refresh_config_digests(root)
+            recovered = read_completed_dci_run(root.absolute(), expected_dataset_id="bright.biology")
+        self.assertEqual(recovered.metric_name, "accuracy")
+
     def test_reader_rejects_missing_and_wrong_type_variant_sources(self) -> None:
         for path in _VARIANT_SOURCES:
             for mutation in ("missing", "wrong-type"):

@@ -180,6 +180,37 @@ class TestDciPathlightDiagnosis(unittest.TestCase):
         for item in report.observations:
             self.assertIn(f"覆盖可用 0/{item.selected_count}", rendered)
 
+    def test_renderer_includes_every_safe_dataset_metric_and_component_relation(self) -> None:
+        report = self._diagnose()
+        rendered = render_chinese_diagnosis(report)
+        for observation in report.observations:
+            with self.subTest(dataset=observation.dataset_id):
+                metrics = observation.workflow_metrics
+                for value in (
+                    observation.score_microunits,
+                    observation.reference_score_microunits,
+                    observation.reference_gap_microunits,
+                    observation.corpus_file_count,
+                    metrics.zero_score_rate_microunits,
+                    metrics.median_agent_total_tokens,
+                    metrics.median_tool_call_count,
+                    metrics.median_wall_time_ns,
+                    metrics.median_tool_time_ns,
+                    metrics.median_read_call_count,
+                    metrics.median_grep_call_count,
+                    metrics.median_read_time_ns,
+                    metrics.median_grep_time_ns,
+                    metrics.median_question_word_count,
+                    metrics.total_tool_error_count,
+                    metrics.tool_time_share_microunits,
+                    metrics.read_time_share_microunits,
+                    metrics.grep_time_share_microunits,
+                ):
+                    self.assertIn(str(value), rendered)
+        self.assertEqual(rendered.count("组件摘要关系："), 30)
+        self.assertIn("覆盖率观测：状态 proposed；最多 50 次 Agent 操作", rendered)
+        self.assertIn("检索查询分解：状态 proposed；最多 80 次 Agent 操作", rendered)
+
     def test_aggregate_metrics_exclude_cross_dataset_score_statistics(self) -> None:
         report = self._diagnose()
         self.assertIs(type(report.aggregate_workflow_metrics), DciAggregateWorkflowMetrics)
@@ -210,6 +241,38 @@ class TestDciPathlightDiagnosis(unittest.TestCase):
         self.assertEqual(
             report.aggregate_workflow_metrics.to_mapping(),
             changed.aggregate_workflow_metrics.to_mapping(),
+        )
+
+    def test_diagnosis_accepts_parallel_tool_time_above_one_case_wall_time(self) -> None:
+        biology = next(run for run in self.six_runs if run.dataset_id == "bright.biology")
+        changed_case = replace(
+            biology.cases[0], wall_time_ns=1, tool_time_ns=2,
+            read_time_ns=1, grep_time_ns=1,
+        )
+        changed = _with_cases(biology, (changed_case, *biology.cases[1:]))
+        runs = tuple(changed if run.dataset_id == "bright.biology" else run for run in self.six_runs)
+        report = diagnose_recommended_pack(runs)
+        self.assertEqual(report.dataset_count, 6)
+
+    def test_diagnosis_computes_large_nanosecond_time_shares_without_overflow(self) -> None:
+        factor = 10_000_000_000
+        enlarged = []
+        for run in self.six_runs:
+            cases = tuple(
+                replace(
+                    case,
+                    wall_time_ns=case.wall_time_ns * factor,
+                    tool_time_ns=case.tool_time_ns * factor,
+                    read_time_ns=case.read_time_ns * factor,
+                    grep_time_ns=case.grep_time_ns * factor,
+                )
+                for case in run.cases
+            )
+            enlarged.append(_with_cases(run, cases))
+        report = diagnose_recommended_pack(tuple(enlarged))
+        self.assertLessEqual(
+            report.aggregate_workflow_metrics.tool_time_share_microunits,
+            1_000_000,
         )
 
     def test_proposals_bind_exact_canonical_case_scopes_and_sole_variables(self) -> None:

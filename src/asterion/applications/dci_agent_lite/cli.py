@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TextIO
 
 from asterion.benchmarks.cli import BenchmarkCommandHost
+from asterion.capability_packages.sources.base import CapabilityPackageSource
 from asterion.applications.dci_agent_lite.operator_config import (
     DciOperatorConfig,
     load_operator_config,
@@ -56,19 +57,24 @@ def main(
     env_file: Path | None = None,
     environment: Mapping[str, str] | None = None,
     amount: Decimal | None = None,
-    benchmark_package_sources: Sequence[object] | None = None,
+    benchmark_package_sources: Sequence[CapabilityPackageSource] | None = None,
 ) -> int:
     """Apply exact DCI defaults and delegate to generic Asterion hosts."""
-
-    from asterion.benchmarks.cli import main as default_benchmark_main
-    from asterion.cli import main as default_application_main
-
     stdin = sys.stdin if stdin is None else stdin
     stdout = sys.stdout if stdout is None else stdout
     stderr = sys.stderr if stderr is None else stderr
     assert stdin is not None
     assert stdout is not None
     assert stderr is not None
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == "pathlight":
+        from asterion.applications.dci_agent_lite.pathlight_cli import main as pathlight_main
+
+        return pathlight_main(arguments[1:], stdout=stdout, stderr=stderr)
+
+    from asterion.benchmarks.cli import main as default_benchmark_main
+    from asterion.cli import main as default_application_main
+
     application_host = (
         default_application_main
         if application_main is None
@@ -77,7 +83,6 @@ def main(
     benchmark_host_main = (
         default_benchmark_main if benchmark_main is None else benchmark_main
     )
-    arguments = list(sys.argv[1:] if argv is None else argv)
     if not arguments or arguments == ["--help"]:
         stdout.write(
             "usage: asterion-dci "
@@ -248,7 +253,7 @@ def _list_benchmark_instances(
 def _create_benchmark_source_lock(
     arguments: Sequence[str],
     *,
-    package_sources: Sequence[object] | None,
+    package_sources: Sequence[CapabilityPackageSource] | None,
     stdout: TextIO,
     stderr: TextIO,
 ) -> int:

@@ -10,11 +10,17 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Literal, Mapping, cast
 
-from asterion.pathlight._private_file import read_private_file_snapshot
+from asterion.pathlight._private_file import (
+    read_private_file,
+    read_private_file_snapshot,
+    write_private_file,
+)
 
 
 _FILES = ("config.json", "batch-state.json", "summary.json", "analysis.json", "results.jsonl")
 _LIMITS = {name: 1 << 20 for name in _FILES}
+DCI_RECOVERY_FILENAME = "pathlight-dci-recovery.json"
+_MAX_RECOVERY_BYTES = 1 << 20
 _HEX_SHA256 = frozenset("0123456789abcdef")
 _MISSING_EVIDENCE = ("sealed-analysis-digest", "sealed-config-digest")
 _RUN_FIELDS = frozenset(
@@ -219,6 +225,44 @@ def validate_recovered_run(mapping: Mapping[str, object]) -> DciRecoveredRun:
     return recovered
 
 
+def write_recovered_run(run: DciRecoveredRun, path: Path) -> None:
+    """Exclusively persist one canonical recovered run as a private file."""
+
+    encoded: bytes | None = None
+    try:
+        if type(run) is not DciRecoveredRun or not isinstance(path, Path) or path.name != DCI_RECOVERY_FILENAME:
+            raise ValueError
+        canonical = validate_recovered_run(run.to_mapping())
+        encoded = _canonical_bytes(canonical.to_mapping())
+    except Exception:
+        pass
+    if encoded is None:
+        raise DciRecoveryError("DCI recovery evidence is invalid") from None
+    try:
+        write_private_file(path, encoded)
+    except Exception:
+        raise DciRecoveryError("DCI recovery evidence is invalid") from None
+
+
+def read_recovered_run(path: Path) -> DciRecoveredRun:
+    """Read and validate one canonical private recovered-run projection."""
+
+    recovered: DciRecoveredRun | None = None
+    try:
+        if not isinstance(path, Path) or path.name != DCI_RECOVERY_FILENAME:
+            raise ValueError
+        encoded = read_private_file(path, _MAX_RECOVERY_BYTES)
+        mapping = _json_mapping(encoded)
+        recovered = validate_recovered_run(mapping)
+        if not hmac.compare_digest(encoded, _canonical_bytes(recovered.to_mapping())):
+            raise ValueError
+    except Exception:
+        pass
+    if recovered is None:
+        raise DciRecoveryError("DCI recovery evidence is invalid") from None
+    return recovered
+
+
 def _recover(
     config: Mapping[str, object],
     state: Mapping[str, object],
@@ -235,7 +279,7 @@ def _recover(
     mode = _mode(config.get("mode"))
     if state.get("status") != "completed":
         raise ValueError
-    variant = _variant(config)
+    variant = _variant(config, mode)
     rows = analysis.get("per_query_metrics")
     if type(rows) is not list or not rows:
         raise ValueError
@@ -326,7 +370,9 @@ def _case(value: object, mode: Literal["ir", "qa"]) -> DciRecoveredCase:
     )
 
 
-def _variant(config: Mapping[str, object]) -> DciRecoveredVariant:
+def _variant(
+    config: Mapping[str, object], mode: Literal["ir", "qa"]
+) -> DciRecoveredVariant:
     runtime = _mapping(config.get("runtime"))
     return DciRecoveredVariant(
         runtime_contract_sha256=_opaque_identity(config.get("runtime_contract"), "runtime-contract"),
@@ -334,7 +380,11 @@ def _variant(config: Mapping[str, object]) -> DciRecoveredVariant:
         toolset_sha256=_opaque_identity(runtime.get("tools"), "toolset"),
         prompt_contract_sha256=_sha256(config.get("benchmark_prompt_contract_sha256")),
         context_contract_sha256=_opaque_identity(config.get("context_contract"), "context-contract"),
-        metric_contract_sha256=_opaque_identity(config.get("ranking_metric_contract"), "metric-contract"),
+        metric_contract_sha256=(
+            _opaque_identity(config.get("ranking_metric_contract"), "metric-contract")
+            if mode == "ir"
+            else _opaque_identity("accuracy", "metric-contract")
+        ),
         implementation_sha256=_sha256(config.get("implementation_sha256")),
         profile_sha256=_sha256(config.get("profile_sha256")),
         policy_sha256=_sha256(config.get("product_effective_config_sha256")),
