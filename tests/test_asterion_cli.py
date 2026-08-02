@@ -46,6 +46,7 @@ from asterion.capabilities.execution import (
     CapabilityExecutionResult,
 )
 from asterion.capability_packages.sources.local import LocalDirectoryCapabilityPackageSource
+from asterion.runner.composed import run_composed_application
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 from asterion.services.controlled_executor import ControlledExecutionResult
@@ -1620,34 +1621,63 @@ class AsterionCliTests(unittest.TestCase):
 
     def test_run_writes_opt_in_safe_workflow_evidence(self) -> None:
         runtime = DciPiFixtureRuntime()
-        registry = RuntimeFactoryRegistry((
-            RuntimeFactoryBinding(
-                runtime_id="claude-code.reference",
-                capabilities=("filesystem.read", "shell"),
-                factory=fail_if_unselected_runtime_is_created,
-            ),
-            RuntimeFactoryBinding(
-                runtime_id="pi.reference",
-                capabilities=("filesystem.read", "shell"),
-                factory=lambda context: runtime,
-            ),
-        ))
+        pathlights = []
+
+        def create_runtime(context):
+            pathlights.append(context.pathlight)
+            return runtime
+
+        registry = RuntimeFactoryRegistry(
+            (
+                RuntimeFactoryBinding(
+                    runtime_id="claude-code.reference",
+                    capabilities=("filesystem.read", "shell"),
+                    factory=fail_if_unselected_runtime_is_created,
+                ),
+                RuntimeFactoryBinding(
+                    runtime_id="pi.reference",
+                    capabilities=("filesystem.read", "shell"),
+                    factory=create_runtime,
+                ),
+            )
+        )
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "workflow-evidence.json"
-            code = main(
-                [
-                    "run", "--provider", "dci-agent-lite", "--runtime", "pi.reference",
-                    "--application", "dci.research-capability@1.0.0",
-                    "--workflow-evidence-file", str(target), *dci_host_arguments(),
-                    "--input", "SECRET-INPUT",
-                ],
-                entry_points=(FakeEntryPoint(name="dci-agent-lite", factory=create_dci_provider),),
-                host_service_entry_points=(dci_host_entry(),),
-                runtime_factories=registry,
-                capability_packages=(transitional_dci_package(),),
-                stdout=io.StringIO(), stderr=io.StringIO(),
-            )
+            with patch(
+                "asterion.cli.run_composed_application",
+                wraps=run_composed_application,
+            ) as composed:
+                code = main(
+                    [
+                        "run",
+                        "--provider",
+                        "dci-agent-lite",
+                        "--runtime",
+                        "pi.reference",
+                        "--application",
+                        "dci.research-capability@1.0.0",
+                        "--workflow-evidence-file",
+                        str(target),
+                        *dci_host_arguments(),
+                        "--input",
+                        "SECRET-INPUT",
+                    ],
+                    entry_points=(
+                        FakeEntryPoint(
+                            name="dci-agent-lite", factory=create_dci_provider
+                        ),
+                    ),
+                    host_service_entry_points=(dci_host_entry(),),
+                    runtime_factories=registry,
+                    capability_packages=(transitional_dci_package(),),
+                    stdout=io.StringIO(),
+                    stderr=io.StringIO(),
+                )
             self.assertEqual(code, 0)
+            call = composed.await_args
+            self.assertIsNotNone(call)
+            assert call is not None
+            self.assertIs(call.kwargs["pathlight"], pathlights[0])
             rendered = target.read_text(encoding="utf-8")
         bundle = json.loads(rendered)
         self.assertEqual(bundle["schema"], "asterion.workflow-observation-bundle/v1")

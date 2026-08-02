@@ -326,6 +326,7 @@ async def _run(
             run_id=args.run_id,
             input_text=input_text,
             host_services=host_services,
+            pathlight=context.pathlight,
         )
         if observed_runtime is not None:
             write_workflow_observation_bundle(

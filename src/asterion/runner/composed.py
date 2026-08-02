@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterable, Mapping
 from types import MappingProxyType
+from typing import Callable
+from uuid import uuid4
 
 from asterion.assembly.protocol import AssemblyPlan
 from asterion.capabilities.catalog import CapabilityRef
@@ -19,6 +22,7 @@ from asterion.runner.application import (
     ApplicationRunError,
     ApplicationRunResult,
 )
+from asterion.pathlight import PathlightRecorder, TraceEvent
 from asterion.runtime.host import (
     AgentRuntimeClient,
     CancellationSignal,
@@ -38,6 +42,7 @@ async def run_composed_application(
     host_events: tuple[Mapping[str, object], ...] = (),
     host_artifacts: tuple[Mapping[str, object], ...] = (),
     signal: CancellationSignal | None = None,
+    pathlight: PathlightRecorder | None = None,
 ) -> ApplicationRunResult:
     """Run explicitly bound capability implementations sequentially."""
 
@@ -51,90 +56,259 @@ async def run_composed_application(
     except Exception:
         raise ApplicationRunError("application host evidence is invalid") from None
 
-    _preflight(
-        plan,
-        runtime=runtime,
-        run_id=run_id,
-        input_text=input_text,
-        host_services=host_services,
-        host_events=host_events_snapshot,
-        host_artifacts=host_artifacts_snapshot,
-        signal=signal,
-    )
-    try:
-        bindings = validate_implementation_bindings(plan, implementations)
-    except CapabilityExecutionError:
-        raise ApplicationRunError("application capability binding is invalid") from None
+    lifecycle = _PathlightLifecycle(pathlight)
+    lifecycle.start_root()
+    lifecycle.start_plan()
+    active_capability_span: str | None = None
+    cancellation_observed = False
+    failure_class = "configuration"
 
-    events: list[Mapping[str, object]] = []
-    artifacts: list[Mapping[str, object]] = []
-    artifact_ids: set[str] = set()
-    for manifest in plan.capability_manifests:
-        if manifest["kind"] not in EXECUTABLE_CAPABILITY_KINDS:
-            continue
-        if signal is not None and signal.cancelled:
-            raise ApplicationRunError("application capability execution was cancelled")
-        capability_ref = CapabilityRef(
-            str(manifest["capability_id"]), str(manifest["version"])
-        )
-        consumed_events = manifest["consumes_events"]
-        consumed_artifacts = manifest["consumes_artifacts"]
-        assert isinstance(consumed_events, tuple)
-        assert isinstance(consumed_artifacts, tuple)
-        upstream_events = tuple(
-            event for event in events if event.get("type") in consumed_events
-        )
-        upstream_artifacts = tuple(
-            artifact
-            for artifact in artifacts
-            if artifact.get("media_type") in consumed_artifacts
-        )
-        package_host_events = tuple(
-            event
-            for event in host_events_snapshot
-            if event.get("type") in consumed_events
-        )
-        package_host_artifacts = tuple(
-            artifact
-            for artifact in host_artifacts_snapshot
-            if artifact.get("media_type") in consumed_artifacts
-        )
-        invocation = CapabilityInvocation(
-            capability_ref=capability_ref,
-            manifest=manifest,
+    def record_cancellation() -> None:
+        nonlocal cancellation_observed
+        cancellation_observed = True
+
+    try:
+        _preflight(
+            plan,
+            runtime=runtime,
             run_id=run_id,
             input_text=input_text,
-            upstream_events=upstream_events,
-            upstream_artifacts=upstream_artifacts,
-            host_events=package_host_events,
-            host_artifacts=package_host_artifacts,
-            runtime=runtime,
             host_services=host_services,
+            host_events=host_events_snapshot,
+            host_artifacts=host_artifacts_snapshot,
             signal=signal,
+            on_cancelled=record_cancellation,
         )
         try:
-            result = await bindings[capability_ref].execute(invocation)
-            validate_capability_result(manifest, result)
-            for artifact in result.artifacts:
-                artifact_id = artifact["artifact_id"]
-                assert isinstance(artifact_id, str)
-                if artifact_id in artifact_ids:
-                    raise CapabilityExecutionError(
-                        "application artifact identity is duplicated"
-                    )
-                artifact_ids.add(artifact_id)
-        except Exception:
-            raise ApplicationRunError("application capability execution failed") from None
-        events.extend(result.events)
-        artifacts.extend(result.artifacts)
+            bindings = validate_implementation_bindings(plan, implementations)
+        except CapabilityExecutionError:
+            raise ApplicationRunError(
+                "application capability binding is invalid"
+            ) from None
 
-    return ApplicationRunResult(
-        application_id=plan.application_id,
-        runtime_id=plan.runtime_id,
-        run_id=run_id,
-        events=tuple(events),
-        artifacts=tuple(artifacts),
-    )
+        events: list[Mapping[str, object]] = []
+        artifacts: list[Mapping[str, object]] = []
+        artifact_ids: set[str] = set()
+        for manifest in plan.capability_manifests:
+            if manifest["kind"] not in EXECUTABLE_CAPABILITY_KINDS:
+                continue
+            if signal is not None and signal.cancelled:
+                record_cancellation()
+                raise ApplicationRunError(
+                    "application capability execution was cancelled"
+                )
+            capability_ref = CapabilityRef(
+                str(manifest["capability_id"]), str(manifest["version"])
+            )
+            consumed_events = manifest["consumes_events"]
+            consumed_artifacts = manifest["consumes_artifacts"]
+            assert isinstance(consumed_events, tuple)
+            assert isinstance(consumed_artifacts, tuple)
+            upstream_events = tuple(
+                event for event in events if event.get("type") in consumed_events
+            )
+            upstream_artifacts = tuple(
+                artifact
+                for artifact in artifacts
+                if artifact.get("media_type") in consumed_artifacts
+            )
+            package_host_events = tuple(
+                event
+                for event in host_events_snapshot
+                if event.get("type") in consumed_events
+            )
+            package_host_artifacts = tuple(
+                artifact
+                for artifact in host_artifacts_snapshot
+                if artifact.get("media_type") in consumed_artifacts
+            )
+            invocation = CapabilityInvocation(
+                capability_ref=capability_ref,
+                manifest=manifest,
+                run_id=run_id,
+                input_text=input_text,
+                upstream_events=upstream_events,
+                upstream_artifacts=upstream_artifacts,
+                host_events=package_host_events,
+                host_artifacts=package_host_artifacts,
+                runtime=runtime,
+                host_services=host_services,
+                signal=signal,
+            )
+            active_capability_span = lifecycle.start_capability()
+            try:
+                result = await bindings[capability_ref].execute(invocation)
+                validate_capability_result(manifest, result)
+                for artifact in result.artifacts:
+                    artifact_id = artifact["artifact_id"]
+                    assert isinstance(artifact_id, str)
+                    if artifact_id in artifact_ids:
+                        raise CapabilityExecutionError(
+                            "application artifact identity is duplicated"
+                        )
+                    artifact_ids.add(artifact_id)
+            except Exception:
+                lifecycle.fail_capability(active_capability_span)
+                active_capability_span = None
+                failure_class = "capability-execution-failed"
+                raise ApplicationRunError(
+                    "application capability execution failed"
+                ) from None
+            lifecycle.complete_capability(active_capability_span)
+            active_capability_span = None
+            events.extend(result.events)
+            artifacts.extend(result.artifacts)
+
+        result = ApplicationRunResult(
+            application_id=plan.application_id,
+            runtime_id=plan.runtime_id,
+            run_id=run_id,
+            events=tuple(events),
+            artifacts=tuple(artifacts),
+        )
+    except asyncio.CancelledError:
+        if active_capability_span is not None:
+            lifecycle.cancel_capability(active_capability_span)
+        lifecycle.cancel_plan()
+        lifecycle.cancel_root()
+        raise
+    except ApplicationRunError:
+        if active_capability_span is not None:
+            lifecycle.fail_capability(active_capability_span)
+        if cancellation_observed:
+            lifecycle.cancel_plan()
+            lifecycle.cancel_root()
+        else:
+            lifecycle.fail_plan(failure_class)
+            lifecycle.fail_root(failure_class)
+        raise
+    lifecycle.complete_plan()
+    lifecycle.complete_root()
+    return result
+
+
+class _PathlightLifecycle:
+    """Emit closed, public-safe spans without influencing execution decisions."""
+
+    def __init__(self, recorder: PathlightRecorder | None) -> None:
+        self._recorder = recorder
+        self._trace_id = None if recorder is None else recorder.trace_id
+        self._sequence = 0
+        self._root_span_id: str | None = None
+        self._plan_span_id: str | None = None
+
+    def start_root(self) -> None:
+        self._root_span_id = self._start("task", None)
+
+    def start_plan(self) -> None:
+        self._plan_span_id = self._start("plan", self._root_span_id)
+
+    def start_capability(self) -> str | None:
+        return self._start("task", self._plan_span_id)
+
+    def complete_capability(self, span_id: str | None) -> None:
+        self._terminal(span_id, "completed", "task")
+
+    def fail_capability(self, span_id: str | None) -> None:
+        self._terminal(
+            span_id,
+            "failed",
+            "task",
+            attributes={"failure_class": "capability-execution-failed"},
+        )
+
+    def cancel_capability(self, span_id: str | None) -> None:
+        self._terminal(
+            span_id,
+            "cancelled",
+            "task",
+            attributes={"failure_class": "cancelled"},
+        )
+
+    def complete_plan(self) -> None:
+        self._terminal(self._plan_span_id, "completed", "plan")
+
+    def fail_plan(self, failure_class: str) -> None:
+        self._terminal(
+            self._plan_span_id,
+            "failed",
+            "plan",
+            attributes={"failure_class": failure_class},
+        )
+
+    def cancel_plan(self) -> None:
+        self._terminal(
+            self._plan_span_id,
+            "cancelled",
+            "plan",
+            attributes={"failure_class": "cancelled"},
+        )
+
+    def complete_root(self) -> None:
+        self._terminal(self._root_span_id, "completed", "task")
+
+    def fail_root(self, failure_class: str) -> None:
+        self._terminal(
+            self._root_span_id,
+            "failed",
+            "task",
+            attributes={"failure_class": failure_class},
+        )
+
+    def cancel_root(self) -> None:
+        self._terminal(
+            self._root_span_id,
+            "cancelled",
+            "task",
+            attributes={"failure_class": "cancelled"},
+        )
+
+    def _start(self, kind: str, parent_span_id: str | None) -> str | None:
+        if self._trace_id is None:
+            return None
+        span_id = str(uuid4())
+        self._sequence += 1
+        self._record(
+            TraceEvent.start(
+                self._trace_id,
+                span_id,
+                parent_span_id,
+                self._sequence,
+                kind,
+            )
+        )
+        return span_id
+
+    def _terminal(
+        self,
+        span_id: str | None,
+        status: str,
+        kind: str,
+        *,
+        attributes: Mapping[str, str] | None = None,
+    ) -> None:
+        if self._trace_id is None or span_id is None:
+            return
+        self._sequence += 1
+        self._record(
+            TraceEvent.terminal(
+                self._trace_id,
+                span_id,
+                self._sequence,
+                status,
+                kind=kind,
+                attributes=attributes,
+            )
+        )
+
+    def _record(self, event: TraceEvent) -> None:
+        assert self._recorder is not None
+        try:
+            self._recorder.record(event)
+        except Exception:
+            # Instrumentation remains observational and cannot replace the
+            # runner's result, failure, or cancellation semantics.
+            return
 
 
 def _preflight(
@@ -147,6 +321,7 @@ def _preflight(
     host_events: tuple[Mapping[str, object], ...],
     host_artifacts: tuple[Mapping[str, object], ...],
     signal: CancellationSignal | None,
+    on_cancelled: Callable[[], None] | None = None,
 ) -> None:
     if runtime.manifest.runtime_id != plan.runtime_id:
         raise ApplicationRunError("application runtime identity does not match")
@@ -163,6 +338,8 @@ def _preflight(
         host_artifacts=host_artifacts,
     )
     if signal is not None and signal.cancelled:
+        if on_cancelled is not None:
+            on_cancelled()
         raise ApplicationRunError("application run was cancelled before invocation")
     try:
         RunRequest(run_id=run_id, input_text=input_text).to_mapping()

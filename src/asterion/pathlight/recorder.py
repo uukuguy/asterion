@@ -12,6 +12,10 @@ from asterion.pathlight.protocol import PathlightError, TraceEvent, TraceGraph, 
 class PathlightRecorder(Protocol):
     """Receive safe events and expose an immutable public trace snapshot."""
 
+    @property
+    def trace_id(self) -> str | None:
+        """Return the exact trace identity, or ``None`` when recording is disabled."""
+
     def record(self, event: TraceEvent) -> None:
         """Accept one safe event for this recorder's trace."""
 
@@ -21,6 +25,10 @@ class PathlightRecorder(Protocol):
 
 class NoopPathlightRecorder:
     """A recorder that neither retains events nor exposes their contents."""
+
+    @property
+    def trace_id(self) -> None:
+        return None
 
     def record(self, event: TraceEvent) -> None:
         del event
@@ -36,6 +44,10 @@ class MemoryPathlightRecorder:
         TraceEvent.start(trace_id, trace_id, None, 1, "task")
         self._trace_id = trace_id
         self._events: list[TraceEvent] = []
+
+    @property
+    def trace_id(self) -> str:
+        return self._trace_id
 
     def record(self, event: TraceEvent) -> None:
         if not isinstance(event, TraceEvent) or event.trace_id != self._trace_id:
