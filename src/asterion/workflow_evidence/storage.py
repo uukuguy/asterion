@@ -8,6 +8,7 @@ import os
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from asterion.pathlight import PathlightError, validate_trace_graph
 from asterion.workflow_evidence.collector import (
     WorkflowEvidenceError,
     validate_workflow_evidence,
@@ -50,6 +51,8 @@ def _validate_failure_observation(record: Mapping[str, object]) -> None:
 def write_workflow_observation_bundle(
     path: Path,
     records: Sequence[Mapping[str, object]],
+    *,
+    pathlight_traces: Sequence[Mapping[str, object]] = (),
 ) -> None:
     """Write validated records once to a caller-selected canonical target."""
 
@@ -75,9 +78,25 @@ def write_workflow_observation_bundle(
             raise WorkflowEvidenceError("workflow observation run identity is duplicated")
         seen_run_ids.add(run_id)
         serialized_records.append(dict(record))
+    serialized_traces: list[dict[str, object]] = []
+    seen_trace_ids: set[str] = set()
+    for trace in pathlight_traces:
+        if not isinstance(trace, Mapping):
+            raise WorkflowEvidenceError("Pathlight trace is invalid")
+        try:
+            validate_trace_graph(trace)
+        except PathlightError:
+            raise WorkflowEvidenceError("Pathlight trace is invalid") from None
+        trace_id = trace["trace_id"]
+        assert isinstance(trace_id, str)
+        if trace_id in seen_trace_ids:
+            raise WorkflowEvidenceError("Pathlight trace identity is duplicated")
+        seen_trace_ids.add(trace_id)
+        serialized_traces.append(_serialize_pathlight_trace(trace))
     bundle: dict[str, object] = {
         "schema": "asterion.workflow-observation-bundle/v1",
         "records": serialized_records,
+        "pathlight_traces": serialized_traces,
     }
     bundle["bundle_sha256"] = hashlib.sha256(
         json.dumps(bundle, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -89,3 +108,36 @@ def write_workflow_observation_bundle(
         raise WorkflowEvidenceError("workflow observation target is unavailable") from error
     with os.fdopen(descriptor, "wb") as output:
         output.write(encoded)
+
+
+def _serialize_pathlight_trace(trace: Mapping[str, object]) -> dict[str, object]:
+    """Copy an already validated trace into standard JSON container types."""
+
+    events = trace["events"]
+    assert isinstance(events, list)
+    serialized_events: list[dict[str, object]] = []
+    for event in events:
+        assert isinstance(event, Mapping)
+        attributes = event["attributes"]
+        links = event["links"]
+        assert isinstance(attributes, Mapping)
+        assert isinstance(links, Sequence)
+        serialized_events.append(
+            {
+                "trace_id": event["trace_id"],
+                "span_id": event["span_id"],
+                "parent_span_id": event["parent_span_id"],
+                "sequence": event["sequence"],
+                "kind": event["kind"],
+                "status": event["status"],
+                "attributes": dict(attributes),
+                "links": [dict(link) for link in links],
+                "timestamp_ns": event["timestamp_ns"],
+            }
+        )
+    return {
+        "schema": trace["schema"],
+        "trace_id": trace["trace_id"],
+        "events": serialized_events,
+        "trace_sha256": trace["trace_sha256"],
+    }

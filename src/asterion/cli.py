@@ -12,6 +12,7 @@ from contextlib import AbstractAsyncContextManager
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Callable, TextIO, cast
+from uuid import uuid4
 
 from asterion.applications.discovery import (
     list_application_providers,
@@ -47,6 +48,7 @@ from asterion.capability_packages import (
 from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
 from asterion.runner.application import ApplicationRunError
 from asterion.runner.composed import run_composed_application
+from asterion.pathlight import MemoryPathlightRecorder, NOOP_PATHLIGHT_RECORDER
 from asterion.runtime.factory import (
     RuntimeFactoryContext,
     RuntimeFactoryError,
@@ -303,6 +305,11 @@ async def _run(
         options=host_options,
         managed=managed_services,
     ) as host_services:
+        pathlight = (
+            MemoryPathlightRecorder(str(uuid4()))
+            if args.workflow_evidence_file is not None
+            else NOOP_PATHLIGHT_RECORDER
+        )
         context = RuntimeFactoryContext(
             provider_id=provider.provider_id,
             application_id=application.application_id,
@@ -311,6 +318,7 @@ async def _run(
             assembly_path=assembly_path,
             options=runtime_options,
             host_services=host_services,
+            pathlight=pathlight,
         )
         runtime = runtime_binding.factory(context)
         input_text = args.input if args.input is not None else stdin.read()
@@ -329,9 +337,11 @@ async def _run(
             pathlight=context.pathlight,
         )
         if observed_runtime is not None:
+            trace = context.pathlight.snapshot()
             write_workflow_observation_bundle(
                 Path(args.workflow_evidence_file),
                 observed_runtime.records + observed_runtime.failed_attempts,
+                pathlight_traces=() if trace is None else (trace,),
             )
     stdout.write(json.dumps(project_public_value(result.__dict__), sort_keys=True) + "\n")
     return 0

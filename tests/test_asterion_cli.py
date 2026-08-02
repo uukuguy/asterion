@@ -1682,6 +1682,11 @@ class AsterionCliTests(unittest.TestCase):
         bundle = json.loads(rendered)
         self.assertEqual(bundle["schema"], "asterion.workflow-observation-bundle/v1")
         self.assertEqual(bundle["records"][0]["run_id"], "asterion-run")
+        self.assertEqual(len(bundle["pathlight_traces"]), 1)
+        self.assertEqual(
+            bundle["pathlight_traces"][0]["schema"],
+            "asterion.pathlight-trace/v1",
+        )
         self.assertNotIn("SECRET-INPUT", rendered)
         self.assertNotIn("SECRET-RUNTIME-DELTA", rendered)
 
