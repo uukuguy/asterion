@@ -11,10 +11,14 @@ from unittest.mock import patch
 
 from asterion.cli import main
 from asterion.pathlight import (
+    DiagnosisBundle,
     EvaluationRecord,
+    Finding,
     MetricContract,
+    Proposal,
     TraceEvent,
     TraceGraph,
+    write_diagnosis_bundle,
     write_evaluation_bundle,
 )
 from asterion.pathlight.experiment import (
@@ -171,6 +175,42 @@ def _experiment_bundle(*, reverse: bool = False) -> ExperimentBundle:
 
 
 class PathlightCliTests(unittest.TestCase):
+    def test_diagnosis_show_and_proposal_list_are_provider_free_canonical_json(self) -> None:
+        observed = Finding(
+            "observed", _digest("subject"), (_digest("evaluation"),), (), "confirmed", _digest("observed")
+        )
+        hypothesis = Finding(
+            "hypothesis", _digest("subject"), (observed.finding_sha256,), (), "medium", _digest("hypothesis")
+        )
+        proposal = Proposal(
+            hypothesis.finding_sha256,
+            _digest("change"), _digest("scope"), _digest("success"), _digest("stop"), _digest("budget"),
+        )
+        bundle = DiagnosisBundle.build(
+            experiment_bundle_sha256s=(_digest("experiment"),),
+            evaluation_sha256s=(_digest("evaluation"),),
+            findings=(observed, hypothesis),
+            proposals=(proposal,),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / "pathlight-diagnosis.json"
+            write_diagnosis_bundle(bundle, path)
+            outputs: list[str] = []
+            for command in (("diagnosis", "show"), ("proposal", "list")):
+                stdout = io.StringIO()
+                code = main(
+                    ["pathlight", *command, "--diagnosis-file", str(path)],
+                    entry_points=(FailIfLoadedEntryPoint(),),
+                    stdout=stdout,
+                )
+                self.assertEqual(code, 0)
+                payload = json.loads(stdout.getvalue())
+                self.assertEqual(stdout.getvalue(), json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n")
+                outputs.append(stdout.getvalue())
+
+        self.assertEqual(json.loads(outputs[0])["bundle_sha256"], bundle.bundle_sha256)
+        self.assertEqual(json.loads(outputs[1])[0]["proposal_sha256"], proposal.proposal_sha256)
+
     def test_experiment_show_and_trials_are_provider_free_canonical_json(self) -> None:
         bundle = _experiment_bundle()
         reversed_bundle = _experiment_bundle(reverse=True)

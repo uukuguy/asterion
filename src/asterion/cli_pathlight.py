@@ -13,6 +13,7 @@ from asterion.pathlight import (
     MetricFilter,
     PathlightCatalog,
     TraceFilter,
+    read_diagnosis_bundle,
     read_evaluation_bundle,
 )
 from asterion.pathlight.experiment import ExperimentCatalog, read_experiment_bundle
@@ -85,6 +86,13 @@ def _execute(args: argparse.Namespace) -> object:
             return catalog.list_trials(
                 args.experiment_sha256, evidence_state=args.evidence_state
             )
+    if args.command == "diagnosis":
+        return read_diagnosis_bundle(_diagnosis_path(args.diagnosis_file)).to_mapping()
+    if args.command == "proposal":
+        return [
+            proposal.to_mapping()
+            for proposal in read_diagnosis_bundle(_diagnosis_path(args.diagnosis_file)).proposals
+        ]
     raise ValueError("invalid pathlight command")
 
 
@@ -108,6 +116,10 @@ def _catalog_from_evaluations(values: Sequence[str]) -> PathlightCatalog:
 def _catalog_from_experiment(value: str) -> ExperimentCatalog:
     path = _absolute_canonical_paths((value,), "pathlight-experiment.json")[0]
     return ExperimentCatalog.build((read_experiment_bundle(path),))
+
+
+def _diagnosis_path(value: str) -> Path:
+    return _absolute_canonical_paths((value,), "pathlight-diagnosis.json")[0]
 
 
 def _absolute_canonical_paths(values: Sequence[str], filename: str) -> tuple[Path, ...]:
@@ -184,6 +196,19 @@ def _parser() -> argparse.ArgumentParser:
     _add_experiment_file(experiment_trials)
     experiment_trials.add_argument("--experiment-sha256", required=True)
     experiment_trials.add_argument("--evidence-state")
+    diagnosis = commands.add_parser("diagnosis", add_help=False)
+    diagnosis_commands = diagnosis.add_subparsers(
+        dest="diagnosis_command", required=True, parser_class=_Parser
+    )
+    diagnosis_show = diagnosis_commands.add_parser("show", add_help=False)
+    _add_diagnosis_file(diagnosis_show)
+
+    proposal = commands.add_parser("proposal", add_help=False)
+    proposal_commands = proposal.add_subparsers(
+        dest="proposal_command", required=True, parser_class=_Parser
+    )
+    proposal_list = proposal_commands.add_parser("list", add_help=False)
+    _add_diagnosis_file(proposal_list)
     return parser
 
 
@@ -197,3 +222,7 @@ def _add_evaluation_file(parser: argparse.ArgumentParser) -> None:
 
 def _add_experiment_file(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--experiment-file", required=True)
+
+
+def _add_diagnosis_file(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--diagnosis-file", required=True)

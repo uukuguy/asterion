@@ -45,6 +45,16 @@ from asterion.pathlight.recorder import (
     PathlightRecorder,
 )
 from asterion.pathlight.query import MetricFilter, PathlightCatalog, TraceFilter
+from asterion.pathlight.diagnosis import (
+    DiagnosisBundle,
+    Finding,
+    Proposal,
+    read_diagnosis_bundle,
+    validate_diagnosis_bundle,
+    validate_finding,
+    validate_proposal,
+    write_diagnosis_bundle,
+)
 
 __all__ = (
     "PathlightError",
@@ -82,6 +92,14 @@ __all__ = (
     "validate_experiment_bundle",
     "write_experiment_bundle",
     "read_experiment_bundle",
+    "Finding",
+    "Proposal",
+    "DiagnosisBundle",
+    "validate_finding",
+    "validate_proposal",
+    "validate_diagnosis_bundle",
+    "write_diagnosis_bundle",
+    "read_diagnosis_bundle",
     "TraceFilter",
     "MetricFilter",
     "PathlightCatalog",
