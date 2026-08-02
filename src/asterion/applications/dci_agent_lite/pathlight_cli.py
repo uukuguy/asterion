@@ -94,11 +94,15 @@ def _recover(arguments: tuple[str, ...]) -> dict[str, object]:
     experiment = recovered_run_to_experiment(recovered)
     evaluations = recovered_run_to_evaluation_bundle(recovered)
     _require_experiment_evaluation_closure(experiment, evaluations)
-    write_recovered_run(recovered, targets["recovery"])
-    write_experiment_bundle(experiment, targets["experiment"])
-    write_evaluation_bundle(
-        targets["evaluations"], evaluations.evaluations, evaluations.metric_contracts
-    )
+    try:
+        write_recovered_run(recovered, targets["recovery"])
+        write_experiment_bundle(experiment, targets["experiment"])
+        write_evaluation_bundle(
+            targets["evaluations"], evaluations.evaluations, evaluations.metric_contracts
+        )
+    except BaseException:
+        _rollback_outputs(output_root, tuple(targets.values()))
+        raise RuntimeError from None
     return {
         "case_count": recovered.selected_count,
         "dataset_digest": recovered.dataset_snapshot_sha256,
@@ -118,8 +122,12 @@ def _diagnose(arguments: tuple[str, ...]) -> dict[str, object]:
         raise ValueError
     report = diagnose_recommended_pack(recovered)
     markdown = render_chinese_diagnosis(report)
-    write_diagnosis_bundle(report.diagnosis_bundle, targets["diagnosis"])
-    write_private_file(targets["markdown"], markdown.encode("utf-8"))
+    try:
+        write_diagnosis_bundle(report.diagnosis_bundle, targets["diagnosis"])
+        write_private_file(targets["markdown"], markdown.encode("utf-8"))
+    except BaseException:
+        _rollback_outputs(output_root, tuple(targets.values()))
+        raise RuntimeError from None
     return {
         "case_count": report.total_case_count,
         "dataset_digest": _cohort_digest(recovered),
@@ -247,6 +255,52 @@ def _require_private_files(paths: Sequence[Path]) -> None:
         metadata = os.stat(path, follow_symlinks=False)
         if not isinstance(path, Path) or not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600:
             raise ValueError
+
+
+def _rollback_outputs(root: Path, targets: Sequence[Path]) -> None:
+    """Remove only this command's exact preflight-absent output names."""
+
+    descriptor = -1
+    failed = False
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _nofollow_flag()
+        descriptor = os.open(root, flags)
+        before = os.fstat(descriptor)
+        entry = os.stat(root, follow_symlinks=False)
+        if (
+            not stat.S_ISDIR(before.st_mode)
+            or stat.S_IMODE(before.st_mode) != 0o700
+            or before.st_uid != os.getuid()
+            or (before.st_dev, before.st_ino) != (entry.st_dev, entry.st_ino)
+        ):
+            raise OSError
+        for target in targets:
+            if not isinstance(target, Path) or target.parent != root or not target.name:
+                raise OSError
+            try:
+                os.unlink(target.name, dir_fd=descriptor)
+            except FileNotFoundError:
+                pass
+        after = os.fstat(descriptor)
+        if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+            raise OSError
+    except Exception:
+        failed = True
+    finally:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except Exception:
+                failed = True
+    if failed:
+        raise RuntimeError from None
+
+
+def _nofollow_flag() -> int:
+    value = getattr(os, "O_NOFOLLOW", None)
+    if type(value) is not int:
+        raise OSError
+    return value
 
 
 def _canonical_bytes(value: object) -> bytes:
