@@ -465,7 +465,20 @@ class DciRecoveredCase:
     grep_time_ns: int
     question_word_count: int
     resolution_status: Literal["available", "not-available"]
+    resolution_coverage_microunits: int | None
     case_source_sha256: str
+
+@dataclass(frozen=True, slots=True)
+class DciRecoveredVariant:
+    runtime_contract_sha256: str
+    model_sha256: str
+    toolset_sha256: str
+    prompt_contract_sha256: str
+    context_contract_sha256: str
+    metric_contract_sha256: str
+    implementation_sha256: str
+    profile_sha256: str
+    policy_sha256: str
 
 @dataclass(frozen=True, slots=True)
 class DciRecoveredRun:
@@ -478,14 +491,14 @@ class DciRecoveredRun:
     failed_count: int
     corpus_file_count: int
     dataset_snapshot_sha256: str
-    variant_component_sha256s: tuple[str, ...]
+    variant: DciRecoveredVariant
     cases: tuple[DciRecoveredCase, ...]
     source_document_sha256s: tuple[str, ...]
     missing_evidence: tuple[str, ...]
     recovered_run_sha256: str
 ```
 
-只读取下列 `analysis.per_query_metrics` 字段：`query_id`（立即 SHA-256）、`ndcg_at_10` 或 `is_correct`、`run_status`、agent token/cost、wall/tool time、tool counts/errors/durations、question word count、resolution status 和数值 coverage。tool 名只允许 `read`、`grep`。float 用 `Decimal(str(value))` 转为整数 microunits/nanoseconds/microusd；拒绝 NaN、Infinity、bool 和负值。
+只读取下列 `analysis.per_query_metrics` 字段：`query_id`（立即 domain-separated SHA-256）、`ndcg_at_10` 或 `is_correct`、`run_status`、agent token/cost、wall/tool time、tool counts/errors/durations、question word count、resolution status 和数值 coverage。tool 名只允许 `read`、`grep`。variant 只保存 runtime/model/toolset/prompt/context/metric/implementation/profile/policy 的 domain-separated digest，不保留 provider/model 名称或配置值。float 用 `Decimal(str(value))` 转为整数 microunits/nanoseconds/microusd；拒绝 NaN、Infinity、bool 和负值。
 
 读取后必须：验证 config 中 `summary.json`/`results.jsonl` digest；逐行验证 results 与 analysis 的 query identity/status；重算逐例聚合并与 summary 在 1 microunit 内一致；验证 selected/total/failed 和 exact dataset/mode/metric。因为历史外层证据既未封存 `config.json` 本身，也未通过 config 封存 `analysis.json`，始终加入 `sealed-config-digest`、`sealed-analysis-digest` missing evidence，并把本次五文件 snapshot digest 写入 `source_document_sha256s`。
 
@@ -606,7 +619,7 @@ Expected: FAIL，因为 DCI diagnosis module 不存在。
 
 - [ ] **Step 3: 实现 deterministic cohort analyzer**
 
-固定输出以下 observed facts：六项 selected/total/failed/metric/reference gap；Bright 四项与 SciFact 共享的公开 runtime/model/tool/prompt/context/metric 摘要；corpus file count；逐项 zero-score rate、median tokens/tool calls/wall/tool time、read/grep calls/errors/time share、question word median；所有运行 `resolution.available_queries == 0` 的缺口。
+固定输出以下 observed facts：六项 selected/total/failed/metric/reference gap；Bright 四项与 SciFact 的 runtime/model/tool/prompt/context/metric component digest 相同或不同（不输出 provider/model 配置值）；corpus file count；逐项 zero-score rate、median tokens/tool calls/wall/tool time、read/grep calls/errors/time share、question word median；所有运行 `resolution.available_queries == 0` 的缺口。
 
 只生成以下 hypothesis codes，且每项引用 observed finding digests 和 counterevidence：
 
