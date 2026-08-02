@@ -10,10 +10,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 from typing import Literal, Mapping, cast
 
-from asterion.pathlight._private_file import (
-    PrivateFileError,
-    read_private_file_snapshot,
-)
+from asterion.pathlight._private_file import read_private_file_snapshot
 
 
 _FILES = ("config.json", "batch-state.json", "summary.json", "analysis.json", "results.jsonl")
@@ -133,6 +130,8 @@ class DciRecoveredRun:
 def read_completed_dci_run(root: Path, expected_dataset_id: str) -> DciRecoveredRun:
     """Recover one completed DCI batch without retaining private source content."""
 
+    recovered: DciRecoveredRun | None = None
+    failed = False
     try:
         if not isinstance(root, Path) or not root.is_absolute() or type(expected_dataset_id) is not str or not expected_dataset_id:
             raise ValueError
@@ -143,9 +142,12 @@ def read_completed_dci_run(root: Path, expected_dataset_id: str) -> DciRecovered
         analysis = _json_mapping(documents["analysis.json"])
         _validate_artifact_digests(config, documents)
         result_rows = _jsonl_mappings(documents["results.jsonl"])
-        return _recover(config, state, summary, analysis, result_rows, expected_dataset_id, documents)
-    except (DciRecoveryError, PrivateFileError, ValueError, TypeError, UnicodeError):
-        raise DciRecoveryError("DCI recovery evidence is invalid") from None
+        recovered = _recover(config, state, summary, analysis, result_rows, expected_dataset_id, documents)
+    except Exception:
+        failed = True
+    if failed or recovered is None:
+        raise DciRecoveryError("DCI recovery evidence is invalid")
+    return recovered
 
 
 def _recover(
@@ -323,8 +325,10 @@ def _selected_count(config: Mapping[str, object]) -> int:
 def _counts(state: Mapping[str, object], summary: Mapping[str, object]) -> tuple[int, int]:
     state_counts = _mapping(state.get("counts"))
     summary_counts = _mapping(summary.get("counts"))
+    if "failed_runs" in state_counts or "failed" in summary_counts:
+        raise ValueError
     total = _natural(summary_counts.get("total"))
-    failed = _natural(summary_counts.get("failed", summary_counts.get("failed_runs")))
+    failed = _natural(summary_counts.get("failed_runs"))
     if total != _natural(state_counts.get("total")) or failed != _natural(state_counts.get("failed")):
         raise ValueError
     return total, failed

@@ -31,6 +31,7 @@ _SENTINELS = (
     "SENTINEL_PRIVATE_PROVIDER",
     "SENTINEL_PRIVATE_SELECTION_ID",
     "SENTINEL_PRIVATE_CONFIG_VALUE",
+    "SENTINEL_DEEP_JSON",
     _RAW_64_HEX_SECRET,
 )
 _VARIANT_SOURCES = (
@@ -91,6 +92,8 @@ class TestDciPathlightRecovery(unittest.TestCase):
         with self.assertRaises(DciRecoveryError) as raised:
             read_completed_dci_run(root.absolute(), expected_dataset_id=expected_dataset_id)
         self.assertEqual(str(raised.exception), "DCI recovery evidence is invalid")
+        self.assertIsNone(raised.exception.__cause__)
+        self.assertIsNone(raised.exception.__context__)
         error_closure = repr((raised.exception, raised.exception.__cause__, raised.exception.__context__))
         for secret in _SENTINELS:
             self.assertNotIn(secret, error_closure)
@@ -183,6 +186,38 @@ class TestDciPathlightRecovery(unittest.TestCase):
                     selection["total_count"] = 2
                 _write(root, "config.json", config)
                 self.assert_recovery_error(root)
+
+    def test_reader_rejects_count_aliases_by_exact_document_schema(self) -> None:
+        for document, mutation in (
+            ("batch-state.json", "both-equal"),
+            ("batch-state.json", "both-contradictory"),
+            ("batch-state.json", "wrong-only"),
+            ("summary.json", "both-equal"),
+            ("summary.json", "both-contradictory"),
+            ("summary.json", "wrong-only"),
+        ):
+            with self.subTest(document=document, mutation=mutation), private_fixture() as root:
+                value = _load(root, document)
+                counts = value["counts"]
+                assert type(counts) is dict
+                required = "failed" if document == "batch-state.json" else "failed_runs"
+                alias = "failed_runs" if required == "failed" else "failed"
+                if mutation == "wrong-only":
+                    counts.pop(required)
+                    counts[alias] = 0
+                else:
+                    counts[alias] = 0 if mutation == "both-equal" else 1
+                _write(root, document, value)
+                if document == "summary.json":
+                    _refresh_config_digests(root)
+                self.assert_recovery_error(root)
+
+    def test_reader_normalizes_deep_json_recursion_without_context(self) -> None:
+        with private_fixture() as root:
+            path = root / "config.json"
+            path.write_bytes(b"[" * 100_000 + b'"SENTINEL_DEEP_JSON"' + b"]" * 100_000)
+            path.chmod(0o600)
+            self.assert_recovery_error(root)
 
     def test_reader_rejects_symlinks_tampering_count_mismatch_and_hostile_types(self) -> None:
         cases = (
