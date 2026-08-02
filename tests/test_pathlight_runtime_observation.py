@@ -353,9 +353,21 @@ class RuntimeObservationTests(unittest.TestCase):
             status="completed",
         )
         expected_labels = ("tool-arguments", "tool-identity", "tool-result")
+        empty_closure_labels = (
+            "context-frame",
+            "model-request",
+            "model-request-boundary",
+        )
 
         for omitted in expected_labels:
-            labels = tuple(label for label in expected_labels if label != omitted)
+            labels = tuple(
+                sorted(
+                    (
+                        *empty_closure_labels,
+                        *(label for label in expected_labels if label != omitted),
+                    )
+                )
+            )
             with self.subTest(omitted=omitted), self.assertRaisesRegex(
                 PathlightError, "runtime observation is invalid"
             ):
@@ -366,6 +378,73 @@ class RuntimeObservationTests(unittest.TestCase):
                     tools=(tool,),
                     missing_evidence=labels,
                 )
+
+    def test_empty_batch_requires_conservative_frame_and_request_evidence(self) -> None:
+        with self.assertRaisesRegex(PathlightError, "runtime observation is invalid"):
+            RuntimeObservationBatch.build(
+                run_sha256=_digest("run"),
+                frames=(),
+                model_calls=(),
+                tools=(),
+            )
+
+        batch = RuntimeObservationBatch.build(
+            run_sha256=_digest("run"),
+            frames=(),
+            model_calls=(),
+            tools=(),
+            missing_evidence=(
+                "context-frame",
+                "model-request",
+                "model-request-boundary",
+            ),
+        )
+        self.assertEqual(validate_runtime_observation_batch(batch.to_mapping()), batch)
+
+    def test_missing_tool_status_requires_tool_boundary_evidence(self) -> None:
+        batch = _valid_batch()
+        frame = ContextFrameObservation(
+            frame_index=1, segments=(batch.frames[0].segments[0],)
+        )
+        call = ModelCallObservation(
+            request_index=1,
+            frame_sha256=frame.frame_sha256,
+            model_sha256=_digest("model identity"),
+            request_sha256=_digest("request"),
+            response_sha256=_digest("response"),
+            response_length=8,
+            input_tokens=10,
+            output_tokens=3,
+            status="completed",
+            boundary_observed=True,
+        )
+        tool = ToolCallObservation(
+            call_sha256=_digest("other-call"),
+            tool_sha256=_digest("tool identity"),
+            arguments_sha256=_digest("arguments"),
+            result_sha256=_digest("result"),
+            result_length=6,
+            status="missing",
+        )
+
+        with self.assertRaisesRegex(PathlightError, "runtime observation is invalid"):
+            RuntimeObservationBatch.build(
+                run_sha256=batch.run_sha256,
+                frames=(frame,),
+                model_calls=(call,),
+                tools=(tool,),
+            )
+
+        observed = RuntimeObservationBatch.build(
+            run_sha256=batch.run_sha256,
+            frames=(frame,),
+            model_calls=(call,),
+            tools=(tool,),
+            missing_evidence=("tool-boundary",),
+        )
+        self.assertEqual(
+            validate_runtime_observation_batch(observed.to_mapping()), observed
+        )
 
     def test_hostile_keys_and_values_are_normalized_without_invocation_or_leakage(self) -> None:
         class HostileKey:

@@ -472,6 +472,10 @@ def _required_missing_evidence(
     tools: tuple[ToolCallObservation, ...],
 ) -> frozenset[str]:
     required: set[str] = set()
+    if not frames:
+        required.add("context-frame")
+    if not model_calls:
+        required.update(("model-request", "model-request-boundary"))
     if any(segment.missing_evidence for frame in frames for segment in frame.segments):
         required.add("context-segment")
     for call in model_calls:
@@ -486,6 +490,8 @@ def _required_missing_evidence(
         if call.input_tokens is None or call.output_tokens is None:
             required.add("token-usage")
     for tool in tools:
+        if tool.status == "missing":
+            required.add("tool-boundary")
         if tool.tool_sha256 is None:
             required.add("tool-identity")
         if tool.arguments_sha256 is None:
