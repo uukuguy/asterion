@@ -7,6 +7,7 @@ import json
 import shutil
 import tempfile
 import unittest
+from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -14,6 +15,7 @@ from typing import Iterator
 from asterion.capabilities.dci.implementation.pathlight.recovery import (
     DciRecoveryError,
     read_completed_dci_run,
+    validate_recovered_run,
 )
 
 
@@ -87,10 +89,32 @@ def _write_results(root: Path, rows: list[dict[str, object]]) -> None:
     path.chmod(0o600)
 
 
+def _run_digest(mapping: Mapping[str, object]) -> str:
+    unsigned = {key: value for key, value in mapping.items() if key != "recovered_run_sha256"}
+    return hashlib.sha256(
+        json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+class _HostileMapping(dict[str, object]):
+    def __iter__(self) -> Iterator[str]:
+        raise RuntimeError("SENTINEL_PRIVATE_CONFIG_VALUE")
+
+
 class TestDciPathlightRecovery(unittest.TestCase):
     def assert_recovery_error(self, root: Path, expected_dataset_id: str = "bright.biology") -> None:
         with self.assertRaises(DciRecoveryError) as raised:
             read_completed_dci_run(root.absolute(), expected_dataset_id=expected_dataset_id)
+        self.assertEqual(str(raised.exception), "DCI recovery evidence is invalid")
+        self.assertIsNone(raised.exception.__cause__)
+        self.assertIsNone(raised.exception.__context__)
+        error_closure = repr((raised.exception, raised.exception.__cause__, raised.exception.__context__))
+        for secret in _SENTINELS:
+            self.assertNotIn(secret, error_closure)
+
+    def assert_validation_error(self, mapping: object) -> None:
+        with self.assertRaises(DciRecoveryError) as raised:
+            validate_recovered_run(mapping)  # type: ignore[arg-type]
         self.assertEqual(str(raised.exception), "DCI recovery evidence is invalid")
         self.assertIsNone(raised.exception.__cause__)
         self.assertIsNone(raised.exception.__context__)
@@ -122,6 +146,87 @@ class TestDciPathlightRecovery(unittest.TestCase):
         )
         self.assertEqual(recovered.metric_value_microunits, 750_000)
         self.assertEqual(recovered.missing_evidence, ("sealed-analysis-digest", "sealed-config-digest"))
+        self.assertEqual(validate_recovered_run(recovered.to_mapping()), recovered)
+
+    def test_validator_rejects_tampered_digest_fields_and_inconsistent_aggregate(self) -> None:
+        with private_fixture() as root:
+            recovered = read_completed_dci_run(root, expected_dataset_id="bright.biology")
+        original = recovered.to_mapping()
+        cases = (
+            ("case-metric", ("cases", 0, "metric_value_microunits"), 500_010),
+            ("aggregate-metric", ("metric_value_microunits",), 100_000),
+            ("case-source", ("cases", 0, "case_source_sha256"), "f" * 63),
+            ("dataset-item", ("cases", 0, "dataset_item_sha256"), "e" * 63),
+            ("selected-count", ("selected_count",), 3),
+            ("total-count", ("total_count",), 3),
+            ("failed-count", ("failed_count",), 1),
+            ("case-status", ("cases", 0, "run_status"), "failed"),
+        )
+        for name, path, value in cases:
+            with self.subTest(name=name):
+                mapping = json.loads(json.dumps(original))
+                owner: object = mapping
+                for component in path[:-1]:
+                    if type(component) is int:
+                        assert type(owner) is list
+                        owner = owner[component]
+                    else:
+                        assert type(owner) is dict
+                        owner = owner[component]
+                assert type(owner) is dict
+                owner[path[-1]] = value
+                mapping["recovered_run_sha256"] = _run_digest(mapping)
+                self.assert_validation_error(mapping)
+
+        stale = json.loads(json.dumps(original))
+        stale["recovered_run_sha256"] = "0" * 64
+        self.assert_validation_error(stale)
+
+    def test_validator_rejects_noncanonical_arrays_duplicates_and_unknown_fields(self) -> None:
+        with private_fixture() as root:
+            recovered = read_completed_dci_run(root, expected_dataset_id="bright.biology")
+        original = recovered.to_mapping()
+        for name, mutate in (
+            ("reordered-cases", lambda value: value.__setitem__("cases", list(reversed(value["cases"])))),
+            ("duplicate-case", lambda value: value.__setitem__("cases", [*value["cases"], value["cases"][0]])),
+            (
+                "duplicate-source",
+                lambda value: value.__setitem__(
+                    "source_document_sha256s",
+                    [value["source_document_sha256s"][0], value["source_document_sha256s"][0]],
+                ),
+            ),
+            (
+                "reordered-source",
+                lambda value: value.__setitem__("source_document_sha256s", ["1" * 64, "0" * 64]),
+            ),
+            (
+                "reordered-missing",
+                lambda value: value.__setitem__("missing_evidence", list(reversed(value["missing_evidence"]))),
+            ),
+            (
+                "duplicate-missing",
+                lambda value: value.__setitem__(
+                    "missing_evidence", [*value["missing_evidence"], value["missing_evidence"][0]]
+                ),
+            ),
+            ("unknown-field", lambda value: value.__setitem__("private_path", "SENTINEL_PRIVATE_PATH")),
+        ):
+            with self.subTest(name=name):
+                mapping = json.loads(json.dumps(original))
+                mutate(mapping)
+                mapping["recovered_run_sha256"] = _run_digest(mapping)
+                self.assert_validation_error(mapping)
+
+    def test_validator_rejects_mapping_subclasses_without_context(self) -> None:
+        with private_fixture() as root:
+            recovered = read_completed_dci_run(root, expected_dataset_id="bright.biology")
+        self.assert_validation_error(_HostileMapping(recovered.to_mapping()))
+        nested_hostile = recovered.to_mapping()
+        variant = nested_hostile["variant"]
+        assert type(variant) is dict
+        nested_hostile["variant"] = _HostileMapping(variant)
+        self.assert_validation_error(nested_hostile)
 
     def test_reader_recovers_qa_accuracy_with_boolean_metric_only(self) -> None:
         with private_fixture() as root:

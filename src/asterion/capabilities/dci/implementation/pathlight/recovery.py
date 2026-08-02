@@ -17,6 +17,58 @@ _FILES = ("config.json", "batch-state.json", "summary.json", "analysis.json", "r
 _LIMITS = {name: 1 << 20 for name in _FILES}
 _HEX_SHA256 = frozenset("0123456789abcdef")
 _MISSING_EVIDENCE = ("sealed-analysis-digest", "sealed-config-digest")
+_RUN_FIELDS = frozenset(
+    {
+        "dataset_id",
+        "mode",
+        "metric_name",
+        "metric_value_microunits",
+        "selected_count",
+        "total_count",
+        "failed_count",
+        "corpus_file_count",
+        "dataset_snapshot_sha256",
+        "variant",
+        "cases",
+        "source_document_sha256s",
+        "missing_evidence",
+        "recovered_run_sha256",
+    }
+)
+_VARIANT_FIELDS = frozenset(
+    {
+        "runtime_contract_sha256",
+        "model_sha256",
+        "toolset_sha256",
+        "prompt_contract_sha256",
+        "context_contract_sha256",
+        "metric_contract_sha256",
+        "implementation_sha256",
+        "profile_sha256",
+        "policy_sha256",
+    }
+)
+_CASE_FIELDS = frozenset(
+    {
+        "dataset_item_sha256",
+        "metric_value_microunits",
+        "run_status",
+        "agent_total_tokens",
+        "overall_cost_microusd",
+        "wall_time_ns",
+        "tool_time_ns",
+        "tool_call_count",
+        "tool_error_count",
+        "read_call_count",
+        "grep_call_count",
+        "read_time_ns",
+        "grep_time_ns",
+        "question_word_count",
+        "resolution_status",
+        "resolution_coverage_microunits",
+        "case_source_sha256",
+    }
+)
 
 
 class DciRecoveryError(Exception):
@@ -108,23 +160,25 @@ class DciRecoveredRun:
     missing_evidence: tuple[str, ...]
     recovered_run_sha256: str
 
+    def _unsigned_mapping(self) -> dict[str, object]:
+        return _run_unsigned_mapping(
+            self.dataset_id,
+            self.mode,
+            self.metric_name,
+            self.metric_value_microunits,
+            self.selected_count,
+            self.total_count,
+            self.failed_count,
+            self.corpus_file_count,
+            self.dataset_snapshot_sha256,
+            self.variant,
+            self.cases,
+            self.source_document_sha256s,
+            self.missing_evidence,
+        )
+
     def to_mapping(self) -> dict[str, object]:
-        return {
-            "dataset_id": self.dataset_id,
-            "mode": self.mode,
-            "metric_name": self.metric_name,
-            "metric_value_microunits": self.metric_value_microunits,
-            "selected_count": self.selected_count,
-            "total_count": self.total_count,
-            "failed_count": self.failed_count,
-            "corpus_file_count": self.corpus_file_count,
-            "dataset_snapshot_sha256": self.dataset_snapshot_sha256,
-            "variant": self.variant.to_mapping(),
-            "cases": [case.to_mapping() for case in self.cases],
-            "source_document_sha256s": list(self.source_document_sha256s),
-            "missing_evidence": list(self.missing_evidence),
-            "recovered_run_sha256": self.recovered_run_sha256,
-        }
+        return {**self._unsigned_mapping(), "recovered_run_sha256": self.recovered_run_sha256}
 
 
 def read_completed_dci_run(root: Path, expected_dataset_id: str) -> DciRecoveredRun:
@@ -143,6 +197,20 @@ def read_completed_dci_run(root: Path, expected_dataset_id: str) -> DciRecovered
         _validate_artifact_digests(config, documents)
         result_rows = _jsonl_mappings(documents["results.jsonl"])
         recovered = _recover(config, state, summary, analysis, result_rows, expected_dataset_id, documents)
+    except Exception:
+        failed = True
+    if failed or recovered is None:
+        raise DciRecoveryError("DCI recovery evidence is invalid")
+    return recovered
+
+
+def validate_recovered_run(mapping: Mapping[str, object]) -> DciRecoveredRun:
+    """Reconstruct one exact canonical recovered run and verify its content address."""
+
+    recovered: DciRecoveredRun | None = None
+    failed = False
+    try:
+        recovered = _validate_recovered_run_mapping(mapping)
     except Exception:
         failed = True
     if failed or recovered is None:
@@ -181,14 +249,12 @@ def _recover(
         raise ValueError
     metric_name: Literal["ndcg-at-10", "accuracy"] = "ndcg-at-10" if mode == "ir" else "accuracy"
     metric_value = _summary_metric(summary, mode)
-    mean = sum((Decimal(case.metric_value_microunits) for case in cases), Decimal(0)) / len(cases)
-    if abs(Decimal(metric_value) - mean) > 1:
-        raise ValueError
+    _validate_aggregate_metric(metric_value, cases)
     corpus = _mapping(config.get("corpus_content_identity"))
     corpus_file_count = _natural(corpus.get("file_count"))
     dataset_snapshot_sha256 = _sha256(dataset.get("sha256"))
     source_document_sha256s = (_snapshot_digest(documents),)
-    document = _run_document(
+    return _build_recovered_run(
         dataset_id,
         mode,
         metric_name,
@@ -201,23 +267,7 @@ def _recover(
         variant,
         cases,
         source_document_sha256s,
-    )
-    document["missing_evidence"] = list(_MISSING_EVIDENCE)
-    return DciRecoveredRun(
-        dataset_id=dataset_id,
-        mode=mode,
-        metric_name=metric_name,
-        metric_value_microunits=metric_value,
-        selected_count=selected_count,
-        total_count=total_count,
-        failed_count=failed_count,
-        corpus_file_count=corpus_file_count,
-        dataset_snapshot_sha256=dataset_snapshot_sha256,
-        variant=variant,
-        cases=cases,
-        source_document_sha256s=source_document_sha256s,
-        missing_evidence=_MISSING_EVIDENCE,
-        recovered_run_sha256=_canonical_digest(document),
+        _MISSING_EVIDENCE,
     )
 
 
@@ -364,7 +414,7 @@ def _tool_durations(value: object) -> dict[str, int]:
     return {name: _scaled(mapping.get(name, 0), Decimal("1000000000")) for name in ("read", "grep")}
 
 
-def _run_document(
+def _run_unsigned_mapping(
     dataset_id: str,
     mode: Literal["ir", "qa"],
     metric_name: Literal["ndcg-at-10", "accuracy"],
@@ -377,6 +427,7 @@ def _run_document(
     variant: DciRecoveredVariant,
     cases: tuple[DciRecoveredCase, ...],
     source_document_sha256s: tuple[str, ...],
+    missing_evidence: tuple[str, ...],
 ) -> dict[str, object]:
     return {
         "dataset_id": dataset_id,
@@ -388,10 +439,230 @@ def _run_document(
         "failed_count": failed_count,
         "corpus_file_count": corpus_file_count,
         "dataset_snapshot_sha256": dataset_snapshot_sha256,
-        "variant": variant,
-        "cases": cases,
-        "source_document_sha256s": source_document_sha256s,
+        "variant": variant.to_mapping(),
+        "cases": [case.to_mapping() for case in cases],
+        "source_document_sha256s": list(source_document_sha256s),
+        "missing_evidence": list(missing_evidence),
     }
+
+
+def _build_recovered_run(
+    dataset_id: str,
+    mode: Literal["ir", "qa"],
+    metric_name: Literal["ndcg-at-10", "accuracy"],
+    metric_value_microunits: int,
+    selected_count: int,
+    total_count: int,
+    failed_count: int,
+    corpus_file_count: int,
+    dataset_snapshot_sha256: str,
+    variant: DciRecoveredVariant,
+    cases: tuple[DciRecoveredCase, ...],
+    source_document_sha256s: tuple[str, ...],
+    missing_evidence: tuple[str, ...],
+) -> DciRecoveredRun:
+    unsigned = _run_unsigned_mapping(
+        dataset_id,
+        mode,
+        metric_name,
+        metric_value_microunits,
+        selected_count,
+        total_count,
+        failed_count,
+        corpus_file_count,
+        dataset_snapshot_sha256,
+        variant,
+        cases,
+        source_document_sha256s,
+        missing_evidence,
+    )
+    return DciRecoveredRun(
+        dataset_id,
+        mode,
+        metric_name,
+        metric_value_microunits,
+        selected_count,
+        total_count,
+        failed_count,
+        corpus_file_count,
+        dataset_snapshot_sha256,
+        variant,
+        cases,
+        source_document_sha256s,
+        missing_evidence,
+        _canonical_digest(unsigned),
+    )
+
+
+def _validate_recovered_run_mapping(mapping: object) -> DciRecoveredRun:
+    value = _exact_mapping(mapping, _RUN_FIELDS)
+    dataset_id = _string(value["dataset_id"])
+    mode = _exact_mode(value["mode"])
+    metric_name = _exact_metric_name(value["metric_name"])
+    if (mode, metric_name) not in {("ir", "ndcg-at-10"), ("qa", "accuracy")}:
+        raise ValueError
+    metric_value = _exact_unit(value["metric_value_microunits"])
+    selected_count = _exact_natural(value["selected_count"])
+    total_count = _exact_natural(value["total_count"])
+    failed_count = _exact_natural(value["failed_count"])
+    corpus_file_count = _exact_natural(value["corpus_file_count"])
+    dataset_snapshot_sha256 = _sha256(value["dataset_snapshot_sha256"])
+    variant = _validated_variant(value["variant"])
+    raw_cases = _exact_list(value["cases"])
+    if not raw_cases:
+        raise ValueError
+    cases = tuple(_validated_case(item, mode) for item in raw_cases)
+    case_ids = tuple(case.dataset_item_sha256 for case in cases)
+    if case_ids != tuple(sorted(case_ids)) or len(case_ids) != len(set(case_ids)):
+        raise ValueError
+    source_document_sha256s = _canonical_sha256_list(value["source_document_sha256s"])
+    missing_evidence = _canonical_string_list(value["missing_evidence"])
+    if missing_evidence != _MISSING_EVIDENCE:
+        raise ValueError
+    if (
+        selected_count != len(cases)
+        or total_count != len(cases)
+        or failed_count != sum(case.run_status == "failed" for case in cases)
+    ):
+        raise ValueError
+    _validate_aggregate_metric(metric_value, cases)
+    recovered = _build_recovered_run(
+        dataset_id,
+        mode,
+        metric_name,
+        metric_value,
+        selected_count,
+        total_count,
+        failed_count,
+        corpus_file_count,
+        dataset_snapshot_sha256,
+        variant,
+        cases,
+        source_document_sha256s,
+        missing_evidence,
+    )
+    supplied = _sha256(value["recovered_run_sha256"])
+    if not hmac.compare_digest(supplied, recovered.recovered_run_sha256):
+        raise ValueError
+    return recovered
+
+
+def _validated_variant(value: object) -> DciRecoveredVariant:
+    mapping = _exact_mapping(value, _VARIANT_FIELDS)
+    return DciRecoveredVariant(**{field: _sha256(mapping[field]) for field in _VARIANT_FIELDS})
+
+
+def _validated_case(value: object, mode: Literal["ir", "qa"]) -> DciRecoveredCase:
+    mapping = _exact_mapping(value, _CASE_FIELDS)
+    metric_value = _exact_unit(mapping["metric_value_microunits"])
+    if mode == "qa" and metric_value not in {0, 1_000_000}:
+        raise ValueError
+    run_status = _exact_run_status(mapping["run_status"])
+    resolution_status = _exact_resolution_status(mapping["resolution_status"])
+    resolution_coverage = _exact_optional_unit(mapping["resolution_coverage_microunits"])
+    if resolution_coverage is not None and resolution_status != "available":
+        raise ValueError
+    case = DciRecoveredCase(
+        dataset_item_sha256=_sha256(mapping["dataset_item_sha256"]),
+        metric_value_microunits=metric_value,
+        run_status=run_status,
+        agent_total_tokens=_exact_natural(mapping["agent_total_tokens"]),
+        overall_cost_microusd=_exact_natural(mapping["overall_cost_microusd"]),
+        wall_time_ns=_exact_natural(mapping["wall_time_ns"]),
+        tool_time_ns=_exact_natural(mapping["tool_time_ns"]),
+        tool_call_count=_exact_natural(mapping["tool_call_count"]),
+        tool_error_count=_exact_natural(mapping["tool_error_count"]),
+        read_call_count=_exact_natural(mapping["read_call_count"]),
+        grep_call_count=_exact_natural(mapping["grep_call_count"]),
+        read_time_ns=_exact_natural(mapping["read_time_ns"]),
+        grep_time_ns=_exact_natural(mapping["grep_time_ns"]),
+        question_word_count=_exact_natural(mapping["question_word_count"]),
+        resolution_status=resolution_status,
+        resolution_coverage_microunits=resolution_coverage,
+        case_source_sha256=_sha256(mapping["case_source_sha256"]),
+    )
+    if case.tool_call_count != case.read_call_count + case.grep_call_count:
+        raise ValueError
+    if case.tool_time_ns != case.read_time_ns + case.grep_time_ns:
+        raise ValueError
+    return case
+
+
+def _validate_aggregate_metric(
+    metric_value_microunits: int, cases: tuple[DciRecoveredCase, ...]
+) -> None:
+    mean = sum(
+        (Decimal(case.metric_value_microunits) for case in cases), Decimal(0)
+    ) / len(cases)
+    if abs(Decimal(metric_value_microunits) - mean) > 1:
+        raise ValueError
+
+
+def _exact_mapping(value: object, fields: frozenset[str]) -> dict[str, object]:
+    if type(value) is not dict or set(value) != fields:
+        raise ValueError
+    return cast(dict[str, object], value)
+
+
+def _exact_list(value: object) -> list[object]:
+    if type(value) is not list:
+        raise ValueError
+    return cast(list[object], value)
+
+
+def _canonical_sha256_list(value: object) -> tuple[str, ...]:
+    values = tuple(_sha256(item) for item in _exact_list(value))
+    if not values or values != tuple(sorted(values)) or len(values) != len(set(values)):
+        raise ValueError
+    return values
+
+
+def _canonical_string_list(value: object) -> tuple[str, ...]:
+    values = tuple(_string(item) for item in _exact_list(value))
+    if values != tuple(sorted(values)) or len(values) != len(set(values)):
+        raise ValueError
+    return values
+
+
+def _exact_mode(value: object) -> Literal["ir", "qa"]:
+    if type(value) is not str or value not in {"ir", "qa"}:
+        raise ValueError
+    return cast(Literal["ir", "qa"], value)
+
+
+def _exact_metric_name(value: object) -> Literal["ndcg-at-10", "accuracy"]:
+    if type(value) is not str or value not in {"ndcg-at-10", "accuracy"}:
+        raise ValueError
+    return cast(Literal["ndcg-at-10", "accuracy"], value)
+
+
+def _exact_run_status(value: object) -> Literal["completed", "failed"]:
+    if type(value) is not str or value not in {"completed", "failed"}:
+        raise ValueError
+    return cast(Literal["completed", "failed"], value)
+
+
+def _exact_resolution_status(value: object) -> Literal["available", "not-available"]:
+    if type(value) is not str or value not in {"available", "not-available"}:
+        raise ValueError
+    return cast(Literal["available", "not-available"], value)
+
+
+def _exact_natural(value: object) -> int:
+    if type(value) is not int or value < 0:
+        raise ValueError
+    return value
+
+
+def _exact_unit(value: object) -> int:
+    value = _exact_natural(value)
+    if value > 1_000_000:
+        raise ValueError
+    return value
+
+
+def _exact_optional_unit(value: object) -> int | None:
+    return None if value is None else _exact_unit(value)
 
 
 def _json_mapping(raw: bytes) -> Mapping[str, object]:

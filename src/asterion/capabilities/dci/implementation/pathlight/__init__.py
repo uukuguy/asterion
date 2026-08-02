@@ -6,6 +6,7 @@ from .recovery import (
     DciRecoveredVariant,
     DciRecoveryError,
     read_completed_dci_run,
+    validate_recovered_run,
 )
 from .conversion import (
     DciConversionError,
@@ -22,6 +23,7 @@ __all__ = (
     "DciConversionError",
     "DciReferenceComparison",
     "read_completed_dci_run",
+    "validate_recovered_run",
     "load_paper_reference",
     "recovered_run_to_experiment",
 )

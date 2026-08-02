@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Literal
@@ -12,7 +11,7 @@ from typing import Literal
 from asterion.capabilities.dci.implementation.pathlight.recovery import (
     DciRecoveredCase,
     DciRecoveredRun,
-    DciRecoveredVariant,
+    validate_recovered_run,
 )
 from asterion.capabilities.dci.implementation.reproduction import reproduction
 from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import (
@@ -31,8 +30,6 @@ from asterion.pathlight.experiment import (
 
 
 _TARGET_ID = "paper.2605.05242v1/dci-agent-cc/main"
-_HEX_SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_RECOVERY_MISSING = frozenset({"sealed-analysis-digest", "sealed-config-digest"})
 _LINEAGE_MISSING = frozenset({"assembly-lineage", "package-lineage", "trace-graph"})
 
 
@@ -86,7 +83,16 @@ def recovered_run_to_experiment(run: DciRecoveredRun) -> ExperimentBundle:
     result: ExperimentBundle | None = None
     failed = False
     try:
-        cases = _validate_recovered_run(run)
+        if type(run) is not DciRecoveredRun:
+            raise ValueError
+        run = validate_recovered_run(run.to_mapping())
+        benchmark = resolve_paper_benchmark(run.dataset_id)
+        if (benchmark.mode, run.metric_name) not in {
+            ("ir", "ndcg-at-10"),
+            ("qa", "accuracy"),
+        }:
+            raise ValueError
+        cases = run.cases
         dataset = DatasetSnapshot(
             dataset_contract_sha256=_project(
                 "dataset-contract/v1", {"dataset_id": run.dataset_id, "mode": run.mode}
@@ -240,86 +246,6 @@ def _load_paper_reference(dataset_id: object) -> DciReferenceComparison:
     )
 
 
-def _validate_recovered_run(run: object) -> tuple[DciRecoveredCase, ...]:
-    if type(run) is not DciRecoveredRun or type(run.variant) is not DciRecoveredVariant:
-        raise ValueError
-    if (
-        type(run.dataset_id) is not str
-        or run.mode not in {"ir", "qa"}
-        or run.metric_name not in {"accuracy", "ndcg-at-10"}
-        or not _is_natural(run.metric_value_microunits)
-        or not _is_natural(run.selected_count)
-        or not _is_natural(run.total_count)
-        or not _is_natural(run.failed_count)
-        or not _is_natural(run.corpus_file_count)
-        or not _sha256(run.dataset_snapshot_sha256)
-        or not _sha256(run.recovered_run_sha256)
-        or type(run.cases) is not tuple
-        or type(run.source_document_sha256s) is not tuple
-        or not run.source_document_sha256s
-        or any(not _sha256(value) for value in run.source_document_sha256s)
-        or type(run.missing_evidence) is not tuple
-        or set(run.missing_evidence) != _RECOVERY_MISSING
-    ):
-        raise ValueError
-    benchmark = resolve_paper_benchmark(run.dataset_id)
-    expected_mode = "ir" if benchmark.mode == "ir" else "qa"
-    expected_metric = "ndcg-at-10" if expected_mode == "ir" else "accuracy"
-    if run.mode != expected_mode or run.metric_name != expected_metric:
-        raise ValueError
-    _validate_variant(run.variant)
-    cases = tuple(sorted(run.cases, key=lambda case: case.dataset_item_sha256))
-    if (
-        len(cases) != run.selected_count
-        or run.total_count != run.selected_count
-        or len({case.dataset_item_sha256 for case in cases}) != len(cases)
-        or run.failed_count != sum(case.run_status == "failed" for case in cases)
-    ):
-        raise ValueError
-    for case in cases:
-        _validate_case(case)
-    return cases
-
-
-def _validate_variant(variant: DciRecoveredVariant) -> None:
-    if any(not _sha256(getattr(variant, field)) for field in variant.to_mapping()):
-        raise ValueError
-
-
-def _validate_case(case: object) -> None:
-    if type(case) is not DciRecoveredCase:
-        raise ValueError
-    if (
-        not _sha256(case.dataset_item_sha256)
-        or not _sha256(case.case_source_sha256)
-        or not _is_natural(case.metric_value_microunits)
-        or case.run_status not in {"completed", "failed"}
-        or case.resolution_status not in {"available", "not-available"}
-        or (case.resolution_status == "available" and not _is_natural(case.resolution_coverage_microunits))
-        or (case.resolution_status == "not-available" and case.resolution_coverage_microunits is not None)
-    ):
-        raise ValueError
-    numeric_fields = (
-        "agent_total_tokens",
-        "overall_cost_microusd",
-        "wall_time_ns",
-        "tool_time_ns",
-        "tool_call_count",
-        "tool_error_count",
-        "read_call_count",
-        "grep_call_count",
-        "read_time_ns",
-        "grep_time_ns",
-        "question_word_count",
-    )
-    if any(not _is_natural(getattr(case, field)) for field in numeric_fields):
-        raise ValueError
-    if case.tool_call_count != case.read_call_count + case.grep_call_count:
-        raise ValueError
-    if case.tool_time_ns != case.read_time_ns + case.grep_time_ns:
-        raise ValueError
-
-
 def _evaluator(run: DciRecoveredRun) -> EvaluatorContract:
     return EvaluatorContract(
         metric_contract_sha256=_project("metric-contract/v1", run.variant.metric_contract_sha256),
@@ -374,14 +300,6 @@ def _project(domain: str, value: object) -> str:
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()
-
-
-def _sha256(value: object) -> bool:
-    return type(value) is str and _HEX_SHA256.fullmatch(value) is not None
-
-
-def _is_natural(value: object) -> bool:
-    return type(value) is int and value >= 0
 
 
 def _microunits(value: object) -> int:

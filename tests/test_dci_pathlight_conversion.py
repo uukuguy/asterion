@@ -21,6 +21,7 @@ from asterion.capabilities.dci.implementation.pathlight.conversion import (
 from asterion.capabilities.dci.implementation.pathlight.recovery import (
     DciRecoveredRun,
     read_completed_dci_run,
+    validate_recovered_run,
 )
 from asterion.pathlight.experiment import validate_experiment_bundle
 
@@ -41,6 +42,10 @@ _SENTINELS = (
     "SENTINEL_DEEP_JSON",
     "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
 )
+
+
+class _RecoveredRunSubclass(DciRecoveredRun):
+    pass
 
 
 @contextmanager
@@ -142,10 +147,15 @@ class TestDciPathlightConversion(unittest.TestCase):
             self.assertEqual(evaluation.trace_sha256, trial.trace_sha256)
             self.assertEqual(evaluation.scope_sha256, _case_scope(trial.dataset_item_sha256))
 
-    def test_conversion_is_deterministic_when_recovered_cases_are_reversed(self) -> None:
+    def test_conversion_is_deterministic_for_canonically_reconstructed_reversed_input(self) -> None:
         forward = recovered_run_to_experiment(self.recovered)
-        reversed_run = replace(self.recovered, cases=tuple(reversed(self.recovered.cases)))
-        reverse = recovered_run_to_experiment(reversed_run)
+        mapping = self.recovered.to_mapping()
+        cases = mapping["cases"]
+        assert type(cases) is list
+        cases.reverse()
+        cases.sort(key=lambda case: case["dataset_item_sha256"])
+        reconstructed = validate_recovered_run(mapping)
+        reverse = recovered_run_to_experiment(reconstructed)
         self.assertEqual(forward.to_mapping(), reverse.to_mapping())
 
     def test_conversion_marks_legacy_lineage_and_unavailable_retrieval_evidence(self) -> None:
@@ -191,6 +201,26 @@ class TestDciPathlightConversion(unittest.TestCase):
             self.assertNotIn(sentinel, public)
 
     def test_conversion_fails_closed_for_invalid_reference_and_recovery_contracts(self) -> None:
+        changed_index = next(
+            index
+            for index, case in enumerate(self.recovered.cases)
+            if case.metric_value_microunits < 1_000_000
+        )
+        changed_case = replace(
+            self.recovered.cases[changed_index],
+            metric_value_microunits=(
+                self.recovered.cases[changed_index].metric_value_microunits + 1
+            ),
+        )
+        changed_cases = list(self.recovered.cases)
+        changed_cases[changed_index] = changed_case
+        one_microunit_mutation = replace(
+            self.recovered,
+            cases=tuple(changed_cases),
+        )
+        self.assert_conversion_error(
+            lambda: recovered_run_to_experiment(one_microunit_mutation)
+        )
         invalid_metric = replace(self.recovered, metric_name="accuracy")
         self.assert_conversion_error(lambda: recovered_run_to_experiment(invalid_metric))
         self.assert_conversion_error(lambda: load_paper_reference("unknown.dataset"))
@@ -199,6 +229,61 @@ class TestDciPathlightConversion(unittest.TestCase):
             return_value={"schema": "invalid", "targets": []},
         ):
             self.assert_conversion_error(lambda: load_paper_reference("bright.biology"))
+
+    def test_conversion_rejects_forged_recovered_objects_and_hostile_serialization(self) -> None:
+        mutations = (
+            replace(self.recovered, metric_value_microunits=100_000),
+            replace(self.recovered, recovered_run_sha256="0" * 64),
+            replace(
+                self.recovered,
+                source_document_sha256s=(
+                    self.recovered.source_document_sha256s[0],
+                    self.recovered.source_document_sha256s[0],
+                ),
+            ),
+            replace(self.recovered, missing_evidence=tuple(reversed(self.recovered.missing_evidence))),
+            replace(
+                self.recovered,
+                cases=(
+                    replace(self.recovered.cases[0], case_source_sha256="1" * 64),
+                    *self.recovered.cases[1:],
+                ),
+            ),
+            replace(
+                self.recovered,
+                cases=(
+                    replace(self.recovered.cases[0], dataset_item_sha256="2" * 64),
+                    *self.recovered.cases[1:],
+                ),
+            ),
+        )
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                self.assert_conversion_error(lambda mutation=mutation: recovered_run_to_experiment(mutation))
+
+        subclass = _RecoveredRunSubclass(
+            self.recovered.dataset_id,
+            self.recovered.mode,
+            self.recovered.metric_name,
+            self.recovered.metric_value_microunits,
+            self.recovered.selected_count,
+            self.recovered.total_count,
+            self.recovered.failed_count,
+            self.recovered.corpus_file_count,
+            self.recovered.dataset_snapshot_sha256,
+            self.recovered.variant,
+            self.recovered.cases,
+            self.recovered.source_document_sha256s,
+            self.recovered.missing_evidence,
+            self.recovered.recovered_run_sha256,
+        )
+        self.assert_conversion_error(lambda: recovered_run_to_experiment(subclass))
+        with patch.object(
+            DciRecoveredRun,
+            "to_mapping",
+            side_effect=RuntimeError("SENTINEL_PRIVATE_CONFIG_VALUE"),
+        ):
+            self.assert_conversion_error(lambda: recovered_run_to_experiment(self.recovered))
 
 
 def _case_scope(dataset_item_sha256: str) -> str:
