@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import stat
 from pathlib import Path
+from typing import Mapping, Sequence
 
 
 class PrivateFileError(Exception):
@@ -109,6 +110,122 @@ def read_private_file(path: Path, max_bytes: int) -> bytes:
     if failure or encoded is None:
         raise PrivateFileError("private file source is invalid")
     return encoded
+
+
+def read_private_file_snapshot(
+    root: Path,
+    names: Sequence[str],
+    max_bytes: Mapping[str, int],
+) -> tuple[tuple[str, bytes], ...]:
+    """Read exact private children through one stable directory descriptor."""
+
+    valid = False
+    try:
+        valid = (
+            isinstance(root, Path)
+            and root.is_absolute()
+            and bool(root.name)
+            and type(names) in {tuple, list}
+            and bool(names)
+            and all(
+                type(name) is str
+                and bool(name)
+                and "/" not in name
+                and name not in {".", ".."}
+                for name in names
+            )
+            and len(set(names)) == len(names)
+            and type(max_bytes) is dict
+            and set(max_bytes) == set(names)
+            and all(type(limit) is int and limit >= 0 for limit in max_bytes.values())
+        )
+    except Exception:
+        pass
+    if not valid:
+        raise PrivateFileError("private file snapshot is invalid")
+
+    parent_fd = -1
+    root_fd = -1
+    descriptors: list[tuple[str, int, os.stat_result]] = []
+    snapshot: tuple[tuple[str, bytes], ...] | None = None
+    failure = False
+    try:
+        parent_fd = _open_parent_directory(root)
+        root_fd = os.open(
+            root.name,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _nofollow_flag(),
+            dir_fd=parent_fd,
+        )
+        root_before = os.fstat(root_fd)
+        root_entry_before = os.stat(root.name, dir_fd=parent_fd, follow_symlinks=False)
+        if (
+            not stat.S_ISDIR(root_before.st_mode)
+            or stat.S_IMODE(root_before.st_mode) != 0o700
+            or (root_before.st_dev, root_before.st_ino)
+            != (root_entry_before.st_dev, root_entry_before.st_ino)
+        ):
+            raise OSError("private file snapshot root is unsafe")
+        contents: list[tuple[str, bytes]] = []
+        for name in names:
+            descriptor = os.open(
+                name,
+                os.O_RDONLY | os.O_NONBLOCK | _nofollow_flag(),
+                dir_fd=root_fd,
+            )
+            before = os.fstat(descriptor)
+            if not _is_private_regular(before) or before.st_size > max_bytes[name]:
+                os.close(descriptor)
+                raise OSError("private file snapshot child is unsafe")
+            descriptors.append((name, descriptor, before))
+            contents.append((name, _read_bounded(descriptor, max_bytes[name] + 1)))
+        if any(len(content) > max_bytes[name] for name, content in contents):
+            raise OSError("private file snapshot child is oversized")
+        content_by_name = dict(contents)
+        for name, descriptor, before in descriptors:
+            after = os.fstat(descriptor)
+            entry_after = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+            content = content_by_name[name]
+            if (
+                not _is_private_regular(after)
+                or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)
+                or before.st_size != after.st_size
+                or after.st_size != len(content)
+                or (before.st_dev, before.st_ino)
+                != (entry_after.st_dev, entry_after.st_ino)
+            ):
+                raise OSError("private file snapshot child changed while reading")
+        root_after = os.fstat(root_fd)
+        root_entry_after = os.stat(root.name, dir_fd=parent_fd, follow_symlinks=False)
+        if (
+            not stat.S_ISDIR(root_after.st_mode)
+            or (root_before.st_dev, root_before.st_ino)
+            != (root_after.st_dev, root_after.st_ino)
+            or (root_before.st_dev, root_before.st_ino)
+            != (root_entry_after.st_dev, root_entry_after.st_ino)
+        ):
+            raise OSError("private file snapshot root changed while reading")
+        snapshot = tuple(contents)
+    except Exception:
+        failure = True
+    finally:
+        for _name, descriptor, _before in descriptors:
+            try:
+                os.close(descriptor)
+            except Exception:
+                failure = True
+        if root_fd >= 0:
+            try:
+                os.close(root_fd)
+            except Exception:
+                failure = True
+        if parent_fd >= 0:
+            try:
+                os.close(parent_fd)
+            except Exception:
+                failure = True
+    if failure or snapshot is None:
+        raise PrivateFileError("private file snapshot is invalid")
+    return snapshot
 
 
 def _is_private_regular(metadata: os.stat_result) -> bool:

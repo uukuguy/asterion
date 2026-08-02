@@ -1,0 +1,27 @@
+{
+  "schema": "asterion.dci.batch-config/v1",
+  "cwd": "/SENTINEL_PRIVATE_PATH",
+  "dataset": {
+    "dataset_id": "bright.biology",
+    "identity": "SENTINEL_PRIVATE_DATASET_IDENTITY",
+    "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "mode": "ir",
+  "runtime_contract": "asterion.agent-runtime/v1",
+  "runtime": {
+    "model": "SENTINEL_PRIVATE_MODEL",
+    "tools": "read,grep",
+    "context_policy_identity": "bounded-context-v1"
+  },
+  "benchmark_prompt_contract_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+  "context_contract": "dci.context-contract/v1",
+  "ranking_metric_contract": "dci.metric.ndcg-at-10/v1",
+  "implementation_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+  "profile_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+  "selection": {"selected_count": 2, "total_count": 2},
+  "corpus_content_identity": {"file_count": 3},
+  "artifact_digests": {
+    "results.jsonl": "RESULTS_DIGEST",
+    "summary.json": "SUMMARY_DIGEST"
+  }
+}

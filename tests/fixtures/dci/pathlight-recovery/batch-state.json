@@ -1,0 +1,5 @@
+{
+  "schema": "asterion.dci.batch-state/v1",
+  "status": "completed",
+  "counts": {"total": 2, "failed": 0}
+}

@@ -1,0 +1,43 @@
+{
+  "schema": "asterion.dci.batch-analysis/v1",
+  "per_query_metrics": [
+    {
+      "query_id": "q-001",
+      "query": "SENTINEL_QUERY first query",
+      "gold_answer": "SENTINEL_ANSWER first answer",
+      "final_text": "SENTINEL_FINAL first final",
+      "judge_reason": "SENTINEL_JUDGE_REASON first reason",
+      "ndcg_at_10": 0.5,
+      "run_status": "completed",
+      "agent_total_tokens": 100,
+      "overall_cost_total": 0.001,
+      "wall_time_seconds": 2.0,
+      "tool_time_seconds": 1.0,
+      "tool_call_count": 3,
+      "tool_error_count": 0,
+      "tool_counts": {"read": 2, "grep": 1},
+      "tool_durations": {"read": 0.7, "grep": 0.3},
+      "question_word_count": 3,
+      "resolution_status": "available",
+      "coverage_any": 0.5
+    },
+    {
+      "query_id": "q-002",
+      "query": "SENTINEL_QUERY second query",
+      "gold_answer": "SENTINEL_ANSWER second answer",
+      "final_text": "SENTINEL_FINAL second final",
+      "judge_reason": "SENTINEL_JUDGE_REASON second reason",
+      "ndcg_at_10": 1.0,
+      "run_status": "completed",
+      "agent_total_tokens": 200,
+      "overall_cost_total": 0.002,
+      "wall_time_seconds": 3.0,
+      "tool_time_seconds": 0.0,
+      "tool_call_count": 0,
+      "tool_error_count": 1,
+      "question_word_count": 4,
+      "resolution_status": "not-available",
+      "coverage_any": null
+    }
+  ]
+}

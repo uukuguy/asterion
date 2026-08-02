@@ -13,6 +13,7 @@ from unittest.mock import patch
 from asterion.pathlight._private_file import (
     PrivateFileError,
     read_private_file,
+    read_private_file_snapshot,
     write_private_file,
 )
 
@@ -284,6 +285,36 @@ class TestPathlightPrivateFile(unittest.TestCase):
             path = Path(directory).resolve() / _FILENAME
             write_private_file(path, _PAYLOAD)
             self.assertEqual(read_private_file(path, _MAX_BYTES), _PAYLOAD)
+
+    def test_snapshot_rejects_child_entry_identity_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve() / "evidence"
+            root.mkdir(mode=0o700)
+            root.chmod(0o700)
+            for name in ("one.json", "two.json"):
+                write_private_file(root / name, _PAYLOAD)
+            original_stat = os.stat
+
+            def changed_entry(
+                path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+                *args: object,
+                **kwargs: object,
+            ) -> os.stat_result:
+                result = original_stat(path, *args, **kwargs)
+                if path == "two.json":
+                    values = list(result)
+                    values[1] = result.st_ino + 1
+                    return os.stat_result(values)
+                return result
+
+            with patch(
+                "asterion.pathlight._private_file.os.stat", side_effect=changed_entry
+            ), self.assertRaises(PrivateFileError) as raised:
+                read_private_file_snapshot(
+                    root, ("one.json", "two.json"), {"one.json": _MAX_BYTES, "two.json": _MAX_BYTES}
+                )
+
+        self.assert_private_error(raised.exception, "private file snapshot is invalid")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,5 @@
+{
+  "schema": "asterion.dci.batch-summary/v1",
+  "counts": {"total": 2, "failed_runs": 0},
+  "ndcg_at_10": 0.75
+}
