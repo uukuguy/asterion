@@ -33,7 +33,103 @@ from asterion.capabilities.dci.implementation.research.trajectory_resolution imp
 )
 
 
+def _bright_source_row(query_id: str, document: str) -> dict[str, object]:
+    return {
+        "query_id": query_id,
+        "query": "query",
+        "answer": "answer",
+        "excluded_ids": ["excluded.txt"],
+        "gold_ids": [document],
+        "gold_ids_long": [document],
+        "id": f"source-{query_id}",
+        "reasoning": "reasoning",
+    }
+
+
 class DciPathlightCoverageRegistryTests(unittest.TestCase):
+    def test_registry_accepts_the_exact_beir_and_bright_source_shapes(self) -> None:
+        cases = (
+            (
+                "beir.scifact",
+                {
+                    "query_id": "q-beir",
+                    "query": "query",
+                    "answer": "",
+                    "gold_ids": ["doc.txt"],
+                },
+            ),
+            (
+                "bright.biology",
+                {
+                    "query_id": 7,
+                    "query": "query",
+                    "answer": "answer",
+                    "excluded_ids": ["excluded.txt"],
+                    "gold_ids": ["doc.txt"],
+                    "gold_ids_long": ["doc.txt"],
+                    "id": "bright-source-id",
+                    "reasoning": "reasoning",
+                },
+            ),
+        )
+        for dataset_id, row in cases:
+            with self.subTest(dataset_id=dataset_id), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                dataset = root / "dataset.jsonl"
+                dataset.write_text(json.dumps(row) + "\n", encoding="utf-8")
+                corpus = root / "corpus"
+                corpus.mkdir()
+                (corpus / "doc.txt").write_text("body\n", encoding="utf-8")
+
+                registry = prepare_coverage_registry(
+                    dataset_id=dataset_id,
+                    dataset_path=dataset,
+                    corpus_dir=corpus,
+                    selected_count=1,
+                    output_root=root / "coverage",
+                )
+
+                self.assertEqual(registry.selected_count, 1)
+
+    def test_registry_preserves_exact_source_paths_with_colliding_basenames(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dataset = root / "dataset.jsonl"
+            rows = [
+                _bright_source_row("q-1", "source-a/doc.txt"),
+                _bright_source_row("q-2", "source-b/doc.txt"),
+            ]
+            dataset.write_text(
+                "".join(json.dumps(row) + "\n" for row in rows),
+                encoding="utf-8",
+            )
+            corpus = root / "corpus"
+            corpus.mkdir()
+            for source in ("source-a", "source-b"):
+                (corpus / source).mkdir()
+                (corpus / source / "doc.txt").write_text(
+                    f"{source} body\n", encoding="utf-8"
+                )
+
+            registry = prepare_coverage_registry(
+                dataset_id="bright.earth-science",
+                dataset_path=dataset,
+                corpus_dir=corpus,
+                selected_count=2,
+                output_root=root / "coverage",
+            )
+
+            observed_ids = []
+            observed_paths = []
+            for ref in registry.manifests:
+                manifest = json.loads(
+                    (root / "coverage" / ref.relative_path).read_text(encoding="utf-8")
+                )
+                observed_ids.append(manifest["documents"][0]["id"])
+                observed_paths.append(manifest["documents"][0]["path"])
+            self.assertEqual(observed_ids, ["source-a/doc.txt", "source-b/doc.txt"])
+            self.assertEqual(observed_paths, observed_ids)
+
     def test_atomic_publish_does_not_replace_concurrently_created_directory(self) -> None:
         publisher = getattr(coverage_module, "_publish_directory_no_replace", None)
         self.assertIsNotNone(publisher, "atomic no-replace publish primitive is missing")
@@ -75,9 +171,7 @@ class DciPathlightCoverageRegistryTests(unittest.TestCase):
             root = Path(directory)
             dataset = root / "dataset.jsonl"
             dataset.write_text(
-                json.dumps(
-                    {"query_id": "q-1", "query": "query", "gold_ids": ["doc.txt"]}
-                )
+                json.dumps(_bright_source_row("q-1", "doc.txt"))
                 + "\n",
                 encoding="utf-8",
             )
@@ -138,11 +232,7 @@ class DciPathlightCoverageRegistryTests(unittest.TestCase):
             root = Path(directory)
             dataset = root / "dataset.jsonl"
             rows = [
-                {
-                    "query_id": f"q-{index}",
-                    "query": f"query {index}",
-                    "gold_ids": [f"doc-{index}.txt"],
-                }
+                _bright_source_row(f"q-{index}", f"doc-{index}.txt")
                 for index in range(12)
             ]
             dataset.write_text(

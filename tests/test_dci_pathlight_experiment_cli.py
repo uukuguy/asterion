@@ -68,13 +68,29 @@ def _write_inputs(root: Path, *, suffix: str = "") -> None:
         rows = []
         for index in range(10):
             document = f"doc-{index}.txt"
-            rows.append(
-                {
-                    "query_id": f"{task_id}-q-{index}{suffix}",
-                    "query": f"query {index}",
-                    "gold_ids": [document],
-                }
-            )
+            query_id = f"{task_id}-q-{index}{suffix}"
+            if task_id.startswith("beir."):
+                rows.append(
+                    {
+                        "query_id": query_id,
+                        "query": f"query {index}",
+                        "answer": "",
+                        "gold_ids": [document],
+                    }
+                )
+            else:
+                rows.append(
+                    {
+                        "query_id": query_id,
+                        "query": f"query {index}",
+                        "answer": "answer",
+                        "excluded_ids": ["excluded.txt"],
+                        "gold_ids": [document],
+                        "gold_ids_long": [document],
+                        "id": f"source-{query_id}",
+                        "reasoning": "reasoning",
+                    }
+                )
             (corpus / document).write_text(f"body {index}\n", encoding="utf-8")
         dataset.write_text(
             "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"

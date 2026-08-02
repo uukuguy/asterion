@@ -20,7 +20,9 @@ from typing import Literal
 from asterion.capabilities.dci.implementation.datasets import (
     BenchmarkRow,
     DatasetError,
+    load_beir_benchmark_rows_bytes,
     load_benchmark_rows_bytes,
+    load_bright_benchmark_rows_bytes,
     normalize_retrieved_path,
 )
 
@@ -528,8 +530,7 @@ def _bind_documents(
     corpus_dir: Path, rows: tuple[BenchmarkRow, ...]
 ) -> tuple[dict[str, tuple[dict[str, str], ...]], tuple[_FileSnapshot, ...]]:
     row_gold: dict[str, tuple[tuple[str, str], ...]] = {}
-    all_gold: list[str] = []
-    source_ids: dict[str, str] = {}
+    all_source_ids: list[str] = []
     for row in rows:
         raw = row.gold_ids if row.gold_ids is not None else row.gold_docs
         if raw is None:
@@ -539,37 +540,28 @@ def _bind_documents(
             raise DciCoverageError("DCI coverage gold documents are ambiguous")
         for source_id, normalized_id in zip(raw, normalized, strict=True):
             _safe_relative(source_id)
-            prior = source_ids.setdefault(normalized_id, source_id)
-            if prior != source_id:
-                raise DciCoverageError("DCI coverage gold documents are ambiguous")
         row_gold[row.query_id] = tuple(zip(raw, normalized, strict=True))
-        all_gold.extend(normalized)
-    wanted = frozenset(all_gold)
-    candidates = _corpus_candidates(corpus_dir, wanted)
+        all_source_ids.extend(raw)
     snapshots_by_path: dict[str, _FileSnapshot] = {}
-    document_by_id: dict[str, dict[str, str]] = {}
-    for document_id in sorted(wanted):
-        paths = candidates.get(document_id, [])
-        if len(paths) != 1:
-            raise DciCoverageError("DCI coverage gold document binding is ambiguous")
-        relative_path = paths[0]
-        snapshot = _read_snapshot(corpus_dir, relative_path)
+    document_by_source: dict[str, dict[str, str]] = {}
+    for source_id in sorted(set(all_source_ids)):
+        snapshot = _read_snapshot(corpus_dir, source_id)
         try:
             snapshot.data.decode("utf-8", errors="strict")
         except UnicodeDecodeError as error:
             raise DciCoverageError(
                 "DCI coverage corpus document is not UTF-8"
             ) from error
-        snapshots_by_path[relative_path] = snapshot
-        document_by_id[document_id] = {
-            "id": source_ids[document_id],
-            "path": relative_path,
+        snapshots_by_path[source_id] = snapshot
+        document_by_source[source_id] = {
+            "id": source_id,
+            "path": source_id,
             "sha256": snapshot.sha256,
         }
     manifests = {
         row.query_id: tuple(
-            document_by_id[normalized_id]
-            for _source_id, normalized_id in sorted(row_gold[row.query_id])
+            document_by_source[source_id]
+            for source_id, _normalized_id in sorted(row_gold[row.query_id])
         )
         for row in rows
     }
@@ -758,7 +750,7 @@ def prepare_coverage_registry(
         if type(selected_count) is not int or selected_count <= 0:
             raise DciCoverageError("DCI coverage selection is invalid")
         dataset_snapshot = _read_path_snapshot(Path(dataset_path))
-        rows = load_benchmark_rows_bytes(dataset_snapshot.data)
+        rows = _load_coverage_rows(dataset_id, dataset_snapshot.data)
         if selected_count > len(rows):
             raise DciCoverageError("DCI coverage selection exceeds dataset")
         selected = rows[:selected_count]
@@ -840,6 +832,14 @@ def prepare_coverage_registry(
     if published is None:
         raise DciCoverageError("DCI coverage registry preparation failed")
     return published
+
+
+def _load_coverage_rows(dataset_id: str, raw: bytes) -> tuple[BenchmarkRow, ...]:
+    if dataset_id.startswith("bright."):
+        return load_bright_benchmark_rows_bytes(raw)
+    if dataset_id.startswith("beir."):
+        return load_beir_benchmark_rows_bytes(raw)
+    return load_benchmark_rows_bytes(raw)
 
 
 def analyze_coverage_run(
