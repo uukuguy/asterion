@@ -9,9 +9,11 @@ from dataclasses import replace
 from typing import Literal
 
 from asterion.capabilities.dci.implementation.pathlight.diagnosis import (
+    DciAggregateWorkflowMetrics,
     DciDatasetObservation,
     DciDiagnosisError,
     DciDiagnosisReport,
+    DciProposalSummary,
     DciWorkflowMetrics,
     diagnose_recommended_pack,
     render_chinese_diagnosis,
@@ -71,9 +73,15 @@ def _run(
     )
 
 
-def _with_cases(run: DciRecoveredRun, cases: tuple[DciRecoveredCase, ...]) -> DciRecoveredRun:
+def _with_cases(
+    run: DciRecoveredRun,
+    cases: tuple[DciRecoveredCase, ...],
+    *,
+    metric_value_microunits: int | None = None,
+) -> DciRecoveredRun:
     return _build_recovered_run(
-        run.dataset_id, run.mode, run.metric_name, run.metric_value_microunits,
+        run.dataset_id, run.mode, run.metric_name,
+        run.metric_value_microunits if metric_value_microunits is None else metric_value_microunits,
         run.selected_count, run.total_count, run.failed_count, run.corpus_file_count,
         run.dataset_snapshot_sha256, run.variant, tuple(sorted(cases, key=lambda case: case.dataset_item_sha256)),
         run.source_document_sha256s, run.missing_evidence,
@@ -172,6 +180,173 @@ class TestDciPathlightDiagnosis(unittest.TestCase):
         for item in report.observations:
             self.assertIn(f"覆盖可用 0/{item.selected_count}", rendered)
 
+    def test_aggregate_metrics_exclude_cross_dataset_score_statistics(self) -> None:
+        report = self._diagnose()
+        self.assertIs(type(report.aggregate_workflow_metrics), DciAggregateWorkflowMetrics)
+        self.assertNotIn("zero_score_rate_microunits", report.aggregate_workflow_metrics.to_mapping())
+        self.assertFalse(hasattr(report.aggregate_workflow_metrics, "zero_score_rate_microunits"))
+
+        changed_runs = []
+        for run in self.six_runs:
+            if run.dataset_id != "qa.bamboogle":
+                changed_runs.append(run)
+                continue
+            zero_index = next(
+                index for index, case in enumerate(run.cases)
+                if case.metric_value_microunits == 0
+            )
+            changed_cases = list(run.cases)
+            changed_cases[zero_index] = replace(
+                changed_cases[zero_index], metric_value_microunits=1_000_000
+            )
+            changed_runs.append(
+                _with_cases(
+                    run,
+                    tuple(changed_cases),
+                    metric_value_microunits=808_000,
+                )
+            )
+        changed = diagnose_recommended_pack(tuple(changed_runs))
+        self.assertEqual(
+            report.aggregate_workflow_metrics.to_mapping(),
+            changed.aggregate_workflow_metrics.to_mapping(),
+        )
+
+    def test_proposals_bind_exact_canonical_case_scopes_and_sole_variables(self) -> None:
+        report = self._diagnose()
+        runs = {run.dataset_id: run for run in self.six_runs}
+        bright_ids = (
+            "bright.biology", "bright.earth-science", "bright.economics", "bright.robotics"
+        )
+        coverage_ids = (*bright_ids, "beir.scifact")
+        scopes = {
+            dataset_id: _domain_digest(
+                "proposal-dataset-case-scope",
+                {
+                    "dataset_id": dataset_id,
+                    "case_sha256s": [
+                        case.dataset_item_sha256
+                        for case in runs[dataset_id].cases[:10]
+                    ],
+                },
+            )
+            for dataset_id in coverage_ids
+        }
+        coverage_scope = _combined_scope(scopes, coverage_ids, "coverage")
+        bright_scope = _combined_scope(scopes, bright_ids, "paired-bright")
+        coverage, query = report.proposals
+        self.assertEqual(coverage.case_scope_sha256, coverage_scope)
+        self.assertEqual(query.case_scope_sha256, bright_scope)
+        self.assertEqual(coverage.dataset_case_counts, tuple((item, 10) for item in coverage_ids))
+        self.assertEqual(query.dataset_case_counts, tuple((item, 10) for item in bright_ids))
+        self.assertEqual(
+            coverage.dataset_case_scope_sha256s,
+            tuple((item, scopes[item]) for item in coverage_ids),
+        )
+        self.assertEqual(
+            query.dataset_case_scope_sha256s,
+            tuple((item, scopes[item]) for item in bright_ids),
+        )
+        self.assertEqual((coverage.baseline_operation_count, coverage.candidate_operation_count), (50, 0))
+        self.assertEqual((query.baseline_operation_count, query.candidate_operation_count), (40, 40))
+        self.assertEqual(
+            coverage.sole_variable_sha256,
+            _domain_digest("proposal-sole-variable", "trajectory-coverage-instrumentation-only"),
+        )
+        self.assertEqual(
+            query.sole_variable_sha256,
+            _domain_digest("proposal-sole-variable", "retrieval-query-planning"),
+        )
+
+        core_by_sha = {
+            item.proposal_sha256: item for item in report.diagnosis_bundle.proposals
+        }
+        coverage_core = core_by_sha[coverage.proposal_sha256]
+        query_core = core_by_sha[query.proposal_sha256]
+        self.assertEqual(
+            coverage_core.change_sha256,
+            _domain_digest("proposal-change", {
+                "change": "coverage-instrumentation",
+                "sole_variable_sha256": coverage.sole_variable_sha256,
+            }),
+        )
+        self.assertEqual(
+            coverage_core.scope_sha256,
+            _domain_digest("proposal-scope", _scope_mapping(coverage)),
+        )
+        self.assertEqual(
+            coverage_core.success_criteria_sha256,
+            _domain_digest("proposal-success", {"trajectory_coverage_recorded": True}),
+        )
+        self.assertEqual(
+            coverage_core.stop_criteria_sha256,
+            _domain_digest("proposal-stop", {"infrastructure_failures": 2}),
+        )
+        self.assertEqual(
+            coverage_core.budget_sha256,
+            _domain_digest("proposal-budget", {
+                "agent_operations": 50, "max_cost_microusd": 5_000_000,
+            }),
+        )
+        self.assertEqual(
+            query_core.change_sha256,
+            _domain_digest("proposal-change", {
+                "change": "retrieval-query-decomposition",
+                "sole_variable_sha256": query.sole_variable_sha256,
+            }),
+        )
+        self.assertEqual(
+            query_core.scope_sha256,
+            _domain_digest("proposal-scope", _scope_mapping(query)),
+        )
+        self.assertEqual(
+            query_core.success_criteria_sha256,
+            _domain_digest("proposal-success", {
+                "mean_ndcg_gain_microunits": 50_000,
+                "maximum_cost_or_time_increase_microunits": 250_000,
+            }),
+        )
+        self.assertEqual(
+            query_core.stop_criteria_sha256,
+            _domain_digest("proposal-stop", {
+                "prerequisite_proposal_sha256": coverage.proposal_sha256,
+            }),
+        )
+        self.assertEqual(
+            query_core.budget_sha256,
+            _domain_digest("proposal-budget", {
+                "agent_operations": 80, "max_cost_microusd": 8_000_000,
+            }),
+        )
+
+        for attribute, value in (
+            ("dataset_case_counts", (("bright.biology", 9), *coverage.dataset_case_counts[1:])),
+            (
+                "dataset_case_scope_sha256s",
+                (("bright.biology", "2" * 64), *coverage.dataset_case_scope_sha256s[1:]),
+            ),
+            ("case_scope_sha256", "0" * 64),
+            ("baseline_operation_count", 49),
+            ("sole_variable_sha256", "1" * 64),
+        ):
+            forged = self._diagnose()
+            object.__setattr__(forged.proposals[0], attribute, value)
+            object.__setattr__(forged, "report_sha256", _report_digest(forged))
+            self._assert_render_error(forged)
+
+        forged = self._diagnose()
+        object.__setattr__(forged.proposals[1], "candidate_operation_count", 39)
+        object.__setattr__(forged, "report_sha256", _report_digest(forged))
+        self._assert_render_error(forged)
+
+    def test_component_matrix_excludes_bamboogle_health_anchor(self) -> None:
+        report = self._diagnose()
+        self.assertEqual(len(report.component_comparisons), 30)
+        self.assertNotIn(
+            "qa.bamboogle",
+            {item.dataset_id for item in report.component_comparisons},
+        )
+
     def test_renderer_rejects_self_consistent_forged_nested_values_without_leakage(self) -> None:
         mutations: tuple[tuple[str, object], ...] = (
             ("score_microunits", "SENTINEL_RENDER_LEAK"),
@@ -239,7 +414,6 @@ class TestDciPathlightDiagnosis(unittest.TestCase):
         report = self._diagnose()
         metrics = report.aggregate_workflow_metrics
         invalid_metrics = (
-            ("zero_score_rate_microunits", True),
             ("read_time_share_microunits", -1),
             ("grep_time_share_microunits", 1_000_001),
             ("median_read_time_ns", 1 << 63),
@@ -249,7 +423,12 @@ class TestDciPathlightDiagnosis(unittest.TestCase):
             mapping.update(metrics.to_mapping())
             mapping[attribute] = value
             with self.subTest(attribute=attribute), self.assertRaises(ValueError):
-                DciWorkflowMetrics(**mapping)  # type: ignore[arg-type]
+                DciAggregateWorkflowMetrics(**mapping)  # type: ignore[arg-type]
+
+        dataset_metrics = report.observations[0].workflow_metrics.to_mapping()
+        dataset_metrics["zero_score_rate_microunits"] = True
+        with self.assertRaises(ValueError):
+            DciWorkflowMetrics(**dataset_metrics)
 
         with self.assertRaises(ValueError):
             replace(report.observations[0], dataset_id="SENTINEL_UNKNOWN_DATASET")
@@ -313,6 +492,56 @@ def _report_digest(report: DciDiagnosisReport) -> str:
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()
+
+
+def _domain_digest(domain: str, value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            {
+                "domain": f"asterion.dci.pathlight.diagnosis/{domain}/v1",
+                "value": value,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _combined_scope(
+    scopes: dict[str, str], dataset_ids: tuple[str, ...], purpose: str
+) -> str:
+    return _domain_digest(
+        "proposal-case-scope",
+        {
+            "datasets": [
+                {
+                    "dataset_id": dataset_id,
+                    "case_count": 10,
+                    "case_scope_sha256": scopes[dataset_id],
+                    "role": (
+                        "scifact-anchor"
+                        if dataset_id == "beir.scifact"
+                        else "bright-target"
+                    ),
+                }
+                for dataset_id in dataset_ids
+            ],
+            "purpose": purpose,
+            "total_case_count": len(dataset_ids) * 10,
+        },
+    )
+
+
+def _scope_mapping(proposal: DciProposalSummary) -> dict[str, object]:
+    return {
+        "case_scope_sha256": proposal.case_scope_sha256,
+        "dataset_case_counts": [list(item) for item in proposal.dataset_case_counts],
+        "dataset_case_scope_sha256s": [
+            list(item) for item in proposal.dataset_case_scope_sha256s
+        ],
+        "baseline_operation_count": proposal.baseline_operation_count,
+        "candidate_operation_count": proposal.candidate_operation_count,
+    }
 
 
 if __name__ == "__main__":

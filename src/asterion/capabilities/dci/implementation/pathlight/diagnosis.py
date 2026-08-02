@@ -47,6 +47,16 @@ _REQUIRED: dict[str, tuple[Literal["ir", "qa"], Literal["ndcg-at-10", "accuracy"
     "qa.bamboogle": ("qa", "accuracy", 125),
 }
 _DATASET_ORDER = tuple(sorted(_REQUIRED))
+_BRIGHT_DATASETS = (
+    "bright.biology",
+    "bright.earth-science",
+    "bright.economics",
+    "bright.robotics",
+)
+_COVERAGE_DATASETS = (*_BRIGHT_DATASETS, "beir.scifact")
+_COMPARISON_DATASETS = tuple(
+    dataset_id for dataset_id in _DATASET_ORDER if dataset_id != "qa.bamboogle"
+)
 _COMPONENTS = (
     "runtime",
     "model",
@@ -240,6 +250,93 @@ class DciWorkflowMetrics:
 
 
 @dataclass(frozen=True, slots=True)
+class DciAggregateWorkflowMetrics:
+    """Cross-dataset workflow metrics with no score-derived statistic."""
+
+    median_agent_total_tokens: int
+    median_tool_call_count: int
+    median_wall_time_ns: int
+    median_tool_time_ns: int
+    median_read_call_count: int
+    median_grep_call_count: int
+    median_read_time_ns: int
+    median_grep_time_ns: int
+    median_question_word_count: int
+    total_tool_error_count: int
+    total_wall_time_ns: int
+    total_tool_time_ns: int
+    total_read_time_ns: int
+    total_grep_time_ns: int
+    tool_time_share_microunits: int
+    read_time_share_microunits: int
+    grep_time_share_microunits: int
+
+    def __post_init__(self) -> None:
+        try:
+            if type(self) is not DciAggregateWorkflowMetrics:
+                raise ValueError
+            for value in (
+                self.median_agent_total_tokens,
+                self.median_tool_call_count,
+                self.median_wall_time_ns,
+                self.median_tool_time_ns,
+                self.median_read_call_count,
+                self.median_grep_call_count,
+                self.median_read_time_ns,
+                self.median_grep_time_ns,
+                self.median_question_word_count,
+                self.total_tool_error_count,
+                self.total_wall_time_ns,
+                self.total_tool_time_ns,
+                self.total_read_time_ns,
+                self.total_grep_time_ns,
+            ):
+                _checked(value)
+            for value in (
+                self.tool_time_share_microunits,
+                self.read_time_share_microunits,
+                self.grep_time_share_microunits,
+            ):
+                _unit(value)
+            if (
+                self.total_wall_time_ns == 0
+                or self.total_tool_time_ns
+                != self.total_read_time_ns + self.total_grep_time_ns
+                or self.total_tool_time_ns > self.total_wall_time_ns
+                or self.tool_time_share_microunits
+                != _ratio_microunits(self.total_tool_time_ns, self.total_wall_time_ns)
+                or self.read_time_share_microunits
+                != _time_share_microunits(self.total_read_time_ns, self.total_tool_time_ns)
+                or self.grep_time_share_microunits
+                != _time_share_microunits(self.total_grep_time_ns, self.total_tool_time_ns)
+            ):
+                raise ValueError
+        except Exception:
+            raise ValueError("invalid DCI aggregate workflow metrics") from None
+
+    def to_mapping(self) -> dict[str, int]:
+        return {
+            "median_agent_total_tokens": self.median_agent_total_tokens,
+            "median_tool_call_count": self.median_tool_call_count,
+            "median_wall_time_ns": self.median_wall_time_ns,
+            "median_tool_time_ns": self.median_tool_time_ns,
+            "median_read_call_count": self.median_read_call_count,
+            "median_grep_call_count": self.median_grep_call_count,
+            "median_read_time_ns": self.median_read_time_ns,
+            "median_grep_time_ns": self.median_grep_time_ns,
+            "median_question_word_count": self.median_question_word_count,
+            "total_tool_error_count": self.total_tool_error_count,
+            "total_wall_time_ns": self.total_wall_time_ns,
+            "total_tool_time_ns": self.total_tool_time_ns,
+            "total_read_time_ns": self.total_read_time_ns,
+            "total_grep_time_ns": self.total_grep_time_ns,
+            "tool_time_share_microunits": self.tool_time_share_microunits,
+            "read_time_share_microunits": self.read_time_share_microunits,
+            "grep_time_share_microunits": self.grep_time_share_microunits,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class DciDatasetObservation:
     dataset_id: str
     metric_name: Literal["ndcg-at-10", "accuracy"]
@@ -319,7 +416,7 @@ class DciComponentComparison:
         if (
             type(self) is not DciComponentComparison
             or type(self.dataset_id) is not str
-            or self.dataset_id not in _REQUIRED
+            or self.dataset_id not in _COMPARISON_DATASETS
             or type(self.component) is not str
             or self.component not in _COMPONENTS
             or type(self.relation_to_bright_biology) is not str
@@ -349,6 +446,12 @@ class DciProposalSummary:
     prerequisite_proposal_sha256: str | None
     minimum_mean_ndcg_gain_microunits: int | None
     maximum_cost_or_time_increase_microunits: int | None
+    dataset_case_counts: tuple[tuple[str, int], ...]
+    dataset_case_scope_sha256s: tuple[tuple[str, str], ...]
+    case_scope_sha256: str
+    baseline_operation_count: int
+    candidate_operation_count: int
+    sole_variable_sha256: str
 
     def __post_init__(self) -> None:
         try:
@@ -364,12 +467,51 @@ class DciProposalSummary:
             _checked(self.agent_operation_cap)
             _checked(self.max_cost_microusd)
             if self.code == "coverage-instrumentation":
-                expected = (50, 5_000_000, 2, None, None, None)
+                dataset_ids = _COVERAGE_DATASETS
+                expected = (50, 5_000_000, 2, None, None, None, 50, 0)
+                purpose = "coverage"
+                sole_variable = "trajectory-coverage-instrumentation-only"
             else:
                 if self.prerequisite_proposal_sha256 is None:
                     raise ValueError
                 _sha256(self.prerequisite_proposal_sha256)
-                expected = (80, 8_000_000, None, self.prerequisite_proposal_sha256, 50_000, 250_000)
+                dataset_ids = _BRIGHT_DATASETS
+                expected = (
+                    80, 8_000_000, None, self.prerequisite_proposal_sha256,
+                    50_000, 250_000, 40, 40,
+                )
+                purpose = "paired-bright"
+                sole_variable = "retrieval-query-planning"
+            if (
+                type(self.dataset_case_counts) is not tuple
+                or type(self.dataset_case_scope_sha256s) is not tuple
+                or tuple(item[0] for item in self.dataset_case_counts) != dataset_ids
+                or tuple(item[0] for item in self.dataset_case_scope_sha256s) != dataset_ids
+                or any(
+                    type(item) is not tuple
+                    or len(item) != 2
+                    or type(item[0]) is not str
+                    or type(item[1]) is not int
+                    or item[1] != 10
+                    for item in self.dataset_case_counts
+                )
+                or any(
+                    type(item) is not tuple
+                    or len(item) != 2
+                    or type(item[0]) is not str
+                    or _sha256(item[1]) != item[1]
+                    for item in self.dataset_case_scope_sha256s
+                )
+                or _sha256(self.case_scope_sha256) != self.case_scope_sha256
+                or _sha256(self.sole_variable_sha256) != self.sole_variable_sha256
+                or self.sole_variable_sha256
+                != _digest("proposal-sole-variable", sole_variable)
+                or self.case_scope_sha256
+                != _combined_case_scope_sha256(
+                    self.dataset_case_scope_sha256s, dataset_ids, purpose
+                )
+            ):
+                raise ValueError
             actual = (
                 self.agent_operation_cap,
                 self.max_cost_microusd,
@@ -377,6 +519,8 @@ class DciProposalSummary:
                 self.prerequisite_proposal_sha256,
                 self.minimum_mean_ndcg_gain_microunits,
                 self.maximum_cost_or_time_increase_microunits,
+                self.baseline_operation_count,
+                self.candidate_operation_count,
             )
             if actual != expected:
                 raise ValueError
@@ -395,6 +539,14 @@ class DciProposalSummary:
             "prerequisite_proposal_sha256": self.prerequisite_proposal_sha256,
             "minimum_mean_ndcg_gain_microunits": self.minimum_mean_ndcg_gain_microunits,
             "maximum_cost_or_time_increase_microunits": self.maximum_cost_or_time_increase_microunits,
+            "dataset_case_counts": [list(item) for item in self.dataset_case_counts],
+            "dataset_case_scope_sha256s": [
+                list(item) for item in self.dataset_case_scope_sha256s
+            ],
+            "case_scope_sha256": self.case_scope_sha256,
+            "baseline_operation_count": self.baseline_operation_count,
+            "candidate_operation_count": self.candidate_operation_count,
+            "sole_variable_sha256": self.sole_variable_sha256,
         }
 
 
@@ -406,7 +558,7 @@ class DciDiagnosisReport:
     missing_evidence: tuple[str, ...]
     hypothesis_codes: tuple[str, ...]
     proposals: tuple[DciProposalSummary, ...]
-    aggregate_workflow_metrics: DciWorkflowMetrics
+    aggregate_workflow_metrics: DciAggregateWorkflowMetrics
     diagnosis_bundle: DiagnosisBundle
     report_sha256: str = field(init=False)
 
@@ -428,11 +580,13 @@ class DciDiagnosisReport:
             components = tuple(_copy_component(item) for item in self.component_comparisons)
             findings = tuple(_copy_finding(item) for item in self.findings)
             proposals = tuple(_copy_proposal_summary(item) for item in self.proposals)
-            aggregate_metrics = _copy_workflow_metrics(self.aggregate_workflow_metrics)
+            aggregate_metrics = _copy_aggregate_workflow_metrics(
+                self.aggregate_workflow_metrics
+            )
             diagnosis_bundle = _copy_diagnosis_bundle(self.diagnosis_bundle)
             expected_components = tuple(
                 (dataset_id, component)
-                for dataset_id in _DATASET_ORDER
+                for dataset_id in _COMPARISON_DATASETS
                 for component in _COMPONENTS
             )
             expected_finding_codes = {
@@ -465,7 +619,9 @@ class DciDiagnosisReport:
                     key=lambda item: item.finding_sha256,
                 )
             )
-            expected_bundle_proposals = _fixed_pathlight_proposals(expected_findings)
+            expected_bundle_proposals = _fixed_pathlight_proposals(
+                expected_findings, proposals
+            )
             if (
                 tuple(item.dataset_id for item in observations) != _DATASET_ORDER
                 or len(set(evaluation_ids)) != len(evaluation_ids)
@@ -566,6 +722,12 @@ def _copy_workflow_metrics(value: object) -> DciWorkflowMetrics:
     return DciWorkflowMetrics(**value.to_mapping())
 
 
+def _copy_aggregate_workflow_metrics(value: object) -> DciAggregateWorkflowMetrics:
+    if type(value) is not DciAggregateWorkflowMetrics:
+        raise ValueError
+    return DciAggregateWorkflowMetrics(**value.to_mapping())
+
+
 def _copy_observation(value: object) -> DciDatasetObservation:
     if type(value) is not DciDatasetObservation:
         raise ValueError
@@ -610,6 +772,12 @@ def _copy_proposal_summary(value: object) -> DciProposalSummary:
         value.prerequisite_proposal_sha256,
         value.minimum_mean_ndcg_gain_microunits,
         value.maximum_cost_or_time_increase_microunits,
+        value.dataset_case_counts,
+        value.dataset_case_scope_sha256s,
+        value.case_scope_sha256,
+        value.baseline_operation_count,
+        value.candidate_operation_count,
+        value.sole_variable_sha256,
     )
 
 
@@ -686,7 +854,9 @@ def diagnose_recommended_pack(runs: object) -> DciDiagnosisReport:
         )
         aggregate_ids = {item.dataset_id: item.aggregate_evaluation_sha256 for item in observations}
         findings = _findings(observations, aggregate_ids)
-        bundle, public_proposals = _diagnosis_bundle(experiments, aggregate_ids, findings)
+        bundle, public_proposals = _diagnosis_bundle(
+            experiments, aggregate_ids, findings, normalized
+        )
         comparisons = _component_comparisons(normalized)
         result = DciDiagnosisReport(
             observations=observations,
@@ -695,7 +865,7 @@ def diagnose_recommended_pack(runs: object) -> DciDiagnosisReport:
             missing_evidence=_MISSING_CODES,
             hypothesis_codes=_HYPOTHESIS_CODES,
             proposals=public_proposals,
-            aggregate_workflow_metrics=_workflow_metrics(
+            aggregate_workflow_metrics=_aggregate_workflow_metrics(
                 tuple(case for run in normalized.values() for case in run.cases)
             ),
             diagnosis_bundle=bundle,
@@ -832,6 +1002,42 @@ def _workflow_metrics(cases: tuple[DciRecoveredCase, ...]) -> DciWorkflowMetrics
     )
 
 
+def _aggregate_workflow_metrics(
+    cases: tuple[DciRecoveredCase, ...],
+) -> DciAggregateWorkflowMetrics:
+    """Aggregate workflow behavior only; scores are intentionally never read."""
+
+    if not cases:
+        raise ValueError
+
+    def values(attribute: str) -> tuple[int, ...]:
+        return tuple(getattr(case, attribute) for case in cases)
+
+    wall = _sum(values("wall_time_ns"))
+    tool = _sum(values("tool_time_ns"))
+    read = _sum(values("read_time_ns"))
+    grep = _sum(values("grep_time_ns"))
+    return DciAggregateWorkflowMetrics(
+        median_agent_total_tokens=_median(values("agent_total_tokens")),
+        median_tool_call_count=_median(values("tool_call_count")),
+        median_wall_time_ns=_median(values("wall_time_ns")),
+        median_tool_time_ns=_median(values("tool_time_ns")),
+        median_read_call_count=_median(values("read_call_count")),
+        median_grep_call_count=_median(values("grep_call_count")),
+        median_read_time_ns=_median(values("read_time_ns")),
+        median_grep_time_ns=_median(values("grep_time_ns")),
+        median_question_word_count=_median(values("question_word_count")),
+        total_tool_error_count=_sum(values("tool_error_count")),
+        total_wall_time_ns=wall,
+        total_tool_time_ns=tool,
+        total_read_time_ns=read,
+        total_grep_time_ns=grep,
+        tool_time_share_microunits=_ratio_microunits(tool, wall),
+        read_time_share_microunits=_time_share_microunits(read, tool),
+        grep_time_share_microunits=_time_share_microunits(grep, tool),
+    )
+
+
 def _component_comparisons(runs: dict[str, DciRecoveredRun]) -> tuple[DciComponentComparison, ...]:
     baseline = runs["bright.biology"].variant
     attributes = {
@@ -842,7 +1048,7 @@ def _component_comparisons(runs: dict[str, DciRecoveredRun]) -> tuple[DciCompone
         DciComponentComparison(
             dataset_id, component, "same" if getattr(runs[dataset_id].variant, attributes[component]) == getattr(baseline, attributes[component]) else "different"
         )
-        for dataset_id in _DATASET_ORDER
+        for dataset_id in _COMPARISON_DATASETS
         for component in _COMPONENTS
     )
 
@@ -874,38 +1080,192 @@ def _diagnosis_bundle(
     experiments: Mapping[str, ExperimentBundle],
     aggregate_ids: dict[str, str],
     findings: tuple[Finding, ...],
+    runs: Mapping[str, DciRecoveredRun],
 ) -> tuple[DiagnosisBundle, tuple[DciProposalSummary, ...]]:
-    coverage, decomposition = _fixed_pathlight_proposals(findings)
+    coverage_scope = _proposal_scope(runs, _COVERAGE_DATASETS, "coverage")
+    query_scope = _proposal_scope(runs, _BRIGHT_DATASETS, "paired-bright")
+    coverage, decomposition = _pathlight_proposals(
+        findings, coverage_scope, query_scope
+    )
     bundle = DiagnosisBundle.build(
         experiment_bundle_sha256s=tuple(experiments[key].bundle_sha256 for key in _DATASET_ORDER),
         evaluation_sha256s=tuple(aggregate_ids.values()), findings=findings, proposals=(coverage, decomposition),
     )
     summaries = (
-        DciProposalSummary("coverage-instrumentation", coverage.proposal_sha256, True, False, 50, 5_000_000, 2, None, None, None),
-        DciProposalSummary("retrieval-query-decomposition", decomposition.proposal_sha256, True, False, 80, 8_000_000, None, coverage.proposal_sha256, 50_000, 250_000),
+        DciProposalSummary(
+            "coverage-instrumentation", coverage.proposal_sha256, True, False,
+            50, 5_000_000, 2, None, None, None,
+            coverage_scope.dataset_case_counts,
+            coverage_scope.dataset_case_scope_sha256s,
+            coverage_scope.case_scope_sha256, 50, 0,
+            coverage_scope.sole_variable_sha256,
+        ),
+        DciProposalSummary(
+            "retrieval-query-decomposition", decomposition.proposal_sha256,
+            True, False, 80, 8_000_000, None, coverage.proposal_sha256,
+            50_000, 250_000, query_scope.dataset_case_counts,
+            query_scope.dataset_case_scope_sha256s,
+            query_scope.case_scope_sha256, 40, 40,
+            query_scope.sole_variable_sha256,
+        ),
     )
     return bundle, summaries
 
 
-def _fixed_pathlight_proposals(findings: tuple[Finding, ...]) -> tuple[Proposal, Proposal]:
+@dataclass(frozen=True, slots=True)
+class _ProposalScope:
+    dataset_case_counts: tuple[tuple[str, int], ...]
+    dataset_case_scope_sha256s: tuple[tuple[str, str], ...]
+    case_scope_sha256: str
+    baseline_operation_count: int
+    candidate_operation_count: int
+    sole_variable_sha256: str
+
+
+def _combined_case_scope_sha256(
+    scopes: tuple[tuple[str, str], ...],
+    dataset_ids: tuple[str, ...],
+    purpose: str,
+) -> str:
+    scope_by_dataset = dict(scopes)
+    return _digest(
+        "proposal-case-scope",
+        {
+            "datasets": [
+                {
+                    "dataset_id": dataset_id,
+                    "case_count": 10,
+                    "case_scope_sha256": scope_by_dataset[dataset_id],
+                    "role": (
+                        "scifact-anchor"
+                        if dataset_id == "beir.scifact"
+                        else "bright-target"
+                    ),
+                }
+                for dataset_id in dataset_ids
+            ],
+            "purpose": purpose,
+            "total_case_count": len(dataset_ids) * 10,
+        },
+    )
+
+
+def _proposal_scope(
+    runs: Mapping[str, DciRecoveredRun],
+    dataset_ids: tuple[str, ...],
+    purpose: str,
+) -> _ProposalScope:
+    scope_digests = tuple(
+        (
+            dataset_id,
+            _digest(
+                "proposal-dataset-case-scope",
+                {
+                    "dataset_id": dataset_id,
+                    "case_sha256s": [
+                        case.dataset_item_sha256
+                        for case in runs[dataset_id].cases[:10]
+                    ],
+                },
+            ),
+        )
+        for dataset_id in dataset_ids
+    )
+    coverage = purpose == "coverage"
+    return _ProposalScope(
+        dataset_case_counts=tuple((dataset_id, 10) for dataset_id in dataset_ids),
+        dataset_case_scope_sha256s=scope_digests,
+        case_scope_sha256=_combined_case_scope_sha256(
+            scope_digests, dataset_ids, purpose
+        ),
+        baseline_operation_count=50 if coverage else 40,
+        candidate_operation_count=0 if coverage else 40,
+        sole_variable_sha256=_digest(
+            "proposal-sole-variable",
+            (
+                "trajectory-coverage-instrumentation-only"
+                if coverage
+                else "retrieval-query-planning"
+            ),
+        ),
+    )
+
+
+def _scope_from_summary(summary: DciProposalSummary) -> _ProposalScope:
+    return _ProposalScope(
+        summary.dataset_case_counts,
+        summary.dataset_case_scope_sha256s,
+        summary.case_scope_sha256,
+        summary.baseline_operation_count,
+        summary.candidate_operation_count,
+        summary.sole_variable_sha256,
+    )
+
+
+def _fixed_pathlight_proposals(
+    findings: tuple[Finding, ...],
+    summaries: tuple[DciProposalSummary, ...],
+) -> tuple[Proposal, Proposal]:
+    if len(summaries) != 2:
+        raise ValueError
+    return _pathlight_proposals(
+        findings, _scope_from_summary(summaries[0]), _scope_from_summary(summaries[1])
+    )
+
+
+def _pathlight_proposals(
+    findings: tuple[Finding, ...],
+    coverage_scope: _ProposalScope,
+    query_scope: _ProposalScope,
+) -> tuple[Proposal, Proposal]:
     hypothesis = {
         code: next(item for item in findings if item.finding_code_sha256 == _digest("code", f"hypothesis:{code}"))
         for code in _HYPOTHESIS_CODES
     }
     coverage = Proposal(
         hypothesis["context-retention"].finding_sha256,
-        _digest("proposal-change", "coverage-instrumentation"), _digest("proposal-scope", {"bright_cases": 40, "scifact_cases": 10}),
-        _digest("proposal-success", "trajectory-coverage-only"), _digest("proposal-stop", {"infrastructure_failures": 2}),
+        _digest(
+            "proposal-change",
+            {
+                "change": "coverage-instrumentation",
+                "sole_variable_sha256": coverage_scope.sole_variable_sha256,
+            },
+        ),
+        _digest("proposal-scope", _proposal_scope_mapping(coverage_scope)),
+        _digest("proposal-success", {"trajectory_coverage_recorded": True}),
+        _digest("proposal-stop", {"infrastructure_failures": 2}),
         _digest("proposal-budget", {"agent_operations": 50, "max_cost_microusd": 5_000_000}),
     )
     decomposition = Proposal(
         hypothesis["query-decomposition"].finding_sha256,
-        _digest("proposal-change", "retrieval-query-decomposition"), _digest("proposal-scope", {"paired_agent_operations": 80}),
+        _digest(
+            "proposal-change",
+            {
+                "change": "retrieval-query-decomposition",
+                "sole_variable_sha256": query_scope.sole_variable_sha256,
+            },
+        ),
+        _digest("proposal-scope", _proposal_scope_mapping(query_scope)),
         _digest("proposal-success", {"mean_ndcg_gain_microunits": 50_000, "maximum_cost_or_time_increase_microunits": 250_000}),
-        _digest("proposal-stop", "coverage-proposal-must-succeed"),
+        _digest(
+            "proposal-stop",
+            {"prerequisite_proposal_sha256": coverage.proposal_sha256},
+        ),
         _digest("proposal-budget", {"agent_operations": 80, "max_cost_microusd": 8_000_000}),
     )
     return coverage, decomposition
+
+
+def _proposal_scope_mapping(scope: _ProposalScope) -> dict[str, object]:
+    return {
+        "case_scope_sha256": scope.case_scope_sha256,
+        "dataset_case_counts": [list(item) for item in scope.dataset_case_counts],
+        "dataset_case_scope_sha256s": [
+            list(item) for item in scope.dataset_case_scope_sha256s
+        ],
+        "baseline_operation_count": scope.baseline_operation_count,
+        "candidate_operation_count": scope.candidate_operation_count,
+    }
 
 
 _CN_DATASETS = {

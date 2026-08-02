@@ -15,6 +15,7 @@ from .conversion import (
     recovered_run_to_experiment,
 )
 from .diagnosis import (
+    DciAggregateWorkflowMetrics,
     DciComponentComparison,
     DciDatasetObservation,
     DciDiagnosisError,
@@ -37,6 +38,7 @@ __all__ = (
     "load_paper_reference",
     "recovered_run_to_experiment",
     "DciComponentComparison",
+    "DciAggregateWorkflowMetrics",
     "DciDatasetObservation",
     "DciDiagnosisError",
     "DciDiagnosisReport",
