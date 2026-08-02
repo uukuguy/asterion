@@ -34,6 +34,9 @@ _MISSING_EVIDENCE = frozenset(
         "sealed-config-digest",
         "sealed-analysis-digest",
         "paper-method-detail",
+        "assembly-lineage",
+        "package-lineage",
+        "trace-graph",
     }
 )
 
