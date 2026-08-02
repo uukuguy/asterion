@@ -97,6 +97,13 @@ def _require_trace_id(value: object) -> str:
 
 
 def _freeze_json(value: object) -> object:
+    try:
+        return _freeze_json_value(value)
+    except Exception:
+        raise PathlightError("Pathlight query projection is invalid") from None
+
+
+def _freeze_json_value(value: object) -> object:
     if isinstance(value, Mapping):
         if any(type(key) is not str for key in value):
             raise PathlightError("Pathlight query projection is invalid")
@@ -109,6 +116,13 @@ def _freeze_json(value: object) -> object:
 
 
 def _mutable_json(value: object) -> object:
+    try:
+        return _mutable_json_value(value)
+    except Exception:
+        raise PathlightError("Pathlight query projection is invalid") from None
+
+
+def _mutable_json_value(value: object) -> object:
     if isinstance(value, Mapping):
         if any(type(key) is not str for key in value):
             raise PathlightError("Pathlight trace is invalid")
@@ -176,6 +190,12 @@ class PathlightCatalog:
     _evaluations: Mapping[str, Mapping[str, object] | EvaluationRecord]
 
     def __post_init__(self) -> None:
+        try:
+            self._validate_and_copy_inputs()
+        except Exception:
+            raise PathlightError("Pathlight catalog input is invalid") from None
+
+    def _validate_and_copy_inputs(self) -> None:
         if not isinstance(self._traces, Mapping) or not isinstance(
             self._evaluations, Mapping
         ):
@@ -327,8 +347,8 @@ def _validated_frozen_trace(value: object) -> Mapping[str, object]:
         raise PathlightError("Pathlight trace is invalid")
     try:
         validate_trace_graph(mutable)
-    except (TypeError, ValueError) as error:
-        raise PathlightError("Pathlight trace is invalid") from error
+    except (TypeError, ValueError):
+        raise PathlightError("Pathlight trace is invalid") from None
     frozen = _freeze_json(mutable)
     if not isinstance(frozen, Mapping):
         raise PathlightError("Pathlight trace is invalid")

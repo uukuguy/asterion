@@ -6,7 +6,7 @@ import os
 import stat
 import tempfile
 import unittest
-from collections.abc import Mapping
+from collections.abc import ItemsView, Iterator, Mapping
 from pathlib import Path
 from unittest.mock import patch
 
@@ -18,6 +18,23 @@ from asterion.workflow_evidence import (
     validate_workflow_observation_bundle,
     write_workflow_observation_bundle,
 )
+
+SENTINEL_MAPPING_ERROR = "SENTINEL_PRIVATE_MAPPING_ERROR"
+
+
+class _HostileMapping(Mapping[str, object]):
+    def __getitem__(self, key: str) -> object:
+        del key
+        raise RuntimeError(SENTINEL_MAPPING_ERROR)
+
+    def __iter__(self) -> Iterator[str]:
+        raise RuntimeError(SENTINEL_MAPPING_ERROR)
+
+    def __len__(self) -> int:
+        raise RuntimeError(SENTINEL_MAPPING_ERROR)
+
+    def items(self) -> ItemsView[str, object]:
+        raise RuntimeError(SENTINEL_MAPPING_ERROR)
 
 
 def _completed_record() -> dict[str, object]:
@@ -385,6 +402,39 @@ class WorkflowEvidenceStorageTests(unittest.TestCase):
             incomplete = object.__new__(WorkflowObservationBundle)
             with self.assertRaises(WorkflowEvidenceError):
                 validate_workflow_observation_bundle(incomplete)
+
+    def test_bundle_normalizes_hostile_mapping_failures_without_leaking_text(
+        self,
+    ) -> None:
+        hostile = _HostileMapping()
+        calls = (
+            lambda: WorkflowObservationBundle(
+                records=(hostile,),
+                pathlight_traces=(),
+                bundle_sha256="0" * 64,
+                projection_sha256="0" * 64,
+            ),
+            lambda: WorkflowObservationBundle(
+                records=(),
+                pathlight_traces=(hostile,),
+                bundle_sha256="0" * 64,
+                projection_sha256="0" * 64,
+            ),
+        )
+        forged = object.__new__(WorkflowObservationBundle)
+        object.__setattr__(forged, "records", (hostile,))
+        object.__setattr__(forged, "pathlight_traces", ())
+        object.__setattr__(forged, "bundle_sha256", "0" * 64)
+        object.__setattr__(forged, "projection_sha256", "0" * 64)
+
+        for call in (*calls, lambda: validate_workflow_observation_bundle(forged)):
+            with (
+                self.subTest(call=call),
+                self.assertRaises(WorkflowEvidenceError) as raised,
+            ):
+                call()
+            self.assertNotIn(SENTINEL_MAPPING_ERROR, str(raised.exception))
+            self.assertTrue(raised.exception.__suppress_context__)
 
     def test_reader_rejects_invalid_or_tampered_bundle(self) -> None:
         mutations = (

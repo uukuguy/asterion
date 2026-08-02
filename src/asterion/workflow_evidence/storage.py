@@ -31,6 +31,14 @@ class WorkflowObservationBundle:
     projection_sha256: str
 
     def __post_init__(self) -> None:
+        try:
+            self._validate_and_freeze_projection()
+        except Exception:
+            raise WorkflowEvidenceError(
+                "workflow observation projection is invalid"
+            ) from None
+
+    def _validate_and_freeze_projection(self) -> None:
         if not isinstance(self.records, tuple) or not isinstance(
             self.pathlight_traces, tuple
         ):
@@ -57,8 +65,8 @@ def _digest(value: object) -> str:
         raise WorkflowEvidenceError("workflow observation digest is invalid")
     try:
         int(value, 16)
-    except ValueError as error:
-        raise WorkflowEvidenceError("workflow observation digest is invalid") from error
+    except ValueError:
+        raise WorkflowEvidenceError("workflow observation digest is invalid") from None
     return value
 
 
@@ -86,6 +94,15 @@ def _projection_mapping(
 
 
 def _json_copy(value: object) -> object:
+    try:
+        return _json_copy_value(value)
+    except Exception:
+        raise WorkflowEvidenceError(
+            "workflow observation projection is invalid"
+        ) from None
+
+
+def _json_copy_value(value: object) -> object:
     if isinstance(value, Mapping):
         if any(type(key) is not str for key in value):
             raise WorkflowEvidenceError("workflow observation projection is invalid")
@@ -200,6 +217,15 @@ def _validate_projected_failure_record(record: Mapping[str, object]) -> None:
 def validate_workflow_observation_bundle(bundle: WorkflowObservationBundle) -> None:
     """Validate one typed public-safe projection and its exact identity."""
 
+    try:
+        _validate_workflow_observation_bundle(bundle)
+    except Exception:
+        raise WorkflowEvidenceError(
+            "workflow observation projection is invalid"
+        ) from None
+
+
+def _validate_workflow_observation_bundle(bundle: WorkflowObservationBundle) -> None:
     if not isinstance(bundle, WorkflowObservationBundle):
         raise WorkflowEvidenceError("workflow observation projection is invalid")
     records = getattr(bundle, "records", None)
@@ -509,7 +535,12 @@ def _validate_and_freeze_bundle(document: object) -> WorkflowObservationBundle:
 
 
 def _freeze_mapping(value: Mapping[str, object]) -> Mapping[str, object]:
-    return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+    try:
+        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+    except Exception:
+        raise WorkflowEvidenceError(
+            "workflow observation projection is invalid"
+        ) from None
 
 
 def _freeze(value: object) -> object:

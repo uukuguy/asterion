@@ -4,8 +4,9 @@ import hashlib
 import json
 import tempfile
 import unittest
-from collections.abc import Mapping
+from collections.abc import ItemsView, Iterator, Mapping
 from pathlib import Path
+from typing import cast
 
 from asterion.pathlight import (
     EvaluationRecord,
@@ -34,6 +35,22 @@ def _opaque_id(number: int) -> str:
 
 TRACE_A = _opaque_id(1)
 TRACE_B = _opaque_id(2)
+SENTINEL_MAPPING_ERROR = "SENTINEL_PRIVATE_MAPPING_ERROR"
+
+
+class _HostileMapping(Mapping[str, object]):
+    def __getitem__(self, key: str) -> object:
+        del key
+        raise RuntimeError(SENTINEL_MAPPING_ERROR)
+
+    def __iter__(self) -> Iterator[str]:
+        raise RuntimeError(SENTINEL_MAPPING_ERROR)
+
+    def __len__(self) -> int:
+        raise RuntimeError(SENTINEL_MAPPING_ERROR)
+
+    def items(self) -> ItemsView[str, object]:
+        raise RuntimeError(SENTINEL_MAPPING_ERROR)
 
 
 def _trace(trace_id: str, *, status: str, component: str) -> dict[str, object]:
@@ -237,6 +254,29 @@ class PathlightQueryTests(unittest.TestCase):
         ):
             with self.subTest(read=read), self.assertRaises(PathlightError):
                 read()
+
+    def test_catalog_normalizes_hostile_mapping_failures_without_leaking_text(
+        self,
+    ) -> None:
+        hostile = _HostileMapping()
+        hostile_traces = cast(Mapping[str, Mapping[str, object]], hostile)
+        hostile_evaluations = cast(
+            Mapping[str, Mapping[str, object] | EvaluationRecord], hostile
+        )
+        calls = (
+            lambda: PathlightCatalog(hostile_traces, {}),
+            lambda: PathlightCatalog({}, hostile_evaluations),
+            lambda: PathlightCatalog({TRACE_A: hostile}, {}),
+            lambda: PathlightCatalog(
+                {}, {self.evaluation_a.evaluation_sha256: hostile}
+            ),
+        )
+
+        for call in calls:
+            with self.subTest(call=call), self.assertRaises(PathlightError) as raised:
+                call()
+            self.assertNotIn(SENTINEL_MAPPING_ERROR, str(raised.exception))
+            self.assertTrue(raised.exception.__suppress_context__)
 
     def test_trace_filters_use_only_validated_public_values(self) -> None:
         catalog = PathlightCatalog.build((self.bundle_a, self.bundle_b), ())
