@@ -145,7 +145,7 @@ class PathlightExperimentTests(unittest.TestCase):
                     final_calls.append((name, flags, dir_fd))
                 return original_open(name, flags, mode, dir_fd=dir_fd)
 
-            with patch("asterion.pathlight.experiment.os.open", side_effect=recording_open):
+            with patch("asterion.pathlight._private_file.os.open", side_effect=recording_open):
                 write_experiment_bundle(bundle, path)
 
         self.assertEqual(len(final_calls), 1)
@@ -196,7 +196,7 @@ class PathlightExperimentTests(unittest.TestCase):
                 raise OSError(f"{_HOSTILE_SENTINEL}: partial write")
 
             with patch(
-                "asterion.pathlight.experiment.os.write", side_effect=partial_then_fail
+                "asterion.pathlight._private_file.os.write", side_effect=partial_then_fail
             ), self.assertRaises(PathlightError):
                 write_experiment_bundle(bundle, path)
 
@@ -218,8 +218,8 @@ class PathlightExperimentTests(unittest.TestCase):
                 raise OSError(f"{_HOSTILE_SENTINEL}: chmod")
 
             with patch(
-                "asterion.pathlight.experiment.os.fchmod", side_effect=replace_then_fail
-            ), patch("asterion.pathlight.experiment.os.unlink") as unlink, self.assertRaises(
+                "asterion.pathlight._private_file.os.fchmod", side_effect=replace_then_fail
+            ), patch("asterion.pathlight._private_file.os.unlink") as unlink, self.assertRaises(
                 PathlightError
             ):
                 write_experiment_bundle(bundle, path)
@@ -350,7 +350,7 @@ class PathlightExperimentTests(unittest.TestCase):
                 return result
 
             with patch(
-                "asterion.pathlight.experiment.os.fstat", side_effect=grow_after_stat
+                "asterion.pathlight._private_file.os.fstat", side_effect=grow_after_stat
             ), self.assertRaises(PathlightError):
                 read_experiment_bundle(path)
 
@@ -371,7 +371,7 @@ class PathlightExperimentTests(unittest.TestCase):
                 return result
 
             with patch(
-                "asterion.pathlight.experiment.os.fstat",
+                "asterion.pathlight._private_file.os.fstat",
                 side_effect=replace_identity_after_stat,
             ), self.assertRaises(PathlightError):
                 read_experiment_bundle(path)

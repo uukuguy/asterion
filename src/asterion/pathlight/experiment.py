@@ -5,15 +5,14 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
 import re
-import stat
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 from typing import Callable, Literal, Protocol, Sequence, TypeAlias, cast
 
+from asterion.pathlight._private_file import read_private_file, write_private_file
 from asterion.pathlight.evaluation import EvaluationRecord, validate_evaluation_record
 from asterion.pathlight.protocol import PathlightError
 
@@ -861,44 +860,13 @@ def write_experiment_bundle(bundle: ExperimentBundle, path: Path) -> None:
     if encoded is None:
         raise PathlightError("Pathlight experiment target is invalid")
 
-    directory_fd = -1
-    descriptor = -1
     failure = False
     try:
-        directory_fd = _open_parent_directory(path)
-        nofollow = _nofollow_flag()
-        descriptor = os.open(
-            path.name,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow,
-            0o600,
-            dir_fd=directory_fd,
-        )
-        os.fchmod(descriptor, 0o600)
-        _write_all(descriptor, encoded)
+        write_private_file(path, encoded)
     except Exception:
         failure = True
-    finally:
-        if descriptor >= 0:
-            try:
-                os.close(descriptor)
-            except Exception:
-                failure = True
-        if directory_fd >= 0:
-            try:
-                os.close(directory_fd)
-            except Exception:
-                failure = True
     if failure:
         raise PathlightError("Pathlight experiment target is unavailable")
-
-
-def _write_all(descriptor: int, encoded: bytes) -> None:
-    remaining = memoryview(encoded)
-    while remaining:
-        written = os.write(descriptor, remaining)
-        if written <= 0:
-            raise OSError("Pathlight experiment target write is incomplete")
-        remaining = remaining[written:]
 
 
 def read_experiment_bundle(path: Path) -> ExperimentBundle:
@@ -913,109 +881,21 @@ def read_experiment_bundle(path: Path) -> ExperimentBundle:
         pass
     if not valid_path:
         raise PathlightError("Pathlight experiment source is invalid")
-    document = _read_experiment_document(path)
+    encoded: bytes | None = None
+    try:
+        encoded = read_private_file(path, _MAX_EXPERIMENT_BUNDLE_BYTES)
+    except Exception:
+        pass
+    if encoded is None:
+        raise PathlightError("Pathlight experiment source is invalid")
+    document: object | None = None
+    try:
+        document = json.loads(encoded.decode("utf-8"))
+    except Exception:
+        pass
     if not isinstance(document, Mapping):
         raise PathlightError("Pathlight experiment source is invalid")
     return validate_experiment_bundle(document)
-
-
-def _read_experiment_document(path: Path) -> object:
-    directory_fd = -1
-    source_fd = -1
-    failure = False
-    document: object | None = None
-    try:
-        directory_fd = _open_parent_directory(path)
-        source_fd = os.open(
-            path.name,
-            os.O_RDONLY | os.O_NONBLOCK | _nofollow_flag(),
-            dir_fd=directory_fd,
-        )
-        before = os.fstat(source_fd)
-        if (
-            not stat.S_ISREG(before.st_mode)
-            or stat.S_IMODE(before.st_mode) != 0o600
-            or before.st_size > _MAX_EXPERIMENT_BUNDLE_BYTES
-        ):
-            raise OSError("Pathlight experiment source is unsafe")
-        encoded = _read_bounded(source_fd, _MAX_EXPERIMENT_BUNDLE_BYTES + 1)
-        after = os.fstat(source_fd)
-        if (
-            len(encoded) > _MAX_EXPERIMENT_BUNDLE_BYTES
-            or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino)
-            or before.st_size != after.st_size
-            or after.st_size != len(encoded)
-        ):
-            raise OSError("Pathlight experiment source changed while reading")
-        document = json.loads(encoded.decode("utf-8"))
-    except Exception:
-        failure = True
-    finally:
-        if source_fd >= 0:
-            try:
-                os.close(source_fd)
-            except Exception:
-                failure = True
-        if directory_fd >= 0:
-            try:
-                os.close(directory_fd)
-            except Exception:
-                failure = True
-    if failure or document is None:
-        raise PathlightError("Pathlight experiment source is invalid")
-    return document
-
-
-def _nofollow_flag() -> int:
-    nofollow = getattr(os, "O_NOFOLLOW", None)
-    if not isinstance(nofollow, int):
-        raise OSError("no-follow descriptor opening is unavailable")
-    return nofollow
-
-
-def _open_parent_directory(path: Path) -> int:
-    absolute = path.absolute()
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _nofollow_flag()
-    descriptor = -1
-    failure = False
-    try:
-        descriptor = os.open(absolute.anchor, flags)
-        for component in absolute.parts[1:-1]:
-            next_descriptor = os.open(component, flags, dir_fd=descriptor)
-            try:
-                os.close(descriptor)
-            except Exception:
-                try:
-                    os.close(next_descriptor)
-                except Exception:
-                    pass
-                raise
-            descriptor = next_descriptor
-    except BaseException as error:
-        if descriptor >= 0:
-            try:
-                os.close(descriptor)
-            except Exception:
-                pass
-            descriptor = -1
-        if not isinstance(error, Exception):
-            raise
-        failure = True
-    if failure:
-        raise OSError("Pathlight experiment parent is unavailable")
-    return descriptor
-
-
-def _read_bounded(descriptor: int, limit: int) -> bytes:
-    chunks: list[bytes] = []
-    total = 0
-    while total < limit:
-        chunk = os.read(descriptor, min(65_536, limit - total))
-        if not chunk:
-            break
-        chunks.append(chunk)
-        total += len(chunk)
-    return b"".join(chunks)
 
 
 def validate_experiment_bundle(mapping: Mapping[str, object]) -> ExperimentBundle:

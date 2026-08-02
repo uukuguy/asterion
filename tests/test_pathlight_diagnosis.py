@@ -8,8 +8,10 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from asterion.pathlight import PathlightError
+from asterion.pathlight._private_file import PrivateFileError
 from asterion.pathlight.diagnosis import (
     DIAGNOSIS_BUNDLE_FILENAME,
     DiagnosisBundle,
@@ -173,6 +175,18 @@ class TestPathlightDiagnosis(unittest.TestCase):
             with self.assertRaisesRegex(PathlightError, "^Pathlight diagnosis source is invalid$") as raised:
                 read_diagnosis_bundle(link)
             self.assertNotIn(str(target), str(raised.exception))
+
+    def test_wrapper_normalizes_shared_parent_fifo_and_race_failures(self) -> None:
+        path = Path("/private/pathlight-diagnosis.json")
+        for boundary in ("parent-symlink", "fifo", "identity-race"):
+            with self.subTest(boundary=boundary), patch(
+                "asterion.pathlight.diagnosis.read_private_file",
+                side_effect=PrivateFileError(f"SENTINEL_PRIVATE_{boundary}"),
+            ), self.assertRaisesRegex(
+                PathlightError, "^Pathlight diagnosis source is invalid$"
+            ) as raised:
+                read_diagnosis_bundle(path)
+            self.assertNotIn("SENTINEL_PRIVATE", str(raised.exception))
 
 
 def stat_mode(path: Path) -> int:

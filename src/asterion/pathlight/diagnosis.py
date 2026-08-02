@@ -5,14 +5,13 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
 import re
-import stat
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Literal, TypeAlias, cast
 
+from asterion.pathlight._private_file import read_private_file, write_private_file
 from asterion.pathlight.protocol import PathlightError
 
 
@@ -433,23 +432,11 @@ def write_diagnosis_bundle(bundle: DiagnosisBundle, path: Path) -> None:
         pass
     if encoded is None:
         raise PathlightError("Pathlight diagnosis target is invalid")
-    directory_fd = -1
-    descriptor = -1
     failure = False
     try:
-        directory_fd = _open_parent_directory(path)
-        descriptor = os.open(path.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _nofollow_flag(), 0o600, dir_fd=directory_fd)
-        os.fchmod(descriptor, 0o600)
-        _write_all(descriptor, encoded)
+        write_private_file(path, encoded)
     except Exception:
         failure = True
-    finally:
-        for value in (descriptor, directory_fd):
-            if value >= 0:
-                try:
-                    os.close(value)
-                except Exception:
-                    failure = True
     if failure:
         raise PathlightError("Pathlight diagnosis target is unavailable")
 
@@ -457,92 +444,25 @@ def write_diagnosis_bundle(bundle: DiagnosisBundle, path: Path) -> None:
 def read_diagnosis_bundle(path: Path) -> DiagnosisBundle:
     """Read one descriptor-verified private diagnosis bundle."""
 
+    valid_path = False
     try:
-        if not isinstance(path, Path) or path.name != DIAGNOSIS_BUNDLE_FILENAME:
-            raise ValueError
-        document = _read_diagnosis_document(path)
-        if not isinstance(document, Mapping):
-            raise ValueError
-        return validate_diagnosis_bundle(document)
-    except PathlightError:
-        raise
+        valid_path = isinstance(path, Path) and path.name == DIAGNOSIS_BUNDLE_FILENAME
     except Exception:
-        raise PathlightError("Pathlight diagnosis source is invalid") from None
-
-
-def _read_diagnosis_document(path: Path) -> object:
-    directory_fd = -1
-    source_fd = -1
-    document: object | None = None
-    failure = False
+        pass
+    if not valid_path:
+        raise PathlightError("Pathlight diagnosis source is invalid")
+    encoded: bytes | None = None
     try:
-        directory_fd = _open_parent_directory(path)
-        source_fd = os.open(path.name, os.O_RDONLY | os.O_NONBLOCK | _nofollow_flag(), dir_fd=directory_fd)
-        before = os.fstat(source_fd)
-        if not stat.S_ISREG(before.st_mode) or stat.S_IMODE(before.st_mode) != 0o600 or before.st_size > _MAX_DIAGNOSIS_BUNDLE_BYTES:
-            raise OSError
-        encoded = _read_bounded(source_fd, _MAX_DIAGNOSIS_BUNDLE_BYTES + 1)
-        after = os.fstat(source_fd)
-        if len(encoded) > _MAX_DIAGNOSIS_BUNDLE_BYTES or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino) or before.st_size != after.st_size or after.st_size != len(encoded):
-            raise OSError
+        encoded = read_private_file(path, _MAX_DIAGNOSIS_BUNDLE_BYTES)
+    except Exception:
+        pass
+    if encoded is None:
+        raise PathlightError("Pathlight diagnosis source is invalid")
+    document: object | None = None
+    try:
         document = json.loads(encoded.decode("utf-8"))
     except Exception:
-        failure = True
-    finally:
-        for value in (source_fd, directory_fd):
-            if value >= 0:
-                try:
-                    os.close(value)
-                except Exception:
-                    failure = True
-    if failure or document is None:
+        pass
+    if not isinstance(document, Mapping):
         raise PathlightError("Pathlight diagnosis source is invalid")
-    return document
-
-
-def _nofollow_flag() -> int:
-    flag = getattr(os, "O_NOFOLLOW", None)
-    if type(flag) is not int:
-        raise OSError
-    return flag
-
-
-def _open_parent_directory(path: Path) -> int:
-    absolute = path.absolute()
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _nofollow_flag()
-    descriptor = -1
-    try:
-        descriptor = os.open(absolute.anchor, flags)
-        for component in absolute.parts[1:-1]:
-            next_descriptor = os.open(component, flags, dir_fd=descriptor)
-            os.close(descriptor)
-            descriptor = next_descriptor
-        return descriptor
-    except BaseException:
-        if descriptor >= 0:
-            try:
-                os.close(descriptor)
-            except Exception:
-                pass
-        raise
-
-
-def _read_bounded(descriptor: int, limit: int) -> bytes:
-    chunks: list[bytes] = []
-    total = 0
-    while total < limit:
-        chunk = os.read(descriptor, min(65_536, limit - total))
-        if not chunk:
-            break
-        chunks.append(chunk)
-        total += len(chunk)
-    return b"".join(chunks)
-
-
-def _write_all(descriptor: int, encoded: bytes) -> None:
-    remaining = memoryview(encoded)
-    while remaining:
-        written = os.write(descriptor, remaining)
-        if written <= 0:
-            raise OSError
-        remaining = remaining[written:]
+    return validate_diagnosis_bundle(document)
