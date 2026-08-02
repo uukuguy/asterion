@@ -39,6 +39,7 @@ _METRIC_NAMES = frozenset(
         "tool-call-count",
     }
 )
+METRIC_NAMES = _METRIC_NAMES
 _UNITS = frozenset({"ratio", "count", "microunits", "tokens", "nanoseconds"})
 _RECORD_FIELDS = frozenset(
     {
@@ -51,6 +52,15 @@ _RECORD_FIELDS = frozenset(
         "total_count",
         "status",
         "evaluation_sha256",
+    }
+)
+_METRIC_CONTRACT_FIELDS = frozenset(
+    {
+        "metric_name",
+        "unit",
+        "higher_is_better",
+        "contract_version",
+        "metric_contract_sha256",
     }
 )
 
@@ -108,6 +118,23 @@ class MetricContract:
         """Return the complete canonical JSON-compatible metric contract."""
 
         return {**self._unsigned_mapping(), "metric_contract_sha256": self.metric_contract_sha256}
+
+
+def validate_metric_contract(mapping: Mapping[str, object]) -> MetricContract:
+    """Validate one exact metric contract mapping."""
+
+    if not isinstance(mapping, Mapping) or set(mapping) != _METRIC_CONTRACT_FIELDS:
+        raise PathlightError("Pathlight metric contract is invalid")
+    contract = MetricContract(
+        metric_name=mapping["metric_name"],  # type: ignore[arg-type]
+        unit=mapping["unit"],  # type: ignore[arg-type]
+        higher_is_better=mapping["higher_is_better"],  # type: ignore[arg-type]
+        contract_version=mapping["contract_version"],  # type: ignore[arg-type]
+    )
+    supplied = _require_sha256(mapping["metric_contract_sha256"], "metric contract digest")
+    if not hmac.compare_digest(supplied, contract.metric_contract_sha256):
+        raise PathlightError("Pathlight metric contract digest mismatches")
+    return contract
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,21 +216,55 @@ class EvaluationComparison:
 class EvaluationBundle:
     """A verified immutable collection of sorted evaluation records."""
 
+    metric_contracts: tuple[MetricContract, ...]
     evaluations: tuple[EvaluationRecord, ...]
     bundle_sha256: str
 
     def __post_init__(self) -> None:
+        if not isinstance(self.metric_contracts, tuple) or any(
+            not isinstance(contract, MetricContract) for contract in self.metric_contracts
+        ):
+            raise PathlightError("Pathlight evaluation bundle contracts are invalid")
+        try:
+            contracts = tuple(
+                validate_metric_contract(contract.to_mapping())
+                for contract in self.metric_contracts
+            )
+        except (PathlightError, TypeError, ValueError):
+            raise PathlightError("Pathlight evaluation bundle contracts are invalid") from None
+        object.__setattr__(self, "metric_contracts", contracts)
+        contract_ids = tuple(
+            contract.metric_contract_sha256 for contract in contracts
+        )
+        if contract_ids != tuple(sorted(contract_ids)) or len(set(contract_ids)) != len(contract_ids):
+            raise PathlightError("Pathlight evaluation bundle contracts are invalid")
         if not isinstance(self.evaluations, tuple) or any(
             not isinstance(record, EvaluationRecord) for record in self.evaluations
         ):
             raise PathlightError("Pathlight evaluation bundle is invalid")
-        identities = tuple(record.evaluation_sha256 for record in self.evaluations)
+        try:
+            evaluations = tuple(
+                validate_evaluation_record(record.to_mapping())
+                for record in self.evaluations
+            )
+        except (PathlightError, TypeError, ValueError):
+            raise PathlightError("Pathlight evaluation bundle is invalid") from None
+        object.__setattr__(self, "evaluations", evaluations)
+        identities = tuple(record.evaluation_sha256 for record in evaluations)
         if identities != tuple(sorted(identities)) or len(set(identities)) != len(identities):
             raise PathlightError("Pathlight evaluation bundle identities are invalid")
+        if any(
+            record.metric_contract_sha256 not in set(contract_ids)
+            for record in evaluations
+        ):
+            raise PathlightError("Pathlight evaluation record contract is unresolved")
         supplied = _require_sha256(self.bundle_sha256, "bundle digest")
         expected = _canonical_digest(
             {
                 "schema": EVALUATION_BUNDLE_SCHEMA,
+                "metric_contracts": [
+                    contract.to_mapping() for contract in self.metric_contracts
+                ],
                 "evaluations": [record.to_mapping() for record in self.evaluations],
             }
         )
@@ -269,7 +330,11 @@ def _comparability_reasons(
     return reasons
 
 
-def write_evaluation_bundle(path: Path, records: Sequence[EvaluationRecord]) -> None:
+def write_evaluation_bundle(
+    path: Path,
+    records: Sequence[EvaluationRecord],
+    metric_contracts: Sequence[MetricContract],
+) -> None:
     """Exclusively write sorted, validated records to the one canonical filename."""
 
     if (
@@ -281,6 +346,19 @@ def write_evaluation_bundle(path: Path, records: Sequence[EvaluationRecord]) -> 
         raise PathlightError("Pathlight evaluation target is invalid")
     if any(not isinstance(record, EvaluationRecord) for record in records):
         raise PathlightError("Pathlight evaluation record is invalid")
+    if any(not isinstance(contract, MetricContract) for contract in metric_contracts):
+        raise PathlightError("Pathlight metric contract is invalid")
+    contracts = tuple(
+        sorted(
+            (
+                validate_metric_contract(contract.to_mapping())
+                for contract in metric_contracts
+            ),
+            key=lambda contract: contract.metric_contract_sha256,
+        )
+    )
+    if len({contract.metric_contract_sha256 for contract in contracts}) != len(contracts):
+        raise PathlightError("Pathlight metric contract identity is duplicated")
     evaluations = tuple(
         sorted(
             (validate_evaluation_record(record.to_mapping()) for record in records),
@@ -289,8 +367,15 @@ def write_evaluation_bundle(path: Path, records: Sequence[EvaluationRecord]) -> 
     )
     if len({record.evaluation_sha256 for record in evaluations}) != len(evaluations):
         raise PathlightError("Pathlight evaluation identity is duplicated")
+    if any(
+        record.metric_contract_sha256
+        not in {contract.metric_contract_sha256 for contract in contracts}
+        for record in evaluations
+    ):
+        raise PathlightError("Pathlight evaluation record contract is unresolved")
     document: dict[str, object] = {
         "schema": EVALUATION_BUNDLE_SCHEMA,
+        "metric_contracts": [contract.to_mapping() for contract in contracts],
         "evaluations": [record.to_mapping() for record in evaluations],
     }
     document["bundle_sha256"] = _canonical_digest(document)
@@ -367,6 +452,7 @@ def _read_bundle_document(path: Path) -> object:
 def _validate_bundle(document: object) -> EvaluationBundle:
     if not isinstance(document, Mapping) or set(document) != {
         "schema",
+        "metric_contracts",
         "evaluations",
         "bundle_sha256",
     }:
@@ -376,16 +462,28 @@ def _validate_bundle(document: object) -> EvaluationBundle:
         or document["schema"] != EVALUATION_BUNDLE_SCHEMA
     ):
         raise PathlightError("Pathlight evaluation bundle schema is invalid")
+    contracts_value = document["metric_contracts"]
     evaluations_value = document["evaluations"]
-    if not isinstance(evaluations_value, list):
+    if not isinstance(contracts_value, list) or not isinstance(evaluations_value, list):
         raise PathlightError("Pathlight evaluation bundle evaluations are invalid")
     supplied = _require_sha256(document["bundle_sha256"], "bundle digest")
     expected = _canonical_digest(
-        {"schema": document["schema"], "evaluations": evaluations_value}
+        {
+            "schema": document["schema"],
+            "metric_contracts": contracts_value,
+            "evaluations": evaluations_value,
+        }
     )
     if not hmac.compare_digest(supplied, expected):
         raise PathlightError("Pathlight evaluation bundle digest mismatches")
+    contracts = tuple(
+        validate_metric_contract(item)
+        for item in contracts_value
+        if isinstance(item, Mapping)
+    )
+    if len(contracts) != len(contracts_value):
+        raise PathlightError("Pathlight metric contract is invalid")
     records = tuple(validate_evaluation_record(item) for item in evaluations_value if isinstance(item, Mapping))
     if len(records) != len(evaluations_value):
         raise PathlightError("Pathlight evaluation record is invalid")
-    return EvaluationBundle(records, supplied)
+    return EvaluationBundle(contracts, records, supplied)

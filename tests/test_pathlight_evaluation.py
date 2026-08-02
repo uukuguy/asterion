@@ -18,7 +18,7 @@ from asterion.pathlight.evaluation import (
     compare_evaluations,
     read_evaluation_bundle,
     validate_evaluation_record,
-    write_evaluation_bundle,
+    write_evaluation_bundle as _write_evaluation_bundle,
 )
 
 
@@ -28,6 +28,10 @@ def _digest(value: str) -> str:
 
 def _contract() -> MetricContract:
     return MetricContract("accuracy", "ratio", True, "1.0.0")
+
+
+def write_evaluation_bundle(path: Path, records: tuple[EvaluationRecord, ...]) -> None:
+    _write_evaluation_bundle(path, records, (_contract(),))
 
 
 def evaluation(
@@ -303,7 +307,58 @@ class PathlightEvaluationTests(unittest.TestCase):
         record = evaluation()
 
         with self.assertRaises(PathlightError):
-            EvaluationBundle((record,), "0" * 64)
+            EvaluationBundle((_contract(),), (record,), "0" * 64)
+
+    def test_bundle_carries_contract_registry_and_requires_exact_record_binding(self) -> None:
+        contract = _contract()
+        record = evaluation(contract=contract)
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / "pathlight-evaluations.json"
+            _write_evaluation_bundle(path, (record,), (contract,))
+            bundle = read_evaluation_bundle(path)
+
+        self.assertEqual(bundle.metric_contracts, (contract,))
+        with self.assertRaises(PathlightError):
+            EvaluationBundle((), (record,), bundle.bundle_sha256)
+
+    def test_bundle_revalidates_tampered_metric_contract_identity(self) -> None:
+        contract = _contract()
+        record = evaluation(contract=contract)
+        object.__setattr__(contract, "metric_name", "coverage")
+        bundle_sha256 = hashlib.sha256(
+            json.dumps(
+                {
+                    "schema": "asterion.pathlight-evaluations/v1",
+                    "metric_contracts": [contract.to_mapping()],
+                    "evaluations": [record.to_mapping()],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+
+        with self.assertRaises(PathlightError):
+            EvaluationBundle((contract,), (record,), bundle_sha256)
+
+    def test_bundle_revalidates_tampered_evaluation_identity(self) -> None:
+        contract = _contract()
+        record = evaluation(contract=contract)
+        object.__setattr__(record, "value_microunits", 1)
+        bundle_sha256 = hashlib.sha256(
+            json.dumps(
+                {
+                    "schema": "asterion.pathlight-evaluations/v1",
+                    "metric_contracts": [contract.to_mapping()],
+                    "evaluations": [record.to_mapping()],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+
+        with self.assertRaises(PathlightError):
+            EvaluationBundle((contract,), (record,), bundle_sha256)
 
     def test_bundle_rejects_duplicates_tampering_and_unsafe_paths(self) -> None:
         record = evaluation()

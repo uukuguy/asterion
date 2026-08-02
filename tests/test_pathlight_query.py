@@ -10,6 +10,7 @@ from typing import cast
 
 from asterion.pathlight import (
     EvaluationRecord,
+    MetricContract,
     MetricFilter,
     PathlightCatalog,
     PathlightError,
@@ -36,6 +37,7 @@ def _opaque_id(number: int) -> str:
 TRACE_A = _opaque_id(1)
 TRACE_B = _opaque_id(2)
 SENTINEL_MAPPING_ERROR = "SENTINEL_PRIVATE_MAPPING_ERROR"
+METRIC_CONTRACT = MetricContract("accuracy", "ratio", True, "1.0.0")
 
 
 class _HostileMapping(Mapping[str, object]):
@@ -109,7 +111,7 @@ def _evaluation(
 ) -> EvaluationRecord:
     return EvaluationRecord(
         trace_sha256=_digest(trace),
-        metric_contract_sha256=_digest("contract"),
+        metric_contract_sha256=METRIC_CONTRACT.metric_contract_sha256,
         dataset_snapshot_sha256=_digest("dataset"),
         scope_sha256=_digest("scope"),
         value_microunits=value,
@@ -136,7 +138,7 @@ class PathlightQueryTests(unittest.TestCase):
         )
 
     def test_list_show_and_tail_are_deterministic_and_safe(self) -> None:
-        catalog = PathlightCatalog.build((self.bundle_b, self.bundle_a), ())
+        catalog = PathlightCatalog.build((self.bundle_b, self.bundle_a), (), ())
 
         summaries = catalog.list_traces()
 
@@ -156,7 +158,7 @@ class PathlightQueryTests(unittest.TestCase):
         self.assertEqual(summaries[0]["component_sha256s"], (self.component_a,))
 
     def test_catalog_projections_are_deeply_immutable(self) -> None:
-        catalog = PathlightCatalog.build((self.bundle_a,), (self.evaluation_a,))
+        catalog = PathlightCatalog.build((self.bundle_a,), (self.evaluation_a,), (METRIC_CONTRACT,))
         trace = catalog.show_trace(TRACE_A)
         events = trace["events"]
         assert isinstance(trace, dict)
@@ -180,7 +182,7 @@ class PathlightQueryTests(unittest.TestCase):
             metric["status"] = "missing"
 
     def test_return_value_mutation_cannot_change_catalog_internal_state(self) -> None:
-        catalog = PathlightCatalog.build((self.bundle_a,), (self.evaluation_a,))
+        catalog = PathlightCatalog.build((self.bundle_a,), (self.evaluation_a,), (METRIC_CONTRACT,))
         original_trace_sha256 = catalog.show_trace(TRACE_A)["trace_sha256"]
         returned_trace = catalog.show_trace(TRACE_A)
         returned_events = returned_trace["events"]
@@ -213,6 +215,7 @@ class PathlightQueryTests(unittest.TestCase):
         catalog = PathlightCatalog(
             {TRACE_A: trace},
             {self.evaluation_a.evaluation_sha256: self.evaluation_a},
+            {METRIC_CONTRACT.metric_contract_sha256: METRIC_CONTRACT},
         )
         source_events = trace["events"]
 
@@ -228,15 +231,17 @@ class PathlightQueryTests(unittest.TestCase):
             PathlightCatalog(
                 {TRACE_A: {"sentinel": "SENTINEL_PRIVATE"}},
                 {},
+                {},
             )
         with self.assertRaises(PathlightError):
             PathlightCatalog(
                 {},
                 {self.evaluation_a.evaluation_sha256: {"sentinel": "SENTINEL_PRIVATE"}},
+                {},
             )
 
     def test_catalog_revalidates_internal_digests_before_every_read(self) -> None:
-        catalog = PathlightCatalog.build((self.bundle_a,), (self.evaluation_a,))
+        catalog = PathlightCatalog.build((self.bundle_a,), (self.evaluation_a,), (METRIC_CONTRACT,))
         internal_trace = catalog._traces[TRACE_A]
         internal_evaluation = catalog._evaluations[self.evaluation_a.evaluation_sha256]
         dict.__setitem__(internal_trace, "trace_sha256", "0" * 64)  # type: ignore[arg-type]
@@ -264,11 +269,11 @@ class PathlightQueryTests(unittest.TestCase):
             Mapping[str, Mapping[str, object] | EvaluationRecord], hostile
         )
         calls = (
-            lambda: PathlightCatalog(hostile_traces, {}),
-            lambda: PathlightCatalog({}, hostile_evaluations),
-            lambda: PathlightCatalog({TRACE_A: hostile}, {}),
+            lambda: PathlightCatalog(hostile_traces, {}, {}),
+            lambda: PathlightCatalog({}, hostile_evaluations, {}),
+            lambda: PathlightCatalog({TRACE_A: hostile}, {}, {}),
             lambda: PathlightCatalog(
-                {}, {self.evaluation_a.evaluation_sha256: hostile}
+                {}, {self.evaluation_a.evaluation_sha256: hostile}, {}
             ),
         )
 
@@ -279,7 +284,7 @@ class PathlightQueryTests(unittest.TestCase):
             self.assertTrue(raised.exception.__suppress_context__)
 
     def test_trace_filters_use_only_validated_public_values(self) -> None:
-        catalog = PathlightCatalog.build((self.bundle_a, self.bundle_b), ())
+        catalog = PathlightCatalog.build((self.bundle_a, self.bundle_b), (), ())
 
         self.assertEqual(
             [
@@ -307,7 +312,9 @@ class PathlightQueryTests(unittest.TestCase):
 
     def test_metric_query_and_comparison_use_exact_evaluation_ids(self) -> None:
         catalog = PathlightCatalog.build(
-            (), (self.evaluation_b, self.missing_evaluation, self.evaluation_a)
+            (),
+            (self.evaluation_b, self.missing_evaluation, self.evaluation_a),
+            (METRIC_CONTRACT,),
         )
 
         self.assertEqual(
@@ -334,16 +341,23 @@ class PathlightQueryTests(unittest.TestCase):
         self.assertEqual(comparison["delta_microunits"], 25)
         self.assertEqual(json.loads(json.dumps(comparison))["reasons"], [])
 
+    def test_metric_filter_requires_allowlisted_exact_metric_name(self) -> None:
+        self.assertEqual(MetricFilter(metric_name="accuracy").metric_name, "accuracy")
+        with self.assertRaises(PathlightError):
+            MetricFilter(metric_name="SENTINEL_PRIVATE_METRIC")
+
     def test_catalog_rejects_duplicate_trace_or_evaluation_identity(self) -> None:
         with self.assertRaises(PathlightError):
-            PathlightCatalog.build((self.bundle_a, self.bundle_a), ())
+            PathlightCatalog.build((self.bundle_a, self.bundle_a), (), ())
         with self.assertRaises(PathlightError):
-            PathlightCatalog.build((), (self.evaluation_a, self.evaluation_a))
+            PathlightCatalog.build(
+                (), (self.evaluation_a, self.evaluation_a), (METRIC_CONTRACT,)
+            )
 
     def test_catalog_rejects_unknown_identity_and_malformed_queries_without_type_errors(
         self,
     ) -> None:
-        catalog = PathlightCatalog.build((self.bundle_a,), (self.evaluation_a,))
+        catalog = PathlightCatalog.build((self.bundle_a,), (self.evaluation_a,), (METRIC_CONTRACT,))
 
         for call in (
             lambda: catalog.show_trace("not-a-trace-id"),
@@ -367,7 +381,7 @@ class PathlightQueryTests(unittest.TestCase):
                 call()
 
     def test_catalog_normalizes_tampered_typed_inputs_to_pathlight_errors(self) -> None:
-        catalog = PathlightCatalog.build((self.bundle_a,), ())
+        catalog = PathlightCatalog.build((self.bundle_a,), (), ())
         tampered_filter = TraceFilter()
         object.__setattr__(tampered_filter, "status", [])
         invalid_bundle = object.__new__(WorkflowObservationBundle)
@@ -379,7 +393,7 @@ class PathlightQueryTests(unittest.TestCase):
         with self.assertRaises(PathlightError):
             catalog.list_traces(tampered_filter)
         with self.assertRaises(PathlightError):
-            PathlightCatalog.build((invalid_bundle,), ())
+            PathlightCatalog.build((invalid_bundle,), (), ())
 
     def test_build_authenticates_bundle_projection_before_consuming_traces(
         self,
@@ -391,7 +405,7 @@ class PathlightQueryTests(unittest.TestCase):
         object.__setattr__(forged, "projection_sha256", "0" * 64)
 
         with self.assertRaises(PathlightError):
-            PathlightCatalog.build((forged,), ())
+            PathlightCatalog.build((forged,), (), ())
 
 
 if __name__ == "__main__":

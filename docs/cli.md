@@ -1,5 +1,24 @@
 # Asterion CLI
 
+## Pathlight 查询与评估
+
+`asterion pathlight` 是 provider-free 的只读命令：不会加载 application provider、不会发起网络或
+模型调用，也不会授予执行权限。它只读取操作员显式选定的、经过验证的公开安全记录；输入必须是
+绝对路径且使用以下精确文件名。成功输出为一行 canonical JSON，错误只返回安全的固定消息。
+
+```bash
+uv run asterion pathlight trace list --evidence-file /absolute/operator/path/workflow-evidence.json
+uv run asterion pathlight trace show --evidence-file /absolute/operator/path/workflow-evidence.json --trace-id <uuidv4>
+uv run asterion pathlight trace tail --evidence-file /absolute/operator/path/workflow-evidence.json --trace-id <uuidv4> --after-sequence 0
+uv run asterion pathlight metrics query --evaluation-file /absolute/operator/path/pathlight-evaluations.json
+uv run asterion pathlight evaluate compare --evaluation-file /absolute/operator/path/pathlight-evaluations.json --baseline <sha256> --candidate <sha256>
+```
+
+`trace list` 可使用公开的 `--status`、`--kind`、`--component-sha256` 精确过滤；`metrics query`
+接受 allowlisted 的 `--metric-name`、`--status` 和各个公开 SHA-256 identity filter。`evaluate compare`
+只接受准确的 baseline/candidate evaluation SHA-256 identities。`trace tail` 读取当前的不可变
+snapshot，不轮询、不 follow，也不会连接私有 evidence store。
+
 ## 应用运行证据
 
 `asterion run` 默认只输出既有的公开结果，不会自动捕获或写入 workflow evidence 或

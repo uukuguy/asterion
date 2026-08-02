@@ -50,6 +50,7 @@ from asterion.runner.composed import run_composed_application
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 from asterion.services.controlled_executor import ControlledExecutionResult
+from asterion.workflow_evidence import write_workflow_observation_bundle
 from tests.test_application_discovery import FakeEntryPoint
 from tests.test_installed_application_provider import (
     example_package,
@@ -314,6 +315,21 @@ class AsterionCliTests(unittest.TestCase):
         self.assertNotIn("asterion.dci", source)
         self.assertNotIn("ConfigLayers", source)
         self.assertNotIn("resolve_dci_runtime", source)
+
+    def test_pathlight_route_bypasses_application_provider_discovery(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory).resolve() / "workflow-evidence.json"
+            write_workflow_observation_bundle(bundle, ())
+            stdout = io.StringIO()
+
+            code = main(
+                ["pathlight", "trace", "list", "--evidence-file", str(bundle)],
+                entry_points=(object(),),
+                stdout=stdout,
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(stdout.getvalue()), [])
 
     def test_run_parser_accepts_repeatable_opaque_runtime_options(self) -> None:
         args, unknown = _parser().parse_known_args(

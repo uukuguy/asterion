@@ -7,6 +7,7 @@ from asterion.pathlight.evaluation import (
     MetricContract,
     compare_evaluations,
     read_evaluation_bundle,
+    validate_metric_contract,
     validate_evaluation_record,
     write_evaluation_bundle,
 )
@@ -40,6 +41,7 @@ __all__ = (
     "EvaluationRecord",
     "EvaluationComparison",
     "EvaluationBundle",
+    "validate_metric_contract",
     "validate_evaluation_record",
     "write_evaluation_bundle",
     "read_evaluation_bundle",

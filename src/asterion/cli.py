@@ -96,6 +96,10 @@ def main(
     assert stdout is not None
     assert stderr is not None
     raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if raw_argv[:1] == ["pathlight"]:
+        from asterion.cli_pathlight import main as pathlight_main
+
+        return pathlight_main(raw_argv[1:], stdout=stdout, stderr=stderr)
     if raw_argv[:1] == ["capability"]:
         from asterion.cli_capability import main as capability_main
 

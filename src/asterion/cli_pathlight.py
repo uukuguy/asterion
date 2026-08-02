@@ -1,0 +1,169 @@
+"""Provider-free read-only Pathlight command line."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+from typing import NoReturn, TextIO
+
+from asterion.pathlight import (
+    MetricFilter,
+    PathlightCatalog,
+    TraceFilter,
+    read_evaluation_bundle,
+)
+from asterion.workflow_evidence import read_workflow_observation_bundle
+
+
+_ERROR = "asterion pathlight: request is invalid\n"
+
+
+class _Parser(argparse.ArgumentParser):
+    def error(self, message: str) -> NoReturn:
+        del message
+        raise ValueError("invalid pathlight arguments")
+
+
+def main(
+    argv: list[str] | None = None,
+    *,
+    stdout: TextIO | None = None,
+    stderr: TextIO | None = None,
+) -> int:
+    """Run a provider-free, public-safe Pathlight read command."""
+
+    stdout = sys.stdout if stdout is None else stdout
+    stderr = sys.stderr if stderr is None else stderr
+    assert stdout is not None
+    assert stderr is not None
+    try:
+        args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
+        result = _execute(args)
+        stdout.write(json.dumps(_json_copy(result), sort_keys=True, separators=(",", ":")) + "\n")
+        return 0
+    except (argparse.ArgumentError, SystemExit, ValueError, OSError, UnicodeError, json.JSONDecodeError):
+        stderr.write(_ERROR)
+        return 2
+
+
+def _execute(args: argparse.Namespace) -> object:
+    if args.command == "trace":
+        catalog = _catalog_from_evidence(args.evidence_file)
+        if args.trace_command == "list":
+            return catalog.list_traces(
+                TraceFilter(args.status, args.kind, args.component_sha256)
+            )
+        if args.trace_command == "show":
+            return catalog.show_trace(args.trace_id)
+        if args.trace_command == "tail":
+            return catalog.tail_trace(args.trace_id, after_sequence=args.after_sequence)
+    if args.command == "metrics":
+        catalog = _catalog_from_evaluations(args.evaluation_file)
+        return catalog.query_metrics(
+            MetricFilter(
+                args.metric_name,
+                args.status,
+                args.trace_sha256,
+                args.metric_contract_sha256,
+                args.dataset_snapshot_sha256,
+                args.scope_sha256,
+            )
+        )
+    if args.command == "evaluate":
+        return _catalog_from_evaluations(args.evaluation_file).compare_evaluation_ids(
+            args.baseline, args.candidate
+        )
+    raise ValueError("invalid pathlight command")
+
+
+def _catalog_from_evidence(values: Sequence[str]) -> PathlightCatalog:
+    paths = _absolute_canonical_paths(values, "workflow-evidence.json")
+    return PathlightCatalog.build(
+        tuple(read_workflow_observation_bundle(path) for path in paths), (), ()
+    )
+
+
+def _catalog_from_evaluations(values: Sequence[str]) -> PathlightCatalog:
+    paths = _absolute_canonical_paths(values, "pathlight-evaluations.json")
+    bundles = tuple(read_evaluation_bundle(path) for path in paths)
+    return PathlightCatalog.build(
+        (),
+        tuple(record for bundle in bundles for record in bundle.evaluations),
+        tuple(contract for bundle in bundles for contract in bundle.metric_contracts),
+    )
+
+
+def _absolute_canonical_paths(values: Sequence[str], filename: str) -> tuple[Path, ...]:
+    if not values:
+        raise ValueError("pathlight input is missing")
+    paths = tuple(Path(value) for value in values)
+    if any(not path.is_absolute() or path.name != filename for path in paths):
+        raise ValueError("pathlight input is invalid")
+    return paths
+
+
+def _json_copy(value: object) -> object:
+    if isinstance(value, Mapping):
+        if any(type(key) is not str for key in value):
+            raise ValueError("pathlight output is invalid")
+        return {key: _json_copy(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_copy(item) for item in value]
+    if value is None or type(value) in {str, int, bool}:
+        return value
+    raise ValueError("pathlight output is invalid")
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = _Parser(prog="asterion pathlight", add_help=False)
+    commands = parser.add_subparsers(dest="command", required=True, parser_class=_Parser)
+    trace = commands.add_parser("trace", add_help=False)
+    trace_commands = trace.add_subparsers(
+        dest="trace_command", required=True, parser_class=_Parser
+    )
+    trace_list = trace_commands.add_parser("list", add_help=False)
+    _add_evidence_file(trace_list)
+    trace_list.add_argument("--status")
+    trace_list.add_argument("--kind")
+    trace_list.add_argument("--component-sha256")
+    trace_show = trace_commands.add_parser("show", add_help=False)
+    _add_evidence_file(trace_show)
+    trace_show.add_argument("--trace-id", required=True)
+    trace_tail = trace_commands.add_parser("tail", add_help=False)
+    _add_evidence_file(trace_tail)
+    trace_tail.add_argument("--trace-id", required=True)
+    trace_tail.add_argument("--after-sequence", type=int, default=0)
+
+    metrics = commands.add_parser("metrics", add_help=False)
+    metric_commands = metrics.add_subparsers(
+        dest="metric_command", required=True, parser_class=_Parser
+    )
+    metric_query = metric_commands.add_parser("query", add_help=False)
+    _add_evaluation_file(metric_query)
+    metric_query.add_argument("--metric-name")
+    metric_query.add_argument("--status")
+    metric_query.add_argument("--trace-sha256")
+    metric_query.add_argument("--metric-contract-sha256")
+    metric_query.add_argument("--dataset-snapshot-sha256")
+    metric_query.add_argument("--scope-sha256")
+
+    evaluate = commands.add_parser("evaluate", add_help=False)
+    evaluate_commands = evaluate.add_subparsers(
+        dest="evaluate_command", required=True, parser_class=_Parser
+    )
+    compare = evaluate_commands.add_parser("compare", add_help=False)
+    _add_evaluation_file(compare)
+    compare.add_argument("--baseline", required=True)
+    compare.add_argument("--candidate", required=True)
+    return parser
+
+
+def _add_evidence_file(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--evidence-file", action="append", required=True)
+
+
+def _add_evaluation_file(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--evaluation-file", action="append", required=True)

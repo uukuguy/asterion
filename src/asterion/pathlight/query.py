@@ -9,6 +9,8 @@ from types import MappingProxyType
 
 from asterion.pathlight.evaluation import (
     EvaluationRecord,
+    METRIC_NAMES,
+    MetricContract,
     compare_evaluations,
     validate_evaluation_record,
 )
@@ -160,6 +162,7 @@ class TraceFilter:
 class MetricFilter:
     """Exact public filters for immutable evaluation record projections."""
 
+    metric_name: str | None = None
     status: str | None = None
     trace_sha256: str | None = None
     metric_contract_sha256: str | None = None
@@ -167,6 +170,10 @@ class MetricFilter:
     scope_sha256: str | None = None
 
     def __post_init__(self) -> None:
+        if self.metric_name is not None and (
+            type(self.metric_name) is not str or self.metric_name not in METRIC_NAMES
+        ):
+            raise PathlightError("Pathlight metric name filter is invalid")
         if self.status is not None and (
             type(self.status) is not str or self.status not in _METRIC_STATUSES
         ):
@@ -188,6 +195,7 @@ class PathlightCatalog:
 
     _traces: Mapping[str, Mapping[str, object]]
     _evaluations: Mapping[str, Mapping[str, object] | EvaluationRecord]
+    _metric_contracts: Mapping[str, MetricContract]
 
     def __post_init__(self) -> None:
         try:
@@ -196,12 +204,30 @@ class PathlightCatalog:
             raise PathlightError("Pathlight catalog input is invalid") from None
 
     def _validate_and_copy_inputs(self) -> None:
-        if not isinstance(self._traces, Mapping) or not isinstance(
-            self._evaluations, Mapping
+        if (
+            not isinstance(self._traces, Mapping)
+            or not isinstance(self._evaluations, Mapping)
+            or not isinstance(self._metric_contracts, Mapping)
         ):
             raise PathlightError("Pathlight catalog input is invalid")
         traces: dict[str, Mapping[str, object]] = {}
         records: dict[str, Mapping[str, object]] = {}
+        contracts: dict[str, MetricContract] = {}
+        for supplied_contract_sha256, source_contract in self._metric_contracts.items():
+            if not isinstance(source_contract, MetricContract):
+                raise PathlightError("Pathlight metric contract is invalid")
+            contract = MetricContract(
+                source_contract.metric_name,
+                source_contract.unit,
+                source_contract.higher_is_better,
+                source_contract.contract_version,
+            )
+            if (
+                supplied_contract_sha256 != contract.metric_contract_sha256
+                or contract.metric_contract_sha256 in contracts
+            ):
+                raise PathlightError("Pathlight metric contract identity is invalid")
+            contracts[contract.metric_contract_sha256] = contract
         for supplied_trace_id, source_trace in self._traces.items():
             trace = _validated_frozen_trace(source_trace)
             trace_id = _require_trace_id(trace["trace_id"])
@@ -216,22 +242,42 @@ class PathlightCatalog:
             if (
                 supplied_evaluation_sha256 != evaluation_sha256
                 or evaluation_sha256 in records
+                or record["metric_contract_sha256"] not in contracts
             ):
                 raise PathlightError("Pathlight evaluation identity is invalid")
             records[evaluation_sha256] = record
         object.__setattr__(self, "_traces", MappingProxyType(traces))
         object.__setattr__(self, "_evaluations", MappingProxyType(records))
+        object.__setattr__(self, "_metric_contracts", MappingProxyType(contracts))
 
     @classmethod
     def build(
         cls,
         bundles: Sequence[WorkflowObservationBundle],
         evaluations: Sequence[EvaluationRecord],
+        metric_contracts: Sequence[MetricContract],
     ) -> PathlightCatalog:
-        if not _is_sequence(bundles) or not _is_sequence(evaluations):
+        if (
+            not _is_sequence(bundles)
+            or not _is_sequence(evaluations)
+            or not _is_sequence(metric_contracts)
+        ):
             raise PathlightError("Pathlight catalog input is invalid")
         traces: dict[str, Mapping[str, object]] = {}
         records: dict[str, EvaluationRecord] = {}
+        contracts: dict[str, MetricContract] = {}
+        for contract in metric_contracts:
+            if not isinstance(contract, MetricContract):
+                raise PathlightError("Pathlight metric contract is invalid")
+            validated_contract = MetricContract(
+                contract.metric_name,
+                contract.unit,
+                contract.higher_is_better,
+                contract.contract_version,
+            )
+            if validated_contract.metric_contract_sha256 in contracts:
+                raise PathlightError("Pathlight metric contract identity is duplicated")
+            contracts[validated_contract.metric_contract_sha256] = validated_contract
         for bundle in bundles:
             if not isinstance(bundle, WorkflowObservationBundle):
                 raise PathlightError("Pathlight observation bundle is invalid")
@@ -251,10 +297,16 @@ class PathlightCatalog:
             if not isinstance(record, EvaluationRecord):
                 raise PathlightError("Pathlight evaluation record is invalid")
             validated = validate_evaluation_record(record.to_mapping())
+            if validated.metric_contract_sha256 not in contracts:
+                raise PathlightError("Pathlight evaluation record contract is unresolved")
             if validated.evaluation_sha256 in records:
                 raise PathlightError("Pathlight evaluation identity is duplicated")
             records[validated.evaluation_sha256] = validated
-        return cls(MappingProxyType(traces), MappingProxyType(records))
+        return cls(
+            MappingProxyType(traces),
+            MappingProxyType(records),
+            MappingProxyType(contracts),
+        )
 
     def list_traces(
         self, query: TraceFilter = TraceFilter()
@@ -297,12 +349,19 @@ class PathlightCatalog:
     ) -> tuple[Mapping[str, object], ...]:
         query = _require_metric_filter(query)
         return tuple(
-            _metric_projection(record)
+            _metric_projection(
+                record,
+                self._metric_contract(record.metric_contract_sha256),
+            )
             for evaluation_sha256 in sorted(self._evaluations)
             for record in (
                 _read_validated_evaluation(self._evaluations, evaluation_sha256),
             )
-            if _matches_metric_filter(record, query)
+            if _matches_metric_filter(
+                record,
+                self._metric_contract(record.metric_contract_sha256),
+                query,
+            )
         )
 
     def compare_evaluation_ids(
@@ -331,6 +390,12 @@ class PathlightCatalog:
                 "reasons": tuple(comparison.reasons),
             }
         )
+
+    def _metric_contract(self, metric_contract_sha256: str) -> MetricContract:
+        try:
+            return self._metric_contracts[metric_contract_sha256]
+        except KeyError:
+            raise PathlightError("Pathlight evaluation record contract is unresolved") from None
 
 
 def _is_sequence(value: object) -> bool:
@@ -405,6 +470,7 @@ def _require_metric_filter(value: object) -> MetricFilter:
     if not isinstance(value, MetricFilter):
         raise PathlightError("Pathlight metric filter is invalid")
     return MetricFilter(
+        value.metric_name,
         value.status,
         value.trace_sha256,
         value.metric_contract_sha256,
@@ -506,14 +572,20 @@ def _matches_trace_filter(trace: Mapping[str, object], query: TraceFilter) -> bo
     )
 
 
-def _metric_projection(record: EvaluationRecord) -> Mapping[str, object]:
-    projection = _freeze_json(record.to_mapping())
+def _metric_projection(
+    record: EvaluationRecord, contract: MetricContract
+) -> Mapping[str, object]:
+    projection = _freeze_json({**record.to_mapping(), "metric_name": contract.metric_name})
     if not isinstance(projection, Mapping):
         raise PathlightError("Pathlight evaluation record is invalid")
     return projection
 
 
-def _matches_metric_filter(record: EvaluationRecord, query: MetricFilter) -> bool:
+def _matches_metric_filter(
+    record: EvaluationRecord, contract: MetricContract, query: MetricFilter
+) -> bool:
+    if query.metric_name is not None and contract.metric_name != query.metric_name:
+        return False
     return all(
         value is None or getattr(record, field_name) == value
         for field_name, value in (
