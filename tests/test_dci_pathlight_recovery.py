@@ -19,6 +19,7 @@ from asterion.capabilities.dci.implementation.pathlight.recovery import (
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "dci" / "pathlight-recovery"
 _FILES = ("config.json", "batch-state.json", "summary.json", "analysis.json", "results.jsonl")
+_RAW_64_HEX_SECRET = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
 _SENTINELS = (
     "SENTINEL_PRIVATE_PATH",
     "SENTINEL_QUERY",
@@ -27,6 +28,21 @@ _SENTINELS = (
     "SENTINEL_JUDGE_REASON",
     "SENTINEL_PRIVATE_DATASET_IDENTITY",
     "SENTINEL_PRIVATE_MODEL",
+    "SENTINEL_PRIVATE_PROVIDER",
+    "SENTINEL_PRIVATE_SELECTION_ID",
+    "SENTINEL_PRIVATE_CONFIG_VALUE",
+    _RAW_64_HEX_SECRET,
+)
+_VARIANT_SOURCES = (
+    ("runtime_contract",),
+    ("runtime", "model"),
+    ("runtime", "tools"),
+    ("benchmark_prompt_contract_sha256",),
+    ("context_contract",),
+    ("ranking_metric_contract",),
+    ("implementation_sha256",),
+    ("profile_sha256",),
+    ("product_effective_config_sha256",),
 )
 
 
@@ -75,7 +91,9 @@ class TestDciPathlightRecovery(unittest.TestCase):
         with self.assertRaises(DciRecoveryError) as raised:
             read_completed_dci_run(root.absolute(), expected_dataset_id=expected_dataset_id)
         self.assertEqual(str(raised.exception), "DCI recovery evidence is invalid")
-        self.assertNotIn("SENTINEL", str(raised.exception))
+        error_closure = repr((raised.exception, raised.exception.__cause__, raised.exception.__context__))
+        for secret in _SENTINELS:
+            self.assertNotIn(secret, error_closure)
 
     def test_reader_projects_only_allowlisted_numeric_case_evidence(self) -> None:
         with private_fixture() as root:
@@ -84,6 +102,15 @@ class TestDciPathlightRecovery(unittest.TestCase):
         public = json.dumps(recovered.to_mapping(), sort_keys=True)
         for secret in _SENTINELS:
             self.assertNotIn(secret, public)
+        opaque_variant_digests = (
+            recovered.variant.runtime_contract_sha256,
+            recovered.variant.model_sha256,
+            recovered.variant.toolset_sha256,
+            recovered.variant.context_contract_sha256,
+            recovered.variant.metric_contract_sha256,
+        )
+        self.assertNotIn(_RAW_64_HEX_SECRET, opaque_variant_digests)
+        self.assertEqual(len(set(opaque_variant_digests)), len(opaque_variant_digests))
         self.assertEqual(len(recovered.cases), 2)
         self.assertRegex(recovered.cases[0].dataset_item_sha256, r"^[0-9a-f]{64}$")
         self.assertEqual(
@@ -120,6 +147,42 @@ class TestDciPathlightRecovery(unittest.TestCase):
 
         self.assertEqual(recovered.metric_name, "accuracy")
         self.assertEqual(recovered.metric_value_microunits, 500_000)
+
+    def test_reader_rejects_missing_and_wrong_type_variant_sources(self) -> None:
+        for path in _VARIANT_SOURCES:
+            for mutation in ("missing", "wrong-type"):
+                with self.subTest(path=path, mutation=mutation), private_fixture() as root:
+                    config = _load(root, "config.json")
+                    owner = config
+                    for component in path[:-1]:
+                        value = owner[component]
+                        assert type(value) is dict
+                        owner = value
+                    if mutation == "missing":
+                        owner.pop(path[-1])
+                    else:
+                        owner[path[-1]] = ["SENTINEL_PRIVATE_CONFIG_VALUE"]
+                    _write(root, "config.json", config)
+                    self.assert_recovery_error(root)
+
+    def test_reader_requires_exact_selected_rows_semantics(self) -> None:
+        for mutation in ("missing", "wrong-type", "mismatch", "invented-legacy-field"):
+            with self.subTest(mutation=mutation), private_fixture() as root:
+                config = _load(root, "config.json")
+                selection = config["selection"]
+                assert type(selection) is dict
+                if mutation == "missing":
+                    selection.pop("selected_rows")
+                elif mutation == "wrong-type":
+                    selection["selected_rows"] = "2"
+                elif mutation == "mismatch":
+                    selection["selected_rows"] = 3
+                else:
+                    selection.pop("selected_rows")
+                    selection["selected_count"] = 2
+                    selection["total_count"] = 2
+                _write(root, "config.json", config)
+                self.assert_recovery_error(root)
 
     def test_reader_rejects_symlinks_tampering_count_mismatch_and_hostile_types(self) -> None:
         cases = (

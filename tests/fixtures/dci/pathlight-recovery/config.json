@@ -7,18 +7,29 @@
     "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
   },
   "mode": "ir",
-  "runtime_contract": "asterion.agent-runtime/v1",
+  "runtime_contract": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
   "runtime": {
-    "model": "SENTINEL_PRIVATE_MODEL",
-    "tools": "read,grep",
-    "context_policy_identity": "bounded-context-v1"
+    "provider": "SENTINEL_PRIVATE_PROVIDER",
+    "model": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+    "tools": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
   },
   "benchmark_prompt_contract_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
-  "context_contract": "dci.context-contract/v1",
-  "ranking_metric_contract": "dci.metric.ndcg-at-10/v1",
+  "context_contract": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+  "ranking_metric_contract": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
   "implementation_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
   "profile_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
-  "selection": {"selected_count": 2, "total_count": 2},
+  "product_effective_config_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+  "selection": {
+    "schema": "asterion.dci.selection/v1",
+    "execution_class": "synthetic",
+    "id": "SENTINEL_PRIVATE_SELECTION_ID",
+    "paper_scope": "synthetic",
+    "selected_rows": 2,
+    "full_dataset": false,
+    "comparable": true,
+    "authorization_profile": "synthetic",
+    "selected_ids_sha256": "6666666666666666666666666666666666666666666666666666666666666666"
+  },
   "corpus_content_identity": {"file_count": 3},
   "artifact_digests": {
     "results.jsonl": "RESULTS_DIGEST",

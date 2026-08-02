@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from asterion.pathlight import _private_file as private_file_module
 from asterion.pathlight._private_file import (
     PrivateFileError,
     read_private_file,
@@ -313,6 +314,30 @@ class TestPathlightPrivateFile(unittest.TestCase):
                 read_private_file_snapshot(
                     root, ("one.json", "two.json"), {"one.json": _MAX_BYTES, "two.json": _MAX_BYTES}
                 )
+
+        self.assert_private_error(raised.exception, "private file snapshot is invalid")
+
+    def test_snapshot_rejects_root_mode_change_during_read(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve() / "evidence"
+            root.mkdir(mode=0o700)
+            root.chmod(0o700)
+            write_private_file(root / "one.json", _PAYLOAD)
+            original_read = private_file_module._read_bounded
+            changed = False
+
+            def chmod_root(descriptor: int, limit: int) -> bytes:
+                nonlocal changed
+                if not changed:
+                    changed = True
+                    root.chmod(0o750)
+                return original_read(descriptor, limit)
+
+            with patch(
+                "asterion.pathlight._private_file._read_bounded",
+                side_effect=chmod_root,
+            ), self.assertRaises(PrivateFileError) as raised:
+                read_private_file_snapshot(root, ("one.json",), {"one.json": _MAX_BYTES})
 
         self.assert_private_error(raised.exception, "private file snapshot is invalid")
 

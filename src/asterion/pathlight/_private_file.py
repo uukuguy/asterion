@@ -159,8 +159,8 @@ def read_private_file_snapshot(
         root_before = os.fstat(root_fd)
         root_entry_before = os.stat(root.name, dir_fd=parent_fd, follow_symlinks=False)
         if (
-            not stat.S_ISDIR(root_before.st_mode)
-            or stat.S_IMODE(root_before.st_mode) != 0o700
+            not _is_private_directory(root_before)
+            or not _is_private_directory(root_entry_before)
             or (root_before.st_dev, root_before.st_ino)
             != (root_entry_before.st_dev, root_entry_before.st_ino)
         ):
@@ -197,7 +197,8 @@ def read_private_file_snapshot(
         root_after = os.fstat(root_fd)
         root_entry_after = os.stat(root.name, dir_fd=parent_fd, follow_symlinks=False)
         if (
-            not stat.S_ISDIR(root_after.st_mode)
+            not _is_private_directory(root_after)
+            or not _is_private_directory(root_entry_after)
             or (root_before.st_dev, root_before.st_ino)
             != (root_after.st_dev, root_after.st_ino)
             or (root_before.st_dev, root_before.st_ino)
@@ -230,6 +231,10 @@ def read_private_file_snapshot(
 
 def _is_private_regular(metadata: os.stat_result) -> bool:
     return stat.S_ISREG(metadata.st_mode) and stat.S_IMODE(metadata.st_mode) == 0o600
+
+
+def _is_private_directory(metadata: os.stat_result) -> bool:
+    return stat.S_ISDIR(metadata.st_mode) and stat.S_IMODE(metadata.st_mode) == 0o700
 
 
 def _nofollow_flag() -> int:

@@ -276,15 +276,15 @@ def _case(value: object, mode: Literal["ir", "qa"]) -> DciRecoveredCase:
 def _variant(config: Mapping[str, object]) -> DciRecoveredVariant:
     runtime = _mapping(config.get("runtime"))
     return DciRecoveredVariant(
-        runtime_contract_sha256=_identity(config.get("runtime_contract"), "runtime-contract"),
-        model_sha256=_identity(runtime.get("model"), "model"),
-        toolset_sha256=_identity(runtime.get("tools"), "toolset"),
-        prompt_contract_sha256=_identity(config.get("benchmark_prompt_contract_sha256"), "prompt-contract"),
-        context_contract_sha256=_identity(config.get("context_contract"), "context-contract"),
-        metric_contract_sha256=_identity(config.get("ranking_metric_contract"), "metric-contract"),
-        implementation_sha256=_identity(config.get("implementation_sha256"), "implementation"),
-        profile_sha256=_identity(config.get("profile_sha256"), "profile"),
-        policy_sha256=_identity(runtime.get("context_policy_identity"), "policy"),
+        runtime_contract_sha256=_opaque_identity(config.get("runtime_contract"), "runtime-contract"),
+        model_sha256=_opaque_identity(runtime.get("model"), "model"),
+        toolset_sha256=_opaque_identity(runtime.get("tools"), "toolset"),
+        prompt_contract_sha256=_sha256(config.get("benchmark_prompt_contract_sha256")),
+        context_contract_sha256=_opaque_identity(config.get("context_contract"), "context-contract"),
+        metric_contract_sha256=_opaque_identity(config.get("ranking_metric_contract"), "metric-contract"),
+        implementation_sha256=_sha256(config.get("implementation_sha256")),
+        profile_sha256=_sha256(config.get("profile_sha256")),
+        policy_sha256=_sha256(config.get("product_effective_config_sha256")),
     )
 
 
@@ -317,7 +317,7 @@ def _validate_result_rows(
 
 def _selected_count(config: Mapping[str, object]) -> int:
     selection = _mapping(config.get("selection"))
-    return _natural(selection.get("selected_rows", selection.get("selected_count")))
+    return _natural(selection.get("selected_rows"))
 
 
 def _counts(state: Mapping[str, object], summary: Mapping[str, object]) -> tuple[int, int]:
@@ -479,10 +479,8 @@ def _sha256(value: object) -> str:
     return value
 
 
-def _identity(value: object, domain: str) -> str:
-    if type(value) is str and len(value) == 64 and not (set(value) - _HEX_SHA256):
-        return cast(str, value)
-    return _domain_digest(domain, value)
+def _opaque_identity(value: object, domain: str) -> str:
+    return _domain_digest(domain, _string(value))
 
 
 def _snapshot_digest(documents: Mapping[str, bytes]) -> str:
