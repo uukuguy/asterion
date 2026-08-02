@@ -1,7 +1,7 @@
 # Asterion Pathlight 设计
 
 **日期：** 2026-08-02  
-**状态：** 已与用户逐节确认，待实现计划  
+**状态：** Core 已验证；查询、评估、诊断与 Opik 互操作待实现
 **名称：** Asterion Pathlight — 路径可观测、评估与受控优化
 
 ## 目标
@@ -117,6 +117,36 @@ ContextFrame。Pathlight 分两阶段处理，避免以大规模重跑掩盖缺�
 
 ## API、CLI 和 Dashboard
 
+## Opik 互操作与设计吸收
+
+Opik 是 Pathlight 的重要外部工具和可选工作台，但不是 Asterion 的执行权威、私有证据库或
+运行时依赖。Pathlight 先在本地形成可验证的安全记录；安装并显式配置 Opik exporter 后，才以
+异步、失败不影响任务的方式导出可分享摘要。默认优先 operator-local/self-hosted 部署；云端
+导出必须另有操作员配置与审计。
+
+从 Opik 吸收以下框架设计，同时保持 Asterion 的边界：
+
+- **Trace / Span / Thread。** 保留 Pathlight 的端到端 Trace 与 Span，增加跨轮次的安全
+  `thread` 关联摘要；它仅链接 digest 身份，不携带会话文本。
+- **评估可回溯。** 每项 Evaluation、人工/规则反馈和指标反馈都指向产生它的 Trace、Span 与
+  版本化 metric contract；因此分数能够回到具体工作流阶段，而不是孤立报表。
+- **不可变数据集与实验。** 用 dataset snapshot、case scope、experiment 和 variant 明确记录
+  比较对象，拒绝覆盖范围、版本或指标契约不一致的比较。Opik 的 experiment 可成为 Pathlight
+  的外部镜像，不能取代本地记录。
+- **从失败到回归。** 经确认的 Finding 可以产生最小 regression case/test-suite 候选；候选须
+  保留事实、假设、成功标准和基线，而不能把模型推测自动固化为真相。
+- **离线优先导出。** 导出进入 operator-owned 队列；网络、认证或 Opik 服务故障只形成安全的
+  exporter 状态，不得改变 runner、runtime、评估或证据落盘结果。恢复后可幂等补发。
+- **标准互操作。** 优先通过安全的 OpenTelemetry trace/span 摘要或一个窄 Pathlight exporter
+  adapter 对接 Opik；不在 framework core 引入 Opik SDK、自动装饰器或不稳定 REST 依赖。
+- **受控优化。** Opik 的 prompt/模型优化、评估和实验分析只能产生 Pathlight Proposal 的建议。
+  仍由 Asterion 的操作员审批、预算、停止条件、授权和取消链路决定是否执行。
+
+导出时只允许 Pathlight 默认安全层：opaque/digest identity、状态、时延、token/可信成本、失败
+分类、版本摘要、metric 和已授权的安全 evidence reference。prompt、answer、语料、工具/模型
+原始 payload、凭据、私有路径及其可逆编码一律禁止。Dashboard 阶段将把 Opik UI 作为可选的
+外部视图，与 Asterion operator-local UI 的取舍基于稳定 API 决定。
+
 ### API
 
 - 创建/读取 trace，实时订阅安全事件；
@@ -144,7 +174,10 @@ Span 时序；辅助视图为跨运行对比、评估差异、证据缺口和实
    关联。
 3. **诊断与受控优化。** 可比性规则、事实/假设/缺口报告、proposal 生命周期及最小实验授权。
 4. **DCI 验收。** 对 Bright/SciFact/Bamboogle 生成回收报告；对证据缺口执行批准的小样本验证。
-5. **Dashboard。** 基于稳定 API 实现 operator-local UI，随后才考虑受控 OpenTelemetry 摘要导出。
+5. **Opik 互操作。** 在本地查询、评估和 proposal 契约稳定后，实现离线安全 exporter、实验
+   映射与回归反馈闭环。
+6. **Dashboard。** 基于稳定 API 实现 operator-local UI，并评估 Opik 作为可选外部工作台；两者
+   都不得绕过安全层或操作员授权。
 
 ## 验收与测试
 
