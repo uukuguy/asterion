@@ -1,4 +1,15 @@
-"""Public Pathlight trace contract."""
+"""Public Pathlight trace and evaluation contracts."""
+
+from asterion.pathlight.evaluation import (
+    EvaluationBundle,
+    EvaluationComparison,
+    EvaluationRecord,
+    MetricContract,
+    compare_evaluations,
+    read_evaluation_bundle,
+    validate_evaluation_record,
+    write_evaluation_bundle,
+)
 
 from asterion.pathlight.protocol import (
     PathlightError,
@@ -24,4 +35,12 @@ __all__ = (
     "TraceGraph",
     "trace_graph_digest",
     "validate_trace_graph",
+    "MetricContract",
+    "EvaluationRecord",
+    "EvaluationComparison",
+    "EvaluationBundle",
+    "validate_evaluation_record",
+    "write_evaluation_bundle",
+    "read_evaluation_bundle",
+    "compare_evaluations",
 )

@@ -1,0 +1,360 @@
+"""Versioned, public-safe Pathlight metric evaluation records."""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import os
+import re
+import stat
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Literal
+
+from asterion.pathlight.protocol import PathlightError
+
+
+EVALUATION_BUNDLE_SCHEMA = "asterion.pathlight-evaluations/v1"
+EVALUATION_BUNDLE_FILENAME = "pathlight-evaluations.json"
+
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+_METRIC_NAMES = frozenset(
+    {
+        "accuracy",
+        "ndcg-at-10",
+        "artifact-count",
+        "content-length",
+        "cost-microunits",
+        "coverage",
+        "duration-ns",
+        "error-count",
+        "evaluation-score",
+        "failure-rate",
+        "input-tokens",
+        "output-tokens",
+        "success-rate",
+        "tool-call-count",
+    }
+)
+_UNITS = frozenset({"ratio", "count", "microunits", "tokens", "nanoseconds"})
+_RECORD_FIELDS = frozenset(
+    {
+        "trace_sha256",
+        "metric_contract_sha256",
+        "dataset_snapshot_sha256",
+        "scope_sha256",
+        "value_microunits",
+        "selected_count",
+        "total_count",
+        "status",
+        "evaluation_sha256",
+    }
+)
+
+
+def _canonical_digest(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _require_sha256(value: object, field_name: str) -> str:
+    if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
+        raise PathlightError(f"Pathlight evaluation {field_name} is invalid")
+    return value
+
+
+def _require_nonnegative_int(value: object, field_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise PathlightError(f"Pathlight evaluation {field_name} is invalid")
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class MetricContract:
+    """A versioned definition of one supported public metric."""
+
+    metric_name: str
+    unit: str
+    higher_is_better: bool
+    contract_version: str
+    metric_contract_sha256: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        if self.metric_name not in _METRIC_NAMES:
+            raise PathlightError("Pathlight metric name is invalid")
+        if self.unit not in _UNITS:
+            raise PathlightError("Pathlight metric unit is invalid")
+        if not isinstance(self.higher_is_better, bool):
+            raise PathlightError("Pathlight metric direction is invalid")
+        if not isinstance(self.contract_version, str) or _SEMVER.fullmatch(
+            self.contract_version
+        ) is None:
+            raise PathlightError("Pathlight metric contract version is invalid")
+        object.__setattr__(self, "metric_contract_sha256", _canonical_digest(self._unsigned_mapping()))
+
+    def _unsigned_mapping(self) -> dict[str, object]:
+        return {
+            "metric_name": self.metric_name,
+            "unit": self.unit,
+            "higher_is_better": self.higher_is_better,
+            "contract_version": self.contract_version,
+        }
+
+    def to_mapping(self) -> dict[str, object]:
+        """Return the complete canonical JSON-compatible metric contract."""
+
+        return {**self._unsigned_mapping(), "metric_contract_sha256": self.metric_contract_sha256}
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluationRecord:
+    """An immutable evaluation value bound to exact public identities."""
+
+    trace_sha256: str
+    metric_contract_sha256: str
+    dataset_snapshot_sha256: str
+    scope_sha256: str
+    value_microunits: int | None
+    selected_count: int
+    total_count: int
+    status: Literal["observed", "recovered", "missing"]
+    evaluation_sha256: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        _require_sha256(self.trace_sha256, "trace digest")
+        _require_sha256(self.metric_contract_sha256, "metric contract digest")
+        _require_sha256(self.dataset_snapshot_sha256, "dataset snapshot digest")
+        _require_sha256(self.scope_sha256, "scope digest")
+        selected_count = _require_nonnegative_int(self.selected_count, "selected count")
+        total_count = _require_nonnegative_int(self.total_count, "total count")
+        if selected_count > total_count:
+            raise PathlightError("Pathlight evaluation coverage is invalid")
+        if self.status not in {"observed", "recovered", "missing"}:
+            raise PathlightError("Pathlight evaluation status is invalid")
+        if self.status == "missing":
+            if self.value_microunits is not None:
+                raise PathlightError("Pathlight missing evaluation value is invalid")
+        elif isinstance(self.value_microunits, bool) or not isinstance(self.value_microunits, int):
+            raise PathlightError("Pathlight evaluation value is invalid")
+        object.__setattr__(self, "evaluation_sha256", _canonical_digest(self._unsigned_mapping()))
+
+    def _unsigned_mapping(self) -> dict[str, object]:
+        return {
+            "trace_sha256": self.trace_sha256,
+            "metric_contract_sha256": self.metric_contract_sha256,
+            "dataset_snapshot_sha256": self.dataset_snapshot_sha256,
+            "scope_sha256": self.scope_sha256,
+            "value_microunits": self.value_microunits,
+            "selected_count": self.selected_count,
+            "total_count": self.total_count,
+            "status": self.status,
+        }
+
+    def to_mapping(self) -> dict[str, object]:
+        """Return the complete canonical JSON-compatible evaluation record."""
+
+        return {**self._unsigned_mapping(), "evaluation_sha256": self.evaluation_sha256}
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluationComparison:
+    """The exact comparability result for two evaluation records."""
+
+    status: Literal["comparable", "not-comparable"]
+    delta_microunits: int | None
+    reasons: tuple[str, ...]
+
+    @classmethod
+    def comparable(
+        cls, baseline: EvaluationRecord, candidate: EvaluationRecord
+    ) -> EvaluationComparison:
+        assert baseline.value_microunits is not None
+        assert candidate.value_microunits is not None
+        return cls("comparable", candidate.value_microunits - baseline.value_microunits, ())
+
+    @classmethod
+    def not_comparable(cls, reasons: Sequence[str]) -> EvaluationComparison:
+        return cls("not-comparable", None, tuple(reasons))
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluationBundle:
+    """A verified immutable collection of sorted evaluation records."""
+
+    evaluations: tuple[EvaluationRecord, ...]
+    bundle_sha256: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.evaluations, tuple) or any(
+            not isinstance(record, EvaluationRecord) for record in self.evaluations
+        ):
+            raise PathlightError("Pathlight evaluation bundle is invalid")
+        identities = tuple(record.evaluation_sha256 for record in self.evaluations)
+        if identities != tuple(sorted(identities)) or len(set(identities)) != len(identities):
+            raise PathlightError("Pathlight evaluation bundle identities are invalid")
+        supplied = _require_sha256(self.bundle_sha256, "bundle digest")
+        expected = _canonical_digest(
+            {
+                "schema": EVALUATION_BUNDLE_SCHEMA,
+                "evaluations": [record.to_mapping() for record in self.evaluations],
+            }
+        )
+        if not hmac.compare_digest(supplied, expected):
+            raise PathlightError("Pathlight evaluation bundle digest mismatches")
+
+
+def validate_evaluation_record(mapping: Mapping[str, object]) -> EvaluationRecord:
+    """Validate one exact record mapping and return its frozen canonical value."""
+
+    if not isinstance(mapping, Mapping) or set(mapping) != _RECORD_FIELDS:
+        raise PathlightError("Pathlight evaluation record is invalid")
+    record = EvaluationRecord(
+        trace_sha256=_require_sha256(mapping["trace_sha256"], "trace digest"),
+        metric_contract_sha256=_require_sha256(
+            mapping["metric_contract_sha256"], "metric contract digest"
+        ),
+        dataset_snapshot_sha256=_require_sha256(
+            mapping["dataset_snapshot_sha256"], "dataset snapshot digest"
+        ),
+        scope_sha256=_require_sha256(mapping["scope_sha256"], "scope digest"),
+        value_microunits=mapping["value_microunits"],  # type: ignore[arg-type]
+        selected_count=mapping["selected_count"],  # type: ignore[arg-type]
+        total_count=mapping["total_count"],  # type: ignore[arg-type]
+        status=mapping["status"],  # type: ignore[arg-type]
+    )
+    supplied = _require_sha256(mapping["evaluation_sha256"], "record digest")
+    if not hmac.compare_digest(supplied, record.evaluation_sha256):
+        raise PathlightError("Pathlight evaluation record digest mismatches")
+    return record
+
+
+def compare_evaluations(
+    baseline: EvaluationRecord, candidate: EvaluationRecord
+) -> EvaluationComparison:
+    """Compare values only where their contract, snapshot, scope, and coverage match."""
+
+    if not isinstance(baseline, EvaluationRecord) or not isinstance(candidate, EvaluationRecord):
+        raise PathlightError("Pathlight evaluation comparison is invalid")
+    reasons = _comparability_reasons(baseline, candidate)
+    return (
+        EvaluationComparison.not_comparable(reasons)
+        if reasons
+        else EvaluationComparison.comparable(baseline, candidate)
+    )
+
+
+def _comparability_reasons(
+    baseline: EvaluationRecord, candidate: EvaluationRecord
+) -> tuple[str, ...]:
+    fields = (
+        "metric_contract_sha256",
+        "dataset_snapshot_sha256",
+        "scope_sha256",
+        "selected_count",
+        "total_count",
+    )
+    reasons = tuple(field for field in fields if getattr(baseline, field) != getattr(candidate, field))
+    if baseline.value_microunits is None:
+        reasons += ("baseline.value_microunits",)
+    if candidate.value_microunits is None:
+        reasons += ("candidate.value_microunits",)
+    return reasons
+
+
+def write_evaluation_bundle(path: Path, records: Sequence[EvaluationRecord]) -> None:
+    """Exclusively write sorted, validated records to the one canonical filename."""
+
+    if (
+        path.name != EVALUATION_BUNDLE_FILENAME
+        or not path.parent.is_dir()
+        or path.exists()
+        or path.is_symlink()
+    ):
+        raise PathlightError("Pathlight evaluation target is invalid")
+    if any(not isinstance(record, EvaluationRecord) for record in records):
+        raise PathlightError("Pathlight evaluation record is invalid")
+    evaluations = tuple(
+        sorted(
+            (validate_evaluation_record(record.to_mapping()) for record in records),
+            key=lambda record: record.evaluation_sha256,
+        )
+    )
+    if len({record.evaluation_sha256 for record in evaluations}) != len(evaluations):
+        raise PathlightError("Pathlight evaluation identity is duplicated")
+    document: dict[str, object] = {
+        "schema": EVALUATION_BUNDLE_SCHEMA,
+        "evaluations": [record.to_mapping() for record in evaluations],
+    }
+    document["bundle_sha256"] = _canonical_digest(document)
+    encoded = json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except OSError as error:
+        raise PathlightError("Pathlight evaluation target is unavailable") from error
+    with os.fdopen(descriptor, "wb") as output:
+        output.write(encoded)
+
+
+def read_evaluation_bundle(path: Path) -> EvaluationBundle:
+    """Read one descriptor-verified canonical evaluation bundle."""
+
+    if path.name != EVALUATION_BUNDLE_FILENAME:
+        raise PathlightError("Pathlight evaluation source is invalid")
+    return _validate_bundle(_read_bundle_document(path))
+
+
+def _read_bundle_document(path: Path) -> object:
+    directory_fd = -1
+    source_fd = -1
+    try:
+        absolute = path.absolute()
+        nofollow = getattr(os, "O_NOFOLLOW", None)
+        if not isinstance(nofollow, int):
+            raise OSError("no-follow descriptor opening is unavailable")
+        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow
+        directory_fd = os.open(absolute.anchor, directory_flags)
+        for component in absolute.parts[1:-1]:
+            next_directory_fd = os.open(component, directory_flags, dir_fd=directory_fd)
+            os.close(directory_fd)
+            directory_fd = next_directory_fd
+        source_fd = os.open(path.name, os.O_RDONLY | nofollow, dir_fd=directory_fd)
+        if not stat.S_ISREG(os.fstat(source_fd).st_mode):
+            raise OSError("Pathlight evaluation source is not a regular file")
+        with os.fdopen(source_fd, "rb") as source:
+            source_fd = -1
+            return json.loads(source.read().decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise PathlightError("Pathlight evaluation source is invalid") from error
+    finally:
+        if source_fd >= 0:
+            os.close(source_fd)
+        if directory_fd >= 0:
+            os.close(directory_fd)
+
+
+def _validate_bundle(document: object) -> EvaluationBundle:
+    if not isinstance(document, Mapping) or set(document) != {
+        "schema",
+        "evaluations",
+        "bundle_sha256",
+    }:
+        raise PathlightError("Pathlight evaluation bundle is invalid")
+    if document["schema"] != EVALUATION_BUNDLE_SCHEMA:
+        raise PathlightError("Pathlight evaluation bundle schema is invalid")
+    evaluations_value = document["evaluations"]
+    if not isinstance(evaluations_value, list):
+        raise PathlightError("Pathlight evaluation bundle evaluations are invalid")
+    supplied = _require_sha256(document["bundle_sha256"], "bundle digest")
+    expected = _canonical_digest(
+        {"schema": document["schema"], "evaluations": evaluations_value}
+    )
+    if not hmac.compare_digest(supplied, expected):
+        raise PathlightError("Pathlight evaluation bundle digest mismatches")
+    records = tuple(validate_evaluation_record(item) for item in evaluations_value if isinstance(item, Mapping))
+    if len(records) != len(evaluations_value):
+        raise PathlightError("Pathlight evaluation record is invalid")
+    return EvaluationBundle(records, supplied)
