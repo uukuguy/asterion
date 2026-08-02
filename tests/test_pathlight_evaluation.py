@@ -83,6 +83,8 @@ class _HostileMapping(Mapping[str, object]):
         return self._payload[key]
 
     def __iter__(self) -> Iterator[str]:
+        if self._fail_at == "pathlight":
+            raise PathlightError(f"{_HOSTILE_SENTINEL}: pathlight")
         if self._fail_at == "iter":
             raise RuntimeError(f"{_HOSTILE_SENTINEL}: iter")
         return iter(self._payload)
@@ -168,7 +170,7 @@ class PathlightEvaluationTests(unittest.TestCase):
         )
 
         for validator, payload, message in cases:
-            for fail_at in ("iter", "getitem"):
+            for fail_at in ("iter", "getitem", "pathlight"):
                 with self.subTest(validator=validator.__name__, fail_at=fail_at):
                     hostile = _HostileMapping(payload, fail_at)
                     with self.assertRaises(PathlightError) as raised:
