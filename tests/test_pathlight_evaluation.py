@@ -6,6 +6,7 @@ import os
 import stat
 import tempfile
 import unittest
+from collections.abc import ItemsView, Iterator, Mapping
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
@@ -18,8 +19,12 @@ from asterion.pathlight.evaluation import (
     compare_evaluations,
     read_evaluation_bundle,
     validate_evaluation_record,
+    validate_metric_contract,
     write_evaluation_bundle as _write_evaluation_bundle,
 )
+
+
+_HOSTILE_SENTINEL = "SENTINEL_PRIVATE_PATHLIGHT_EVALUATION"
 
 
 def _digest(value: str) -> str:
@@ -67,7 +72,47 @@ def _rehash(document: dict[str, object]) -> None:
     ).hexdigest()
 
 
+class _HostileMapping(Mapping[str, object]):
+    def __init__(self, payload: Mapping[str, object], fail_at: str) -> None:
+        self._payload = payload
+        self._fail_at = fail_at
+
+    def __getitem__(self, key: str) -> object:
+        if self._fail_at == "getitem":
+            raise RuntimeError(f"{_HOSTILE_SENTINEL}: getitem")
+        return self._payload[key]
+
+    def __iter__(self) -> Iterator[str]:
+        if self._fail_at == "iter":
+            raise RuntimeError(f"{_HOSTILE_SENTINEL}: iter")
+        return iter(self._payload)
+
+    def __len__(self) -> int:
+        if self._fail_at == "len":
+            raise RuntimeError(f"{_HOSTILE_SENTINEL}: len")
+        return len(self._payload)
+
+    def items(self) -> ItemsView[str, object]:
+        raise RuntimeError(f"{_HOSTILE_SENTINEL}: items")
+
+
+class _HostileMetricContract(MetricContract):
+    def to_mapping(self) -> dict[str, object]:
+        raise RuntimeError(f"{_HOSTILE_SENTINEL}: metric contract")
+
+
+class _HostileEvaluationRecord(EvaluationRecord):
+    def to_mapping(self) -> dict[str, object]:
+        raise RuntimeError(f"{_HOSTILE_SENTINEL}: evaluation record")
+
+
 class PathlightEvaluationTests(unittest.TestCase):
+    def assertPublicPathlightError(self, error: PathlightError, message: str) -> None:
+        self.assertEqual(str(error), message)
+        self.assertIsNone(error.__cause__)
+        self.assertIsNone(error.__context__)
+        self.assertNotIn(_HOSTILE_SENTINEL, repr(error))
+
     def test_metric_contract_has_a_computed_canonical_digest(self) -> None:
         contract = _contract()
 
@@ -105,6 +150,31 @@ class PathlightEvaluationTests(unittest.TestCase):
                 mutated[field] = value
                 with self.assertRaises(PathlightError):
                     validate_evaluation_record(mutated)
+
+    def test_public_validators_normalize_hostile_mapping_failures(self) -> None:
+        contract = _contract()
+        record = evaluation(contract=contract)
+        cases = (
+            (
+                validate_metric_contract,
+                contract.to_mapping(),
+                "Pathlight metric contract is invalid",
+            ),
+            (
+                validate_evaluation_record,
+                record.to_mapping(),
+                "Pathlight evaluation record is invalid",
+            ),
+        )
+
+        for validator, payload, message in cases:
+            for fail_at in ("iter", "getitem"):
+                with self.subTest(validator=validator.__name__, fail_at=fail_at):
+                    hostile = _HostileMapping(payload, fail_at)
+                    with self.assertRaises(PathlightError) as raised:
+                        validator(hostile)
+
+                    self.assertPublicPathlightError(raised.exception, message)
 
     def test_rejects_invalid_contract_and_record_values(self) -> None:
         for args in (
@@ -308,6 +378,51 @@ class PathlightEvaluationTests(unittest.TestCase):
 
         with self.assertRaises(PathlightError):
             EvaluationBundle((_contract(),), (record,), "0" * 64)
+
+    def test_bundle_normalizes_hostile_value_subclasses(self) -> None:
+        contract = _contract()
+        record = evaluation(contract=contract)
+        bundle_digest = hashlib.sha256(
+            json.dumps(
+                {
+                    "schema": "asterion.pathlight-evaluations/v1",
+                    "metric_contracts": [contract.to_mapping()],
+                    "evaluations": [record.to_mapping()],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        cases = (
+            (
+                (_HostileMetricContract("accuracy", "ratio", True, "1.0.0"),),
+                (record,),
+                "Pathlight evaluation bundle contracts are invalid",
+            ),
+            (
+                (contract,),
+                (
+                    _HostileEvaluationRecord(
+                        trace_sha256=record.trace_sha256,
+                        metric_contract_sha256=record.metric_contract_sha256,
+                        dataset_snapshot_sha256=record.dataset_snapshot_sha256,
+                        scope_sha256=record.scope_sha256,
+                        value_microunits=record.value_microunits,
+                        selected_count=record.selected_count,
+                        total_count=record.total_count,
+                        status=record.status,
+                    ),
+                ),
+                "Pathlight evaluation bundle is invalid",
+            ),
+        )
+
+        for contracts, records, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaises(PathlightError) as raised:
+                    EvaluationBundle(contracts, records, bundle_digest)
+
+                self.assertPublicPathlightError(raised.exception, message)
 
     def test_bundle_carries_contract_registry_and_requires_exact_record_binding(self) -> None:
         contract = _contract()

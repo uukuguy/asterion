@@ -123,15 +123,30 @@ class MetricContract:
 def validate_metric_contract(mapping: Mapping[str, object]) -> MetricContract:
     """Validate one exact metric contract mapping."""
 
-    if not isinstance(mapping, Mapping) or set(mapping) != _METRIC_CONTRACT_FIELDS:
+    if not isinstance(mapping, Mapping):
         raise PathlightError("Pathlight metric contract is invalid")
+    raw_values: tuple[object, object, object, object, object] | None = None
+    try:
+        if set(mapping) == _METRIC_CONTRACT_FIELDS:
+            raw_values = (
+                mapping["metric_name"],
+                mapping["unit"],
+                mapping["higher_is_better"],
+                mapping["contract_version"],
+                mapping["metric_contract_sha256"],
+            )
+    except Exception:
+        pass
+    if raw_values is None:
+        raise PathlightError("Pathlight metric contract is invalid")
+    metric_name, unit, higher_is_better, contract_version, supplied_digest = raw_values
     contract = MetricContract(
-        metric_name=mapping["metric_name"],  # type: ignore[arg-type]
-        unit=mapping["unit"],  # type: ignore[arg-type]
-        higher_is_better=mapping["higher_is_better"],  # type: ignore[arg-type]
-        contract_version=mapping["contract_version"],  # type: ignore[arg-type]
+        metric_name=metric_name,  # type: ignore[arg-type]
+        unit=unit,  # type: ignore[arg-type]
+        higher_is_better=higher_is_better,  # type: ignore[arg-type]
+        contract_version=contract_version,  # type: ignore[arg-type]
     )
-    supplied = _require_sha256(mapping["metric_contract_sha256"], "metric contract digest")
+    supplied = _require_sha256(supplied_digest, "metric contract digest")
     if not hmac.compare_digest(supplied, contract.metric_contract_sha256):
         raise PathlightError("Pathlight metric contract digest mismatches")
     return contract
@@ -222,7 +237,7 @@ class EvaluationBundle:
 
     def __post_init__(self) -> None:
         if not isinstance(self.metric_contracts, tuple) or any(
-            not isinstance(contract, MetricContract) for contract in self.metric_contracts
+            type(contract) is not MetricContract for contract in self.metric_contracts
         ):
             raise PathlightError("Pathlight evaluation bundle contracts are invalid")
         try:
@@ -239,7 +254,7 @@ class EvaluationBundle:
         if contract_ids != tuple(sorted(contract_ids)) or len(set(contract_ids)) != len(contract_ids):
             raise PathlightError("Pathlight evaluation bundle contracts are invalid")
         if not isinstance(self.evaluations, tuple) or any(
-            not isinstance(record, EvaluationRecord) for record in self.evaluations
+            type(record) is not EvaluationRecord for record in self.evaluations
         ):
             raise PathlightError("Pathlight evaluation bundle is invalid")
         try:
@@ -275,23 +290,50 @@ class EvaluationBundle:
 def validate_evaluation_record(mapping: Mapping[str, object]) -> EvaluationRecord:
     """Validate one exact record mapping and return its frozen canonical value."""
 
-    if not isinstance(mapping, Mapping) or set(mapping) != _RECORD_FIELDS:
+    if not isinstance(mapping, Mapping):
         raise PathlightError("Pathlight evaluation record is invalid")
+    raw_values: tuple[object, object, object, object, object, object, object, object, object] | None = None
+    try:
+        if set(mapping) == _RECORD_FIELDS:
+            raw_values = (
+                mapping["trace_sha256"],
+                mapping["metric_contract_sha256"],
+                mapping["dataset_snapshot_sha256"],
+                mapping["scope_sha256"],
+                mapping["value_microunits"],
+                mapping["selected_count"],
+                mapping["total_count"],
+                mapping["status"],
+                mapping["evaluation_sha256"],
+            )
+    except Exception:
+        pass
+    if raw_values is None:
+        raise PathlightError("Pathlight evaluation record is invalid")
+    (
+        trace_sha256,
+        metric_contract_sha256,
+        dataset_snapshot_sha256,
+        scope_sha256,
+        value_microunits,
+        selected_count,
+        total_count,
+        status,
+        supplied_digest,
+    ) = raw_values
     record = EvaluationRecord(
-        trace_sha256=_require_sha256(mapping["trace_sha256"], "trace digest"),
-        metric_contract_sha256=_require_sha256(
-            mapping["metric_contract_sha256"], "metric contract digest"
-        ),
+        trace_sha256=_require_sha256(trace_sha256, "trace digest"),
+        metric_contract_sha256=_require_sha256(metric_contract_sha256, "metric contract digest"),
         dataset_snapshot_sha256=_require_sha256(
-            mapping["dataset_snapshot_sha256"], "dataset snapshot digest"
+            dataset_snapshot_sha256, "dataset snapshot digest"
         ),
-        scope_sha256=_require_sha256(mapping["scope_sha256"], "scope digest"),
-        value_microunits=mapping["value_microunits"],  # type: ignore[arg-type]
-        selected_count=mapping["selected_count"],  # type: ignore[arg-type]
-        total_count=mapping["total_count"],  # type: ignore[arg-type]
-        status=mapping["status"],  # type: ignore[arg-type]
+        scope_sha256=_require_sha256(scope_sha256, "scope digest"),
+        value_microunits=value_microunits,  # type: ignore[arg-type]
+        selected_count=selected_count,  # type: ignore[arg-type]
+        total_count=total_count,  # type: ignore[arg-type]
+        status=status,  # type: ignore[arg-type]
     )
-    supplied = _require_sha256(mapping["evaluation_sha256"], "record digest")
+    supplied = _require_sha256(supplied_digest, "record digest")
     if not hmac.compare_digest(supplied, record.evaluation_sha256):
         raise PathlightError("Pathlight evaluation record digest mismatches")
     return record
