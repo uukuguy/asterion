@@ -263,7 +263,7 @@ class PathlightCatalog:
         records: dict[str, EvaluationRecord] = {}
         contracts: dict[str, MetricContract] = {}
         for contract in metric_contracts:
-            if not isinstance(contract, MetricContract):
+            if type(contract) is not MetricContract:
                 raise PathlightError("Pathlight metric contract is invalid")
             validated_contract = validate_metric_contract(contract.to_mapping())
             identity = validated_contract.metric_contract_sha256

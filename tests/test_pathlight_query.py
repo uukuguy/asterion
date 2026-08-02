@@ -37,6 +37,7 @@ def _opaque_id(number: int) -> str:
 TRACE_A = _opaque_id(1)
 TRACE_B = _opaque_id(2)
 SENTINEL_MAPPING_ERROR = "SENTINEL_PRIVATE_MAPPING_ERROR"
+SENTINEL_CONTRACT_ERROR = "SENTINEL_PRIVATE_CONTRACT_ERROR"
 METRIC_CONTRACT = MetricContract("accuracy", "ratio", True, "1.0.0")
 
 
@@ -53,6 +54,11 @@ class _HostileMapping(Mapping[str, object]):
 
     def items(self) -> ItemsView[str, object]:
         raise RuntimeError(SENTINEL_MAPPING_ERROR)
+
+
+class _HostileMetricContract(MetricContract):
+    def to_mapping(self) -> dict[str, object]:
+        raise RuntimeError(SENTINEL_CONTRACT_ERROR)
 
 
 def _trace(trace_id: str, *, status: str, component: str) -> dict[str, object]:
@@ -373,6 +379,18 @@ class PathlightQueryTests(unittest.TestCase):
             PathlightCatalog.build(
                 (), (self.evaluation_a,), (METRIC_CONTRACT, conflicting)
             )
+
+    def test_catalog_rejects_metric_contract_subclasses_without_leaking_causes(
+        self,
+    ) -> None:
+        hostile = _HostileMetricContract("accuracy", "ratio", True, "1.0.0")
+
+        with self.assertRaises(PathlightError) as raised:
+            PathlightCatalog.build((), (), (hostile,))
+
+        self.assertEqual(str(raised.exception), "Pathlight metric contract is invalid")
+        self.assertIsNone(raised.exception.__cause__)
+        self.assertIsNone(raised.exception.__context__)
 
     def test_catalog_rejects_unknown_identity_and_malformed_queries_without_type_errors(
         self,
