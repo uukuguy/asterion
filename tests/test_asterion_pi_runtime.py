@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import gc
+import hashlib
 import json
 import os
 import sys
@@ -152,6 +153,68 @@ print(json.dumps({
     "type": "message_end", "message": {
         "role": "assistant", "stopReason": "stop", "usage": {"input": 7, "output": 3},
         "content": "SENTINEL_ANSWER",
+    },
+}), flush=True)
+print(json.dumps({"type": "agent_end"}), flush=True)
+'''
+
+OBSERVATION_RETRY_SCRIPT = r'''
+import json, sys
+request = json.loads(sys.stdin.readline())
+print(json.dumps({"type": "response", "id": request["id"], "success": True}), flush=True)
+print(json.dumps({"type": "agent_start"}), flush=True)
+print(json.dumps({"type": "turn_start"}), flush=True)
+print(json.dumps({
+    "type": "provider_request_context", "requestIndex": 1,
+    "provider": "provider", "model": "model",
+    "messages": [{"role": "user", "content": "FIRST_PRIVATE_PROMPT"}],
+}), flush=True)
+print(json.dumps({
+    "type": "tool_execution_start", "toolCallId": "first-call", "toolName": "grep",
+    "args": {"pattern": "FIRST_PRIVATE_ARGUMENT"},
+}), flush=True)
+print(json.dumps({
+    "type": "tool_execution_end", "toolCallId": "first-call",
+    "result": "FIRST_PRIVATE_RESULT", "isError": False,
+}), flush=True)
+print(json.dumps({
+    "type": "provider_request_context", "requestIndex": 2,
+    "provider": "provider", "model": "model",
+    "messages": [
+        {"role": "user", "content": "FIRST_PRIVATE_PROMPT"},
+        {"role": "toolResult", "toolCallId": "first-call", "content": "FIRST_PRIVATE_RESULT"},
+    ],
+}), flush=True)
+print(json.dumps({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "FIRST_PRIVATE_ANSWER"}}), flush=True)
+print(json.dumps({"type": "agent_end", "willRetry": True}), flush=True)
+print(json.dumps({"type": "agent_start"}), flush=True)
+print(json.dumps({"type": "turn_start"}), flush=True)
+print(json.dumps({
+    "type": "provider_request_context", "requestIndex": 3,
+    "provider": "provider", "model": "model",
+    "messages": [{"role": "user", "content": "SECOND_PRIVATE_PROMPT"}],
+}), flush=True)
+print(json.dumps({
+    "type": "tool_execution_start", "toolCallId": "second-call", "toolName": "grep",
+    "args": {"pattern": "SECOND_PRIVATE_ARGUMENT"},
+}), flush=True)
+print(json.dumps({
+    "type": "tool_execution_end", "toolCallId": "second-call",
+    "result": "SECOND_PRIVATE_RESULT", "isError": False,
+}), flush=True)
+print(json.dumps({
+    "type": "provider_request_context", "requestIndex": 4,
+    "provider": "provider", "model": "model",
+    "messages": [
+        {"role": "user", "content": "SECOND_PRIVATE_PROMPT"},
+        {"role": "toolResult", "toolCallId": "second-call", "content": "SECOND_PRIVATE_RESULT"},
+    ],
+}), flush=True)
+print(json.dumps({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "SECOND_PRIVATE_ANSWER"}}), flush=True)
+print(json.dumps({
+    "type": "message_end", "message": {
+        "role": "assistant", "stopReason": "stop", "usage": {"input": 9, "output": 2},
+        "content": "SECOND_PRIVATE_ANSWER",
     },
 }), flush=True)
 print(json.dumps({"type": "agent_end"}), flush=True)
@@ -761,6 +824,64 @@ print(json.dumps({"type": "agent_end"}), flush=True)
             assert next_observed is not None
             self.assertEqual(len(next_observed["frames"]), 2)
             self.assertIsNone(client.pathlight_runtime_observation("other-run"))
+
+    async def test_retry_discards_first_observation_and_normalizes_request_indexes(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            client = PiRuntimeClient(
+                command=(sys.executable, "-u", "-c", OBSERVATION_RETRY_SCRIPT),
+                cwd=root,
+                capabilities=("filesystem.read",),
+                evidence_root=root / "evidence",
+            )
+            events = await _collect(
+                client,
+                RunRequest(
+                    run_id="pathlight-retry-run",
+                    input_text="question",
+                    requested_capabilities=("filesystem.read",),
+                ),
+                MutableSignal(),
+            )
+
+            public_events = json.dumps([event.to_mapping() for event in events])
+            self.assertNotIn("FIRST_PRIVATE", public_events)
+            self.assertIn("SECOND_PRIVATE", public_events)
+            self.assertEqual(
+                [event.payload["call_id"] for event in events if event.type == "tool.call"],
+                ["second-call"],
+            )
+            observed = client.pathlight_runtime_observation("pathlight-retry-run")
+            self.assertIsNotNone(observed)
+            assert observed is not None
+            frames = observed["frames"]
+            calls = observed["model_calls"]
+            tools = observed["tools"]
+            assert isinstance(frames, list)
+            assert isinstance(calls, list)
+            assert isinstance(tools, list)
+            self.assertEqual([frame["frame_index"] for frame in frames], [1, 2])
+            self.assertEqual([call["request_index"] for call in calls], [1, 2])
+            first_call_sha256 = hashlib.sha256(b"first-call").hexdigest()
+            second_call_sha256 = hashlib.sha256(b"second-call").hexdigest()
+            first_prompt_sha256 = hashlib.sha256(
+                b"FIRST_PRIVATE_PROMPT"
+            ).hexdigest()
+            second_prompt_sha256 = hashlib.sha256(
+                b"SECOND_PRIVATE_PROMPT"
+            ).hexdigest()
+            self.assertEqual(
+                [tool["call_sha256"] for tool in tools], [second_call_sha256]
+            )
+            observed_rendered = json.dumps(observed)
+            self.assertNotIn("FIRST_PRIVATE", observed_rendered)
+            self.assertNotIn("SECOND_PRIVATE", observed_rendered)
+            self.assertNotIn(first_call_sha256, observed_rendered)
+            self.assertIn(second_call_sha256, observed_rendered)
+            self.assertNotIn(first_prompt_sha256, observed_rendered)
+            self.assertIn(second_prompt_sha256, observed_rendered)
 
     async def test_completion_is_published_only_after_normal_stream_exhaustion(
         self,

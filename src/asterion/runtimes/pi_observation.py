@@ -45,6 +45,7 @@ class _SegmentDraft:
 @dataclass(frozen=True, slots=True)
 class _FrameDraft:
     request_index: int
+    native_request_index: int
     segments: tuple[_SegmentDraft, ...]
     valid: bool
 
@@ -83,6 +84,7 @@ class PiObservationBuilder:
         self._frames: list[_FrameDraft] = []
         self._model_calls: list[_ModelCallDraft] = []
         self._tools: list[_ToolDraft] = []
+        self._retry_native_starts: frozenset[int] | None = None
 
     def consume(self, event: Mapping[str, object], timestamp_ns: int) -> None:
         """Consume one native event without allowing observation failures out."""
@@ -123,9 +125,23 @@ class PiObservationBuilder:
             or checkpoint.tool_count > len(self._tools)
         ):
             return
+        removed_native_indexes = tuple(
+            frame.native_request_index
+            for frame in self._frames[checkpoint.frame_count :]
+            if frame.valid
+        )
         del self._frames[checkpoint.frame_count :]
         del self._model_calls[checkpoint.model_call_count :]
         del self._tools[checkpoint.tool_count :]
+        if removed_native_indexes:
+            reset_start = (
+                self._frames[-1].native_request_index + 1
+                if self._frames
+                else 1
+            )
+            self._retry_native_starts = frozenset(
+                (reset_start, max(removed_native_indexes) + 1)
+            )
 
     def complete(self, run_id: str) -> RuntimeObservationBatch:
         """Return the validated safe closure, degrading to missing evidence."""
@@ -150,14 +166,28 @@ class PiObservationBuilder:
 
     def _consume_provider_context(self, event: Mapping[str, object]) -> None:
         index = event.get("requestIndex")
+        expected_index = (
+            self._frames[-1].native_request_index + 1
+            if self._frames
+            else None
+        )
+        index_is_expected = (
+            index == expected_index
+            if expected_index is not None
+            else index in self._retry_native_starts
+            if self._retry_native_starts is not None
+            else index == 1
+        )
         if (
             type(index) is not int
             or index < 1
-            or index != len(self._frames) + 1
             or len(self._model_calls) != len(self._frames)
+            or not index_is_expected
         ):
             self._mark_invalid()
             return
+        normalized_index = len(self._frames) + 1
+        self._retry_native_starts = None
         messages = event.get("messages")
         if type(messages) is list:
             segments = tuple(_segment_from_message(message) for message in messages)
@@ -168,10 +198,12 @@ class PiObservationBuilder:
             segments = (_missing_segment(),)
             request_sha256 = None
         model_sha256 = _model_digest(event)
-        self._frames.append(_FrameDraft(index, segments, True))
+        self._frames.append(
+            _FrameDraft(normalized_index, index, segments, True)
+        )
         self._model_calls.append(
             _ModelCallDraft(
-                frame_index=index,
+                frame_index=normalized_index,
                 model_sha256=model_sha256,
                 request_sha256=request_sha256,
             )
@@ -236,7 +268,8 @@ class PiObservationBuilder:
     def _mark_invalid(self) -> None:
         # A sentinel is counted by checkpoints, making retry rollback restore
         # the prior trustworthy state without expanding their public shape.
-        self._frames.append(_FrameDraft(0, (), False))
+        self._retry_native_starts = None
+        self._frames.append(_FrameDraft(0, 0, (), False))
 
     def _completed_tools(self) -> tuple[ToolCallObservation, ...]:
         return tuple(
@@ -263,28 +296,33 @@ class PiObservationBuilder:
         for frame in self._frames:
             segments: list[ContextSegmentSummary] = []
             for index, draft in enumerate(frame.segments):
-                source_call_sha256 = (
+                candidate_call_sha256 = (
                     _digest_text(draft.source_call_id)
                     if draft.source_call_id is not None
                     else None
                 )
                 source = (
-                    tools_by_call.get(source_call_sha256)
-                    if source_call_sha256 is not None
+                    tools_by_call.get(candidate_call_sha256)
+                    if candidate_call_sha256 is not None
                     else None
                 )
-                if draft.role == "tool-result" and source is not None:
-                    content_sha256 = source.result_sha256
-                    content_length = source.result_length
-                    missing_evidence = content_sha256 is None
-                elif draft.role == "tool-result":
-                    content_sha256 = None
-                    content_length = None
-                    source_call_sha256 = None
-                    missing_evidence = True
+                if draft.role == "tool-result":
+                    content_sha256 = draft.content_sha256
+                    content_length = draft.content_length
+                    verified_lineage = (
+                        source is not None
+                        and content_sha256 is not None
+                        and (content_sha256, content_length)
+                        == (source.result_sha256, source.result_length)
+                    )
+                    source_call_sha256 = (
+                        candidate_call_sha256 if verified_lineage else None
+                    )
+                    missing_evidence = not verified_lineage
                 else:
                     content_sha256 = draft.content_sha256
                     content_length = draft.content_length
+                    source_call_sha256 = None
                     missing_evidence = draft.missing_evidence
                 segments.append(
                     ContextSegmentSummary(
@@ -333,12 +371,15 @@ def _segment_from_message(value: object) -> _SegmentDraft:
     role = value.get("role")
     if role in {"tool", "tool-result", "tool_result", "toolResult"}:
         call_id = value.get("toolCallId", value.get("tool_call_id"))
+        digest, length = _content_summary(
+            value.get("content", value.get("text"))
+        )
         return _SegmentDraft(
             "tool-result",
-            None,
-            None,
+            digest,
+            length,
             call_id if type(call_id) is str and call_id else None,
-            type(call_id) is not str or not call_id,
+            digest is None or type(call_id) is not str or not call_id,
         )
     normalized_role: _Role = role if role in {"system", "user", "assistant"} else "unknown"
     digest, length = _content_summary(value.get("content", value.get("text")))

@@ -95,6 +95,35 @@ class PiObservationBuilderTests(unittest.TestCase):
         self.assertNotIn("secret", json.dumps(batch.to_mapping()))
         self.assertNotIn("SENTINEL_PROVIDER", repr(batch))
 
+    def test_transformed_tool_result_keeps_observed_context_without_lineage(self) -> None:
+        builder = PiObservationBuilder(_clock)
+        builder.consume(_provider_context(1, [_user("q")]), 10)
+        builder.consume(_tool_start("c1", "grep", {"pattern": "private"}), 20)
+        builder.consume(_tool_end("c1", "private complete result", False), 30)
+        builder.consume(
+            _provider_context(
+                2,
+                [
+                    _user("q"),
+                    _tool_result("c1", "private truncated result"),
+                ],
+            ),
+            40,
+        )
+
+        batch = builder.complete("run-private")
+        segment = batch.frames[1].segments[-1]
+
+        self.assertEqual(segment.content_sha256, _digest("private truncated result"))
+        self.assertEqual(segment.content_length, len("private truncated result"))
+        self.assertIsNone(segment.source_call_sha256)
+        self.assertTrue(segment.missing_evidence)
+        self.assertIn("context-segment", batch.missing_evidence)
+        self.assertEqual(batch.tools[0].result_sha256, _digest("private complete result"))
+        rendered = json.dumps(batch.to_mapping())
+        self.assertNotIn("private complete result", rendered)
+        self.assertNotIn("private truncated result", rendered)
+
     def test_rollback_discards_a_retried_attempt(self) -> None:
         builder = PiObservationBuilder(_clock)
         checkpoint = builder.checkpoint()
@@ -124,6 +153,16 @@ class PiObservationBuilderTests(unittest.TestCase):
             batch.missing_evidence,
             ("context-frame", "model-request", "model-request-boundary"),
         )
+
+    def test_initial_request_index_cannot_skip_without_a_retry_boundary(self) -> None:
+        builder = PiObservationBuilder(_clock)
+        builder.consume(_provider_context(3, [_user("partial")]), 10)
+
+        batch = builder.complete("run")
+
+        self.assertEqual(batch.frames, ())
+        self.assertEqual(batch.model_calls, ())
+        self.assertIn("context-frame", batch.missing_evidence)
 
     def test_malformed_context_and_unmatched_tool_result_are_explicitly_missing(self) -> None:
         builder = PiObservationBuilder(_clock)
