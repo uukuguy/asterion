@@ -6,6 +6,7 @@ import os
 import stat
 import tempfile
 import unittest
+from collections.abc import Mapping
 from pathlib import Path
 from unittest.mock import patch
 
@@ -65,6 +66,28 @@ def _rehash_bundle(document: dict[str, object]) -> None:
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()
+
+
+def _text_digest(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _json_compatible(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {key: _json_compatible(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_json_compatible(item) for item in value]
+    return value
+
+
+def _failure_record(run_id: str) -> dict[str, object]:
+    return {
+        "schema": "asterion.workflow-observation/v1",
+        "run_id": run_id,
+        "input_digest": "b" * 64,
+        "status": "failed",
+        "failure_class": "runtime-invocation-failed",
+    }
 
 
 def _mutated_bundle_path(root: Path, mutation: str) -> Path:
@@ -133,6 +156,73 @@ def _mutated_bundle_path(root: Path, mutation: str) -> Path:
 
 
 class WorkflowEvidenceStorageTests(unittest.TestCase):
+    def test_reader_projects_completed_record_identifiers_as_sha256(self) -> None:
+        run_id = "/private/SECRET-RUN"
+        tool_name = "/private/SECRET-TOOL"
+        artifact_id = "/private/SECRET-ARTIFACT"
+        record = _completed_record()
+        record["run_id"] = run_id
+        record["tools"] = [{"name": tool_name, "calls": 1, "errors": 0}]
+        record["artifacts"] = [{"artifact_id": artifact_id, "sha256": "c" * 64}]
+        _rehash_record(record)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / "workflow-evidence.json"
+            write_workflow_observation_bundle(path, (record,))
+
+            bundle = read_workflow_observation_bundle(path)
+
+        summary = _json_compatible(bundle.records[0])
+        self.assertEqual(
+            summary,
+            {
+                "schema": "asterion.pathlight-workflow-summary/v1",
+                "source_graph_sha256": record["graph_sha256"],
+                "run_sha256": _text_digest(run_id),
+                "input_sha256": record["input_digest"],
+                "terminal_status": "completed",
+                "tools": [
+                    {"tool_sha256": _text_digest(tool_name), "calls": 1, "errors": 0}
+                ],
+                "usage": {"input_tokens": 0, "output_tokens": 0},
+                "artifacts": [
+                    {
+                        "artifact_id_sha256": _text_digest(artifact_id),
+                        "sha256": "c" * 64,
+                    }
+                ],
+            },
+        )
+        rendered = json.dumps(summary, sort_keys=True)
+        for raw_value in (run_id, tool_name, artifact_id):
+            self.assertNotIn(raw_value, rendered)
+            self.assertNotIn(raw_value, repr(bundle))
+
+    def test_reader_projects_failure_record_identifiers_as_sha256(self) -> None:
+        run_id = "/private/SECRET-FAILED-RUN"
+        record = _failure_record(run_id)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / "workflow-evidence.json"
+            write_workflow_observation_bundle(path, (record,))
+
+            bundle = read_workflow_observation_bundle(path)
+
+        summary = _json_compatible(bundle.records[0])
+        self.assertEqual(
+            summary,
+            {
+                "schema": "asterion.pathlight-workflow-summary/v1",
+                "source_graph_sha256": hashlib.sha256(
+                    json.dumps(record, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                ).hexdigest(),
+                "run_sha256": _text_digest(run_id),
+                "input_sha256": "b" * 64,
+                "terminal_status": "failed",
+                "failure_class": "runtime-invocation-failed",
+            },
+        )
+        self.assertNotIn(run_id, json.dumps(summary, sort_keys=True))
+        self.assertNotIn(run_id, repr(bundle))
+
     def test_reader_accepts_exact_public_safe_nested_record_entries(self) -> None:
         record = _completed_record()
         record["tools"] = [{"name": "search", "calls": 1, "errors": 0}]
@@ -145,9 +235,15 @@ class WorkflowEvidenceStorageTests(unittest.TestCase):
 
             bundle = read_workflow_observation_bundle(path)
 
-        self.assertEqual(bundle.records[0]["tools"], ({"name": "search", "calls": 1, "errors": 0},))
+        self.assertEqual(
+            bundle.records[0]["tools"],
+            ({"tool_sha256": _text_digest("search"), "calls": 1, "errors": 0},),
+        )
         self.assertEqual(bundle.records[0]["usage"]["input_tokens"], 3)
-        self.assertEqual(bundle.records[0]["artifacts"][0]["artifact_id"], "answer")
+        self.assertEqual(
+            bundle.records[0]["artifacts"][0]["artifact_id_sha256"],
+            _text_digest("answer"),
+        )
 
     def test_reader_rejects_private_or_invalid_nested_record_values(self) -> None:
         mutations = (
@@ -221,6 +317,10 @@ class WorkflowEvidenceStorageTests(unittest.TestCase):
             self.assertEqual(
                 bundle.pathlight_traces[0]["trace_sha256"],
                 trace["trace_sha256"],
+            )
+            self.assertEqual(
+                bundle.records[0]["schema"],
+                "asterion.pathlight-workflow-summary/v1",
             )
             with self.assertRaises(TypeError):
                 bundle.pathlight_traces[0]["trace_id"] = "mutated"  # type: ignore[index]

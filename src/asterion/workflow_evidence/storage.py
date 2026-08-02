@@ -38,6 +38,16 @@ def _digest(value: object) -> str:
     return value
 
 
+def _text_digest(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _canonical_digest(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 def _validate_failure_observation(record: Mapping[str, object]) -> None:
     if set(record) != {
         "schema",
@@ -109,6 +119,78 @@ def _validate_completed_observation(record: Mapping[str, object]) -> None:
         if not isinstance(artifact["artifact_id"], str) or not artifact["artifact_id"]:
             raise WorkflowEvidenceError("workflow observation artifact is invalid")
         _digest(artifact["sha256"])
+
+
+def _project_completed_observation(record: Mapping[str, object]) -> dict[str, object]:
+    tools = record["tools"]
+    usage = record["usage"]
+    artifacts = record["artifacts"]
+    run_id = record["run_id"]
+    input_digest = record["input_digest"]
+    source_graph_sha256 = record["graph_sha256"]
+    terminal_status = record["terminal_status"]
+    assert isinstance(tools, list)
+    assert isinstance(usage, Mapping)
+    assert isinstance(artifacts, list)
+    assert isinstance(run_id, str)
+    assert isinstance(input_digest, str)
+    assert isinstance(source_graph_sha256, str)
+    assert isinstance(terminal_status, str)
+    projected_tools: list[dict[str, object]] = []
+    for tool in tools:
+        assert isinstance(tool, Mapping)
+        name = tool["name"]
+        assert isinstance(name, str)
+        projected_tools.append(
+            {
+                "tool_sha256": _text_digest(name),
+                "calls": tool["calls"],
+                "errors": tool["errors"],
+            }
+        )
+    projected_artifacts: list[dict[str, object]] = []
+    for artifact in artifacts:
+        assert isinstance(artifact, Mapping)
+        artifact_id = artifact["artifact_id"]
+        assert isinstance(artifact_id, str)
+        projected_artifacts.append(
+            {
+                "artifact_id_sha256": _text_digest(artifact_id),
+                "sha256": artifact["sha256"],
+            }
+        )
+    return {
+        "schema": "asterion.pathlight-workflow-summary/v1",
+        "source_graph_sha256": source_graph_sha256,
+        "run_sha256": _text_digest(run_id),
+        "input_sha256": input_digest,
+        "terminal_status": terminal_status,
+        "tools": projected_tools,
+        "usage": {
+            "input_tokens": usage["input_tokens"],
+            "output_tokens": usage["output_tokens"],
+        },
+        "artifacts": projected_artifacts,
+    }
+
+
+def _project_failure_observation(record: Mapping[str, object]) -> dict[str, object]:
+    run_id = record["run_id"]
+    input_digest = record["input_digest"]
+    status = record["status"]
+    failure_class = record["failure_class"]
+    assert isinstance(run_id, str)
+    assert isinstance(input_digest, str)
+    assert isinstance(status, str)
+    assert isinstance(failure_class, str)
+    return {
+        "schema": "asterion.pathlight-workflow-summary/v1",
+        "source_graph_sha256": _canonical_digest(record),
+        "run_sha256": _text_digest(run_id),
+        "input_sha256": input_digest,
+        "terminal_status": status,
+        "failure_class": failure_class,
+    }
 
 
 def read_workflow_observation_bundle(path: Path) -> WorkflowObservationBundle:
@@ -209,8 +291,14 @@ def _validate_and_freeze_bundle(document: object) -> WorkflowObservationBundle:
             raise WorkflowEvidenceError("Pathlight trace identity is duplicated")
         seen_trace_ids.add(trace_id)
 
+    projected_records = tuple(
+        _freeze_mapping(_project_completed_observation(record))
+        if record["schema"] == "asterion.workflow-evidence/v1"
+        else _freeze_mapping(_project_failure_observation(record))
+        for record in records
+    )
     return WorkflowObservationBundle(
-        records=tuple(_freeze_mapping(record) for record in records),
+        records=projected_records,
         pathlight_traces=tuple(_freeze_mapping(trace) for trace in pathlight_traces),
         bundle_sha256=bundle_sha256,
     )
