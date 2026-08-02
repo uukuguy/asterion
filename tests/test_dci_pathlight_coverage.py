@@ -130,6 +130,40 @@ class DciPathlightCoverageRegistryTests(unittest.TestCase):
             self.assertEqual(observed_ids, ["source-a/doc.txt", "source-b/doc.txt"])
             self.assertEqual(observed_paths, observed_ids)
 
+    def test_registry_keeps_two_same_basename_gold_documents_in_one_query(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dataset = root / "dataset.jsonl"
+            row = _bright_source_row("q-1", "source-a/doc.txt")
+            row["gold_ids"] = ["source-a/doc.txt", "source-b/doc.txt"]
+            row["gold_ids_long"] = ["source-a/doc.txt", "source-b/doc.txt"]
+            dataset.write_text(json.dumps(row) + "\n", encoding="utf-8")
+            corpus = root / "corpus"
+            corpus.mkdir()
+            for source in ("source-a", "source-b"):
+                (corpus / source).mkdir()
+                (corpus / source / "doc.txt").write_text(
+                    f"{source} body\n", encoding="utf-8"
+                )
+
+            registry = prepare_coverage_registry(
+                dataset_id="bright.earth-science",
+                dataset_path=dataset,
+                corpus_dir=corpus,
+                selected_count=1,
+                output_root=root / "coverage",
+            )
+
+            manifest = json.loads(
+                (root / "coverage" / registry.manifests[0].relative_path).read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(
+                [document["path"] for document in manifest["documents"]],
+                ["source-a/doc.txt", "source-b/doc.txt"],
+            )
+
     def test_atomic_publish_does_not_replace_concurrently_created_directory(self) -> None:
         publisher = getattr(coverage_module, "_publish_directory_no_replace", None)
         self.assertIsNotNone(publisher, "atomic no-replace publish primitive is missing")

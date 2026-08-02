@@ -23,7 +23,6 @@ from asterion.capabilities.dci.implementation.datasets import (
     load_beir_benchmark_rows_bytes,
     load_benchmark_rows_bytes,
     load_bright_benchmark_rows_bytes,
-    normalize_retrieved_path,
 )
 
 
@@ -481,66 +480,20 @@ def _snapshot_matches(expected: _FileSnapshot) -> bool:
     )
 
 
-def _corpus_candidates(
-    corpus_dir: Path, wanted: frozenset[str]
-) -> dict[str, list[str]]:
-    results = {name: [] for name in wanted}
-    root_fd = _open_directory(corpus_dir)
-
-    def visit(directory_fd: int, prefix: tuple[str, ...]) -> None:
-        for name in sorted(os.listdir(directory_fd)):
-            if name in {"", ".", ".."} or "/" in name or "\\" in name:
-                raise DciCoverageError("DCI coverage corpus entry is invalid")
-            metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-            if stat.S_ISLNK(metadata.st_mode):
-                if normalize_retrieved_path(name, corpus_dir) in wanted:
-                    raise DciCoverageError("DCI coverage corpus document is unsafe")
-                continue
-            if stat.S_ISDIR(metadata.st_mode):
-                child = os.open(
-                    name,
-                    os.O_RDONLY
-                    | os.O_DIRECTORY
-                    | _nofollow()
-                    | getattr(os, "O_CLOEXEC", 0),
-                    dir_fd=directory_fd,
-                )
-                try:
-                    visit(child, (*prefix, name))
-                finally:
-                    os.close(child)
-                continue
-            if stat.S_ISREG(metadata.st_mode):
-                normalized = normalize_retrieved_path(name, corpus_dir)
-                if normalized in wanted:
-                    results[normalized].append(PurePosixPath(*prefix, name).as_posix())
-
-    try:
-        visit(root_fd, ())
-    except DciCoverageError:
-        raise
-    except (DatasetError, OSError) as error:
-        raise DciCoverageError("DCI coverage corpus is unsafe") from error
-    finally:
-        os.close(root_fd)
-    return results
-
-
 def _bind_documents(
     corpus_dir: Path, rows: tuple[BenchmarkRow, ...]
 ) -> tuple[dict[str, tuple[dict[str, str], ...]], tuple[_FileSnapshot, ...]]:
-    row_gold: dict[str, tuple[tuple[str, str], ...]] = {}
+    row_gold: dict[str, tuple[str, ...]] = {}
     all_source_ids: list[str] = []
     for row in rows:
         raw = row.gold_ids if row.gold_ids is not None else row.gold_docs
         if raw is None:
             raise DciCoverageError("DCI coverage requires IR dataset rows")
-        normalized = tuple(normalize_retrieved_path(value, corpus_dir) for value in raw)
-        if len(set(normalized)) != len(normalized):
+        if len(set(raw)) != len(raw):
             raise DciCoverageError("DCI coverage gold documents are ambiguous")
-        for source_id, normalized_id in zip(raw, normalized, strict=True):
+        for source_id in raw:
             _safe_relative(source_id)
-        row_gold[row.query_id] = tuple(zip(raw, normalized, strict=True))
+        row_gold[row.query_id] = raw
         all_source_ids.extend(raw)
     snapshots_by_path: dict[str, _FileSnapshot] = {}
     document_by_source: dict[str, dict[str, str]] = {}
@@ -561,7 +514,7 @@ def _bind_documents(
     manifests = {
         row.query_id: tuple(
             document_by_source[source_id]
-            for source_id, _normalized_id in sorted(row_gold[row.query_id])
+            for source_id in sorted(row_gold[row.query_id])
         )
         for row in rows
     }
