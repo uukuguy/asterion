@@ -152,6 +152,64 @@ class DciPiFixtureRuntime:
         yield RunEvent(request.run_id, 4, "run.completed", {"status": "completed"})
 
 
+class DciPiPathlightFixtureRuntime(DciPiFixtureRuntime):
+    async def run(
+        self,
+        request: RunRequest,
+        *,
+        signal: object | None = None,
+    ) -> AsyncIterator[RunEvent]:
+        del signal
+        self.requests.append(request)
+        yield RunEvent(request.run_id, 1, "run.started", {"capabilities": []})
+        yield RunEvent(
+            request.run_id,
+            2,
+            "text.delta",
+            {"text": "SECRET-RUNTIME-DELTA"},
+        )
+        yield RunEvent(
+            request.run_id,
+            3,
+            "tool.call",
+            {
+                "call_id": "SENTINEL_PRIVATE_CALL",
+                "name": "private.tool",
+                "arguments": {
+                    "credential": "SENTINEL_CREDENTIAL",
+                    "value": "SENTINEL_TOOL_ARGUMENT",
+                },
+            },
+        )
+        yield RunEvent(
+            request.run_id,
+            4,
+            "tool.result",
+            {
+                "call_id": "SENTINEL_PRIVATE_CALL",
+                "output": {
+                    "exception": "SENTINEL_EXCEPTION_TEXT",
+                    "value": "SENTINEL_TOOL_OUTPUT",
+                },
+                "is_error": False,
+            },
+        )
+        yield RunEvent(
+            request.run_id,
+            5,
+            "artifact.created",
+            {
+                "artifact": {
+                    "artifact_id": "answer",
+                    "kind": "answer",
+                    "media_type": "text/plain",
+                    "uri": "SENTINEL_PRIVATE_URI",
+                }
+            },
+        )
+        yield RunEvent(request.run_id, 6, "run.completed", {"status": "completed"})
+
+
 class ControlledFixtureRuntime(FixtureRuntime):
     manifest = RuntimeManifest(
         runtime_id="pi.reference", capabilities=("filesystem.read", "shell")
@@ -1620,7 +1678,7 @@ class AsterionCliTests(unittest.TestCase):
         self.assertNotIn("SECRET-RUNTIME-DELTA", stdout.getvalue())
 
     def test_run_writes_opt_in_safe_workflow_evidence(self) -> None:
-        runtime = DciPiFixtureRuntime()
+        runtime = DciPiPathlightFixtureRuntime()
         pathlights = []
 
         def create_runtime(context):
@@ -1687,8 +1745,26 @@ class AsterionCliTests(unittest.TestCase):
             bundle["pathlight_traces"][0]["schema"],
             "asterion.pathlight-trace/v1",
         )
-        self.assertNotIn("SECRET-INPUT", rendered)
-        self.assertNotIn("SECRET-RUNTIME-DELTA", rendered)
+        trace_events = bundle["pathlight_traces"][0]["events"]
+        self.assertIn(
+            ("runtime", "started"),
+            [(event["kind"], event["status"]) for event in trace_events],
+        )
+        self.assertIn(
+            ("tool-call", "completed"),
+            [(event["kind"], event["status"]) for event in trace_events],
+        )
+        for sentinel in (
+            "SECRET-INPUT",
+            "SECRET-RUNTIME-DELTA",
+            "SENTINEL_TOOL_ARGUMENT",
+            "SENTINEL_TOOL_OUTPUT",
+            "SENTINEL_PRIVATE_URI",
+            "SENTINEL_CREDENTIAL",
+            "SENTINEL_EXCEPTION_TEXT",
+        ):
+            with self.subTest(sentinel=sentinel):
+                self.assertNotIn(sentinel, rendered)
 
     def test_bundled_dci_pi_application_emits_one_body_free_json_object(self) -> None:
         runtime = DciPiFixtureRuntime()

@@ -323,7 +323,7 @@ async def _run(
         runtime = runtime_binding.factory(context)
         input_text = args.input if args.input is not None else stdin.read()
         observed_runtime = (
-            ObservedRuntimeClient(runtime)
+            ObservedRuntimeClient(runtime, pathlight=context.pathlight)
             if args.workflow_evidence_file is not None
             else None
         )
