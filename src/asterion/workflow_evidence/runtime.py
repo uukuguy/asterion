@@ -331,7 +331,6 @@ class _RuntimePathlightProjection:
             )
             for call in observation.model_calls
         }
-        tool_observations = _tool_projection_observations(observations)
         projected_tools: set[str] = set()
         frame_span_ids: dict[str, str] = {}
         for frame in observation.frames:
@@ -342,14 +341,17 @@ class _RuntimePathlightProjection:
                     if segment.source_call_sha256 is not None
                 )
             )
-            for call_sha256 in source_calls:
-                if call_sha256 not in projected_tools:
-                    self._project_native_tool(
-                        observation,
-                        call_sha256,
-                        tool_observations,
-                    )
-                    projected_tools.add(call_sha256)
+            pending_source_calls = tuple(
+                call_sha256
+                for call_sha256 in source_calls
+                if call_sha256 not in projected_tools
+            )
+            self._project_native_tools(
+                observation,
+                pending_source_calls,
+                observations,
+            )
+            projected_tools.update(pending_source_calls)
             frame_calls = tuple(
                 call
                 for call in observation.model_calls
@@ -426,14 +428,16 @@ class _RuntimePathlightProjection:
                     observation,
                 )
 
-        for call_sha256 in tool_observations:
-            if call_sha256 not in projected_tools:
-                self._project_native_tool(
-                    observation,
-                    call_sha256,
-                    tool_observations,
-                )
-                projected_tools.add(call_sha256)
+        remaining_tools = tuple(
+            tool.call_sha256
+            for tool in observation.tools
+            if tool.call_sha256 not in projected_tools
+        )
+        self._project_native_tools(
+            observation,
+            remaining_tools,
+            observations,
+        )
 
     def _project_native_model_call(
         self,
@@ -494,29 +498,47 @@ class _RuntimePathlightProjection:
             timestamp_ns=0,
         )
 
-    def _project_native_tool(
+    def _project_native_tools(
         self,
         observation: RuntimeObservationBatch,
-        call_sha256: str,
-        tool_observations: Mapping[
-            str,
-            tuple[
-                Mapping[str, object],
-                int | None,
-                Mapping[str, object],
-                int | None,
-            ],
+        call_sha256s: tuple[str, ...],
+        observations: list[
+            tuple[Mapping[str, object], int | None, int | None]
         ],
     ) -> None:
-        call_payload, started_ns, result_payload, ended_ns = tool_observations[
-            call_sha256
-        ]
-        self._project_tool_call(
-            call_payload,
-            native_observation=observation,
-            timestamp_ns=started_ns,
-        )
-        self._project_tool_result(result_payload, timestamp_ns=ended_ns)
+        selected = set(call_sha256s)
+        if not selected:
+            return
+        started: set[str] = set()
+        completed: set[str] = set()
+        for event, observed_started_ns, observed_ended_ns in observations:
+            event_type = event["type"]
+            if event_type not in {"tool.call", "tool.result"}:
+                continue
+            payload = event["payload"]
+            if not isinstance(payload, Mapping):
+                raise ValueError("Pathlight tool projection payload is invalid")
+            call_id = payload["call_id"]
+            if type(call_id) is not str:
+                raise ValueError("Pathlight tool projection identity is invalid")
+            call_sha256 = _text_digest(call_id)
+            if call_sha256 not in selected:
+                continue
+            if event_type == "tool.call":
+                self._project_tool_call(
+                    payload,
+                    native_observation=observation,
+                    timestamp_ns=observed_started_ns,
+                )
+                started.add(call_sha256)
+            else:
+                self._project_tool_result(
+                    payload,
+                    timestamp_ns=observed_ended_ns,
+                )
+                completed.add(call_sha256)
+        if started != selected or completed != selected:
+            raise ValueError("Pathlight tool projection is incomplete")
 
     def complete(
         self,
@@ -861,58 +883,6 @@ def _reserved_span_id(
             }
         )
     )
-
-
-def _tool_projection_observations(
-    observations: list[
-        tuple[Mapping[str, object], int | None, int | None]
-    ],
-) -> dict[
-    str,
-    tuple[
-        Mapping[str, object],
-        int | None,
-        Mapping[str, object],
-        int | None,
-    ],
-]:
-    pending: dict[
-        str, tuple[Mapping[str, object], int | None]
-    ] = {}
-    completed: dict[
-        str,
-        tuple[
-            Mapping[str, object],
-            int | None,
-            Mapping[str, object],
-            int | None,
-        ],
-    ] = {}
-    for event, observed_started_ns, observed_ended_ns in observations:
-        payload = event["payload"]
-        if not isinstance(payload, Mapping):
-            raise ValueError("Pathlight tool projection payload is invalid")
-        event_type = event["type"]
-        if event_type == "tool.call":
-            call_id = payload["call_id"]
-            if type(call_id) is not str:
-                raise ValueError("Pathlight tool projection identity is invalid")
-            pending[_text_digest(call_id)] = (payload, observed_started_ns)
-        elif event_type == "tool.result":
-            call_id = payload["call_id"]
-            if type(call_id) is not str:
-                raise ValueError("Pathlight tool projection identity is invalid")
-            call_sha256 = _text_digest(call_id)
-            call_payload, started_ns = pending.pop(call_sha256)
-            completed[call_sha256] = (
-                call_payload,
-                started_ns,
-                payload,
-                observed_ended_ns,
-            )
-    if pending:
-        raise ValueError("Pathlight tool projection is incomplete")
-    return completed
 
 
 def _reraise_process_control(error: BaseException) -> None:

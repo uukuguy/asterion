@@ -500,6 +500,128 @@ def _two_frame_batch() -> RuntimeObservationBatch:
     )
 
 
+def _two_tool_flow(
+    *,
+    overlap: bool,
+    reverse_segments: bool,
+) -> tuple[RuntimeObservationBatch, tuple[tuple[str, dict[str, object]], ...]]:
+    tool_specs = (
+        ("SENTINEL_CALL_A", "private.tool.a", "A"),
+        ("SENTINEL_CALL_B", "private.tool.b", "B"),
+    )
+    tools = tuple(
+        sorted(
+            (
+                ToolCallObservation(
+                    call_sha256=_digest(call_id),
+                    tool_sha256=_digest(name),
+                    arguments_sha256=_digest(
+                        json.dumps(
+                            {"query": label},
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        )
+                    ),
+                    result_sha256=_digest(f"RESULT_{label}"),
+                    result_length=len(f"RESULT_{label}"),
+                    status="completed",
+                )
+                for call_id, name, label in tool_specs
+            ),
+            key=lambda tool: tool.call_sha256,
+        )
+    )
+    tools_by_call = {tool.call_sha256: tool for tool in tools}
+    first_frame = ContextFrameObservation(
+        frame_index=1,
+        segments=(
+            ContextSegmentSummary(
+                segment_index=0,
+                role="user",
+                structure_kind="message",
+                content_sha256=_digest("FIRST"),
+                content_length=5,
+                source_call_sha256=None,
+                missing_evidence=False,
+            ),
+        ),
+    )
+    segment_specs = tuple(reversed(tool_specs)) if reverse_segments else tool_specs
+    second_frame = ContextFrameObservation(
+        frame_index=2,
+        segments=tuple(
+            ContextSegmentSummary(
+                segment_index=index,
+                role="tool-result",
+                structure_kind="tool-result",
+                content_sha256=tools_by_call[_digest(call_id)].result_sha256,
+                content_length=tools_by_call[_digest(call_id)].result_length,
+                source_call_sha256=_digest(call_id),
+                missing_evidence=False,
+            )
+            for index, (call_id, _name, _label) in enumerate(segment_specs)
+        ),
+    )
+    calls = tuple(
+        ModelCallObservation(
+            request_index=index,
+            frame_sha256=frame.frame_sha256,
+            model_sha256=_digest("private.model"),
+            request_sha256=_digest(f"REQUEST_{index}"),
+            response_sha256=_digest(f"RESPONSE_{index}"),
+            response_length=len(f"RESPONSE_{index}"),
+            input_tokens=index,
+            output_tokens=index,
+            status="completed",
+            boundary_observed=True,
+        )
+        for index, frame in ((1, first_frame), (2, second_frame))
+    )
+    batch = RuntimeObservationBatch.build(
+        run_sha256=_digest("native-run"),
+        frames=(first_frame, second_frame),
+        model_calls=calls,
+        tools=tools,
+    )
+    call_events = tuple(
+        (
+            "tool.call",
+            {
+                "call_id": call_id,
+                "name": name,
+                "arguments": {"query": label},
+            },
+        )
+        for call_id, name, label in tool_specs
+    )
+    result_events = tuple(
+        (
+            "tool.result",
+            {
+                "call_id": call_id,
+                "output": f"RESULT_{label}",
+                "is_error": False,
+            },
+        )
+        for call_id, _name, label in tool_specs
+    )
+    tool_events = (
+        (*call_events, *result_events)
+        if overlap
+        else (
+            call_events[0],
+            result_events[0],
+            call_events[1],
+            result_events[1],
+        )
+    )
+    return batch, (
+        ("run.started", {"capabilities": []}),
+        *tool_events,
+        ("run.completed", {"status": "completed"}),
+    )
+
+
 class ObservedFixtureRuntime(EventRuntime):
     def __init__(
         self,
@@ -541,6 +663,86 @@ def _context_frames(graph: Mapping[str, object]) -> list[Mapping[str, object]]:
 
 
 class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reverse_context_tool_results_preserve_public_tool_order(self) -> None:
+        batch, events = _two_tool_flow(overlap=False, reverse_segments=True)
+        runtime = ObservedFixtureRuntime(batch.to_mapping(), events)
+        recorder = MemoryPathlightRecorder(TRACE_ID)
+        observed = ObservedRuntimeClient(
+            runtime,
+            pathlight=recorder,
+            monotonic_ns=IncrementingClock(),
+        )
+
+        _ = [event async for event in observed.run(_request())]
+        graph = recorder.snapshot()
+        starts = _started_events(graph)
+        tool_starts = [event for event in starts if event["kind"] == "tool-call"]
+        tool_spans = {
+            event["attributes"]["call_id"]: event["span_id"] for event in tool_starts
+        }
+        result_segments = [
+            event
+            for event in starts
+            if event["attributes"].get("segment_role") == "tool-result"
+        ]
+
+        self.assertEqual(_kinds(graph).count("model-call"), 2)
+        self.assertEqual(
+            [event["attributes"]["call_id"] for event in tool_starts],
+            [_digest("SENTINEL_CALL_A"), _digest("SENTINEL_CALL_B")],
+        )
+        self.assertEqual(
+            [event["attributes"]["source_call_sha256"] for event in result_segments],
+            [_digest("SENTINEL_CALL_B"), _digest("SENTINEL_CALL_A")],
+        )
+        for segment in result_segments:
+            produced = next(
+                link for link in segment["links"] if link["relation"] == "produced-by"
+            )
+            self.assertEqual(
+                produced["span_id"],
+                tool_spans[segment["attributes"]["source_call_sha256"]],
+            )
+
+    async def test_overlapping_public_tool_calls_replay_exact_event_order(self) -> None:
+        batch, events = _two_tool_flow(overlap=True, reverse_segments=False)
+        runtime = ObservedFixtureRuntime(batch.to_mapping(), events)
+        recorder = MemoryPathlightRecorder(TRACE_ID)
+        observed = ObservedRuntimeClient(
+            runtime,
+            pathlight=recorder,
+            monotonic_ns=IncrementingClock(),
+        )
+
+        _ = [event async for event in observed.run(_request())]
+        graph = recorder.snapshot()
+        trace_events = cast(list[Mapping[str, object]], graph["events"])
+        starts = [event for event in trace_events if event["status"] == "started"]
+        tool_starts = [event for event in starts if event["kind"] == "tool-call"]
+        tool_terminals = {
+            event["span_id"]: event
+            for event in trace_events
+            if event["kind"] == "tool-call" and event["status"] != "started"
+        }
+        first, second = tool_starts
+
+        self.assertEqual(_kinds(graph).count("model-call"), 2)
+        self.assertLess(first["sequence"], second["sequence"])
+        self.assertLess(second["sequence"], tool_terminals[first["span_id"]]["sequence"])
+        self.assertLess(
+            tool_terminals[first["span_id"]]["sequence"],
+            tool_terminals[second["span_id"]]["sequence"],
+        )
+        self.assertEqual(
+            sum(
+                1
+                for event in starts
+                for link in event["links"]
+                if link["relation"] == "produced-by"
+            ),
+            2,
+        )
+
     async def test_foreign_public_stream_run_identity_forces_fallback(self) -> None:
         runtime = ForeignRunObservedRuntime(_batch().to_mapping())
         recorder = MemoryPathlightRecorder(TRACE_ID)
