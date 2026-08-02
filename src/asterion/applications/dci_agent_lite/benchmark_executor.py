@@ -402,7 +402,9 @@ def _authorize_full_request(
             tuple(sorted(row.query_id for row in rows[: payload.case_limit]))
         )
     profile = resolve_experiment_profile(_DEFAULT_EXPERIMENT_PROFILE)
-    judge_operations = payload.case_limit if request.mode == "qa" else 1
+    judge_operations = (
+        payload.case_limit if request.mode == "qa" else int(not coverage_case10)
+    )
     # The authorization ledger reserves an operation's full upper bound before
     # it starts, then replaces that reservation with its actual spend.  A
     # per-operation bound equal to the total envelope therefore makes a

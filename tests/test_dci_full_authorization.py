@@ -696,8 +696,8 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
                     ),
                     output_root=Path(temporary) / "private",
                     max_agent_operations=sum(selected_counts),
-                    max_judge_operations=max(
-                        1, cast(int, case["planned_judge_operations"])
+                    max_judge_operations=cast(
+                        int, case["planned_judge_operations"]
                     ),
                     max_cost_usd=10,
                     max_agent_cost_per_operation_usd=2,
@@ -706,6 +706,10 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     authority.planned_judge_operations,
+                    case["planned_judge_operations"],
+                )
+                self.assertEqual(
+                    authority.max_judge_operations,
                     case["planned_judge_operations"],
                 )
 
@@ -834,13 +838,15 @@ class FullExecutionAuthorizationTests(unittest.TestCase):
                         **values,
                     )
 
-    def test_requires_exact_positive_limits(self) -> None:
+    def test_requires_exact_positive_agent_and_nonnegative_judge_limits(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             parent = Path(temporary) / "private-parent"
             for value in (0, -1, True, 1.5):
-                with self.subTest(kind="operation", value=value):
+                with self.subTest(kind="agent operation", value=value):
                     with self.assertRaises(ExperimentAuthorizationError):
                         authorize(parent, max_agents=value)  # type: ignore[arg-type]
+            for value in (-1, True, 1.5):
+                with self.subTest(kind="judge operation", value=value):
                     with self.assertRaises(ExperimentAuthorizationError):
                         authorize(parent, max_judges=value)  # type: ignore[arg-type]
             for value in (0.0, -1.0, float("inf"), float("-inf"), math.nan, True):

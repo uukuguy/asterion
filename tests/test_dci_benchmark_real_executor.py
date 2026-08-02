@@ -26,6 +26,12 @@ from asterion.capabilities.dci.implementation.evaluation.benchmark import (
     BenchmarkResult,
 )
 from asterion.capabilities.dci.implementation.evaluation.judge import JudgeConfig
+from asterion.capabilities.dci.implementation.research.experiment_profiles import (
+    ExperimentAuthorizationError,
+    consume_full_execution_authorization,
+    reconcile_full_execution_operation,
+    reserve_full_execution_operation,
+)
 
 
 class MutableCancellation:
@@ -141,6 +147,32 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
         async def runner(request, *, paths):
             del paths
             calls.append(request)
+            authority = request.full_execution_authorization
+            self.assertIsNotNone(authority)
+            consume_full_execution_authorization(
+                authority,
+                request.experiment_scope_id,
+                request.dataset_input_binding,
+            )
+            with self.assertRaises(ExperimentAuthorizationError):
+                reserve_full_execution_operation(
+                    authority,
+                    request.experiment_scope_id,
+                    "judge",
+                )
+            for _index in range(10):
+                reservation = reserve_full_execution_operation(
+                    authority,
+                    request.experiment_scope_id,
+                    "agent",
+                )
+                reconcile_full_execution_operation(authority, reservation, 0.05)
+            with self.assertRaises(ExperimentAuthorizationError):
+                reserve_full_execution_operation(
+                    authority,
+                    request.experiment_scope_id,
+                    "agent",
+                )
             return BenchmarkResult(
                 output_root=request.output_root,
                 counts={"total": 10, "completed": 10, "failed": 0},
@@ -177,6 +209,7 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
         self.assertEqual(authority.max_agent_operations, 10)
         self.assertEqual(authority.planned_agent_operations, 10)
         self.assertEqual(authority.planned_judge_operations, 0)
+        self.assertEqual(authority.max_judge_operations, 0)
         self.assertEqual(authority.max_cost_usd, 1.0)
         self.assertEqual(authority.selected_query_counts, (10,))
         self.assertEqual(calls[0].experiment_scope_id, "bright.biology.main.full")
@@ -184,8 +217,8 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
             result.artifact_ids,
             (
                 "bright.biology.native-result",
+                "coverage-actual-microusd.500000",
                 "coverage-authorized-microusd.1000000",
-                "coverage-upper-microusd.1000000",
             ),
         )
 

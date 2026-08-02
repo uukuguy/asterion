@@ -24,6 +24,8 @@ full-execution authority for the first ten selected IDs: ten Agent operations,
 zero Judge operations, and at most one dollar. Missing, non-positive, or
 over-one-dollar coverage amounts fail before the Agent runner. Ordinary
 non-coverage executions of 50 or fewer cases retain their prior behavior.
+The authority itself now carries a zero Judge-operation cap for an exact
+zero-Judge plan; positive Judge plans still require a sufficient positive cap.
 
 Immutable receipts bind every attempt to the plan, proposal, scope, variant,
 registry, authorization, run ID, and generation. Re-entry skips completed
@@ -61,6 +63,9 @@ then expanded and driven green for:
 - exact case-10 coverage authority, missing/zero/over-one-dollar rejection,
   body-free cost evidence, and a 250,000-microusd cancellation followed by an
   exact 750,000-microusd resumed authorization;
+- live authority-ledger proof that ten Agent reservations reconcile to
+  500,000 microusd while an eleventh Agent reservation and every Judge
+  reservation are rejected;
 - private `.env` sentinel redaction, prepare rollback/retry, and read-only
   status.
 
@@ -100,17 +105,32 @@ uv run ruff check \
 
 git diff --check
   PASS
+
+uv run python -m unittest -v \
+  tests.test_dci_full_authorization \
+  tests.test_dci_benchmark_real_executor \
+  tests.test_dci_pathlight_experiment_cli
+  PASS: 85 tests
+
+uv run pyright \
+  tests/test_dci_benchmark_real_executor.py \
+  tests/test_dci_pathlight_experiment_cli.py \
+  src/asterion/applications/dci_agent_lite/benchmark_executor.py \
+  src/asterion/capabilities/dci/implementation/research/experiment_profiles.py
+  PASS: 0 errors, 0 warnings
 ```
 
 ## Files
 
 - `src/asterion/applications/dci_agent_lite/pathlight_experiment_cli.py`
 - `src/asterion/applications/dci_agent_lite/benchmark_executor.py`
+- `src/asterion/capabilities/dci/implementation/research/experiment_profiles.py`
 - `src/asterion/applications/dci_agent_lite/cli.py`
 - `src/asterion/applications/dci_agent_lite/pathlight_cli.py`
 - `src/asterion/capabilities/dci/implementation/pathlight/coverage.py`
 - `tests/test_dci_pathlight_experiment_cli.py`
 - `tests/test_dci_benchmark_real_executor.py`
+- `tests/test_dci_full_authorization.py`
 - `.superpowers/sdd/task-8-report.md`
 
 The pre-existing dirty `docs/status/JOURNAL.md` and

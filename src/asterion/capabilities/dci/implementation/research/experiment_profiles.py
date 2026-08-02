@@ -833,6 +833,10 @@ def _positive_operation_limit(value: object) -> bool:
     return type(value) is int and value > 0
 
 
+def _nonnegative_operation_limit(value: object) -> bool:
+    return type(value) is int and value >= 0
+
+
 def _usd_decimal(value: object) -> Decimal:
     if type(value) is int:
         numeric = value
@@ -1044,7 +1048,7 @@ def authorize_full_execution(
         )
     if (
         not _positive_operation_limit(max_agent_operations)
-        or not _positive_operation_limit(max_judge_operations)
+        or not _nonnegative_operation_limit(max_judge_operations)
         or not _positive_usd_limit(max_cost_usd)
         or not _positive_usd_limit(max_agent_cost_per_operation_usd)
         or not _positive_usd_limit(max_judge_cost_per_operation_usd)
