@@ -354,6 +354,26 @@ class PathlightQueryTests(unittest.TestCase):
                 (), (self.evaluation_a, self.evaluation_a), (METRIC_CONTRACT,)
             )
 
+    def test_catalog_deduplicates_identical_metric_contract_identities(self) -> None:
+        duplicate = MetricContract("accuracy", "ratio", True, "1.0.0")
+
+        catalog = PathlightCatalog.build(
+            (), (self.evaluation_a,), (METRIC_CONTRACT, duplicate)
+        )
+
+        self.assertEqual(
+            catalog.query_metrics()[0]["metric_name"], METRIC_CONTRACT.metric_name
+        )
+
+    def test_catalog_rejects_tampered_contract_with_conflicting_digest(self) -> None:
+        conflicting = MetricContract("accuracy", "ratio", True, "1.0.0")
+        object.__setattr__(conflicting, "metric_name", "coverage")
+
+        with self.assertRaises(PathlightError):
+            PathlightCatalog.build(
+                (), (self.evaluation_a,), (METRIC_CONTRACT, conflicting)
+            )
+
     def test_catalog_rejects_unknown_identity_and_malformed_queries_without_type_errors(
         self,
     ) -> None:

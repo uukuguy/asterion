@@ -13,6 +13,7 @@ from asterion.pathlight.evaluation import (
     MetricContract,
     compare_evaluations,
     validate_evaluation_record,
+    validate_metric_contract,
 )
 from asterion.pathlight.protocol import (
     PathlightError,
@@ -216,12 +217,7 @@ class PathlightCatalog:
         for supplied_contract_sha256, source_contract in self._metric_contracts.items():
             if not isinstance(source_contract, MetricContract):
                 raise PathlightError("Pathlight metric contract is invalid")
-            contract = MetricContract(
-                source_contract.metric_name,
-                source_contract.unit,
-                source_contract.higher_is_better,
-                source_contract.contract_version,
-            )
+            contract = validate_metric_contract(source_contract.to_mapping())
             if (
                 supplied_contract_sha256 != contract.metric_contract_sha256
                 or contract.metric_contract_sha256 in contracts
@@ -269,15 +265,13 @@ class PathlightCatalog:
         for contract in metric_contracts:
             if not isinstance(contract, MetricContract):
                 raise PathlightError("Pathlight metric contract is invalid")
-            validated_contract = MetricContract(
-                contract.metric_name,
-                contract.unit,
-                contract.higher_is_better,
-                contract.contract_version,
-            )
-            if validated_contract.metric_contract_sha256 in contracts:
-                raise PathlightError("Pathlight metric contract identity is duplicated")
-            contracts[validated_contract.metric_contract_sha256] = validated_contract
+            validated_contract = validate_metric_contract(contract.to_mapping())
+            identity = validated_contract.metric_contract_sha256
+            existing = contracts.get(identity)
+            if existing is None:
+                contracts[identity] = validated_contract
+            elif existing != validated_contract:
+                raise PathlightError("Pathlight metric contract identity is conflicting")
         for bundle in bundles:
             if not isinstance(bundle, WorkflowObservationBundle):
                 raise PathlightError("Pathlight observation bundle is invalid")

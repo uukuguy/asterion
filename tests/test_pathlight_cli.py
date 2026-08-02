@@ -168,6 +168,75 @@ class PathlightCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(stdout.getvalue())["delta_microunits"], 25)
 
+    def test_metric_query_deduplicates_shared_contract_across_evaluation_files(self) -> None:
+        contract, first = _evaluation(100)
+        _, second = _evaluation(125)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            first_root = root / "first"
+            second_root = root / "second"
+            first_root.mkdir()
+            second_root.mkdir()
+            first_path = first_root / "pathlight-evaluations.json"
+            second_path = second_root / "pathlight-evaluations.json"
+            write_evaluation_bundle(first_path, (first,), (contract,))
+            write_evaluation_bundle(second_path, (second,), (contract,))
+            stdout = io.StringIO()
+
+            code = main(
+                [
+                    "pathlight",
+                    "metrics",
+                    "query",
+                    "--evaluation-file",
+                    str(first_path),
+                    "--evaluation-file",
+                    str(second_path),
+                ],
+                stdout=stdout,
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            [row["evaluation_sha256"] for row in json.loads(stdout.getvalue())],
+            sorted((first.evaluation_sha256, second.evaluation_sha256)),
+        )
+
+    def test_compare_deduplicates_shared_contract_across_evaluation_files(self) -> None:
+        contract, baseline = _evaluation(100)
+        _, candidate = _evaluation(125)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            baseline_root = root / "baseline"
+            candidate_root = root / "candidate"
+            baseline_root.mkdir()
+            candidate_root.mkdir()
+            baseline_path = baseline_root / "pathlight-evaluations.json"
+            candidate_path = candidate_root / "pathlight-evaluations.json"
+            write_evaluation_bundle(baseline_path, (baseline,), (contract,))
+            write_evaluation_bundle(candidate_path, (candidate,), (contract,))
+            stdout = io.StringIO()
+
+            code = main(
+                [
+                    "pathlight",
+                    "evaluate",
+                    "compare",
+                    "--evaluation-file",
+                    str(baseline_path),
+                    "--evaluation-file",
+                    str(candidate_path),
+                    "--baseline",
+                    baseline.evaluation_sha256,
+                    "--candidate",
+                    candidate.evaluation_sha256,
+                ],
+                stdout=stdout,
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(stdout.getvalue())["delta_microunits"], 25)
+
     def test_cli_requires_absolute_canonical_regular_filenames(self) -> None:
         stderr = io.StringIO()
 
