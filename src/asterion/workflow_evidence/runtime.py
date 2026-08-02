@@ -443,8 +443,7 @@ class _RuntimePathlightProjection:
         if self._recorder is None or self._trace_id is None:
             return
         try:
-            for event in self._events:
-                self._recorder.record(event)
+            self._recorder.record_many(tuple(self._events))
         except Exception:
             self._disable()
 

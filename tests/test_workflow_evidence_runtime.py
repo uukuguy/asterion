@@ -145,7 +145,59 @@ class RepeatedClock:
         return self.value
 
 
+class PrefixRejectingRecorder:
+    """Reject a batch after inspecting its prefix without committing it."""
+
+    def __init__(self) -> None:
+        self.trace_id = TRACE_ID
+        self.next_sequence = 1
+        self.active_span_id = None
+        self._accepted: list[TraceEvent] = []
+        self.record_many_calls = 0
+
+    @property
+    def event_count(self) -> int:
+        return len(self._accepted)
+
+    def record(self, event: TraceEvent) -> None:
+        self._accepted.append(event)
+        if len(self._accepted) == 3:
+            raise RuntimeError("recorder rejected trace after a prefix")
+
+    def record_many(self, events: tuple[TraceEvent, ...]) -> None:
+        self.record_many_calls += 1
+        for index, event in enumerate(events, start=1):
+            assert isinstance(event, TraceEvent)
+            if index == 3:
+                raise RuntimeError("recorder rejected trace after a prefix")
+        self._accepted.extend(events)
+
+    def snapshot(self) -> None:
+        return None
+
+
 class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_projection_rejection_does_not_persist_a_partial_trace(self) -> None:
+        recorder = PrefixRejectingRecorder()
+        observed = ObservedRuntimeClient(
+            CompletedRuntime(),
+            pathlight=recorder,
+            monotonic_ns=IncrementingClock(),
+        )
+
+        events = [
+            event
+            async for event in observed.run(
+                RunRequest(run_id="run-1", input_text="SENTINEL_SECRET_INPUT")
+            )
+        ]
+
+        self.assertEqual(events[-1].type, "run.completed")
+        self.assertEqual(len(observed.records), 1)
+        self.assertEqual(recorder.record_many_calls, 1)
+        self.assertEqual(recorder.event_count, 0)
+        self.assertIsNone(recorder.snapshot())
+
     async def test_repeated_clock_values_keep_runtime_projection_complete(self) -> None:
         runtime = CompletedRuntime()
         recorder = MemoryPathlightRecorder(TRACE_ID)

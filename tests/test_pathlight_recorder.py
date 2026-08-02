@@ -13,6 +13,7 @@ def opaque_id(number: int) -> str:
 TRACE_ID = opaque_id(1)
 OTHER_TRACE_ID = opaque_id(2)
 ROOT_SPAN_ID = opaque_id(3)
+CHILD_SPAN_ID = opaque_id(4)
 
 
 class PathlightRecorderTests(unittest.TestCase):
@@ -43,6 +44,27 @@ class PathlightRecorderTests(unittest.TestCase):
                 TraceEvent.start(OTHER_TRACE_ID, ROOT_SPAN_ID, None, 1, "task")
             )
 
+    def test_memory_recorder_record_many_validates_the_complete_candidate_before_commit(
+        self,
+    ) -> None:
+        recorder = MemoryPathlightRecorder(TRACE_ID)
+
+        with self.assertRaises(PathlightError):
+            recorder.record_many(
+                (
+                    TraceEvent.start(TRACE_ID, ROOT_SPAN_ID, None, 1, "task"),
+                    TraceEvent.start(
+                        TRACE_ID,
+                        CHILD_SPAN_ID,
+                        ROOT_SPAN_ID,
+                        3,
+                        "task",
+                    ),
+                )
+            )
+
+        self.assertEqual(recorder.event_count, 0)
+
     def test_memory_recorder_fails_closed_for_an_incomplete_graph(self) -> None:
         recorder = MemoryPathlightRecorder(TRACE_ID)
         recorder.record(TraceEvent.start(TRACE_ID, ROOT_SPAN_ID, None, 1, "task"))
@@ -53,6 +75,9 @@ class PathlightRecorderTests(unittest.TestCase):
     def test_noop_recorder_retains_no_events(self) -> None:
         recorder = NoopPathlightRecorder()
         recorder.record(TraceEvent.start(TRACE_ID, ROOT_SPAN_ID, None, 1, "task"))
+        recorder.record_many(
+            (TraceEvent.start(TRACE_ID, ROOT_SPAN_ID, None, 1, "task"),)
+        )
 
         self.assertIsNone(recorder.snapshot())
 
