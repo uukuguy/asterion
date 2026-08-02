@@ -82,7 +82,7 @@
           "properties": {
             "value": {"oneOf": [{"$ref": "#/$defs/unit"}, {"type": "null"}]},
             "matched_gold_count": {"type": "integer", "minimum": 0},
-            "unavailable_reason": {"enum": [null, "no-surfaced-gold"]},
+            "unavailable_reason": {"enum": [null, "no-surfaced-gold", "evidence-spans-unavailable"]},
             "per_document": {
               "type": "array",
               "items": {

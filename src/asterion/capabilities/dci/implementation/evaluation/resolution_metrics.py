@@ -17,6 +17,7 @@ class LocalizationUnavailableReason(str, Enum):
     NO_SURFACED_GOLD = "no-surfaced-gold"
     NO_DATASET_SURFACED_GOLD = "no-dataset-surfaced-gold"
     FINAL_CONTEXT_UNAVAILABLE = "final-context-unavailable"
+    EVIDENCE_SPANS_UNAVAILABLE = "evidence-spans-unavailable"
 
 
 @dataclass(frozen=True, slots=True)

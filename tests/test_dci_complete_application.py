@@ -95,6 +95,7 @@ DCI_EXECUTABLE_SOURCE_ROOTS = (
     "capabilities/dci/implementation/runtime/bridge.py",
     "capabilities/dci/implementation/evaluation/evaluation.py",
     "capabilities/dci/implementation/evaluation/judge.py",
+    "capabilities/dci/implementation/pathlight/coverage.py",
     "capabilities/dci/implementation/runtime/run.py",
     "capabilities/dci/implementation/services.py",
 )
@@ -106,6 +107,8 @@ DCI_PACKAGED_RESOURCE_CLOSURE = {
     "capabilities/dci/resources/experiment-profiles.json",
     "capabilities/dci/resources/gold-document-manifest.schema.json",
     "capabilities/dci/resources/gold-document-registry.schema.json",
+    "capabilities/dci/resources/retrieval-coverage-manifest.schema.json",
+    "capabilities/dci/resources/retrieval-coverage-registry.schema.json",
     "capabilities/dci/resources/paper-ablation-matrix.json",
     "capabilities/dci/resources/paper-ablation.schema.json",
     "capabilities/dci/resources/paper-benchmark.schema.json",
@@ -257,7 +260,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
             if name.endswith(".py")
         }
         self.assertEqual(declared, reachable)
-        self.assertEqual(len(DCI_COMPLETE_IMPLEMENTATION_RESOURCES), 68)
+        self.assertEqual(len(DCI_COMPLETE_IMPLEMENTATION_RESOURCES), 71)
 
     def test_transitive_identity_contains_explicit_packaged_resource_closure(
         self,

@@ -20,6 +20,8 @@ from asterion.capabilities.dci.implementation.evaluation.artifacts import (
     validate_latest_context_evidence,
 )
 from asterion.capabilities.dci.implementation.evaluation.resolution_metrics import (
+    LocalizationAggregate,
+    LocalizationUnavailableReason,
     best_document_localization,
     compute_query_coverage,
     compute_retained_coverage,
@@ -99,7 +101,7 @@ class _GoldDocument:
     relative_path: str
     body: str
     digest: str
-    evidence_spans: tuple[tuple[int, int], ...]
+    evidence_spans: tuple[tuple[int, int], ...] | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -454,9 +456,11 @@ def _parse_gold_manifest(
     data: bytes, corpus_dir: Path
 ) -> tuple[str, str, tuple[_GoldDocument, ...], tuple[_Snapshot, ...]]:
     manifest = _json_object(data, label="gold manifest")
-    if set(manifest) != {"schema", "dataset_id", "query_id", "documents"} or manifest.get(
-        "schema"
-    ) != "dci.gold-document-manifest/v1":
+    schema = manifest.get("schema")
+    if set(manifest) != {"schema", "dataset_id", "query_id", "documents"} or schema not in {
+        "dci.gold-document-manifest/v1",
+        "dci.retrieval-coverage-manifest/v1",
+    }:
         raise TrajectoryResolutionError("DCI gold manifest is invalid")
     dataset_id = manifest.get("dataset_id")
     query_id = manifest.get("query_id")
@@ -474,12 +478,12 @@ def _parse_gold_manifest(
     snapshots: list[_Snapshot] = []
     aliases: set[str] = set()
     for entry in entries:
-        if type(entry) is not dict or set(entry) != {
-            "id",
-            "path",
-            "sha256",
-            "evidence_spans",
-        }:
+        expected_fields = (
+            {"id", "path", "sha256", "evidence_spans"}
+            if schema == "dci.gold-document-manifest/v1"
+            else {"id", "path", "sha256"}
+        )
+        if type(entry) is not dict or set(entry) != expected_fields:
             raise TrajectoryResolutionError("DCI gold manifest is invalid")
         document_id = _safe_relative_path(entry.get("id"))
         relative_path = _safe_relative_path(entry.get("path"))
@@ -497,31 +501,33 @@ def _parse_gold_manifest(
             body = body_bytes.decode("utf-8")
         except UnicodeDecodeError as error:
             raise TrajectoryResolutionError("DCI gold document is not UTF-8") from error
-        spans_value = entry.get("evidence_spans")
-        if type(spans_value) is not list or not spans_value:
-            raise TrajectoryResolutionError("DCI gold evidence spans are invalid")
-        spans: list[tuple[int, int]] = []
-        for span in spans_value:
-            if (
-                type(span) is not dict
-                or set(span) != {"start", "end"}
-                or type(span.get("start")) is not int
-                or type(span.get("end")) is not int
-                or span["start"] < 0
-                or span["start"] >= span["end"]
-                or span["end"] > len(body)
-            ):
+        spans: list[tuple[int, int]] | None = None
+        if schema == "dci.gold-document-manifest/v1":
+            spans_value = entry.get("evidence_spans")
+            if type(spans_value) is not list or not spans_value:
                 raise TrajectoryResolutionError("DCI gold evidence spans are invalid")
-            spans.append((span["start"], span["end"]))
-        if spans != sorted(set(spans)):
-            raise TrajectoryResolutionError("DCI gold evidence spans are invalid")
+            spans = []
+            for span in spans_value:
+                if (
+                    type(span) is not dict
+                    or set(span) != {"start", "end"}
+                    or type(span.get("start")) is not int
+                    or type(span.get("end")) is not int
+                    or span["start"] < 0
+                    or span["start"] >= span["end"]
+                    or span["end"] > len(body)
+                ):
+                    raise TrajectoryResolutionError("DCI gold evidence spans are invalid")
+                spans.append((span["start"], span["end"]))
+            if spans != sorted(set(spans)):
+                raise TrajectoryResolutionError("DCI gold evidence spans are invalid")
         documents.append(
             _GoldDocument(
                 document_id=document_id,
                 relative_path=relative_path,
                 body=body,
                 digest=snapshot.sha256,
-                evidence_spans=tuple(spans),
+                evidence_spans=None if spans is None else tuple(spans),
             )
         )
         snapshots.append(snapshot)
@@ -697,7 +703,7 @@ def _read_alignments(
     if document is None:
         return []
     starts = [match.start() for match in re.finditer(re.escape(observation.output), document.body)] if observation.output else []
-    if len(starts) == 1:
+    if len(starts) == 1 and document.evidence_spans is not None:
         start = starts[0]
         end = start + len(observation.output)
         if _overlaps_gold(start, end, document.evidence_spans, config.read_minimum_evidence_overlap):
@@ -876,7 +882,7 @@ def _retained_alignments(
         return None
     evidence_owners: dict[str, set[str]] = {}
     for document in documents:
-        for start, end in document.evidence_spans:
+        for start, end in document.evidence_spans or ():
             evidence_owners.setdefault(document.body[start:end], set()).add(
                 document.document_id
             )
@@ -905,7 +911,7 @@ def _retained_alignments(
             continue
         candidates = [
             document.body[start:end]
-            for start, end in document.evidence_spans
+            for start, end in document.evidence_spans or ()
             if evidence_owners.get(document.body[start:end]) == {document.document_id}
         ]
         match = next(
@@ -1071,23 +1077,33 @@ def analyze_trajectory_resolution(
     gold = gold_document_set(tuple(document.document_id for document in documents))
     surfaced = surfaced_gold_set(gold, surfaced_ids)
     coverage = compute_query_coverage(gold, surfaced)
-    localizations = []
-    for document in documents:
-        candidates = [
-            int(item["snippet_characters"])
-            for item in alignments
-            if item["document_id"] == document.document_id
-        ]
-        if candidates:
-            localizations.append(
-                best_document_localization(
-                    document.document_id,
-                    len(document.body),
-                    candidates,
-                    config.segment_characters,
+    if all(document.evidence_spans is not None for document in documents):
+        localizations = []
+        for document in documents:
+            candidates = [
+                snippet
+                for item in alignments
+                for snippet in (item.get("snippet_characters"),)
+                if item["document_id"] == document.document_id
+                and type(snippet) is int
+            ]
+            if candidates:
+                localizations.append(
+                    best_document_localization(
+                        document.document_id,
+                        len(document.body),
+                        candidates,
+                        config.segment_characters,
+                    )
                 )
-            )
-    localization = query_localization(localizations)
+        localization = query_localization(localizations)
+    else:
+        localization = LocalizationAggregate(
+            value=None,
+            matched_gold_count=0,
+            per_document=(),
+            unavailable_reason=LocalizationUnavailableReason.EVIDENCE_SPANS_UNAVAILABLE,
+        )
     retained_ids = (
         None
         if retained_alignments is None
@@ -1233,6 +1249,12 @@ def _non_negative_int(value: object) -> int:
 
 def _valid_analysis_configuration(value: object) -> bool:
     overlap = value.get("read_minimum_evidence_overlap") if type(value) is dict else None
+    if type(overlap) is int:
+        numeric_overlap = float(overlap)
+    elif type(overlap) is float:
+        numeric_overlap = overlap
+    else:
+        return False
     return (
         type(value) is dict
         and set(value)
@@ -1244,9 +1266,8 @@ def _valid_analysis_configuration(value: object) -> bool:
         }
         and value.get("parameter_source") == "asterion-defined"
         and value.get("alignment_version") == "dci.paper-alignment/v1"
-        and type(overlap) in {int, float}
-        and math.isfinite(float(overlap))
-        and 0.0 < float(overlap) <= 1.0
+        and math.isfinite(numeric_overlap)
+        and 0.0 < numeric_overlap <= 1.0
         and type(value.get("segment_characters")) is int
         and value["segment_characters"] > 0
     )
@@ -1413,6 +1434,9 @@ def _validated_public_fields(
         _finite_unit_float(item.get("value"))
     value = localization.get("value")
     reason = localization.get("unavailable_reason")
+    unavailable_localization = reason == "evidence-spans-unavailable" or (
+        reason == "no-surfaced-gold" and surfaced_count == 0
+    )
     if matched_count:
         expected = sum(item["value"] for item in per_document) / matched_count
         if (
@@ -1422,7 +1446,7 @@ def _validated_public_fields(
             or matched_count != surfaced_count
         ):
             raise TrajectoryResolutionError("DCI public localization evidence is invalid")
-    elif value is not None or reason != "no-surfaced-gold" or surfaced_count != 0:
+    elif value is not None or not unavailable_localization:
         raise TrajectoryResolutionError("DCI public localization evidence is invalid")
     retained_value = retained.get("value")
     retained_reason = retained.get("unavailable_reason")
@@ -1540,15 +1564,14 @@ def validate_public_resolution_summary(summary: object) -> dict[str, Any]:
     matched_count = _non_negative_int(localization.get("matched_gold_count"))
     localization_value = localization.get("value")
     localization_reason = localization.get("unavailable_reason")
+    unavailable_localization = localization_reason == "evidence-spans-unavailable" or (
+        localization_reason == "no-surfaced-gold" and surfaced_count == 0
+    )
     if matched_count:
         _finite_unit_float(localization_value)
         if matched_count != surfaced_count or localization_reason is not None:
             raise TrajectoryResolutionError("DCI public resolution summary is invalid")
-    elif (
-        localization_value is not None
-        or localization_reason != "no-surfaced-gold"
-        or surfaced_count != 0
-    ):
+    elif localization_value is not None or not unavailable_localization:
         raise TrajectoryResolutionError("DCI public resolution summary is invalid")
     retained_value = retained.get("value")
     retained_reason = retained.get("unavailable_reason")
