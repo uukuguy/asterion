@@ -171,7 +171,7 @@ class CaseTrial:
     case_trial_sha256: str = field(init=False)
 ```
 
-每个 `__post_init__` 必须检查 exact primitive type、SHA-256、semver、枚举、非负计数和 sorted-unique tuple，再以 canonical JSON 计算 digest。`missing_evidence` 只允许 `context-frames`、`retrieval-coverage`、`tool-payload-lineage`、`sealed-config-digest`、`sealed-analysis-digest` 和 `paper-method-detail`。
+每个 `__post_init__` 必须检查 exact primitive type、SHA-256、semver、枚举、非负计数和 sorted-unique tuple，再以 canonical JSON 计算 digest。`missing_evidence` 只允许 `assembly-lineage`、`package-lineage`、`trace-graph`、`context-frames`、`retrieval-coverage`、`tool-payload-lineage`、`sealed-config-digest`、`sealed-analysis-digest` 和 `paper-method-detail`。
 
 - [ ] **Step 4: 验证 GREEN 和静态检查**
 
@@ -565,7 +565,7 @@ Expected: FAIL，因为 conversion module 不存在。
 
 `load_paper_reference` 必须从已校验的 `reproduction-targets.json` 读取 DCI-Agent-CC main target，并与 `paper-benchmarks.json` 的 source count 交叉验证。不得从 `docs/status` 反向解析分数。
 
-`recovered_run_to_experiment` 必须创建：一个 DatasetSnapshot、一个 recovered EvaluatorContract、一个 baseline Variant、一个 observation ExperimentPlan、每 case 一个 EvaluationRecord/CaseTrial，以及一个 aggregate EvaluationRecord。每个 case scope 绑定其 dataset item digest；aggregate scope 绑定 selected ID set digest。论文 target 不写入 candidate variant，也不伪造成 trace。
+`recovered_run_to_experiment` 必须创建：一个 DatasetSnapshot、一个 recovered EvaluatorContract、一个 baseline Variant、一个 observation ExperimentPlan、每 case 一个 EvaluationRecord/CaseTrial，以及一个 aggregate EvaluationRecord。每个 case scope 绑定其 dataset item digest；aggregate scope 绑定 selected ID set digest。旧 evidence 没有 generic assembly/package identity 或 Pathlight TraceGraph；转换必须为 recovery projection 生成 domain-separated digest，并在每个 trial 明确记录 `assembly-lineage`、`package-lineage`、`trace-graph` missing evidence，不能把派生 digest 称为原始观测。论文 target 不写入 candidate variant，也不伪造成 trace。
 
 - [ ] **Step 4: 验证并提交**
 
