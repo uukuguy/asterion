@@ -12,6 +12,7 @@ from asterion.workflow_evidence.runtime import ObservedRuntimeClient
 from asterion.workflow_evidence.storage import (
     WorkflowObservationBundle,
     read_workflow_observation_bundle,
+    validate_workflow_observation_bundle,
     write_workflow_observation_bundle,
 )
 
@@ -24,6 +25,7 @@ __all__ = [
     "ObservedRuntimeClient",
     "diagnose_workflow_comparison",
     "read_workflow_observation_bundle",
+    "validate_workflow_observation_bundle",
     "validate_workflow_evidence",
     "write_workflow_observation_bundle",
 ]

@@ -12,8 +12,10 @@ from unittest.mock import patch
 
 from asterion.pathlight import TraceEvent, TraceGraph
 from asterion.workflow_evidence import (
+    WorkflowObservationBundle,
     WorkflowEvidenceError,
     read_workflow_observation_bundle,
+    validate_workflow_observation_bundle,
     write_workflow_observation_bundle,
 )
 
@@ -93,7 +95,9 @@ def _failure_record(run_id: str) -> dict[str, object]:
 def _mutated_bundle_path(root: Path, mutation: str) -> Path:
     path = root / "workflow-evidence.json"
     trace = _completed_pathlight_trace()
-    write_workflow_observation_bundle(path, (_completed_record(),), pathlight_traces=(trace,))
+    write_workflow_observation_bundle(
+        path, (_completed_record(),), pathlight_traces=(trace,)
+    )
     if mutation == "symlink":
         target = root / "source.json"
         path.rename(target)
@@ -212,7 +216,9 @@ class WorkflowEvidenceStorageTests(unittest.TestCase):
             {
                 "schema": "asterion.pathlight-workflow-summary/v1",
                 "source_graph_sha256": hashlib.sha256(
-                    json.dumps(record, sort_keys=True, separators=(",", ":")).encode("utf-8")
+                    json.dumps(record, sort_keys=True, separators=(",", ":")).encode(
+                        "utf-8"
+                    )
                 ).hexdigest(),
                 "run_sha256": _text_digest(run_id),
                 "input_sha256": "b" * 64,
@@ -253,14 +259,20 @@ class WorkflowEvidenceStorageTests(unittest.TestCase):
             "artifact-private-field",
         )
         for mutation in mutations:
-            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(mutation=mutation),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 with self.assertRaises(WorkflowEvidenceError):
                     read_workflow_observation_bundle(
                         _mutated_bundle_path(Path(directory).resolve(), mutation)
                     )
 
     def test_reader_rejects_ancestor_symlink_and_final_replacement(self) -> None:
-        with self.subTest("ancestor-symlink"), tempfile.TemporaryDirectory() as directory:
+        with (
+            self.subTest("ancestor-symlink"),
+            tempfile.TemporaryDirectory() as directory,
+        ):
             root = Path(directory).resolve()
             target = root / "target"
             target.mkdir()
@@ -270,9 +282,14 @@ class WorkflowEvidenceStorageTests(unittest.TestCase):
             (root / "ancestor").symlink_to(target, target_is_directory=True)
 
             with self.assertRaises(WorkflowEvidenceError):
-                read_workflow_observation_bundle(root / "ancestor" / "workflow-evidence.json")
+                read_workflow_observation_bundle(
+                    root / "ancestor" / "workflow-evidence.json"
+                )
 
-        with self.subTest("final-replacement"), tempfile.TemporaryDirectory() as directory:
+        with (
+            self.subTest("final-replacement"),
+            tempfile.TemporaryDirectory() as directory,
+        ):
             root = Path(directory).resolve()
             path = root / "workflow-evidence.json"
             replacement = root / "replacement.json"
@@ -292,10 +309,13 @@ class WorkflowEvidenceStorageTests(unittest.TestCase):
                     path.symlink_to(replacement)
                 return original_open(name, flags, mode, dir_fd=dir_fd)
 
-            with patch(
-                "asterion.workflow_evidence.storage.os.open",
-                side_effect=replace_before_final_open,
-            ), self.assertRaises(WorkflowEvidenceError):
+            with (
+                patch(
+                    "asterion.workflow_evidence.storage.os.open",
+                    side_effect=replace_before_final_open,
+                ),
+                self.assertRaises(WorkflowEvidenceError),
+            ):
                 read_workflow_observation_bundle(path)
 
     def test_reads_written_bundle_as_immutable_validated_value(self) -> None:
@@ -309,6 +329,8 @@ class WorkflowEvidenceStorageTests(unittest.TestCase):
             )
 
             bundle = read_workflow_observation_bundle(path)
+
+            validate_workflow_observation_bundle(bundle)
 
             self.assertEqual(
                 bundle.bundle_sha256,
@@ -328,6 +350,36 @@ class WorkflowEvidenceStorageTests(unittest.TestCase):
             with self.assertRaises(TypeError):
                 bundle.records[0]["usage"]["input_tokens"] = 1  # type: ignore[index]
 
+    def test_bundle_projection_digest_rejects_forged_typed_values(self) -> None:
+        trace = _completed_pathlight_trace()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / "workflow-evidence.json"
+            write_workflow_observation_bundle(
+                path, (_completed_record(),), pathlight_traces=(trace,)
+            )
+            bundle = read_workflow_observation_bundle(path)
+            tampered_record = dict(bundle.records[0])
+            tampered_record["run_sha256"] = "SENTINEL_PRIVATE"
+
+            with self.assertRaises(WorkflowEvidenceError):
+                WorkflowObservationBundle(
+                    records=(tampered_record,),
+                    pathlight_traces=bundle.pathlight_traces,
+                    bundle_sha256=bundle.bundle_sha256,
+                    projection_sha256=bundle.projection_sha256,
+                )
+            with self.assertRaises(WorkflowEvidenceError):
+                WorkflowObservationBundle(
+                    records=bundle.records,
+                    pathlight_traces=bundle.pathlight_traces,
+                    bundle_sha256=bundle.bundle_sha256,
+                    projection_sha256="0" * 64,
+                )
+
+            incomplete = object.__new__(WorkflowObservationBundle)
+            with self.assertRaises(WorkflowEvidenceError):
+                validate_workflow_observation_bundle(incomplete)
+
     def test_reader_rejects_invalid_or_tampered_bundle(self) -> None:
         mutations = (
             "symlink",
@@ -339,7 +391,10 @@ class WorkflowEvidenceStorageTests(unittest.TestCase):
             "unknown-field",
         )
         for mutation in mutations:
-            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+            with (
+                self.subTest(mutation=mutation),
+                tempfile.TemporaryDirectory() as directory,
+            ):
                 with self.assertRaises(WorkflowEvidenceError):
                     read_workflow_observation_bundle(
                         _mutated_bundle_path(Path(directory).resolve(), mutation)
@@ -384,7 +439,9 @@ class WorkflowEvidenceStorageTests(unittest.TestCase):
 
             self.assertEqual(existing.read_text(encoding="utf-8"), "keep")
             with self.assertRaises(ValueError):
-                write_workflow_observation_bundle(root / "other.json", (_completed_record(),))
+                write_workflow_observation_bundle(
+                    root / "other.json", (_completed_record(),)
+                )
 
     def test_writes_validated_pathlight_traces_into_bundle_digest(self) -> None:
         record = _completed_record()

@@ -18,7 +18,11 @@ from asterion.pathlight.protocol import (
     SAFE_STATUSES,
     validate_trace_graph,
 )
-from asterion.workflow_evidence.storage import WorkflowObservationBundle
+from asterion.workflow_evidence.collector import WorkflowEvidenceError
+from asterion.workflow_evidence.storage import (
+    WorkflowObservationBundle,
+    validate_workflow_observation_bundle,
+)
 
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -152,7 +156,34 @@ class PathlightCatalog:
     """A deterministic in-memory index of verified public Pathlight records."""
 
     _traces: Mapping[str, Mapping[str, object]]
-    _evaluations: Mapping[str, EvaluationRecord]
+    _evaluations: Mapping[str, Mapping[str, object] | EvaluationRecord]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self._traces, Mapping) or not isinstance(
+            self._evaluations, Mapping
+        ):
+            raise PathlightError("Pathlight catalog input is invalid")
+        traces: dict[str, Mapping[str, object]] = {}
+        records: dict[str, Mapping[str, object]] = {}
+        for supplied_trace_id, source_trace in self._traces.items():
+            trace = _validated_frozen_trace(source_trace)
+            trace_id = _require_trace_id(trace["trace_id"])
+            if supplied_trace_id != trace_id or trace_id in traces:
+                raise PathlightError("Pathlight trace identity is invalid")
+            traces[trace_id] = trace
+        for supplied_evaluation_sha256, source_record in self._evaluations.items():
+            record = _validated_frozen_evaluation(source_record)
+            evaluation_sha256 = _require_sha256(
+                record["evaluation_sha256"], field_name="evaluation identity"
+            )
+            if (
+                supplied_evaluation_sha256 != evaluation_sha256
+                or evaluation_sha256 in records
+            ):
+                raise PathlightError("Pathlight evaluation identity is invalid")
+            records[evaluation_sha256] = record
+        object.__setattr__(self, "_traces", MappingProxyType(traces))
+        object.__setattr__(self, "_evaluations", MappingProxyType(records))
 
     @classmethod
     def build(
@@ -167,8 +198,12 @@ class PathlightCatalog:
         for bundle in bundles:
             if not isinstance(bundle, WorkflowObservationBundle):
                 raise PathlightError("Pathlight observation bundle is invalid")
-            if not isinstance(bundle.pathlight_traces, tuple):
-                raise PathlightError("Pathlight observation bundle is invalid")
+            try:
+                validate_workflow_observation_bundle(bundle)
+            except WorkflowEvidenceError:
+                raise PathlightError(
+                    "Pathlight observation bundle is invalid"
+                ) from None
             for source_trace in bundle.pathlight_traces:
                 trace = _validated_frozen_trace(source_trace)
                 trace_id = _require_trace_id(trace["trace_id"])
@@ -189,17 +224,19 @@ class PathlightCatalog:
     ) -> tuple[Mapping[str, object], ...]:
         query = _require_trace_filter(query)
         return tuple(
-            _trace_summary(self._traces[trace_id])
+            _trace_summary(trace)
             for trace_id in sorted(self._traces)
-            if _matches_trace_filter(self._traces[trace_id], query)
+            for trace in (_read_validated_trace(self._traces, trace_id),)
+            if _matches_trace_filter(trace, query)
         )
 
     def show_trace(self, trace_id: str) -> Mapping[str, object]:
         trace_id = _require_trace_id(trace_id)
         try:
-            return self._traces[trace_id]
+            trace = self._traces[trace_id]
         except KeyError as error:
             raise PathlightError("Pathlight trace identity is unknown") from error
+        return _validated_frozen_trace(trace)
 
     def tail_trace(
         self, trace_id: str, *, after_sequence: int = 0
@@ -223,9 +260,12 @@ class PathlightCatalog:
     ) -> tuple[Mapping[str, object], ...]:
         query = _require_metric_filter(query)
         return tuple(
-            _metric_projection(self._evaluations[evaluation_sha256])
+            _metric_projection(record)
             for evaluation_sha256 in sorted(self._evaluations)
-            if _matches_metric_filter(self._evaluations[evaluation_sha256], query)
+            for record in (
+                _read_validated_evaluation(self._evaluations, evaluation_sha256),
+            )
+            if _matches_metric_filter(record, query)
         )
 
     def compare_evaluation_ids(
@@ -238,10 +278,12 @@ class PathlightCatalog:
             candidate_sha256, field_name="candidate evaluation identity"
         )
         try:
-            baseline = self._evaluations[baseline_sha256]
-            candidate = self._evaluations[candidate_sha256]
+            baseline_mapping = self._evaluations[baseline_sha256]
+            candidate_mapping = self._evaluations[candidate_sha256]
         except KeyError as error:
             raise PathlightError("Pathlight evaluation identity is unknown") from error
+        baseline = _evaluation_record(baseline_mapping)
+        candidate = _evaluation_record(candidate_mapping)
         comparison = compare_evaluations(baseline, candidate)
         return _FrozenDict(
             {
@@ -274,6 +316,46 @@ def _validated_frozen_trace(value: object) -> Mapping[str, object]:
     if not isinstance(frozen, Mapping):
         raise PathlightError("Pathlight trace is invalid")
     return frozen
+
+
+def _validated_frozen_evaluation(value: object) -> Mapping[str, object]:
+    if isinstance(value, EvaluationRecord):
+        mutable = value.to_mapping()
+    elif isinstance(value, Mapping):
+        mutable = _mutable_json(value)
+    else:
+        raise PathlightError("Pathlight evaluation record is invalid")
+    if not isinstance(mutable, Mapping):
+        raise PathlightError("Pathlight evaluation record is invalid")
+    try:
+        record = validate_evaluation_record(mutable)
+    except (PathlightError, TypeError, ValueError):
+        raise PathlightError("Pathlight evaluation record is invalid") from None
+    frozen = _freeze_json(record.to_mapping())
+    if not isinstance(frozen, Mapping):
+        raise PathlightError("Pathlight evaluation record is invalid")
+    return frozen
+
+
+def _read_validated_trace(
+    traces: Mapping[str, Mapping[str, object]], trace_id: str
+) -> Mapping[str, object]:
+    return _validated_frozen_trace(traces[trace_id])
+
+
+def _read_validated_evaluation(
+    evaluations: Mapping[str, Mapping[str, object] | EvaluationRecord],
+    evaluation_sha256: str,
+) -> EvaluationRecord:
+    return _evaluation_record(evaluations[evaluation_sha256])
+
+
+def _evaluation_record(value: object) -> EvaluationRecord:
+    frozen = _validated_frozen_evaluation(value)
+    mutable = _mutable_json(frozen)
+    if not isinstance(mutable, Mapping):
+        raise PathlightError("Pathlight evaluation record is invalid")
+    return validate_evaluation_record(mutable)
 
 
 def _require_trace_filter(value: object) -> TraceFilter:

@@ -18,6 +18,7 @@ from asterion.pathlight import (
 from asterion.workflow_evidence import (
     WorkflowObservationBundle,
     read_workflow_observation_bundle,
+    validate_workflow_observation_bundle,
     write_workflow_observation_bundle,
 )
 
@@ -150,6 +151,69 @@ class PathlightQueryTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             catalog.query_metrics()[0]["status"] = "missing"  # type: ignore[index]
 
+    def test_return_value_mutation_cannot_change_catalog_internal_state(self) -> None:
+        catalog = PathlightCatalog.build((self.bundle_a,), (self.evaluation_a,))
+        original_trace_sha256 = catalog.show_trace(TRACE_A)["trace_sha256"]
+        returned_trace = catalog.show_trace(TRACE_A)
+        returned_attributes = returned_trace["events"][1]["attributes"]
+        returned_metric = catalog.query_metrics()[0]
+
+        dict.__setitem__(returned_trace, "trace_sha256", "0" * 64)  # type: ignore[arg-type]
+        dict.__setitem__(returned_attributes, "missing_evidence", False)  # type: ignore[arg-type]
+        dict.__setitem__(returned_metric, "status", "missing")  # type: ignore[arg-type]
+
+        next_trace = catalog.show_trace(TRACE_A)
+        self.assertEqual(next_trace["trace_sha256"], original_trace_sha256)
+        self.assertIs(next_trace["events"][1]["attributes"]["missing_evidence"], True)
+        self.assertEqual(catalog.query_metrics()[0]["status"], "observed")
+
+    def test_direct_catalog_construction_validates_and_copies_inputs(self) -> None:
+        trace = self.bundle_a.pathlight_traces[0]
+        catalog = PathlightCatalog(
+            {TRACE_A: trace},
+            {self.evaluation_a.evaluation_sha256: self.evaluation_a},
+        )
+        source_events = trace["events"]
+
+        self.assertEqual(
+            catalog.show_trace(TRACE_A)["trace_sha256"], trace["trace_sha256"]
+        )
+        self.assertEqual(
+            catalog.query_metrics()[0]["evaluation_sha256"],
+            self.evaluation_a.evaluation_sha256,
+        )
+        self.assertIsNot(catalog.show_trace(TRACE_A)["events"], source_events)
+        with self.assertRaises(PathlightError):
+            PathlightCatalog(
+                {TRACE_A: {"sentinel": "SENTINEL_PRIVATE"}},
+                {},
+            )
+        with self.assertRaises(PathlightError):
+            PathlightCatalog(
+                {},
+                {self.evaluation_a.evaluation_sha256: {"sentinel": "SENTINEL_PRIVATE"}},
+            )
+
+    def test_catalog_revalidates_internal_digests_before_every_read(self) -> None:
+        catalog = PathlightCatalog.build((self.bundle_a,), (self.evaluation_a,))
+        internal_trace = catalog._traces[TRACE_A]
+        internal_evaluation = catalog._evaluations[self.evaluation_a.evaluation_sha256]
+        dict.__setitem__(internal_trace, "trace_sha256", "0" * 64)  # type: ignore[arg-type]
+        dict.__setitem__(internal_evaluation, "evaluation_sha256", "0" * 64)  # type: ignore[arg-type]
+
+        for read in (
+            lambda: catalog.show_trace(TRACE_A),
+            lambda: catalog.tail_trace(TRACE_A),
+            catalog.list_traces,
+            catalog.query_metrics,
+            lambda: catalog.compare_evaluation_ids(
+                self.evaluation_a.evaluation_sha256,
+                self.evaluation_a.evaluation_sha256,
+            ),
+        ):
+            with self.subTest(read=read), self.assertRaises(PathlightError):
+                read()
+
     def test_trace_filters_use_only_validated_public_values(self) -> None:
         catalog = PathlightCatalog.build((self.bundle_a, self.bundle_b), ())
 
@@ -242,12 +306,28 @@ class PathlightQueryTests(unittest.TestCase):
         catalog = PathlightCatalog.build((self.bundle_a,), ())
         tampered_filter = TraceFilter()
         object.__setattr__(tampered_filter, "status", [])
-        invalid_bundle = WorkflowObservationBundle((), [], "0" * 64)  # type: ignore[arg-type]
+        invalid_bundle = object.__new__(WorkflowObservationBundle)
+        object.__setattr__(invalid_bundle, "records", ())
+        object.__setattr__(invalid_bundle, "pathlight_traces", ())
+        object.__setattr__(invalid_bundle, "bundle_sha256", "0" * 64)
+        object.__setattr__(invalid_bundle, "projection_sha256", "0" * 64)
 
         with self.assertRaises(PathlightError):
             catalog.list_traces(tampered_filter)
         with self.assertRaises(PathlightError):
             PathlightCatalog.build((invalid_bundle,), ())
+
+    def test_build_authenticates_bundle_projection_before_consuming_traces(
+        self,
+    ) -> None:
+        validate_workflow_observation_bundle(self.bundle_a)
+        forged = object.__new__(WorkflowObservationBundle)
+        for field_name in ("records", "pathlight_traces", "bundle_sha256"):
+            object.__setattr__(forged, field_name, getattr(self.bundle_a, field_name))
+        object.__setattr__(forged, "projection_sha256", "0" * 64)
+
+        with self.assertRaises(PathlightError):
+            PathlightCatalog.build((forged,), ())
 
 
 if __name__ == "__main__":

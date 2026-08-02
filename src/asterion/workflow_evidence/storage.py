@@ -18,6 +18,8 @@ from asterion.workflow_evidence.collector import (
     validate_workflow_evidence,
 )
 
+_PROJECTION_SCHEMA = "asterion.workflow-observation-projection/v1"
+
 
 @dataclass(frozen=True, slots=True)
 class WorkflowObservationBundle:
@@ -26,6 +28,28 @@ class WorkflowObservationBundle:
     records: tuple[Mapping[str, object], ...]
     pathlight_traces: tuple[Mapping[str, object], ...]
     bundle_sha256: str
+    projection_sha256: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.records, tuple) or not isinstance(
+            self.pathlight_traces, tuple
+        ):
+            raise WorkflowEvidenceError("workflow observation projection is invalid")
+        if any(not isinstance(record, Mapping) for record in self.records) or any(
+            not isinstance(trace, Mapping) for trace in self.pathlight_traces
+        ):
+            raise WorkflowEvidenceError("workflow observation projection is invalid")
+        object.__setattr__(
+            self,
+            "records",
+            tuple(_freeze_mapping(record) for record in self.records),
+        )
+        object.__setattr__(
+            self,
+            "pathlight_traces",
+            tuple(_freeze_mapping(trace) for trace in self.pathlight_traces),
+        )
+        validate_workflow_observation_bundle(self)
 
 
 def _digest(value: object) -> str:
@@ -46,6 +70,173 @@ def _canonical_digest(value: object) -> str:
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+
+
+def _projection_mapping(
+    bundle_sha256: str,
+    records: Sequence[Mapping[str, object]],
+    pathlight_traces: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    return {
+        "schema": _PROJECTION_SCHEMA,
+        "source_bundle_sha256": bundle_sha256,
+        "records": [_json_copy(record) for record in records],
+        "pathlight_traces": [_json_copy(trace) for trace in pathlight_traces],
+    }
+
+
+def _json_copy(value: object) -> object:
+    if isinstance(value, Mapping):
+        if any(type(key) is not str for key in value):
+            raise WorkflowEvidenceError("workflow observation projection is invalid")
+        return {key: _json_copy(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_copy(item) for item in value]
+    if value is None or type(value) in {str, int, bool}:
+        return value
+    raise WorkflowEvidenceError("workflow observation projection is invalid")
+
+
+def _validate_projected_record(record: Mapping[str, object]) -> None:
+    completed_fields = {
+        "schema",
+        "source_graph_sha256",
+        "run_sha256",
+        "input_sha256",
+        "terminal_status",
+        "tools",
+        "usage",
+        "artifacts",
+    }
+    failure_fields = {
+        "schema",
+        "source_graph_sha256",
+        "run_sha256",
+        "input_sha256",
+        "terminal_status",
+        "failure_class",
+    }
+    if record.get("schema") != "asterion.pathlight-workflow-summary/v1":
+        raise WorkflowEvidenceError("workflow observation projection record is invalid")
+    if set(record) == completed_fields:
+        _validate_projected_completed_record(record)
+    elif set(record) == failure_fields:
+        _validate_projected_failure_record(record)
+    else:
+        raise WorkflowEvidenceError("workflow observation projection record is invalid")
+
+
+def _validate_projected_completed_record(record: Mapping[str, object]) -> None:
+    for field_name in (
+        "source_graph_sha256",
+        "run_sha256",
+        "input_sha256",
+    ):
+        _digest(record[field_name])
+    if record["terminal_status"] not in {"completed", "failed", "cancelled"}:
+        raise WorkflowEvidenceError("workflow observation projection status is invalid")
+    tools = record["tools"]
+    usage = record["usage"]
+    artifacts = record["artifacts"]
+    if (
+        not isinstance(tools, (list, tuple))
+        or not isinstance(usage, Mapping)
+        or not isinstance(artifacts, (list, tuple))
+    ):
+        raise WorkflowEvidenceError("workflow observation projection record is invalid")
+    for tool in tools:
+        if not isinstance(tool, Mapping) or set(tool) != {
+            "tool_sha256",
+            "calls",
+            "errors",
+        }:
+            raise WorkflowEvidenceError(
+                "workflow observation projection tool is invalid"
+            )
+        _digest(tool["tool_sha256"])
+        calls = tool["calls"]
+        errors = tool["errors"]
+        if (
+            type(calls) is not int
+            or calls < 0
+            or type(errors) is not int
+            or errors < 0
+            or errors > calls
+        ):
+            raise WorkflowEvidenceError(
+                "workflow observation projection tool is invalid"
+            )
+    if set(usage) != {"input_tokens", "output_tokens"} or any(
+        type(value) is not int or value < 0 for value in usage.values()
+    ):
+        raise WorkflowEvidenceError("workflow observation projection usage is invalid")
+    for artifact in artifacts:
+        if not isinstance(artifact, Mapping) or set(artifact) != {
+            "artifact_id_sha256",
+            "sha256",
+        }:
+            raise WorkflowEvidenceError(
+                "workflow observation projection artifact is invalid"
+            )
+        _digest(artifact["artifact_id_sha256"])
+        _digest(artifact["sha256"])
+
+
+def _validate_projected_failure_record(record: Mapping[str, object]) -> None:
+    for field_name in (
+        "source_graph_sha256",
+        "run_sha256",
+        "input_sha256",
+    ):
+        _digest(record[field_name])
+    if record["terminal_status"] not in {"failed", "cancelled"} or record[
+        "failure_class"
+    ] not in {"runtime-invocation-failed", "runtime-cancelled"}:
+        raise WorkflowEvidenceError(
+            "workflow observation projection failure is invalid"
+        )
+
+
+def validate_workflow_observation_bundle(bundle: WorkflowObservationBundle) -> None:
+    """Validate one typed public-safe projection and its exact identity."""
+
+    if not isinstance(bundle, WorkflowObservationBundle):
+        raise WorkflowEvidenceError("workflow observation projection is invalid")
+    records = getattr(bundle, "records", None)
+    pathlight_traces = getattr(bundle, "pathlight_traces", None)
+    bundle_sha256_value = getattr(bundle, "bundle_sha256", None)
+    projection_sha256_value = getattr(bundle, "projection_sha256", None)
+    if not isinstance(records, tuple) or not isinstance(pathlight_traces, tuple):
+        raise WorkflowEvidenceError("workflow observation projection is invalid")
+    bundle_sha256 = _digest(bundle_sha256_value)
+    projection_sha256 = _digest(projection_sha256_value)
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise WorkflowEvidenceError(
+                "workflow observation projection record is invalid"
+            )
+        _validate_projected_record(record)
+    seen_trace_ids: set[str] = set()
+    for trace in pathlight_traces:
+        if not isinstance(trace, Mapping):
+            raise WorkflowEvidenceError("Pathlight trace is invalid")
+        thawed_trace = _json_copy(trace)
+        if not isinstance(thawed_trace, Mapping):
+            raise WorkflowEvidenceError("Pathlight trace is invalid")
+        try:
+            validate_trace_graph(thawed_trace)
+        except (PathlightError, TypeError, ValueError):
+            raise WorkflowEvidenceError("Pathlight trace is invalid") from None
+        trace_id = thawed_trace["trace_id"]
+        assert isinstance(trace_id, str)
+        if trace_id in seen_trace_ids:
+            raise WorkflowEvidenceError("Pathlight trace identity is duplicated")
+        seen_trace_ids.add(trace_id)
+    expected = _canonical_digest(
+        _projection_mapping(bundle_sha256, records, pathlight_traces)
+    )
+    if not hmac.compare_digest(projection_sha256, expected):
+        raise WorkflowEvidenceError("workflow observation projection digest mismatches")
 
 
 def _validate_failure_observation(record: Mapping[str, object]) -> None:
@@ -87,8 +278,10 @@ def _validate_completed_observation(record: Mapping[str, object]) -> None:
     tools = record["tools"]
     usage = record["usage"]
     artifacts = record["artifacts"]
-    if not isinstance(tools, list) or not isinstance(usage, Mapping) or not isinstance(
-        artifacts, list
+    if (
+        not isinstance(tools, list)
+        or not isinstance(usage, Mapping)
+        or not isinstance(artifacts, list)
     ):
         raise WorkflowEvidenceError("workflow observation record is invalid")
     for tool in tools:
@@ -114,7 +307,10 @@ def _validate_completed_observation(record: Mapping[str, object]) -> None:
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise WorkflowEvidenceError("workflow observation usage is invalid")
     for artifact in artifacts:
-        if not isinstance(artifact, Mapping) or set(artifact) != {"artifact_id", "sha256"}:
+        if not isinstance(artifact, Mapping) or set(artifact) != {
+            "artifact_id",
+            "sha256",
+        }:
             raise WorkflowEvidenceError("workflow observation artifact is invalid")
         if not isinstance(artifact["artifact_id"], str) or not artifact["artifact_id"]:
             raise WorkflowEvidenceError("workflow observation artifact is invalid")
@@ -247,7 +443,9 @@ def _validate_and_freeze_bundle(document: object) -> WorkflowObservationBundle:
     records = document["records"]
     pathlight_traces = document["pathlight_traces"]
     if not isinstance(records, list) or not isinstance(pathlight_traces, list):
-        raise WorkflowEvidenceError("workflow observation bundle collections are invalid")
+        raise WorkflowEvidenceError(
+            "workflow observation bundle collections are invalid"
+        )
     bundle_sha256 = _digest(document["bundle_sha256"])
     expected_bundle_sha256 = hashlib.sha256(
         json.dumps(
@@ -274,7 +472,9 @@ def _validate_and_freeze_bundle(document: object) -> WorkflowObservationBundle:
         run_id = record["run_id"]
         assert isinstance(run_id, str)
         if run_id in seen_run_ids:
-            raise WorkflowEvidenceError("workflow observation run identity is duplicated")
+            raise WorkflowEvidenceError(
+                "workflow observation run identity is duplicated"
+            )
         seen_run_ids.add(run_id)
 
     seen_trace_ids: set[str] = set()
@@ -292,15 +492,19 @@ def _validate_and_freeze_bundle(document: object) -> WorkflowObservationBundle:
         seen_trace_ids.add(trace_id)
 
     projected_records = tuple(
-        _freeze_mapping(_project_completed_observation(record))
+        _project_completed_observation(record)
         if record["schema"] == "asterion.workflow-evidence/v1"
-        else _freeze_mapping(_project_failure_observation(record))
+        else _project_failure_observation(record)
         for record in records
+    )
+    projection_sha256 = _canonical_digest(
+        _projection_mapping(bundle_sha256, projected_records, pathlight_traces)
     )
     return WorkflowObservationBundle(
         records=projected_records,
-        pathlight_traces=tuple(_freeze_mapping(trace) for trace in pathlight_traces),
+        pathlight_traces=tuple(pathlight_traces),
         bundle_sha256=bundle_sha256,
+        projection_sha256=projection_sha256,
     )
 
 
@@ -343,7 +547,9 @@ def write_workflow_observation_bundle(
         run_id = record["run_id"]
         assert isinstance(run_id, str)
         if run_id in seen_run_ids:
-            raise WorkflowEvidenceError("workflow observation run identity is duplicated")
+            raise WorkflowEvidenceError(
+                "workflow observation run identity is duplicated"
+            )
         seen_run_ids.add(run_id)
         serialized_records.append(dict(record))
     serialized_traces: list[dict[str, object]] = []
@@ -373,7 +579,9 @@ def write_workflow_observation_bundle(
     try:
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except OSError as error:
-        raise WorkflowEvidenceError("workflow observation target is unavailable") from error
+        raise WorkflowEvidenceError(
+            "workflow observation target is unavailable"
+        ) from error
     with os.fdopen(descriptor, "wb") as output:
         output.write(encoded)
 
