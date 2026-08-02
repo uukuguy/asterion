@@ -5,12 +5,15 @@ import json
 import unittest
 from collections.abc import AsyncIterator
 
-from asterion.pathlight import MemoryPathlightRecorder
+from asterion.pathlight import MemoryPathlightRecorder, TraceEvent
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 from asterion.workflow_evidence import ObservedRuntimeClient
 
 
 TRACE_ID = "00000000-0000-4000-8000-000000000001"
+ROOT_SPAN_ID = "00000000-0000-4000-8000-000000000010"
+PLAN_SPAN_ID = "00000000-0000-4000-8000-000000000011"
+CAPABILITY_SPAN_ID = "00000000-0000-4000-8000-000000000012"
 
 
 class CompletedRuntime:
@@ -120,6 +123,41 @@ class CancelledSignal:
 
 
 class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_projection_composes_with_open_lifecycle_trace(self) -> None:
+        recorder = MemoryPathlightRecorder(TRACE_ID)
+        recorder.record(TraceEvent.start(TRACE_ID, ROOT_SPAN_ID, None, 1, "task"))
+        recorder.record(TraceEvent.start(TRACE_ID, PLAN_SPAN_ID, ROOT_SPAN_ID, 2, "plan"))
+        recorder.record(
+            TraceEvent.start(TRACE_ID, CAPABILITY_SPAN_ID, PLAN_SPAN_ID, 3, "task")
+        )
+        observed = ObservedRuntimeClient(ToolRuntime(), pathlight=recorder)
+
+        events = [
+            event
+            async for event in observed.run(
+                RunRequest(run_id="run-1", input_text="SENTINEL_SECRET_INPUT")
+            )
+        ]
+
+        recorder.record(
+            TraceEvent.complete(
+                TRACE_ID, CAPABILITY_SPAN_ID, recorder.next_sequence, kind="task"
+            )
+        )
+        recorder.record(
+            TraceEvent.complete(TRACE_ID, PLAN_SPAN_ID, recorder.next_sequence, kind="plan")
+        )
+        recorder.record(TraceEvent.complete(TRACE_ID, ROOT_SPAN_ID, recorder.next_sequence))
+
+        self.assertEqual(events[-1].type, "run.completed")
+        graph = recorder.snapshot()
+        runtime_start = next(
+            item
+            for item in graph["events"]
+            if item["kind"] == "runtime" and item["status"] == "started"
+        )
+        self.assertEqual(runtime_start["parent_span_id"], CAPABILITY_SPAN_ID)
+
     async def test_observed_runtime_links_tool_result_to_next_context_frame(self) -> None:
         recorder = MemoryPathlightRecorder(TRACE_ID)
         observed = ObservedRuntimeClient(ToolRuntime(), pathlight=recorder)
@@ -273,8 +311,12 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 ("run.completed", {"status": "completed"}),
             )
         )
-        for index, (runtime, error) in enumerate(
-            ((FailingRuntime(), RuntimeError), (invalid_runtime, ValueError)), start=5
+        for index, (runtime, error, signal) in enumerate(
+            (
+                (FailingRuntime(), RuntimeError, CancelledSignal()),
+                (invalid_runtime, ValueError, None),
+            ),
+            start=5,
         ):
             with self.subTest(runtime=type(runtime).__name__):
                 recorder = MemoryPathlightRecorder(
@@ -286,13 +328,12 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
                     _ = [
                         event
                         async for event in observed.run(
-                            RunRequest(run_id="run-1", input_text="SENTINEL_INPUT")
+                            RunRequest(run_id="run-1", input_text="SENTINEL_INPUT"),
+                            signal=signal,
                         )
                     ]
 
-                graph = recorder.snapshot()
-                self.assertEqual(graph["events"][-1]["status"], "failed")
-                self.assertNotIn("SENTINEL", repr(graph))
+                self.assertEqual(recorder.event_count, 0)
 
     async def test_records_a_validated_runtime_stream_without_input_or_uri(self) -> None:
         observed = ObservedRuntimeClient(CompletedRuntime())

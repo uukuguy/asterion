@@ -63,19 +63,13 @@ class ObservedRuntimeClient:
 
         events: list[Mapping[str, object]] = []
         input_digest = hashlib.sha256(request.input_text.encode("utf-8")).hexdigest()
-        projection = _RuntimePathlightProjection(self._pathlight)
-        projection.start(request)
         try:
             async for event in self._runtime.run(request, signal=signal):
                 events.append(event.to_mapping())
                 yield event
             evidence = collect_workflow_evidence(events, input_digest=input_digest)
-            projection.project(events)
+            _RuntimePathlightProjection(self._pathlight).project(request, events)
         except BaseException:
-            projection.fail(
-                "cancelled" if signal is not None and signal.cancelled else "unknown",
-                cancelled=signal is not None and signal.cancelled,
-            )
             self._failed_attempts.append(
                 MappingProxyType(
                     {
@@ -101,12 +95,16 @@ class _RuntimePathlightProjection:
     def __init__(self, recorder: PathlightRecorder | None) -> None:
         self._recorder = recorder
         self._trace_id: str | None = None
+        self._sequence = 0
+        self._parent_span_id: str | None = None
         if recorder is not None:
             try:
                 self._trace_id = recorder.trace_id
+                if self._trace_id is not None:
+                    self._sequence = _recorder_sequence(recorder) - 1
+                    self._parent_span_id = _recorder_active_span(recorder)
             except Exception:
                 self._disable()
-        self._sequence = 0
         self._root_span_id: str | None = None
         self._context_span_id: str | None = None
         self._tool_spans: dict[str, tuple[str, str | None]] = {}
@@ -114,7 +112,7 @@ class _RuntimePathlightProjection:
     def start(self, request: RunRequest) -> None:
         """Start with the request's digest and length, never the request itself."""
 
-        self._root_span_id = self._start("runtime", None)
+        self._root_span_id = self._start("runtime", self._parent_span_id)
         self._context_span_id = self._start_context(
             {
                 "content_sha256": _text_digest(request.input_text),
@@ -124,9 +122,10 @@ class _RuntimePathlightProjection:
             }
         )
 
-    def project(self, events: list[Mapping[str, object]]) -> None:
+    def project(self, request: RunRequest, events: list[Mapping[str, object]]) -> None:
         """Record spans only after the complete stream has been validated."""
 
+        self.start(request)
         for event in events:
             payload = event["payload"]
             assert isinstance(payload, Mapping)
@@ -140,7 +139,13 @@ class _RuntimePathlightProjection:
             elif event_type == "run.completed":
                 self.complete(str(payload["status"]))
             elif event_type == "run.failed":
-                self.fail("unknown")
+                self._close_context()
+                self._terminal(
+                    self._root_span_id,
+                    "failed",
+                    "runtime",
+                    attributes={"failure_class": "unknown"},
+                )
 
     def complete(self, status: str) -> None:
         self._close_context()
@@ -149,15 +154,6 @@ class _RuntimePathlightProjection:
             "cancelled" if status == "cancelled" else "completed",
             "runtime",
             attributes={"failure_class": "cancelled"} if status == "cancelled" else None,
-        )
-
-    def fail(self, failure_class: str, *, cancelled: bool = False) -> None:
-        self._close_context()
-        self._terminal(
-            self._root_span_id,
-            "cancelled" if cancelled else "failed",
-            "runtime",
-            attributes={"failure_class": failure_class},
         )
 
     def _project_tool_call(self, payload: Mapping[str, object]) -> None:
@@ -305,6 +301,20 @@ class _RuntimePathlightProjection:
 
 def _text_digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _recorder_sequence(recorder: PathlightRecorder) -> int:
+    sequence = recorder.next_sequence
+    if type(sequence) is not int or sequence < 1:
+        raise ValueError("Pathlight recorder sequence is invalid")
+    return sequence
+
+
+def _recorder_active_span(recorder: PathlightRecorder) -> str | None:
+    span_id = recorder.active_span_id
+    if span_id is not None and type(span_id) is not str:
+        raise ValueError("Pathlight recorder active span is invalid")
+    return span_id
 
 
 def _content_summary(value: object) -> dict[str, str | int | bool]:

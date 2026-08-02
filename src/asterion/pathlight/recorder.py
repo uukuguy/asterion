@@ -16,6 +16,14 @@ class PathlightRecorder(Protocol):
     def trace_id(self) -> str | None:
         """Return the exact trace identity, or ``None`` when recording is disabled."""
 
+    @property
+    def next_sequence(self) -> int:
+        """Return the recorder-owned sequence for the next event."""
+
+    @property
+    def active_span_id(self) -> str | None:
+        """Return the innermost open span in the recorder's trace."""
+
     def record(self, event: TraceEvent) -> None:
         """Accept one safe event for this recorder's trace."""
 
@@ -28,6 +36,14 @@ class NoopPathlightRecorder:
 
     @property
     def trace_id(self) -> None:
+        return None
+
+    @property
+    def next_sequence(self) -> int:
+        return 1
+
+    @property
+    def active_span_id(self) -> None:
         return None
 
     def record(self, event: TraceEvent) -> None:
@@ -48,6 +64,30 @@ class MemoryPathlightRecorder:
     @property
     def trace_id(self) -> str:
         return self._trace_id
+
+    @property
+    def event_count(self) -> int:
+        """Return the number of accepted events without exposing their contents."""
+
+        return len(self._events)
+
+    @property
+    def next_sequence(self) -> int:
+        """Return the only valid sequence for the next event in this trace."""
+
+        return len(self._events) + 1
+
+    @property
+    def active_span_id(self) -> str | None:
+        """Return the innermost currently-open span, if any."""
+
+        open_spans: list[str] = []
+        for event in self._events:
+            if event.status == "started":
+                open_spans.append(event.span_id)
+            elif event.span_id in open_spans:
+                open_spans.remove(event.span_id)
+        return open_spans[-1] if open_spans else None
 
     def record(self, event: TraceEvent) -> None:
         if not isinstance(event, TraceEvent) or event.trace_id != self._trace_id:

@@ -272,7 +272,7 @@ class _PathlightLifecycle:
         if self._trace_id is None:
             return None
         span_id = str(uuid4())
-        sequence = self._sequence + 1
+        sequence = self._next_sequence()
         try:
             event = TraceEvent.start(
                 self._trace_id,
@@ -298,7 +298,7 @@ class _PathlightLifecycle:
     ) -> None:
         if self._trace_id is None or span_id is None:
             return
-        sequence = self._sequence + 1
+        sequence = self._next_sequence()
         try:
             event = TraceEvent.terminal(
                 self._trace_id,
@@ -322,6 +322,18 @@ class _PathlightLifecycle:
             # Instrumentation remains observational and cannot replace the
             # runner's result, failure, or cancellation semantics.
             self._disable()
+
+    def _next_sequence(self) -> int:
+        if self._recorder is None:
+            return self._sequence + 1
+        try:
+            sequence = self._recorder.next_sequence
+        except Exception:
+            return self._sequence + 1
+        if type(sequence) is not int or sequence < 1:
+            self._disable()
+            return self._sequence + 1
+        return sequence
 
     def _disable(self) -> None:
         self._recorder = None
