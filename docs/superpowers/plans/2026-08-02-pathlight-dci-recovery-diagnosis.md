@@ -49,6 +49,9 @@ class PathlightExperimentTests(unittest.TestCase):
             metric_contract_sha256=_digest("metric"),
             evaluator_kind="recovered",
             implementation_sha256=_digest("evaluator"),
+            input_contract_sha256=_digest("evaluator-input"),
+            output_contract_sha256=_digest("evaluator-output"),
+            failure_semantics_sha256=_digest("evaluator-failures"),
             contract_version="1.0.0",
         )
         variant = Variant(
@@ -60,6 +63,7 @@ class PathlightExperimentTests(unittest.TestCase):
             toolset_sha256=_digest("tools"),
             prompt_contract_sha256=_digest("prompt-contract"),
             policy_sha256=_digest("policy"),
+            change_sha256=_digest("observation-baseline"),
         )
         trial = CaseTrial(
             experiment_plan_sha256=_digest("experiment-plan"),
@@ -104,6 +108,12 @@ EvidenceState = Literal["observed", "recovered", "missing"]
 EvaluatorKind = Literal["rule", "human", "judge", "recovered"]
 
 @dataclass(frozen=True, slots=True)
+class SubjectRef:
+    subject_kind: SubjectKind
+    subject_sha256: str
+    subject_ref_sha256: str = field(init=False)
+
+@dataclass(frozen=True, slots=True)
 class DatasetSnapshot:
     dataset_contract_sha256: str
     content_sha256: str
@@ -117,6 +127,9 @@ class EvaluatorContract:
     metric_contract_sha256: str
     evaluator_kind: EvaluatorKind
     implementation_sha256: str
+    input_contract_sha256: str
+    output_contract_sha256: str
+    failure_semantics_sha256: str
     contract_version: str
     evaluator_contract_sha256: str = field(init=False)
 
@@ -130,6 +143,7 @@ class Variant:
     toolset_sha256: str
     prompt_contract_sha256: str
     policy_sha256: str
+    change_sha256: str
     variant_sha256: str = field(init=False)
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +155,7 @@ class ExperimentPlan:
     assignment_sha256: str
     evaluator_contract_sha256s: tuple[str, ...]
     budget_sha256: str
+    stop_criteria_sha256: str
     authorization_sha256: str | None = None
     experiment_plan_sha256: str = field(init=False)
 
