@@ -4,6 +4,8 @@ import hashlib
 import json
 import unittest
 from collections.abc import AsyncIterator
+from collections.abc import Mapping
+from typing import cast
 
 from asterion.pathlight import MemoryPathlightRecorder, TraceEvent
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
@@ -122,7 +124,84 @@ class CancelledSignal:
     cancelled = True
 
 
+class IncrementingClock:
+    def __init__(self, start: int = 1_000) -> None:
+        self.value = start
+
+    def __call__(self) -> int:
+        value = self.value
+        self.value += 10
+        return value
+
+
 class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_runtime_trace_has_safe_identity_timing_tokens_and_artifact(self) -> None:
+        recorder = MemoryPathlightRecorder(TRACE_ID)
+        observed = ObservedRuntimeClient(
+            CompletedRuntime(),
+            pathlight=recorder,
+            monotonic_ns=IncrementingClock(),
+        )
+
+        _ = [
+            event
+            async for event in observed.run(
+                RunRequest(
+                    run_id="SENTINEL-PRIVATE-RUN",
+                    input_text="SENTINEL_SECRET_INPUT",
+                )
+            )
+        ]
+
+        graph = recorder.snapshot()
+        events = cast(list[Mapping[str, object]], graph["events"])
+        starts = {item["span_id"]: item for item in events if item["status"] == "started"}
+        runtime_start = next(
+            item
+            for item in events
+            if item["kind"] == "runtime" and item["status"] == "started"
+        )
+        runtime_terminal = next(
+            item
+            for item in events
+            if item["span_id"] == runtime_start["span_id"]
+            and item["status"] == "completed"
+        )
+        start_attributes = cast(Mapping[str, object], runtime_start["attributes"])
+        terminal_attributes = cast(Mapping[str, object], runtime_terminal["attributes"])
+        self.assertEqual(
+            start_attributes["run_sha256"],
+            hashlib.sha256(b"SENTINEL-PRIVATE-RUN").hexdigest(),
+        )
+        self.assertEqual(
+            start_attributes["runtime_sha256"],
+            hashlib.sha256(b"fixture.runtime").hexdigest(),
+        )
+        self.assertEqual(terminal_attributes["input_tokens"], 3)
+        self.assertEqual(terminal_attributes["output_tokens"], 5)
+        self.assertNotIn("cost_microunits", terminal_attributes)
+        self.assertGreater(terminal_attributes["duration_ns"], 0)
+        self.assertIn("artifact", [item["kind"] for item in events])
+        for item in events:
+            self.assertGreater(item["timestamp_ns"], 0)
+            if item["status"] != "started":
+                attributes = cast(Mapping[str, object], item["attributes"])
+                self.assertEqual(
+                    attributes["duration_ns"],
+                    item["timestamp_ns"] - starts[item["span_id"]]["timestamp_ns"],
+                )
+                self.assertGreater(attributes["duration_ns"], 0)
+        rendered = json.dumps(graph, default=dict, sort_keys=True)
+        for source in (
+            "SENTINEL-PRIVATE-RUN",
+            "fixture.runtime",
+            "answer",
+            "text/plain",
+            "SENTINEL_ARTIFACT",
+            "SENTINEL_SECRET_INPUT",
+        ):
+            self.assertNotIn(source, rendered)
+
     async def test_projection_composes_with_open_lifecycle_trace(self) -> None:
         recorder = MemoryPathlightRecorder(TRACE_ID)
         recorder.record(TraceEvent.start(TRACE_ID, ROOT_SPAN_ID, None, 1, "task"))
@@ -281,17 +360,11 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
                         item
                         for item in graph["events"]
                         if item["kind"] == "runtime"
-                        and item["status"] == "started"
-                        and item["attributes"]
+                        and item["status"] == "completed"
                     )
-                    self.assertEqual(
-                        usage["attributes"],
-                        {
-                            "metric_name": "input-tokens",
-                            "metric_value": 3,
-                            "unit": "tokens",
-                        },
-                    )
+                    self.assertEqual(usage["attributes"]["input_tokens"], 3)
+                    self.assertEqual(usage["attributes"]["output_tokens"], 5)
+                    self.assertNotIn("cost_microunits", usage["attributes"])
                 self.assertNotIn("SENTINEL", repr(graph))
 
     async def test_pathlight_failure_graph_redacts_stream_exception_and_invalid_tool_event(

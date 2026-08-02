@@ -327,6 +327,13 @@ async def _run(
             if args.workflow_evidence_file is not None
             else None
         )
+        implementation_packages = MappingProxyType(
+            {
+                binding.capability_ref: package.package_ref
+                for package in application.installed_packages
+                for binding in package.implementations
+            }
+        )
         result = await run_composed_application(
             plan,
             implementations=application.implementations,
@@ -335,6 +342,7 @@ async def _run(
             input_text=input_text,
             host_services=host_services,
             pathlight=context.pathlight,
+            implementation_packages=implementation_packages,
         )
         if observed_runtime is not None:
             trace = context.pathlight.snapshot()

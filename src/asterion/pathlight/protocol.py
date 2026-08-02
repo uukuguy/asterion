@@ -53,7 +53,24 @@ _OPAQUE_ID = re.compile(
 )
 
 _DIGEST_ATTRIBUTES = frozenset(
-    {"content_sha256", "evidence_ref", "policy_sha256", "scope_sha256", "coverage_sha256"}
+    {
+        "application_sha256",
+        "artifact_sha256",
+        "assembly_sha256",
+        "capability_package_sha256",
+        "capability_ref_sha256",
+        "content_sha256",
+        "coverage_sha256",
+        "evaluation_sha256",
+        "evidence_ref",
+        "host_service_sha256",
+        "implementation_sha256",
+        "policy_sha256",
+        "run_sha256",
+        "runtime_sha256",
+        "scope_sha256",
+        "task_sha256",
+    }
 )
 _OPAQUE_ID_ATTRIBUTES = frozenset(
     {
@@ -394,11 +411,20 @@ def _validate_trace_components(trace_id: str, events: tuple[TraceEvent, ...]) ->
     spans: dict[str, TraceEvent] = {}
     open_spans: dict[str, TraceEvent] = {}
     root_span_id: str | None = None
+    previous_timestamp = 0
     for expected_sequence, event in enumerate(events, start=1):
         if event.trace_id != trace_id:
             raise PathlightError("Pathlight event trace identity mismatches")
         if event.sequence != expected_sequence:
             raise PathlightError("Pathlight graph sequence is not contiguous")
+        if (
+            previous_timestamp > 0
+            and event.timestamp_ns > 0
+            and event.timestamp_ns < previous_timestamp
+        ):
+            raise PathlightError("Pathlight graph timestamps are not monotonic")
+        if event.timestamp_ns > 0:
+            previous_timestamp = event.timestamp_ns
         if event.status == "started":
             if event.span_id in spans:
                 raise PathlightError("Pathlight graph has duplicate span identity")
@@ -418,6 +444,13 @@ def _validate_trace_components(trace_id: str, events: tuple[TraceEvent, ...]) ->
                 raise PathlightError("Pathlight terminal event is unmatched")
             if event.kind != started.kind:
                 raise PathlightError("Pathlight terminal event kind mismatches")
+            if event.timestamp_ns < started.timestamp_ns:
+                raise PathlightError("Pathlight span timestamps are invalid")
+            duration_ns = event.attributes.get("duration_ns")
+            if duration_ns is not None and duration_ns != (
+                event.timestamp_ns - started.timestamp_ns
+            ):
+                raise PathlightError("Pathlight span duration mismatches")
             if any(
                 open_event.parent_span_id == event.span_id
                 for open_event in open_spans.values()

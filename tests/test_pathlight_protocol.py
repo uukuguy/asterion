@@ -26,6 +26,26 @@ MISSING_SPAN_ID = opaque_id(5)
 
 
 class PathlightProtocolTests(unittest.TestCase):
+    def test_rejects_terminal_duration_that_disagrees_with_monotonic_timestamps(self) -> None:
+        trace_id = TRACE_ID
+        span_id = ROOT_SPAN_ID
+        with self.assertRaisesRegex(PathlightError, "duration"):
+            TraceGraph.build(
+                trace_id,
+                (
+                    TraceEvent.start(
+                        trace_id, span_id, None, 1, "task", timestamp_ns=10
+                    ),
+                    TraceEvent.complete(
+                        trace_id,
+                        span_id,
+                        2,
+                        timestamp_ns=30,
+                        attributes={"duration_ns": 19},
+                    ),
+                ),
+            )
+
     STRING_ATTRIBUTE_VALUES = {
         "artifact_id": "a" * 64,
         "call_id": "a" * 64,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import unittest
 from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
@@ -55,6 +57,23 @@ class FailingImplementation:
         raise RuntimeError("SECRET-CAPABILITY-DIAGNOSTIC")
 
 
+class EvaluationImplementation:
+    async def execute(
+        self, invocation: CapabilityInvocation
+    ) -> CapabilityExecutionResult:
+        del invocation
+        return CapabilityExecutionResult(
+            events=(),
+            artifacts=(
+                {
+                    "artifact_id": "private-evaluation-artifact",
+                    "media_type": "application/evaluation+json",
+                    "value": {"answer": "SENTINEL-PRIVATE-EVALUATION"},
+                },
+            ),
+        )
+
+
 class FailingAfterCancellationImplementation:
     async def execute(
         self, invocation: CapabilityInvocation
@@ -71,6 +90,16 @@ class CancelledSignal:
 class MutableSignal:
     def __init__(self) -> None:
         self.cancelled = False
+
+
+class IncrementingClock:
+    def __init__(self, start: int = 100) -> None:
+        self.value = start
+
+    def __call__(self) -> int:
+        value = self.value
+        self.value += 10
+        return value
 
 
 class RaisingRecorder:
@@ -103,18 +132,22 @@ def trace_events(recorder: MemoryPathlightRecorder) -> Sequence[Mapping[str, obj
     return tuple(cast(Mapping[str, object], event) for event in events)
 
 
-def plan():
+def plan(
+    *,
+    kind: str = "capability",
+    produces_artifacts: tuple[str, ...] = (),
+):
     manifest = {
         "protocol": "asterion.capability/v1",
         "capability_id": "trace.capability",
         "version": "1.0.0",
-        "kind": "capability",
+        "kind": kind,
         "provides_capabilities": [],
         "requires_capabilities": [],
         "requires_policies": [],
         "emits_events": [],
         "consumes_events": [],
-        "produces_artifacts": [],
+        "produces_artifacts": list(produces_artifacts),
         "consumes_artifacts": [],
     }
     catalog = CapabilityCatalog(
@@ -145,6 +178,122 @@ def plan():
 
 
 class ComposedRunnerPathlightTests(unittest.IsolatedAsyncioTestCase):
+    async def test_trace_links_available_evaluation_and_artifact_identity(self) -> None:
+        recorder = MemoryPathlightRecorder(TRACE_ID)
+        p = plan(
+            kind="evaluation",
+            produces_artifacts=("application/evaluation+json",),
+        )
+
+        await run_composed_application(
+            p,
+            implementations=(
+                (CapabilityRef("trace.capability", "1.0.0"), EvaluationImplementation()),
+            ),
+            runtime=FixtureRuntime(),
+            run_id="private-evaluation-run",
+            input_text="SECRET-INPUT",
+            host_services={},
+            pathlight=recorder,
+            monotonic_ns=IncrementingClock(),
+        )
+
+        events = trace_events(recorder)
+        capability = next(
+            item
+            for item in events
+            if item["kind"] == "task"
+            and "capability_ref_sha256"
+            in cast(Mapping[str, object], item["attributes"])
+        )
+        evaluation = next(item for item in events if item["kind"] == "evaluation")
+        artifact = next(item for item in events if item["kind"] == "artifact")
+        self.assertEqual(evaluation["parent_span_id"], capability["span_id"])
+        self.assertEqual(artifact["parent_span_id"], capability["span_id"])
+        self.assertIn(
+            "evaluation_sha256", cast(Mapping[str, object], evaluation["attributes"])
+        )
+        self.assertIn(
+            "artifact_sha256", cast(Mapping[str, object], artifact["attributes"])
+        )
+        rendered = json.dumps(recorder.snapshot(), default=dict, sort_keys=True)
+        self.assertNotIn("private-evaluation-artifact", rendered)
+        self.assertNotIn("application/evaluation+json", rendered)
+        self.assertNotIn("SENTINEL-PRIVATE-EVALUATION", rendered)
+
+    async def test_trace_links_safe_execution_identity_and_real_span_timing(self) -> None:
+        recorder = MemoryPathlightRecorder(TRACE_ID)
+        p = plan()
+        implementation = CompletedImplementation()
+
+        await run_composed_application(
+            p,
+            implementations=((CapabilityRef("trace.capability", "1.0.0"), implementation),),
+            runtime=FixtureRuntime(),
+            run_id="SENTINEL-PRIVATE-RUN",
+            input_text="SECRET-INPUT",
+            host_services={"private.host": object()},
+            pathlight=recorder,
+            monotonic_ns=IncrementingClock(),
+        )
+
+        events = trace_events(recorder)
+        starts = {item["span_id"]: item for item in events if item["status"] == "started"}
+        self.assertEqual([item["timestamp_ns"] for item in events], sorted(
+            item["timestamp_ns"] for item in events
+        ))
+        for item in events:
+            self.assertGreater(item["timestamp_ns"], 0)
+            if item["status"] != "started":
+                attributes = cast(Mapping[str, object], item["attributes"])
+                self.assertGreater(attributes["duration_ns"], 0)
+                self.assertEqual(
+                    attributes["duration_ns"],
+                    item["timestamp_ns"] - starts[item["span_id"]]["timestamp_ns"],
+                )
+
+        kinds = [item["kind"] for item in events]
+        self.assertIn("assembly", kinds)
+        self.assertIn("host-service", kinds)
+        root = events[0]
+        root_attributes = cast(Mapping[str, object], root["attributes"])
+        self.assertEqual(
+            root_attributes["run_sha256"],
+            hashlib.sha256(b"SENTINEL-PRIVATE-RUN").hexdigest(),
+        )
+        assembly = next(item for item in events if item["kind"] == "assembly")
+        assembly_attributes = cast(Mapping[str, object], assembly["attributes"])
+        for name in ("application_sha256", "assembly_sha256", "runtime_sha256"):
+            self.assertRegex(str(assembly_attributes[name]), r"^[0-9a-f]{64}$")
+        capability = next(
+            item
+            for item in events
+            if item["kind"] == "task"
+            and item["parent_span_id"] is not None
+            and "capability_ref_sha256" in cast(Mapping[str, object], item["attributes"])
+        )
+        capability_attributes = cast(Mapping[str, object], capability["attributes"])
+        for name in ("task_sha256", "capability_ref_sha256", "implementation_sha256"):
+            self.assertRegex(str(capability_attributes[name]), r"^[0-9a-f]{64}$")
+        package = next(
+            item
+            for item in events
+            if "capability_package_sha256"
+            in cast(Mapping[str, object], item["attributes"])
+        )
+        self.assertEqual(package["parent_span_id"], assembly["span_id"])
+
+        rendered = json.dumps(recorder.snapshot(), default=dict, sort_keys=True)
+        for source in (
+            "SENTINEL-PRIVATE-RUN",
+            "trace.application",
+            "pi.reference",
+            "trace.capability",
+            "private.host",
+            "CompletedImplementation",
+        ):
+            self.assertNotIn(source, rendered)
+
     async def test_composed_run_records_lifecycle_in_execution_order(self) -> None:
         recorder = MemoryPathlightRecorder(TRACE_ID)
 
@@ -166,16 +315,21 @@ class ComposedRunnerPathlightTests(unittest.IsolatedAsyncioTestCase):
             [(item["kind"], item["status"]) for item in events],
             [
                 ("task", "started"),
+                ("assembly", "started"),
+                ("plan", "started"),
+                ("plan", "completed"),
                 ("plan", "started"),
                 ("task", "started"),
                 ("task", "completed"),
                 ("plan", "completed"),
+                ("assembly", "completed"),
                 ("task", "completed"),
             ],
         )
         self.assertIsNone(events[0]["parent_span_id"])
         self.assertEqual(events[1]["parent_span_id"], events[0]["span_id"])
-        self.assertEqual(events[2]["parent_span_id"], events[1]["span_id"])
+        self.assertEqual(events[4]["parent_span_id"], events[1]["span_id"])
+        self.assertEqual(events[5]["parent_span_id"], events[4]["span_id"])
         self.assertNotIn("SECRET-INPUT", repr(snapshot))
 
     async def test_composed_failure_records_fixed_failure_class(self) -> None:
@@ -202,10 +356,10 @@ class ComposedRunnerPathlightTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             str(raised.exception), "application capability execution failed"
         )
-        self.assertEqual(len(failed), 3)
+        self.assertEqual(len(failed), 4)
         self.assertEqual(
             [failure_class(item) for item in failed],
-            ["capability-execution-failed"] * 3,
+            ["capability-execution-failed"] * 4,
         )
         self.assertNotIn("SECRET-CAPABILITY-DIAGNOSTIC", repr(snapshot))
 
@@ -236,8 +390,12 @@ class ComposedRunnerPathlightTests(unittest.IsolatedAsyncioTestCase):
             [(item["kind"], item["status"]) for item in events],
             [
                 ("task", "started"),
+                ("assembly", "started"),
+                ("plan", "started"),
+                ("plan", "completed"),
                 ("plan", "started"),
                 ("plan", "cancelled"),
+                ("assembly", "cancelled"),
                 ("task", "cancelled"),
             ],
         )
@@ -268,7 +426,18 @@ class ComposedRunnerPathlightTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             [item["status"] for item in trace_events(recorder)],
-            ["started", "started", "started", "failed", "failed", "failed"],
+            [
+                "started",
+                "started",
+                "started",
+                "completed",
+                "started",
+                "started",
+                "failed",
+                "failed",
+                "failed",
+                "failed",
+            ],
         )
 
     async def test_recorder_failure_does_not_change_the_application_result(self) -> None:

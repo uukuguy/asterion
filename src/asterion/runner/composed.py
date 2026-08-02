@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+import time
 from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 from typing import Callable
 from uuid import uuid4
 
 from asterion.assembly.protocol import AssemblyPlan
+from asterion.capability_packages import CapabilityPackageRef
 from asterion.capabilities.catalog import CapabilityRef
 from asterion.capabilities.execution import (
     EXECUTABLE_CAPABILITY_KINDS,
@@ -43,6 +47,8 @@ async def run_composed_application(
     host_artifacts: tuple[Mapping[str, object], ...] = (),
     signal: CancellationSignal | None = None,
     pathlight: PathlightRecorder | None = None,
+    implementation_packages: Mapping[CapabilityRef, CapabilityPackageRef] | None = None,
+    monotonic_ns: Callable[[], int] | None = None,
 ) -> ApplicationRunResult:
     """Run explicitly bound capability implementations sequentially."""
 
@@ -56,8 +62,11 @@ async def run_composed_application(
     except Exception:
         raise ApplicationRunError("application host evidence is invalid") from None
 
-    lifecycle = _PathlightLifecycle(pathlight)
-    lifecycle.start_root()
+    lifecycle = _PathlightLifecycle(pathlight, monotonic_ns=monotonic_ns)
+    lifecycle.start_root(plan, run_id=run_id)
+    lifecycle.start_assembly(plan)
+    lifecycle.record_package_boundaries(plan.capability_package_refs)
+    lifecycle.record_host_service_boundaries(host_services)
     lifecycle.start_plan()
     active_capability_span: str | None = None
     cancellation_observed = False
@@ -135,9 +144,23 @@ async def run_composed_application(
                 host_services=host_services,
                 signal=signal,
             )
-            active_capability_span = lifecycle.start_capability()
+            implementation = bindings[capability_ref]
+            owner_package: CapabilityPackageRef | None = None
+            if implementation_packages is not None:
+                try:
+                    candidate = implementation_packages.get(capability_ref)
+                    if isinstance(candidate, CapabilityPackageRef):
+                        owner_package = candidate
+                except Exception:
+                    owner_package = None
+            active_capability_span = lifecycle.start_capability(
+                capability_ref,
+                implementation,
+                run_id=run_id,
+                owner_package=owner_package,
+            )
             try:
-                result = await bindings[capability_ref].execute(invocation)
+                result = await implementation.execute(invocation)
                 validate_capability_result(manifest, result)
                 for artifact in result.artifacts:
                     artifact_id = artifact["artifact_id"]
@@ -154,6 +177,11 @@ async def run_composed_application(
                 raise ApplicationRunError(
                     "application capability execution failed"
                 ) from None
+            lifecycle.record_capability_outputs(
+                active_capability_span,
+                manifest=manifest,
+                artifacts=result.artifacts,
+            )
             lifecycle.complete_capability(active_capability_span)
             active_capability_span = None
             events.extend(result.events)
@@ -170,6 +198,7 @@ async def run_composed_application(
         if active_capability_span is not None:
             lifecycle.cancel_capability(active_capability_span)
         lifecycle.cancel_plan()
+        lifecycle.cancel_assembly()
         lifecycle.cancel_root()
         raise
     except ApplicationRunError:
@@ -177,12 +206,15 @@ async def run_composed_application(
             lifecycle.fail_capability(active_capability_span)
         if cancellation_observed:
             lifecycle.cancel_plan()
+            lifecycle.cancel_assembly()
             lifecycle.cancel_root()
         else:
             lifecycle.fail_plan(failure_class)
+            lifecycle.fail_assembly(failure_class)
             lifecycle.fail_root(failure_class)
         raise
     lifecycle.complete_plan()
+    lifecycle.complete_assembly()
     lifecycle.complete_root()
     return result
 
@@ -190,7 +222,12 @@ async def run_composed_application(
 class _PathlightLifecycle:
     """Emit closed, public-safe spans without influencing execution decisions."""
 
-    def __init__(self, recorder: PathlightRecorder | None) -> None:
+    def __init__(
+        self,
+        recorder: PathlightRecorder | None,
+        *,
+        monotonic_ns: Callable[[], int] | None,
+    ) -> None:
         self._recorder = recorder
         self._trace_id: str | None = None
         if recorder is not None:
@@ -199,17 +236,145 @@ class _PathlightLifecycle:
             except Exception:
                 self._disable()
         self._sequence = 0
+        self._clock = monotonic_ns if monotonic_ns is not None else time.monotonic_ns
+        self._started_ns: dict[str, int] = {}
         self._root_span_id: str | None = None
+        self._assembly_span_id: str | None = None
+        self._assembly_digest_value: str | None = None
         self._plan_span_id: str | None = None
 
-    def start_root(self) -> None:
-        self._root_span_id = self._start("task", None)
+    def start_root(self, plan: AssemblyPlan, *, run_id: str) -> None:
+        self._root_span_id = self._start(
+            "task",
+            None,
+            attributes={
+                "run_sha256": _identity_sha256(run_id),
+                "application_sha256": _identity_sha256(
+                    {"application_id": plan.application_id, "version": plan.version}
+                ),
+                "task_sha256": _identity_sha256(
+                    {
+                        "application_id": plan.application_id,
+                        "application_version": plan.version,
+                        "run_id": run_id,
+                    }
+                ),
+            },
+        )
+
+    def start_assembly(self, plan: AssemblyPlan) -> None:
+        self._assembly_digest_value = _assembly_sha256(plan)
+        self._assembly_span_id = self._start(
+            "assembly",
+            self._root_span_id,
+            attributes={
+                "application_sha256": _identity_sha256(
+                    {"application_id": plan.application_id, "version": plan.version}
+                ),
+                "assembly_sha256": self._assembly_digest_value,
+                "runtime_sha256": _identity_sha256(plan.runtime_id),
+            },
+        )
+
+    def record_package_boundaries(
+        self, package_refs: tuple[CapabilityPackageRef, ...]
+    ) -> None:
+        for package_ref in package_refs:
+            span_id = self._start(
+                "plan",
+                self._assembly_span_id,
+                attributes={
+                    "capability_package_sha256": _package_ref_sha256(package_ref)
+                },
+            )
+            self._terminal(span_id, "completed", "plan")
+
+    def record_host_service_boundaries(
+        self, host_services: Mapping[str, object]
+    ) -> None:
+        try:
+            service_ids = tuple(sorted(host_services))
+        except Exception:
+            return
+        for service_id in service_ids:
+            if type(service_id) is not str:
+                continue
+            span_id = self._start(
+                "host-service",
+                self._assembly_span_id,
+                attributes={"host_service_sha256": _identity_sha256(service_id)},
+            )
+            self._terminal(span_id, "completed", "host-service")
 
     def start_plan(self) -> None:
-        self._plan_span_id = self._start("plan", self._root_span_id)
+        if self._assembly_span_id is None or self._assembly_digest_value is None:
+            return
+        self._plan_span_id = self._start(
+            "plan",
+            self._assembly_span_id,
+            attributes={"assembly_sha256": self._assembly_digest_value},
+        )
 
-    def start_capability(self) -> str | None:
-        return self._start("task", self._plan_span_id)
+    def start_capability(
+        self,
+        capability_ref: CapabilityRef,
+        implementation: CapabilityImplementation,
+        *,
+        run_id: str,
+        owner_package: CapabilityPackageRef | None,
+    ) -> str | None:
+        attributes = {
+            "task_sha256": _identity_sha256(
+                {
+                    "capability_id": capability_ref.capability_id,
+                    "capability_version": capability_ref.version,
+                    "run_id": run_id,
+                }
+            ),
+            "capability_ref_sha256": _capability_ref_sha256(capability_ref),
+            "implementation_sha256": _implementation_binding_sha256(
+                capability_ref, implementation
+            ),
+        }
+        if owner_package is not None:
+            attributes["capability_package_sha256"] = _package_ref_sha256(
+                owner_package
+            )
+        return self._start("task", self._plan_span_id, attributes=attributes)
+
+    def record_capability_outputs(
+        self,
+        capability_span_id: str | None,
+        *,
+        manifest: Mapping[str, object],
+        artifacts: tuple[Mapping[str, object], ...],
+    ) -> None:
+        capability_ref = {
+            "capability_id": manifest.get("capability_id"),
+            "version": manifest.get("version"),
+        }
+        if manifest.get("kind") == "evaluation":
+            span_id = self._start(
+                "evaluation",
+                capability_span_id,
+                attributes={"evaluation_sha256": _identity_sha256(capability_ref)},
+            )
+            self._terminal(span_id, "completed", "evaluation")
+        for artifact in artifacts:
+            artifact_id = artifact.get("artifact_id")
+            media_type = artifact.get("media_type")
+            if type(artifact_id) is not str or type(media_type) is not str:
+                continue
+            span_id = self._start(
+                "artifact",
+                capability_span_id,
+                attributes={
+                    "artifact_sha256": _identity_sha256(
+                        {"artifact_id": artifact_id, "media_type": media_type}
+                    )
+                },
+            )
+            self._terminal(span_id, "completed", "artifact")
 
     def complete_capability(self, span_id: str | None) -> None:
         self._terminal(span_id, "completed", "task")
@@ -241,6 +406,25 @@ class _PathlightLifecycle:
             attributes={"failure_class": failure_class},
         )
 
+    def complete_assembly(self) -> None:
+        self._terminal(self._assembly_span_id, "completed", "assembly")
+
+    def fail_assembly(self, failure_class: str) -> None:
+        self._terminal(
+            self._assembly_span_id,
+            "failed",
+            "assembly",
+            attributes={"failure_class": failure_class},
+        )
+
+    def cancel_assembly(self) -> None:
+        self._terminal(
+            self._assembly_span_id,
+            "cancelled",
+            "assembly",
+            attributes={"failure_class": "cancelled"},
+        )
+
     def cancel_plan(self) -> None:
         self._terminal(
             self._plan_span_id,
@@ -268,8 +452,17 @@ class _PathlightLifecycle:
             attributes={"failure_class": "cancelled"},
         )
 
-    def _start(self, kind: str, parent_span_id: str | None) -> str | None:
+    def _start(
+        self,
+        kind: str,
+        parent_span_id: str | None,
+        *,
+        attributes: Mapping[str, str | int | bool] | None = None,
+    ) -> str | None:
         if self._trace_id is None:
+            return None
+        timestamp_ns = self._now()
+        if timestamp_ns is None:
             return None
         span_id = str(uuid4())
         sequence = self._next_sequence()
@@ -280,12 +473,16 @@ class _PathlightLifecycle:
                 parent_span_id,
                 sequence,
                 kind,
+                attributes=attributes,
+                timestamp_ns=timestamp_ns,
             )
         except Exception:
             self._disable()
             return None
         self._sequence = sequence
         self._record(event)
+        if self._trace_id is not None:
+            self._started_ns[span_id] = timestamp_ns
         return span_id
 
     def _terminal(
@@ -294,10 +491,19 @@ class _PathlightLifecycle:
         status: str,
         kind: str,
         *,
-        attributes: Mapping[str, str] | None = None,
+        attributes: Mapping[str, str | int | bool] | None = None,
     ) -> None:
         if self._trace_id is None or span_id is None:
             return
+        timestamp_ns = self._now()
+        started_ns = self._started_ns.get(span_id)
+        if timestamp_ns is None or started_ns is None:
+            return
+        if timestamp_ns <= started_ns:
+            self._disable()
+            return
+        terminal_attributes: dict[str, str | int | bool] = dict(attributes or {})
+        terminal_attributes["duration_ns"] = timestamp_ns - started_ns
         sequence = self._next_sequence()
         try:
             event = TraceEvent.terminal(
@@ -306,13 +512,15 @@ class _PathlightLifecycle:
                 sequence,
                 status,
                 kind=kind,
-                attributes=attributes,
+                attributes=terminal_attributes,
+                timestamp_ns=timestamp_ns,
             )
         except Exception:
             self._disable()
             return
         self._sequence = sequence
         self._record(event)
+        self._started_ns.pop(span_id, None)
 
     def _record(self, event: TraceEvent) -> None:
         assert self._recorder is not None
@@ -335,9 +543,75 @@ class _PathlightLifecycle:
             return self._sequence + 1
         return sequence
 
+    def _now(self) -> int | None:
+        try:
+            value = self._clock()
+        except Exception:
+            self._disable()
+            return None
+        if type(value) is not int or value <= 0:
+            self._disable()
+            return None
+        return value
+
     def _disable(self) -> None:
         self._recorder = None
         self._trace_id = None
+
+
+def _identity_sha256(value: object) -> str:
+    if type(value) is str:
+        rendered = value
+    else:
+        rendered = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(rendered.encode("utf-8")).hexdigest()
+
+
+def _package_ref_sha256(package_ref: CapabilityPackageRef) -> str:
+    return _identity_sha256(
+        {"package_id": package_ref.package_id, "version": package_ref.version}
+    )
+
+
+def _capability_ref_sha256(capability_ref: CapabilityRef) -> str:
+    return _identity_sha256(
+        {
+            "capability_id": capability_ref.capability_id,
+            "version": capability_ref.version,
+        }
+    )
+
+
+def _implementation_binding_sha256(
+    capability_ref: CapabilityRef, implementation: CapabilityImplementation
+) -> str:
+    implementation_type = type(implementation)
+    return _identity_sha256(
+        {
+            "capability_sha256": _capability_ref_sha256(capability_ref),
+            "implementation_type": (
+                f"{implementation_type.__module__}.{implementation_type.__qualname__}"
+            ),
+        }
+    )
+
+
+def _assembly_sha256(plan: AssemblyPlan) -> str:
+    return _identity_sha256(
+        {
+            "application_id": plan.application_id,
+            "application_version": plan.version,
+            "capability_packages": [
+                {"package_id": ref.package_id, "version": ref.version}
+                for ref in plan.capability_package_refs
+            ],
+            "capabilities": [
+                {"capability_id": ref.capability_id, "version": ref.version}
+                for ref in plan.capability_refs
+            ],
+            "runtime_id": plan.runtime_id,
+        }
+    )
 
 
 def _preflight(

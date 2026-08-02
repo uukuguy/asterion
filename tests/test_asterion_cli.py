@@ -1747,6 +1747,10 @@ class AsterionCliTests(unittest.TestCase):
         )
         trace_events = bundle["pathlight_traces"][0]["events"]
         self.assertIn(
+            ("assembly", "started"),
+            [(event["kind"], event["status"]) for event in trace_events],
+        )
+        self.assertIn(
             ("runtime", "started"),
             [(event["kind"], event["status"]) for event in trace_events],
         )
@@ -1754,6 +1758,46 @@ class AsterionCliTests(unittest.TestCase):
             ("tool-call", "completed"),
             [(event["kind"], event["status"]) for event in trace_events],
         )
+        capability_start = next(
+            event
+            for event in trace_events
+            if event["kind"] == "task"
+            and event["status"] == "started"
+            and "capability_ref_sha256" in event["attributes"]
+        )
+        self.assertIn("implementation_sha256", capability_start["attributes"])
+        self.assertIn("capability_package_sha256", capability_start["attributes"])
+        runtime_start = next(
+            event
+            for event in trace_events
+            if event["kind"] == "runtime" and event["status"] == "started"
+        )
+        self.assertIn("runtime_sha256", runtime_start["attributes"])
+        self.assertTrue(
+            any(event["kind"] == "host-service" for event in trace_events)
+        )
+        starts = {
+            event["span_id"]: event
+            for event in trace_events
+            if event["status"] == "started"
+        }
+        for event in trace_events:
+            self.assertGreater(event["timestamp_ns"], 0)
+            if event["status"] != "started":
+                self.assertGreater(event["attributes"]["duration_ns"], 0)
+                self.assertEqual(
+                    event["attributes"]["duration_ns"],
+                    event["timestamp_ns"]
+                    - starts[event["span_id"]]["timestamp_ns"],
+                )
+        trace_rendered = json.dumps(bundle["pathlight_traces"][0], sort_keys=True)
+        for identity_source in (
+            "asterion-run",
+            "dci.research-capability",
+            "pi.reference",
+            "executor.controlled",
+        ):
+            self.assertNotIn(identity_source, trace_rendered)
         for sentinel in (
             "SECRET-INPUT",
             "SECRET-RUNTIME-DELTA",
