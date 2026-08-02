@@ -126,6 +126,44 @@ class PathlightEvaluationTests(unittest.TestCase):
         with self.assertRaises(PathlightError):
             evaluation(status="recovered", value_microunits=None)
 
+    def test_rejects_nonstring_contract_and_status_values_without_type_errors(self) -> None:
+        for field, values in {
+            "metric_name": ([], {}),
+            "unit": ([], {}),
+        }.items():
+            for value in values:
+                with self.subTest(field=field, value=type(value).__name__), self.assertRaises(
+                    PathlightError
+                ):
+                    arguments: dict[str, object] = {
+                        "metric_name": "accuracy",
+                        "unit": "ratio",
+                        "higher_is_better": True,
+                        "contract_version": "1.0.0",
+                    }
+                    arguments[field] = value
+                    MetricContract(**arguments)  # type: ignore[arg-type]
+        for value in ([], {}):
+            with self.subTest(field="status", value=type(value).__name__), self.assertRaises(
+                PathlightError
+            ):
+                evaluation(status=value)  # type: ignore[arg-type]
+
+    def test_reader_normalizes_nonstring_status_json_values(self) -> None:
+        record = evaluation()
+        for value in ([], {}):
+            with self.subTest(value=type(value).__name__), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory).resolve() / "pathlight-evaluations.json"
+                write_evaluation_bundle(path, (record,))
+                document = json.loads(path.read_text(encoding="utf-8"))
+                document["evaluations"][0]["status"] = value
+                document["evaluations"][0]["evaluation_sha256"] = _digest("changed")
+                _rehash(document)
+                path.write_text(json.dumps(document), encoding="utf-8")
+
+                with self.assertRaises(PathlightError):
+                    read_evaluation_bundle(path)
+
     def test_compares_only_same_contract_snapshot_scope_and_coverage(self) -> None:
         baseline = evaluation(value_microunits=771_000)
         candidate = evaluation(trace="candidate", value_microunits=445_600)
@@ -180,6 +218,28 @@ class PathlightEvaluationTests(unittest.TestCase):
             self.assertEqual(bundle.evaluations, tuple(sorted((first, second), key=lambda item: item.evaluation_sha256)))
             with self.assertRaises((AttributeError, TypeError)):
                 bundle.evaluations[0].status = "missing"  # type: ignore[misc]
+
+    def test_writer_forces_mode_0600_under_restrictive_umask(self) -> None:
+        record = evaluation()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / "pathlight-evaluations.json"
+            previous_umask = os.umask(0o777)
+            try:
+                write_evaluation_bundle(path, (record,))
+            finally:
+                os.umask(previous_umask)
+
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+
+    def test_writer_removes_output_when_mode_cannot_be_set(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / "pathlight-evaluations.json"
+            with patch(
+                "asterion.pathlight.evaluation.os.fchmod", side_effect=OSError("blocked")
+            ), self.assertRaises(PathlightError):
+                write_evaluation_bundle(path, (evaluation(),))
+
+            self.assertFalse(path.exists())
 
     def test_bundle_rejects_a_noncanonical_digest(self) -> None:
         record = evaluation()

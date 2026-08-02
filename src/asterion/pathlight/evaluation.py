@@ -62,7 +62,7 @@ def _canonical_digest(value: object) -> str:
 
 
 def _require_sha256(value: object, field_name: str) -> str:
-    if not isinstance(value, str) or _SHA256.fullmatch(value) is None:
+    if type(value) is not str or _SHA256.fullmatch(value) is None:
         raise PathlightError(f"Pathlight evaluation {field_name} is invalid")
     return value
 
@@ -84,13 +84,13 @@ class MetricContract:
     metric_contract_sha256: str = field(init=False)
 
     def __post_init__(self) -> None:
-        if self.metric_name not in _METRIC_NAMES:
+        if type(self.metric_name) is not str or self.metric_name not in _METRIC_NAMES:
             raise PathlightError("Pathlight metric name is invalid")
-        if self.unit not in _UNITS:
+        if type(self.unit) is not str or self.unit not in _UNITS:
             raise PathlightError("Pathlight metric unit is invalid")
         if not isinstance(self.higher_is_better, bool):
             raise PathlightError("Pathlight metric direction is invalid")
-        if not isinstance(self.contract_version, str) or _SEMVER.fullmatch(
+        if type(self.contract_version) is not str or _SEMVER.fullmatch(
             self.contract_version
         ) is None:
             raise PathlightError("Pathlight metric contract version is invalid")
@@ -133,7 +133,11 @@ class EvaluationRecord:
         total_count = _require_nonnegative_int(self.total_count, "total count")
         if selected_count > total_count:
             raise PathlightError("Pathlight evaluation coverage is invalid")
-        if self.status not in {"observed", "recovered", "missing"}:
+        if type(self.status) is not str or self.status not in {
+            "observed",
+            "recovered",
+            "missing",
+        }:
             raise PathlightError("Pathlight evaluation status is invalid")
         if self.status == "missing":
             if self.value_microunits is not None:
@@ -291,12 +295,32 @@ def write_evaluation_bundle(path: Path, records: Sequence[EvaluationRecord]) -> 
     }
     document["bundle_sha256"] = _canonical_digest(document)
     encoded = json.dumps(document, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    descriptor = -1
+    created_stat: os.stat_result | None = None
     try:
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        created_stat = os.fstat(descriptor)
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "wb") as output:
+            descriptor = -1
+            output.write(encoded)
     except OSError as error:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if created_stat is not None:
+            _remove_created_target(path, created_stat)
         raise PathlightError("Pathlight evaluation target is unavailable") from error
-    with os.fdopen(descriptor, "wb") as output:
-        output.write(encoded)
+
+
+def _remove_created_target(path: Path, created_stat: os.stat_result) -> None:
+    """Remove only the exact output inode created by this failed write."""
+
+    try:
+        current = os.stat(path, follow_symlinks=False)
+        if (current.st_dev, current.st_ino) == (created_stat.st_dev, created_stat.st_ino):
+            os.unlink(path)
+    except OSError:
+        pass
 
 
 def read_evaluation_bundle(path: Path) -> EvaluationBundle:
@@ -343,7 +367,10 @@ def _validate_bundle(document: object) -> EvaluationBundle:
         "bundle_sha256",
     }:
         raise PathlightError("Pathlight evaluation bundle is invalid")
-    if document["schema"] != EVALUATION_BUNDLE_SCHEMA:
+    if (
+        type(document["schema"]) is not str
+        or document["schema"] != EVALUATION_BUNDLE_SCHEMA
+    ):
         raise PathlightError("Pathlight evaluation bundle schema is invalid")
     evaluations_value = document["evaluations"]
     if not isinstance(evaluations_value, list):
