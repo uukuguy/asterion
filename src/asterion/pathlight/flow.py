@@ -14,6 +14,8 @@ _FLOW_RELATIONS = frozenset(
 )
 _FLOW_ATTRIBUTE_KEYS = frozenset(
     {
+        "arguments_length",
+        "arguments_sha256",
         "call_id",
         "content_length",
         "content_sha256",
@@ -26,6 +28,8 @@ _FLOW_ATTRIBUTE_KEYS = frozenset(
         "observation_sha256",
         "output_tokens",
         "request_sha256",
+        "result_length",
+        "result_sha256",
         "response_length",
         "response_sha256",
         "segment_count",
@@ -97,8 +101,11 @@ def project_trace_flow(trace: Mapping[str, object]) -> tuple[Mapping[str, object
         spans = _spans_from_trace(canonical)
         selected = _select_mainline(spans)
         return _project_mainline(spans, selected)
-    except Exception:
-        raise PathlightError("Pathlight trace flow is invalid") from None
+    except (KeyboardInterrupt, SystemExit):
+        raise
+    except BaseException:
+        pass
+    raise PathlightError("Pathlight trace flow is invalid")
 
 
 def _json_copy(value: object) -> object:
@@ -143,7 +150,9 @@ def _spans_from_trace(trace: Mapping[str, object]) -> Mapping[str, _Span]:
         sequence = started["sequence"]
         kind = started["kind"]
         status = terminal["status"]
-        attributes = _combined_attributes(started["attributes"], terminal["attributes"])
+        attributes = _combined_attributes(
+            kind, started["attributes"], terminal["attributes"]
+        )
         links = _combined_links(started["links"], terminal["links"])
         if (
             parent_span_id is not None
@@ -161,14 +170,54 @@ def _spans_from_trace(trace: Mapping[str, object]) -> Mapping[str, _Span]:
     return spans
 
 
-def _combined_attributes(started: object, terminal: object) -> Mapping[str, object]:
+def _combined_attributes(
+    kind: object, started: object, terminal: object
+) -> Mapping[str, object]:
     if not isinstance(started, Mapping) or not isinstance(terminal, Mapping):
         raise PathlightError("Pathlight trace flow is invalid")
-    attributes = dict(started)
-    for key, value in terminal.items():
-        if key in attributes and attributes[key] != value:
-            raise PathlightError("Pathlight trace flow is invalid")
-        attributes[key] = value
+    started_attributes = dict(started)
+    terminal_attributes = dict(terminal)
+    projected: dict[str, object] = {}
+    if kind == "tool-call":
+        _rename_summary(
+            started_attributes,
+            projected,
+            digest_key="arguments_sha256",
+            length_key="arguments_length",
+        )
+        _rename_summary(
+            terminal_attributes,
+            projected,
+            digest_key="result_sha256",
+            length_key="result_length",
+        )
+    return _merge_same_semantics(projected, started_attributes, terminal_attributes)
+
+
+def _rename_summary(
+    source: dict[object, object],
+    projected: dict[str, object],
+    *,
+    digest_key: str,
+    length_key: str,
+) -> None:
+    if "content_sha256" in source:
+        projected[digest_key] = source.pop("content_sha256")
+    if "content_length" in source:
+        projected[length_key] = source.pop("content_length")
+
+
+def _merge_same_semantics(
+    projected: dict[str, object], *sources: Mapping[object, object]
+) -> Mapping[str, object]:
+    attributes = dict(projected)
+    for source in sources:
+        for key, value in source.items():
+            if type(key) is not str:
+                raise PathlightError("Pathlight trace flow is invalid")
+            if key in attributes and attributes[key] != value:
+                raise PathlightError("Pathlight trace flow is invalid")
+            attributes[key] = value
     return attributes
 
 
@@ -250,9 +299,7 @@ def _project_mainline(
     for span_id in selected:
         span = selected_by_id[span_id]
         parent_sequence = _parent_sequence(span, spans)
-        causes = caused_by[span_id]
-        if len(causes) > 1:
-            raise PathlightError("Pathlight trace flow is invalid")
+        causes = tuple(sorted(caused_by[span_id]))
         safe_attributes = {
             key: span.attributes[key]
             for key in sorted(_FLOW_ATTRIBUTE_KEYS & set(span.attributes))
@@ -264,7 +311,8 @@ def _project_mainline(
                     "kind": span.kind,
                     "status": span.status,
                     "parent_sequence": parent_sequence,
-                    "caused_by_sequence": next(iter(causes), None),
+                    "caused_by_sequence": causes[0] if len(causes) == 1 else None,
+                    "caused_by_sequences": causes,
                     "consumed_by_sequences": tuple(sorted(consumed_by[span_id])),
                     "produced_by_sequences": tuple(sorted(produced_by[span_id])),
                     "attributes": _FrozenDict(safe_attributes),

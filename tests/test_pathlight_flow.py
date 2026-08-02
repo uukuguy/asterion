@@ -1,11 +1,27 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import unittest
 from collections.abc import ItemsView, Iterator, Mapping
+from typing import cast
 
-from asterion.pathlight import PathlightError, TraceEvent, TraceGraph, project_trace_flow
+from asterion.pathlight import (
+    MemoryPathlightRecorder,
+    PathlightError,
+    RuntimeObservationBatch,
+    TraceEvent,
+    TraceGraph,
+    project_trace_flow,
+)
 from asterion.pathlight.protocol import trace_graph_digest
+from asterion.workflow_evidence.runtime import _RuntimePathlightProjection
+from tests.test_workflow_evidence_runtime import (
+    _native_events,
+    _request,
+    _two_frame_batch,
+    _two_tool_flow,
+)
 
 
 TRACE_ID = "00000000-0000-4000-8000-000000000101"
@@ -32,6 +48,23 @@ class _HostileMapping(Mapping[str, object]):
 
     def items(self) -> ItemsView[str, object]:
         raise RuntimeError(SENTINEL)
+
+
+class _HostileBoundary(BaseException):
+    pass
+
+
+class _HostileBaseExceptionMapping(_HostileMapping):
+    def items(self) -> ItemsView[str, object]:
+        raise _HostileBoundary(SENTINEL)
+
+
+class _ProcessControlMapping(_HostileMapping):
+    def __init__(self, error: KeyboardInterrupt | SystemExit) -> None:
+        self._error = error
+
+    def items(self) -> ItemsView[str, object]:
+        raise self._error
 
 
 def _link(relation: str, span_id: str) -> dict[str, str]:
@@ -112,6 +145,35 @@ def _rich_trace() -> dict[str, object]:
     ).to_mapping()
 
 
+def _runtime_graph(
+    observation: RuntimeObservationBatch | None,
+    events: tuple[tuple[str, dict[str, object]], ...],
+) -> Mapping[str, object]:
+    recorder = MemoryPathlightRecorder(TRACE_ID)
+    projection = _RuntimePathlightProjection(recorder)
+    observed: list[tuple[Mapping[str, object], int | None, int | None]] = []
+    for index, (event_type, payload) in enumerate(events):
+        event: Mapping[str, object] = {"type": event_type, "payload": payload}
+        observed.append((event, index + 2, index + 2))
+    projection.project(
+        _request(),
+        observed,
+        evidence={"usage": {"input_tokens": 7, "output_tokens": 11}},
+        native_observation=observation,
+        runtime_id="fixture.runtime",
+        invocation_started_ns=1,
+        invocation_ended_ns=len(events) + 3,
+    )
+    return recorder.snapshot()
+
+
+def _sequence_tuple(node: Mapping[str, object], key: str) -> tuple[int, ...]:
+    value = node[key]
+    if not isinstance(value, tuple) or any(type(item) is not int for item in value):
+        raise AssertionError("flow sequence projection is invalid")
+    return cast(tuple[int, ...], value)
+
+
 class PathlightFlowTests(unittest.TestCase):
     def test_flow_projects_frame_model_tool_frame_mainline(self) -> None:
         flow = project_trace_flow(_rich_trace())
@@ -132,6 +194,118 @@ class PathlightFlowTests(unittest.TestCase):
         self.assertTrue(flow[3]["missing_evidence"])
         self.assertNotIn(SENTINEL, json.dumps(flow))
 
+    def test_real_rich_and_fallback_tool_lifecycle_has_distinct_safe_summaries(
+        self,
+    ) -> None:
+        observation = _two_frame_batch()
+        fallback_result = json.dumps(
+            "SENTINEL_NATIVE_RESULT", sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        cases = (
+            (
+                "rich",
+                observation,
+                _native_events(),
+                observation.tools[0].result_sha256,
+                observation.tools[0].result_length,
+            ),
+            (
+                "fallback",
+                None,
+                _native_events(),
+                hashlib.sha256(fallback_result).hexdigest(),
+                len(fallback_result),
+            ),
+        )
+
+        for name, native, events, result_sha256, result_length in cases:
+            with self.subTest(name=name):
+                flow = project_trace_flow(_runtime_graph(native, events))
+                tool = next(node for node in flow if node["kind"] == "tool-call")
+                attributes = tool["attributes"]
+                assert isinstance(attributes, Mapping)
+
+                self.assertIn("arguments_sha256", attributes)
+                self.assertIn("result_sha256", attributes)
+                self.assertEqual(attributes["result_sha256"], result_sha256)
+                self.assertEqual(attributes["result_length"], result_length)
+                self.assertNotIn("content_sha256", attributes)
+                self.assertNotIn("content_length", attributes)
+
+    def test_real_two_tool_graphs_preserve_all_canonical_causes(self) -> None:
+        cases = (
+            ("sequential", False, False),
+            ("same-frame-overlap", True, False),
+            ("split-frame-overlap", True, True),
+        )
+
+        for name, overlap, split_frames in cases:
+            with self.subTest(name=name):
+                observation, events = _two_tool_flow(
+                    overlap=overlap,
+                    reverse_segments=False,
+                    split_frames=split_frames,
+                )
+                flow = project_trace_flow(_runtime_graph(observation, events))
+                frames = [
+                    node
+                    for node in flow
+                    if node["kind"] == "context-frame"
+                    and node["produced_by_sequences"]
+                ]
+                causes = tuple(
+                    sequence
+                    for frame in frames
+                    for sequence in _sequence_tuple(frame, "caused_by_sequences")
+                )
+                tool_sequences = tuple(
+                    cast(int, node["sequence"])
+                    for node in flow
+                    if node["kind"] == "tool-call"
+                )
+
+                self.assertEqual(tuple(sorted(causes)), tool_sequences)
+                self.assertEqual(
+                    tuple(
+                        sorted(
+                            sequence
+                            for frame in frames
+                            for sequence in _sequence_tuple(
+                                frame, "produced_by_sequences"
+                            )
+                        )
+                    ),
+                    tool_sequences,
+                )
+                if split_frames:
+                    self.assertEqual(
+                        [
+                            len(_sequence_tuple(frame, "caused_by_sequences"))
+                            for frame in frames
+                        ],
+                        [1, 1],
+                    )
+                    self.assertTrue(all(frame["caused_by_sequence"] is not None for frame in frames))
+                else:
+                    self.assertEqual(len(frames), 1)
+                    self.assertEqual(frames[0]["caused_by_sequences"], tool_sequences)
+                    self.assertIsNone(frames[0]["caused_by_sequence"])
+
+    def test_real_fallback_graph_keeps_single_cause_compatibility(self) -> None:
+        flow = project_trace_flow(_runtime_graph(None, _native_events()))
+        caused_frames = [
+            node
+            for node in flow
+            if node["kind"] == "context-frame" and node["caused_by_sequences"]
+        ]
+
+        self.assertEqual(len(caused_frames), 1)
+        causes = _sequence_tuple(caused_frames[0], "caused_by_sequences")
+        self.assertEqual(
+            caused_frames[0]["caused_by_sequence"],
+            causes[0],
+        )
+
     def test_flow_rejects_hostile_or_semantically_unsupported_mappings(self) -> None:
         with self.assertRaises(PathlightError) as raised:
             project_trace_flow(_HostileMapping())
@@ -151,6 +325,20 @@ class PathlightFlowTests(unittest.TestCase):
 
         with self.assertRaises(PathlightError):
             project_trace_flow(trace)
+
+    def test_flow_normalizes_hostile_base_exceptions_without_context(self) -> None:
+        with self.assertRaises(PathlightError) as raised:
+            project_trace_flow(_HostileBaseExceptionMapping())
+
+        self.assertEqual(str(raised.exception), "Pathlight trace flow is invalid")
+        self.assertNotIn(SENTINEL, str(raised.exception))
+        self.assertIsNone(raised.exception.__context__)
+        self.assertIsNone(raised.exception.__cause__)
+
+    def test_flow_propagates_process_control_base_exceptions(self) -> None:
+        for error in (KeyboardInterrupt(), SystemExit(7)):
+            with self.subTest(error=type(error).__name__), self.assertRaises(type(error)):
+                project_trace_flow(_ProcessControlMapping(error))
 
 
 if __name__ == "__main__":
