@@ -10,7 +10,7 @@ import unittest
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Iterator
+from typing import ClassVar, Iterator
 from unittest.mock import patch
 
 from asterion.capabilities.dci.implementation.pathlight.conversion import (
@@ -19,9 +19,10 @@ from asterion.capabilities.dci.implementation.pathlight.conversion import (
     recovered_run_to_experiment,
 )
 from asterion.capabilities.dci.implementation.pathlight.recovery import (
+    DciRecoveredCase,
     DciRecoveredRun,
+    DciRecoveredVariant,
     read_completed_dci_run,
-    validate_recovered_run,
 )
 from asterion.pathlight.experiment import validate_experiment_bundle
 
@@ -46,6 +47,22 @@ _SENTINELS = (
 
 class _RecoveredRunSubclass(DciRecoveredRun):
     pass
+
+
+class _HostileRecoveredVariant(DciRecoveredVariant):
+    method_called: ClassVar[bool] = False
+
+    def to_mapping(self) -> dict[str, str]:
+        type(self).method_called = True
+        raise RuntimeError("SENTINEL_PRIVATE_CONFIG_VALUE")
+
+
+class _HostileRecoveredCase(DciRecoveredCase):
+    method_called: ClassVar[bool] = False
+
+    def to_mapping(self) -> dict[str, object]:
+        type(self).method_called = True
+        raise RuntimeError("SENTINEL_PRIVATE_CONFIG_VALUE")
 
 
 @contextmanager
@@ -147,16 +164,17 @@ class TestDciPathlightConversion(unittest.TestCase):
             self.assertEqual(evaluation.trace_sha256, trial.trace_sha256)
             self.assertEqual(evaluation.scope_sha256, _case_scope(trial.dataset_item_sha256))
 
-    def test_conversion_is_deterministic_for_canonically_reconstructed_reversed_input(self) -> None:
+    def test_conversion_is_deterministic_for_direct_reversed_case_tuple(self) -> None:
         forward = recovered_run_to_experiment(self.recovered)
-        mapping = self.recovered.to_mapping()
-        cases = mapping["cases"]
-        assert type(cases) is list
-        cases.reverse()
-        cases.sort(key=lambda case: case["dataset_item_sha256"])
-        reconstructed = validate_recovered_run(mapping)
-        reverse = recovered_run_to_experiment(reconstructed)
+        reversed_run = replace(
+            self.recovered, cases=tuple(reversed(self.recovered.cases))
+        )
+        self.assertEqual(
+            reversed_run.recovered_run_sha256, self.recovered.recovered_run_sha256
+        )
+        reverse = recovered_run_to_experiment(reversed_run)
         self.assertEqual(forward.to_mapping(), reverse.to_mapping())
+        self.assertEqual(forward.bundle_sha256, reverse.bundle_sha256)
 
     def test_conversion_marks_legacy_lineage_and_unavailable_retrieval_evidence(self) -> None:
         bundle = recovered_run_to_experiment(self.recovered)
@@ -284,6 +302,31 @@ class TestDciPathlightConversion(unittest.TestCase):
             side_effect=RuntimeError("SENTINEL_PRIVATE_CONFIG_VALUE"),
         ):
             self.assert_conversion_error(lambda: recovered_run_to_experiment(self.recovered))
+
+    def test_conversion_rejects_nested_subclasses_before_calling_their_methods(self) -> None:
+        hostile_variant = _HostileRecoveredVariant(
+            **self.recovered.variant.to_mapping()
+        )
+        _HostileRecoveredVariant.method_called = False
+        self.assert_conversion_error(
+            lambda: recovered_run_to_experiment(
+                replace(self.recovered, variant=hostile_variant)
+            )
+        )
+        self.assertFalse(_HostileRecoveredVariant.method_called)
+
+        case_values = self.recovered.cases[0].to_mapping()
+        hostile_case = _HostileRecoveredCase(**case_values)  # type: ignore[arg-type]
+        _HostileRecoveredCase.method_called = False
+        self.assert_conversion_error(
+            lambda: recovered_run_to_experiment(
+                replace(
+                    self.recovered,
+                    cases=(hostile_case, *self.recovered.cases[1:]),
+                )
+            )
+        )
+        self.assertFalse(_HostileRecoveredCase.method_called)
 
 
 def _case_scope(dataset_item_sha256: str) -> str:

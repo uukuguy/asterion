@@ -175,6 +175,7 @@ class DciRecoveredRun:
             self.cases,
             self.source_document_sha256s,
             self.missing_evidence,
+            canonicalize_cases=False,
         )
 
     def to_mapping(self) -> dict[str, object]:
@@ -428,7 +429,14 @@ def _run_unsigned_mapping(
     cases: tuple[DciRecoveredCase, ...],
     source_document_sha256s: tuple[str, ...],
     missing_evidence: tuple[str, ...],
+    *,
+    canonicalize_cases: bool,
 ) -> dict[str, object]:
+    mapped_cases = (
+        tuple(sorted(cases, key=lambda case: case.dataset_item_sha256))
+        if canonicalize_cases
+        else cases
+    )
     return {
         "dataset_id": dataset_id,
         "mode": mode,
@@ -440,7 +448,7 @@ def _run_unsigned_mapping(
         "corpus_file_count": corpus_file_count,
         "dataset_snapshot_sha256": dataset_snapshot_sha256,
         "variant": variant.to_mapping(),
-        "cases": [case.to_mapping() for case in cases],
+        "cases": [case.to_mapping() for case in mapped_cases],
         "source_document_sha256s": list(source_document_sha256s),
         "missing_evidence": list(missing_evidence),
     }
@@ -475,6 +483,7 @@ def _build_recovered_run(
         cases,
         source_document_sha256s,
         missing_evidence,
+        canonicalize_cases=True,
     )
     return DciRecoveredRun(
         dataset_id,

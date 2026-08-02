@@ -11,6 +11,7 @@ from typing import Literal
 from asterion.capabilities.dci.implementation.pathlight.recovery import (
     DciRecoveredCase,
     DciRecoveredRun,
+    DciRecoveredVariant,
     validate_recovered_run,
 )
 from asterion.capabilities.dci.implementation.reproduction import reproduction
@@ -83,9 +84,7 @@ def recovered_run_to_experiment(run: DciRecoveredRun) -> ExperimentBundle:
     result: ExperimentBundle | None = None
     failed = False
     try:
-        if type(run) is not DciRecoveredRun:
-            raise ValueError
-        run = validate_recovered_run(run.to_mapping())
+        run = _validated_conversion_run(run)
         benchmark = resolve_paper_benchmark(run.dataset_id)
         if (benchmark.mode, run.metric_name) not in {
             ("ir", "ndcg-at-10"),
@@ -184,6 +183,28 @@ def recovered_run_to_experiment(run: DciRecoveredRun) -> ExperimentBundle:
     if failed or result is None:
         raise DciConversionError("DCI Pathlight conversion is invalid")
     return result
+
+
+def _validated_conversion_run(run: object) -> DciRecoveredRun:
+    if (
+        type(run) is not DciRecoveredRun
+        or type(run.variant) is not DciRecoveredVariant
+        or type(run.cases) is not tuple
+        or any(type(case) is not DciRecoveredCase for case in run.cases)
+    ):
+        raise ValueError
+    case_ids = tuple(case.dataset_item_sha256 for case in run.cases)
+    if len(case_ids) != len(set(case_ids)):
+        raise ValueError
+    mapping = run.to_mapping()
+    raw_cases = mapping.get("cases")
+    if type(raw_cases) is not list or len(raw_cases) != len(run.cases):
+        raise ValueError
+    mapping["cases"] = sorted(
+        raw_cases,
+        key=lambda case: case["dataset_item_sha256"] if type(case) is dict else "",
+    )
+    return validate_recovered_run(mapping)
 
 
 def _load_paper_reference(dataset_id: object) -> DciReferenceComparison:
