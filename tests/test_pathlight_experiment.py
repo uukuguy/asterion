@@ -4,6 +4,8 @@ import hashlib
 import json
 import unittest
 from collections.abc import ItemsView, Iterator, Mapping
+from dataclasses import replace
+from typing import Any
 
 from asterion.pathlight import PathlightError
 from asterion.pathlight.experiment import (
@@ -244,6 +246,174 @@ class PathlightExperimentTests(unittest.TestCase):
                     self.assertPublicPathlightError(
                         raised.exception,
                         f"Pathlight {validator.__name__[9:].replace('_', ' ')} is invalid",
+                    )
+
+    def test_public_validators_reject_mismatched_supplied_identities(self) -> None:
+        subject = SubjectRef("trace", _digest("trace"))
+        dataset = DatasetSnapshot(
+            _digest("dataset-contract"), _digest("dataset-content"), 1, "1.0.0"
+        )
+        evaluator = EvaluatorContract(
+            _digest("metric"), "rule", _digest("implementation"), _digest("input"),
+            _digest("output"), _digest("failure"), "1.0.0",
+        )
+        variant = Variant(*(_digest(name) for name in (
+            "assembly", "packages", "implementation", "runtime", "model", "tools",
+            "prompt", "policy", "change",
+        )))
+        plan = ExperimentPlan(
+            dataset.dataset_snapshot_sha256, _digest("scope"), variant.variant_sha256, (),
+            _digest("assignment"), (evaluator.evaluator_contract_sha256,),
+            _digest("budget"), _digest("stop"),
+        )
+        trial = CaseTrial(
+            plan.experiment_plan_sha256, _digest("case"), variant.variant_sha256,
+            _digest("trace"), (), "observed", (),
+        )
+        cases = (
+            (
+                validate_subject_ref,
+                subject,
+                "subject_ref_sha256",
+                "Pathlight subject ref is invalid",
+            ),
+            (
+                validate_dataset_snapshot,
+                dataset,
+                "dataset_snapshot_sha256",
+                "Pathlight dataset snapshot is invalid",
+            ),
+            (
+                validate_evaluator_contract,
+                evaluator,
+                "evaluator_contract_sha256",
+                "Pathlight evaluator contract is invalid",
+            ),
+            (validate_variant, variant, "variant_sha256", "Pathlight variant is invalid"),
+            (
+                validate_experiment_plan,
+                plan,
+                "experiment_plan_sha256",
+                "Pathlight experiment plan is invalid",
+            ),
+            (
+                validate_case_trial,
+                trial,
+                "case_trial_sha256",
+                "Pathlight case trial is invalid",
+            ),
+        )
+
+        for validator, value, identity_field, message in cases:
+            with self.subTest(validator=validator.__name__):
+                mapping = value.to_mapping()
+                mapping[identity_field] = _digest(
+                    f"{_HOSTILE_SENTINEL}-{identity_field}-mismatch"
+                )
+                with self.assertRaises(PathlightError) as raised:
+                    validator(mapping)
+
+                self.assertPublicPathlightError(raised.exception, message)
+
+    def test_every_identity_input_changes_its_enclosing_content_address(self) -> None:
+        subject = SubjectRef("trace", _digest("subject"))
+        dataset = DatasetSnapshot(
+            _digest("dataset-contract"), _digest("dataset-content"), 1, "1.0.0",
+            _digest("parent-snapshot"),
+        )
+        evaluator = EvaluatorContract(
+            _digest("metric"), "judge", _digest("evaluator-implementation"),
+            _digest("evaluator-input"), _digest("evaluator-output"),
+            _digest("evaluator-failure"), "1.0.0",
+        )
+        variant = Variant(*(_digest(name) for name in (
+            "assembly", "package-set", "implementation", "runtime", "model", "toolset",
+            "prompt-contract", "policy", "change",
+        )))
+        plan = ExperimentPlan(
+            dataset.dataset_snapshot_sha256, _digest("scope"), variant.variant_sha256,
+            (_digest("candidate"),), _digest("assignment"),
+            (evaluator.evaluator_contract_sha256,), _digest("budget"),
+            _digest("stop-criteria"), _digest("authorization"),
+        )
+        trial = CaseTrial(
+            plan.experiment_plan_sha256, _digest("dataset-item"), variant.variant_sha256,
+            _digest("trace"), (_digest("evaluation"),), "recovered", (),
+        )
+        matrices: tuple[tuple[Any, str, tuple[str, ...]], ...] = (
+            (subject, "subject_ref_sha256", ("subject_sha256",)),
+            (
+                dataset,
+                "dataset_snapshot_sha256",
+                ("dataset_contract_sha256", "content_sha256", "parent_snapshot_sha256"),
+            ),
+            (
+                evaluator,
+                "evaluator_contract_sha256",
+                (
+                    "metric_contract_sha256",
+                    "implementation_sha256",
+                    "input_contract_sha256",
+                    "output_contract_sha256",
+                    "failure_semantics_sha256",
+                ),
+            ),
+            (
+                variant,
+                "variant_sha256",
+                (
+                    "assembly_sha256",
+                    "package_set_sha256",
+                    "implementation_sha256",
+                    "runtime_sha256",
+                    "model_sha256",
+                    "toolset_sha256",
+                    "prompt_contract_sha256",
+                    "policy_sha256",
+                    "change_sha256",
+                ),
+            ),
+            (
+                plan,
+                "experiment_plan_sha256",
+                (
+                    "dataset_snapshot_sha256",
+                    "scope_sha256",
+                    "baseline_variant_sha256",
+                    "candidate_variant_sha256s",
+                    "assignment_sha256",
+                    "evaluator_contract_sha256s",
+                    "budget_sha256",
+                    "stop_criteria_sha256",
+                    "authorization_sha256",
+                ),
+            ),
+            (
+                trial,
+                "case_trial_sha256",
+                (
+                    "experiment_plan_sha256",
+                    "dataset_item_sha256",
+                    "variant_sha256",
+                    "trace_sha256",
+                    "evaluation_sha256s",
+                ),
+            ),
+        )
+
+        for value, identity_field, input_fields in matrices:
+            for input_field in input_fields:
+                with self.subTest(type=type(value).__name__, field=input_field):
+                    current = getattr(value, input_field)
+                    replacement = (
+                        (_digest(f"changed-{input_field}"),)
+                        if type(current) is tuple
+                        else _digest(f"changed-{input_field}")
+                    )
+                    mutated = replace(value, **{input_field: replacement})
+
+                    self.assertNotEqual(
+                        getattr(mutated, identity_field), getattr(value, identity_field)
                     )
 
 
