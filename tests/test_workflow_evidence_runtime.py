@@ -4,12 +4,20 @@ import hashlib
 import json
 import unittest
 from collections.abc import AsyncIterator
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import cast
 
-from asterion.pathlight import MemoryPathlightRecorder, TraceEvent
+from asterion.pathlight import (
+    ContextFrameObservation,
+    ContextSegmentSummary,
+    MemoryPathlightRecorder,
+    ModelCallObservation,
+    RuntimeObservationBatch,
+    ToolCallObservation,
+    TraceEvent,
+)
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 from asterion.workflow_evidence import ObservedRuntimeClient
 from asterion.workflow_evidence.storage import write_workflow_observation_bundle
@@ -145,6 +153,14 @@ class RepeatedClock:
         return self.value
 
 
+class NonmonotonicClock:
+    def __init__(self) -> None:
+        self.values = iter((1_000, 1_010, 1_005, *range(1_020, 1_200, 10)))
+
+    def __call__(self) -> int:
+        return next(self.values)
+
+
 class PrefixRejectingRecorder:
     """Reject a batch after inspecting its prefix without committing it."""
 
@@ -176,7 +192,329 @@ class PrefixRejectingRecorder:
         return None
 
 
+class RichRejectingRecorder:
+    """Atomically reject rich candidates while accepting fallback candidates."""
+
+    def __init__(self) -> None:
+        self._recorder = MemoryPathlightRecorder(TRACE_ID)
+        self.record_many_calls = 0
+
+    @property
+    def trace_id(self) -> str:
+        return self._recorder.trace_id
+
+    @property
+    def next_sequence(self) -> int:
+        return self._recorder.next_sequence
+
+    @property
+    def active_span_id(self) -> str | None:
+        return self._recorder.active_span_id
+
+    def record(self, event: TraceEvent) -> None:
+        self._recorder.record(event)
+
+    def record_many(self, events: tuple[TraceEvent, ...]) -> None:
+        self.record_many_calls += 1
+        if any(event.kind == "model-call" for event in events):
+            raise RuntimeError("SENTINEL_RICH_REJECTION")
+        self._recorder.record_many(events)
+
+    def snapshot(self) -> Mapping[str, object]:
+        return self._recorder.snapshot()
+
+
+class HostileObservationMapping(Mapping[str, object]):
+    def __getitem__(self, key: str) -> object:
+        del key
+        raise RuntimeError("SENTINEL_HOSTILE_SOURCE")
+
+    def __iter__(self) -> Iterator[str]:
+        raise RuntimeError("SENTINEL_HOSTILE_SOURCE")
+
+    def __len__(self) -> int:
+        raise RuntimeError("SENTINEL_HOSTILE_SOURCE")
+
+
+class PropertyExplodingRuntime(EventRuntime):
+    def __init__(self) -> None:
+        super().__init__(_native_events())
+
+    @property
+    def pathlight_runtime_observation(self) -> object:
+        raise RuntimeError("SENTINEL_SOURCE_PROPERTY")
+
+
+def _digest(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _request() -> RunRequest:
+    return RunRequest(run_id="native-run", input_text="SENTINEL_NATIVE_INPUT")
+
+
+def _native_events() -> tuple[tuple[str, dict[str, object]], ...]:
+    return (
+        ("run.started", {"capabilities": []}),
+        (
+            "tool.call",
+            {
+                "call_id": "SENTINEL_NATIVE_CALL",
+                "name": "private.native.tool",
+                "arguments": {"query": "SENTINEL_NATIVE_ARGUMENT"},
+            },
+        ),
+        (
+            "tool.result",
+            {
+                "call_id": "SENTINEL_NATIVE_CALL",
+                "output": "SENTINEL_NATIVE_RESULT",
+                "is_error": False,
+            },
+        ),
+        ("usage.reported", {"input_tokens": 7, "output_tokens": 11}),
+        ("run.completed", {"status": "completed"}),
+    )
+
+
+def _batch(
+    *,
+    wrong_tool_digest: bool = False,
+    run_id: str = "native-run",
+) -> RuntimeObservationBatch:
+    tool = ToolCallObservation(
+        call_sha256=_digest("SENTINEL_NATIVE_CALL"),
+        tool_sha256=_digest("private.native.tool"),
+        arguments_sha256=_digest(
+            json.dumps(
+                {"query": "WRONG" if wrong_tool_digest else "SENTINEL_NATIVE_ARGUMENT"},
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        ),
+        result_sha256=_digest("SENTINEL_NATIVE_RESULT"),
+        result_length=len("SENTINEL_NATIVE_RESULT"),
+        status="completed",
+    )
+    frame = ContextFrameObservation(
+        frame_index=1,
+        segments=(
+            ContextSegmentSummary(
+                segment_index=0,
+                role="user",
+                structure_kind="message",
+                content_sha256=_digest("SENTINEL_NATIVE_INPUT"),
+                content_length=len("SENTINEL_NATIVE_INPUT"),
+                source_call_sha256=None,
+                missing_evidence=False,
+            ),
+            ContextSegmentSummary(
+                segment_index=1,
+                role="assistant",
+                structure_kind="message",
+                content_sha256=_digest("SENTINEL_MODEL_RESPONSE"),
+                content_length=len("SENTINEL_MODEL_RESPONSE"),
+                source_call_sha256=None,
+                missing_evidence=False,
+            ),
+            ContextSegmentSummary(
+                segment_index=2,
+                role="tool-result",
+                structure_kind="tool-result",
+                content_sha256=tool.result_sha256,
+                content_length=tool.result_length,
+                source_call_sha256=tool.call_sha256,
+                missing_evidence=False,
+            ),
+        ),
+    )
+    model_calls = tuple(
+        ModelCallObservation(
+            request_index=index,
+            frame_sha256=frame.frame_sha256,
+            model_sha256=_digest("private.model"),
+            request_sha256=_digest(f"SENTINEL_MODEL_REQUEST_{index}"),
+            response_sha256=_digest(f"SENTINEL_MODEL_RESPONSE_{index}"),
+            response_length=len(f"SENTINEL_MODEL_RESPONSE_{index}"),
+            input_tokens=index + 2,
+            output_tokens=index + 3,
+            status="completed",
+            boundary_observed=True,
+        )
+        for index in (1, 2)
+    )
+    return RuntimeObservationBatch.build(
+        run_sha256=_digest(run_id),
+        frames=(frame,),
+        model_calls=model_calls,
+        tools=(tool,),
+    )
+
+
+class ObservedFixtureRuntime(EventRuntime):
+    def __init__(
+        self,
+        observation: Mapping[str, object],
+        events: tuple[tuple[str, dict[str, object]], ...] | None = None,
+    ) -> None:
+        super().__init__(_native_events() if events is None else events)
+        self.observation = observation
+
+    def pathlight_runtime_observation(self, run_id: str) -> Mapping[str, object] | None:
+        del run_id
+        return self.observation
+
+
+def _started_events(graph: Mapping[str, object]) -> list[Mapping[str, object]]:
+    events = cast(list[Mapping[str, object]], graph["events"])
+    return [event for event in events if event["status"] == "started"]
+
+
+def _kinds(graph: Mapping[str, object]) -> list[object]:
+    return [event["kind"] for event in _started_events(graph)]
+
+
+def _segment_indexes(graph: Mapping[str, object]) -> list[object]:
+    return [
+        attributes["segment_index"]
+        for event in _started_events(graph)
+        if "segment_index" in (attributes := cast(Mapping[str, object], event["attributes"]))
+    ]
+
+
+def _relations(graph: Mapping[str, object]) -> list[object]:
+    events = cast(list[Mapping[str, object]], graph["events"])
+    return [link["relation"] for event in events for link in event["links"]]
+
+
+def _context_frames(graph: Mapping[str, object]) -> list[Mapping[str, object]]:
+    return [event for event in _started_events(graph) if event["kind"] == "context-frame"]
+
+
 class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_native_observation_projects_frame_segments_model_calls_and_tool_flow(
+        self,
+    ) -> None:
+        runtime = ObservedFixtureRuntime(_batch().to_mapping())
+        recorder = MemoryPathlightRecorder(TRACE_ID)
+        observed = ObservedRuntimeClient(
+            runtime,
+            pathlight=recorder,
+            monotonic_ns=IncrementingClock(),
+        )
+
+        yielded = [event async for event in observed.run(_request())]
+        graph = recorder.snapshot()
+
+        self.assertEqual(yielded, runtime.yielded)
+        self.assertEqual(_kinds(graph).count("model-call"), 2)
+        self.assertEqual(_segment_indexes(graph), [0, 1, 2])
+        self.assertIn("consumed-by", _relations(graph))
+        self.assertIn("produced-by", _relations(graph))
+        self.assertFalse(
+            any(
+                event["attributes"].get("missing_evidence") is True
+                for event in _context_frames(graph)
+            )
+        )
+        self.assertNotIn("SENTINEL", repr(graph))
+
+    async def test_native_projection_failure_atomically_retries_fallback(self) -> None:
+        runtime = ObservedFixtureRuntime(_batch().to_mapping())
+        recorder = RichRejectingRecorder()
+        observed = ObservedRuntimeClient(runtime, pathlight=recorder)
+
+        yielded = [event async for event in observed.run(_request())]
+        graph = recorder.snapshot()
+
+        self.assertEqual(yielded, runtime.yielded)
+        self.assertEqual(recorder.record_many_calls, 2)
+        self.assertNotIn("model-call", _kinds(graph))
+        self.assertTrue(_context_frames(graph)[0]["attributes"]["missing_evidence"])
+        self.assertNotIn("SENTINEL", repr(graph))
+
+    async def test_hostile_cross_run_and_noncanonical_sources_fail_closed_to_fallback(
+        self,
+    ) -> None:
+        duplicate_frame = _batch().to_mapping()
+        duplicate_frame["frames"].append(duplicate_frame["frames"][0])
+        duplicate_tool = _batch().to_mapping()
+        duplicate_tool["tools"].append(duplicate_tool["tools"][0])
+        cases = (
+            PropertyExplodingRuntime(),
+            ObservedFixtureRuntime(HostileObservationMapping()),
+            ObservedFixtureRuntime(_batch(run_id="foreign-run").to_mapping()),
+            ObservedFixtureRuntime(
+                RuntimeObservationBatch.build(
+                    run_sha256=_digest("native-run"),
+                    frames=(),
+                    model_calls=(),
+                    tools=(),
+                    missing_evidence=(
+                        "context-frame",
+                        "model-request",
+                        "model-request-boundary",
+                    ),
+                ).to_mapping(),
+                (
+                    ("run.started", {"capabilities": []}),
+                    ("run.completed", {"status": "completed"}),
+                ),
+            ),
+            ObservedFixtureRuntime(duplicate_frame),
+            ObservedFixtureRuntime(duplicate_tool),
+        )
+        for index, runtime in enumerate(cases, start=20):
+            with self.subTest(runtime=type(runtime).__name__, index=index):
+                recorder = MemoryPathlightRecorder(
+                    f"00000000-0000-4000-8000-{index:012x}"
+                )
+                observed = ObservedRuntimeClient(runtime, pathlight=recorder)
+
+                yielded = [event async for event in observed.run(_request())]
+                graph = recorder.snapshot()
+
+                self.assertEqual(yielded, runtime.yielded)
+                self.assertNotIn("model-call", _kinds(graph))
+                self.assertTrue(
+                    _context_frames(graph)[0]["attributes"]["missing_evidence"]
+                )
+                self.assertNotIn("SENTINEL", repr(graph))
+
+    async def test_nonmonotonic_observation_clock_falls_back_without_partial_rich_trace(
+        self,
+    ) -> None:
+        runtime = ObservedFixtureRuntime(_batch().to_mapping())
+        recorder = MemoryPathlightRecorder(TRACE_ID)
+        observed = ObservedRuntimeClient(
+            runtime,
+            pathlight=recorder,
+            monotonic_ns=NonmonotonicClock(),
+        )
+
+        yielded = [event async for event in observed.run(_request())]
+        graph = recorder.snapshot()
+
+        self.assertEqual(yielded, runtime.yielded)
+        self.assertNotIn("model-call", _kinds(graph))
+        self.assertTrue(_context_frames(graph)[0]["attributes"]["missing_evidence"])
+        self.assertNotIn("SENTINEL", repr(graph))
+
+    async def test_mismatched_native_tool_digest_does_not_publish_a_partial_rich_trace(
+        self,
+    ) -> None:
+        runtime = ObservedFixtureRuntime(_batch(wrong_tool_digest=True).to_mapping())
+        recorder = MemoryPathlightRecorder(TRACE_ID)
+        observed = ObservedRuntimeClient(runtime, pathlight=recorder)
+
+        yielded = [event async for event in observed.run(_request())]
+        graph = recorder.snapshot()
+
+        self.assertEqual(yielded, runtime.yielded)
+        self.assertNotIn("model-call", _kinds(graph))
+        self.assertTrue(_context_frames(graph)[0]["attributes"]["missing_evidence"])
+        self.assertNotIn("SENTINEL", repr(graph))
+
     async def test_projection_rejection_does_not_persist_a_partial_trace(self) -> None:
         recorder = PrefixRejectingRecorder()
         observed = ObservedRuntimeClient(

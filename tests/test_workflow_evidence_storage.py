@@ -65,6 +65,32 @@ def _completed_pathlight_trace(
     ).to_mapping()
 
 
+def _rich_pathlight_trace() -> dict[str, object]:
+    return TraceGraph.build(
+        "00000000-0000-4000-8000-000000000002",
+        (
+            TraceEvent.start(
+                "00000000-0000-4000-8000-000000000002",
+                "00000000-0000-4000-8000-000000000002",
+                None,
+                1,
+                "context-frame",
+                attributes={
+                    "frame_index": 1,
+                    "segment_count": 0,
+                    "observation_sha256": "a" * 64,
+                },
+            ),
+            TraceEvent.complete(
+                "00000000-0000-4000-8000-000000000002",
+                "00000000-0000-4000-8000-000000000002",
+                2,
+                kind="context-frame",
+            ),
+        ),
+    ).to_mapping()
+
+
 def _rehash_record(record: dict[str, object]) -> None:
     graph = dict(record)
     graph.pop("graph_sha256")
@@ -177,6 +203,29 @@ def _mutated_bundle_path(root: Path, mutation: str) -> Path:
 
 
 class WorkflowEvidenceStorageTests(unittest.TestCase):
+    def test_rich_trace_round_trips_without_losing_safe_observation_attributes(
+        self,
+    ) -> None:
+        trace = _rich_pathlight_trace()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / "workflow-evidence.json"
+            write_workflow_observation_bundle(
+                path,
+                (_completed_record(),),
+                pathlight_traces=(trace,),
+            )
+
+            bundle = read_workflow_observation_bundle(path)
+
+        self.assertEqual(
+            bundle.pathlight_traces[0]["events"][0]["attributes"],
+            {
+                "frame_index": 1,
+                "segment_count": 0,
+                "observation_sha256": "a" * 64,
+            },
+        )
+
     def test_reader_projects_completed_record_identifiers_as_sha256(self) -> None:
         run_id = "/private/SECRET-RUN"
         tool_name = "/private/SECRET-TOOL"

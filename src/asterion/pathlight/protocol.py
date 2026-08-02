@@ -9,7 +9,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import TypeAlias
+from typing import TypeAlias, cast
 
 
 TRACE_SCHEMA = "asterion.pathlight-trace/v1"
@@ -66,9 +66,13 @@ _DIGEST_ATTRIBUTES = frozenset(
         "host_service_sha256",
         "implementation_sha256",
         "policy_sha256",
+        "observation_sha256",
+        "request_sha256",
+        "response_sha256",
         "run_sha256",
         "runtime_sha256",
         "scope_sha256",
+        "source_call_sha256",
         "task_sha256",
     }
 )
@@ -119,8 +123,11 @@ _TRUSTED_STRING_ATTRIBUTE_VALUES = {
     "structure_kind": frozenset(
         {
             "artifact",
+            "contract",
             "context-frame",
+            "message",
             "metadata",
+            "missing",
             "missing-evidence",
             "model-request",
             "model-response",
@@ -128,6 +135,9 @@ _TRUSTED_STRING_ATTRIBUTE_VALUES = {
             "tool-arguments",
             "tool-result",
         }
+    ),
+    "segment_role": frozenset(
+        {"assistant", "system", "tool-result", "unknown", "user"}
     ),
     "unit": frozenset({"boolean", "bytes", "count", "microunits", "nanoseconds", "ratio", "tokens"}),
 }
@@ -137,12 +147,19 @@ _NONNEGATIVE_INT_ATTRIBUTES = frozenset(
         "content_length",
         "cost_microunits",
         "duration_ns",
+        "frame_index",
         "input_tokens",
         "output_tokens",
+        "request_index",
+        "response_length",
+        "segment_count",
+        "segment_index",
     }
 )
 _INTEGER_ATTRIBUTES = frozenset({"metric_value"})
-_BOOLEAN_ATTRIBUTES = frozenset({"is_error", "missing_evidence"})
+_BOOLEAN_ATTRIBUTES = frozenset(
+    {"boundary_observed", "is_error", "missing_evidence"}
+)
 _SAFE_ATTRIBUTE_KEYS = (
     _DIGEST_ATTRIBUTES
     | _OPAQUE_ID_ATTRIBUTES
@@ -393,15 +410,15 @@ def _event_from_mapping(value: object) -> TraceEvent:
     if not isinstance(value, Mapping) or set(value) != _EVENT_FIELDS:
         raise PathlightError("Pathlight event fields are invalid")
     return TraceEvent(
-        trace_id=value.get("trace_id"),
-        span_id=value.get("span_id"),
-        parent_span_id=value.get("parent_span_id"),
-        sequence=value.get("sequence"),
-        kind=value.get("kind"),
-        status=value.get("status"),
-        attributes=value.get("attributes"),
-        links=value.get("links"),
-        timestamp_ns=value.get("timestamp_ns"),
+        trace_id=cast(str, value["trace_id"]),
+        span_id=cast(str, value["span_id"]),
+        parent_span_id=cast(str | None, value["parent_span_id"]),
+        sequence=cast(int, value["sequence"]),
+        kind=cast(str, value["kind"]),
+        status=cast(str, value["status"]),
+        attributes=cast(Mapping[str, SafeAttributeValue], value["attributes"]),
+        links=cast(Sequence[Mapping[str, str]], value["links"]),
+        timestamp_ns=cast(int, value["timestamp_ns"]),
     )
 
 

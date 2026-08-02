@@ -57,13 +57,50 @@ class PathlightProtocolTests(unittest.TestCase):
         "metric_contract_id": "a" * 64,
         "metric_name": "input-tokens",
         "model_id": "a" * 64,
+        "observation_sha256": "a" * 64,
         "policy_sha256": "a" * 64,
+        "request_sha256": "a" * 64,
+        "response_sha256": "a" * 64,
         "runtime_id": "a" * 64,
         "scope_sha256": "a" * 64,
+        "segment_role": "assistant",
+        "source_call_sha256": "a" * 64,
         "structure_kind": "context-frame",
         "tool_id": "a" * 64,
         "unit": "count",
     }
+
+    def test_accepts_only_fixed_native_observation_attributes(self) -> None:
+        attributes = {
+            "boundary_observed": True,
+            "frame_index": 1,
+            "request_index": 2,
+            "segment_count": 3,
+            "segment_index": 0,
+            "segment_role": "tool-result",
+            "source_call_sha256": "a" * 64,
+            "request_sha256": "b" * 64,
+            "response_sha256": "c" * 64,
+            "response_length": 4,
+            "observation_sha256": "d" * 64,
+            "structure_kind": "message",
+        }
+
+        event = TraceEvent.start(
+            TRACE_ID, ROOT_SPAN_ID, None, 1, "context-frame", attributes=attributes
+        )
+
+        self.assertEqual(dict(event.attributes), attributes)
+        for key in ("frame_index", "request_index", "segment_count", "segment_index"):
+            with self.subTest(key=key), self.assertRaises(PathlightError):
+                TraceEvent.start(
+                    TRACE_ID,
+                    ROOT_SPAN_ID,
+                    None,
+                    1,
+                    "context-frame",
+                    attributes={key: True},
+                )
 
     def complete_graph(self) -> TraceGraph:
         return TraceGraph.build(
