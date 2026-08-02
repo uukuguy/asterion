@@ -269,6 +269,8 @@ class PromotionCheckTests(unittest.TestCase):
             "'capabilities/dci/payload/benchmark-suites/*.json'",
             smoke_source,
         )
+        self.assertIn("declared_suite_paths", smoke_source)
+        self.assertIn("descriptor_payload['benchmark_suites']", smoke_source)
         self.assertIn("root.glob(pattern)", smoke_source)
         self.assertIn("capability_sdk/templates/minimal", smoke_source)
         self.assertIn("asterion.capability_sdk", smoke_source)
@@ -288,10 +290,6 @@ class PromotionCheckTests(unittest.TestCase):
             "capabilities/controlled_code/manifests/controlled-code-policy.json",
             "capabilities/controlled_code/manifests/execution-audit-observability.json",
             "capabilities/dci/payload/capability-package.json",
-            "capabilities/dci/payload/benchmark-suites/all.json",
-            "capabilities/dci/payload/benchmark-suites/github.json",
-            "capabilities/dci/payload/benchmark-suites/paper-main.json",
-            "capabilities/dci/payload/benchmark-suites/qa-bamboogle-github-sample50.json",
             "capabilities/dci/payload/capabilities/dci-analysis.json",
             "capabilities/dci/payload/capabilities/dci-benchmark.json",
             "capabilities/dci/payload/capabilities/dci-evaluation.json",

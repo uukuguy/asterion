@@ -130,14 +130,6 @@ expected = {
         'asterion.capability/v1',
     'capabilities/dci/payload/capability-package.json':
         'asterion.capability-package/v1',
-    'capabilities/dci/payload/benchmark-suites/all.json':
-        'asterion.benchmark-suite/v1',
-    'capabilities/dci/payload/benchmark-suites/github.json':
-        'asterion.benchmark-suite/v1',
-    'capabilities/dci/payload/benchmark-suites/paper-main.json':
-        'asterion.benchmark-suite/v1',
-    'capabilities/dci/payload/benchmark-suites/qa-bamboogle-github-sample50.json':
-        'asterion.benchmark-suite/v1',
     'capabilities/dci/payload/capabilities/dci-analysis.json':
         'asterion.capability/v1',
     'capabilities/dci/payload/capabilities/dci-benchmark.json':
@@ -153,6 +145,26 @@ expected = {
     'capabilities/dci/payload/capabilities/protocol-observability.json':
         'asterion.capability/v1',
 }
+descriptor_payload = json.loads(
+    (root / 'capabilities/dci/payload/capability-package.json').read_text(
+        encoding='utf-8'
+    )
+)
+declared_suite_paths = set()
+for suite_ref in descriptor_payload['benchmark_suites']:
+    assert type(suite_ref) is dict
+    assert set(suite_ref) == {'suite_id', 'version'}
+    suite_id = suite_ref['suite_id']
+    assert type(suite_id) is str and suite_id.startswith('dci.')
+    assert type(suite_ref['version']) is str
+    suite_path = (
+        'capabilities/dci/payload/benchmark-suites/'
+        + suite_id.removeprefix('dci.').replace('.', '-')
+        + '.json'
+    )
+    assert suite_path not in declared_suite_paths
+    declared_suite_paths.add(suite_path)
+    expected[suite_path] = 'asterion.benchmark-suite/v1'
 actual_paths = {
     str(path.relative_to(root))
     for pattern in (
