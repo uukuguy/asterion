@@ -441,7 +441,11 @@ def _read_bundle_document(path: Path) -> object:
             os.close(directory_fd)
             directory_fd = next_directory_fd
         source_fd = os.open(path.name, os.O_RDONLY | nofollow, dir_fd=directory_fd)
-        if not stat.S_ISREG(os.fstat(source_fd).st_mode):
+        source_metadata = os.fstat(source_fd)
+        if (
+            not stat.S_ISREG(source_metadata.st_mode)
+            or stat.S_IMODE(source_metadata.st_mode) != 0o600
+        ):
             raise OSError("workflow observation source is not a regular file")
         with os.fdopen(source_fd, "rb") as source:
             source_fd = -1

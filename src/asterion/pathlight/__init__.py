@@ -54,6 +54,7 @@ from asterion.pathlight.recorder import (
     PathlightRecorder,
 )
 from asterion.pathlight.query import MetricFilter, PathlightCatalog, TraceFilter
+from asterion.pathlight.flow import project_trace_flow
 from asterion.pathlight.diagnosis import (
     DiagnosisBundle,
     Finding,
@@ -119,4 +120,5 @@ __all__ = (
     "TraceFilter",
     "MetricFilter",
     "PathlightCatalog",
+    "project_trace_flow",
 )

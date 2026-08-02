@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import hashlib
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -31,6 +32,7 @@ from asterion.pathlight.experiment import (
     write_experiment_bundle,
 )
 from asterion.workflow_evidence import write_workflow_observation_bundle
+from tests.test_pathlight_flow import _rich_trace
 
 
 TRACE_ID = "00000000-0000-4000-8000-000000000001"
@@ -384,6 +386,56 @@ class PathlightCliTests(unittest.TestCase):
                         expected,
                     )
                     self.assertEqual(stdout.getvalue(), json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n")
+
+    def test_trace_flow_is_provider_free_and_emits_canonical_mainline_json(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory).resolve() / "workflow-evidence.json"
+            write_workflow_observation_bundle(bundle, (), pathlight_traces=(_rich_trace(),))
+            stdout = io.StringIO()
+
+            code = main(
+                [
+                    "pathlight",
+                    "trace",
+                    "flow",
+                    "--evidence-file",
+                    str(bundle),
+                    "--trace-id",
+                    "00000000-0000-4000-8000-000000000101",
+                ],
+                entry_points=(FailIfLoadedEntryPoint(),),
+                stdout=stdout,
+            )
+
+        self.assertEqual(code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual([item["kind"] for item in payload], [
+            "context-frame", "model-call", "tool-call", "context-frame", "model-call"
+        ])
+        self.assertEqual(stdout.getvalue(), json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n")
+
+    def test_trace_flow_rejects_nonprivate_evidence_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory).resolve() / "workflow-evidence.json"
+            write_workflow_observation_bundle(bundle, (), pathlight_traces=(_rich_trace(),))
+            os.chmod(bundle, 0o640)
+            stderr = io.StringIO()
+
+            code = main(
+                [
+                    "pathlight",
+                    "trace",
+                    "flow",
+                    "--evidence-file",
+                    str(bundle),
+                    "--trace-id",
+                    "00000000-0000-4000-8000-000000000101",
+                ],
+                stderr=stderr,
+            )
+
+        self.assertEqual(code, 2)
+        self.assertEqual(stderr.getvalue(), "asterion pathlight: request is invalid\n")
 
     def test_metric_query_and_exact_evaluation_comparison_are_provider_free(self) -> None:
         first_contract, baseline = _evaluation(100)

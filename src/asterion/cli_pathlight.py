@@ -13,6 +13,7 @@ from asterion.pathlight import (
     MetricFilter,
     PathlightCatalog,
     TraceFilter,
+    project_trace_flow,
     read_diagnosis_bundle,
     read_evaluation_bundle,
 )
@@ -62,6 +63,8 @@ def _execute(args: argparse.Namespace) -> object:
             return catalog.show_trace(args.trace_id)
         if args.trace_command == "tail":
             return catalog.tail_trace(args.trace_id, after_sequence=args.after_sequence)
+        if args.trace_command == "flow":
+            return project_trace_flow(catalog.show_trace(args.trace_id))
     if args.command == "metrics":
         catalog = _catalog_from_evaluations(args.evaluation_file)
         return catalog.query_metrics(
@@ -162,6 +165,9 @@ def _parser() -> argparse.ArgumentParser:
     _add_evidence_file(trace_tail)
     trace_tail.add_argument("--trace-id", required=True)
     trace_tail.add_argument("--after-sequence", type=int, default=0)
+    trace_flow = trace_commands.add_parser("flow", add_help=False)
+    _add_evidence_file(trace_flow)
+    trace_flow.add_argument("--trace-id", required=True)
 
     metrics = commands.add_parser("metrics", add_help=False)
     metric_commands = metrics.add_subparsers(
