@@ -327,7 +327,12 @@ def test_proposal_is_digest_only_and_never_authority(self) -> None:
 
 def test_diagnosis_refuses_hypothesis_without_observed_support(self) -> None:
     with self.assertRaises(PathlightError):
-        DiagnosisBundle.build(findings=(unsupported_hypothesis,), proposals=())
+        DiagnosisBundle.build(
+            experiment_bundle_sha256s=(_digest("experiment-bundle"),),
+            evaluation_sha256s=(_digest("evaluation"),),
+            findings=(unsupported_hypothesis,),
+            proposals=(),
+        )
 ```
 
 - [ ] **Step 2: 运行测试确认 RED**
@@ -364,9 +369,17 @@ class Proposal:
     requires_operator_authorization: bool = True
     execution_authorized: bool = False
     proposal_sha256: str = field(init=False)
+
+@dataclass(frozen=True, slots=True)
+class DiagnosisBundle:
+    experiment_bundle_sha256s: tuple[str, ...]
+    evaluation_sha256s: tuple[str, ...]
+    findings: tuple[Finding, ...]
+    proposals: tuple[Proposal, ...]
+    bundle_sha256: str
 ```
 
-`DiagnosisBundle.build` 必须要求 hypothesis 至少引用一个已存在的 observed finding digest；Proposal 只能引用 hypothesis；所有引用闭包、数组和 digests 必须验证。read/write 规则与 ExperimentBundle 相同，exact filename `pathlight-diagnosis.json`。
+`DiagnosisBundle.build` 必须保存非空、sorted-unique 的 ExperimentBundle 和 EvaluationRecord identity registry；observed finding 的 evidence 必须引用 registry 中的 EvaluationRecord，hypothesis 至少引用一个已存在的 observed finding digest；Proposal 只能引用 hypothesis。missing-evidence/not-comparable finding 只能引用 registry 中的 evaluation 或 bundle 内 finding。所有引用闭包、数组和 digests 必须验证。read/write 规则与 ExperimentBundle 相同，exact filename `pathlight-diagnosis.json`。
 
 - [ ] **Step 4: 加入只读 CLI 并验证**
 
