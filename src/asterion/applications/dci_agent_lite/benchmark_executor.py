@@ -8,8 +8,9 @@ import os
 import stat
 import urllib.error
 import urllib.request
-from dataclasses import replace
 from collections.abc import Callable
+from dataclasses import replace
+from decimal import ROUND_CEILING, Decimal
 from pathlib import Path
 from typing import Any, Never
 
@@ -26,6 +27,9 @@ from asterion.capabilities.dci.implementation.config import (
     DciPaths,
     DciRuntimeOptions,
 )
+from asterion.capabilities.dci.implementation.datasets import (
+    load_benchmark_rows_bytes,
+)
 from asterion.capabilities.dci.implementation.evaluation.benchmark import (
     BenchmarkRequest,
     BenchmarkResult,
@@ -36,6 +40,7 @@ from asterion.capabilities.dci.implementation.evaluation.artifacts import (
 )
 from asterion.capabilities.dci.implementation.evaluation.judge import JudgeConfig
 from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import (
+    canonical_sha256,
     read_paper_benchmark_dataset,
     resolve_paper_benchmark,
     resolve_paper_experiment_scope,
@@ -43,6 +48,8 @@ from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks impo
 from asterion.capabilities.dci.implementation.research.experiment_profiles import (
     authorize_full_execution,
     authorized_scope_output_root,
+    cancel_full_execution_authorization,
+    consumed_full_execution_authorization_snapshot,
     resolve_experiment_profile,
 )
 from asterion.capabilities.dci.implementation.runtime.pi_rpc import (
@@ -298,7 +305,10 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 )
             )
             if cancellation.cancelled:
-                return _cancelled(invocation.task_id)
+                return _cancelled(
+                    invocation.task_id,
+                    artifact_ids=_unused_coverage_budget_artifacts(request, payload),
+                )
             native = asyncio.run(
                 _run_cancellable(
                     self._benchmark_runner,
@@ -308,9 +318,13 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 )
             )
             if native is None:
-                return _cancelled(invocation.task_id)
+                return _cancelled(
+                    invocation.task_id,
+                    artifact_ids=_coverage_budget_artifacts(request, payload),
+                )
             if not isinstance(native, BenchmarkResult):
                 _fail()
+            budget_artifacts = _coverage_budget_artifacts(request, payload)
             total = native.counts.get("total")
             failed = native.counts.get("failed")
             if (
@@ -323,6 +337,7 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                     task_id=invocation.task_id,
                     status="failed",
                     case_count=total if type(total) is int and total >= 0 else 0,
+                    artifact_ids=budget_artifacts,
                 )
             on_progress(
                 BenchmarkProgressEvent(
@@ -335,7 +350,9 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 task_id=invocation.task_id,
                 status="completed",
                 case_count=total,
-                artifact_ids=(f"{invocation.task_id}.native-result",),
+                artifact_ids=tuple(
+                    sorted((f"{invocation.task_id}.native-result", *budget_artifacts))
+                ),
             )
         except DciBenchmarkExecutorError:
             raise
@@ -357,15 +374,33 @@ def _authorize_full_request(
     """Issue one in-process, budget-bound capability for supported full scopes."""
 
     scope_id = _FULL_SCOPE_BY_TASK.get(task_id)
-    if scope_id is None or payload.case_limit <= 50:
+    coverage_case10 = (
+        payload.coverage_registry is not None
+        and task_id in _COVERAGE_TASK_IDS
+        and payload.case_limit == 10
+    )
+    if scope_id is None or payload.case_limit <= 50 and not coverage_case10:
         return request
-    if payload.amount is None or payload.amount <= 0:
+    if (
+        payload.amount is None
+        or payload.amount <= 0
+        or coverage_case10
+        and payload.amount > Decimal("1")
+    ):
         _fail()
     scope = resolve_paper_experiment_scope(scope_id)
-    if payload.case_limit != scope.selection_count:
+    if not coverage_case10 and payload.case_limit != scope.selection_count:
         _fail()
     benchmark = resolve_paper_benchmark(scope.dataset_id)
-    _raw, binding = read_paper_benchmark_dataset(payload.dataset, benchmark)
+    raw, binding = read_paper_benchmark_dataset(payload.dataset, benchmark)
+    selected_ids_sha256 = scope.selected_ids_sha256
+    if coverage_case10:
+        rows = load_benchmark_rows_bytes(raw)
+        if len(rows) < payload.case_limit:
+            _fail()
+        selected_ids_sha256 = canonical_sha256(
+            tuple(sorted(row.query_id for row in rows[: payload.case_limit]))
+        )
     profile = resolve_experiment_profile(_DEFAULT_EXPERIMENT_PROFILE)
     judge_operations = payload.case_limit if request.mode == "qa" else 1
     # The authorization ledger reserves an operation's full upper bound before
@@ -379,7 +414,7 @@ def _authorize_full_request(
         profile=profile,
         scope_ids=(scope_id,),
         dataset_input_bindings=(binding,),
-        bounded_selected_ids_sha256=(scope.selected_ids_sha256,),
+        bounded_selected_ids_sha256=(selected_ids_sha256,),
         selected_query_counts=(payload.case_limit,),
         planned_agent_operations=payload.case_limit,
         planned_judge_operations=(payload.case_limit if request.mode == "qa" else 0),
@@ -398,6 +433,75 @@ def _authorize_full_request(
         experiment_scope_id=scope_id,
         dataset_input_binding=binding,
     )
+
+
+def _coverage_budget_artifacts(
+    request: BenchmarkRequest,
+    payload: DciBenchmarkInvocationPayload,
+) -> tuple[str, ...]:
+    """Return body-free bounded cost evidence for one coverage task."""
+
+    authority = request.full_execution_authorization
+    if payload.coverage_registry is None or authority is None or payload.amount is None:
+        return ()
+    authorized = _cost_microusd(payload.amount)
+    try:
+        receipt = consumed_full_execution_authorization_snapshot(authority)
+        ledger = receipt.get("ledger")
+        if type(ledger) is not dict:
+            raise ValueError
+        actual = ledger.get("actual_cost_usd")
+        if isinstance(actual, bool) or not isinstance(actual, (int, float)):
+            raise ValueError
+        consumed = _cost_microusd(Decimal(str(actual)))
+        if consumed > authorized:
+            raise ValueError
+        return tuple(
+            sorted(
+                (
+                    f"coverage-actual-microusd.{consumed}",
+                    f"coverage-authorized-microusd.{authorized}",
+                )
+            )
+        )
+    except Exception:
+        try:
+            cancel_full_execution_authorization(authority)
+        except Exception:
+            pass
+        return (
+            f"coverage-authorized-microusd.{authorized}",
+            f"coverage-upper-microusd.{authorized}",
+        )
+
+
+def _unused_coverage_budget_artifacts(
+    request: BenchmarkRequest,
+    payload: DciBenchmarkInvocationPayload,
+) -> tuple[str, ...]:
+    authority = request.full_execution_authorization
+    if payload.coverage_registry is None or authority is None or payload.amount is None:
+        return ()
+    try:
+        cancel_full_execution_authorization(authority)
+    except Exception:
+        pass
+    authorized = _cost_microusd(payload.amount)
+    return tuple(
+        sorted(
+            (
+                "coverage-actual-microusd.0",
+                f"coverage-authorized-microusd.{authorized}",
+            )
+        )
+    )
+
+
+def _cost_microusd(amount: Decimal) -> int:
+    value = (amount * Decimal(1_000_000)).to_integral_value(rounding=ROUND_CEILING)
+    if value < 0 or value > 1_000_000:
+        raise ValueError
+    return int(value)
 
 
 def _real_payload(
@@ -516,7 +620,9 @@ def verify_judge_connectivity(config: JudgeConfig) -> None:
         headers={"Authorization": f"Bearer {config.api_key}"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=min(config.timeout_seconds, 15)) as response:
+        with urllib.request.urlopen(
+            request, timeout=min(config.timeout_seconds, 15)
+        ) as response:
             if response.status < 200 or response.status >= 300:
                 _fail()
     except (OSError, ValueError, urllib.error.HTTPError):
@@ -563,11 +669,14 @@ def _has_symlink_component(path: Path) -> bool:
     return False
 
 
-def _cancelled(task_id: str) -> BenchmarkTaskResult:
+def _cancelled(
+    task_id: str, *, artifact_ids: tuple[str, ...] = ()
+) -> BenchmarkTaskResult:
     return BenchmarkTaskResult(
         task_id=task_id,
         status="cancelled",
         case_count=0,
+        artifact_ids=artifact_ids,
     )
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ctypes
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -80,7 +81,8 @@ class DciCoverageRegistry:
             or type(self.manifests) is not tuple
             or not self.manifests
             or any(type(item) is not DciCoverageManifestRef for item in self.manifests)
-            or len({item.query_sha256 for item in self.manifests}) != len(self.manifests)
+            or len({item.query_sha256 for item in self.manifests})
+            != len(self.manifests)
             or self.relative_path != "registry.json"
             or type(self.sha256) is not str
             or _SHA256.fullmatch(self.sha256) is None
@@ -252,8 +254,7 @@ def validate_coverage_registry_bytes(data: bytes) -> DciCoverageRegistry:
                 or _SHA256.fullmatch(query_sha256) is None
                 or query_sha256 in seen
                 or type(relative_path) is not str
-                or _safe_relative(relative_path)
-                != f"manifests/{query_sha256}.json"
+                or _safe_relative(relative_path) != f"manifests/{query_sha256}.json"
                 or type(digest) is not str
                 or _SHA256.fullmatch(digest) is None
             ):
@@ -271,6 +272,63 @@ def validate_coverage_registry_bytes(data: bytes) -> DciCoverageRegistry:
         raise
     except Exception as error:
         raise DciCoverageError("DCI coverage registry is invalid") from error
+
+
+def validate_coverage_registry_root(
+    registry_path: Path,
+    *,
+    corpus_dir: Path,
+    expected_dataset_id: str,
+    expected_count: int,
+) -> DciCoverageRegistry:
+    """Validate one registry and every bound manifest through stable descriptors."""
+
+    try:
+        if (
+            not isinstance(registry_path, Path)
+            or registry_path.name != "registry.json"
+            or type(expected_count) is not int
+            or expected_count < 1
+        ):
+            raise ValueError
+        expected_dataset_id = _safe_identity(expected_dataset_id)
+        root = registry_path.absolute().parent
+        registry_snapshot = _read_snapshot(root, registry_path.name)
+        registry = validate_coverage_registry_bytes(registry_snapshot.data)
+        if (
+            registry.dataset_id != expected_dataset_id
+            or registry.selected_count != expected_count
+        ):
+            raise ValueError
+        selected_ids: list[str] = []
+        manifest_snapshots: list[_FileSnapshot] = []
+        for reference in registry.manifests:
+            snapshot = _read_snapshot(root, reference.relative_path)
+            if not hmac.compare_digest(snapshot.sha256, reference.sha256):
+                raise ValueError
+            dataset_id, query_id, _documents = validate_coverage_manifest_bytes(
+                snapshot.data,
+                corpus_dir=corpus_dir,
+            )
+            if dataset_id != expected_dataset_id or not hmac.compare_digest(
+                coverage_query_sha256(query_id), reference.query_sha256
+            ):
+                raise ValueError
+            selected_ids.append(query_id)
+            manifest_snapshots.append(snapshot)
+        if not hmac.compare_digest(
+            _canonical_sha256(tuple(selected_ids)), registry.selected_ids_sha256
+        ):
+            raise ValueError
+        if not _snapshot_matches(registry_snapshot) or any(
+            not _snapshot_matches(snapshot) for snapshot in manifest_snapshots
+        ):
+            raise ValueError
+        return registry
+    except DciCoverageError:
+        raise
+    except Exception as error:
+        raise DciCoverageError("DCI coverage registry root is invalid") from error
 
 
 def _safe_identity(value: object) -> str:
@@ -370,8 +428,7 @@ def _read_snapshot(root: Path, relative_path: str) -> _FileSnapshot:
         after = os.fstat(descriptor)
         metadata = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
         if (
-            metadata
-            != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+            metadata != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
             or first != second
             or len(first) != before.st_size
         ):
@@ -422,7 +479,9 @@ def _snapshot_matches(expected: _FileSnapshot) -> bool:
     )
 
 
-def _corpus_candidates(corpus_dir: Path, wanted: frozenset[str]) -> dict[str, list[str]]:
+def _corpus_candidates(
+    corpus_dir: Path, wanted: frozenset[str]
+) -> dict[str, list[str]]:
     results = {name: [] for name in wanted}
     root_fd = _open_directory(corpus_dir)
 
@@ -498,7 +557,9 @@ def _bind_documents(
         try:
             snapshot.data.decode("utf-8", errors="strict")
         except UnicodeDecodeError as error:
-            raise DciCoverageError("DCI coverage corpus document is not UTF-8") from error
+            raise DciCoverageError(
+                "DCI coverage corpus document is not UTF-8"
+            ) from error
         snapshots_by_path[relative_path] = snapshot
         document_by_id[document_id] = {
             "id": source_ids[document_id],
@@ -512,7 +573,9 @@ def _bind_documents(
         )
         for row in rows
     }
-    return manifests, tuple(snapshots_by_path[path] for path in sorted(snapshots_by_path))
+    return manifests, tuple(
+        snapshots_by_path[path] for path in sorted(snapshots_by_path)
+    )
 
 
 def _write_at(directory_fd: int, relative_path: str, data: bytes) -> None:
@@ -656,7 +719,9 @@ def _remove_staging(parent_fd: int, staging_fd: int, staging_name: str) -> None:
         for name in os.listdir(staging_fd):
             metadata = os.stat(name, dir_fd=staging_fd, follow_symlinks=False)
             if stat.S_ISDIR(metadata.st_mode):
-                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | _nofollow(), dir_fd=staging_fd)
+                child = os.open(
+                    name, os.O_RDONLY | os.O_DIRECTORY | _nofollow(), dir_fd=staging_fd
+                )
                 try:
                     for child_name in os.listdir(child):
                         os.unlink(child_name, dir_fd=child)
@@ -823,8 +888,7 @@ def analyze_coverage_run(
             or type(dataset.get("dataset_id")) is not str
             or type(dataset.get("query_id")) is not str
             or type(coverage) is not float
-            or public.get("schema")
-            != "dci.trajectory-resolution-coverage-summary/v1"
+            or public.get("schema") != "dci.trajectory-resolution-coverage-summary/v1"
             or type(public.get("query_sha256")) is not str
         ):
             raise DciCoverageError("DCI coverage evidence is invalid")
@@ -863,4 +927,5 @@ __all__ = (
     "prepare_coverage_registry",
     "validate_coverage_manifest_bytes",
     "validate_coverage_registry_bytes",
+    "validate_coverage_registry_root",
 )

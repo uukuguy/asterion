@@ -41,6 +41,7 @@ _RUNTIME_ALIASES = {
 _ApplicationMain = Callable[..., int]
 _BenchmarkMain = Callable[..., int]
 _BenchmarkHostFactory = Callable[[DciOperatorConfig], BenchmarkCommandHost]
+_ExperimentHostFactory = Callable[..., BenchmarkCommandHost]
 
 
 def main(
@@ -58,6 +59,7 @@ def main(
     environment: Mapping[str, str] | None = None,
     amount: Decimal | None = None,
     benchmark_package_sources: Sequence[CapabilityPackageSource] | None = None,
+    experiment_host_factory: _ExperimentHostFactory | None = None,
 ) -> int:
     """Apply exact DCI defaults and delegate to generic Asterion hosts."""
     stdin = sys.stdin if stdin is None else stdin
@@ -70,7 +72,16 @@ def main(
     if arguments and arguments[0] == "pathlight":
         from asterion.applications.dci_agent_lite.pathlight_cli import main as pathlight_main
 
-        return pathlight_main(arguments[1:], stdout=stdout, stderr=stderr)
+        return pathlight_main(
+            arguments[1:],
+            stdout=stdout,
+            stderr=stderr,
+            repo_root=repo_root,
+            env_file=env_file,
+            environment=environment,
+            package_sources=benchmark_package_sources,
+            experiment_host_factory=experiment_host_factory,
+        )
 
     from asterion.benchmarks.cli import main as default_benchmark_main
     from asterion.cli import main as default_application_main

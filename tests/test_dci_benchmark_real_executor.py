@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import tempfile
 import threading
 import unittest
@@ -47,6 +48,8 @@ def _paths(root: Path) -> DciPaths:
 def _invocation(root: Path, **changes: object) -> BenchmarkTaskInvocation:
     task_id = changes.pop("task_id", "qa.bamboogle.github-sample50")
     binding_id = changes.pop("binding_id", task_id)
+    if not isinstance(task_id, str) or not isinstance(binding_id, str):
+        raise AssertionError("test invocation identity is invalid")
     values = {
         "profile_id": "qa.bamboogle",
         "selection_variant": "github-sample50",
@@ -69,7 +72,123 @@ def _invocation(root: Path, **changes: object) -> BenchmarkTaskInvocation:
     )
 
 
+def _write_coverage_dataset(root: Path, *, count: int = 10) -> None:
+    (root / "dataset.jsonl").write_text(
+        "".join(
+            json.dumps(
+                {
+                    "query_id": f"bright.biology-q-{index}",
+                    "query": f"query {index}",
+                    "gold_ids": [f"doc-{index}"],
+                }
+            )
+            + "\n"
+            for index in range(count)
+        ),
+        encoding="utf-8",
+    )
+
+
 class RealDciBenchmarkExecutorTests(unittest.TestCase):
+    def test_coverage_case10_requires_one_dollar_or_less_before_agent(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            _write_coverage_dataset(root)
+            calls: list[object] = []
+
+            async def runner(request, *, paths):
+                del request, paths
+                calls.append("started")
+                return BenchmarkResult(
+                    output_root=root / "output",
+                    counts={"total": 10, "completed": 10, "failed": 0},
+                )
+
+            executor = RealDciBenchmarkExecutor(
+                paths=_paths(root),
+                runtime_options=DciRuntimeOptions(),
+                judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
+                benchmark_runner=runner,
+                readiness_probe=lambda *_args: None,
+            )
+            registry = root / "coverage" / "bright.biology" / "registry.json"
+            for amount in (None, Decimal("0"), Decimal("1.000001")):
+                with (
+                    self.subTest(amount=amount),
+                    self.assertRaisesRegex(
+                        DciBenchmarkExecutorError,
+                        "^DCI benchmark execution is invalid$",
+                    ),
+                ):
+                    executor.execute(
+                        _invocation(
+                            root,
+                            task_id="bright.biology",
+                            profile_id="bright.biology",
+                            selection_variant="main",
+                            coverage_registry=registry,
+                            case_limit=10,
+                            amount=amount,
+                        ),
+                        cancellation=MutableCancellation(),
+                        on_progress=lambda _event: None,
+                    )
+            self.assertEqual(calls, [])
+
+    def test_coverage_case10_binds_exact_selected_rows_and_budget(self) -> None:
+        calls = []
+
+        async def runner(request, *, paths):
+            del paths
+            calls.append(request)
+            return BenchmarkResult(
+                output_root=request.output_root,
+                counts={"total": 10, "completed": 10, "failed": 0},
+            )
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            _write_coverage_dataset(root)
+            registry = root / "coverage" / "bright.biology" / "registry.json"
+            result = RealDciBenchmarkExecutor(
+                paths=_paths(root),
+                runtime_options=DciRuntimeOptions(),
+                judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
+                benchmark_runner=runner,
+                readiness_probe=lambda *_args: None,
+            ).execute(
+                _invocation(
+                    root,
+                    task_id="bright.biology",
+                    profile_id="bright.biology",
+                    selection_variant="main",
+                    coverage_registry=registry,
+                    case_limit=10,
+                    amount=Decimal("1"),
+                ),
+                cancellation=MutableCancellation(),
+                on_progress=lambda _event: None,
+            )
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(len(calls), 1)
+        authority = calls[0].full_execution_authorization
+        self.assertIsNotNone(authority)
+        self.assertEqual(authority.max_agent_operations, 10)
+        self.assertEqual(authority.planned_agent_operations, 10)
+        self.assertEqual(authority.planned_judge_operations, 0)
+        self.assertEqual(authority.max_cost_usd, 1.0)
+        self.assertEqual(authority.selected_query_counts, (10,))
+        self.assertEqual(calls[0].experiment_scope_id, "bright.biology.main.full")
+        self.assertEqual(
+            result.artifact_ids,
+            (
+                "bright.biology.native-result",
+                "coverage-authorized-microusd.1000000",
+                "coverage-upper-microusd.1000000",
+            ),
+        )
+
     def test_real_ir_executor_enables_exact_coverage_observation_without_judge(
         self,
     ) -> None:
@@ -149,9 +268,12 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
                 ),
             )
             for invocation in cases:
-                with self.subTest(task_id=invocation.task_id), self.assertRaisesRegex(
-                    DciBenchmarkExecutorError,
-                    "^DCI benchmark execution is invalid$",
+                with (
+                    self.subTest(task_id=invocation.task_id),
+                    self.assertRaisesRegex(
+                        DciBenchmarkExecutorError,
+                        "^DCI benchmark execution is invalid$",
+                    ),
                 ):
                     executor.execute(
                         invocation,
@@ -545,14 +667,21 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
             result = RealDciBenchmarkExecutor(
-                paths=_paths(root), runtime_options=DciRuntimeOptions(),
+                paths=_paths(root),
+                runtime_options=DciRuntimeOptions(),
                 judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
-                benchmark_runner=runner, readiness_probe=lambda *_args: None,
+                benchmark_runner=runner,
+                readiness_probe=lambda *_args: None,
             ).execute(
                 _invocation(
-                    root, task_id="bright.biology", profile_id="bright.biology",
-                    selection_variant="main", case_limit=50,
-                ), cancellation=MutableCancellation(), on_progress=lambda _event: None,
+                    root,
+                    task_id="bright.biology",
+                    profile_id="bright.biology",
+                    selection_variant="main",
+                    case_limit=50,
+                ),
+                cancellation=MutableCancellation(),
+                on_progress=lambda _event: None,
             )
 
         self.assertEqual(result.status, "completed")
@@ -576,15 +705,21 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
             result = RealDciBenchmarkExecutor(
-                paths=_paths(root), runtime_options=DciRuntimeOptions(),
+                paths=_paths(root),
+                runtime_options=DciRuntimeOptions(),
                 judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
-                benchmark_runner=runner, readiness_probe=lambda *_args: None,
+                benchmark_runner=runner,
+                readiness_probe=lambda *_args: None,
             ).execute(
                 _invocation(
-                    root, task_id="bright.earth-science",
-                    profile_id="bright.earth-science", selection_variant="main",
+                    root,
+                    task_id="bright.earth-science",
+                    profile_id="bright.earth-science",
+                    selection_variant="main",
                     case_limit=50,
-                ), cancellation=MutableCancellation(), on_progress=lambda _event: None,
+                ),
+                cancellation=MutableCancellation(),
+                on_progress=lambda _event: None,
             )
 
         self.assertEqual(result.status, "completed")
@@ -600,17 +735,29 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
 
         async def runner(request, *, paths):
             calls.append((request, paths))
-            return BenchmarkResult(output_root=request.output_root, counts={"total": 50, "completed": 50, "failed": 0})
+            return BenchmarkResult(
+                output_root=request.output_root,
+                counts={"total": 50, "completed": 50, "failed": 0},
+            )
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
             result = RealDciBenchmarkExecutor(
-                paths=_paths(root), runtime_options=DciRuntimeOptions(),
+                paths=_paths(root),
+                runtime_options=DciRuntimeOptions(),
                 judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
-                benchmark_runner=runner, readiness_probe=lambda *_args: None,
+                benchmark_runner=runner,
+                readiness_probe=lambda *_args: None,
             ).execute(
-                _invocation(root, task_id="bright.economics", profile_id="bright.economics", selection_variant="main", case_limit=50),
-                cancellation=MutableCancellation(), on_progress=lambda _event: None,
+                _invocation(
+                    root,
+                    task_id="bright.economics",
+                    profile_id="bright.economics",
+                    selection_variant="main",
+                    case_limit=50,
+                ),
+                cancellation=MutableCancellation(),
+                on_progress=lambda _event: None,
             )
 
         self.assertEqual(result.status, "completed")
@@ -626,17 +773,29 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
 
         async def runner(request, *, paths):
             calls.append((request, paths))
-            return BenchmarkResult(output_root=request.output_root, counts={"total": 50, "completed": 50, "failed": 0})
+            return BenchmarkResult(
+                output_root=request.output_root,
+                counts={"total": 50, "completed": 50, "failed": 0},
+            )
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
             result = RealDciBenchmarkExecutor(
-                paths=_paths(root), runtime_options=DciRuntimeOptions(),
+                paths=_paths(root),
+                runtime_options=DciRuntimeOptions(),
                 judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
-                benchmark_runner=runner, readiness_probe=lambda *_args: None,
+                benchmark_runner=runner,
+                readiness_probe=lambda *_args: None,
             ).execute(
-                _invocation(root, task_id="bright.robotics", profile_id="bright.robotics", selection_variant="main", case_limit=50),
-                cancellation=MutableCancellation(), on_progress=lambda _event: None,
+                _invocation(
+                    root,
+                    task_id="bright.robotics",
+                    profile_id="bright.robotics",
+                    selection_variant="main",
+                    case_limit=50,
+                ),
+                cancellation=MutableCancellation(),
+                on_progress=lambda _event: None,
             )
 
         self.assertEqual(result.status, "completed")
@@ -652,17 +811,29 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
 
         async def runner(request, *, paths):
             calls.append((request, paths))
-            return BenchmarkResult(output_root=request.output_root, counts={"total": 50, "completed": 50, "failed": 0})
+            return BenchmarkResult(
+                output_root=request.output_root,
+                counts={"total": 50, "completed": 50, "failed": 0},
+            )
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
             result = RealDciBenchmarkExecutor(
-                paths=_paths(root), runtime_options=DciRuntimeOptions(),
+                paths=_paths(root),
+                runtime_options=DciRuntimeOptions(),
                 judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
-                benchmark_runner=runner, readiness_probe=lambda *_args: None,
+                benchmark_runner=runner,
+                readiness_probe=lambda *_args: None,
             ).execute(
-                _invocation(root, task_id="qa.2wikimultihopqa", profile_id="qa.2wikimultihopqa", selection_variant="main", case_limit=50),
-                cancellation=MutableCancellation(), on_progress=lambda _event: None,
+                _invocation(
+                    root,
+                    task_id="qa.2wikimultihopqa",
+                    profile_id="qa.2wikimultihopqa",
+                    selection_variant="main",
+                    case_limit=50,
+                ),
+                cancellation=MutableCancellation(),
+                on_progress=lambda _event: None,
             )
 
         self.assertEqual(result.status, "completed")
@@ -678,17 +849,29 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
 
         async def runner(request, *, paths):
             calls.append((request, paths))
-            return BenchmarkResult(output_root=request.output_root, counts={"total": 50, "completed": 50, "failed": 0})
+            return BenchmarkResult(
+                output_root=request.output_root,
+                counts={"total": 50, "completed": 50, "failed": 0},
+            )
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
             result = RealDciBenchmarkExecutor(
-                paths=_paths(root), runtime_options=DciRuntimeOptions(),
+                paths=_paths(root),
+                runtime_options=DciRuntimeOptions(),
                 judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
-                benchmark_runner=runner, readiness_probe=lambda *_args: None,
+                benchmark_runner=runner,
+                readiness_probe=lambda *_args: None,
             ).execute(
-                _invocation(root, task_id="qa.hotpotqa", profile_id="qa.hotpotqa", selection_variant="main", case_limit=50),
-                cancellation=MutableCancellation(), on_progress=lambda _event: None,
+                _invocation(
+                    root,
+                    task_id="qa.hotpotqa",
+                    profile_id="qa.hotpotqa",
+                    selection_variant="main",
+                    case_limit=50,
+                ),
+                cancellation=MutableCancellation(),
+                on_progress=lambda _event: None,
             )
 
         self.assertEqual(result.status, "completed")
@@ -704,17 +887,29 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
 
         async def runner(request, *, paths):
             calls.append((request, paths))
-            return BenchmarkResult(output_root=request.output_root, counts={"total": 50, "completed": 50, "failed": 0})
+            return BenchmarkResult(
+                output_root=request.output_root,
+                counts={"total": 50, "completed": 50, "failed": 0},
+            )
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
             result = RealDciBenchmarkExecutor(
-                paths=_paths(root), runtime_options=DciRuntimeOptions(),
+                paths=_paths(root),
+                runtime_options=DciRuntimeOptions(),
                 judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
-                benchmark_runner=runner, readiness_probe=lambda *_args: None,
+                benchmark_runner=runner,
+                readiness_probe=lambda *_args: None,
             ).execute(
-                _invocation(root, task_id="qa.musique", profile_id="qa.musique", selection_variant="main", case_limit=50),
-                cancellation=MutableCancellation(), on_progress=lambda _event: None,
+                _invocation(
+                    root,
+                    task_id="qa.musique",
+                    profile_id="qa.musique",
+                    selection_variant="main",
+                    case_limit=50,
+                ),
+                cancellation=MutableCancellation(),
+                on_progress=lambda _event: None,
             )
 
         self.assertEqual(result.status, "completed")
@@ -746,8 +941,7 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
                 ),
                 judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
                 experiment_profile=(
-                    "upstream-github/"
-                    "271f37e71f053bf0c99c05ce6d2fb53b841d922e/pi"
+                    "upstream-github/271f37e71f053bf0c99c05ce6d2fb53b841d922e/pi"
                 ),
                 max_turns=300,
                 benchmark_runner=runner,

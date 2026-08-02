@@ -8,9 +8,12 @@ import json
 import os
 import stat
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TextIO
+
+from asterion.benchmarks.cli import BenchmarkCommandHost
+from asterion.capability_packages.sources.base import CapabilityPackageSource
 
 from asterion.capabilities.dci.implementation.pathlight.conversion import (
     recovered_run_to_evaluation_bundle,
@@ -61,13 +64,38 @@ _TARGET_DATASETS = {
 _TARGET_DATASET_IDS = tuple(sorted(_TARGET_DATASETS.values()))
 
 
-def main(arguments: Sequence[str], *, stdout: TextIO, stderr: TextIO) -> int:
+def main(
+    arguments: Sequence[str],
+    *,
+    stdout: TextIO,
+    stderr: TextIO,
+    repo_root: Path | None = None,
+    env_file: Path | None = None,
+    environment: Mapping[str, str] | None = None,
+    package_sources: Sequence[CapabilityPackageSource] | None = None,
+    experiment_host_factory: Callable[..., BenchmarkCommandHost] | None = None,
+) -> int:
     """Run one fixed DCI Pathlight command without touching application providers."""
 
     try:
         values = tuple(arguments)
         if not values:
             raise ValueError
+        if values[0] == "experiment":
+            from asterion.applications.dci_agent_lite.pathlight_experiment_cli import (
+                main as experiment_main,
+            )
+
+            return experiment_main(
+                values[1:],
+                stdout=stdout,
+                stderr=stderr,
+                repo_root=(Path.cwd() if repo_root is None else repo_root),
+                env_file=env_file,
+                environment=environment,
+                package_sources=package_sources,
+                host_factory=experiment_host_factory,
+            )
         if values[0] == "recover":
             output = _recover(values[1:])
         elif values[0] == "diagnose":
@@ -82,7 +110,9 @@ def main(arguments: Sequence[str], *, stdout: TextIO, stderr: TextIO) -> int:
 
 
 def _recover(arguments: tuple[str, ...]) -> dict[str, object]:
-    options = _exact_options(arguments, {"--instance", "--evidence-root", "--output-root"})
+    options = _exact_options(
+        arguments, {"--instance", "--evidence-root", "--output-root"}
+    )
     instance = options["--instance"]
     expected_dataset_id = _TARGET_DATASETS.get(instance)
     if expected_dataset_id is None:
@@ -151,13 +181,11 @@ def _diagnose(arguments: tuple[str, ...]) -> dict[str, object]:
     try:
         write_diagnosis_bundle(report.diagnosis_bundle, staging_targets["diagnosis"])
         write_private_file(staging_targets["markdown"], markdown.encode("utf-8"))
-        if (
-            read_diagnosis_bundle(staging_targets["diagnosis"])
-            != report.diagnosis_bundle
-            or not hmac.compare_digest(
-                read_private_file(staging_targets["markdown"], 1 << 20),
-                markdown.encode("utf-8"),
-            )
+        if read_diagnosis_bundle(
+            staging_targets["diagnosis"]
+        ) != report.diagnosis_bundle or not hmac.compare_digest(
+            read_private_file(staging_targets["markdown"], 1 << 20),
+            markdown.encode("utf-8"),
         ):
             raise ValueError
         _publish_staged_outputs(
@@ -192,15 +220,12 @@ def _read_verified_recovery(root: Path):
     _require_experiment_evaluation_closure(experiment, evaluations)
     stored_experiment = read_experiment_bundle(targets["experiment"])
     stored_evaluations = read_evaluation_bundle(targets["evaluations"])
-    if (
-        not hmac.compare_digest(
-            _canonical_bytes(stored_experiment.to_mapping()),
-            _canonical_bytes(experiment.to_mapping()),
-        )
-        or not hmac.compare_digest(
-            _canonical_bytes(_stored_evaluations_to_mapping(stored_evaluations)),
-            _canonical_bytes(_stored_evaluations_to_mapping(evaluations)),
-        )
+    if not hmac.compare_digest(
+        _canonical_bytes(stored_experiment.to_mapping()),
+        _canonical_bytes(experiment.to_mapping()),
+    ) or not hmac.compare_digest(
+        _canonical_bytes(_stored_evaluations_to_mapping(stored_evaluations)),
+        _canonical_bytes(_stored_evaluations_to_mapping(evaluations)),
     ):
         raise ValueError
     for path, expected in (
@@ -208,12 +233,16 @@ def _read_verified_recovery(root: Path):
         (targets["experiment"], experiment.to_mapping()),
         (targets["evaluations"], _stored_evaluations_to_mapping(evaluations)),
     ):
-        if not hmac.compare_digest(read_private_file(path, _RECOVERY_LIMIT), _canonical_bytes(expected)):
+        if not hmac.compare_digest(
+            read_private_file(path, _RECOVERY_LIMIT), _canonical_bytes(expected)
+        ):
             raise ValueError
     return recovered
 
 
-def _require_experiment_evaluation_closure(experiment: object, evaluations: object) -> None:
+def _require_experiment_evaluation_closure(
+    experiment: object, evaluations: object
+) -> None:
     experiment_records = getattr(experiment, "evaluations", None)
     evaluation_records = getattr(evaluations, "evaluations", None)
     contracts = getattr(evaluations, "metric_contracts", None)
@@ -224,7 +253,10 @@ def _require_experiment_evaluation_closure(experiment: object, evaluations: obje
         or tuple(record.evaluation_sha256 for record in experiment_records)
         != tuple(record.evaluation_sha256 for record in evaluation_records)
         or len(contracts) != 1
-        or any(record.metric_contract_sha256 != contracts[0].metric_contract_sha256 for record in experiment_records)
+        or any(
+            record.metric_contract_sha256 != contracts[0].metric_contract_sha256
+            for record in experiment_records
+        )
     ):
         raise ValueError
 
@@ -243,7 +275,13 @@ def _exact_options(arguments: tuple[str, ...], names: set[str]) -> dict[str, str
     values: dict[str, str] = {}
     for index in range(0, len(arguments), 2):
         name, value = arguments[index], arguments[index + 1]
-        if type(name) is not str or type(value) is not str or name not in names or name in values or not value:
+        if (
+            type(name) is not str
+            or type(value) is not str
+            or name not in names
+            or name in values
+            or not value
+        ):
             raise ValueError
         values[name] = value
     if set(values) != names:
@@ -300,7 +338,11 @@ def _require_absent(paths: Sequence[Path]) -> None:
 def _require_private_files(paths: Sequence[Path]) -> None:
     for path in paths:
         metadata = os.stat(path, follow_symlinks=False)
-        if not isinstance(path, Path) or not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600:
+        if (
+            not isinstance(path, Path)
+            or not stat.S_ISREG(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+        ):
             raise ValueError
 
 
@@ -317,9 +359,7 @@ def _create_staging_root(root: Path) -> Path:
         raise RuntimeError from None
 
 
-def _publish_staged_outputs(
-    root: Path, staging: Path, names: Sequence[str]
-) -> None:
+def _publish_staged_outputs(root: Path, staging: Path, names: Sequence[str]) -> None:
     root_descriptor = -1
     staging_descriptor = -1
     published: list[tuple[str, int, int]] = []
@@ -419,6 +459,144 @@ def _cleanup_staging(root: Path, staging: Path, names: Sequence[str]) -> None:
                 try:
                     os.close(descriptor)
                 except Exception:
+                    failed = True
+    if failed:
+        raise RuntimeError from None
+
+
+def _publish_staged_tree(root: Path, staging: Path) -> None:
+    """Exclusively hard-link one private staged tree with inode-safe rollback."""
+
+    root_descriptor = -1
+    staging_descriptor = -1
+    published: list[tuple[str, int, str, int, int]] = []
+    failed = False
+
+    def publish(source_fd: int, target_fd: int) -> None:
+        for name in sorted(os.listdir(source_fd)):
+            if not name or name in {".", ".."} or "/" in name or "\\" in name:
+                raise OSError
+            source = os.stat(name, dir_fd=source_fd, follow_symlinks=False)
+            if stat.S_ISDIR(source.st_mode):
+                if stat.S_IMODE(source.st_mode) != 0o700:
+                    raise OSError
+                os.mkdir(name, 0o700, dir_fd=target_fd)
+                target = os.stat(name, dir_fd=target_fd, follow_symlinks=False)
+                published.append(
+                    ("directory", os.dup(target_fd), name, target.st_dev, target.st_ino)
+                )
+                source_child = os.open(
+                    name,
+                    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _nofollow_flag(),
+                    dir_fd=source_fd,
+                )
+                target_child = os.open(
+                    name,
+                    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _nofollow_flag(),
+                    dir_fd=target_fd,
+                )
+                try:
+                    publish(source_child, target_child)
+                    os.fsync(target_child)
+                finally:
+                    os.close(target_child)
+                    os.close(source_child)
+            elif stat.S_ISREG(source.st_mode) and stat.S_IMODE(source.st_mode) == 0o600:
+                os.link(
+                    name,
+                    name,
+                    src_dir_fd=source_fd,
+                    dst_dir_fd=target_fd,
+                    follow_symlinks=False,
+                )
+                target = os.stat(name, dir_fd=target_fd, follow_symlinks=False)
+                if (target.st_dev, target.st_ino) != (source.st_dev, source.st_ino):
+                    raise OSError
+                published.append(
+                    ("file", os.dup(target_fd), name, source.st_dev, source.st_ino)
+                )
+            else:
+                raise OSError
+
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _nofollow_flag()
+        root_descriptor = os.open(root, flags)
+        staging_descriptor = os.open(staging.name, flags, dir_fd=root_descriptor)
+        _verify_open_directory(root_descriptor, root)
+        _verify_open_directory(staging_descriptor, staging)
+        publish(staging_descriptor, root_descriptor)
+        os.fsync(root_descriptor)
+    except BaseException:
+        failed = True
+    if failed:
+        for kind, parent_fd, name, device, inode in reversed(published):
+            try:
+                target = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+                if (target.st_dev, target.st_ino) != (device, inode):
+                    continue
+                if kind == "file":
+                    os.unlink(name, dir_fd=parent_fd)
+                else:
+                    os.rmdir(name, dir_fd=parent_fd)
+            except (FileNotFoundError, OSError):
+                pass
+    for _kind, parent_fd, _name, _device, _inode in published:
+        try:
+            os.close(parent_fd)
+        except OSError:
+            failed = True
+    for descriptor in (staging_descriptor, root_descriptor):
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                failed = True
+    if failed:
+        raise RuntimeError from None
+
+
+def _cleanup_staging_tree(root: Path, staging: Path) -> None:
+    """Remove a command-owned private staging tree through directory descriptors."""
+
+    root_descriptor = -1
+    staging_descriptor = -1
+    failed = False
+
+    def remove(directory_fd: int) -> None:
+        for name in sorted(os.listdir(directory_fd)):
+            metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            if stat.S_ISDIR(metadata.st_mode):
+                child = os.open(
+                    name,
+                    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _nofollow_flag(),
+                    dir_fd=directory_fd,
+                )
+                try:
+                    remove(child)
+                finally:
+                    os.close(child)
+                os.rmdir(name, dir_fd=directory_fd)
+            elif stat.S_ISREG(metadata.st_mode):
+                os.unlink(name, dir_fd=directory_fd)
+            else:
+                raise OSError
+
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | _nofollow_flag()
+        root_descriptor = os.open(root, flags)
+        staging_descriptor = os.open(staging.name, flags, dir_fd=root_descriptor)
+        _verify_open_directory(root_descriptor, root)
+        _verify_open_directory(staging_descriptor, staging)
+        remove(staging_descriptor)
+        os.rmdir(staging.name, dir_fd=root_descriptor)
+    except BaseException:
+        failed = True
+    finally:
+        for descriptor in (staging_descriptor, root_descriptor):
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
                     failed = True
     if failed:
         raise RuntimeError from None
