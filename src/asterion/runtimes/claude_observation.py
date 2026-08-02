@@ -44,10 +44,13 @@ class _FrameDraft:
 @dataclass(slots=True)
 class _ModelCallDraft:
     frame_index: int
+    message_id: str | None
     response_sha256: str | None = None
     response_length: int | None = None
+    response_valid: bool = True
     input_tokens: int | None = None
     output_tokens: int | None = None
+    usage_valid: bool = True
     status: _Status = "missing"
 
 
@@ -70,6 +73,9 @@ class ClaudeObservationBuilder:
         self._tools: list[_ToolDraft] = []
         self._pending_segments: list[_SegmentDraft] = [_missing_segment()]
         self._host_input_recorded = False
+        self._calls_by_message_id: dict[str, _ModelCallDraft] = {}
+        self._active_message_id: str | None = None
+        self._active_step_open = False
 
     def record_host_input(self, input_text: str) -> None:
         """Record only the host input digest, never a claimed provider request."""
@@ -124,21 +130,88 @@ class ClaudeObservationBuilder:
     def _consume_assistant(self, event: Mapping[str, object]) -> None:
         message = event.get("message")
         content = message.get("content") if isinstance(message, Mapping) else None
-        call = self._start_model_call()
-        call.response_sha256, call.response_length = _content_summary(content)
-        call.status = "failed" if event.get("error") is not None else "completed"
+        message_id_value = message.get("id") if isinstance(message, Mapping) else None
+        message_id = (
+            message_id_value
+            if type(message_id_value) is str and message_id_value
+            else None
+        )
+        conflict = False
+        if message_id is None:
+            call = self._start_model_call(None)
+            self._active_message_id = None
+            self._active_step_open = False
+        elif message_id == self._active_message_id and self._active_step_open:
+            call = self._calls_by_message_id[message_id]
+        elif message_id not in self._calls_by_message_id:
+            call = self._start_model_call(message_id)
+            self._calls_by_message_id[message_id] = call
+            self._active_message_id = message_id
+            self._active_step_open = True
+        else:
+            call = self._calls_by_message_id[message_id]
+            conflict = True
+            call.response_sha256 = None
+            call.response_length = None
+            call.response_valid = False
+            call.input_tokens = None
+            call.output_tokens = None
+            call.usage_valid = False
+        response_sha256, response_length = _content_summary(content)
+        if not conflict:
+            _merge_response_summary(call, response_sha256, response_length)
+            self._record_message_usage(call, message, message_id)
+        call.status = (
+            "failed"
+            if event.get("error") is not None or call.status == "failed"
+            else "completed"
+        )
         self._pending_segments.append(
             _SegmentDraft(
                 "assistant",
-                call.response_sha256,
-                call.response_length,
+                response_sha256,
+                response_length,
                 None,
-                call.response_sha256 is None,
+                response_sha256 is None or message_id is None or conflict,
             )
         )
         if isinstance(content, list):
             for block in content:
                 self._consume_tool_use(block)
+
+    def _record_message_usage(
+        self,
+        call: _ModelCallDraft,
+        message: object,
+        message_id: str | None,
+    ) -> None:
+        if message_id is None or not isinstance(message, Mapping):
+            call.input_tokens = None
+            call.output_tokens = None
+            call.usage_valid = False
+            return
+        usage = message.get("usage")
+        input_tokens = usage.get("input_tokens") if isinstance(usage, Mapping) else None
+        output_tokens = (
+            usage.get("output_tokens") if isinstance(usage, Mapping) else None
+        )
+        if not _nonnegative_int(input_tokens) or not _nonnegative_int(output_tokens):
+            call.input_tokens = None
+            call.output_tokens = None
+            call.usage_valid = False
+            return
+        if not call.usage_valid:
+            return
+        if call.input_tokens is None and call.output_tokens is None:
+            call.input_tokens = input_tokens
+            call.output_tokens = output_tokens
+        elif (call.input_tokens, call.output_tokens) != (
+            input_tokens,
+            output_tokens,
+        ):
+            call.input_tokens = None
+            call.output_tokens = None
+            call.usage_valid = False
 
     def _consume_tool_use(self, block: object) -> None:
         if not isinstance(block, Mapping) or block.get("type") != "tool_use":
@@ -165,6 +238,7 @@ class ClaudeObservationBuilder:
         content = message.get("content") if isinstance(message, Mapping) else None
         if not isinstance(content, list):
             return
+        self._active_step_open = False
         for block in content:
             self._consume_tool_result(block)
 
@@ -205,8 +279,13 @@ class ClaudeObservationBuilder:
         )
 
     def _consume_result(self, event: Mapping[str, object]) -> None:
-        call = self._model_calls[-1] if self._model_calls else self._start_model_call()
-        if call.response_sha256 is None:
+        self._active_step_open = False
+        call = (
+            self._model_calls[-1]
+            if self._model_calls
+            else self._start_model_call(None)
+        )
+        if call.response_sha256 is None and call.response_valid:
             call.response_sha256, call.response_length = _content_summary(
                 event.get("result")
             )
@@ -215,20 +294,13 @@ class ClaudeObservationBuilder:
             call.status = "failed"
         elif is_error is False:
             call.status = "completed"
-        usage = event.get("usage")
-        if isinstance(usage, Mapping):
-            input_tokens = usage.get("input_tokens")
-            output_tokens = usage.get("output_tokens")
-            if _nonnegative_int(input_tokens) and _nonnegative_int(output_tokens):
-                call.input_tokens = input_tokens
-                call.output_tokens = output_tokens
 
-    def _start_model_call(self) -> _ModelCallDraft:
+    def _start_model_call(self, message_id: str | None) -> _ModelCallDraft:
         frame_index = len(self._frames) + 1
         self._frames.append(
             _FrameDraft(frame_index, tuple(self._pending_segments))
         )
-        call = _ModelCallDraft(frame_index)
+        call = _ModelCallDraft(frame_index, message_id)
         self._model_calls.append(call)
         return call
 
@@ -315,6 +387,35 @@ class ClaudeObservationBuilder:
 
 def _missing_segment() -> _SegmentDraft:
     return _SegmentDraft("unknown", None, None, None, True)
+
+
+def _merge_response_summary(
+    call: _ModelCallDraft,
+    content_sha256: str | None,
+    content_length: int | None,
+) -> None:
+    if not call.response_valid:
+        return
+    if content_sha256 is None or content_length is None:
+        call.response_sha256 = None
+        call.response_length = None
+        call.response_valid = False
+        return
+    if call.response_sha256 is None or call.response_length is None:
+        call.response_sha256 = content_sha256
+        call.response_length = content_length
+        return
+    call.response_sha256 = _digest_json(
+        {
+            "domain": "asterion.claude/ordered-response-summaries/v1",
+            "left": {
+                "sha256": call.response_sha256,
+                "length": call.response_length,
+            },
+            "right": {"sha256": content_sha256, "length": content_length},
+        }
+    )
+    call.response_length += content_length
 
 
 def _content_summary(value: object) -> tuple[str | None, int | None]:

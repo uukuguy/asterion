@@ -7,21 +7,34 @@ from asterion.runtimes.claude_observation import ClaudeObservationBuilder
 
 
 def _assistant_tool_use(
-    call_id: str, name: str, arguments: object
+    call_id: str,
+    name: str,
+    arguments: object,
+    *,
+    message_id: str | None = None,
+    usage: tuple[int, int] | None = None,
 ) -> dict[str, object]:
+    message: dict[str, object] = {
+        "role": "assistant",
+        "content": [
+            {
+                "type": "tool_use",
+                "id": call_id,
+                "name": name,
+                "input": arguments,
+            }
+        ],
+    }
+    if message_id is not None:
+        message["id"] = message_id
+    if usage is not None:
+        message["usage"] = {
+            "input_tokens": usage[0],
+            "output_tokens": usage[1],
+        }
     return {
         "type": "assistant",
-        "message": {
-            "role": "assistant",
-            "content": [
-                {
-                    "type": "tool_use",
-                    "id": call_id,
-                    "name": name,
-                    "input": arguments,
-                }
-            ],
-        },
+        "message": message,
     }
 
 
@@ -42,13 +55,26 @@ def _user_tool_result(call_id: str, result: object, *, is_error: bool = False) -
     }
 
 
-def _assistant_text(text: str) -> dict[str, object]:
+def _assistant_text(
+    text: str,
+    *,
+    message_id: str | None = None,
+    usage: tuple[int, int] | None = None,
+) -> dict[str, object]:
+    message: dict[str, object] = {
+        "role": "assistant",
+        "content": [{"type": "text", "text": text}],
+    }
+    if message_id is not None:
+        message["id"] = message_id
+    if usage is not None:
+        message["usage"] = {
+            "input_tokens": usage[0],
+            "output_tokens": usage[1],
+        }
     return {
         "type": "assistant",
-        "message": {
-            "role": "assistant",
-            "content": [{"type": "text", "text": text}],
-        },
+        "message": message,
     }
 
 
@@ -62,6 +88,115 @@ def _result(*, is_error: bool, text: str, input_tokens: int = 7, output_tokens: 
 
 
 class ClaudeObservationBuilderTests(unittest.TestCase):
+    def test_same_message_id_merges_parallel_tool_events_until_a_new_id(self) -> None:
+        builder = ClaudeObservationBuilder()
+        builder.consume(
+            _assistant_tool_use(
+                "c1", "Grep", {"pattern": "one"}, message_id="message-1"
+            ),
+            10,
+        )
+        builder.consume(
+            _assistant_tool_use(
+                "c2", "Read", {"path": "two"}, message_id="message-1"
+            ),
+            20,
+        )
+        builder.consume(_user_tool_result("c1", "first result"), 30)
+        builder.consume(_user_tool_result("c2", "second result"), 40)
+        builder.consume(_assistant_text("answer", message_id="message-2"), 50)
+
+        batch = builder.complete("run")
+
+        self.assertEqual(len(batch.model_calls), 2)
+        self.assertEqual(len(batch.frames), 2)
+        self.assertEqual(len(batch.tools), 2)
+        roles = [segment.role for segment in batch.frames[1].segments]
+        self.assertEqual(
+            roles[-4:],
+            ["assistant", "assistant", "tool-result", "tool-result"],
+        )
+
+    def test_call_usage_comes_from_each_message_and_ignores_cumulative_result(self) -> None:
+        builder = ClaudeObservationBuilder()
+        builder.consume(
+            _assistant_tool_use(
+                "c1",
+                "Grep",
+                {"pattern": "private"},
+                message_id="message-1",
+                usage=(11, 2),
+            ),
+            10,
+        )
+        builder.consume(
+            _assistant_tool_use(
+                "c2",
+                "Read",
+                {"path": "private"},
+                message_id="message-1",
+                usage=(11, 2),
+            ),
+            20,
+        )
+        builder.consume(_user_tool_result("c1", "result one"), 30)
+        builder.consume(_user_tool_result("c2", "result two"), 40)
+        builder.consume(
+            _assistant_text("answer", message_id="message-2", usage=(29, 4)),
+            50,
+        )
+        builder.consume(
+            _result(
+                is_error=False,
+                text="answer",
+                input_tokens=40,
+                output_tokens=6,
+            ),
+            60,
+        )
+
+        batch = builder.complete("run")
+
+        self.assertEqual(
+            [(call.input_tokens, call.output_tokens) for call in batch.model_calls],
+            [(11, 2), (29, 4)],
+        )
+
+    def test_duplicate_message_usage_conflict_is_explicitly_missing(self) -> None:
+        builder = ClaudeObservationBuilder()
+        builder.consume(
+            _assistant_text("first", message_id="message-1", usage=(1, 2)), 10
+        )
+        builder.consume(
+            _assistant_text("second", message_id="message-1", usage=(3, 4)), 20
+        )
+
+        batch = builder.complete("run")
+
+        self.assertEqual(len(batch.model_calls), 1)
+        self.assertIsNone(batch.model_calls[0].input_tokens)
+        self.assertIsNone(batch.model_calls[0].output_tokens)
+        self.assertIn("token-usage", batch.missing_evidence)
+
+    def test_message_id_reused_after_tool_result_remains_conflicted(self) -> None:
+        builder = ClaudeObservationBuilder()
+        builder.consume(
+            _assistant_tool_use(
+                "c1", "Grep", {"pattern": "private"}, message_id="message-1"
+            ),
+            10,
+        )
+        builder.consume(_user_tool_result("c1", "private result"), 20)
+        builder.consume(_assistant_text("answer", message_id="message-1"), 30)
+        builder.consume(_result(is_error=False, text="answer"), 40)
+
+        batch = builder.complete("run")
+
+        self.assertEqual(len(batch.model_calls), 1)
+        self.assertIsNone(batch.model_calls[0].response_sha256)
+        self.assertIn("model-response", batch.missing_evidence)
+        self.assertIn("context-segment", batch.missing_evidence)
+
     def test_claude_builder_records_known_segments_and_marks_request_boundary_missing(self) -> None:
         builder = ClaudeObservationBuilder()
         builder.consume(_assistant_tool_use("c1", "Grep", {"pattern": "secret"}), 10)
