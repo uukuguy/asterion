@@ -7,7 +7,7 @@ import io
 import json
 import tempfile
 import unittest
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -109,12 +109,20 @@ def _write_diagnosis(root: Path) -> tuple[Path, str]:
     return diagnosis, proposal
 
 
-def _prepare(root: Path, *, suffix: str = "") -> tuple[Path, Path, str]:
+def _prepare(
+    root: Path,
+    *,
+    suffix: str = "",
+    environment_overrides: Mapping[str, str] | None = None,
+) -> tuple[Path, Path, str]:
     resource_root = root / "resources"
     _write_inputs(resource_root, suffix=suffix)
     diagnosis, proposal = _write_diagnosis(root)
     output = root / "output"
     output.mkdir(mode=0o700)
+    environment = {"ASTERION_DCI_RESOURCE_ROOT": str(resource_root)}
+    if environment_overrides is not None:
+        environment.update(environment_overrides)
     code = main(
         [
             "pathlight",
@@ -128,7 +136,7 @@ def _prepare(root: Path, *, suffix: str = "") -> tuple[Path, Path, str]:
             str(output),
         ],
         repo_root=root,
-        environment={"ASTERION_DCI_RESOURCE_ROOT": str(resource_root)},
+        environment=environment,
         stdout=io.StringIO(),
         stderr=io.StringIO(),
     )
@@ -159,6 +167,7 @@ def _write_authorization(root: Path, plan_path: Path) -> Path:
         "scope_sha256": plan["scope_sha256"],
         "variant_sha256": plan["variant_sha256"],
         "registry_set_sha256": plan["registry_set_sha256"],
+        "execution_config_sha256": plan["execution_config_sha256"],
         "max_agent_operations": 50,
         "max_cost_microusd": 5_000_000,
         "max_infrastructure_failures": 2,
@@ -285,6 +294,76 @@ def _host_factory(
 
 
 class TestDciPathlightExperimentCli(unittest.TestCase):
+    def test_prepare_binds_only_effective_execution_config(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory).resolve()
+            baseline = {
+                "DCI_RPC_TIMEOUT_SECONDS": "120",
+                "DCI_PI_THINKING_LEVEL": "high",
+                "DCI_NODE_MAX_OLD_SPACE_SIZE_MB": "4096",
+                "OPENAI_API_KEY": "SENTINEL_CREDENTIAL_A",
+                "DCI_PROVIDER": "ignored-provider-a",
+                "DCI_MODEL": "ignored-model-a",
+                "DCI_RUNTIME": "ignored-runtime-a",
+                "DCI_TOOLS": "ignored-tools-a",
+                "DCI_MAX_TURNS": "7",
+                "DCI_RUNTIME_CONTEXT_LEVEL": "level1",
+            }
+            rotated = {
+                **baseline,
+                "OPENAI_API_KEY": "SENTINEL_CREDENTIAL_B",
+                "DCI_PROVIDER": "ignored-provider-b",
+                "DCI_MODEL": "ignored-model-b",
+                "DCI_RUNTIME": "ignored-runtime-b",
+                "DCI_TOOLS": "ignored-tools-b",
+                "DCI_MAX_TURNS": "9",
+                "DCI_RUNTIME_CONTEXT_LEVEL": "level2",
+            }
+
+            plans: dict[str, dict[str, object]] = {}
+            environments = {
+                "baseline": baseline,
+                "rotated": rotated,
+                "timeout": {**baseline, "DCI_RPC_TIMEOUT_SECONDS": "121"},
+                "thinking": {**baseline, "DCI_PI_THINKING_LEVEL": "low"},
+                "node-memory": {
+                    **baseline,
+                    "DCI_NODE_MAX_OLD_SPACE_SIZE_MB": "8192",
+                },
+            }
+            for name, environment in environments.items():
+                root = parent / name
+                root.mkdir(mode=0o700)
+                env_file = root / ".env"
+                env_file.write_text(
+                    "PRIVATE_SENTINEL=SENTINEL_DOTENV_PRIVATE\n",
+                    encoding="utf-8",
+                )
+                env_file.chmod(0o600)
+                plan_path, _output, _proposal = _prepare(
+                    root,
+                    environment_overrides=environment,
+                )
+                encoded = plan_path.read_text(encoding="utf-8")
+                self.assertNotIn("SENTINEL_", encoded)
+                self.assertNotIn(str(root), encoded)
+                plans[name] = json.loads(encoded)
+
+            for plan in plans.values():
+                self.assertIn("execution_config_sha256", plan)
+            baseline_digest = plans["baseline"]["execution_config_sha256"]
+            self.assertRegex(str(baseline_digest), r"^[0-9a-f]{64}$")
+            self.assertEqual(
+                plans["rotated"]["execution_config_sha256"],
+                baseline_digest,
+            )
+            for name in ("timeout", "thinking", "node-memory"):
+                with self.subTest(name=name):
+                    self.assertNotEqual(
+                        plans[name]["execution_config_sha256"],
+                        baseline_digest,
+                    )
+
     def test_prepare_builds_exact_five_by_ten_scope_without_loading_provider(
         self,
     ) -> None:
@@ -381,6 +460,138 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
             self.assertNotIn(str(root), stderr.getvalue())
             self.assertNotIn("must-not-leak", stderr.getvalue())
 
+    def test_execute_rejects_effective_config_drift_before_host_construction(
+        self,
+    ) -> None:
+        changes = {
+            "timeout": {"DCI_RPC_TIMEOUT_SECONDS": "121"},
+            "thinking": {"DCI_PI_THINKING_LEVEL": "low"},
+            "node-memory": {"DCI_NODE_MAX_OLD_SPACE_SIZE_MB": "8192"},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory).resolve()
+            for name, change in changes.items():
+                with self.subTest(name=name):
+                    root = parent / name
+                    root.mkdir(mode=0o700)
+                    prepared_environment = {
+                        "DCI_RPC_TIMEOUT_SECONDS": "120",
+                        "DCI_PI_THINKING_LEVEL": "high",
+                        "DCI_NODE_MAX_OLD_SPACE_SIZE_MB": "4096",
+                    }
+                    plan, output, _proposal = _prepare(
+                        root,
+                        environment_overrides=prepared_environment,
+                    )
+                    authorization = _write_authorization(root, plan)
+                    events: list[str] = []
+                    execution_environment = {
+                        **_execution_environment(root),
+                        **prepared_environment,
+                        **change,
+                    }
+
+                    code = main(
+                        [
+                            "pathlight",
+                            "experiment",
+                            "execute",
+                            "--plan-file",
+                            str(plan),
+                            "--authorization-file",
+                            str(authorization),
+                            "--output-root",
+                            str(output),
+                        ],
+                        repo_root=root,
+                        environment=execution_environment,
+                        experiment_host_factory=_host_factory(events, {}),
+                        stdout=io.StringIO(),
+                        stderr=io.StringIO(),
+                    )
+
+                    self.assertEqual(code, 2)
+                    self.assertEqual(events, [])
+
+    def test_execute_rejects_code_defined_config_drift_before_host_construction(
+        self,
+    ) -> None:
+        fixed_overrides = {
+            "runtime": "pi",
+            "provider": "openai-codex",
+            "model": "gpt-5.6-luna",
+            "tools": "read,bash",
+            "runtime_context_level": "level2",
+        }
+        config_patches = (
+            (
+                "executor-profile",
+                lambda: patch(
+                    "asterion.applications.dci_agent_lite.benchmark_host."
+                    "_REAL_AGENT_EXECUTOR_PROFILE",
+                    "changed-real-profile",
+                    create=True,
+                ),
+            ),
+            (
+                "runtime-context",
+                lambda: patch(
+                    "asterion.applications.dci_agent_lite.benchmark_host."
+                    "_REAL_AGENT_RUNTIME_OVERRIDES",
+                    fixed_overrides,
+                ),
+            ),
+            (
+                "native-attempts",
+                lambda: patch.dict(
+                    "asterion.applications.dci_agent_lite.benchmark_executor."
+                    "_REAL_TASK_NATIVE_ATTEMPTS",
+                    {"bright.biology": 4},
+                ),
+            ),
+            (
+                "effective-tools",
+                lambda: patch(
+                    "asterion.applications.dci_agent_lite.benchmark_executor."
+                    "_COVERAGE_EFFECTIVE_TOOLS",
+                    "read",
+                    create=True,
+                ),
+            ),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory).resolve()
+            for name, config_patch in config_patches:
+                with self.subTest(name=name):
+                    root = parent / name
+                    root.mkdir(mode=0o700)
+                    plan, output, _proposal = _prepare(root)
+                    authorization = _write_authorization(root, plan)
+                    events: list[str] = []
+
+                    with config_patch():
+                        code = main(
+                            [
+                                "pathlight",
+                                "experiment",
+                                "execute",
+                                "--plan-file",
+                                str(plan),
+                                "--authorization-file",
+                                str(authorization),
+                                "--output-root",
+                                str(output),
+                            ],
+                            repo_root=root,
+                            environment=_execution_environment(root),
+                            experiment_host_factory=_host_factory(events, {}),
+                            stdout=io.StringIO(),
+                            stderr=io.StringIO(),
+                        )
+
+                    self.assertEqual(code, 2)
+                    self.assertEqual(events, [])
+
     def test_execute_preflights_all_five_then_runs_sequentially_without_judge(
         self,
     ) -> None:
@@ -443,6 +654,16 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
             self.assertNotIn("must-not-leak", stdout.getvalue())
             self.assertNotIn("SENTINEL_ENV_PRIVATE_JUDGE_KEY", stdout.getvalue())
             self.assertNotIn(str(root), stdout.getvalue())
+            plan_value = json.loads(plan.read_bytes())
+            receipts = sorted((output / "receipts").glob("receipt-*.json"))
+            self.assertEqual(len(receipts), 5)
+            for receipt_path in receipts:
+                receipt = json.loads(receipt_path.read_bytes())
+                self.assertIn("execution_config_sha256", receipt)
+                self.assertEqual(
+                    receipt["execution_config_sha256"],
+                    plan_value["execution_config_sha256"],
+                )
 
             status_stdout = io.StringIO()
             self.assertEqual(

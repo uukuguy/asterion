@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NoReturn
@@ -48,11 +48,13 @@ from asterion.capabilities.dci.implementation.operator_inputs import (
     create_local_fixture_operator_inputs,
 )
 from asterion.applications.dci_agent_lite.benchmark_executor import (
+    _coverage_execution_config_sha256,
     LocalDciBenchmarkExecutor,
     RealDciBenchmarkExecutor,
     verify_judge_connectivity,
 )
 from asterion.capabilities.dci.implementation.config import (
+    DciRuntimeOptions,
     resolve_dci_paths,
     resolve_dci_runtime_options,
 )
@@ -62,6 +64,38 @@ from asterion.runtime.host import CancellationSignal
 
 class DciBenchmarkHostError(ValueError):
     """Raised when DCI host lifecycle or selected provider state is invalid."""
+
+
+_REAL_AGENT_RUNTIME_OVERRIDES: Mapping[str, object] = {
+    "runtime": "pi",
+    "provider": "openai-codex",
+    "model": "gpt-5.6-luna",
+    "tools": "read,bash",
+    "runtime_context_level": "level3",
+}
+_REAL_AGENT_EXECUTOR_PROFILE = "real-agent-judge"
+_REAL_AGENT_EXPERIMENT_PROFILE = "asterion-safe/pi"
+
+
+def _real_agent_runtime_options(
+    environment: Mapping[str, str],
+) -> DciRuntimeOptions:
+    return resolve_dci_runtime_options(
+        _REAL_AGENT_RUNTIME_OVERRIDES,
+        environment=environment,
+    )
+
+
+def coverage_execution_config_sha256(
+    environment: Mapping[str, str],
+) -> str:
+    """Return only the fixed coverage experiment's effective config digest."""
+
+    return _coverage_execution_config_sha256(
+        _real_agent_runtime_options(environment),
+        executor_profile=_REAL_AGENT_EXECUTOR_PROFILE,
+        experiment_profile=_REAL_AGENT_EXPERIMENT_PROFILE,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -340,7 +374,7 @@ class DciBenchmarkHost:
     def _default_executor(self) -> BenchmarkTaskExecutor:
         if self._instance.executor_profile == "local-fixture":
             return LocalDciBenchmarkExecutor()
-        if self._instance.executor_profile == "real-agent-judge":
+        if self._instance.executor_profile == _REAL_AGENT_EXECUTOR_PROFILE:
             config = self._operator_config
             if config is None:
                 _fail()
@@ -350,18 +384,9 @@ class DciBenchmarkHost:
                     config.repo_root,
                     environment=environment,
                 ),
-                runtime_options=resolve_dci_runtime_options(
-                    {
-                        "runtime": "pi",
-                        "provider": "openai-codex",
-                        "model": "gpt-5.6-luna",
-                        "tools": "read,bash",
-                        "runtime_context_level": "level3",
-                    },
-                    environment=environment,
-                ),
+                runtime_options=_real_agent_runtime_options(environment),
                 judge_config=JudgeConfig.from_environment(environment),
-                experiment_profile="asterion-safe/pi",
+                experiment_profile=_REAL_AGENT_EXPERIMENT_PROFILE,
                 max_turns=100,
                 judge_connectivity_probe=verify_judge_connectivity,
             )
@@ -485,4 +510,5 @@ __all__ = (
     "DciBenchmarkHost",
     "DciBenchmarkHostError",
     "DciLoadedBenchmarkProviders",
+    "coverage_execution_config_sha256",
 )

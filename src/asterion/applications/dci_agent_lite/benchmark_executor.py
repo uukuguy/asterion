@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
+import json
 import os
 import stat
 import urllib.error
@@ -99,15 +101,15 @@ _REAL_TASK_MODES = {
     "bright.economics": "ir",
     "bright.robotics": "ir",
 }
-_COVERAGE_TASK_IDS = frozenset(
-    {
-        "beir.scifact",
-        "bright.biology",
-        "bright.earth-science",
-        "bright.economics",
-        "bright.robotics",
-    }
+_COVERAGE_TASK_ORDER = (
+    "bright.biology",
+    "bright.earth-science",
+    "bright.economics",
+    "bright.robotics",
+    "beir.scifact",
 )
+_COVERAGE_TASK_IDS = frozenset(_COVERAGE_TASK_ORDER)
+_COVERAGE_EFFECTIVE_TOOLS = "read,grep"
 _DEFAULT_EXPERIMENT_PROFILE = "asterion-safe/pi"
 _FULL_SCOPE_BY_TASK = {
     "beir.scifact": "beir.scifact.main.full",
@@ -124,6 +126,59 @@ _EXPERIMENT_PROFILES = {
     _DEFAULT_EXPERIMENT_PROFILE,
     _UPSTREAM_EXPERIMENT_PROFILE,
 }
+
+
+def _coverage_execution_config_sha256(
+    runtime_options: DciRuntimeOptions,
+    *,
+    executor_profile: str,
+    experiment_profile: str,
+) -> str:
+    """Digest exact effective settings for the fixed coverage experiment."""
+
+    if (
+        type(runtime_options) is not DciRuntimeOptions
+        or type(executor_profile) is not str
+        or not executor_profile
+        or experiment_profile not in _EXPERIMENT_PROFILES
+    ):
+        _fail()
+    value = {
+        "schema": "asterion.dci.coverage-execution-config/v1",
+        "executor_profile": executor_profile,
+        "experiment_profile": experiment_profile,
+        "runtime": runtime_options.runtime,
+        "provider": runtime_options.provider,
+        "model": runtime_options.model,
+        "tools": _COVERAGE_EFFECTIVE_TOOLS,
+        "timeout_seconds": runtime_options.timeout_seconds,
+        "runtime_context_level": runtime_options.runtime_context_level,
+        "thinking_level": runtime_options.thinking_level,
+        "node_max_old_space_size_mb": runtime_options.node_max_old_space_size_mb,
+        "keep_session": runtime_options.keep_session,
+        "extra_args": list(runtime_options.extra_args),
+        "authentication_mode": runtime_options.authentication_mode,
+        "tasks": [
+            {
+                "task_id": task_id,
+                "mode": _REAL_TASK_MODES[task_id],
+                "max_turns": _REAL_TASK_EXECUTION[task_id][0],
+                "max_concurrency": _REAL_TASK_EXECUTION[task_id][1],
+                "max_native_attempts": _REAL_TASK_NATIVE_ATTEMPTS[task_id],
+                "case_limit": 10,
+                "externalize_tool_results": True,
+                "judge_operations": 0,
+            }
+            for task_id in _COVERAGE_TASK_ORDER
+        ],
+    }
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 class DciBenchmarkExecutorError(ValueError):
@@ -273,7 +328,10 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 output_root=payload.output_directory,
                 cwd=self._paths.repo_root,
                 judge_config=judge_config,
-                runtime_options=replace(self._runtime_options, tools="read,grep"),
+                runtime_options=replace(
+                    self._runtime_options,
+                    tools=_COVERAGE_EFFECTIVE_TOOLS,
+                ),
                 limit=payload.case_limit,
                 mode=mode,
                 profile=self._experiment_profile,

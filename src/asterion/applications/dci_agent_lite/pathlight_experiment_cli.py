@@ -16,6 +16,9 @@ from asterion.applications.dci_agent_lite.benchmark_instances import (
     DciBenchmarkInstance,
     select_benchmark_instance,
 )
+from asterion.applications.dci_agent_lite.benchmark_host import (
+    coverage_execution_config_sha256,
+)
 from asterion.applications.dci_agent_lite.benchmark_source_lock import (
     resolve_benchmark_source_lock,
     write_benchmark_source_lock,
@@ -201,6 +204,9 @@ def _prepare(
             "registry_set_sha256": registry_set_sha256,
             "source_lock_path": _SOURCE_LOCK_FILENAME,
             "source_lock_sha256": _file_sha256(source_lock_path),
+            "execution_config_sha256": coverage_execution_config_sha256(
+                config.benchmark_inputs.private_environment
+            ),
             "max_agent_operations": _MAX_AGENT_OPERATIONS,
             "max_cost_microusd": _MAX_COST_MICROUSD,
             "max_infrastructure_failures": _MAX_INFRASTRUCTURE_FAILURES,
@@ -265,6 +271,17 @@ def _execute(
         env_file=env_file,
         environment=environment,
     )
+    expected_execution_config = plan.get("execution_config_sha256")
+    if (
+        type(expected_execution_config) is not str
+        or not hmac.compare_digest(
+            coverage_execution_config_sha256(
+                base_config.benchmark_inputs.private_environment
+            ),
+            expected_execution_config,
+        )
+    ):
+        raise ValueError
     tasks = plan["tasks"]
     if type(tasks) is not list:
         raise ValueError
@@ -658,6 +675,7 @@ def _read_receipt_chain(
             "scope_sha256",
             "variant_sha256",
             "registry_sha256",
+            "execution_config_sha256",
             "authorization_sha256",
             "run_id",
             "status",
@@ -685,6 +703,8 @@ def _read_receipt_chain(
             or value.get("scope_sha256") != plan["scope_sha256"]
             or value.get("variant_sha256") != plan["variant_sha256"]
             or value.get("registry_sha256") != task["registry_sha256"]
+            or value.get("execution_config_sha256")
+            != plan["execution_config_sha256"]
             or not _is_sha256(value.get("authorization_sha256"))
             or type(value.get("run_id")) is not str
             or _RUN_ID.fullmatch(str(value.get("run_id"))) is None
@@ -753,6 +773,7 @@ def _publish_receipt(
         "scope_sha256": plan["scope_sha256"],
         "variant_sha256": plan["variant_sha256"],
         "registry_sha256": task["registry_sha256"],
+        "execution_config_sha256": plan["execution_config_sha256"],
         "authorization_sha256": authorization["authorization_sha256"],
         "run_id": run_id,
         "status": status,
@@ -812,6 +833,7 @@ def _read_plan(path: Path) -> dict[str, object]:
         "registry_set_sha256",
         "source_lock_path",
         "source_lock_sha256",
+        "execution_config_sha256",
         "max_agent_operations",
         "max_cost_microusd",
         "max_infrastructure_failures",
@@ -838,6 +860,7 @@ def _read_plan(path: Path) -> dict[str, object]:
                 "variant_sha256",
                 "registry_set_sha256",
                 "source_lock_sha256",
+                "execution_config_sha256",
             )
         )
         or not _is_sha256(digest)
@@ -896,6 +919,7 @@ def _read_authorization(path: Path, *, plan: Mapping[str, object]) -> dict[str, 
         "scope_sha256",
         "variant_sha256",
         "registry_set_sha256",
+        "execution_config_sha256",
         "max_agent_operations",
         "max_cost_microusd",
         "max_infrastructure_failures",
@@ -913,6 +937,8 @@ def _read_authorization(path: Path, *, plan: Mapping[str, object]) -> dict[str, 
         or value.get("scope_sha256") != plan["scope_sha256"]
         or value.get("variant_sha256") != plan["variant_sha256"]
         or value.get("registry_set_sha256") != plan["registry_set_sha256"]
+        or value.get("execution_config_sha256")
+        != plan["execution_config_sha256"]
         or value.get("max_agent_operations") != _MAX_AGENT_OPERATIONS
         or value.get("max_cost_microusd") != _MAX_COST_MICROUSD
         or value.get("max_infrastructure_failures") != _MAX_INFRASTRUCTURE_FAILURES
