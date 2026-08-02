@@ -84,6 +84,17 @@ class RaisingRecorder:
         return None
 
 
+class InvalidTraceRecorder:
+    trace_id = "not-a-uuid"
+
+    def record(self, event: object) -> None:
+        del event
+        raise AssertionError("invalid recorder must not receive events")
+
+    def snapshot(self) -> None:
+        return None
+
+
 def trace_events(recorder: MemoryPathlightRecorder) -> Sequence[Mapping[str, object]]:
     snapshot = recorder.snapshot()
     events = snapshot["events"]
@@ -271,6 +282,23 @@ class ComposedRunnerPathlightTests(unittest.IsolatedAsyncioTestCase):
             input_text="SECRET-INPUT",
             host_services={},
             pathlight=RaisingRecorder(),
+        )
+
+        self.assertEqual(result.application_id, "trace.application")
+
+    async def test_invalid_recorder_identity_does_not_change_the_application_result(
+        self,
+    ) -> None:
+        result = await run_composed_application(
+            plan(),
+            implementations=(
+                (CapabilityRef("trace.capability", "1.0.0"), CompletedImplementation()),
+            ),
+            runtime=FixtureRuntime(),
+            run_id="run-1",
+            input_text="SECRET-INPUT",
+            host_services={},
+            pathlight=InvalidTraceRecorder(),
         )
 
         self.assertEqual(result.application_id, "trace.application")

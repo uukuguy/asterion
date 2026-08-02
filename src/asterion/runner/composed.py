@@ -192,7 +192,12 @@ class _PathlightLifecycle:
 
     def __init__(self, recorder: PathlightRecorder | None) -> None:
         self._recorder = recorder
-        self._trace_id = None if recorder is None else recorder.trace_id
+        self._trace_id: str | None = None
+        if recorder is not None:
+            try:
+                self._trace_id = recorder.trace_id
+            except Exception:
+                self._disable()
         self._sequence = 0
         self._root_span_id: str | None = None
         self._plan_span_id: str | None = None
@@ -267,16 +272,20 @@ class _PathlightLifecycle:
         if self._trace_id is None:
             return None
         span_id = str(uuid4())
-        self._sequence += 1
-        self._record(
-            TraceEvent.start(
+        sequence = self._sequence + 1
+        try:
+            event = TraceEvent.start(
                 self._trace_id,
                 span_id,
                 parent_span_id,
-                self._sequence,
+                sequence,
                 kind,
             )
-        )
+        except Exception:
+            self._disable()
+            return None
+        self._sequence = sequence
+        self._record(event)
         return span_id
 
     def _terminal(
@@ -289,17 +298,21 @@ class _PathlightLifecycle:
     ) -> None:
         if self._trace_id is None or span_id is None:
             return
-        self._sequence += 1
-        self._record(
-            TraceEvent.terminal(
+        sequence = self._sequence + 1
+        try:
+            event = TraceEvent.terminal(
                 self._trace_id,
                 span_id,
-                self._sequence,
+                sequence,
                 status,
                 kind=kind,
                 attributes=attributes,
             )
-        )
+        except Exception:
+            self._disable()
+            return
+        self._sequence = sequence
+        self._record(event)
 
     def _record(self, event: TraceEvent) -> None:
         assert self._recorder is not None
@@ -308,7 +321,11 @@ class _PathlightLifecycle:
         except Exception:
             # Instrumentation remains observational and cannot replace the
             # runner's result, failure, or cancellation semantics.
-            return
+            self._disable()
+
+    def _disable(self) -> None:
+        self._recorder = None
+        self._trace_id = None
 
 
 def _preflight(
