@@ -928,7 +928,7 @@ def _read_experiment_document(path: Path) -> object:
         directory_fd = _open_parent_directory(path)
         source_fd = os.open(
             path.name,
-            os.O_RDONLY | _nofollow_flag(),
+            os.O_RDONLY | os.O_NONBLOCK | _nofollow_flag(),
             dir_fd=directory_fd,
         )
         before = os.fstat(source_fd)

@@ -5,6 +5,7 @@ import json
 import os
 import stat
 import tempfile
+import threading
 import unittest
 from collections.abc import ItemsView, Iterator, Mapping
 from dataclasses import replace
@@ -27,6 +28,7 @@ from asterion.pathlight.experiment import (
     validate_dataset_snapshot,
     validate_evaluator_contract,
     validate_experiment_plan,
+    validate_experiment_bundle,
     validate_subject_ref,
     validate_variant,
     read_experiment_bundle,
@@ -266,6 +268,65 @@ class PathlightExperimentTests(unittest.TestCase):
             path.chmod(0o600)
             with self.assertRaises(PathlightError):
                 read_experiment_bundle(path)
+
+    def test_reader_rejects_fifo_promptly_without_a_writer(self) -> None:
+        if not hasattr(os, "mkfifo"):
+            self.skipTest("os.mkfifo is unavailable")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / "pathlight-experiment.json"
+            os.mkfifo(path, 0o600)
+            path.chmod(0o600)
+            completed = threading.Event()
+            outcomes: list[BaseException | object] = []
+
+            def read_fifo() -> None:
+                try:
+                    outcomes.append(read_experiment_bundle(path))
+                except BaseException as error:
+                    outcomes.append(error)
+                finally:
+                    completed.set()
+
+            thread = threading.Thread(target=read_fifo, daemon=True)
+            thread.start()
+            finished_without_writer = completed.wait(0.25)
+            if not finished_without_writer:
+                writer = os.open(path, os.O_WRONLY | os.O_NONBLOCK)
+                os.close(writer)
+                thread.join(1)
+
+            self.assertTrue(
+                finished_without_writer,
+                "Pathlight FIFO read blocked waiting for a writer",
+            )
+            self.assertEqual(len(outcomes), 1)
+            error = outcomes[0]
+            self.assertIsInstance(error, PathlightError)
+            assert isinstance(error, PathlightError)
+            self.assertPublicPathlightError(
+                error, "Pathlight experiment source is invalid"
+            )
+
+    def test_bundle_validator_rejects_hostile_mapping_subclasses(self) -> None:
+        values = self._complete_bundle_values()
+        bundle = ExperimentBundle.build(
+            datasets=(values[0],),
+            evaluators=(values[1],),
+            variants=(values[2],),
+            plans=(values[3],),
+            trials=(values[4],),
+            evaluations=(values[5],),
+        )
+        for fail_at in ("iter", "getitem", "pathlight"):
+            with self.subTest(fail_at=fail_at), self.assertRaises(
+                PathlightError
+            ) as raised:
+                validate_experiment_bundle(
+                    _HostileMapping(bundle.to_mapping(), fail_at)
+                )
+            self.assertPublicPathlightError(
+                raised.exception, "Pathlight experiment bundle is invalid"
+            )
 
     def test_reader_bounds_post_stat_growth(self) -> None:
         values = self._complete_bundle_values()
