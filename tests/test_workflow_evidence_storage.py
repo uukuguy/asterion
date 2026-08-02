@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import stat
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from asterion.pathlight import TraceEvent, TraceGraph
 from asterion.workflow_evidence import (
@@ -43,6 +45,28 @@ def _completed_pathlight_trace(
     ).to_mapping()
 
 
+def _rehash_record(record: dict[str, object]) -> None:
+    graph = dict(record)
+    graph.pop("graph_sha256")
+    record["graph_sha256"] = hashlib.sha256(
+        json.dumps(graph, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _rehash_bundle(document: dict[str, object]) -> None:
+    document["bundle_sha256"] = hashlib.sha256(
+        json.dumps(
+            {
+                "schema": document["schema"],
+                "records": document["records"],
+                "pathlight_traces": document["pathlight_traces"],
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def _mutated_bundle_path(root: Path, mutation: str) -> Path:
     path = root / "workflow-evidence.json"
     trace = _completed_pathlight_trace()
@@ -63,30 +87,43 @@ def _mutated_bundle_path(root: Path, mutation: str) -> Path:
         document["pathlight_traces"][0]["trace_sha256"] = "0" * 64
     elif mutation == "duplicate-run":
         document["records"].append(document["records"][0])
-        document["bundle_sha256"] = hashlib.sha256(
-            json.dumps(
-                {
-                    "schema": document["schema"],
-                    "records": document["records"],
-                    "pathlight_traces": document["pathlight_traces"],
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
+        _rehash_bundle(document)
     elif mutation == "duplicate-trace":
         document["pathlight_traces"].append(document["pathlight_traces"][0])
-        document["bundle_sha256"] = hashlib.sha256(
-            json.dumps(
-                {
-                    "schema": document["schema"],
-                    "records": document["records"],
-                    "pathlight_traces": document["pathlight_traces"],
-                },
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
+        _rehash_bundle(document)
+    elif mutation == "tool-private-field":
+        record = document["records"][0]
+        record["tools"] = [
+            {
+                "name": "search",
+                "calls": 1,
+                "errors": 0,
+                "prompt": "SECRET-WORKFLOW-PROMPT",
+            }
+        ]
+        _rehash_record(record)
+        _rehash_bundle(document)
+    elif mutation == "tool-bool-count":
+        record = document["records"][0]
+        record["tools"] = [{"name": "search", "calls": True, "errors": 0}]
+        _rehash_record(record)
+        _rehash_bundle(document)
+    elif mutation == "usage-bool":
+        record = document["records"][0]
+        record["usage"] = {"input_tokens": True, "output_tokens": 0}
+        _rehash_record(record)
+        _rehash_bundle(document)
+    elif mutation == "artifact-private-field":
+        record = document["records"][0]
+        record["artifacts"] = [
+            {
+                "artifact_id": "answer",
+                "sha256": "a" * 64,
+                "raw_payload": "SECRET-WORKFLOW-ANSWER",
+            }
+        ]
+        _rehash_record(record)
+        _rehash_bundle(document)
     elif mutation == "unknown-field":
         document["private_sentinel"] = "SECRET-WORKFLOW-EVIDENCE"
     else:
@@ -96,10 +133,79 @@ def _mutated_bundle_path(root: Path, mutation: str) -> Path:
 
 
 class WorkflowEvidenceStorageTests(unittest.TestCase):
+    def test_reader_accepts_exact_public_safe_nested_record_entries(self) -> None:
+        record = _completed_record()
+        record["tools"] = [{"name": "search", "calls": 1, "errors": 0}]
+        record["usage"] = {"input_tokens": 3, "output_tokens": 2}
+        record["artifacts"] = [{"artifact_id": "answer", "sha256": "a" * 64}]
+        _rehash_record(record)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / "workflow-evidence.json"
+            write_workflow_observation_bundle(path, (record,))
+
+            bundle = read_workflow_observation_bundle(path)
+
+        self.assertEqual(bundle.records[0]["tools"], ({"name": "search", "calls": 1, "errors": 0},))
+        self.assertEqual(bundle.records[0]["usage"]["input_tokens"], 3)
+        self.assertEqual(bundle.records[0]["artifacts"][0]["artifact_id"], "answer")
+
+    def test_reader_rejects_private_or_invalid_nested_record_values(self) -> None:
+        mutations = (
+            "tool-private-field",
+            "tool-bool-count",
+            "usage-bool",
+            "artifact-private-field",
+        )
+        for mutation in mutations:
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                with self.assertRaises(WorkflowEvidenceError):
+                    read_workflow_observation_bundle(
+                        _mutated_bundle_path(Path(directory).resolve(), mutation)
+                    )
+
+    def test_reader_rejects_ancestor_symlink_and_final_replacement(self) -> None:
+        with self.subTest("ancestor-symlink"), tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            target = root / "target"
+            target.mkdir()
+            write_workflow_observation_bundle(
+                target / "workflow-evidence.json", (_completed_record(),)
+            )
+            (root / "ancestor").symlink_to(target, target_is_directory=True)
+
+            with self.assertRaises(WorkflowEvidenceError):
+                read_workflow_observation_bundle(root / "ancestor" / "workflow-evidence.json")
+
+        with self.subTest("final-replacement"), tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            path = root / "workflow-evidence.json"
+            replacement = root / "replacement.json"
+            write_workflow_observation_bundle(path, (_completed_record(),))
+            replacement.write_bytes(path.read_bytes())
+            original_open = os.open
+
+            def replace_before_final_open(
+                name: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+                flags: int,
+                mode: int = 0o777,
+                *,
+                dir_fd: int | None = None,
+            ) -> int:
+                if name == "workflow-evidence.json" and dir_fd is not None:
+                    path.rename(root / "original.json")
+                    path.symlink_to(replacement)
+                return original_open(name, flags, mode, dir_fd=dir_fd)
+
+            with patch(
+                "asterion.workflow_evidence.storage.os.open",
+                side_effect=replace_before_final_open,
+            ), self.assertRaises(WorkflowEvidenceError):
+                read_workflow_observation_bundle(path)
+
     def test_reads_written_bundle_as_immutable_validated_value(self) -> None:
         trace = _completed_pathlight_trace()
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "workflow-evidence.json"
+            path = Path(directory).resolve() / "workflow-evidence.json"
             write_workflow_observation_bundle(
                 path,
                 (_completed_record(),),
@@ -136,7 +242,7 @@ class WorkflowEvidenceStorageTests(unittest.TestCase):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
                 with self.assertRaises(WorkflowEvidenceError):
                     read_workflow_observation_bundle(
-                        _mutated_bundle_path(Path(directory), mutation)
+                        _mutated_bundle_path(Path(directory).resolve(), mutation)
                     )
 
     def test_writes_canonical_observation_bundle_to_explicit_new_file(self) -> None:

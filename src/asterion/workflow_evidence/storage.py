@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import os
+import stat
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,16 +61,95 @@ def _validate_failure_observation(record: Mapping[str, object]) -> None:
         raise WorkflowEvidenceError("workflow observation failure class is invalid")
 
 
+def _validate_completed_observation(record: Mapping[str, object]) -> None:
+    validate_workflow_evidence(record)
+    if set(record) != {
+        "schema",
+        "run_id",
+        "input_digest",
+        "terminal_status",
+        "tools",
+        "usage",
+        "artifacts",
+        "graph_sha256",
+    }:
+        raise WorkflowEvidenceError("workflow observation record is invalid")
+    tools = record["tools"]
+    usage = record["usage"]
+    artifacts = record["artifacts"]
+    if not isinstance(tools, list) or not isinstance(usage, Mapping) or not isinstance(
+        artifacts, list
+    ):
+        raise WorkflowEvidenceError("workflow observation record is invalid")
+    for tool in tools:
+        if not isinstance(tool, Mapping) or set(tool) != {"name", "calls", "errors"}:
+            raise WorkflowEvidenceError("workflow observation tool is invalid")
+        if not isinstance(tool["name"], str) or not tool["name"]:
+            raise WorkflowEvidenceError("workflow observation tool is invalid")
+        calls = tool["calls"]
+        errors = tool["errors"]
+        if (
+            isinstance(calls, bool)
+            or not isinstance(calls, int)
+            or calls < 0
+            or isinstance(errors, bool)
+            or not isinstance(errors, int)
+            or errors < 0
+            or errors > calls
+        ):
+            raise WorkflowEvidenceError("workflow observation tool is invalid")
+    if set(usage) != {"input_tokens", "output_tokens"}:
+        raise WorkflowEvidenceError("workflow observation usage is invalid")
+    for value in usage.values():
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise WorkflowEvidenceError("workflow observation usage is invalid")
+    for artifact in artifacts:
+        if not isinstance(artifact, Mapping) or set(artifact) != {"artifact_id", "sha256"}:
+            raise WorkflowEvidenceError("workflow observation artifact is invalid")
+        if not isinstance(artifact["artifact_id"], str) or not artifact["artifact_id"]:
+            raise WorkflowEvidenceError("workflow observation artifact is invalid")
+        _digest(artifact["sha256"])
+
+
 def read_workflow_observation_bundle(path: Path) -> WorkflowObservationBundle:
     """Read one canonical observation bundle into a validated immutable value."""
 
-    if path.name != "workflow-evidence.json" or path.is_symlink() or not path.is_file():
+    if path.name != "workflow-evidence.json":
         raise WorkflowEvidenceError("workflow observation source is invalid")
+    document = _read_bundle_document(path)
+    return _validate_and_freeze_bundle(document)
+
+
+def _read_bundle_document(path: Path) -> object:
+    """Read one regular file through no-follow descriptors for every component."""
+
+    directory_fd = -1
+    source_fd = -1
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
+        absolute = path.absolute()
+        nofollow = getattr(os, "O_NOFOLLOW", None)
+        if nofollow is None:
+            raise OSError("no-follow descriptor opening is unavailable")
+        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow
+        directory_fd = os.open(absolute.anchor, directory_flags)
+        for component in absolute.parts[1:-1]:
+            next_directory_fd = os.open(component, directory_flags, dir_fd=directory_fd)
+            os.close(directory_fd)
+            directory_fd = next_directory_fd
+        source_fd = os.open(path.name, os.O_RDONLY | nofollow, dir_fd=directory_fd)
+        if not stat.S_ISREG(os.fstat(source_fd).st_mode):
+            raise OSError("workflow observation source is not a regular file")
+        with os.fdopen(source_fd, "rb") as source:
+            source_fd = -1
+            document = json.loads(source.read().decode("utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         raise WorkflowEvidenceError("workflow observation source is invalid") from error
-    return _validate_and_freeze_bundle(document)
+    finally:
+        if source_fd >= 0:
+            os.close(source_fd)
+        if directory_fd >= 0:
+            os.close(directory_fd)
+    return document
 
 
 def _validate_and_freeze_bundle(document: object) -> WorkflowObservationBundle:
@@ -106,7 +186,7 @@ def _validate_and_freeze_bundle(document: object) -> WorkflowObservationBundle:
         if not isinstance(record, Mapping):
             raise WorkflowEvidenceError("workflow observation record is invalid")
         if record.get("schema") == "asterion.workflow-evidence/v1":
-            validate_workflow_evidence(record)
+            _validate_completed_observation(record)
         else:
             _validate_failure_observation(record)
         run_id = record["run_id"]
