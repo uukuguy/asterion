@@ -1813,9 +1813,13 @@ def render_chinese_diagnosis(report: object) -> str:
             lines.append(
                 "- 缺少封存配置、封存分析、装配/包谱系、轨迹图谱与检索覆盖率，不能把差值归因于任一组件。"
             )
-        else:
+        elif canonical.coverage_experiment.complete:
             lines.append(
                 "- 覆盖观测只关闭检索覆盖率缺口；其余证据缺口仍禁止把差值归因于任一组件。"
+            )
+        else:
+            lines.append(
+                "- 覆盖观测未完整，未关闭检索覆盖率缺口；其余证据缺口仍禁止把差值归因于任一组件。"
             )
         lines.extend(["", "## 证据缺口", ""])
         lines.extend(f"- {_CN_MISSING[code]}" for code in canonical.missing_evidence)

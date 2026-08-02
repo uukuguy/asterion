@@ -233,6 +233,13 @@ class TestDciPathlightDiagnosis(unittest.TestCase):
                     report.query_decomposition_gate,
                     "blocked-by-coverage",
                 )
+                rendered = render_chinese_diagnosis(report)
+                self.assertIn(
+                    "覆盖观测未完整，未关闭检索覆盖率缺口",
+                    rendered,
+                )
+                self.assertIn("授权门槛阻塞", rendered)
+                self.assertNotIn("只关闭检索覆盖率缺口", rendered)
                 self.assertTrue(
                     all(
                         not proposal.execution_authorized
