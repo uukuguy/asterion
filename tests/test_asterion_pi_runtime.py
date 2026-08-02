@@ -121,6 +121,42 @@ print(json.dumps({"type": "message_end", "message": {"role": "assistant", "stopR
 print(json.dumps({"type": "agent_end"}), flush=True)
 '''
 
+OBSERVATION_SCRIPT = r'''
+import json, sys
+request = json.loads(sys.stdin.readline())
+print(json.dumps({"type": "response", "id": request["id"], "success": True}), flush=True)
+print(json.dumps({"type": "agent_start"}), flush=True)
+print(json.dumps({"type": "turn_start"}), flush=True)
+print(json.dumps({
+    "type": "provider_request_context", "requestIndex": 1,
+    "provider": "SENTINEL_PROVIDER", "model": "SENTINEL_MODEL",
+    "messages": [{"role": "user", "content": "SENTINEL_PROMPT"}],
+}), flush=True)
+print(json.dumps({
+    "type": "tool_execution_start", "toolCallId": "call-1", "toolName": "grep",
+    "args": {"pattern": "SENTINEL_ARGUMENTS"},
+}), flush=True)
+print(json.dumps({
+    "type": "tool_execution_end", "toolCallId": "call-1",
+    "result": "SENTINEL_RESULT", "isError": False,
+}), flush=True)
+print(json.dumps({
+    "type": "provider_request_context", "requestIndex": 2,
+    "provider": "SENTINEL_PROVIDER", "model": "SENTINEL_MODEL",
+    "messages": [
+        {"role": "user", "content": "SENTINEL_PROMPT"},
+        {"role": "toolResult", "toolCallId": "call-1", "content": "SENTINEL_RESULT"},
+    ],
+}), flush=True)
+print(json.dumps({
+    "type": "message_end", "message": {
+        "role": "assistant", "stopReason": "stop", "usage": {"input": 7, "output": 3},
+        "content": "SENTINEL_ANSWER",
+    },
+}), flush=True)
+print(json.dumps({"type": "agent_end"}), flush=True)
+'''
+
 DESCENDANT_STDERR_SCRIPT = r'''
 import json, subprocess, sys
 request = json.loads(sys.stdin.readline())
@@ -682,6 +718,50 @@ print(json.dumps({"type": "agent_end"}), flush=True)
         )
         self.assertEqual(events[-1].payload["status"], "completed")
 
+    async def test_completed_run_exposes_only_a_validated_deep_copied_observation(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            client = PiRuntimeClient(
+                command=(sys.executable, "-u", "-c", OBSERVATION_SCRIPT),
+                cwd=root,
+                capabilities=("filesystem.read",),
+                evidence_root=root / "evidence",
+            )
+            events = [
+                event
+                async for event in client.run(
+                    RunRequest(
+                        run_id="pathlight-private-run",
+                        input_text="question",
+                        requested_capabilities=("filesystem.read",),
+                    )
+                )
+            ]
+
+            observed = client.pathlight_runtime_observation("pathlight-private-run")
+            self.assertEqual(events[-1].type, "run.completed")
+            self.assertIsNotNone(observed)
+            assert observed is not None
+            self.assertEqual(len(observed["frames"]), 2)
+            self.assertEqual(len(observed["model_calls"]), 2)
+            rendered = json.dumps(observed)
+            for sentinel in (
+                "SENTINEL_PROVIDER",
+                "SENTINEL_MODEL",
+                "SENTINEL_PROMPT",
+                "SENTINEL_ARGUMENTS",
+                "SENTINEL_RESULT",
+                "SENTINEL_ANSWER",
+            ):
+                self.assertNotIn(sentinel, rendered)
+            observed["frames"].clear()
+            next_observed = client.pathlight_runtime_observation("pathlight-private-run")
+            assert next_observed is not None
+            self.assertEqual(len(next_observed["frames"]), 2)
+            self.assertIsNone(client.pathlight_runtime_observation("other-run"))
+
     async def test_completion_is_published_only_after_normal_stream_exhaustion(
         self,
     ) -> None:
@@ -1074,6 +1154,7 @@ print(json.dumps({"type": "agent_end"}), flush=True)
                 )
             await cancel_task
             self.assertIsNone(client.completed_run_dir("cancelled-run"))
+            self.assertIsNone(client.pathlight_runtime_observation("cancelled-run"))
 
     async def test_rejects_a_second_active_run(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

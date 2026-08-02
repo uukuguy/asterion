@@ -12,10 +12,13 @@ import secrets
 import signal as process_signal
 import stat
 import sys
+import time
 from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from asterion.adapters.pi import PiProtocolAdapter
 from asterion.runtime.host import (
@@ -30,6 +33,11 @@ from asterion.runtime.working_directory import (
     bind_process_working_directory,
     prepare_process_launch,
 )
+from asterion.pathlight.runtime_observation import (
+    RuntimeObservationBatch,
+    validate_runtime_observation_batch,
+)
+from asterion.runtimes.pi_observation import PiObservationBuilder
 
 
 _MAX_STDOUT_LINE_BYTES = 64 * 1024
@@ -58,6 +66,7 @@ _SECURE_EVIDENCE_AVAILABLE = (
 class _RuntimeSnapshot:
     events: tuple[dict[str, object], ...]
     final_text: str
+    observation: RuntimeObservationBatch | None
 
 
 @dataclass
@@ -108,6 +117,7 @@ class PiRuntimeClient:
         self._completed_run_identities: dict[
             str, tuple[tuple[int, int], tuple[int, int]]
         ] = {}
+        self._pathlight_observations: dict[str, dict[str, object]] = {}
         self._provider = provider
         self._model = model
         self._tools = tuple(tools)
@@ -140,6 +150,21 @@ class PiRuntimeClient:
         ):
             return None
         return path
+
+    def pathlight_runtime_observation(
+        self, run_id: str
+    ) -> Mapping[str, object] | None:
+        """Return a copied safe observation for one completed, owned run."""
+
+        if type(run_id) is not str or run_id not in self._completed_runs:
+            return None
+        mapping = self._pathlight_observations.get(run_id)
+        if mapping is None:
+            return None
+        try:
+            return deepcopy(validate_runtime_observation_batch(mapping).to_mapping())
+        except Exception:
+            return None
 
     async def run(
         self,
@@ -183,6 +208,7 @@ class PiRuntimeClient:
                     validate_event_stream(snapshot.events)
                     if snapshot.events[-1]["type"] != "run.completed":
                         raise ProtocolError("Pi runtime execution failed")
+                    observation = _validated_observation(snapshot.observation)
                     for mapping in snapshot.events:
                         yield RunEvent.from_mapping(mapping)
 
@@ -217,6 +243,10 @@ class PiRuntimeClient:
                             root_identity,
                             target_identity,
                         )
+                        if observation is not None:
+                            self._pathlight_observations[request.run_id] = (
+                                observation.to_mapping()
+                            )
                 finally:
                     if (
                         root is not None
@@ -252,6 +282,8 @@ async def _collect_runtime_snapshot(
         capabilities=list(request.requested_capabilities),
         emit=emitted.append,
     )
+    observation_builder = PiObservationBuilder(time.monotonic_ns)
+    attempt_observation_checkpoint = observation_builder.checkpoint()
     adapter.start()
     try:
         with bind_process_working_directory(
@@ -263,7 +295,7 @@ async def _collect_runtime_snapshot(
                 command=command,
                 environment=environment,
             ) as launch:
-                descriptor_options = (
+                descriptor_options: dict[str, Any] = (
                     {"pass_fds": launch.pass_fds}
                     if launch.pass_fds
                     else {}
@@ -346,6 +378,13 @@ async def _collect_runtime_snapshot(
             if not isinstance(event, dict):
                 raise ProtocolError("Pi runtime emitted an invalid JSONL object")
 
+            try:
+                observation_builder.consume(event, time.monotonic_ns())
+            except Exception:
+                # Observation is an optional post-run side channel and cannot
+                # alter the normalized runtime stream or its failure behavior.
+                pass
+
             event_type = event.get("type")
             if event_type == "response" and event.get("id") == "asterion-1":
                 if event.get("success") is not True:
@@ -358,6 +397,7 @@ async def _collect_runtime_snapshot(
                 assistant_error = False
                 attempt_event_start = len(emitted)
                 adapter.consume(event)
+                attempt_observation_checkpoint = observation_builder.checkpoint()
                 continue
             if event_type == "turn_start":
                 turns += 1
@@ -400,6 +440,7 @@ async def _collect_runtime_snapshot(
                     adapter.sequence = len(emitted)
                     adapter.tool_calls.clear()
                     adapter.tool_results.clear()
+                    observation_builder.rollback(attempt_observation_checkpoint)
                     continue
                 if assistant_error:
                     raise ProtocolError("Pi runtime provider execution failed")
@@ -436,7 +477,22 @@ async def _collect_runtime_snapshot(
 
     if returncode != 0:
         raise ProtocolError("Pi runtime execution failed")
-    return _RuntimeSnapshot(tuple(emitted), final_text)
+    try:
+        observation = observation_builder.complete(request.run_id)
+    except Exception:
+        observation = None
+    return _RuntimeSnapshot(tuple(emitted), final_text, observation)
+
+
+def _validated_observation(
+    observation: RuntimeObservationBatch | None,
+) -> RuntimeObservationBatch | None:
+    if observation is None:
+        return None
+    try:
+        return validate_runtime_observation_batch(observation.to_mapping())
+    except Exception:
+        return None
 
 
 def _assistant_delta(event: Mapping[str, object]) -> str | None:
