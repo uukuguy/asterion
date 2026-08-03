@@ -1,7 +1,7 @@
 # Asterion Pathlight 设计
 
 **日期：** 2026-08-02  
-**状态：** Core、查询、评估、诊断与 Opik 离线互操作已验证；运行时上下文补全与 Dashboard 待实现
+**状态：** Core、查询、评估、诊断、Opik 离线互操作与 operator-local Dashboard 已验证；历史 DCI 最终 ContextFrame 缺口保持显式
 **名称：** Asterion Pathlight — 路径可观测、评估与受控优化
 
 ## 目标
@@ -246,12 +246,34 @@ variant 和 failure category 的交并条件。未知字段、私有字段和不
 - 请求 comparison、diagnosis 和 proposal，拒绝范围或指标不兼容；
 - 私有 evidence 只返回授权引用，永不返回原文。
 
+Dashboard API 已实现为一次性验证并固定的 `DashboardSnapshot`。它只读取操作员显式指定的
+`workflow-evidence.json`、`pathlight-evaluations.json`、`pathlight-experiment.json` 和
+`pathlight-diagnosis.json`；诊断引用的 experiment/evaluation 必须在同一快照内解析，否则在
+开端口前拒绝。API 只允许回环地址上的 `GET`/`HEAD`，提供 `summary`、`traces`、逐 trace
+`flow`、`evaluations`、`experiments`、`diagnoses` 和完整 `snapshot` 投影。没有写入、执行、授权、
+上传、provider 或外部网络接口。
+
 ### CLI
 
-提供 `trace list/show/tail`、`metrics query`、`evaluate compare`、`diagnose`、
+提供 `trace list/show/tail/flow`、`metrics query`、`evaluate compare`、`diagnose`、
 `proposal create/review/execute`、`export opik/inspect` 和 `import opik-observation`。所有
 human-readable 输出与 JSON 输出都遵守安全层；执行 proposal 复用显式 authorization、成本上限
 和 cancellation，绝不以已有 trace 或外部建议授权。
+
+已实现的本机界面命令为：
+
+```bash
+uv run asterion pathlight dashboard \
+  --evidence-file /absolute/path/workflow-evidence.json \
+  --evaluation-file /absolute/path/pathlight-evaluations.json \
+  --experiment-file /absolute/path/pathlight-experiment.json \
+  --diagnosis-file /absolute/path/pathlight-diagnosis.json \
+  --host 127.0.0.1 \
+  --port 8765
+```
+
+四类输入均可重复指定且至少需要一种；若包含 diagnosis，则必须同时提供它引用的 experiment
+和 evaluation 闭包。命令在前台运行，只有显式 `--open` 才打开浏览器，`Ctrl-C` 后输出停止状态。
 
 ### Opik 离线操作模式
 
@@ -286,7 +308,15 @@ uv run asterion pathlight import opik-observation \
 ### Dashboard（最后实现）
 
 Dashboard 只通过 API 工作，不直接读取 evidence store。主视图是 ContextFrame 数据流主线与
-Span 时序；辅助视图为跨运行对比、评估差异、证据缺口和实验历史。它默认只展示安全层。
+Span 时序；辅助视图为评估、实验历史、诊断和证据缺口。它默认只展示安全层。当前实现为随 wheel
+发布的无外部依赖 HTML/CSS/JavaScript，使用同源只读 API，不使用 CDN、远程字体、分析脚本或
+浏览器持久化。没有 ContextFrame 的历史运行显示为 `missing`，不根据结果反推节点。
+
+2026-08-03 使用六项现有 DCI 安全实验、最新五条 coverage evaluation 和诊断闭包完成前台核验：
+快照摘要为 `eb21c3b98b8a2e1ed511ad26a447ba47ff746c65bbf156beef8dfe46c7157435`，包含 6 个
+experiment、848 个 trial、859 个 evaluation、21 个 finding 和 2 个 proposal。由于这些 848 条
+历史运行没有 Pathlight trace graph，Dashboard 如实显示 0 条 trace 主线和 854 个证据缺口；这
+证明现有结果/评估/诊断可观察，不表示历史最终 LLM ContextFrame 已被恢复。
 
 ## 分期交付
 
@@ -298,8 +328,8 @@ Span 时序；辅助视图为跨运行对比、评估差异、证据缺口和实
 4. **DCI 验收。** 对 Bright/SciFact/Bamboogle 生成回收报告；对证据缺口执行批准的小样本验证。
 5. **Opik 互操作。** 在本地查询、评估和 proposal 契约稳定后，实现离线安全 exporter、实验
    映射与回归反馈闭环。
-6. **Dashboard。** 基于稳定 API 实现 operator-local UI，并评估 Opik 作为可选外部工作台；两者
-   都不得绕过安全层或操作员授权。
+6. **Dashboard（已验证）。** 基于稳定 API 实现 operator-local UI，并保留 Opik 作为可选外部
+   工作台；两者都不得绕过安全层或操作员授权。
 
 ## 验收与测试
 

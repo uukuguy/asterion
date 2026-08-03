@@ -44,6 +44,12 @@ Pathlight coverage 有限实验已完成五项各 10/10：共 50 次 Agent、0 �
 `3ba1d6d212b083375f5764c246c8cae6189910f64a3fb2cca6379d3be98a32ce`，网络调用为 0。
 这证明本地映射与队列闭环可用，不表示已向 Opik 服务发送数据；外部发送仍由操作员适配器负责。
 
+同一组安全 experiment/evaluation/diagnosis 已通过 Pathlight Dashboard 前台核验：6 个 experiment、
+848 个 trial、859 个 evaluation、21 个 finding、2 个 proposal；快照摘要为
+`eb21c3b98b8a2e1ed511ad26a447ba47ff746c65bbf156beef8dfe46c7157435`。历史运行没有 Pathlight
+trace graph，因此界面明确显示 0 条 ContextFrame 主线和 854 个证据缺口，不把最终结果伪造成
+调用过程。完整启动方式与安全边界见 [Pathlight 设计](../superpowers/specs/2026-08-02-asterion-pathlight-design.md)。
+
 ## 推荐核验包的全量执行台账
 
 推荐核验包共 848 条：Bright Biology 103、Earth Science 116、Economics 103、Robotics 101、

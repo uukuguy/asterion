@@ -155,6 +155,23 @@ Opik 导回的优化建议只能形成未授权的 `ProposalCandidate`。
 - 封存配置摘要
 - 轨迹图谱
 
+## Pathlight Dashboard 核验
+
+现有六项 DCI experiment、最新五条 coverage evaluation 和诊断闭包已通过同一个只读
+`DashboardSnapshot` 验证并以前台服务启动；没有执行 Agent、Judge 或外部网络请求。快照摘要为
+`eb21c3b98b8a2e1ed511ad26a447ba47ff746c65bbf156beef8dfe46c7157435`，包含：
+
+- 6 个 experiment、848 个 case trial；
+- 859 个唯一 evaluation；
+- 21 个 finding、2 个未获执行权的 proposal；
+- 0 条历史 trace/ContextFrame 主线、854 个显式证据缺口。
+
+最后一行不是 Dashboard 失败：早期 848 条 DCI evidence 只恢复了结果、指标和实验谱系，没有
+Pathlight trace graph；界面因此拒绝伪造 ContextFrame。后续新运行只要产生已验证的
+`workflow-evidence.json`，同一 Dashboard 就会显示 ContextFrame、模型调用、工具调用、节点
+成功/失败和结构化摘要。启动命令和 API 边界见
+[Pathlight 设计](../superpowers/specs/2026-08-02-asterion-pathlight-design.md)。
+
 ## 最小受控实验
 
 - 覆盖率观测：状态 completed；五项各 10/10，50 次 Agent、0 次 Judge、0 失败，实际成本 2950832 微美元。

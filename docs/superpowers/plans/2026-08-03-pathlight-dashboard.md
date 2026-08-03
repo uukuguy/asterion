@@ -309,7 +309,7 @@ git commit -m "feat: launch Pathlight Dashboard locally"
 - Consumes: the latest immutable Pathlight DCI evaluation, experiment, and diagnosis files plus any available safe workflow evidence.
 - Produces: a verified startup command and a truthful Dashboard state that distinguishes observed flows from missing historical ContextFrames.
 
-- [ ] **Step 1: Add a real-input snapshot test without model execution**
+- [x] **Step 1: Add a real-input snapshot test without model execution**
 
 ```python
 def test_latest_dci_safe_inputs_build_a_dashboard_snapshot(self) -> None:
@@ -324,7 +324,7 @@ def test_latest_dci_safe_inputs_build_a_dashboard_snapshot(self) -> None:
 
 Keep machine-specific paths out of committed tests; pass real paths through an opt-in verification command or construct the same safe bundle shapes in fixtures.
 
-- [ ] **Step 2: Run all related tests and repository checks**
+- [x] **Step 2: Run all related tests and repository checks**
 
 Run:
 
@@ -345,7 +345,7 @@ make promotion-check
 
 Expected: every command passes; no provider, model, Judge, Opik SDK, or external network operation occurs.
 
-- [ ] **Step 3: Verify the built wheel in isolation**
+- [x] **Step 3: Verify the built wheel in isolation**
 
 ```bash
 uv build
@@ -356,15 +356,15 @@ python -m venv "$DASHBOARD_VERIFY_VENV"
 
 Expected: the installed wheel contains HTML/JS/CSS assets, imports without Opik, and exposes the Dashboard command. Use a task-specific temporary venv path and remove it after verification.
 
-- [ ] **Step 4: Start the real Dashboard in the foreground and inspect safe API responses**
+- [x] **Step 4: Start the real Dashboard in the foreground and inspect safe API responses**
 
 Run the CLI with the latest immutable evaluation, experiment, and diagnosis files, bind to `127.0.0.1`, and use an ephemeral port. Query `/api/pathlight/v1/summary` and `/api/pathlight/v1/snapshot`; confirm the known DCI evaluation counts and that historical final-context gaps remain explicit. Stop with `Ctrl-C`. Do not execute or rerun any benchmark.
 
-- [ ] **Step 5: Update Chinese status documentation and close the plan**
+- [x] **Step 5: Update Chinese status documentation and close the plan**
 
 Record the exact snapshot digest, input record counts, verified commands, and the distinction between Dashboard readiness and still-missing historical final ContextFrames. Mark each plan checkbox complete only after its named evidence passes.
 
-- [ ] **Step 6: Commit verified Dashboard closure**
+- [x] **Step 6: Commit verified Dashboard closure**
 
 ```bash
 git add docs/superpowers/specs/2026-08-02-asterion-pathlight-design.md \
