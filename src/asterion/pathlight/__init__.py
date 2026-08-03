@@ -81,6 +81,7 @@ from asterion.pathlight.interop import (
     validate_proposal_candidate,
     write_export_batch,
 )
+from asterion.pathlight.opik import OPIK_MAPPING_VERSION, map_opik_exports
 
 __all__ = (
     "PathlightError",
@@ -151,4 +152,6 @@ __all__ = (
     "read_export_batch",
     "record_export_receipt",
     "read_export_receipts",
+    "OPIK_MAPPING_VERSION",
+    "map_opik_exports",
 )
