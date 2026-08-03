@@ -1,0 +1,44 @@
+{
+  "fixture_schema": "dci.provider-request-fixture/v1",
+  "payload": {
+    "messages": [
+      {"role": "assistant", "content": "calling a tool"},
+      {"role": "tool", "tool_call_id": "call-1", "content": "tool result"}
+    ],
+    "tools": [
+      {"name": "search", "input_schema": {"type": "object"}}
+    ]
+  },
+  "summary": {
+    "payload_sha256": "eba8ff15fed1c64ec1b3a0ef2271f1d222d932069c866875d5a980812e111efe",
+    "payload_bytes": 187,
+    "shape_sha256": "d8c5903d84a3f9639d39628f229c206e7ce74a1d75d386ed76ee41155a0f5e98",
+    "field_count": 10,
+    "leaf_count": 7,
+    "text_characters": 56,
+    "segments": [
+      {
+        "segment_index": 0,
+        "role": "assistant",
+        "structure_kind": "message",
+        "content_sha256": "0a41241eb1c41d667ca5fde33f490a31d8d62a2f9e18bbe7f06c2588c133ca96",
+        "content_length": 14,
+        "source_call_sha256": null,
+        "missing_evidence": false,
+        "segment_sha256": "a51ed871fbf3ccdd2e9f7147a47468e61d4f637a87daef41005e4e418c9c3c8f"
+      },
+      {
+        "segment_index": 1,
+        "role": "tool-result",
+        "structure_kind": "tool-result",
+        "content_sha256": "496514e28de40f2624fbc4fb01c89afaba32fde82d1e1d6c19ab43d702f7a230",
+        "content_length": 11,
+        "source_call_sha256": "5d7963c4f471e142f5a72214a9666fb164718f9ba1066a7862ac1c5041887940",
+        "missing_evidence": false,
+        "segment_sha256": "225a65e0d05a086cd10937cba084d410cedb5a5d111a730ef5c2a4cc2810bcea"
+      }
+    ],
+    "missing_evidence": [],
+    "summary_sha256": "9439c19bac7874474859d7fa25be226946e2469444edf495301017b94e2b7747"
+  }
+}

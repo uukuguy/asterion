@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "../asterion-runtime/node_modules/.bin/tsc -p tsconfig.json",
+    "build": "../asterion-runtime/node_modules/.bin/tsc -p tsconfig.json --typeRoots ../asterion-runtime/node_modules/@types --types node",
     "sync-resource": "node scripts/sync-runtime-resource.mjs",
     "check-resource": "node scripts/sync-runtime-resource.mjs --check",
+    "test:observation": "node --test test/pathlight-observation.test.mjs",
     "test": "node --test test/*.test.mjs && npm run check-resource"
   },
   "engines": {

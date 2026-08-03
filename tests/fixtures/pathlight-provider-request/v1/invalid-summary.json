@@ -1,0 +1,12 @@
+{
+  "fixture_schema": "dci.provider-request-fixture/v1",
+  "payload": {
+    "messages": [
+      {"role": "user", "content": "question"}
+    ]
+  },
+  "summary": {
+    "schema": "dci.provider-request-observation/v1",
+    "payload_sha256": "SENTINEL_PRIVATE_PAYLOAD"
+  }
+}

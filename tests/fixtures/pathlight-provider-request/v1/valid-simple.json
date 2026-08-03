@@ -1,0 +1,41 @@
+{
+  "fixture_schema": "dci.provider-request-fixture/v1",
+  "payload": {
+    "instructions": "system contract",
+    "messages": [
+      {"role": "user", "content": "question"}
+    ]
+  },
+  "summary": {
+    "payload_sha256": "8f6e1e4e2096f0e7099237483362a0cba1c1a2b712cc6cc6c74d8450a0997f7e",
+    "payload_bytes": 84,
+    "shape_sha256": "e66c6668bf21aa186634a51078e62daa1bc5bb4f45fa5677c400cad2b5c3472b",
+    "field_count": 4,
+    "leaf_count": 3,
+    "text_characters": 27,
+    "segments": [
+      {
+        "segment_index": 0,
+        "role": "system",
+        "structure_kind": "contract",
+        "content_sha256": "be7097021ec327795bc052925cdecd4d4aba1a5c41ba4306285fcf12d181eeb2",
+        "content_length": 15,
+        "source_call_sha256": null,
+        "missing_evidence": false,
+        "segment_sha256": "736ef9ec95d92d5cb6b45e229ecd53c3e5a3d513c6dd2426b27863f1fa17dd56"
+      },
+      {
+        "segment_index": 1,
+        "role": "user",
+        "structure_kind": "message",
+        "content_sha256": "1f5087db919ced5c123c7f507d3fcce818cb0cf6e77c2f95a8a35e951e03fdb9",
+        "content_length": 8,
+        "source_call_sha256": null,
+        "missing_evidence": false,
+        "segment_sha256": "db1103aed4e3285150a6ac691c0dd4ed441a137b0d6d17824a04233964ef7132"
+      }
+    ],
+    "missing_evidence": [],
+    "summary_sha256": "674817f809322e77607c850b288ec5c40f60a6c80ba6e0f8739a5e010097181b"
+  }
+}
