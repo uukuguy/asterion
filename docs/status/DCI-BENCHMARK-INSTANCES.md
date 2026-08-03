@@ -31,11 +31,13 @@ benchmark 实例的实现清单、验证台账和运行手册。
 六项已完成 evidence 已经由 provider-free Pathlight 命令恢复、交叉验证并诊断；安全的数值观察、证据缺口和未获授权的两项最小实验提案见
 [Pathlight DCI 差分诊断](PATHLIGHT-DCI-DIAGNOSIS.md)。该诊断中的论文数值为 reference-only，不能作为完全复现或跨配置可比性的结论。
 
-Task 9 的 coverage 诊断合并与中文安全渲染已经完成 provider-free
-准备，但五项各 10 例的有限实验尚未执行，当前没有 observed coverage
-数值。检索查询分解仍被 coverage 门槛阻塞且未获授权。有限边界、需核对的
-plan/authorization 摘要字段及前台命令见上述诊断文档；只有独立的 0600
-authorization 才能启动该实验。
+Pathlight coverage 有限实验已完成五项各 10/10：共 50 次 Agent、0 次 Judge、
+0 失败，实际成本 $2.950832。其 observed gold mean coverage 中位数分别为 Biology
+0.758772、Earth Science 0.833333、Economics 0.214285、Robotics 1.000000、SciFact
+1.000000。Economics 显示明显的检索覆盖不足；Earth Science 与 Robotics 已找到大部分或
+全部 gold 却仍低分，说明还需检查排序、证据选择和最终输出。最后一次 LLM 调用上下文尚未形成
+可验证帧，因此 retained coverage 仍不可用；这项框架采集缺口必须先于新的模型优化实验修复。
+完整分母、成本、摘要和结论边界见上述中文诊断文档。
 
 ## 推荐核验包的全量执行台账
 

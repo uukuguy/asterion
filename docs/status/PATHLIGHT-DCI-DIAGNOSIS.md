@@ -2,66 +2,40 @@
 
 本报告由六项已完成 historical evidence 的 provider-free Pathlight 恢复与诊断生成。它只包含数值、摘要关系和预先固定的中文说明；不包含 operator 路径、案例标识、提示、答案、payload 或 provider/model/config 值。
 
-## Coverage 实验状态（部分完成）
+## Coverage 实验状态（已完成）
 
-已获批计划完成了 Biology 与 Earth Science 各 10/10；Biology 的 observed
-nDCG@10 为 0.476539，实际成本 631138 微美元，Earth Science 为 0.456546，
-实际成本 529101 微美元。Economics 只完成 8/10，Robotics 0/10，SciFact 未启动，
-因此五项 coverage 闭包仍未完成，也没有把任何总体缺口写成已关闭。检索查询分解门槛仍为
-`blocked-by-coverage`；即使未来五项都达到 10/10，它也只会变成“可申请单独
-授权”，不会自动获得执行权限。
+获批的 v8 有限实验已以前台串行方式完成：五个数据集各 10/10，共 50 次 Agent、
+0 次 Judge、0 次失败，实际成本 2,950,832 微美元（$2.950832）。执行绑定摘要为
+`0ca6151fbef02c009729fffba4a588de298a596a342788a54644a34cfe84c3fd`，计划摘要为
+`143350e02c518f073c26e32074ce73636c21d859522cd4818b21a904f06faf98`；50 条轨迹生成的
+coverage experiment 摘要为
+`8deb7710947e56672e7e13eeb0268b7bf0eaeea222617012f4b46fcea85f23de`。
 
-配置绑定前生成的计划
-`e845f41bb1fa7e81857f12244cc5053393df861bc7b25e815dfb4a5126f00e90`
-已经废止，不得授权或执行。并发预算缺陷修复后，旧获批计划
-`75689698a526d66735b67fa9d8df91f15e92187d230feb5066dc80c15213f202`
-也已成为不可恢复的历史运行。重新完成 provider-free `prepare` 后，计划摘要为
-`143350e02c518f073c26e32074ce73636c21d859522cd4818b21a904f06faf98`，并绑定
-执行配置摘要
-`0ca6151fbef02c009729fffba4a588de298a596a342788a54644a34cfe84c3fd`。
-v7 已对该摘要取得一次精确授权并执行，但在两项失败后终止。修复后生成的 v8 因
-数据、选择和配置不变而具有相同摘要；这不允许重放 v7 的一次性授权，v8 仍须取得
-新的明确批准。
+| 数据集 | v8 nDCG@10（10 条） | 实际成本 | gold coverage any/mean/all 中位数 | 浮现 gold / 工具观测 |
+|---|---:|---:|---:|---:|
+| Bright Biology | 0.581166 | $0.540605 | 1.000000 / 0.758772 / 0.000000 | 39 / 136 |
+| Bright Earth Science | 0.258671 | $0.538526 | 1.000000 / 0.833333 / 0.500000 | 14 / 133 |
+| Bright Economics | 0.140249 | $0.632802 | 1.000000 / 0.214285 / 0.000000 | 12 / 129 |
+| Bright Robotics | 0.473500 | $0.727880 | 1.000000 / 1.000000 / 1.000000 | 23 / 219 |
+| BEIR SciFact | 0.787501 | $0.511019 | 1.000000 / 1.000000 / 1.000000 | 13 / 145 |
 
-已准备的有限边界固定为五个数据集、每项 10 例、最多 50 次 Agent 操作、
-0 次 Judge 操作、5,000,000 微美元，并在第二次基础设施失败后、第三项启动前
-停止。运营者在创建独立的 0600 authorization 前，必须逐项核对 plan 中的
-`plan_sha256`、`proposal_sha256`、`scope_sha256`、`variant_sha256`、
-`registry_set_sha256`、`source_lock_sha256`、`execution_config_sha256`、五项
-`registry_sha256`，以及上述
-操作数、成本和停止线。Authorization 必须回填相同摘要与限制，包含独立的
-`operator_approval_sha256`，并明确写入 `execution_authorized=true`；配置、缓存
-和旧 evidence 都不能代替本次授权。
+这些 10 条结果用于定位工作流环节，不替代 103/116/103/101/300 条全量分数，也不能与
+论文全量分数直接作统计结论。它们足以排除“Bright 四项都因为完全没有找到 gold 文档”这一
+单一解释：Economics 的 mean coverage 只有 0.214285，检索覆盖不足是强候选原因；
+Earth Science 和 Robotics 已有较高或完整覆盖却仍低分，差距还发生在检索之后的排序、证据
+选择或最终输出阶段；SciFact 的完整覆盖与接近论文的分数构成同配置参照。Biology 处于两者
+之间。上述只是机制定位，不是因果证明。
 
-只有完成这些核对后，运营者才能从仓库根目录以前台方式执行以下有限命令：
+真实 Pi 轨迹最初被错误记为零覆盖，原因是工具结果采用结构化 `content/details` 形态，长行还会
+携带明确的截断标志；旧解析器只接受裸字符串和逐字完整行。提交 `972bc13` 已以严格形态校验、
+错误结果排除、空白规范化和显式长前缀绑定修复，并对 50/50 真实轨迹重新验证。新诊断产物摘要为
+`56c5ea15af2d6f8888a0133fde4e4d62d2e1014441e127fd51f58e87eac26f09`。
 
-```bash
-env -i HOME="$HOME" PATH="$PATH" SHELL="$SHELL" zsh -lc '
-  set -a
-  source .env
-  set +a
-  uv run asterion-dci pathlight experiment execute \
-    --plan-file "$ASTERION_PATHLIGHT_COVERAGE_PLAN" \
-    --authorization-file "$ASTERION_PATHLIGHT_COVERAGE_AUTHORIZATION" \
-    --output-root "$ASTERION_PATHLIGHT_COVERAGE_OUTPUT"
-'
-```
-
-上述命令的旧计划已经运行；当前 v8 尚未授权。旧计划的 v5 运行因 clean-shell
-代理为空而产生 20 次 `fetch failed`，全部为 0 token、0 工具调用；v6 修复代理后得到
-两项 10/10 完整结果和两项失败结果。v7 的代理检查通过，Biology 前 3 次 native
-调用和 Earth Science 前 5 次 native 调用均形成可验证的 completed evidence；其状态中
-可核算的调用成本分别为 117854 和 290473 微美元，但任务 receipt 因中途失败只保守记录
-各 1000000 微美元上界，不能把上界称为实际支出。v7 的直接失败不是模型或网络错误，
-而是动态剩余预算在 `Decimal → float → Decimal` 往返后身份不一致：合法 reservation
-结算失败，遗留的活动预留继而表现为“预算耗尽”。提交 `b889be3` 已修复该断点，相关
-92 项测试以及 Ruff、Pyright 均通过。执行 v8 前仍须确认 clean shell 内代理非空并通过
-无 benchmark 内容的 endpoint 连通性检查。
-
-本次 10 条子集用于验证执行和观察链路，不等同于论文全量分数。Biology 10 条为
-0.476539，相对 Asterion 历史全量 0.445584 高 0.030955；Earth Science 10 条为
-0.456546，相对历史全量 0.438227 高 0.018319。由于样本分母分别是 10 与 103/116，
-这些差值只能说明子集结果未出现明显向下崩塌，不能说明已追平论文的 0.771/0.690。
+当前 50 条的 retained coverage 均不可用：现有 evidence 能证明工具输出中出现过 gold，
+但没有保存可验证的最后一次 LLM 调用上下文帧，因此还不能证明这些证据最终进入模型上下文。
+这是 Pathlight 基础采集层的明确缺口，也是下一步先补调用边界与上下文帧、再做查询分解实验的
+原因。coverage 闭包现已把检索查询分解门槛从 `blocked-by-coverage` 打开为
+`ready-for-authorization`；它没有自动授权后续模型实验。
 
 ## 已证实事实
 
@@ -158,18 +132,18 @@ env -i HOME="$HOME" PATH="$PATH" SHELL="$SHELL" zsh -lc '
 ## 反证与不可比较项
 
 - 论文数值仅作参考，当前变体不可视为完全可比；因此没有跨数据集汇总分数或分数导出指标。
-- 缺少封存配置、封存分析、装配/包谱系、轨迹图谱与检索覆盖率，不能把差值归因于任一组件。
+- 缺少封存配置、封存分析、装配/包谱系、最终调用上下文与完整轨迹图谱，不能把差值归因于单一组件。
 
 ## 证据缺口
 
 - 装配谱系
 - 包谱系
-- 检索覆盖率
 - 封存分析摘要
 - 封存配置摘要
 - 轨迹图谱
 
 ## 最小受控实验
 
-- 覆盖率观测：状态 partial；Biology 10/10、Earth Science 10/10、Economics 8/10、Robotics 0/10、SciFact 未启动；新串行计划最多 50 次 Agent 操作，成本上限 5000000 微美元，基础设施失败停止线 2；需新的精确授权，当前未授权。
-- 检索查询分解：状态 proposed；最多 80 次 Agent 操作，成本上限 8000000 微美元；前提为覆盖率观测；最小平均 nDCG 增益 50000 微单位，成本或时间增长上限 250000 微单位；覆盖 4 个数据集、每项 10 例；需运营者授权，当前未授权。
+- 覆盖率观测：状态 completed；五项各 10/10，50 次 Agent、0 次 Judge、0 失败，实际成本 2950832 微美元。
+- 最终调用上下文采集：provider-free 框架工作，先补齐每次 LLM/tool 调用前后的结构化边界、上下文帧与失败原因，不重跑模型。
+- 检索查询分解：状态 proposed；coverage 前提已满足，但仍须在上下文采集闭环后单独授权；最多 80 次 Agent 操作，成本上限 8000000 微美元；最小平均 nDCG 增益 50000 微单位，成本或时间增长上限 250000 微单位；覆盖 4 个数据集、每项 10 例。
