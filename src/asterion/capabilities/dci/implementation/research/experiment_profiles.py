@@ -1520,12 +1520,22 @@ def reserve_full_execution_operation(
             - record.actual_cost_usd
             - record.reserved_cost_usd
         )
-        if configured_upper_bound > remaining and record.active_reservations:
+        if configured_upper_bound > remaining and (
+            record.active_reservations
+            or configured_upper_bound
+            != _usd_decimal(record.snapshot.max_cost_usd)
+        ):
             raise ExperimentAuthorizationError("full execution USD budget is exhausted")
         upper_bound = min(configured_upper_bound, remaining)
         if upper_bound <= 0:
             raise ExperimentAuthorizationError("full execution USD budget is exhausted")
         issued_upper_bound = float(upper_bound)
+        issued_upper_bound_decimal = _usd_decimal(issued_upper_bound)
+        if issued_upper_bound_decimal > remaining:
+            issued_upper_bound = math.nextafter(issued_upper_bound, 0.0)
+            issued_upper_bound_decimal = _usd_decimal(issued_upper_bound)
+        if issued_upper_bound_decimal <= 0 or issued_upper_bound_decimal > remaining:
+            raise ExperimentAuthorizationError("full execution USD budget is exhausted")
         token = secrets.token_hex(32)
         reservation = _issue_reservation(
             scope_id=scope_id,
@@ -1535,13 +1545,13 @@ def reserve_full_execution_operation(
             _reservation_token=token,
         )
         record.active_reservations[token] = _ReservationRecord(
-            reservation, scope_id, kind, upper_bound
+            reservation, scope_id, kind, issued_upper_bound_decimal
         )
         if kind == "agent":
             record.reserved_agent_operations += 1
         else:
             record.reserved_judge_operations += 1
-        record.reserved_cost_usd += upper_bound
+        record.reserved_cost_usd += issued_upper_bound_decimal
         return reservation
 
 

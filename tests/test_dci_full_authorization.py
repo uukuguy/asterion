@@ -1327,6 +1327,34 @@ class FullExecutionBudgetTests(unittest.TestCase):
             self.assertEqual(ledger["reserved_cost_usd"], 0.0)
             self.assertEqual(ledger["actual_cost_usd"], 0.3)
 
+    def test_sequential_remaining_budget_reservations_round_trip_exactly(self) -> None:
+        costs = (0.0423524, 0.043314599999999995, 0.032187)
+        with tempfile.TemporaryDirectory() as temporary:
+            authority = authorize(
+                Path(temporary) / "private",
+                max_agents=10,
+                max_cost=1.0,
+                max_agent_cost=1.0,
+                selected_query_ids=tuple(f"q-{index:03d}" for index in range(10)),
+            )
+            self.consume(authority)
+            for cost in costs:
+                reservation = reserve_full_execution_operation(
+                    authority, self.scope_id, "agent"
+                )
+                reconcile_full_execution_operation(authority, reservation, cost)
+
+            later = reserve_full_execution_operation(
+                authority, self.scope_id, "agent"
+            )
+            reconcile_full_execution_operation(authority, later, 0.05)
+            receipt = consumed_full_execution_authorization_snapshot(authority)
+            ledger = receipt_ledger(receipt)
+            self.assertEqual(ledger["reserved_cost_usd"], 0.0)
+            self.assertAlmostEqual(
+                ledger["actual_cost_usd"], sum(costs) + 0.05
+            )
+
     def test_unrepresentable_numeric_limits_use_the_safe_public_error(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             output_root = Path(temporary) / "private"
