@@ -2175,11 +2175,12 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
             root = Path(temporary_directory).resolve()
             request = replace(_request(root), max_native_attempts=2)
             attempts = 0
+            first_capture_identity: tuple[bytes, int, int] | None = None
 
             def fail_then_resume(
                 _paths: object, native_request: object, **kwargs: object
             ) -> DciRunResult:
-                nonlocal attempts
+                nonlocal attempts, first_capture_identity
                 attempts += 1
                 client = (
                     _FailingFixtureClient if attempts == 1 else _FixtureClient
@@ -2188,11 +2189,26 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                     "asterion.capabilities.dci.implementation.runtime.run.PiRpcClient",
                     client,
                 ):
-                    return _real_run_pi_research(
-                        resolve_dci_paths(Path(native_request.cwd)),
-                        native_request,
-                        **kwargs,
-                    )
+                    try:
+                        return _real_run_pi_research(
+                            resolve_dci_paths(Path(native_request.cwd)),
+                            native_request,
+                            **kwargs,
+                        )
+                    finally:
+                        if attempts == 1:
+                            capture = (
+                                request.output_root
+                                / "q-1"
+                                / "native-generation-0001"
+                                / "provider-requests.jsonl"
+                            )
+                            metadata = capture.stat()
+                            first_capture_identity = (
+                                capture.read_bytes(),
+                                metadata.st_ino,
+                                metadata.st_mtime_ns,
+                            )
 
             with patch(
                 "asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research",
@@ -2214,17 +2230,30 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
             )
             self.assertEqual(state["status"], "completed")
             self.assertEqual(state["resume_count"], 1)
+            capture = (
+                request.output_root
+                / "q-1"
+                / "native-generation-0001"
+                / "provider-requests.jsonl"
+            )
+            metadata = capture.stat()
+            self.assertEqual(
+                (capture.read_bytes(), metadata.st_ino, metadata.st_mtime_ns),
+                first_capture_identity,
+            )
+            self.assertEqual(metadata.st_mode & 0o777, 0o600)
 
     def test_bounded_native_attempts_start_fresh_generation_when_resume_is_invalid(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory).resolve()
             request = replace(_request(root), max_native_attempts=2)
             attempts = 0
+            first_capture_identity: tuple[bytes, int, int] | None = None
 
             def fail_then_restart(
                 _paths: object, native_request: object, **kwargs: object
             ) -> DciRunResult:
-                nonlocal attempts
+                nonlocal attempts, first_capture_identity
                 attempts += 1
                 client = (
                     _FailingFixtureClient if attempts == 1 else _FixtureClient
@@ -2233,11 +2262,26 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                     "asterion.capabilities.dci.implementation.runtime.run.PiRpcClient",
                     client,
                 ):
-                    return _real_run_pi_research(
-                        resolve_dci_paths(Path(native_request.cwd)),
-                        native_request,
-                        **kwargs,
-                    )
+                    try:
+                        return _real_run_pi_research(
+                            resolve_dci_paths(Path(native_request.cwd)),
+                            native_request,
+                            **kwargs,
+                        )
+                    finally:
+                        if attempts == 1:
+                            capture = (
+                                request.output_root
+                                / "q-1"
+                                / "native-generation-0001"
+                                / "provider-requests.jsonl"
+                            )
+                            metadata = capture.stat()
+                            first_capture_identity = (
+                                capture.read_bytes(),
+                                metadata.st_ino,
+                                metadata.st_mtime_ns,
+                            )
 
             with patch(
                 "asterion.capabilities.dci.implementation.evaluation.benchmark.run_pi_research",
@@ -2260,6 +2304,21 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
             second = request.output_root / "q-1" / "native-generation-0002" / "state.json"
             self.assertEqual(json.loads(first.read_text())["status"], "failed")
             self.assertEqual(json.loads(second.read_text())["status"], "completed")
+            first_capture = first.with_name("provider-requests.jsonl")
+            second_capture = second.with_name("provider-requests.jsonl")
+            first_metadata = first_capture.stat()
+            second_metadata = second_capture.stat()
+            self.assertEqual(
+                (
+                    first_capture.read_bytes(),
+                    first_metadata.st_ino,
+                    first_metadata.st_mtime_ns,
+                ),
+                first_capture_identity,
+            )
+            self.assertNotEqual(first_metadata.st_ino, second_metadata.st_ino)
+            self.assertEqual(first_metadata.st_mode & 0o777, 0o600)
+            self.assertEqual(second_metadata.st_mode & 0o777, 0o600)
 
     def test_bounded_native_attempts_retry_invalid_completed_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

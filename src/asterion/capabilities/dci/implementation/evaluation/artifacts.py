@@ -44,8 +44,10 @@ from asterion.workflow_evidence import (
 )
 
 if TYPE_CHECKING:
+    from asterion.capabilities.dci.implementation.evaluation.provider_requests import ProviderRequestCapture
     from asterion.capabilities.dci.implementation.research.context_extension import ResolvedContextExtension
     from asterion.capabilities.dci.implementation.research.context_profiles import DciContextProfile
+    from asterion.pathlight import ProviderRequestObservation
 
 try:
     import fcntl
@@ -2547,6 +2549,28 @@ class DciRunRecorder:
         else:
             self.state["pi_context_session"] = identity
         self._write()
+
+    def open_provider_request_capture(self) -> ProviderRequestCapture:
+        """Create the private request capture inside this pinned generation."""
+
+        from asterion.capabilities.dci.implementation.evaluation.provider_requests import ProviderRequestCapture
+
+        self._ensure_open()
+        return ProviderRequestCapture.open_at(self._root_fd)
+
+    def reconcile_provider_requests(
+        self, observations: tuple[ProviderRequestObservation, ...]
+    ) -> None:
+        """Best-effort reconcile verified requests without affecting execution."""
+
+        self._ensure_open()
+        builder = self._pathlight_observation_builder
+        if builder is None:
+            return
+        try:
+            builder.reconcile_provider_requests(observations)
+        except Exception:
+            return
 
     def _emit_normalized(self, event: dict[str, object]) -> None:
         observed_started_ns = self._pathlight_timestamp()

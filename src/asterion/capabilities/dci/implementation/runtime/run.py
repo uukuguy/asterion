@@ -495,8 +495,30 @@ def run_pi_research(
         raise DciRunError(message) from None
 
     client: PiRpcClient | None = None
+    observation_stack = ExitStack()
+    provider_request_capture = None
+    observation_extension = None
     context_evidence_recorded = False
     try:
+        try:
+            from asterion.capabilities.dci.implementation.research.pathlight_observation import resolve_pathlight_observation_extension
+
+            observation_extension = observation_stack.enter_context(
+                resolve_pathlight_observation_extension()
+            )
+            provider_request_capture = recorder.open_provider_request_capture()
+        except Exception:
+            if provider_request_capture is not None:
+                try:
+                    provider_request_capture.close()
+                except Exception:
+                    pass
+            provider_request_capture = None
+            observation_extension = None
+            try:
+                observation_stack.close()
+            except Exception:
+                pass
         warning = format_pi_revision_warning(recorder.pi_source)
         if warning is not None:
             recorder.add_note(warning)
@@ -537,6 +559,21 @@ def run_pi_research(
                 else None
             ),
             session_file=request.pi_session_file,
+            observation_extension_path=(
+                observation_extension.path
+                if observation_extension is not None
+                else None
+            ),
+            observation_fd=(
+                provider_request_capture.child_fd
+                if provider_request_capture is not None
+                else None
+            ),
+            observation_contract=(
+                observation_extension.contract_version
+                if observation_extension is not None
+                else None
+            ),
         )
         client.start()
         if context_profile is not None and request.keep_session:
@@ -580,6 +617,15 @@ def run_pi_research(
             )
         if not final_text.strip():
             raise RuntimeError("Pi provider returned no final answer")
+        if provider_request_capture is not None:
+            try:
+                safe_entries = client.get_provider_request_entries()
+                observations = provider_request_capture.validate(
+                    tuple(entry["data"] for entry in safe_entries)
+                )
+                recorder.reconcile_provider_requests(observations)
+            except Exception:
+                pass
         if context_profile is not None and request.keep_session:
             materialized_file, materialized_id = _validate_pi_context_session(
                 {"sessionFile": str(session_file), "sessionId": session_id},
@@ -648,9 +694,20 @@ def run_pi_research(
                 client.stop()
         finally:
             try:
-                recorder.close()
+                if provider_request_capture is not None:
+                    try:
+                        provider_request_capture.close()
+                    except Exception:
+                        pass
             finally:
-                resource_stack.close()
+                try:
+                    recorder.close()
+                finally:
+                    try:
+                        observation_stack.close()
+                    except Exception:
+                        pass
+                    resource_stack.close()
 
 
 def _pi_extra_args(request: DciRunRequest) -> tuple[str, ...]:
