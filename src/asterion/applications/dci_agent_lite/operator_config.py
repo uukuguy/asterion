@@ -23,6 +23,14 @@ _COVERAGE_TASK_IDS = (
     "bright.economics",
     "bright.robotics",
 )
+_DOTENV_RELATIVE_PATH_KEYS = (
+    "ASTERION_DCI_PI_AGENT_DIR",
+    "ASTERION_DCI_PI_DIR",
+    "ASTERION_DCI_PI_PACKAGE_DIR",
+    "DCI_PI_AGENT_DIR",
+    "DCI_PI_DIR",
+    "DCI_PI_PACKAGE_DIR",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +74,18 @@ def load_operator_config(
     )
     process = dict(os.environ if environment is None else environment)
     merged = {**dotenv, **process}
+    for name in _DOTENV_RELATIVE_PATH_KEYS:
+        if name not in dotenv or (
+            name in process and process[name] != dotenv[name]
+        ):
+            continue
+        value = merged[name].strip()
+        if not value:
+            continue
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = env_path.parent / path
+        merged[name] = os.path.normpath(path)
     private_environment = dict(merged)
     selected_root = (
         resource_root

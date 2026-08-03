@@ -11,6 +11,7 @@ from asterion.benchmarks.model import BenchmarkTaskImplementation, BenchmarkTask
 from asterion.capabilities.dci.implementation.benchmark_bindings import (
     create_benchmark_bindings,
 )
+from asterion.capabilities.dci.implementation.config import resolve_dci_paths
 from asterion.capabilities.dci.implementation.operator_inputs import (
     DciBenchmarkOperatorInputError,
     DciBenchmarkOperatorInputs,
@@ -28,6 +29,28 @@ _COVERAGE_TASK_IDS = (
 
 
 class DciOperatorCoverageInputTests(unittest.TestCase):
+    def test_dotenv_relative_pi_root_is_anchored_to_dotenv_for_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory).resolve()
+            worktree = parent / "worktree"
+            worktree.mkdir()
+            configuration_root = parent / "operator-config"
+            configuration_root.mkdir()
+            env_file = configuration_root / ".env"
+            env_file.write_text("DCI_PI_DIR=./pi\n", encoding="utf-8")
+
+            config = load_operator_config(
+                worktree,
+                env_file=env_file,
+                environment={"DCI_PI_DIR": "./pi"},
+            )
+            paths = resolve_dci_paths(
+                config.repo_root,
+                environment=config.benchmark_inputs.private_environment,
+            )
+
+        self.assertEqual(paths.pi.repo_dir, configuration_root / "pi")
+
     def test_explicit_coverage_root_binds_five_exact_private_registry_paths(
         self,
     ) -> None:
