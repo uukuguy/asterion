@@ -20,7 +20,7 @@ from asterion.pathlight._private_file import (
     read_private_file,
     write_private_file,
 )
-from asterion.pathlight.protocol import PathlightError
+from asterion.pathlight.protocol import MISSING_EVIDENCE_LABELS, PathlightError
 
 
 Connector: TypeAlias = Literal["opik"]
@@ -36,16 +36,14 @@ ExportEventKind: TypeAlias = Literal[
     "proposal.observe",
     "decision.observe",
 ]
-ReceiptStatus: TypeAlias = Literal[
-    "delivered", "retryable-failure", "terminal-failure"
-]
+ReceiptStatus: TypeAlias = Literal["delivered", "retryable-failure", "terminal-failure"]
 FailureCategory: TypeAlias = Literal[
     "authentication", "rate-limit", "network", "mapping", "service"
 ]
 ObservationKind: TypeAlias = Literal[
     "feedback", "experiment-analysis", "optimization-suggestion"
 ]
-SafeScalar: TypeAlias = str | int | bool | None
+SafeScalar: TypeAlias = str | int | bool | None | tuple[str, ...]
 
 EXPORT_ENVELOPE_SCHEMA = "asterion.pathlight-export-envelope/v1"
 EXPORT_RECEIPT_SCHEMA = "asterion.pathlight-export-receipt/v1"
@@ -70,9 +68,7 @@ _EVENT_KINDS = frozenset(
         "decision.observe",
     }
 )
-_RECEIPT_STATUSES = frozenset(
-    {"delivered", "retryable-failure", "terminal-failure"}
-)
+_RECEIPT_STATUSES = frozenset({"delivered", "retryable-failure", "terminal-failure"})
 _FAILURE_CATEGORIES = frozenset(
     {"authentication", "rate-limit", "network", "mapping", "service"}
 )
@@ -91,6 +87,15 @@ _SAFE_INTEGER_FIELDS = frozenset(
         "tool_call_count",
         "total_count",
         "value_microunits",
+    }
+)
+_REQUEST_INTEGER_FIELDS = frozenset(
+    {
+        "field_count",
+        "leaf_count",
+        "payload_bytes",
+        "request_index",
+        "text_characters",
     }
 )
 _SAFE_BOOLEAN_FIELDS = frozenset(
@@ -213,7 +218,9 @@ def _event_kind(value: object) -> ExportEventKind:
     return cast(ExportEventKind, value)
 
 
-def _safe_payload(value: object) -> MappingProxyType[str, SafeScalar]:
+def _safe_payload(
+    value: object, *, allow_request_metadata: bool = False
+) -> MappingProxyType[str, SafeScalar]:
     if type(value) is not dict:
         raise ValueError
     copied: dict[str, SafeScalar] = {}
@@ -223,8 +230,22 @@ def _safe_payload(value: object) -> MappingProxyType[str, SafeScalar]:
             raise ValueError
         if key.endswith("_sha256"):
             copied[key] = _sha256(item)
-        elif key in _SAFE_INTEGER_FIELDS:
+        elif key in _SAFE_INTEGER_FIELDS or (
+            allow_request_metadata and key in _REQUEST_INTEGER_FIELDS
+        ):
             if type(item) is not int or item < 0:
+                raise ValueError
+            copied[key] = item
+        elif allow_request_metadata and key == "missing_evidence_labels":
+            if (
+                type(item) is not tuple
+                or not item
+                or any(
+                    type(label) is not str or label not in MISSING_EVIDENCE_LABELS
+                    for label in item
+                )
+                or item != tuple(sorted(set(item)))
+            ):
                 raise ValueError
             copied[key] = item
         elif key in _SAFE_BOOLEAN_FIELDS:
@@ -246,8 +267,23 @@ def _safe_payload(value: object) -> MappingProxyType[str, SafeScalar]:
     return MappingProxyType(copied)
 
 
-def _payload_mapping(value: Mapping[str, SafeScalar]) -> dict[str, SafeScalar]:
-    return {key: value[key] for key in sorted(value)}
+def _payload_mapping(value: Mapping[str, SafeScalar]) -> dict[str, object]:
+    return {
+        key: list(item) if type(item := value[key]) is tuple else item
+        for key in sorted(value)
+    }
+
+
+def _export_payload_from_mapping(value: object) -> dict[str, SafeScalar]:
+    if type(value) is not dict:
+        raise ValueError
+    copied = dict(value)
+    if "missing_evidence_labels" in copied:
+        labels = copied["missing_evidence_labels"]
+        if type(labels) is not list:
+            raise ValueError
+        copied["missing_evidence_labels"] = tuple(labels)
+    return copied  # type: ignore[return-value]
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,7 +304,7 @@ class ExportEnvelope:
             _semver(self.mapping_version)
             _event_kind(self.event_kind)
             _sha256(self.local_object_sha256)
-            payload = _safe_payload(self.payload)
+            payload = _safe_payload(self.payload, allow_request_metadata=True)
         except Exception:
             raise PathlightError("Pathlight export envelope is invalid") from None
         object.__setattr__(self, "payload", payload)
@@ -375,7 +411,9 @@ class ExternalObservation:
         except Exception:
             raise PathlightError("Pathlight external observation is invalid") from None
         object.__setattr__(self, "payload", payload)
-        object.__setattr__(self, "observation_sha256", _digest(self._unsigned_mapping()))
+        object.__setattr__(
+            self, "observation_sha256", _digest(self._unsigned_mapping())
+        )
 
     def _unsigned_mapping(self) -> dict[str, object]:
         return {
@@ -504,7 +542,7 @@ def validate_export_envelope(mapping: Mapping[str, object]) -> ExportEnvelope:
             _semver(mapping["mapping_version"]),
             _event_kind(mapping["event_kind"]),
             _sha256(mapping["local_object_sha256"]),
-            mapping["payload"],  # type: ignore[arg-type]
+            _export_payload_from_mapping(mapping["payload"]),
         )
         if not hmac.compare_digest(
             _sha256(mapping["idempotency_key"]), envelope.idempotency_key
@@ -595,7 +633,10 @@ def validate_export_batch(mapping: Mapping[str, object]) -> ExportBatch:
     try:
         if type(mapping) is not dict or set(mapping) != _BATCH_FIELDS:
             raise ValueError
-        if mapping["schema"] != EXPORT_BATCH_SCHEMA or type(mapping["envelopes"]) is not list:
+        if (
+            mapping["schema"] != EXPORT_BATCH_SCHEMA
+            or type(mapping["envelopes"]) is not list
+        ):
             raise ValueError
         batch = ExportBatch(
             tuple(validate_export_envelope(item) for item in mapping["envelopes"])
@@ -609,9 +650,7 @@ def validate_export_batch(mapping: Mapping[str, object]) -> ExportBatch:
         raise PathlightError("Pathlight export batch is invalid") from None
 
 
-def write_export_batch(
-    root: Path, envelopes: Sequence[ExportEnvelope]
-) -> ExportBatch:
+def write_export_batch(root: Path, envelopes: Sequence[ExportEnvelope]) -> ExportBatch:
     """Write one deterministic private batch without contacting its connector."""
 
     try:
@@ -718,9 +757,11 @@ def read_export_receipts(root: Path) -> tuple[ExportReceipt, ...]:
         expected: dict[str, int] = {}
         terminal: set[str] = set()
         for path in sorted(root.glob("receipt-*.json")):
-            if path.is_symlink() or re.fullmatch(
-                r"receipt-[0-9a-f]{64}-[0-9]{6}\.json", path.name
-            ) is None:
+            if (
+                path.is_symlink()
+                or re.fullmatch(r"receipt-[0-9a-f]{64}-[0-9]{6}\.json", path.name)
+                is None
+            ):
                 raise ValueError
             receipt = validate_export_receipt(
                 json.loads(read_private_file(path, _MAX_INTEROP_BYTES))

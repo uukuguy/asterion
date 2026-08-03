@@ -25,14 +25,38 @@ OAuth 的正常刷新链路、Node 原生 fetch 未使用已配置代理、`will
 30 节点主线：6 个 ContextFrame、6 次完成的模型调用、18 次完成的工具调用。companion 的
 时间戳只是严格递增的离线序号，不是执行耗时证据；真实耗时仍来自原生运行账本。
 
-由于 Pi 没有给出精确 provider request，6 个 ContextFrame 与 6 次模型调用均明确标记
-`context-segment` / `model-request` 缺口。Pathlight 能跟踪可见消息和工具结果的纵向关系，
-但不会把它冒充包含 system/hidden 内容的完整最终调用输入。之后由 `f80bcf5` 版本产生的新运行
-会直接写出这种主线，不需要本次再调用模型。
+这条旧运行发生在精确 provider request 观察器实现之前，因此它的 6 个 ContextFrame 与
+6 次模型调用仍明确保留 `context-segment` / `model-request` 缺口。Pathlight 能跟踪可见消息
+和工具结果的纵向关系，但不会把它冒充包含 system/hidden 内容的完整最终调用输入。后续实现
+不会追写或覆盖这条历史事实。
 
 同一 companion 已通过 `pathlight trace list/flow` 和前台 Dashboard 核验。Dashboard 快照摘要为
 `431ed5f79a4231d693f2971b01f779907eeb7dba7f566c10286d9a3709c83e8d`，显示 1 条完成
 trace、6/6/18 节点和 1 类显式证据缺口；服务停止时网络操作计数为 0。
+
+## 精确请求采集实现边界（provider-free）
+
+当前实现已经在 Pi 的 `before_provider_request` 支持边界通过双通道采集每次精确请求：原始
+JSON 只写入 host 创建、权限 0600 的私有 descriptor；公共 observation 只携带请求摘要、结构
+摘要、字节/字段/叶子/文本字符计数、分段摘要和私有记录引用摘要。Python 会独立重算并交叉
+验证两条通道，只有完整一致的连续请求序列才进入通用 Pathlight 主线；失败时保持原有结果并
+显式降级，不改变重试、评分或执行授权。
+
+本轮没有运行 Agent、Judge、模型、provider 或网络。provider-free 测试夹具把原始 payload、
+key/value、provider/model/config 身份、实际 FD 和私有路径只保留在测试 setup 中；CLI
+`trace show/tail/flow`、Dashboard snapshot/API/本地 assets 和 Opik 离线 envelope 只显示已验证的
+请求摘要、结构摘要、计数与私有引用摘要。`trace list` 继续是聚合目录，只报告可定位的 trace
+摘要和缺口计数，不展开逐请求结构。所有公共序列化字节都验证不含上述私有 sentinel 或原文。
+
+精确 request body 已验证后，公共主线不再标记 `model-request` 缺口；但 Pi hook 目前没有提供
+可与 Asterion 单调时钟交叉验证的精确调用边界时间，所以仍诚实保留闭合枚举值
+`model-request-boundary`。这不是自由文本错误原因，也不能被解释为已观测到完整单调边界。
+
+这些结果只证明实现与 provider-free 公共边界。上面的旧单例原生 bundle 仍不可变，离线
+companion 没有被提升为 native evidence，旧单例 nDCG@10 仍为 0.339160，任何正式实例分数也
+没有变化。本轮没有产生新的真实运行。下一条 Bright Biology 单例若要验证原生精确请求采集，
+必须使用新的 source lock 与 evidence root，并获得一次单独、明确的执行授权；现有计划、配置、
+缓存和历史批准都不授予这次调用权限。
 
 ## Coverage 实验状态（已完成）
 

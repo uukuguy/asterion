@@ -21,6 +21,11 @@ from asterion.pathlight.dashboard_server import (
     serve_dashboard,
     validate_dashboard_bind,
 )
+from tests.test_pathlight_cli import (
+    PRIVATE_PROVIDER_REQUEST_SENTINELS,
+    PUBLIC_PROVIDER_REQUEST_FIELDS,
+    _verified_provider_request_fixture,
+)
 
 
 TRACE_ID = "00000000-0000-4000-8000-000000000101"
@@ -66,6 +71,23 @@ def _workflow_bundle() -> WorkflowObservationBundle:
     return WorkflowObservationBundle(
         records=(),
         pathlight_traces=(_trace(),),
+        bundle_sha256=bundle_sha256,
+        projection_sha256=_canonical_digest(projection),
+    )
+
+
+def _verified_request_workflow_bundle() -> WorkflowObservationBundle:
+    _, trace = _verified_provider_request_fixture()
+    from asterion.workflow_evidence.storage import (
+        _canonical_digest,
+        _projection_mapping,
+    )
+
+    bundle_sha256 = "2" * 64
+    projection = _projection_mapping(bundle_sha256, (), (trace,))
+    return WorkflowObservationBundle(
+        records=(),
+        pathlight_traces=(trace,),
         bundle_sha256=bundle_sha256,
         projection_sha256=_canonical_digest(projection),
     )
@@ -246,6 +268,52 @@ class PathlightDashboardApplicationTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, combined)
         self.assertIn("prefers-reduced-motion", style)
+
+    def test_snapshot_api_and_assets_show_safe_verified_request_metadata(self) -> None:
+        batch, _ = _verified_provider_request_fixture()
+        snapshot = DashboardSnapshot.build(
+            workflow_bundles=(_verified_request_workflow_bundle(),)
+        )
+        app = DashboardApplication(snapshot)
+        snapshot_mapping = snapshot.to_mapping()
+        api_mapping = json.loads(app.response("GET", "/api/pathlight/v1/snapshot").body)
+        assets = b"".join(
+            app.response("GET", target).body
+            for target in ("/", "/app.js", "/styles.css")
+        )
+        self.assertEqual(api_mapping, snapshot_mapping)
+        self.assertIn(b"Object.entries(node.attributes)", assets)
+        self.assertIn(b"Array.isArray(value)", assets)
+        expected_values = tuple(
+            value
+            for request in batch.provider_requests
+            for value in (
+                request.payload_sha256,
+                request.shape_sha256,
+                request.payload_bytes,
+                request.field_count,
+                request.leaf_count,
+                request.text_characters,
+                request.private_reference_sha256,
+            )
+        )
+        for name, public_mapping in (
+            ("snapshot", snapshot_mapping),
+            ("api", api_mapping),
+        ):
+            rendered = json.dumps(public_mapping, sort_keys=True)
+            for field in PUBLIC_PROVIDER_REQUEST_FIELDS:
+                with self.subTest(surface=name, field=field):
+                    self.assertIn(json.dumps(field), rendered)
+            for value in expected_values:
+                with self.subTest(surface=name, value=value):
+                    self.assertIn(json.dumps(value), rendered)
+            self.assertIn("model-request-boundary", rendered)
+            self.assertNotIn('"model-request"', rendered)
+        public_bytes = json.dumps(snapshot_mapping, sort_keys=True).encode() + assets
+        for sentinel in PRIVATE_PROVIDER_REQUEST_SENTINELS:
+            with self.subTest(sentinel=sentinel):
+                self.assertNotIn(sentinel.encode(), public_bytes)
 
     def test_static_assets_are_head_safe_and_unknown_assets_are_not_found(self) -> None:
         app = DashboardApplication(self.snapshot)

@@ -438,9 +438,18 @@ git commit -m "feat: capture exact DCI provider requests"
 ### Task 7: Public Surfaces, Documentation, and Provider-Free Gates
 
 **Files:**
+- Modify: `src/asterion/pathlight/protocol.py`
+- Modify: `src/asterion/pathlight/runtime_observation.py`
+- Modify: `src/asterion/pathlight/flow.py`
+- Modify: `src/asterion/pathlight/interop.py`
+- Modify: `src/asterion/pathlight/opik.py`
+- Modify: `src/asterion/workflow_evidence/runtime.py`
 - Modify: `tests/test_pathlight_cli.py`
 - Modify: `tests/test_pathlight_dashboard.py`
+- Modify: `tests/test_pathlight_interop.py`
 - Modify: `tests/test_pathlight_opik.py`
+- Modify: `tests/test_pathlight_protocol.py`
+- Modify: `tests/test_workflow_evidence_runtime.py`
 - Modify: `docs/status/PATHLIGHT-DCI-DIAGNOSIS.md`
 - Modify: `docs/status/DCI-BENCHMARK-INSTANCES.md`
 - Modify: `docs/status/RESUME-NEXT-SESSION.md`
@@ -451,11 +460,11 @@ git commit -m "feat: capture exact DCI provider requests"
 - Produces: provider-free evidence that CLI/Dashboard expose exact request structure but never private bodies, plus a separately authorized real-run handoff.
 - Consumes: Tasks 1–6 only; this task does not execute a model.
 
-- [ ] **Step 1: Add public redaction and workflow-first UI tests**
+- [x] **Step 1: Add public redaction and workflow-first UI tests**
 
 Build a bundle with verified provider request metadata and sentinel private input. Assert `trace list/show/tail/flow`, Dashboard snapshot/API/assets, and Opik export contain request digest/shape/count/private-reference fields, retain `model-request-boundary`, omit `model-request`, and contain none of the sentinel, raw payload, provider/model/config values, FD, or path.
 
-- [ ] **Step 2: Run RED/GREEN for public surfaces**
+- [x] **Step 2: Run RED/GREEN for public surfaces**
 
 ```bash
 uv run python -m unittest -v \
@@ -464,13 +473,16 @@ uv run python -m unittest -v \
   tests.test_pathlight_opik
 ```
 
-Expected: PASS after only fixture/assertion adjustments needed by the v2 observation contract; no network operations.
+Verified: RED exposed three generic public projection gaps. The approved minimal closure added a
+closed `missing_evidence_labels` TraceEvent attribute, the exact request summary fields to flow and
+Opik whitelists, and matching ExportEnvelope validation. No DCI branch, raw attribute passthrough,
+model call, or network operation was added.
 
-- [ ] **Step 3: Update Chinese status documents truthfully**
+- [x] **Step 3: Update Chinese status documents truthfully**
 
 Document the implemented boundary, provider-free fixture proof, remaining monotonic-boundary gap, and the fact that the old one-case native bundle remains immutable. Mark the next real Bright Biology case as requiring separate explicit authorization; do not claim the existing offline companion became native or that a score changed.
 
-- [ ] **Step 4: Run complete provider-free verification**
+- [x] **Step 4: Run complete provider-free verification**
 
 ```bash
 make check
@@ -479,11 +491,20 @@ make promotion-check
 
 Expected: `make check` PASS; promotion full PASS with `provider_operations=0` and `full_dataset=no`.
 
-- [ ] **Step 5: Commit verified implementation closure**
+Verified: `make check` passed 1,254 Python tests plus TypeScript, Rust, docs, lint,
+and distribution builds. `make promotion-check` reported
+`promotion full PASS commands=22 provider_operations=0 full_dataset=no`.
+
+- [x] **Step 5: Commit verified implementation closure**
 
 ```bash
 git add tests/test_pathlight_cli.py tests/test_pathlight_dashboard.py \
-  tests/test_pathlight_opik.py docs/status/PATHLIGHT-DCI-DIAGNOSIS.md \
+  tests/test_pathlight_interop.py tests/test_pathlight_opik.py \
+  tests/test_pathlight_protocol.py tests/test_workflow_evidence_runtime.py \
+  src/asterion/pathlight/protocol.py src/asterion/pathlight/runtime_observation.py \
+  src/asterion/pathlight/flow.py src/asterion/pathlight/interop.py \
+  src/asterion/pathlight/opik.py src/asterion/workflow_evidence/runtime.py \
+  docs/status/PATHLIGHT-DCI-DIAGNOSIS.md \
   docs/status/DCI-BENCHMARK-INSTANCES.md \
   docs/superpowers/plans/2026-08-03-pathlight-provider-request-capture.md
 git commit -m "docs: verify exact Pathlight request capture"

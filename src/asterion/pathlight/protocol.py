@@ -28,6 +28,21 @@ SAFE_KINDS = frozenset(
     }
 )
 SAFE_STATUSES = frozenset({"started", "completed", "failed", "cancelled", "skipped"})
+MISSING_EVIDENCE_LABELS = frozenset(
+    {
+        "context-frame",
+        "context-segment",
+        "model-identity",
+        "model-request",
+        "model-request-boundary",
+        "model-response",
+        "token-usage",
+        "tool-arguments",
+        "tool-boundary",
+        "tool-identity",
+        "tool-result",
+    }
+)
 
 _TRACE_FIELDS = frozenset({"schema", "trace_id", "events", "trace_sha256"})
 _EVENT_FIELDS = frozenset(
@@ -45,7 +60,14 @@ _EVENT_FIELDS = frozenset(
 )
 _LINK_FIELDS = frozenset({"relation", "trace_id", "span_id"})
 _SAFE_RELATIONS = frozenset(
-    {"caused-next", "consumed-by", "derived-from", "evidence-for", "produced-by", "related-to"}
+    {
+        "caused-next",
+        "consumed-by",
+        "derived-from",
+        "evidence-for",
+        "produced-by",
+        "related-to",
+    }
 )
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _OPAQUE_ID = re.compile(
@@ -141,7 +163,9 @@ _TRUSTED_STRING_ATTRIBUTE_VALUES = {
     "segment_role": frozenset(
         {"assistant", "system", "tool-result", "unknown", "user"}
     ),
-    "unit": frozenset({"boolean", "bytes", "count", "microunits", "nanoseconds", "ratio", "tokens"}),
+    "unit": frozenset(
+        {"boolean", "bytes", "count", "microunits", "nanoseconds", "ratio", "tokens"}
+    ),
 }
 _NONNEGATIVE_INT_ATTRIBUTES = frozenset(
     {
@@ -163,9 +187,7 @@ _NONNEGATIVE_INT_ATTRIBUTES = frozenset(
     }
 )
 _INTEGER_ATTRIBUTES = frozenset({"metric_value"})
-_BOOLEAN_ATTRIBUTES = frozenset(
-    {"boundary_observed", "is_error", "missing_evidence"}
-)
+_BOOLEAN_ATTRIBUTES = frozenset({"boundary_observed", "is_error", "missing_evidence"})
 _SAFE_ATTRIBUTE_KEYS = (
     _DIGEST_ATTRIBUTES
     | _OPAQUE_ID_ATTRIBUTES
@@ -173,9 +195,10 @@ _SAFE_ATTRIBUTE_KEYS = (
     | _NONNEGATIVE_INT_ATTRIBUTES
     | _INTEGER_ATTRIBUTES
     | _BOOLEAN_ATTRIBUTES
+    | {"missing_evidence_labels"}
 )
 
-SafeAttributeValue: TypeAlias = str | int | bool
+SafeAttributeValue: TypeAlias = str | int | bool | tuple[str, ...]
 
 
 class PathlightError(ValueError):
@@ -205,7 +228,9 @@ def _require_nonnegative_int(value: object, *, field_name: str) -> int:
     return value
 
 
-def _freeze_attributes(attributes: Mapping[str, SafeAttributeValue]) -> Mapping[str, SafeAttributeValue]:
+def _freeze_attributes(
+    attributes: Mapping[str, SafeAttributeValue],
+) -> Mapping[str, SafeAttributeValue]:
     if not isinstance(attributes, Mapping):
         raise PathlightError("Pathlight event attributes are invalid")
     values = dict(attributes)
@@ -229,6 +254,17 @@ def _freeze_attributes(attributes: Mapping[str, SafeAttributeValue]) -> Mapping[
                 raise PathlightError(f"Pathlight attribute {key} is invalid")
         elif key in _BOOLEAN_ATTRIBUTES and type(value) is not bool:
             raise PathlightError(f"Pathlight attribute {key} is invalid")
+        elif key == "missing_evidence_labels":
+            if (
+                type(value) is not tuple
+                or not value
+                or any(
+                    type(label) is not str or label not in MISSING_EVIDENCE_LABELS
+                    for label in value
+                )
+                or value != tuple(sorted(set(value)))
+            ):
+                raise PathlightError(f"Pathlight attribute {key} is invalid")
     return MappingProxyType(values)
 
 
@@ -383,9 +419,7 @@ class TraceGraph:
         _validate_trace_components(self.trace_id, events)
 
     @classmethod
-    def build(
-        cls, trace_id: str, events: Sequence[TraceEvent]
-    ) -> TraceGraph:
+    def build(cls, trace_id: str, events: Sequence[TraceEvent]) -> TraceGraph:
         return cls(trace_id, tuple(events))
 
     def to_mapping(self) -> dict[str, object]:
@@ -406,7 +440,10 @@ def _event_to_mapping(event: TraceEvent) -> dict[str, object]:
         "sequence": event.sequence,
         "kind": event.kind,
         "status": event.status,
-        "attributes": dict(event.attributes),
+        "attributes": {
+            key: list(value) if type(value) is tuple else value
+            for key, value in event.attributes.items()
+        },
         "links": [dict(link) for link in event.links],
         "timestamp_ns": event.timestamp_ns,
     }
@@ -415,6 +452,15 @@ def _event_to_mapping(event: TraceEvent) -> dict[str, object]:
 def _event_from_mapping(value: object) -> TraceEvent:
     if not isinstance(value, Mapping) or set(value) != _EVENT_FIELDS:
         raise PathlightError("Pathlight event fields are invalid")
+    attributes = value["attributes"]
+    if not isinstance(attributes, Mapping):
+        raise PathlightError("Pathlight event attributes are invalid")
+    copied_attributes = dict(attributes)
+    if "missing_evidence_labels" in copied_attributes:
+        labels = copied_attributes["missing_evidence_labels"]
+        if type(labels) is not list:
+            raise PathlightError("Pathlight event attributes are invalid")
+        copied_attributes["missing_evidence_labels"] = tuple(labels)
     return TraceEvent(
         trace_id=cast(str, value["trace_id"]),
         span_id=cast(str, value["span_id"]),
@@ -422,7 +468,7 @@ def _event_from_mapping(value: object) -> TraceEvent:
         sequence=cast(int, value["sequence"]),
         kind=cast(str, value["kind"]),
         status=cast(str, value["status"]),
-        attributes=cast(Mapping[str, SafeAttributeValue], value["attributes"]),
+        attributes=cast(Mapping[str, SafeAttributeValue], copied_attributes),
         links=cast(Sequence[Mapping[str, str]], value["links"]),
         timestamp_ns=cast(int, value["timestamp_ns"]),
     )
@@ -478,7 +524,9 @@ def _validate_trace_components(trace_id: str, events: tuple[TraceEvent, ...]) ->
                 open_event.parent_span_id == event.span_id
                 for open_event in open_spans.values()
             ):
-                raise PathlightError("Pathlight parent span terminates before its child")
+                raise PathlightError(
+                    "Pathlight parent span terminates before its child"
+                )
             del open_spans[event.span_id]
 
     if root_span_id is None:
@@ -493,11 +541,15 @@ def _validate_trace_components(trace_id: str, events: tuple[TraceEvent, ...]) ->
                 raise PathlightError("Pathlight graph link target is unknown")
 
 
-def _graph_without_digest(graph: Mapping[str, object], *, allow_digest: bool) -> dict[str, object]:
+def _graph_without_digest(
+    graph: Mapping[str, object], *, allow_digest: bool
+) -> dict[str, object]:
     if not isinstance(graph, Mapping):
         raise PathlightError("Pathlight graph must be an object")
     fields = set(graph)
-    expected_fields = _TRACE_FIELDS if allow_digest else _TRACE_FIELDS - {"trace_sha256"}
+    expected_fields = (
+        _TRACE_FIELDS if allow_digest else _TRACE_FIELDS - {"trace_sha256"}
+    )
     if fields != expected_fields:
         raise PathlightError("Pathlight graph fields are invalid")
     if graph.get("schema") != TRACE_SCHEMA:

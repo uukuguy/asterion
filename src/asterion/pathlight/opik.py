@@ -21,6 +21,19 @@ from asterion.pathlight.protocol import (
 
 OPIK_MAPPING_VERSION = "1.0.0"
 _T = TypeVar("_T")
+_SPAN_REQUEST_ATTRIBUTE_KEYS = frozenset(
+    {
+        "field_count",
+        "leaf_count",
+        "missing_evidence_labels",
+        "payload_bytes",
+        "private_reference_sha256",
+        "request_index",
+        "request_sha256",
+        "request_shape_sha256",
+        "text_characters",
+    }
+)
 
 
 def map_opik_exports(
@@ -51,9 +64,7 @@ def map_opik_exports(
             trace_sha256s.add(trace_sha256)
             envelopes.extend(_trace_envelopes(trace, trace_sha256, mapping_version))
 
-        experiment_sha256s = {
-            item.bundle_sha256 for item in experiment_values
-        }
+        experiment_sha256s = {item.bundle_sha256 for item in experiment_values}
         evaluation_records: dict[str, EvaluationRecord] = {}
         metric_names: dict[str, str] = {}
         for bundle in evaluation_values:
@@ -136,6 +147,10 @@ def _trace_envelopes(
     ]
     for span_id, start in starts.items():
         end = terminal[span_id]
+        request_attributes = {
+            key: start.attributes[key]
+            for key in sorted(_SPAN_REQUEST_ATTRIBUTE_KEYS & set(start.attributes))
+        }
         span_sha256 = _digest(
             {
                 "trace_sha256": trace_sha256,
@@ -158,6 +173,7 @@ def _trace_envelopes(
                     "kind": start.kind,
                     "status": end.status,
                     "duration_ns": end.timestamp_ns - start.timestamp_ns,
+                    **request_attributes,
                 },
             )
         )
@@ -291,9 +307,7 @@ def _validate_experiment_bundle(bundle: ExperimentBundle) -> None:
 
 
 def _validate_evaluation_bundle(bundle: EvaluationBundle) -> None:
-    EvaluationBundle(
-        bundle.metric_contracts, bundle.evaluations, bundle.bundle_sha256
-    )
+    EvaluationBundle(bundle.metric_contracts, bundle.evaluations, bundle.bundle_sha256)
 
 
 def _validate_diagnosis_bundle(bundle: DiagnosisBundle) -> None:

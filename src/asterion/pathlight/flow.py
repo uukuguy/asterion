@@ -21,18 +21,26 @@ _FLOW_ATTRIBUTE_KEYS = frozenset(
         "content_sha256",
         "duration_ns",
         "failure_class",
+        "field_count",
         "frame_index",
         "input_tokens",
         "is_error",
+        "leaf_count",
+        "missing_evidence_labels",
         "model_id",
         "observation_sha256",
         "output_tokens",
+        "payload_bytes",
+        "private_reference_sha256",
+        "request_index",
         "request_sha256",
+        "request_shape_sha256",
         "result_length",
         "result_sha256",
         "response_length",
         "response_sha256",
         "segment_count",
+        "text_characters",
         "tool_id",
     }
 )
@@ -284,13 +292,9 @@ def _project_mainline(
                 _require_forward_link(selected_by_id[source], selected_by_id[target])
                 consumed_by[source].add(selected_by_id[target].sequence)
             elif relation == "caused-next":
-                _record_cause(
-                    caused_by, selected_by_id, cause=source, effect=target
-                )
+                _record_cause(caused_by, selected_by_id, cause=source, effect=target)
             else:
-                _record_cause(
-                    caused_by, selected_by_id, cause=target, effect=source
-                )
+                _record_cause(caused_by, selected_by_id, cause=target, effect=source)
                 if relation == "produced-by":
                     produced_by[source].add(selected_by_id[target].sequence)
 
@@ -356,7 +360,9 @@ def _record_cause(
 def _reject_cycles(
     caused_by: Mapping[str, set[int]], selected_by_id: Mapping[str, _Span]
 ) -> None:
-    span_by_sequence = {span.sequence: span_id for span_id, span in selected_by_id.items()}
+    span_by_sequence = {
+        span.sequence: span_id for span_id, span in selected_by_id.items()
+    }
     visiting: set[str] = set()
     visited: set[str] = set()
 

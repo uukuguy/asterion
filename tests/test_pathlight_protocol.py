@@ -26,7 +26,9 @@ MISSING_SPAN_ID = opaque_id(5)
 
 
 class PathlightProtocolTests(unittest.TestCase):
-    def test_rejects_terminal_duration_that_disagrees_with_monotonic_timestamps(self) -> None:
+    def test_rejects_terminal_duration_that_disagrees_with_monotonic_timestamps(
+        self,
+    ) -> None:
         trace_id = TRACE_ID
         span_id = ROOT_SPAN_ID
         with self.assertRaisesRegex(PathlightError, "duration"):
@@ -102,6 +104,44 @@ class PathlightProtocolTests(unittest.TestCase):
                     attributes={key: True},
                 )
 
+    def test_missing_evidence_labels_are_closed_sorted_and_immutable(self) -> None:
+        event = TraceEvent.start(
+            TRACE_ID,
+            ROOT_SPAN_ID,
+            None,
+            1,
+            "model-call",
+            attributes={"missing_evidence_labels": ("model-request-boundary",)},
+        )
+
+        self.assertEqual(
+            event.attributes["missing_evidence_labels"],
+            ("model-request-boundary",),
+        )
+        mapping = TraceGraph.build(
+            TRACE_ID,
+            (event, TraceEvent.complete(TRACE_ID, ROOT_SPAN_ID, 2, kind="model-call")),
+        ).to_mapping()
+        self.assertEqual(
+            mapping["events"][0]["attributes"]["missing_evidence_labels"],
+            ["model-request-boundary"],
+        )
+        for labels in (
+            ["model-request-boundary"],
+            ("model-request-boundary", "model-request-boundary"),
+            ("model-response", "model-request-boundary"),
+            ("SENTINEL_PRIVATE_GAP_REASON",),
+        ):
+            with self.subTest(labels=labels), self.assertRaises(PathlightError):
+                TraceEvent.start(
+                    TRACE_ID,
+                    ROOT_SPAN_ID,
+                    None,
+                    1,
+                    "model-call",
+                    attributes={"missing_evidence_labels": labels},
+                )
+
     def complete_graph(self) -> TraceGraph:
         return TraceGraph.build(
             trace_id=TRACE_ID,
@@ -171,7 +211,11 @@ class PathlightProtocolTests(unittest.TestCase):
             payload["trace_sha256"],
             hashlib.sha256(
                 json.dumps(
-                    {key: value for key, value in payload.items() if key != "trace_sha256"},
+                    {
+                        key: value
+                        for key, value in payload.items()
+                        if key != "trace_sha256"
+                    },
                     sort_keys=True,
                     separators=(",", ":"),
                 ).encode("utf-8")
@@ -186,7 +230,13 @@ class PathlightProtocolTests(unittest.TestCase):
             "span_id": ROOT_SPAN_ID,
         }
         event = TraceEvent.start(
-            TRACE_ID, ROOT_SPAN_ID, None, 1, "task", attributes=attributes, links=(link,)
+            TRACE_ID,
+            ROOT_SPAN_ID,
+            None,
+            1,
+            "task",
+            attributes=attributes,
+            links=(link,),
         )
         attributes["content_length"] = 99
         link["span_id"] = "changed"
@@ -211,7 +261,9 @@ class PathlightProtocolTests(unittest.TestCase):
             "bool-length": {"content_length": True},
         }.items():
             with self.subTest(name=name), self.assertRaises(PathlightError):
-                TraceEvent.start(TRACE_ID, ROOT_SPAN_ID, None, 1, "task", attributes=attributes)
+                TraceEvent.start(
+                    TRACE_ID, ROOT_SPAN_ID, None, 1, "task", attributes=attributes
+                )
 
     def test_rejects_private_content_for_every_string_attribute(self) -> None:
         for key in self.STRING_ATTRIBUTE_VALUES:
@@ -303,9 +355,7 @@ class PathlightProtocolTests(unittest.TestCase):
                 TraceEvent.start(TRACE_ID, ROOT_SPAN_ID, None, 2, "task"),
                 TraceEvent.complete(TRACE_ID, ROOT_SPAN_ID, 3),
             ),
-            "unmatched-terminal": (
-                TraceEvent.complete(TRACE_ID, ROOT_SPAN_ID, 1),
-            ),
+            "unmatched-terminal": (TraceEvent.complete(TRACE_ID, ROOT_SPAN_ID, 1),),
             "open-span": (TraceEvent.start(TRACE_ID, ROOT_SPAN_ID, None, 1, "task"),),
             "parent-terminates-before-child": (
                 TraceEvent.start(TRACE_ID, ROOT_SPAN_ID, None, 1, "task"),

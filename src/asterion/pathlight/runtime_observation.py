@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Literal, NoReturn, Protocol, cast, runtime_checkable
 
-from asterion.pathlight.protocol import PathlightError
+from asterion.pathlight.protocol import MISSING_EVIDENCE_LABELS, PathlightError
 
 
 RUNTIME_OBSERVATION_SCHEMA = "asterion.pathlight-runtime-observation/v2"
@@ -23,21 +23,7 @@ _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SEGMENT_ROLES = frozenset({"system", "user", "assistant", "tool-result", "unknown"})
 _STRUCTURE_KINDS = frozenset({"message", "tool-result", "contract", "missing"})
 _STATUSES = frozenset({"completed", "failed", "cancelled", "missing"})
-_MISSING_EVIDENCE = frozenset(
-    {
-        "context-frame",
-        "context-segment",
-        "model-identity",
-        "model-request",
-        "model-request-boundary",
-        "model-response",
-        "token-usage",
-        "tool-arguments",
-        "tool-boundary",
-        "tool-identity",
-        "tool-result",
-    }
-)
+_MISSING_EVIDENCE = MISSING_EVIDENCE_LABELS
 
 _SEGMENT_FIELDS = frozenset(
     {
@@ -228,7 +214,10 @@ class ContextSegmentSummary:
         object.__setattr__(
             self,
             "segment_sha256",
-            _canonical_digest("asterion.pathlight/context-segment-summary/v1", self._unsigned_mapping()),
+            _canonical_digest(
+                "asterion.pathlight/context-segment-summary/v1",
+                self._unsigned_mapping(),
+            ),
         )
 
     def _unsigned_mapping(self) -> dict[str, object]:
@@ -267,7 +256,10 @@ class ContextFrameObservation:
         object.__setattr__(
             self,
             "frame_sha256",
-            _canonical_digest("asterion.pathlight/context-frame-observation/v1", self._unsigned_mapping()),
+            _canonical_digest(
+                "asterion.pathlight/context-frame-observation/v1",
+                self._unsigned_mapping(),
+            ),
         )
 
     def _unsigned_mapping(self) -> dict[str, object]:
@@ -375,7 +367,9 @@ class ModelCallObservation:
         object.__setattr__(
             self,
             "model_call_sha256",
-            _canonical_digest("asterion.pathlight/model-call-observation/v1", self._unsigned_mapping()),
+            _canonical_digest(
+                "asterion.pathlight/model-call-observation/v1", self._unsigned_mapping()
+            ),
         )
 
     def _unsigned_mapping(self) -> dict[str, object]:
@@ -417,7 +411,9 @@ class ToolCallObservation:
         object.__setattr__(
             self,
             "tool_call_sha256",
-            _canonical_digest("asterion.pathlight/tool-call-observation/v1", self._unsigned_mapping()),
+            _canonical_digest(
+                "asterion.pathlight/tool-call-observation/v1", self._unsigned_mapping()
+            ),
         )
 
     def _unsigned_mapping(self) -> dict[str, object]:
@@ -491,7 +487,10 @@ class RuntimeObservationBatch:
         object.__setattr__(
             self,
             "batch_sha256",
-            _canonical_digest("asterion.pathlight/runtime-observation-batch/v2", self._unsigned_mapping()),
+            _canonical_digest(
+                "asterion.pathlight/runtime-observation-batch/v2",
+                self._unsigned_mapping(),
+            ),
         )
 
     @classmethod
@@ -550,11 +549,13 @@ def _validate_batch_components(
         ) != tuple(range(1, len(provider_requests) + 1)):
             _invalid()
     tool_calls = tuple(tool.call_sha256 for tool in tools)
-    if tool_calls != tuple(sorted(tool_calls)) or len(tool_calls) != len(set(tool_calls)):
-        _invalid()
-    if missing_evidence != tuple(sorted(missing_evidence)) or len(missing_evidence) != len(
-        set(missing_evidence)
+    if tool_calls != tuple(sorted(tool_calls)) or len(tool_calls) != len(
+        set(tool_calls)
     ):
+        _invalid()
+    if missing_evidence != tuple(sorted(missing_evidence)) or len(
+        missing_evidence
+    ) != len(set(missing_evidence)):
         _invalid()
     frame_ids = tuple(frame.frame_sha256 for frame in frames)
     if len(frame_ids) != len(set(frame_ids)):
@@ -644,7 +645,9 @@ def _segment_from_mapping(value: object) -> ContextSegmentSummary:
 
 def _frame_from_mapping(value: object) -> ContextFrameObservation:
     raw = _copy_exact_dict(value, _FRAME_FIELDS)
-    segments = tuple(_segment_from_mapping(item) for item in _copy_exact_list(raw["segments"]))
+    segments = tuple(
+        _segment_from_mapping(item) for item in _copy_exact_list(raw["segments"])
+    )
     frame = ContextFrameObservation(
         frame_index=raw["frame_index"],  # type: ignore[arg-type]
         segments=segments,
@@ -667,8 +670,7 @@ def _provider_request_from_mapping(value: object) -> ProviderRequestObservation:
         text_characters=raw["text_characters"],
         private_reference_sha256=raw["private_reference_sha256"],
         segments=tuple(
-            _segment_from_mapping(item)
-            for item in _copy_exact_list(raw["segments"])
+            _segment_from_mapping(item) for item in _copy_exact_list(raw["segments"])
         ),
     )
     supplied = _require_digest(raw["provider_request_sha256"])
@@ -713,7 +715,9 @@ def _tool_call_from_mapping(value: object) -> ToolCallObservation:
     return tool
 
 
-def validate_runtime_observation_batch(mapping: Mapping[str, object]) -> RuntimeObservationBatch:
+def validate_runtime_observation_batch(
+    mapping: Mapping[str, object],
+) -> RuntimeObservationBatch:
     """Return a verified, immutable runtime observation batch.
 
     Only exact built-in JSON containers are accepted.  Each is copied before a
@@ -728,15 +732,20 @@ def validate_runtime_observation_batch(mapping: Mapping[str, object]) -> Runtime
             or raw["schema"] != RUNTIME_OBSERVATION_SCHEMA
         ):
             _invalid()
-        frames = tuple(_frame_from_mapping(item) for item in _copy_exact_list(raw["frames"]))
+        frames = tuple(
+            _frame_from_mapping(item) for item in _copy_exact_list(raw["frames"])
+        )
         model_calls = tuple(
-            _model_call_from_mapping(item) for item in _copy_exact_list(raw["model_calls"])
+            _model_call_from_mapping(item)
+            for item in _copy_exact_list(raw["model_calls"])
         )
         provider_requests = tuple(
             _provider_request_from_mapping(item)
             for item in _copy_exact_list(raw["provider_requests"])
         )
-        tools = tuple(_tool_call_from_mapping(item) for item in _copy_exact_list(raw["tools"]))
+        tools = tuple(
+            _tool_call_from_mapping(item) for item in _copy_exact_list(raw["tools"])
+        )
         missing_evidence = tuple(_copy_exact_list(raw["missing_evidence"]))
         batch = RuntimeObservationBatch.build(
             run_sha256=raw["run_sha256"],  # type: ignore[arg-type]

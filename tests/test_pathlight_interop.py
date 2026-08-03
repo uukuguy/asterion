@@ -43,7 +43,9 @@ class PathlightInteropContractTests(unittest.TestCase):
             {"trace_sha256": suffix * 64, "status": "completed"},
         )
 
-    def test_export_envelope_is_content_addressed_and_payload_is_immutable(self) -> None:
+    def test_export_envelope_is_content_addressed_and_payload_is_immutable(
+        self,
+    ) -> None:
         payload = {
             "evaluation_sha256": "b" * 64,
             "metric_contract_sha256": "c" * 64,
@@ -61,12 +63,48 @@ class PathlightInteropContractTests(unittest.TestCase):
 
         self.assertEqual(envelope.idempotency_key, envelope.envelope_sha256)
         self.assertEqual(envelope.payload["value_microunits"], 750_000)
-        self.assertEqual(
-            validate_export_envelope(envelope.to_mapping()), envelope
-        )
+        self.assertEqual(validate_export_envelope(envelope.to_mapping()), envelope)
         self.assertNotIn("SENTINEL", json.dumps(envelope.to_mapping()))
 
-    def test_export_envelope_rejects_private_unknown_or_ambiguous_payloads(self) -> None:
+    def test_export_envelope_accepts_only_closed_request_metadata_and_gap_labels(
+        self,
+    ) -> None:
+        payload = {
+            "request_sha256": "b" * 64,
+            "request_shape_sha256": "c" * 64,
+            "private_reference_sha256": "d" * 64,
+            "request_index": 1,
+            "payload_bytes": 2,
+            "field_count": 3,
+            "leaf_count": 4,
+            "text_characters": 5,
+            "missing_evidence_labels": ("model-request-boundary",),
+        }
+
+        envelope = ExportEnvelope("opik", "1.0.0", "span.upsert", "a" * 64, payload)
+
+        self.assertEqual(
+            envelope.to_mapping()["payload"]["missing_evidence_labels"],
+            ["model-request-boundary"],
+        )
+        for labels in (
+            ["model-request-boundary"],
+            ("model-request-boundary", "model-request-boundary"),
+            ("model-response", "model-request-boundary"),
+            ("SENTINEL_PRIVATE_GAP_REASON",),
+        ):
+            with self.subTest(labels=labels), self.assertRaises(PathlightError):
+                ExportEnvelope(
+                    "opik",
+                    "1.0.0",
+                    "span.upsert",
+                    "a" * 64,
+                    {**payload, "missing_evidence_labels": labels},
+                )
+
+    def test_export_envelope_rejects_private_unknown_or_ambiguous_payloads(
+        self,
+    ) -> None:
         valid = {
             "connector": "opik",
             "mapping_version": "1.0.0",
@@ -80,8 +118,9 @@ class PathlightInteropContractTests(unittest.TestCase):
             {"evaluation_sha256": "b" * 64, "status": "unknown"},
             _HostileMapping(evaluation_sha256="b" * 64),
         ):
-            with self.subTest(payload=type(payload).__name__), self.assertRaises(
-                PathlightError
+            with (
+                self.subTest(payload=type(payload).__name__),
+                self.assertRaises(PathlightError),
             ):
                 ExportEnvelope(**valid, payload=payload)  # type: ignore[arg-type]
         self.assertFalse(_HostileMapping.method_called)
@@ -139,7 +178,9 @@ class PathlightInteropContractTests(unittest.TestCase):
                     category,  # type: ignore[arg-type]
                 )
 
-    def test_external_observations_and_candidates_never_authorize_execution(self) -> None:
+    def test_external_observations_and_candidates_never_authorize_execution(
+        self,
+    ) -> None:
         observation = ExternalObservation(
             connector="opik",
             connector_identity_sha256="a" * 64,
@@ -160,9 +201,7 @@ class PathlightInteropContractTests(unittest.TestCase):
         self.assertEqual(
             validate_external_observation(observation.to_mapping()), observation
         )
-        self.assertEqual(
-            validate_proposal_candidate(candidate.to_mapping()), candidate
-        )
+        self.assertEqual(validate_proposal_candidate(candidate.to_mapping()), candidate)
         self.assertFalse(candidate.execution_authorized)
         mapping = candidate.to_mapping()
         mapping["execution_authorized"] = True
@@ -203,7 +242,9 @@ class PathlightInteropContractTests(unittest.TestCase):
             with self.assertRaises(PathlightError):
                 read_export_batch(link)
 
-    def test_receipt_ledger_requires_monotonic_attempts_and_terminal_closure(self) -> None:
+    def test_receipt_ledger_requires_monotonic_attempts_and_terminal_closure(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             root.chmod(0o700)

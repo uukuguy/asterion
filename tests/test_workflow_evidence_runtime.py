@@ -460,7 +460,9 @@ def _verified_provider_request_batch() -> RuntimeObservationBatch:
             request_index=call.request_index,
             frame_sha256=call.frame_sha256,
             model_sha256=call.model_sha256,
-            request_sha256=_digest(f"SENTINEL_EXACT_PROVIDER_PAYLOAD_{call.request_index}"),
+            request_sha256=_digest(
+                f"SENTINEL_EXACT_PROVIDER_PAYLOAD_{call.request_index}"
+            ),
             response_sha256=call.response_sha256,
             response_length=call.response_length,
             input_tokens=call.input_tokens,
@@ -739,9 +741,7 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
         assert projector is not None
         events = tuple(
             RunEvent("native-run", sequence, event_type, payload).to_mapping()
-            for sequence, (event_type, payload) in enumerate(
-                _native_events(), start=1
-            )
+            for sequence, (event_type, payload) in enumerate(_native_events(), start=1)
         )
 
         projected = projector(
@@ -788,9 +788,7 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         events = tuple(
             RunEvent("native-run", sequence, event_type, payload).to_mapping()
-            for sequence, (event_type, payload) in enumerate(
-                _native_events(), start=1
-            )
+            for sequence, (event_type, payload) in enumerate(_native_events(), start=1)
         )
         batch = _verified_provider_request_batch()
 
@@ -815,19 +813,20 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(starts), 2)
         for event, request in zip(starts, batch.provider_requests, strict=True):
             attributes = event["attributes"]
-            self.assertEqual(
-                attributes["request_shape_sha256"], request.shape_sha256
-            )
+            self.assertEqual(attributes["request_shape_sha256"], request.shape_sha256)
             self.assertEqual(attributes["payload_bytes"], request.payload_bytes)
             self.assertEqual(attributes["field_count"], request.field_count)
             self.assertEqual(attributes["leaf_count"], request.leaf_count)
-            self.assertEqual(
-                attributes["text_characters"], request.text_characters
-            )
+            self.assertEqual(attributes["text_characters"], request.text_characters)
             self.assertEqual(
                 attributes["private_reference_sha256"],
                 request.private_reference_sha256,
             )
+            self.assertEqual(
+                attributes["missing_evidence_labels"],
+                ("model-request-boundary",),
+            )
+            self.assertNotIn("model-request", attributes["missing_evidence_labels"])
         rendered = json.dumps(projected.trace, default=dict, sort_keys=True)
         for sentinel in (
             "SENTINEL_EXACT_PROVIDER_PAYLOAD",
@@ -839,9 +838,7 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
     def test_completed_projection_degrades_mismatched_native_observation(self) -> None:
         events = tuple(
             RunEvent("native-run", sequence, event_type, payload).to_mapping()
-            for sequence, (event_type, payload) in enumerate(
-                _native_events(), start=1
-            )
+            for sequence, (event_type, payload) in enumerate(_native_events(), start=1)
         )
 
         projected = workflow_evidence.project_completed_runtime_evidence(
@@ -858,14 +855,14 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertNotIn("model-call", _kinds(projected.trace))
-        self.assertTrue(_context_frames(projected.trace)[0]["attributes"]["missing_evidence"])
+        self.assertTrue(
+            _context_frames(projected.trace)[0]["attributes"]["missing_evidence"]
+        )
 
     def test_completed_projection_rejects_nonmonotonic_timestamps(self) -> None:
         events = tuple(
             RunEvent("native-run", sequence, event_type, payload).to_mapping()
-            for sequence, (event_type, payload) in enumerate(
-                _native_events(), start=1
-            )
+            for sequence, (event_type, payload) in enumerate(_native_events(), start=1)
         )
 
         with self.assertRaises(workflow_evidence.WorkflowEvidenceError):

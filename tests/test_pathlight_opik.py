@@ -20,7 +20,17 @@ from asterion.pathlight.experiment import (
     Variant,
 )
 from asterion.pathlight.opik import map_opik_exports
-from asterion.pathlight.protocol import PathlightError, TraceEvent, TraceGraph
+from asterion.pathlight.protocol import (
+    PathlightError,
+    TraceEvent,
+    TraceGraph,
+    trace_graph_from_mapping,
+)
+from tests.test_pathlight_cli import (
+    PRIVATE_PROVIDER_REQUEST_SENTINELS,
+    PUBLIC_PROVIDER_REQUEST_FIELDS,
+    _verified_provider_request_fixture,
+)
 
 
 def _digest(value: str) -> str:
@@ -31,7 +41,9 @@ def _opaque(value: int) -> str:
     return f"00000000-0000-4000-8000-{value:012x}"
 
 
-def _fixture() -> tuple[TraceGraph, ExperimentBundle, EvaluationBundle, DiagnosisBundle]:
+def _fixture() -> tuple[
+    TraceGraph, ExperimentBundle, EvaluationBundle, DiagnosisBundle
+]:
     trace = TraceGraph.build(
         _opaque(1),
         (
@@ -71,7 +83,9 @@ def _fixture() -> tuple[TraceGraph, ExperimentBundle, EvaluationBundle, Diagnosi
         ),
     )
     metric = MetricContract("ndcg-at-10", "ratio", True, "1.0.0")
-    dataset = DatasetSnapshot(_digest("dataset-contract"), _digest("dataset"), 10, "1.0.0")
+    dataset = DatasetSnapshot(
+        _digest("dataset-contract"), _digest("dataset"), 10, "1.0.0"
+    )
     evaluator = EvaluatorContract(
         metric.metric_contract_sha256,
         "rule",
@@ -185,7 +199,9 @@ def _fixture() -> tuple[TraceGraph, ExperimentBundle, EvaluationBundle, Diagnosi
 
 
 class PathlightOpikMappingTests(unittest.TestCase):
-    def test_mapping_links_safe_trace_experiment_trial_evaluation_and_proposal(self) -> None:
+    def test_mapping_links_safe_trace_experiment_trial_evaluation_and_proposal(
+        self,
+    ) -> None:
         trace, experiment, evaluations, diagnosis = _fixture()
 
         envelopes = map_opik_exports(
@@ -245,7 +261,52 @@ class PathlightOpikMappingTests(unittest.TestCase):
         ]
         self.assertEqual(len(evaluation_ids), 1)
 
-    def test_mapping_fails_closed_on_missing_diagnosis_or_trial_references(self) -> None:
+    def test_mapping_exports_closed_verified_request_metadata_without_private_values(
+        self,
+    ) -> None:
+        batch, trace_mapping = _verified_provider_request_fixture()
+        trace = trace_graph_from_mapping(trace_mapping)
+
+        envelopes = map_opik_exports(traces=(trace,))
+
+        model_spans = tuple(
+            item.to_mapping()["payload"]
+            for item in envelopes
+            if item.event_kind == "span.upsert"
+            and item.to_mapping()["payload"]["kind"] == "model-call"
+            and "request_sha256" in item.to_mapping()["payload"]
+        )
+        self.assertEqual(len(model_spans), len(batch.provider_requests))
+        requests_by_index = {
+            request.request_index: request for request in batch.provider_requests
+        }
+        for payload in model_spans:
+            request = requests_by_index[payload["request_index"]]
+            expected = {
+                "request_sha256": request.payload_sha256,
+                "request_shape_sha256": request.shape_sha256,
+                "payload_bytes": request.payload_bytes,
+                "field_count": request.field_count,
+                "leaf_count": request.leaf_count,
+                "text_characters": request.text_characters,
+                "private_reference_sha256": request.private_reference_sha256,
+            }
+            for field in PUBLIC_PROVIDER_REQUEST_FIELDS:
+                self.assertEqual(payload[field], expected[field])
+            self.assertEqual(
+                payload["missing_evidence_labels"], ["model-request-boundary"]
+            )
+        rendered = json.dumps(
+            [item.to_mapping() for item in envelopes], sort_keys=True
+        ).encode()
+        self.assertNotIn(b'"model-request"', rendered)
+        for sentinel in PRIVATE_PROVIDER_REQUEST_SENTINELS:
+            with self.subTest(sentinel=sentinel):
+                self.assertNotIn(sentinel.encode(), rendered)
+
+    def test_mapping_fails_closed_on_missing_diagnosis_or_trial_references(
+        self,
+    ) -> None:
         trace, experiment, evaluations, diagnosis = _fixture()
         with self.assertRaises(PathlightError):
             map_opik_exports(diagnoses=(diagnosis,))

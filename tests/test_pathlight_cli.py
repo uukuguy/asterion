@@ -18,7 +18,10 @@ from asterion.pathlight import (
     ExternalObservation,
     Finding,
     MetricContract,
+    ModelCallObservation,
     Proposal,
+    ProviderRequestObservation,
+    RuntimeObservationBatch,
     TraceEvent,
     TraceGraph,
     write_diagnosis_bundle,
@@ -35,11 +38,39 @@ from asterion.pathlight.experiment import (
     write_experiment_bundle,
 )
 from asterion.workflow_evidence import write_workflow_observation_bundle
+from asterion.runtime.host import RunEvent
+import asterion.workflow_evidence as workflow_evidence
 from tests.test_pathlight_flow import _rich_trace
+from tests.test_workflow_evidence_runtime import (
+    TRACE_ID as VERIFIED_TRACE_ID,
+    _native_events,
+    _request,
+    _verified_provider_request_batch,
+)
 
 
 TRACE_ID = "00000000-0000-4000-8000-000000000001"
 _T = TypeVar("_T")
+
+PUBLIC_PROVIDER_REQUEST_FIELDS = (
+    "request_sha256",
+    "request_shape_sha256",
+    "payload_bytes",
+    "field_count",
+    "leaf_count",
+    "text_characters",
+    "private_reference_sha256",
+)
+PRIVATE_PROVIDER_REQUEST_SENTINELS = (
+    "SENTINEL_RAW_PROVIDER_PAYLOAD",
+    "SENTINEL_RAW_PAYLOAD_KEY",
+    "SENTINEL_RAW_PAYLOAD_VALUE",
+    "SENTINEL_PRIVATE_PROVIDER_IDENTITY",
+    "SENTINEL_PRIVATE_MODEL_IDENTITY",
+    "SENTINEL_PRIVATE_CONFIG_IDENTITY",
+    "987654321",
+    "/private/SENTINEL_PROVIDER_REQUEST_CAPTURE",
+)
 
 
 class FailIfLoadedEntryPoint:
@@ -71,6 +102,81 @@ def _digest(value: str) -> str:
 
 def _ordered(values: tuple[_T, ...], *, reverse: bool) -> tuple[_T, ...]:
     return tuple(reversed(values)) if reverse else values
+
+
+def _verified_provider_request_fixture() -> tuple[
+    RuntimeObservationBatch, dict[str, object]
+]:
+    raw_payload = {
+        "SENTINEL_RAW_PAYLOAD_KEY": "SENTINEL_RAW_PAYLOAD_VALUE",
+        "provider": "SENTINEL_PRIVATE_PROVIDER_IDENTITY",
+        "model": "SENTINEL_PRIVATE_MODEL_IDENTITY",
+        "config": "SENTINEL_PRIVATE_CONFIG_IDENTITY",
+        "raw": "SENTINEL_RAW_PROVIDER_PAYLOAD",
+    }
+    payload_json = json.dumps(raw_payload, sort_keys=True, separators=(",", ":"))
+    payload_sha256 = _digest(payload_json)
+    private_path = "/private/SENTINEL_PROVIDER_REQUEST_CAPTURE"
+    private_fd = 987654321
+    inferred = _verified_provider_request_batch()
+    model_calls = tuple(
+        ModelCallObservation(
+            request_index=call.request_index,
+            frame_sha256=call.frame_sha256,
+            model_sha256=_digest(raw_payload["model"]),
+            request_sha256=payload_sha256,
+            response_sha256=call.response_sha256,
+            response_length=call.response_length,
+            input_tokens=call.input_tokens,
+            output_tokens=call.output_tokens,
+            status=call.status,
+            boundary_observed=False,
+        )
+        for call in inferred.model_calls
+    )
+    provider_requests = tuple(
+        ProviderRequestObservation.build(
+            request_index=call.request_index,
+            payload_sha256=payload_sha256,
+            payload_bytes=len(payload_json.encode("utf-8")),
+            shape_sha256=_digest(
+                "object:config,model,provider,raw,SENTINEL_RAW_PAYLOAD_KEY"
+            ),
+            field_count=len(raw_payload),
+            leaf_count=len(raw_payload),
+            text_characters=sum(len(value) for value in raw_payload.values()),
+            private_reference_sha256=_digest(
+                f"{private_path}:{private_fd}:{call.request_index}"
+            ),
+            segments=inferred.provider_requests[call.request_index - 1].segments,
+        )
+        for call in model_calls
+    )
+    batch = RuntimeObservationBatch.build(
+        run_sha256=inferred.run_sha256,
+        frames=inferred.frames,
+        model_calls=model_calls,
+        tools=inferred.tools,
+        provider_requests=provider_requests,
+        missing_evidence=("model-request-boundary",),
+    )
+    events = tuple(
+        RunEvent("native-run", sequence, event_type, payload).to_mapping()
+        for sequence, (event_type, payload) in enumerate(_native_events(), start=1)
+    )
+    projected = workflow_evidence.project_completed_runtime_evidence(
+        request=_request(),
+        event_observations=tuple(
+            (event, index * 10 + 2, index * 10 + 3)
+            for index, event in enumerate(events)
+        ),
+        native_observation=batch,
+        runtime_id="pi.reference",
+        trace_id=VERIFIED_TRACE_ID,
+        invocation_started_ns=1,
+        invocation_ended_ns=len(events) * 10 + 4,
+    )
+    return batch, json.loads(json.dumps(projected.trace, default=dict))
 
 
 def _evaluation(value_microunits: int) -> tuple[MetricContract, EvaluationRecord]:
@@ -732,6 +838,78 @@ class PathlightCliTests(unittest.TestCase):
             stdout.getvalue(),
             json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
         )
+
+    def test_trace_surfaces_expose_verified_request_structure_without_private_values(
+        self,
+    ) -> None:
+        batch, trace = _verified_provider_request_fixture()
+        self.assertEqual(batch.missing_evidence, ("model-request-boundary",))
+        self.assertNotIn("model-request", batch.missing_evidence)
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory).resolve() / "workflow-evidence.json"
+            write_workflow_observation_bundle(bundle, (), pathlight_traces=(trace,))
+            outputs: dict[str, object] = {}
+            for name, arguments in (
+                ("list", ["trace", "list"]),
+                (
+                    "show",
+                    ["trace", "show", "--trace-id", VERIFIED_TRACE_ID],
+                ),
+                (
+                    "tail",
+                    [
+                        "trace",
+                        "tail",
+                        "--trace-id",
+                        VERIFIED_TRACE_ID,
+                        "--after-sequence",
+                        "0",
+                    ],
+                ),
+                (
+                    "flow",
+                    ["trace", "flow", "--trace-id", VERIFIED_TRACE_ID],
+                ),
+            ):
+                stdout = io.StringIO()
+                code = main(
+                    ["pathlight", *arguments, "--evidence-file", str(bundle)],
+                    entry_points=(FailIfLoadedEntryPoint(),),
+                    stdout=stdout,
+                )
+                self.assertEqual(code, 0)
+                outputs[name] = json.loads(stdout.getvalue())
+
+        listed = outputs["list"]
+        assert isinstance(listed, list)
+        self.assertEqual(listed[0]["trace_id"], VERIFIED_TRACE_ID)
+        self.assertGreater(listed[0]["missing_evidence_count"], 0)
+        self.assertNotIn("request_shape_sha256", listed[0])
+        expected_requests = tuple(
+            {
+                "request_sha256": request.payload_sha256,
+                "request_shape_sha256": request.shape_sha256,
+                "payload_bytes": request.payload_bytes,
+                "field_count": request.field_count,
+                "leaf_count": request.leaf_count,
+                "text_characters": request.text_characters,
+                "private_reference_sha256": request.private_reference_sha256,
+            }
+            for request in batch.provider_requests
+        )
+        for surface in ("show", "tail", "flow"):
+            rendered = json.dumps(outputs[surface], sort_keys=True)
+            for expected in expected_requests:
+                with self.subTest(surface=surface, request=expected["request_sha256"]):
+                    for key, value in expected.items():
+                        self.assertIn(json.dumps(key), rendered)
+                        self.assertIn(json.dumps(value), rendered)
+            self.assertIn("model-request-boundary", rendered)
+            self.assertNotIn('"model-request"', rendered)
+        all_public_bytes = json.dumps(outputs, sort_keys=True).encode("utf-8")
+        for sentinel in PRIVATE_PROVIDER_REQUEST_SENTINELS:
+            with self.subTest(sentinel=sentinel):
+                self.assertNotIn(sentinel.encode("utf-8"), all_public_bytes)
 
     def test_trace_flow_rejects_nonprivate_evidence_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

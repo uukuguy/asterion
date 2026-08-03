@@ -19,6 +19,7 @@ from asterion.pathlight import (
     TraceEvent,
     validate_runtime_observation_batch,
 )
+from asterion.pathlight.protocol import SafeAttributeValue
 
 from asterion.runtime.host import (
     AgentRuntimeClient,
@@ -34,6 +35,17 @@ from asterion.workflow_evidence.collector import (
 )
 
 
+_MODEL_MISSING_EVIDENCE = frozenset(
+    {
+        "model-identity",
+        "model-request",
+        "model-request-boundary",
+        "model-response",
+        "token-usage",
+    }
+)
+
+
 @dataclass(frozen=True, slots=True)
 class CompletedRuntimeEvidence:
     """One safe workflow record and trace projected after runtime completion."""
@@ -45,9 +57,7 @@ class CompletedRuntimeEvidence:
 def project_completed_runtime_evidence(
     *,
     request: RunRequest,
-    event_observations: Sequence[
-        tuple[Mapping[str, object], int | None, int | None]
-    ],
+    event_observations: Sequence[tuple[Mapping[str, object], int | None, int | None]],
     native_observation: RuntimeObservationBatch | None,
     runtime_id: str,
     trace_id: str,
@@ -595,7 +605,7 @@ class _RuntimePathlightProjection:
             ),
             None,
         )
-        attributes: dict[str, str | int | bool] = {
+        attributes: dict[str, SafeAttributeValue] = {
             "request_index": call.request_index,
             "boundary_observed": call.boundary_observed,
             "observation_sha256": call.model_call_sha256,
@@ -637,6 +647,13 @@ class _RuntimePathlightProjection:
                     ),
                 }
             )
+        missing_evidence_labels = tuple(
+            label
+            for label in observation.missing_evidence
+            if label in _MODEL_MISSING_EVIDENCE
+        )
+        if missing_evidence_labels:
+            attributes["missing_evidence_labels"] = missing_evidence_labels
         if call.response_sha256 is not None:
             attributes["response_sha256"] = call.response_sha256
             assert call.response_length is not None
@@ -879,7 +896,7 @@ class _RuntimePathlightProjection:
         kind: str,
         parent_span_id: str | None,
         *,
-        attributes: Mapping[str, str | int | bool] | None = None,
+        attributes: Mapping[str, SafeAttributeValue] | None = None,
         links: tuple[Mapping[str, str], ...] = (),
         timestamp_ns: int | None,
         span_id: str | None = None,
@@ -887,7 +904,7 @@ class _RuntimePathlightProjection:
         if self._trace_id is None or timestamp_ns is None:
             return None
         sequence = self._sequence + 1
-        effective_attributes: dict[str, str | int | bool] = dict(attributes or {})
+        effective_attributes: dict[str, SafeAttributeValue] = dict(attributes or {})
         if timestamp_ns == 0:
             effective_attributes["missing_evidence"] = True
         span_id = (
@@ -923,7 +940,7 @@ class _RuntimePathlightProjection:
         status: str,
         kind: str,
         *,
-        attributes: Mapping[str, str | int | bool] | None = None,
+        attributes: Mapping[str, SafeAttributeValue] | None = None,
         links: tuple[Mapping[str, str], ...] = (),
         timestamp_ns: int | None,
     ) -> None:
@@ -932,7 +949,7 @@ class _RuntimePathlightProjection:
         started_ns = self._started_ns.get(span_id)
         if started_ns is None or timestamp_ns < started_ns:
             raise ValueError("Pathlight span timestamps are invalid")
-        terminal_attributes: dict[str, str | int | bool] = dict(attributes or {})
+        terminal_attributes: dict[str, SafeAttributeValue] = dict(attributes or {})
         if started_ns == 0 or timestamp_ns == 0:
             terminal_attributes["missing_evidence"] = True
         else:
@@ -1018,7 +1035,7 @@ def _event_span_id(
     sequence: int,
     kind: str,
     parent_span_id: str | None,
-    attributes: Mapping[str, str | int | bool],
+    attributes: Mapping[str, SafeAttributeValue],
 ) -> str:
     return _opaque_digest_id(
         _canonical_digest(
