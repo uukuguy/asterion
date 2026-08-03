@@ -587,6 +587,14 @@ class _RuntimePathlightProjection:
         frame_span_id: str,
         observation: RuntimeObservationBatch,
     ) -> None:
+        provider_request = next(
+            (
+                request
+                for request in observation.provider_requests
+                if request.request_index == call.request_index
+            ),
+            None,
+        )
         attributes: dict[str, str | int | bool] = {
             "request_index": call.request_index,
             "boundary_observed": call.boundary_observed,
@@ -616,6 +624,19 @@ class _RuntimePathlightProjection:
             attributes["model_id"] = call.model_sha256
         if call.request_sha256 is not None:
             attributes["request_sha256"] = call.request_sha256
+        if provider_request is not None:
+            attributes.update(
+                {
+                    "request_shape_sha256": provider_request.shape_sha256,
+                    "payload_bytes": provider_request.payload_bytes,
+                    "field_count": provider_request.field_count,
+                    "leaf_count": provider_request.leaf_count,
+                    "text_characters": provider_request.text_characters,
+                    "private_reference_sha256": (
+                        provider_request.private_reference_sha256
+                    ),
+                }
+            )
         if call.response_sha256 is not None:
             attributes["response_sha256"] = call.response_sha256
             assert call.response_length is not None

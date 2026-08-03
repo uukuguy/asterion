@@ -68,12 +68,14 @@ _DIGEST_ATTRIBUTES = frozenset(
         "policy_sha256",
         "observation_sha256",
         "request_sha256",
+        "request_shape_sha256",
         "response_sha256",
         "run_sha256",
         "runtime_sha256",
         "scope_sha256",
         "source_call_sha256",
         "task_sha256",
+        "private_reference_sha256",
     }
 )
 _OPAQUE_ID_ATTRIBUTES = frozenset(
@@ -148,12 +150,16 @@ _NONNEGATIVE_INT_ATTRIBUTES = frozenset(
         "cost_microunits",
         "duration_ns",
         "frame_index",
+        "field_count",
         "input_tokens",
+        "leaf_count",
         "output_tokens",
+        "payload_bytes",
         "request_index",
         "response_length",
         "segment_count",
         "segment_index",
+        "text_characters",
     }
 )
 _INTEGER_ATTRIBUTES = frozenset({"metric_value"})

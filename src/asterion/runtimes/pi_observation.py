@@ -16,6 +16,7 @@ from asterion.pathlight.runtime_observation import (
     ContextFrameObservation,
     ContextSegmentSummary,
     ModelCallObservation,
+    ProviderRequestObservation,
     RuntimeObservationBatch,
     ToolCallObservation,
 )
@@ -88,6 +89,7 @@ class PiObservationBuilder:
         self._messages: list[Mapping[str, object]] = []
         self._retry_native_starts: frozenset[int] | None = None
         self._inferred_call_open = False
+        self._provider_requests: tuple[ProviderRequestObservation, ...] = ()
 
     def consume(self, event: Mapping[str, object], timestamp_ns: int) -> None:
         """Consume one native event without allowing observation failures out."""
@@ -118,6 +120,30 @@ class PiObservationBuilder:
             message_count=len(self._messages),
         )
 
+    def reconcile_provider_requests(
+        self, values: tuple[ProviderRequestObservation, ...]
+    ) -> None:
+        """Accept a complete verified request tuple or leave inference unchanged."""
+
+        try:
+            if type(values) is not tuple or any(
+                type(value) is not ProviderRequestObservation for value in values
+            ):
+                return
+            requests = tuple(values)
+            if (
+                any(not frame.valid for frame in self._frames)
+                or len(requests) != len(self._frames)
+                or len(requests) != len(self._model_calls)
+                or tuple(request.request_index for request in requests)
+                != tuple(range(1, len(requests) + 1))
+            ):
+                return
+            self._completed_batch("provider-request-reconciliation", requests)
+        except Exception:
+            return
+        self._provider_requests = requests
+
     def rollback(self, checkpoint: PiObservationCheckpoint) -> None:
         """Discard events belonging to a Pi attempt that will be retried."""
 
@@ -138,11 +164,17 @@ class PiObservationBuilder:
             for frame in self._frames[checkpoint.frame_count :]
             if frame.valid
         )
+        reconciliation_crossed = bool(self._provider_requests) and (
+            checkpoint.frame_count < len(self._frames)
+            or checkpoint.model_call_count < len(self._model_calls)
+        )
         del self._frames[checkpoint.frame_count :]
         del self._model_calls[checkpoint.model_call_count :]
         del self._tools[checkpoint.tool_count :]
         del self._messages[checkpoint.message_count :]
         self._inferred_call_open = False
+        if reconciliation_crossed:
+            self._provider_requests = ()
         if removed_native_indexes:
             reset_start = (
                 self._frames[-1].native_request_index + 1
@@ -158,23 +190,47 @@ class PiObservationBuilder:
 
         if any(not frame.valid for frame in self._frames):
             return _empty_batch(run_id)
+        if self._provider_requests:
+            try:
+                return self._completed_batch(run_id, self._provider_requests)
+            except Exception:
+                pass
         try:
-            tools = self._completed_tools()
-            tools_by_call = {tool.call_sha256: tool for tool in tools}
-            frames = self._completed_frames(tools_by_call)
-            calls = self._completed_model_calls(frames)
-            labels = _missing_labels(frames, calls, tools)
-            return RuntimeObservationBatch.build(
-                run_sha256=_digest_text(run_id),
-                frames=frames,
-                model_calls=calls,
-                tools=tools,
-                missing_evidence=tuple(sorted(labels)),
-            )
+            return self._completed_batch(run_id, ())
         except Exception:
             return _empty_batch(run_id)
 
+    def _completed_batch(
+        self,
+        run_id: str,
+        provider_requests: tuple[ProviderRequestObservation, ...],
+    ) -> RuntimeObservationBatch:
+        tools = self._completed_tools()
+        tools_by_call = {tool.call_sha256: tool for tool in tools}
+        frames = (
+            tuple(
+                ContextFrameObservation(
+                    frame_index=request.request_index,
+                    segments=request.segments,
+                )
+                for request in provider_requests
+            )
+            if provider_requests
+            else self._completed_frames(tools_by_call)
+        )
+        calls = self._completed_model_calls(frames, provider_requests)
+        labels = _missing_labels(frames, calls, tools)
+        return RuntimeObservationBatch.build(
+            run_sha256=_digest_text(run_id),
+            frames=frames,
+            model_calls=calls,
+            tools=tools,
+            provider_requests=provider_requests,
+            missing_evidence=tuple(sorted(labels)),
+        )
+
     def _consume_provider_context(self, event: Mapping[str, object]) -> None:
+        self._provider_requests = ()
         if self._inferred_call_open:
             self._frames.pop()
             self._model_calls.pop()
@@ -232,6 +288,7 @@ class PiObservationBuilder:
             or any(not call.response_observed for call in self._model_calls)
         ):
             return
+        self._provider_requests = ()
         index = len(self._frames) + 1
         segments = (
             _missing_segment(),
@@ -395,21 +452,34 @@ class PiObservationBuilder:
         return tuple(frames)
 
     def _completed_model_calls(
-        self, frames: tuple[ContextFrameObservation, ...]
+        self,
+        frames: tuple[ContextFrameObservation, ...],
+        provider_requests: tuple[ProviderRequestObservation, ...] = (),
     ) -> tuple[ModelCallObservation, ...]:
         frame_hashes = {frame.frame_index: frame.frame_sha256 for frame in frames}
+        requests_by_index = {
+            request.request_index: request for request in provider_requests
+        }
         return tuple(
             ModelCallObservation(
                 request_index=call.frame_index,
                 frame_sha256=frame_hashes[call.frame_index],
                 model_sha256=call.model_sha256,
-                request_sha256=call.request_sha256,
+                request_sha256=(
+                    requests_by_index[call.frame_index].payload_sha256
+                    if call.frame_index in requests_by_index
+                    else call.request_sha256
+                ),
                 response_sha256=call.response_sha256,
                 response_length=call.response_length,
                 input_tokens=call.input_tokens,
                 output_tokens=call.output_tokens,
                 status=call.status,
-                boundary_observed=call.boundary_observed,
+                boundary_observed=(
+                    False
+                    if call.frame_index in requests_by_index
+                    else call.boundary_observed
+                ),
             )
             for call in self._model_calls
         )

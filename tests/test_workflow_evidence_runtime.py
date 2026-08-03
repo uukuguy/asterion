@@ -14,6 +14,7 @@ from asterion.pathlight import (
     ContextSegmentSummary,
     MemoryPathlightRecorder,
     ModelCallObservation,
+    ProviderRequestObservation,
     RuntimeObservationBatch,
     ToolCallObservation,
     TraceEvent,
@@ -452,6 +453,49 @@ def _missing_batch() -> RuntimeObservationBatch:
     )
 
 
+def _verified_provider_request_batch() -> RuntimeObservationBatch:
+    inferred = _batch()
+    model_calls = tuple(
+        ModelCallObservation(
+            request_index=call.request_index,
+            frame_sha256=call.frame_sha256,
+            model_sha256=call.model_sha256,
+            request_sha256=_digest(f"SENTINEL_EXACT_PROVIDER_PAYLOAD_{call.request_index}"),
+            response_sha256=call.response_sha256,
+            response_length=call.response_length,
+            input_tokens=call.input_tokens,
+            output_tokens=call.output_tokens,
+            status=call.status,
+            boundary_observed=False,
+        )
+        for call in inferred.model_calls
+    )
+    provider_requests = tuple(
+        ProviderRequestObservation.build(
+            request_index=call.request_index,
+            payload_sha256=call.request_sha256,
+            payload_bytes=100 + call.request_index,
+            shape_sha256=_digest(f"SENTINEL_REQUEST_SHAPE_{call.request_index}"),
+            field_count=10 + call.request_index,
+            leaf_count=20 + call.request_index,
+            text_characters=30 + call.request_index,
+            private_reference_sha256=_digest(
+                f"SENTINEL_PRIVATE_REFERENCE_{call.request_index}"
+            ),
+            segments=inferred.frames[0].segments,
+        )
+        for call in model_calls
+    )
+    return RuntimeObservationBatch.build(
+        run_sha256=inferred.run_sha256,
+        frames=inferred.frames,
+        model_calls=model_calls,
+        tools=inferred.tools,
+        provider_requests=provider_requests,
+        missing_evidence=("model-request-boundary",),
+    )
+
+
 def _two_frame_batch() -> RuntimeObservationBatch:
     tool = _batch().tools[0]
     first_frame = ContextFrameObservation(
@@ -738,6 +782,59 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
             "pi.reference",
         ):
             self.assertNotIn(private_value, rendered)
+
+    def test_projects_verified_provider_request_shape_counts_and_private_reference(
+        self,
+    ) -> None:
+        events = tuple(
+            RunEvent("native-run", sequence, event_type, payload).to_mapping()
+            for sequence, (event_type, payload) in enumerate(
+                _native_events(), start=1
+            )
+        )
+        batch = _verified_provider_request_batch()
+
+        projected = workflow_evidence.project_completed_runtime_evidence(
+            request=_request(),
+            event_observations=tuple(
+                (event, index * 10 + 2, index * 10 + 3)
+                for index, event in enumerate(events)
+            ),
+            native_observation=batch,
+            runtime_id="pi.reference",
+            trace_id=TRACE_ID,
+            invocation_started_ns=1,
+            invocation_ended_ns=len(events) * 10 + 4,
+        )
+
+        starts = [
+            event
+            for event in _started_events(projected.trace)
+            if event["kind"] == "model-call"
+        ]
+        self.assertEqual(len(starts), 2)
+        for event, request in zip(starts, batch.provider_requests, strict=True):
+            attributes = event["attributes"]
+            self.assertEqual(
+                attributes["request_shape_sha256"], request.shape_sha256
+            )
+            self.assertEqual(attributes["payload_bytes"], request.payload_bytes)
+            self.assertEqual(attributes["field_count"], request.field_count)
+            self.assertEqual(attributes["leaf_count"], request.leaf_count)
+            self.assertEqual(
+                attributes["text_characters"], request.text_characters
+            )
+            self.assertEqual(
+                attributes["private_reference_sha256"],
+                request.private_reference_sha256,
+            )
+        rendered = json.dumps(projected.trace, default=dict, sort_keys=True)
+        for sentinel in (
+            "SENTINEL_EXACT_PROVIDER_PAYLOAD",
+            "SENTINEL_REQUEST_SHAPE",
+            "SENTINEL_PRIVATE_REFERENCE",
+        ):
+            self.assertNotIn(sentinel, rendered)
 
     def test_completed_projection_degrades_mismatched_native_observation(self) -> None:
         events = tuple(
