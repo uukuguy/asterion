@@ -2318,7 +2318,7 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
             )
             self.assertNotEqual(first_metadata.st_ino, second_metadata.st_ino)
             self.assertEqual(first_metadata.st_mode & 0o777, 0o600)
-            self.assertEqual(second_metadata.st_mode & 0o777, 0o600)
+            self.assertEqual(second_metadata.st_mode & 0o777, 0o400)
 
     def test_bounded_native_attempts_retry_invalid_completed_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

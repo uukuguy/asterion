@@ -200,6 +200,48 @@ class ProviderRequestCaptureTests(unittest.TestCase):
         finally:
             capture.close()
 
+    def test_validated_capture_seals_read_only_and_closes_writable_descriptor(
+        self,
+    ) -> None:
+        capture = self._open()
+        raw, safe = _captured_pair(_fixture("valid-simple.json"))
+        self._write(capture, raw)
+        descriptor = capture.child_fd
+
+        self.assertEqual(len(capture.validate((safe,))), 1)
+        seal = getattr(capture, "seal", None)
+        self.assertTrue(callable(seal))
+        assert callable(seal)
+        seal()
+
+        self.assertEqual(
+            stat.S_IMODE((self.root / CAPTURE_NAME).stat().st_mode), 0o400
+        )
+        with self.assertRaises(ProviderRequestCaptureError):
+            _ = capture.child_fd
+        with self.assertRaises(OSError):
+            os.write(descriptor, b"late-write")
+        capture.close()
+
+    def test_mutation_between_validation_and_seal_is_rejected(self) -> None:
+        capture = self._open()
+        try:
+            raw, safe = _captured_pair(_fixture("valid-simple.json"))
+            self._write(capture, raw)
+            self.assertEqual(len(capture.validate((safe,))), 1)
+            self._write(capture, b"SENTINEL_LATE_MUTATION\n")
+
+            with self.assertRaisesRegex(
+                ProviderRequestCaptureError, f"^{FIXED_ERROR}$"
+            ):
+                capture.seal()
+
+            self.assertEqual(
+                stat.S_IMODE((self.root / CAPTURE_NAME).stat().st_mode), 0o600
+            )
+        finally:
+            capture.close()
+
     def test_cross_language_lone_surrogate_uses_node_utf8_replacement_semantics(
         self,
     ) -> None:
@@ -611,6 +653,17 @@ class ProviderRequestCaptureTests(unittest.TestCase):
             ):
                 self._assert_invalid(capture, (safe,))
             pread.assert_not_called()
+        finally:
+            capture.close()
+
+    def test_validation_fsync_failure_is_fixed_redacted_and_recoverable(self) -> None:
+        capture = self._open()
+        try:
+            raw, safe = _captured_pair(_fixture("valid-simple.json"))
+            self._write(capture, raw)
+            with patch("os.fsync", side_effect=OSError("SENTINEL_FSYNC")):
+                self._assert_invalid(capture, (safe,))
+            self.assertEqual(len(capture.validate((safe,))), 1)
         finally:
             capture.close()
 

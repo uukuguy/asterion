@@ -81,10 +81,12 @@ def _invalid() -> NoReturn:
 class ProviderRequestCapture:
     """An exclusively-created private capture held by descriptor, never by path."""
 
-    __slots__ = ("_fd",)
+    __slots__ = ("_fd", "_identity", "_validated_snapshot")
 
-    def __init__(self, descriptor: int) -> None:
+    def __init__(self, descriptor: int, identity: tuple[int, int]) -> None:
         self._fd = descriptor
+        self._identity = identity
+        self._validated_snapshot: tuple[int, int, int, int] | None = None
 
     @classmethod
     def open_at(cls, directory_fd: int) -> ProviderRequestCapture:
@@ -106,7 +108,7 @@ class ProviderRequestCapture:
                 or stat.S_IMODE(metadata.st_mode) != 0o600
             ):
                 _invalid()
-            return cls(descriptor)
+            return cls(descriptor, (metadata.st_dev, metadata.st_ino))
         except ProviderRequestCaptureError:
             if descriptor >= 0:
                 _close_quietly(descriptor)
@@ -130,9 +132,10 @@ class ProviderRequestCapture:
         """Cross-check raw JSONL against safe entries as one atomic batch."""
 
         try:
+            self._validated_snapshot = None
             if self._fd < 0 or type(safe_entries) is not tuple:
                 _invalid()
-            raw = _read_held_capture(self._fd)
+            raw, snapshot = _read_held_capture(self._fd)
             records = _parse_records(raw)
             if len(records) != len(safe_entries):
                 _invalid()
@@ -148,11 +151,53 @@ class ProviderRequestCapture:
                     1,
                 )
             )
+            self._validated_snapshot = snapshot
             return observations
         except ProviderRequestCaptureError:
             raise
         except RecursionError:
             _invalid()
+        except Exception:
+            _invalid()
+
+    def seal(self) -> None:
+        """Make the verified held inode read-only and close its writable FD."""
+
+        try:
+            if self._fd < 0:
+                _invalid()
+            os.fsync(self._fd)
+            before = os.fstat(self._fd)
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or stat.S_IMODE(before.st_mode) != 0o600
+                or (before.st_dev, before.st_ino) != self._identity
+                or (
+                    self._validated_snapshot is not None
+                    and (
+                        before.st_dev,
+                        before.st_ino,
+                        before.st_size,
+                        before.st_mtime_ns,
+                    )
+                    != self._validated_snapshot
+                )
+            ):
+                _invalid()
+            os.fchmod(self._fd, 0o400)
+            os.fsync(self._fd)
+            after = os.fstat(self._fd)
+            if (
+                not stat.S_ISREG(after.st_mode)
+                or stat.S_IMODE(after.st_mode) != 0o400
+                or (after.st_dev, after.st_ino) != self._identity
+                or (after.st_size, after.st_mtime_ns)
+                != (before.st_size, before.st_mtime_ns)
+            ):
+                _invalid()
+            self.close()
+        except ProviderRequestCaptureError:
+            raise
         except Exception:
             _invalid()
 
@@ -176,7 +221,9 @@ def _close_quietly(descriptor: int) -> None:
         pass
 
 
-def _read_held_capture(descriptor: int) -> bytes:
+def _read_held_capture(
+    descriptor: int,
+) -> tuple[bytes, tuple[int, int, int, int]]:
     os.fsync(descriptor)
     before = os.fstat(descriptor)
     if (
@@ -202,7 +249,12 @@ def _read_held_capture(descriptor: int) -> bytes:
         before.st_mtime_ns,
     ) or stat.S_IMODE(after.st_mode) != 0o600:
         _invalid()
-    return b"".join(chunks)
+    return b"".join(chunks), (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+    )
 
 
 def _parse_records(raw: bytes) -> tuple[dict[str, object], ...]:

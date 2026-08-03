@@ -264,7 +264,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
             if name.endswith(".py")
         }
         self.assertEqual(declared, reachable)
-        self.assertEqual(len(DCI_COMPLETE_IMPLEMENTATION_RESOURCES), 74)
+        self.assertEqual(len(DCI_COMPLETE_IMPLEMENTATION_RESOURCES), 76)
 
     def test_transitive_identity_contains_explicit_packaged_resource_closure(
         self,

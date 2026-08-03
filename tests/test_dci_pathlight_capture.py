@@ -16,6 +16,10 @@ from asterion.capabilities.dci.implementation.evaluation.artifacts import (
     DciArtifactError,
     DciRunRecorder,
 )
+from asterion.capabilities.dci.implementation.evaluation.provider_requests import (
+    ProviderRequestCapture,
+    ProviderRequestCaptureError,
+)
 from asterion.capabilities.dci.implementation.runtime.run import (
     DciRunError,
     DciRunRequest,
@@ -101,10 +105,12 @@ class _CompletedClient:
 
 class _CapturedClient:
     construction: dict[str, object] = {}
+    stop_calls = 0
     write_capture = True
 
     def __init__(self, **kwargs: object) -> None:
         type(self).construction = dict(kwargs)
+        type(self).stop_calls = 0
         self.observation_fd = kwargs.get("observation_fd")
         self.entries: tuple[dict[str, object], ...] = ()
 
@@ -190,7 +196,7 @@ class _CapturedClient:
         return ""
 
     def stop(self) -> None:
-        pass
+        type(self).stop_calls += 1
 
 
 class _MismatchedCapturedClient(_CapturedClient):
@@ -212,6 +218,25 @@ class _WriteFailedCapturedClient(_CapturedClient):
 class _RpcFailedCapturedClient(_CapturedClient):
     def get_provider_request_entries(self) -> tuple[dict[str, object], ...]:
         raise RuntimeError("injected observer RPC failure")
+
+
+class _PostRpcWriteClient(_CapturedClient):
+    evidence_path: Path | None = None
+    published_before_stop = False
+    stop_calls = 0
+
+    def stop(self) -> None:
+        type(self).stop_calls += 1
+        target = type(self).evidence_path
+        type(self).published_before_stop = bool(target is not None and target.exists())
+        assert isinstance(self.observation_fd, int)
+        os.write(self.observation_fd, b"SENTINEL_POST_RPC_WRITE\n")
+
+
+class _EarlyStopFailedClient(_CapturedClient):
+    def stop(self) -> None:
+        type(self).stop_calls += 1
+        raise RuntimeError("injected early stop failure")
 
 
 class _ProviderFailedClient:
@@ -290,6 +315,225 @@ def _started_kinds(trace: Mapping[str, object]) -> list[str]:
 
 
 class DciPathlightCaptureTests(unittest.TestCase):
+    def test_child_is_quiesced_before_capture_validation_and_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            output = root / "post-rpc-write"
+            _PostRpcWriteClient.evidence_path = output / "workflow-evidence.json"
+            _PostRpcWriteClient.published_before_stop = False
+            _PostRpcWriteClient.stop_calls = 0
+            with patch(
+                "asterion.capabilities.dci.implementation.runtime.run.PiRpcClient",
+                _PostRpcWriteClient,
+            ):
+                result = run_pi_research(
+                    _paths(root),
+                    DciRunRequest(
+                        run_id="post-rpc-write-run",
+                        question=f"question-{_SENTINEL}",
+                        cwd=root,
+                        tools="read",
+                        timeout_seconds=None,
+                    ),
+                    output_dir=output,
+                )
+
+            bundle = read_workflow_observation_bundle(
+                output / "workflow-evidence.json"
+            )
+            model_calls = [
+                event
+                for event in bundle.pathlight_traces[0]["events"]
+                if event["kind"] == "model-call" and event["status"] == "started"
+            ]
+            self.assertEqual(result.status, "completed")
+            self.assertEqual(_PostRpcWriteClient.stop_calls, 1)
+            self.assertFalse(_PostRpcWriteClient.published_before_stop)
+            self.assertTrue(
+                all("request_shape_sha256" not in event["attributes"] for event in model_calls)
+            )
+            capture = output / "provider-requests.jsonl"
+            self.assertEqual(capture.stat().st_mode & 0o777, 0o400)
+            with self.assertRaises(OSError):
+                capture.open("ab").write(b"late-write")
+
+    def test_early_stop_failure_is_single_attempt_and_observation_only(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            output = root / "early-stop-failure"
+            with patch(
+                "asterion.capabilities.dci.implementation.runtime.run.PiRpcClient",
+                _EarlyStopFailedClient,
+            ):
+                result = run_pi_research(
+                    _paths(root),
+                    DciRunRequest(
+                        run_id="early-stop-failure-run",
+                        question=f"question-{_SENTINEL}",
+                        cwd=root,
+                        tools="read",
+                        timeout_seconds=None,
+                    ),
+                    output_dir=output,
+                )
+
+            bundle = read_workflow_observation_bundle(
+                output / "workflow-evidence.json"
+            )
+            model_calls = [
+                event
+                for event in bundle.pathlight_traces[0]["events"]
+                if event["kind"] == "model-call" and event["status"] == "started"
+            ]
+            self.assertEqual(result.status, "completed")
+            self.assertEqual(result.final_text, f"answer-{_SENTINEL}")
+            self.assertEqual(_EarlyStopFailedClient.stop_calls, 1)
+            self.assertTrue(
+                all("request_shape_sha256" not in event["attributes"] for event in model_calls)
+            )
+            self.assertEqual(
+                (output / "provider-requests.jsonl").stat().st_mode & 0o777,
+                0o600,
+            )
+
+    def test_validation_fsync_failure_preserves_result_and_seals_fallback(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            output = root / "validation-fsync-failure"
+            with (
+                patch(
+                    "asterion.capabilities.dci.implementation.runtime.run.PiRpcClient",
+                    _CapturedClient,
+                ),
+                patch.object(
+                    ProviderRequestCapture,
+                    "validate",
+                    autospec=True,
+                    side_effect=ProviderRequestCaptureError(
+                        "provider request capture is invalid"
+                    ),
+                ),
+            ):
+                result = run_pi_research(
+                    _paths(root),
+                    DciRunRequest(
+                        run_id="validation-fsync-failure-run",
+                        question=f"question-{_SENTINEL}",
+                        cwd=root,
+                        tools="read",
+                        timeout_seconds=None,
+                    ),
+                    output_dir=output,
+                )
+
+            bundle = read_workflow_observation_bundle(
+                output / "workflow-evidence.json"
+            )
+            model_calls = [
+                event
+                for event in bundle.pathlight_traces[0]["events"]
+                if event["kind"] == "model-call" and event["status"] == "started"
+            ]
+            descriptor = _CapturedClient.construction["observation_fd"]
+            assert isinstance(descriptor, int)
+            self.assertEqual(result.status, "completed")
+            self.assertEqual(_CapturedClient.stop_calls, 1)
+            self.assertEqual(
+                (output / "provider-requests.jsonl").stat().st_mode & 0o777,
+                0o400,
+            )
+            with self.assertRaises(OSError):
+                os.fstat(descriptor)
+            self.assertTrue(
+                all("request_shape_sha256" not in event["attributes"] for event in model_calls)
+            )
+
+    def test_capture_close_failure_keeps_fallback_and_runs_all_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            output = root / "capture-close-failure"
+            extension = root / "observation.ts"
+            extension.write_text("fixture", encoding="utf-8")
+            cleanup: list[str] = []
+            capture_close_calls = 0
+            recorder_close = DciRunRecorder.close
+            capture_close = ProviderRequestCapture.close
+
+            @contextmanager
+            def resolver():
+                try:
+                    yield SimpleNamespace(
+                        path=extension,
+                        contract_version="dci.pathlight-provider-request-capture/v1",
+                    )
+                finally:
+                    cleanup.append("extension")
+
+            def tracked_recorder_close(recorder: DciRunRecorder) -> None:
+                cleanup.append("recorder")
+                recorder_close(recorder)
+
+            def failing_capture_close(capture: ProviderRequestCapture) -> None:
+                nonlocal capture_close_calls
+                capture_close_calls += 1
+                cleanup.append("capture")
+                capture_close(capture)
+                if capture_close_calls == 1:
+                    raise ProviderRequestCaptureError(
+                        "provider request capture is invalid"
+                    )
+
+            with (
+                patch(
+                    "asterion.capabilities.dci.implementation.runtime.run.PiRpcClient",
+                    _CapturedClient,
+                ),
+                patch(
+                    "asterion.capabilities.dci.implementation.research.pathlight_observation.resolve_pathlight_observation_extension",
+                    resolver,
+                ),
+                patch.object(
+                    DciRunRecorder, "close", autospec=True, side_effect=tracked_recorder_close
+                ),
+                patch.object(
+                    ProviderRequestCapture,
+                    "close",
+                    autospec=True,
+                    side_effect=failing_capture_close,
+                ),
+            ):
+                result = run_pi_research(
+                    _paths(root),
+                    DciRunRequest(
+                        run_id="capture-close-failure-run",
+                        question=f"question-{_SENTINEL}",
+                        cwd=root,
+                        tools="read",
+                        timeout_seconds=None,
+                    ),
+                    output_dir=output,
+                )
+
+            bundle = read_workflow_observation_bundle(
+                output / "workflow-evidence.json"
+            )
+            model_calls = [
+                event
+                for event in bundle.pathlight_traces[0]["events"]
+                if event["kind"] == "model-call" and event["status"] == "started"
+            ]
+            self.assertEqual(result.status, "completed")
+            self.assertEqual(_CapturedClient.stop_calls, 1)
+            self.assertGreaterEqual(capture_close_calls, 2)
+            self.assertIn("capture", cleanup)
+            self.assertIn("recorder", cleanup)
+            self.assertIn("extension", cleanup)
+            self.assertTrue(
+                all("request_shape_sha256" not in event["attributes"] for event in model_calls)
+            )
+
     def test_observation_setup_failures_leave_completed_safe_gap(self) -> None:
         cases = ("resolver", "capture-open")
         for name in cases:
@@ -522,7 +766,7 @@ class DciPathlightCaptureTests(unittest.TestCase):
             self.assertTrue(extension.is_absolute())
             capture = output / "provider-requests.jsonl"
             self.assertTrue(capture.is_file())
-            self.assertEqual(capture.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(capture.stat().st_mode & 0o777, 0o400)
             bundle = read_workflow_observation_bundle(output / "workflow-evidence.json")
             record = bundle.records[0]
             trace = bundle.pathlight_traces[0]

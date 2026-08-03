@@ -495,6 +495,7 @@ def run_pi_research(
         raise DciRunError(message) from None
 
     client: PiRpcClient | None = None
+    client_stop_attempted = False
     observation_stack = ExitStack()
     provider_request_capture = None
     observation_extension = None
@@ -617,13 +618,13 @@ def run_pi_research(
             )
         if not final_text.strip():
             raise RuntimeError("Pi provider returned no final answer")
+        provider_request_safe_entries = None
         if provider_request_capture is not None:
             try:
                 safe_entries = client.get_provider_request_entries()
-                observations = provider_request_capture.validate(
-                    tuple(entry["data"] for entry in safe_entries)
+                provider_request_safe_entries = tuple(
+                    entry["data"] for entry in safe_entries
                 )
-                recorder.reconcile_provider_requests(observations)
             except Exception:
                 pass
         if context_profile is not None and request.keep_session:
@@ -646,6 +647,35 @@ def run_pi_research(
             context_evidence_recorded = True
         stderr_getter = getattr(client, "get_stderr", None)
         stderr_text = stderr_getter() if callable(stderr_getter) else ""
+        client_stop_attempted = True
+        client_quiesced = False
+        try:
+            client.stop()
+        except Exception:
+            pass
+        else:
+            client_quiesced = True
+        if provider_request_capture is not None and client_quiesced:
+            observations = None
+            if provider_request_safe_entries is not None:
+                try:
+                    observations = provider_request_capture.validate(
+                        provider_request_safe_entries
+                    )
+                except Exception:
+                    pass
+            sealed = False
+            try:
+                provider_request_capture.seal()
+            except Exception:
+                pass
+            else:
+                sealed = True
+            if observations is not None and sealed:
+                try:
+                    recorder.reconcile_provider_requests(observations)
+                except Exception:
+                    pass
         normalized_events = recorder.finalize(
             status="completed",
             final_text=final_text,
@@ -690,8 +720,11 @@ def run_pi_research(
         raise DciRunError("DCI Pi execution failed") from None
     finally:
         try:
-            if client is not None:
-                client.stop()
+            if client is not None and not client_stop_attempted:
+                try:
+                    client.stop()
+                except Exception:
+                    pass
         finally:
             try:
                 if provider_request_capture is not None:
