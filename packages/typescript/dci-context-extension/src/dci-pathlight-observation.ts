@@ -16,6 +16,9 @@ delete runtimeProcess.env.ASTERION_DCI_PATHLIGHT_CAPTURE_CONTRACT;
 
 const MAX_PRIVATE_RECORD_BYTES = 64 * 1024 * 1024;
 const MAX_NATIVE_GENERATION_BYTES = 512 * 1024 * 1024;
+// The Python verifier's shape projection expands nesting; 128 preserves a wide
+// operational margin below its recursion boundary while exceeding real payloads.
+const MAX_JSON_STRUCTURAL_DEPTH = 128;
 const FIXED_ERROR = "provider request observation unavailable";
 
 type SegmentRole = "system" | "user" | "assistant" | "tool-result" | "unknown";
@@ -122,6 +125,34 @@ function strictJsonStringify(value: unknown): string {
   } catch {
     fail();
   }
+}
+
+function validateSerializedJsonDepth(value: string): void {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (const character of value) {
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+    } else if (character === "{" || character === "[") {
+      depth += 1;
+      if (depth > MAX_JSON_STRUCTURAL_DEPTH) fail();
+    } else if (character === "}" || character === "]") {
+      depth -= 1;
+      if (depth < 0) fail();
+    }
+  }
+  if (inString || escaped || depth !== 0) fail();
 }
 
 function canonicalJson(value: unknown): string {
@@ -329,6 +360,7 @@ function segmentDrafts(payload: unknown): SegmentDraft[] {
 
 function summarizePayload(payload: unknown): SummarizedPayload {
   const payloadJson = strictJsonStringify(payload);
+  validateSerializedJsonDepth(payloadJson);
   const payloadBytes = Buffer.byteLength(payloadJson, "utf8");
   const parsed: unknown = JSON.parse(payloadJson);
   const shape = summarizeShape(parsed);

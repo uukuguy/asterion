@@ -21,6 +21,8 @@ _SAFE_SCHEMA = "dci.provider-request-observation/v1"
 _FIXED_ERROR = "provider request capture is invalid"
 _MAX_RECORD_BYTES = 64 * 1024 * 1024
 _MAX_CAPTURE_BYTES = 512 * 1024 * 1024
+# Shape projection expands nesting; this leaves a wide recursion safety margin.
+_MAX_JSON_STRUCTURAL_DEPTH = 128
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z")
 _PRIVATE_FIELDS = frozenset(
@@ -149,6 +151,8 @@ class ProviderRequestCapture:
             return observations
         except ProviderRequestCaptureError:
             raise
+        except RecursionError:
+            _invalid()
         except Exception:
             _invalid()
 
@@ -239,6 +243,33 @@ def _loads_exact(value: str, *, javascript_numbers: bool = False) -> object:
     return json.loads(value, **options)  # type: ignore[arg-type]
 
 
+def _validate_serialized_json_depth(value: str) -> None:
+    depth = 0
+    in_string = False
+    escaped = False
+    for character in value:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character in "{[":
+            depth += 1
+            if depth > _MAX_JSON_STRUCTURAL_DEPTH:
+                _invalid()
+        elif character in "}]":
+            depth -= 1
+            if depth < 0:
+                _invalid()
+    if in_string or escaped or depth != 0:
+        _invalid()
+
+
 def _validate_pair(
     expected_index: int,
     raw_line: bytes,
@@ -263,6 +294,7 @@ def _validate_pair(
 
     payload_json = cast(str, record["payload_json"])
     payload_bytes = payload_json.encode("utf-8", errors="strict")
+    _validate_serialized_json_depth(payload_json)
     payload = _loads_exact(payload_json, javascript_numbers=True)
     if not hmac.compare_digest(_json_stringify(payload), payload_json):
         _invalid()

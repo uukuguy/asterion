@@ -65,6 +65,10 @@ def _captured_pair(
     return raw, safe
 
 
+def _nested_array_json(depth: int, leaf: str = '"leaf"') -> str:
+    return "[" * depth + leaf + "]" * depth
+
+
 class ProviderRequestCaptureTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
@@ -352,6 +356,114 @@ class ProviderRequestCaptureTests(unittest.TestCase):
                 self.assertEqual(observation.payload_sha256, payload_digest)
             finally:
                 capture.close()
+
+    def test_payload_structural_depth_accepts_128_and_rejects_129(self) -> None:
+        module = __import__(
+            "asterion.capabilities.dci.implementation.evaluation.provider_requests",
+            fromlist=["_loads_exact"],
+        )
+        accepted_json = _nested_array_json(
+            128, json.dumps('string delimiters [{]} " \\ stay inert')
+        )
+        accepted_payload = module._loads_exact(accepted_json, javascript_numbers=True)
+        summary = module._summarize_payload(accepted_payload, accepted_json.encode())
+        record = {
+            "schema": "dci.private-provider-request/v1",
+            "request_index": 1,
+            "captured_at": "2026-08-03T04:05:06.789Z",
+            "payload_json": accepted_json,
+            "payload_sha256": summary["payload_sha256"],
+            "payload_bytes": summary["payload_bytes"],
+            "shape_sha256": summary["shape_sha256"],
+            "summary_sha256": summary["summary_sha256"],
+        }
+        safe = {
+            "schema": "dci.provider-request-observation/v1",
+            "request_index": 1,
+            "capture_status": "captured",
+            **summary,
+        }
+        capture = self._open_in_child("depth-accepted")
+        try:
+            self._write(capture, self._record_bytes(record))
+            (observation,) = capture.validate((safe,))
+            self.assertEqual(observation.payload_bytes, len(accepted_json))
+        finally:
+            capture.close()
+
+        rejected_json = _nested_array_json(129, '"SENTINEL_PRIVATE_DEPTH"')
+        rejected_record = {
+            **record,
+            "payload_json": rejected_json,
+            "payload_sha256": hashlib.sha256(rejected_json.encode()).hexdigest(),
+            "payload_bytes": len(rejected_json),
+        }
+        capture = self._open_in_child("depth-rejected")
+        try:
+            self._write(capture, self._record_bytes(rejected_record))
+            self._assert_invalid(capture, (safe,))
+        finally:
+            capture.close()
+
+    def test_tampered_extreme_depth_is_rejected_with_fixed_sentinel_free_error(
+        self,
+    ) -> None:
+        payload_json = _nested_array_json(1500, '"SENTINEL_PRIVATE_DEPTH"')
+        record = {
+            "schema": "dci.private-provider-request/v1",
+            "request_index": 1,
+            "captured_at": "2026-08-03T04:05:06.789Z",
+            "payload_json": payload_json,
+            "payload_sha256": hashlib.sha256(payload_json.encode()).hexdigest(),
+            "payload_bytes": len(payload_json),
+            "shape_sha256": "0" * 64,
+            "summary_sha256": "0" * 64,
+        }
+        _, safe = _captured_pair(_fixture("valid-simple.json"))
+        capture = self._open_in_child("depth-extreme")
+        try:
+            self._write(capture, self._record_bytes(record))
+            try:
+                capture.validate((safe,))
+            except Exception as error:
+                raised = error
+            else:
+                self.fail("extreme private depth was accepted")
+            rendered = "".join(traceback.format_exception(raised))
+            self.assertIsInstance(raised, ProviderRequestCaptureError)
+            self.assertEqual(str(raised), FIXED_ERROR)
+            self.assertIsNone(raised.__cause__)
+            self.assertNotIn("SENTINEL_PRIVATE_DEPTH", rendered)
+        finally:
+            capture.close()
+
+    def test_defensive_recursion_failure_is_fixed_and_unchained(self) -> None:
+        raw, safe = _captured_pair(_fixture("valid-simple.json"))
+        capture = self._open_in_child("depth-defensive")
+        try:
+            self._write(capture, raw)
+            module = __import__(
+                "asterion.capabilities.dci.implementation.evaluation.provider_requests",
+                fromlist=["_validate_pair"],
+            )
+            with patch.object(
+                module,
+                "_validate_pair",
+                side_effect=RecursionError("SENTINEL_PRIVATE_DEPTH"),
+            ):
+                try:
+                    capture.validate((safe,))
+                except Exception as error:
+                    raised = error
+                else:
+                    self.fail("recursion failure escaped validation")
+            rendered = "".join(traceback.format_exception(raised))
+            self.assertIsInstance(raised, ProviderRequestCaptureError)
+            self.assertEqual(str(raised), FIXED_ERROR)
+            self.assertIsNone(raised.__cause__)
+            self.assertNotIn("SENTINEL_PRIVATE_DEPTH", rendered)
+        finally:
+            capture.close()
 
     def test_invalid_shared_fixture_and_safe_mismatches_fail_closed(self) -> None:
         valid = _fixture("valid-simple.json")

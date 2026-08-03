@@ -33,6 +33,7 @@ EXPECTED_MODULES = {
         "evaluation.py",
         "judge.py",
         "metrics.py",
+        "provider_requests.py",
         "resolution_metrics.py",
     },
     "reproduction": {

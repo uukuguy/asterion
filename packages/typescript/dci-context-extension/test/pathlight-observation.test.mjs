@@ -100,6 +100,12 @@ function fixture(name) {
   return JSON.parse(readFileSync(new URL(name, fixtureRoot), "utf8"));
 }
 
+function nestedArray(depth, leaf = "leaf") {
+  let value = leaf;
+  for (let index = 0; index < depth; index += 1) value = [value];
+  return value;
+}
+
 test("hook writes private raw first, appends only a safe summary, and preserves task input", async () => {
   await withPrivateFile(async ({ fd, path }) => {
     const extension = await loadObservation({ fd });
@@ -243,6 +249,37 @@ test("strict JSON rejects circular, BigInt, non-finite, and unsupported values w
       (error) => error instanceof Error && error.message === "provider request observation unavailable",
     );
   }
+});
+
+test("serialized JSON structural depth accepts 128 and rejects 129", async () => {
+  const extension = await loadObservation();
+  assert.doesNotThrow(() => extension.summarizeProviderPayload(
+    nestedArray(128, 'string delimiters [{]} " \\ stay inert'),
+  ));
+  assert.throws(
+    () => extension.summarizeProviderPayload(nestedArray(129, "SENTINEL_PRIVATE_DEPTH")),
+    (error) => error instanceof Error
+      && error.message === "provider request observation unavailable"
+      && error.message.includes("SENTINEL_PRIVATE_DEPTH") === false,
+  );
+});
+
+test("over-depth hook payload degrades without writing or leaking its sentinel", async () => {
+  await withPrivateFile(async ({ fd, path }) => {
+    const extension = await loadObservation({ fd });
+    const pi = new FakePi();
+    extension.default(pi);
+
+    assert.equal(pi.registrations[0].handler(
+      { type: "before_provider_request", payload: nestedArray(129, "SENTINEL_PRIVATE_DEPTH") },
+      {},
+    ), undefined);
+
+    assert.equal(readRecords(path, fd).length, 0);
+    assert.equal(JSON.stringify(pi.entries).includes("SENTINEL_PRIVATE_DEPTH"), false);
+    assert.equal(pi.entries[0].data.capture_status, "missing");
+    assert.equal(pi.entries[0].data.error, "provider request observation unavailable");
+  });
 });
 
 test("complete descriptor writes tolerate partial writes", async () => {
