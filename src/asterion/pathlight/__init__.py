@@ -65,6 +65,16 @@ from asterion.pathlight.diagnosis import (
     validate_proposal,
     write_diagnosis_bundle,
 )
+from asterion.pathlight.interop import (
+    ExportEnvelope,
+    ExportReceipt,
+    ExternalObservation,
+    ProposalCandidate,
+    validate_export_envelope,
+    validate_export_receipt,
+    validate_external_observation,
+    validate_proposal_candidate,
+)
 
 __all__ = (
     "PathlightError",
@@ -121,4 +131,12 @@ __all__ = (
     "MetricFilter",
     "PathlightCatalog",
     "project_trace_flow",
+    "ExportEnvelope",
+    "ExportReceipt",
+    "ExternalObservation",
+    "ProposalCandidate",
+    "validate_export_envelope",
+    "validate_export_receipt",
+    "validate_external_observation",
+    "validate_proposal_candidate",
 )
