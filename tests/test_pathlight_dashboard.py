@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import unittest
+from unittest.mock import patch
 
 from asterion.pathlight import (
     DashboardSnapshot,
+    DiagnosisBundle,
+    Finding,
     PathlightError,
     TraceEvent,
     TraceGraph,
@@ -14,6 +18,7 @@ from asterion.pathlight import (
 from asterion.workflow_evidence.storage import WorkflowObservationBundle
 from asterion.pathlight.dashboard_server import (
     DashboardApplication,
+    serve_dashboard,
     validate_dashboard_bind,
 )
 
@@ -111,6 +116,30 @@ class PathlightDashboardSnapshotTests(unittest.TestCase):
             "private_path",
         ):
             self.assertNotIn(forbidden, rendered)
+
+    def test_snapshot_rejects_unresolved_diagnosis_lineage(self) -> None:
+        def digest(value: str) -> str:
+            return hashlib.sha256(value.encode()).hexdigest()
+
+        evaluation_sha256 = digest("unresolved-evaluation")
+        diagnosis = DiagnosisBundle.build(
+            experiment_bundle_sha256s=(digest("unresolved-experiment"),),
+            evaluation_sha256s=(evaluation_sha256,),
+            findings=(
+                Finding(
+                    "observed",
+                    digest("subject"),
+                    (evaluation_sha256,),
+                    (),
+                    "confirmed",
+                    digest("finding-code"),
+                ),
+            ),
+            proposals=(),
+        )
+
+        with self.assertRaises(PathlightError):
+            DashboardSnapshot.build(diagnosis_bundles=(diagnosis,))
 
 
 class PathlightDashboardApplicationTests(unittest.TestCase):
@@ -228,6 +257,46 @@ class PathlightDashboardApplicationTests(unittest.TestCase):
                 self.assertEqual(head.body, b"")
                 self.assertEqual(head.headers["Content-Length"], str(len(get.body)))
         self.assertEqual(app.response("GET", "/favicon.ico").status, 404)
+
+    def test_foreground_server_reports_bound_url_and_opens_browser_only_when_explicit(
+        self,
+    ) -> None:
+        ready_urls: list[str] = []
+        with (
+            patch(
+                "asterion.pathlight.dashboard_server.ThreadingHTTPServer"
+            ) as server_type,
+            patch("asterion.pathlight.dashboard_server.webbrowser.open") as browser,
+        ):
+            server_type.return_value.server_address = ("127.0.0.1", 4567)
+            serve_dashboard(
+                self.snapshot,
+                host="127.0.0.1",
+                port=0,
+                on_ready=ready_urls.append,
+            )
+            handler = server_type.call_args.args[1]
+            self.assertEqual(handler.version_string(handler), "Asterion-Pathlight")
+            browser.assert_not_called()
+            server_type.return_value.serve_forever.assert_called_once()
+            server_type.return_value.server_close.assert_called_once()
+
+        with (
+            patch(
+                "asterion.pathlight.dashboard_server.ThreadingHTTPServer"
+            ) as server_type,
+            patch("asterion.pathlight.dashboard_server.webbrowser.open") as browser,
+        ):
+            server_type.return_value.server_address = ("127.0.0.1", 4568)
+            serve_dashboard(
+                self.snapshot,
+                host="127.0.0.1",
+                port=0,
+                open_browser=True,
+            )
+            browser.assert_called_once_with("http://127.0.0.1:4568/", new=2)
+
+        self.assertEqual(ready_urls, ["http://127.0.0.1:4567/"])
 
 
 if __name__ == "__main__":

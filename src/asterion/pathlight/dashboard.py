@@ -259,6 +259,9 @@ def _snapshot_components(
         )
     ):
         raise ValueError
+    _validate_diagnosis_lineage(
+        normalized_evaluations, normalized_experiments, normalized_diagnoses
+    )
     flows = tuple(_flow_mapping(trace) for trace in normalized_traces)
     summary = _summary(
         normalized_traces,
@@ -275,6 +278,28 @@ def _snapshot_components(
         normalized_diagnoses,
         summary,
     )
+
+
+def _validate_diagnosis_lineage(
+    evaluations: Sequence[Mapping[str, object]],
+    experiments: Sequence[Mapping[str, object]],
+    diagnoses: Sequence[Mapping[str, object]],
+) -> None:
+    experiment_ids = {value["bundle_sha256"] for value in experiments}
+    evaluation_ids = {
+        record["evaluation_sha256"]
+        for bundle in (*evaluations, *experiments)
+        for record in cast(Sequence[Mapping[str, object]], bundle["evaluations"])
+    }
+    for diagnosis in diagnoses:
+        referenced_experiments = cast(
+            Sequence[str], diagnosis["experiment_bundle_sha256s"]
+        )
+        referenced_evaluations = cast(Sequence[str], diagnosis["evaluation_sha256s"])
+        if any(value not in experiment_ids for value in referenced_experiments) or any(
+            value not in evaluation_ids for value in referenced_evaluations
+        ):
+            raise ValueError
 
 
 def _traces_from_workflow_bundles(

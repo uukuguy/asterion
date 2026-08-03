@@ -212,6 +212,12 @@ def _body_response(
 
 def _handler_for(application: DashboardApplication) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
+        server_version = "Asterion-Pathlight"
+        sys_version = ""
+
+        def version_string(self) -> str:
+            return self.server_version
+
         def do_GET(self) -> None:  # noqa: N802
             self._send(application.response("GET", self.path))
 
