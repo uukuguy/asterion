@@ -26,6 +26,9 @@ from asterion.capabilities.dci.implementation.evaluation.benchmark import (
     BenchmarkResult,
 )
 from asterion.capabilities.dci.implementation.evaluation.judge import JudgeConfig
+from asterion.capabilities.dci.implementation.pathlight.coverage import (
+    prepare_coverage_registry,
+)
 from asterion.capabilities.dci.implementation.research.experiment_profiles import (
     ExperimentAuthorizationError,
     consume_full_execution_authorization,
@@ -95,7 +98,86 @@ def _write_coverage_dataset(root: Path, *, count: int = 10) -> None:
     )
 
 
+def _write_bright_source_coverage(
+    root: Path, *, source_count: int = 103, selected_count: int = 10
+) -> Path:
+    dataset = root / "dataset.jsonl"
+    dataset.write_text(
+        "".join(
+            json.dumps(
+                {
+                    "query_id": index,
+                    "query": f"query {index}",
+                    "answer": "answer",
+                    "excluded_ids": ["excluded.txt"],
+                    "gold_ids": [f"doc-{index}.txt"],
+                    "gold_ids_long": [f"doc-{index}.txt"],
+                    "id": f"source-{index}",
+                    "reasoning": "reasoning",
+                }
+            )
+            + "\n"
+            for index in range(source_count)
+        ),
+        encoding="utf-8",
+    )
+    corpus = root / "corpus"
+    corpus.mkdir()
+    (corpus / "excluded.txt").write_text("excluded\n", encoding="utf-8")
+    for index in range(source_count):
+        (corpus / f"doc-{index}.txt").write_text(
+            f"document {index}\n", encoding="utf-8"
+        )
+    (root / "coverage").mkdir()
+    output = root / "coverage" / "bright.biology"
+    prepare_coverage_registry(
+        dataset_id="bright.biology",
+        dataset_path=dataset,
+        corpus_dir=corpus,
+        selected_count=selected_count,
+        output_root=output,
+    )
+    return output / "registry.json"
+
+
 class RealDciBenchmarkExecutorTests(unittest.TestCase):
+    def test_coverage_authority_accepts_exact_bright_source_rows(self) -> None:
+        calls: list[object] = []
+
+        async def runner(request, *, paths):
+            del paths
+            calls.append(request)
+            return BenchmarkResult(
+                output_root=request.output_root,
+                counts={"total": 10, "completed": 10, "failed": 0},
+            )
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            registry = _write_bright_source_coverage(root)
+            result = RealDciBenchmarkExecutor(
+                paths=_paths(root),
+                runtime_options=DciRuntimeOptions(),
+                judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
+                benchmark_runner=runner,
+                readiness_probe=lambda *_args: None,
+            ).execute(
+                _invocation(
+                    root,
+                    task_id="bright.biology",
+                    profile_id="bright.biology",
+                    selection_variant="main",
+                    coverage_registry=registry,
+                    case_limit=10,
+                    amount=Decimal("1"),
+                ),
+                cancellation=MutableCancellation(),
+                on_progress=lambda _event: None,
+            )
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(len(calls), 1)
+
     def test_coverage_case10_requires_one_dollar_or_less_before_agent(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
@@ -180,8 +262,7 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()
-            _write_coverage_dataset(root)
-            registry = root / "coverage" / "bright.biology" / "registry.json"
+            registry = _write_bright_source_coverage(root)
             result = RealDciBenchmarkExecutor(
                 paths=_paths(root),
                 runtime_options=DciRuntimeOptions(),

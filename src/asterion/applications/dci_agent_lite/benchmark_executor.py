@@ -30,7 +30,9 @@ from asterion.capabilities.dci.implementation.config import (
     DciRuntimeOptions,
 )
 from asterion.capabilities.dci.implementation.datasets import (
+    load_beir_benchmark_rows_bytes,
     load_benchmark_rows_bytes,
+    load_bright_benchmark_rows_bytes,
 )
 from asterion.capabilities.dci.implementation.evaluation.benchmark import (
     BenchmarkRequest,
@@ -41,6 +43,9 @@ from asterion.capabilities.dci.implementation.evaluation.artifacts import (
     DciConversationFeatures,
 )
 from asterion.capabilities.dci.implementation.evaluation.judge import JudgeConfig
+from asterion.capabilities.dci.implementation.pathlight.coverage import (
+    validate_coverage_registry_root,
+)
 from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import (
     canonical_sha256,
     read_paper_benchmark_dataset,
@@ -453,11 +458,34 @@ def _authorize_full_request(
     raw, binding = read_paper_benchmark_dataset(payload.dataset, benchmark)
     selected_ids_sha256 = scope.selected_ids_sha256
     if coverage_case10:
-        rows = load_benchmark_rows_bytes(raw)
+        if benchmark.dataset_id.startswith("bright."):
+            rows = load_bright_benchmark_rows_bytes(
+                raw, expected_count=benchmark.source_count
+            )
+        elif benchmark.dataset_id.startswith("beir."):
+            rows = load_beir_benchmark_rows_bytes(
+                raw, expected_count=benchmark.source_count
+            )
+        else:
+            rows = load_benchmark_rows_bytes(raw)
         if len(rows) < payload.case_limit:
             _fail()
+        selected_rows = rows[: payload.case_limit]
+        registry_path = payload.coverage_registry
+        if not isinstance(registry_path, Path):
+            _fail()
+        registry = validate_coverage_registry_root(
+            registry_path,
+            corpus_dir=payload.corpus,
+            expected_dataset_id=task_id,
+            expected_count=payload.case_limit,
+        )
+        if registry.selected_ids_sha256 != canonical_sha256(
+            tuple(row.query_id for row in selected_rows)
+        ):
+            _fail()
         selected_ids_sha256 = canonical_sha256(
-            tuple(sorted(row.query_id for row in rows[: payload.case_limit]))
+            tuple(sorted(row.query_id for row in selected_rows))
         )
     profile = resolve_experiment_profile(_DEFAULT_EXPERIMENT_PROFILE)
     judge_operations = (
