@@ -480,6 +480,18 @@ def _failed_coverage_execution(
         receipt = cancel_full_execution_authorization_snapshot(
             request.full_execution_authorization
         )
+        if receipt.get("cost_evidence") == "upper-bound":
+            return BenchmarkTaskResult(
+                task_id=invocation.task_id,
+                status="failed",
+                case_count=0,
+                artifact_ids=(
+                    f"coverage-authorized-microusd.{authorized}",
+                    f"coverage-upper-microusd.{authorized}",
+                ),
+            )
+        if receipt.get("cost_evidence") != "actual":
+            raise ValueError
         ledger = receipt.get("ledger")
         if type(ledger) is not dict:
             raise ValueError

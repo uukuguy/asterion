@@ -1684,6 +1684,7 @@ def cancel_full_execution_authorization_snapshot(
             raise ExperimentAuthorizationError(
                 "full execution authorization is inactive"
             )
+        cost_evidence = "upper-bound" if record.active_reservations else "actual"
         for item in tuple(record.active_reservations.values()):
             _settle_reservation(record, item.issuer, item, item.upper_bound_usd)
         record.cancelled = True
@@ -1693,10 +1694,12 @@ def cancel_full_execution_authorization_snapshot(
         _validate_output_identity(record.manifest_output, "manifest output")
         record.finalized = True
         record.settled_reservations.clear()
-        return _full_execution_receipt(
+        receipt = _full_execution_receipt(
             record,
             schema="dci.full-execution-authorization-cancellation-receipt/v1",
         )
+        receipt["cost_evidence"] = cost_evidence
+        return receipt
 
 
 def _full_execution_receipt(

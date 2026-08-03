@@ -1369,6 +1369,7 @@ class FullExecutionBudgetTests(unittest.TestCase):
             unused = authorize(Path(temporary) / "unused")
             unused_receipt = cancel_full_execution_authorization_snapshot(unused)
             self.assertEqual(receipt_ledger(unused_receipt)["actual_cost_usd"], 0.0)
+            self.assertEqual(unused_receipt["cost_evidence"], "actual")
 
         with tempfile.TemporaryDirectory() as temporary:
             active = authorize(
@@ -1386,6 +1387,7 @@ class FullExecutionBudgetTests(unittest.TestCase):
             self.assertEqual(ledger["actual_cost_usd"], 2.0)
             self.assertTrue(ledger["cancelled"])
             self.assertTrue(ledger["finalized"])
+            self.assertEqual(active_receipt["cost_evidence"], "upper-bound")
 
     def test_receipt_waits_for_drain_and_contains_exact_body_free_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
