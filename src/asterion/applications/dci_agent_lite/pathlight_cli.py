@@ -21,6 +21,7 @@ from asterion.capabilities.dci.implementation.pathlight.conversion import (
 )
 from asterion.capabilities.dci.implementation.pathlight.diagnosis import (
     DciCoverageExperimentObservation,
+    coverage_evaluation_values,
     diagnose_recommended_pack,
     render_chinese_diagnosis,
 )
@@ -174,6 +175,8 @@ def _diagnose(
         "diagnosis": output_root / DIAGNOSIS_BUNDLE_FILENAME,
         "markdown": output_root / _MARKDOWN_FILENAME,
     }
+    if coverage_experiment is not None:
+        targets["evaluations"] = output_root / EVALUATION_BUNDLE_FILENAME
     _require_absent(tuple(targets.values()))
     recovered = tuple(_read_verified_recovery(root) for root in roots)
     if tuple(sorted(run.dataset_id for run in recovered)) != _TARGET_DATASET_IDS:
@@ -181,16 +184,28 @@ def _diagnose(
     report = diagnose_recommended_pack(
         recovered, coverage_experiment=coverage_experiment
     )
+    coverage_values = (
+        None
+        if coverage_experiment is None
+        else coverage_evaluation_values(coverage_experiment)
+    )
     markdown = render_chinese_diagnosis(report)
     staging_root = _create_staging_root(output_root)
     staging_targets = {
         "diagnosis": staging_root / DIAGNOSIS_BUNDLE_FILENAME,
         "markdown": staging_root / _MARKDOWN_FILENAME,
     }
+    if coverage_experiment is not None:
+        staging_targets["evaluations"] = staging_root / EVALUATION_BUNDLE_FILENAME
     failed = False
     try:
         write_diagnosis_bundle(report.diagnosis_bundle, staging_targets["diagnosis"])
         write_private_file(staging_targets["markdown"], markdown.encode("utf-8"))
+        if coverage_values is not None:
+            contract, evaluations = coverage_values
+            write_evaluation_bundle(
+                staging_targets["evaluations"], evaluations, (contract,)
+            )
         if read_diagnosis_bundle(
             staging_targets["diagnosis"]
         ) != report.diagnosis_bundle or not hmac.compare_digest(
@@ -198,6 +213,13 @@ def _diagnose(
             markdown.encode("utf-8"),
         ):
             raise ValueError
+        if coverage_values is not None:
+            stored = read_evaluation_bundle(staging_targets["evaluations"])
+            if (
+                stored.evaluations != coverage_values[1]
+                or stored.metric_contracts != (coverage_values[0],)
+            ):
+                raise ValueError
         _publish_staged_outputs(
             output_root, staging_root, tuple(path.name for path in targets.values())
         )

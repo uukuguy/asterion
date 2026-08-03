@@ -18,6 +18,7 @@ from asterion.capabilities.dci.implementation.pathlight.diagnosis import (
     DciProposalSummary,
     DciWorkflowMetrics,
     diagnose_recommended_pack,
+    coverage_evaluation_values,
     render_chinese_diagnosis,
 )
 
@@ -216,6 +217,20 @@ class TestDciPathlightDiagnosis(unittest.TestCase):
         )
         self.assertTrue(
             all(not proposal.execution_authorized for proposal in report.proposals)
+        )
+        coverage = report.coverage_experiment
+        self.assertIsNotNone(coverage)
+        assert coverage is not None
+        contract, evaluations = coverage_evaluation_values(coverage)
+        self.assertEqual(contract.metric_name, "coverage")
+        self.assertEqual(len(evaluations), 5)
+        self.assertTrue(
+            {item.evaluation_sha256 for item in evaluations}
+            <= set(report.diagnosis_bundle.evaluation_sha256s)
+        )
+        self.assertTrue(
+            {item.evidence_sha256 for item in coverage.datasets}
+            .isdisjoint(report.diagnosis_bundle.evaluation_sha256s)
         )
 
     def test_partial_or_integrity_failed_coverage_keeps_gate_blocked(self) -> None:

@@ -32,6 +32,7 @@ from asterion.pathlight.diagnosis import (
     Proposal,
     validate_finding,
 )
+from asterion.pathlight.evaluation import EvaluationRecord, MetricContract
 from asterion.pathlight.experiment import ExperimentBundle
 
 
@@ -373,6 +374,44 @@ def _copy_coverage_experiment(
     if not hmac.compare_digest(copied.experiment_sha256, value.experiment_sha256):
         raise ValueError
     return copied
+
+
+def coverage_evaluation_values(
+    coverage: DciCoverageExperimentObservation,
+) -> tuple[MetricContract, tuple[EvaluationRecord, ...]]:
+    """Project coverage aggregates into real, body-free Pathlight evaluations."""
+
+    try:
+        coverage = _copy_coverage_experiment(coverage)
+        contract = MetricContract("coverage", "ratio", True, "1.0.0")
+        records = tuple(
+            EvaluationRecord(
+                trace_sha256=item.evidence_sha256,
+                metric_contract_sha256=contract.metric_contract_sha256,
+                dataset_snapshot_sha256=_digest(
+                    "coverage-dataset",
+                    {
+                        "dataset_id": item.dataset_id,
+                        "registry_set_sha256": coverage.registry_set_sha256,
+                    },
+                ),
+                scope_sha256=coverage.scope_sha256,
+                value_microunits=item.coverage_median_mean_microunits,
+                selected_count=item.coverage_available_queries,
+                total_count=item.coverage_total_queries,
+                status=(
+                    "missing"
+                    if item.coverage_available_queries == 0
+                    else "observed"
+                ),
+            )
+            for item in coverage.datasets
+        )
+        return contract, tuple(
+            sorted(records, key=lambda item: item.evaluation_sha256)
+        )
+    except Exception:
+        raise DciDiagnosisError(_ERROR) from None
 
 
 @dataclass(frozen=True, slots=True)
@@ -924,16 +963,19 @@ class DciDiagnosisReport:
             evaluation_ids = tuple(
                 item.aggregate_evaluation_sha256 for item in observations
             )
+            coverage_evaluation_ids = (
+                {}
+                if coverage_experiment is None
+                else {
+                    dataset.dataset_id: item.evaluation_sha256
+                    for dataset in coverage_experiment.datasets
+                    for item in coverage_evaluation_values(coverage_experiment)[1]
+                    if item.trace_sha256 == dataset.evidence_sha256
+                }
+            )
             bundle_evaluation_ids = (
                 *evaluation_ids,
-                *(
-                    ()
-                    if coverage_experiment is None
-                    else tuple(
-                        item.evidence_sha256
-                        for item in coverage_experiment.datasets
-                    )
-                ),
+                *coverage_evaluation_ids.values(),
             )
             expected_findings = tuple(
                 sorted(
@@ -945,6 +987,7 @@ class DciDiagnosisReport:
                         },
                         expected_missing,
                         coverage_experiment,
+                        coverage_evaluation_ids,
                     ),
                     key=lambda item: item.finding_sha256,
                 )
@@ -1218,15 +1261,31 @@ def diagnose_recommended_pack(
         )
         observations = _merge_coverage_observations(observations, coverage)
         aggregate_ids = {item.dataset_id: item.aggregate_evaluation_sha256 for item in observations}
+        coverage_evaluation_ids = (
+            {}
+            if coverage is None
+            else {
+                dataset.dataset_id: item.evaluation_sha256
+                for dataset in coverage.datasets
+                for item in coverage_evaluation_values(coverage)[1]
+                if item.trace_sha256 == dataset.evidence_sha256
+            }
+        )
         missing_evidence = _missing_codes(coverage)
         findings = _findings(
             observations,
             aggregate_ids,
             missing_evidence,
             coverage,
+            coverage_evaluation_ids,
         )
         bundle, public_proposals = _diagnosis_bundle(
-            experiments, aggregate_ids, findings, normalized, coverage
+            experiments,
+            aggregate_ids,
+            findings,
+            normalized,
+            coverage,
+            coverage_evaluation_ids,
         )
         comparisons = _component_comparisons(normalized)
         result = DciDiagnosisReport(
@@ -1491,6 +1550,7 @@ def _findings(
     aggregate_ids: dict[str, str],
     missing_codes: tuple[str, ...],
     coverage: DciCoverageExperimentObservation | None,
+    coverage_evaluation_ids: Mapping[str, str],
 ) -> tuple[Finding, ...]:
     observed = tuple(_finding("observed", f"observed:{item.dataset_id}", (item.aggregate_evaluation_sha256,)) for item in observations)
     coverage_observed = (
@@ -1500,7 +1560,7 @@ def _findings(
             _finding(
                 "observed",
                 f"observed:coverage:{item.dataset_id}",
-                (item.evidence_sha256,),
+                (coverage_evaluation_ids[item.dataset_id],),
             )
             for item in coverage.datasets
         )
@@ -1539,6 +1599,7 @@ def _diagnosis_bundle(
     findings: tuple[Finding, ...],
     runs: Mapping[str, DciRecoveredRun],
     coverage_experiment: DciCoverageExperimentObservation | None,
+    coverage_evaluation_ids: Mapping[str, str],
 ) -> tuple[DiagnosisBundle, tuple[DciProposalSummary, ...]]:
     coverage_scope = _proposal_scope(runs, _COVERAGE_DATASETS, "coverage")
     query_scope = _proposal_scope(runs, _BRIGHT_DATASETS, "paired-bright")
@@ -1552,9 +1613,7 @@ def _diagnosis_bundle(
             *(
                 ()
                 if coverage_experiment is None
-                else tuple(
-                    item.evidence_sha256 for item in coverage_experiment.datasets
-                )
+                else tuple(coverage_evaluation_ids.values())
             ),
         ), findings=findings, proposals=(coverage, decomposition),
     )

@@ -24,7 +24,10 @@ from asterion.capabilities.dci.implementation.pathlight.recovery import (
     DciRecoveredRun,
     write_recovered_run,
 )
-from asterion.pathlight.evaluation import write_evaluation_bundle
+from asterion.pathlight.evaluation import (
+    read_evaluation_bundle,
+    write_evaluation_bundle,
+)
 from asterion.pathlight.experiment import write_experiment_bundle
 from tests.test_dci_pathlight_diagnosis import _DATASETS, _coverage_pack, _run
 
@@ -202,6 +205,14 @@ class TestDciPathlightCli(unittest.TestCase):
             self.assertIn("覆盖观测", rendered)
             self.assertIn("可申请单独授权", rendered)
             self.assertNotIn("SENTINEL_PRIVATE", rendered)
+            coverage_evaluations = read_evaluation_bundle(
+                output / "pathlight-evaluations.json"
+            )
+            self.assertEqual(len(coverage_evaluations.evaluations), 5)
+            self.assertEqual(
+                {contract.metric_name for contract in coverage_evaluations.metric_contracts},
+                {"coverage"},
+            )
 
     def test_recover_never_removes_a_racing_final_target_it_does_not_own(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
