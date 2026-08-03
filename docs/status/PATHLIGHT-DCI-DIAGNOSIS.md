@@ -2,19 +2,23 @@
 
 本报告由六项已完成 historical evidence 的 provider-free Pathlight 恢复与诊断生成。它只包含数值、摘要关系和预先固定的中文说明；不包含 operator 路径、案例标识、提示、答案、payload 或 provider/model/config 值。
 
-## Coverage 实验前置状态（尚未执行）
+## Coverage 实验状态（部分完成）
 
-50 条 coverage 实验目前**尚未执行**，因此本文没有 observed coverage
-数值，也没有把任何缺口写成已关闭。检索查询分解门槛仍为
+已获批计划完成了 Biology 与 Earth Science 各 10/10；Biology 的 observed
+nDCG@10 为 0.476539，实际成本 631138 微美元，Earth Science 为 0.456546，
+实际成本 529101 微美元。Economics 只完成 8/10，Robotics 0/10，SciFact 未启动，
+因此五项 coverage 闭包仍未完成，也没有把任何总体缺口写成已关闭。检索查询分解门槛仍为
 `blocked-by-coverage`；即使未来五项都达到 10/10，它也只会变成“可申请单独
 授权”，不会自动获得执行权限。
 
 配置绑定前生成的计划
 `e845f41bb1fa7e81857f12244cc5053393df861bc7b25e815dfb4a5126f00e90`
-已经废止，不得授权或执行。重新完成 provider-free `prepare` 后，当前计划摘要为
-`75689698a526d66735b67fa9d8df91f15e92187d230feb5066dc80c15213f202`，并绑定
+已经废止，不得授权或执行。并发预算缺陷修复后，旧获批计划
+`75689698a526d66735b67fa9d8df91f15e92187d230feb5066dc80c15213f202`
+也已成为不可恢复的历史运行。重新完成 provider-free `prepare` 后，当前计划摘要为
+`143350e02c518f073c26e32074ce73636c21d859522cd4818b21a904f06faf98`，并绑定
 执行配置摘要
-`1bd1d4e218984b9ae567bca23710e9b772477e3240a78aa7106f867d13171fa2`。
+`0ca6151fbef02c009729fffba4a588de298a596a342788a54644a34cfe84c3fd`。
 这些摘要只证明计划已准备，不代表已有 authorization，也不代表实验已执行。
 
 已准备的有限边界固定为五个数据集、每项 10 例、最多 50 次 Agent 操作、
@@ -152,5 +156,5 @@ coverage 结果。
 
 ## 最小受控实验
 
-- 覆盖率观测：状态 proposed；最多 50 次 Agent 操作，成本上限 5000000 微美元，基础设施失败停止线 2；覆盖 5 个数据集、每项 10 例；需运营者授权，当前未授权。
+- 覆盖率观测：状态 partial；Biology 10/10、Earth Science 10/10、Economics 8/10、Robotics 0/10、SciFact 未启动；新串行计划最多 50 次 Agent 操作，成本上限 5000000 微美元，基础设施失败停止线 2；需新的精确授权，当前未授权。
 - 检索查询分解：状态 proposed；最多 80 次 Agent 操作，成本上限 8000000 微美元；前提为覆盖率观测；最小平均 nDCG 增益 50000 微单位，成本或时间增长上限 250000 微单位；覆盖 4 个数据集、每项 10 例；需运营者授权，当前未授权。
