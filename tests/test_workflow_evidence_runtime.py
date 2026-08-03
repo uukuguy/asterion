@@ -19,6 +19,7 @@ from asterion.pathlight import (
     TraceEvent,
 )
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
+import asterion.workflow_evidence as workflow_evidence
 from asterion.workflow_evidence import ObservedRuntimeClient
 from asterion.workflow_evidence.storage import write_workflow_observation_bundle
 
@@ -686,6 +687,101 @@ def _context_frames(graph: Mapping[str, object]) -> list[Mapping[str, object]]:
 
 
 class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    def test_projects_one_completed_native_runtime_into_safe_evidence(self) -> None:
+        projector = getattr(
+            workflow_evidence, "project_completed_runtime_evidence", None
+        )
+        self.assertIsNotNone(projector)
+        assert projector is not None
+        events = tuple(
+            RunEvent("native-run", sequence, event_type, payload).to_mapping()
+            for sequence, (event_type, payload) in enumerate(
+                _native_events(), start=1
+            )
+        )
+
+        projected = projector(
+            request=_request(),
+            event_observations=tuple(
+                (event, index * 10 + 2, index * 10 + 3)
+                for index, event in enumerate(events)
+            ),
+            native_observation=_batch(),
+            runtime_id="pi.reference",
+            trace_id=TRACE_ID,
+            invocation_started_ns=1,
+            invocation_ended_ns=len(events) * 10 + 4,
+        )
+
+        self.assertEqual(projected.record["run_id"], "native-run")
+        self.assertEqual(
+            sum(
+                "frame_index" in event["attributes"]
+                for event in _context_frames(projected.trace)
+            ),
+            1,
+        )
+        self.assertEqual(_kinds(projected.trace).count("model-call"), 2)
+        self.assertEqual(_kinds(projected.trace).count("tool-call"), 1)
+        trace_events = projected.trace["events"]
+        self.assertIsInstance(trace_events, tuple)
+        assert isinstance(trace_events, tuple)
+        with self.assertRaises(TypeError):
+            trace_events[0]["attributes"]["unexpected"] = True
+        rendered = json.dumps(projected.trace, default=dict, sort_keys=True)
+        for private_value in (
+            "SENTINEL_NATIVE_INPUT",
+            "SENTINEL_NATIVE_ARGUMENT",
+            "SENTINEL_NATIVE_RESULT",
+            "private.native.tool",
+            "private.model",
+            "pi.reference",
+        ):
+            self.assertNotIn(private_value, rendered)
+
+    def test_completed_projection_degrades_mismatched_native_observation(self) -> None:
+        events = tuple(
+            RunEvent("native-run", sequence, event_type, payload).to_mapping()
+            for sequence, (event_type, payload) in enumerate(
+                _native_events(), start=1
+            )
+        )
+
+        projected = workflow_evidence.project_completed_runtime_evidence(
+            request=_request(),
+            event_observations=tuple(
+                (event, index * 10 + 2, index * 10 + 3)
+                for index, event in enumerate(events)
+            ),
+            native_observation=_batch(run_id="foreign-run"),
+            runtime_id="pi.reference",
+            trace_id=TRACE_ID,
+            invocation_started_ns=1,
+            invocation_ended_ns=len(events) * 10 + 4,
+        )
+
+        self.assertNotIn("model-call", _kinds(projected.trace))
+        self.assertTrue(_context_frames(projected.trace)[0]["attributes"]["missing_evidence"])
+
+    def test_completed_projection_rejects_nonmonotonic_timestamps(self) -> None:
+        events = tuple(
+            RunEvent("native-run", sequence, event_type, payload).to_mapping()
+            for sequence, (event_type, payload) in enumerate(
+                _native_events(), start=1
+            )
+        )
+
+        with self.assertRaises(workflow_evidence.WorkflowEvidenceError):
+            workflow_evidence.project_completed_runtime_evidence(
+                request=_request(),
+                event_observations=tuple((event, 2, 3) for event in events),
+                native_observation=_batch(),
+                runtime_id="pi.reference",
+                trace_id=TRACE_ID,
+                invocation_started_ns=1,
+                invocation_ended_ns=100,
+            )
+
     async def test_cross_frame_overlapping_tools_publish_one_public_component(
         self,
     ) -> None:

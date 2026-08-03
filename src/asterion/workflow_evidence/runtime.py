@@ -6,11 +6,13 @@ import hashlib
 import hmac
 import json
 import time
-from collections.abc import AsyncIterator, Iterable, Mapping
+from collections.abc import AsyncIterator, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Callable
 
 from asterion.pathlight import (
+    MemoryPathlightRecorder,
     ModelCallObservation,
     PathlightRecorder,
     RuntimeObservationBatch,
@@ -26,7 +28,148 @@ from asterion.runtime.host import (
     RuntimeManifest,
 )
 
-from asterion.workflow_evidence.collector import collect_workflow_evidence
+from asterion.workflow_evidence.collector import (
+    WorkflowEvidenceError,
+    collect_workflow_evidence,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class CompletedRuntimeEvidence:
+    """One safe workflow record and trace projected after runtime completion."""
+
+    record: Mapping[str, object]
+    trace: Mapping[str, object]
+
+
+def project_completed_runtime_evidence(
+    *,
+    request: RunRequest,
+    event_observations: Sequence[
+        tuple[Mapping[str, object], int | None, int | None]
+    ],
+    native_observation: RuntimeObservationBatch | None,
+    runtime_id: str,
+    trace_id: str,
+    invocation_started_ns: int | None,
+    invocation_ended_ns: int | None,
+) -> CompletedRuntimeEvidence:
+    """Project an already completed runtime stream without retaining content."""
+
+    try:
+        request.to_mapping()
+        if type(runtime_id) is not str or not runtime_id:
+            raise ValueError
+        observations = _completed_event_observations(
+            event_observations,
+            invocation_started_ns=invocation_started_ns,
+            invocation_ended_ns=invocation_ended_ns,
+        )
+        events = [mapping for mapping, _started, _ended in observations]
+        evidence = collect_workflow_evidence(
+            events,
+            input_digest=hashlib.sha256(request.input_text.encode("utf-8")).hexdigest(),
+        )
+        checked_native = _validated_supplied_runtime_observation(
+            native_observation,
+            request,
+            events,
+            evidence=evidence,
+        )
+        recorder = MemoryPathlightRecorder(trace_id)
+        _RuntimePathlightProjection(recorder).project(
+            request,
+            observations,
+            evidence=evidence,
+            native_observation=checked_native,
+            runtime_id=runtime_id,
+            invocation_started_ns=invocation_started_ns,
+            invocation_ended_ns=invocation_ended_ns,
+        )
+        trace = recorder.snapshot()
+        if trace is None:
+            raise ValueError
+        return CompletedRuntimeEvidence(
+            record=_freeze_completed_mapping(evidence),
+            trace=_freeze_completed_mapping(trace),
+        )
+    except WorkflowEvidenceError:
+        raise
+    except Exception:
+        raise WorkflowEvidenceError("completed runtime evidence is invalid") from None
+
+
+def _freeze_completed_mapping(value: Mapping[str, object]) -> Mapping[str, object]:
+    return MappingProxyType(
+        {key: _freeze_completed_value(item) for key, item in value.items()}
+    )
+
+
+def _freeze_completed_value(value: object) -> object:
+    if isinstance(value, Mapping):
+        return _freeze_completed_mapping(value)
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_completed_value(item) for item in value)
+    return value
+
+
+def _completed_event_observations(
+    values: Sequence[tuple[Mapping[str, object], int | None, int | None]],
+    *,
+    invocation_started_ns: int | None,
+    invocation_ended_ns: int | None,
+) -> list[tuple[Mapping[str, object], int | None, int | None]]:
+    if not isinstance(values, (list, tuple)) or not values:
+        raise ValueError
+    if type(invocation_started_ns) is not int or type(invocation_ended_ns) is not int:
+        raise ValueError
+    cursor = invocation_started_ns
+    observations: list[tuple[Mapping[str, object], int | None, int | None]] = []
+    for value in values:
+        if not isinstance(value, tuple) or len(value) != 3:
+            raise ValueError
+        mapping, started_ns, ended_ns = value
+        if (
+            not isinstance(mapping, Mapping)
+            or type(started_ns) is not int
+            or type(ended_ns) is not int
+            or started_ns <= cursor
+            or ended_ns <= started_ns
+        ):
+            raise ValueError
+        observations.append((dict(mapping), started_ns, ended_ns))
+        cursor = ended_ns
+    if invocation_ended_ns <= cursor:
+        raise ValueError
+    return observations
+
+
+def _validated_supplied_runtime_observation(
+    value: RuntimeObservationBatch | None,
+    request: RunRequest,
+    events: list[Mapping[str, object]],
+    *,
+    evidence: Mapping[str, object],
+) -> RuntimeObservationBatch | None:
+    if value is None:
+        return None
+    try:
+        observation = validate_runtime_observation_batch(value.to_mapping())
+        if evidence.get("run_id") != request.run_id:
+            return None
+        if any(event.get("run_id") != request.run_id for event in events):
+            return None
+        if not hmac.compare_digest(
+            observation.run_sha256, _text_digest(request.run_id)
+        ):
+            return None
+        if not _native_tools_match_stream(observation, events):
+            return None
+        if not observation.frames or not observation.model_calls:
+            return None
+        return observation
+    except Exception:
+        return None
 
 
 class ObservedRuntimeClient:
