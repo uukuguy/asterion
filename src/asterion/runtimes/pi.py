@@ -435,7 +435,7 @@ async def _collect_runtime_snapshot(
                     raise ProtocolError(
                         "Pi runtime completed before acknowledgement"
                     )
-                if event_type == "agent_end" and "willRetry" in event:
+                if event_type == "agent_end" and event.get("willRetry") is True:
                     del emitted[attempt_event_start:]
                     adapter.sequence = len(emitted)
                     adapter.tool_calls.clear()

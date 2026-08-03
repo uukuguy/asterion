@@ -2578,7 +2578,7 @@ class DciRunRecorder:
             event_type = event.get("type")
             if event_type == "agent_start":
                 self._pathlight_observation_checkpoint = builder.checkpoint()
-            elif event_type == "agent_end" and "willRetry" in event:
+            elif event_type == "agent_end" and event.get("willRetry") is True:
                 builder.rollback(self._pathlight_observation_checkpoint)
         except Exception:
             self._pathlight_observation_builder = None

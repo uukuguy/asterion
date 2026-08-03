@@ -31,6 +31,7 @@ class PiObservationCheckpoint:
     frame_count: int
     model_call_count: int
     tool_count: int
+    message_count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,7 +85,9 @@ class PiObservationBuilder:
         self._frames: list[_FrameDraft] = []
         self._model_calls: list[_ModelCallDraft] = []
         self._tools: list[_ToolDraft] = []
+        self._messages: list[Mapping[str, object]] = []
         self._retry_native_starts: frozenset[int] | None = None
+        self._inferred_call_open = False
 
     def consume(self, event: Mapping[str, object], timestamp_ns: int) -> None:
         """Consume one native event without allowing observation failures out."""
@@ -94,6 +97,8 @@ class PiObservationBuilder:
             event_type = event.get("type")
             if event_type == "provider_request_context":
                 self._consume_provider_context(event)
+            elif event_type == "message_start":
+                self._consume_message_start(event)
             elif event_type == "tool_execution_start":
                 self._consume_tool_start(event)
             elif event_type == "tool_execution_end":
@@ -110,6 +115,7 @@ class PiObservationBuilder:
             frame_count=len(self._frames),
             model_call_count=len(self._model_calls),
             tool_count=len(self._tools),
+            message_count=len(self._messages),
         )
 
     def rollback(self, checkpoint: PiObservationCheckpoint) -> None:
@@ -120,9 +126,11 @@ class PiObservationBuilder:
             or checkpoint.frame_count < 0
             or checkpoint.model_call_count < 0
             or checkpoint.tool_count < 0
+            or checkpoint.message_count < 0
             or checkpoint.frame_count > len(self._frames)
             or checkpoint.model_call_count > len(self._model_calls)
             or checkpoint.tool_count > len(self._tools)
+            or checkpoint.message_count > len(self._messages)
         ):
             return
         removed_native_indexes = tuple(
@@ -133,6 +141,8 @@ class PiObservationBuilder:
         del self._frames[checkpoint.frame_count :]
         del self._model_calls[checkpoint.model_call_count :]
         del self._tools[checkpoint.tool_count :]
+        del self._messages[checkpoint.message_count :]
+        self._inferred_call_open = False
         if removed_native_indexes:
             reset_start = (
                 self._frames[-1].native_request_index + 1
@@ -165,6 +175,10 @@ class PiObservationBuilder:
             return _empty_batch(run_id)
 
     def _consume_provider_context(self, event: Mapping[str, object]) -> None:
+        if self._inferred_call_open:
+            self._frames.pop()
+            self._model_calls.pop()
+            self._inferred_call_open = False
         index = event.get("requestIndex")
         expected_index = (
             self._frames[-1].native_request_index + 1
@@ -209,6 +223,30 @@ class PiObservationBuilder:
             )
         )
 
+    def _consume_message_start(self, event: Mapping[str, object]) -> None:
+        message = event.get("message")
+        if (
+            not isinstance(message, Mapping)
+            or message.get("role") != "assistant"
+            or len(self._model_calls) != len(self._frames)
+            or any(not call.response_observed for call in self._model_calls)
+        ):
+            return
+        index = len(self._frames) + 1
+        segments = (
+            _missing_segment(),
+            *(_segment_from_message(value) for value in self._messages),
+        )
+        self._frames.append(_FrameDraft(index, index, segments, True))
+        self._model_calls.append(
+            _ModelCallDraft(
+                frame_index=index,
+                model_sha256=_model_digest(message),
+                request_sha256=None,
+            )
+        )
+        self._inferred_call_open = True
+
     def _consume_tool_start(self, event: Mapping[str, object]) -> None:
         call_id = event.get("toolCallId")
         if (
@@ -245,25 +283,37 @@ class PiObservationBuilder:
 
     def _consume_message_end(self, event: Mapping[str, object]) -> None:
         message = event.get("message")
-        if not isinstance(message, Mapping) or message.get("role") != "assistant":
+        if not isinstance(message, Mapping):
             return
-        call = next(
-            (item for item in reversed(self._model_calls) if not item.response_observed),
-            None,
-        )
-        if call is None:
-            return
-        content = message.get("content", message.get("text"))
-        call.response_sha256, call.response_length = _content_summary(content)
-        usage = message.get("usage")
-        if isinstance(usage, Mapping):
-            input_tokens = usage.get("input")
-            output_tokens = usage.get("output")
-            if _nonnegative_int(input_tokens) and _nonnegative_int(output_tokens):
-                call.input_tokens = input_tokens
-                call.output_tokens = output_tokens
-        call.status = "failed" if message.get("stopReason") == "error" else "completed"
-        call.response_observed = True
+        if message.get("role") == "assistant":
+            call = next(
+                (
+                    item
+                    for item in reversed(self._model_calls)
+                    if not item.response_observed
+                ),
+                None,
+            )
+            if call is not None:
+                content = message.get("content", message.get("text"))
+                call.response_sha256, call.response_length = _content_summary(content)
+                usage = message.get("usage")
+                if isinstance(usage, Mapping):
+                    input_tokens = usage.get("input")
+                    output_tokens = usage.get("output")
+                    if _nonnegative_int(input_tokens) and _nonnegative_int(
+                        output_tokens
+                    ):
+                        call.input_tokens = input_tokens
+                        call.output_tokens = output_tokens
+                call.status = (
+                    "failed" if message.get("stopReason") == "error" else "completed"
+                )
+                call.response_observed = True
+                self._inferred_call_open = False
+        detached = _json_mapping_copy(message)
+        if detached is not None:
+            self._messages.append(detached)
 
     def _mark_invalid(self) -> None:
         # A sentinel is counted by checkpoints, making retry rollback restore
@@ -414,6 +464,14 @@ def _content_summary(value: object) -> tuple[str | None, int | None]:
 def _digest_json(value: object) -> str | None:
     rendered = _canonical_json(value)
     return _digest_text(rendered) if rendered is not None else None
+
+
+def _json_mapping_copy(value: Mapping[str, object]) -> Mapping[str, object] | None:
+    rendered = _canonical_json(value)
+    if rendered is None:
+        return None
+    copied = json.loads(rendered)
+    return copied if isinstance(copied, dict) else None
 
 
 def _canonical_json(value: object) -> str | None:

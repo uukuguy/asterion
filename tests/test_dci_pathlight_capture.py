@@ -94,6 +94,123 @@ def _started_kinds(trace: Mapping[str, object]) -> list[str]:
 
 
 class DciPathlightCaptureTests(unittest.TestCase):
+    def test_message_start_reconstructs_safe_model_mainline_without_context_hook(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            output = root / "message-boundary"
+            request = DciRunRequest(
+                run_id="message-boundary-run",
+                question=f"question-{_SENTINEL}",
+                cwd=root,
+                tools="read",
+                timeout_seconds=None,
+            )
+            first_assistant = _assistant_message(
+                f"tool-request-{_SENTINEL}", input_tokens=10, output_tokens=2
+            )
+            final_assistant = _assistant_message(
+                f"answer-{_SENTINEL}", input_tokens=14, output_tokens=3
+            )
+            with DciRunRecorder(
+                output_dir=output,
+                request=request,
+                paths=_paths(root),
+            ) as recorder:
+                for event in (
+                    {"type": "agent_start"},
+                    {
+                        "type": "message_end",
+                        "message": {
+                            "role": "user",
+                            "content": f"question-{_SENTINEL}",
+                        },
+                    },
+                    {
+                        "type": "message_start",
+                        "message": {
+                            "role": "assistant",
+                            "provider": "private-provider",
+                            "model": "private-model",
+                            "content": [],
+                        },
+                    },
+                    {"type": "message_end", "message": first_assistant},
+                    {
+                        "type": "tool_execution_start",
+                        "toolCallId": "call-1",
+                        "toolName": "read",
+                        "args": {"path": f"private-{_SENTINEL}.txt"},
+                    },
+                    {
+                        "type": "tool_execution_end",
+                        "toolCallId": "call-1",
+                        "toolName": "read",
+                        "result": f"result-{_SENTINEL}",
+                        "isError": False,
+                    },
+                    {
+                        "type": "message_end",
+                        "message": {
+                            "role": "toolResult",
+                            "toolCallId": "call-1",
+                            "content": f"result-{_SENTINEL}",
+                        },
+                    },
+                    {
+                        "type": "message_start",
+                        "message": {
+                            "role": "assistant",
+                            "provider": "private-provider",
+                            "model": "private-model",
+                            "content": [],
+                        },
+                    },
+                    {"type": "message_end", "message": final_assistant},
+                    {"type": "agent_end", "willRetry": None},
+                ):
+                    recorder.record_event(event)
+                recorder.finalize(
+                    status="completed",
+                    final_text=f"answer-{_SENTINEL}",
+                    release_lock=False,
+                )
+                recorder.persist_workflow_evidence()
+
+            bundle = read_workflow_observation_bundle(
+                output / "workflow-evidence.json"
+            )
+            trace = bundle.pathlight_traces[0]
+            kinds = _started_kinds(trace)
+            self.assertEqual(kinds.count("model-call"), 2)
+            self.assertEqual(kinds.count("tool-call"), 1)
+            self.assertEqual(
+                sum(
+                    "frame_index" in event["attributes"]
+                    for event in trace["events"]
+                    if event["kind"] == "context-frame"
+                    and event["status"] == "started"
+                ),
+                2,
+            )
+            rendered = json.dumps(trace, default=dict, sort_keys=True)
+            self.assertTrue(
+                all(
+                    event["attributes"]["missing_evidence"]
+                    for event in trace["events"]
+                    if event["kind"] == "model-call"
+                    and event["status"] == "started"
+                )
+            )
+            for private_value in (
+                _SENTINEL,
+                "private-provider",
+                "private-model",
+                str(root),
+            ):
+                self.assertNotIn(private_value, rendered)
+
     def test_completed_native_attempt_persists_safe_rich_workflow_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
