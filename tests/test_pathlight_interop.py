@@ -1,17 +1,26 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from asterion.pathlight.interop import (
     ExportEnvelope,
     ExportReceipt,
     ExternalObservation,
     ProposalCandidate,
+    read_export_batch,
+    read_export_receipts,
+    record_export_receipt,
     validate_export_envelope,
     validate_export_receipt,
     validate_external_observation,
     validate_proposal_candidate,
+    write_export_batch,
 )
 from asterion.pathlight.protocol import PathlightError
 
@@ -25,6 +34,15 @@ class _HostileMapping(dict[str, object]):
 
 
 class PathlightInteropContractTests(unittest.TestCase):
+    def _envelope(self, suffix: str) -> ExportEnvelope:
+        return ExportEnvelope(
+            "opik",
+            "1.0.0",
+            "trace.upsert",
+            suffix * 64,
+            {"trace_sha256": suffix * 64, "status": "completed"},
+        )
+
     def test_export_envelope_is_content_addressed_and_payload_is_immutable(self) -> None:
         payload = {
             "evaluation_sha256": "b" * 64,
@@ -150,6 +168,96 @@ class PathlightInteropContractTests(unittest.TestCase):
         mapping["execution_authorized"] = True
         with self.assertRaises(PathlightError):
             validate_proposal_candidate(mapping)
+
+    def test_offline_batch_is_private_sorted_deduplicated_and_idempotent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            root.chmod(0o700)
+            first = self._envelope("a")
+            second = self._envelope("b")
+
+            batch = write_export_batch(root, (second, first, first))
+            repeated = write_export_batch(root, (first, second))
+
+            self.assertEqual(batch, repeated)
+            self.assertEqual(
+                tuple(item.envelope_sha256 for item in batch.envelopes),
+                tuple(sorted((first.envelope_sha256, second.envelope_sha256))),
+            )
+            path = root / batch.filename
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+            self.assertEqual(read_export_batch(path), batch)
+            self.assertEqual(tuple(root.iterdir()), (path,))
+
+    def test_offline_batch_rejects_unsafe_roots_and_symlink_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory).resolve()
+            root = parent / "queue"
+            root.mkdir(mode=0o755)
+            with self.assertRaises(PathlightError):
+                write_export_batch(root, (self._envelope("a"),))
+            root.chmod(0o700)
+            batch = write_export_batch(root, (self._envelope("a"),))
+            link = parent / "batch.json"
+            link.symlink_to(root / batch.filename)
+            with self.assertRaises(PathlightError):
+                read_export_batch(link)
+
+    def test_receipt_ledger_requires_monotonic_attempts_and_terminal_closure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            root.chmod(0o700)
+            envelope = self._envelope("a")
+            first = ExportReceipt(
+                envelope.envelope_sha256,
+                "opik",
+                "retryable-failure",
+                1,
+                None,
+                "authentication",
+            )
+            delivered = ExportReceipt(
+                envelope.envelope_sha256,
+                "opik",
+                "delivered",
+                2,
+                "b" * 64,
+                None,
+            )
+
+            self.assertEqual(record_export_receipt(root, first), first)
+            with self.assertRaises(PathlightError):
+                record_export_receipt(root, first)
+            self.assertEqual(record_export_receipt(root, delivered), delivered)
+            with self.assertRaises(PathlightError):
+                record_export_receipt(
+                    root,
+                    ExportReceipt(
+                        envelope.envelope_sha256,
+                        "opik",
+                        "retryable-failure",
+                        3,
+                        None,
+                        "network",
+                    ),
+                )
+            self.assertEqual(read_export_receipts(root), (first, delivered))
+            self.assertTrue(
+                all(
+                    stat.S_IMODE(path.stat().st_mode) == 0o600
+                    for path in root.glob("receipt-*.json")
+                )
+            )
+
+    def test_queue_root_must_be_owned_by_current_operator(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            root.chmod(0o700)
+            with patch(
+                "asterion.pathlight.interop.os.getuid", return_value=os.getuid() + 1
+            ):
+                with self.assertRaises(PathlightError):
+                    write_export_batch(root, (self._envelope("a"),))
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -5,13 +5,21 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import re
+import stat
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from pathlib import Path
 from types import MappingProxyType
-from typing import Literal, TypeAlias, cast
+from typing import Literal, Sequence, TypeAlias, cast
 
 from asterion.pathlight.evaluation import METRIC_NAMES
+from asterion.pathlight._private_file import (
+    PrivateFileError,
+    read_private_file,
+    write_private_file,
+)
 from asterion.pathlight.protocol import PathlightError
 
 
@@ -43,6 +51,7 @@ EXPORT_ENVELOPE_SCHEMA = "asterion.pathlight-export-envelope/v1"
 EXPORT_RECEIPT_SCHEMA = "asterion.pathlight-export-receipt/v1"
 EXTERNAL_OBSERVATION_SCHEMA = "asterion.pathlight-external-observation/v1"
 PROPOSAL_CANDIDATE_SCHEMA = "asterion.pathlight-proposal-candidate/v1"
+EXPORT_BATCH_SCHEMA = "asterion.pathlight-export-batch/v1"
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
@@ -158,6 +167,8 @@ _CANDIDATE_FIELDS = frozenset(
         "proposal_candidate_sha256",
     }
 )
+_BATCH_FIELDS = frozenset({"schema", "envelopes", "batch_sha256"})
+_MAX_INTEROP_BYTES = 4_000_000
 
 
 def _digest(value: object) -> str:
@@ -432,6 +443,44 @@ class ProposalCandidate:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class ExportBatch:
+    """A sorted immutable collection ready for operator-owned delivery."""
+
+    envelopes: tuple[ExportEnvelope, ...]
+    batch_sha256: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        try:
+            if type(self.envelopes) is not tuple or not self.envelopes:
+                raise ValueError
+            copied = tuple(
+                validate_export_envelope(item.to_mapping()) for item in self.envelopes
+            )
+            identities = tuple(item.envelope_sha256 for item in copied)
+            if identities != tuple(sorted(identities)) or len(identities) != len(
+                set(identities)
+            ):
+                raise ValueError
+        except Exception:
+            raise PathlightError("Pathlight export batch is invalid") from None
+        object.__setattr__(self, "envelopes", copied)
+        object.__setattr__(self, "batch_sha256", _digest(self._unsigned_mapping()))
+
+    @property
+    def filename(self) -> str:
+        return f"batch-{self.batch_sha256}.json"
+
+    def _unsigned_mapping(self) -> dict[str, object]:
+        return {
+            "schema": EXPORT_BATCH_SCHEMA,
+            "envelopes": [item.to_mapping() for item in self.envelopes],
+        }
+
+    def to_mapping(self) -> dict[str, object]:
+        return {**self._unsigned_mapping(), "batch_sha256": self.batch_sha256}
+
+
 def validate_export_envelope(mapping: Mapping[str, object]) -> ExportEnvelope:
     try:
         if type(mapping) is not dict or set(mapping) != _ENVELOPE_FIELDS:
@@ -528,3 +577,170 @@ def validate_proposal_candidate(mapping: Mapping[str, object]) -> ProposalCandid
         return candidate
     except Exception:
         raise PathlightError("Pathlight proposal candidate is invalid") from None
+
+
+def validate_export_batch(mapping: Mapping[str, object]) -> ExportBatch:
+    try:
+        if type(mapping) is not dict or set(mapping) != _BATCH_FIELDS:
+            raise ValueError
+        if mapping["schema"] != EXPORT_BATCH_SCHEMA or type(mapping["envelopes"]) is not list:
+            raise ValueError
+        batch = ExportBatch(
+            tuple(validate_export_envelope(item) for item in mapping["envelopes"])
+        )
+        if not hmac.compare_digest(
+            _sha256(mapping["batch_sha256"]), batch.batch_sha256
+        ):
+            raise ValueError
+        return batch
+    except Exception:
+        raise PathlightError("Pathlight export batch is invalid") from None
+
+
+def write_export_batch(
+    root: Path, envelopes: Sequence[ExportEnvelope]
+) -> ExportBatch:
+    """Write one deterministic private batch without contacting its connector."""
+
+    try:
+        _operator_root(root)
+        if type(envelopes) not in {tuple, list} or not envelopes:
+            raise ValueError
+        by_identity: dict[str, ExportEnvelope] = {}
+        for value in envelopes:
+            if type(value) is not ExportEnvelope:
+                raise ValueError
+            copied = validate_export_envelope(value.to_mapping())
+            previous = by_identity.get(copied.idempotency_key)
+            if previous is not None and not hmac.compare_digest(
+                _canonical_bytes(previous.to_mapping()),
+                _canonical_bytes(copied.to_mapping()),
+            ):
+                raise ValueError
+            by_identity[copied.idempotency_key] = copied
+        batch = ExportBatch(
+            tuple(sorted(by_identity.values(), key=lambda item: item.envelope_sha256))
+        )
+        target = root / batch.filename
+        encoded = _canonical_bytes(batch.to_mapping())
+        if target.exists() or target.is_symlink():
+            if not hmac.compare_digest(
+                read_private_file(target, _MAX_INTEROP_BYTES), encoded
+            ):
+                raise ValueError
+            return read_export_batch(target)
+        try:
+            write_private_file(target, encoded)
+        except PrivateFileError:
+            if not hmac.compare_digest(
+                read_private_file(target, _MAX_INTEROP_BYTES), encoded
+            ):
+                raise
+        return read_export_batch(target)
+    except Exception:
+        raise PathlightError("Pathlight export batch could not be written") from None
+
+
+def read_export_batch(path: Path) -> ExportBatch:
+    """Read and validate one exact private export batch."""
+
+    try:
+        if (
+            not isinstance(path, Path)
+            or not path.is_absolute()
+            or path.is_symlink()
+            or re.fullmatch(r"batch-[0-9a-f]{64}\.json", path.name) is None
+        ):
+            raise ValueError
+        raw = read_private_file(path, _MAX_INTEROP_BYTES)
+        mapping = json.loads(raw)
+        batch = validate_export_batch(mapping)
+        if path.name != batch.filename or not hmac.compare_digest(
+            raw, _canonical_bytes(batch.to_mapping())
+        ):
+            raise ValueError
+        return batch
+    except Exception:
+        raise PathlightError("Pathlight export batch is invalid") from None
+
+
+def record_export_receipt(root: Path, receipt: ExportReceipt) -> ExportReceipt:
+    """Append one monotonic delivery result for a single immutable envelope."""
+
+    try:
+        _operator_root(root)
+        if type(receipt) is not ExportReceipt:
+            raise ValueError
+        receipt = validate_export_receipt(receipt.to_mapping())
+        previous = tuple(
+            item
+            for item in read_export_receipts(root)
+            if item.envelope_sha256 == receipt.envelope_sha256
+        )
+        if (
+            receipt.attempt != len(previous) + 1
+            or previous
+            and previous[-1].status in {"delivered", "terminal-failure"}
+        ):
+            raise ValueError
+        target = root / (
+            f"receipt-{receipt.envelope_sha256}-{receipt.attempt:06d}.json"
+        )
+        write_private_file(target, _canonical_bytes(receipt.to_mapping()))
+        observed = validate_export_receipt(
+            json.loads(read_private_file(target, _MAX_INTEROP_BYTES))
+        )
+        if observed != receipt:
+            raise ValueError
+        return observed
+    except Exception:
+        raise PathlightError("Pathlight export receipt could not be recorded") from None
+
+
+def read_export_receipts(root: Path) -> tuple[ExportReceipt, ...]:
+    """Read the exact private receipt ledger in envelope/attempt order."""
+
+    try:
+        _operator_root(root)
+        values: list[ExportReceipt] = []
+        expected: dict[str, int] = {}
+        terminal: set[str] = set()
+        for path in sorted(root.glob("receipt-*.json")):
+            if path.is_symlink() or re.fullmatch(
+                r"receipt-[0-9a-f]{64}-[0-9]{6}\.json", path.name
+            ) is None:
+                raise ValueError
+            receipt = validate_export_receipt(
+                json.loads(read_private_file(path, _MAX_INTEROP_BYTES))
+            )
+            if path.name != (
+                f"receipt-{receipt.envelope_sha256}-{receipt.attempt:06d}.json"
+            ):
+                raise ValueError
+            next_attempt = expected.get(receipt.envelope_sha256, 1)
+            if receipt.attempt != next_attempt or receipt.envelope_sha256 in terminal:
+                raise ValueError
+            expected[receipt.envelope_sha256] = next_attempt + 1
+            if receipt.status in {"delivered", "terminal-failure"}:
+                terminal.add(receipt.envelope_sha256)
+            values.append(receipt)
+        return tuple(values)
+    except Exception:
+        raise PathlightError("Pathlight export receipt ledger is invalid") from None
+
+
+def _canonical_bytes(value: object) -> bytes:
+    return json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _operator_root(root: Path) -> None:
+    if not isinstance(root, Path) or not root.is_absolute() or root != root.resolve():
+        raise ValueError
+    metadata = os.stat(root, follow_symlinks=False)
+    if (
+        root.is_symlink()
+        or not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+        or metadata.st_uid != os.getuid()
+    ):
+        raise ValueError

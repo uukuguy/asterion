@@ -66,14 +66,20 @@ from asterion.pathlight.diagnosis import (
     write_diagnosis_bundle,
 )
 from asterion.pathlight.interop import (
+    ExportBatch,
     ExportEnvelope,
     ExportReceipt,
     ExternalObservation,
     ProposalCandidate,
+    read_export_batch,
+    read_export_receipts,
+    record_export_receipt,
+    validate_export_batch,
     validate_export_envelope,
     validate_export_receipt,
     validate_external_observation,
     validate_proposal_candidate,
+    write_export_batch,
 )
 
 __all__ = (
@@ -132,11 +138,17 @@ __all__ = (
     "PathlightCatalog",
     "project_trace_flow",
     "ExportEnvelope",
+    "ExportBatch",
     "ExportReceipt",
     "ExternalObservation",
     "ProposalCandidate",
     "validate_export_envelope",
+    "validate_export_batch",
     "validate_export_receipt",
     "validate_external_observation",
     "validate_proposal_candidate",
+    "write_export_batch",
+    "read_export_batch",
+    "record_export_receipt",
+    "read_export_receipts",
 )
