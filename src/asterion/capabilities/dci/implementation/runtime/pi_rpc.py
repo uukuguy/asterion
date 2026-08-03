@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable, Mapping
+from importlib import resources
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -194,10 +195,38 @@ def build_pi_command(
 
 
 def _pi_child_environment(
-    *, agent_dir: Path, node_bin: str, node_max_old_space_size_mb: int | None
+    *,
+    package_dir: Path,
+    agent_dir: Path,
+    node_bin: str,
+    node_max_old_space_size_mb: int | None,
 ) -> dict[str, str]:
     environment = _node_env(os.environ, node_bin)
     environment["PI_CODING_AGENT_DIR"] = str(agent_dir)
+    proxy = (
+        environment.get("HTTPS_PROXY", "").strip()
+        or environment.get("HTTP_PROXY", "").strip()
+    )
+    if proxy:
+        try:
+            undici = (
+                Path(package_dir).parents[1] / "node_modules" / "undici" / "index.js"
+            ).resolve(strict=True)
+            bootstrap = Path(
+                str(
+                    resources.files("asterion.capabilities.dci.resources.pi").joinpath(
+                        "node-proxy-bootstrap.mjs"
+                    )
+                )
+            ).resolve(strict=True)
+        except (IndexError, OSError, RuntimeError):
+            raise RuntimeError("Pi proxy transport is unavailable") from None
+        environment["ASTERION_PI_UNDICI_URL"] = undici.as_uri()
+        import_option = f"--import={bootstrap.as_uri()}"
+        current_options = environment.get("NODE_OPTIONS", "").strip()
+        environment["NODE_OPTIONS"] = " ".join(
+            value for value in (current_options, import_option) if value
+        )
     if node_max_old_space_size_mb is not None:
         heap_option = f"--max-old-space-size={node_max_old_space_size_mb}"
         current_options = environment.get("NODE_OPTIONS", "").strip()
@@ -276,6 +305,7 @@ def run_pi_terminal(
         command,
         cwd=verified_cwd,
         env=_pi_child_environment(
+            package_dir=package_dir,
             agent_dir=agent_dir,
             node_bin=node_bin,
             node_max_old_space_size_mb=node_max_old_space_size_mb,
@@ -497,6 +527,7 @@ class PiRpcClient:
 
         selected_node = "node" if node_bin is None else node_bin
         return _pi_child_environment(
+            package_dir=self.package_dir,
             agent_dir=self.agent_dir,
             node_bin=selected_node,
             node_max_old_space_size_mb=self.node_max_old_space_size_mb,
