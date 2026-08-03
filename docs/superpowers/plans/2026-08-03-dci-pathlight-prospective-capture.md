@@ -359,7 +359,7 @@ Actual: `make check` passed 1192 Python tests plus TypeScript, Rust, lint, docs,
 
 Record the new one-case evidence separately from historical 848-case results. State whether final ContextFrame persistence is verified, which gaps remain, and why this does not change or reproduce any benchmark score. Mark every plan checkbox only after its exact evidence exists.
 
-- [ ] **Step 7: Commit verified closure**
+- [x] **Step 7: Commit verified closure**
 
 ```bash
 git add docs/status/PATHLIGHT-DCI-DIAGNOSIS.md \
