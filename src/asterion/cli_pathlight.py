@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
+import os
+import re
+import stat
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -12,11 +16,18 @@ from typing import NoReturn, TextIO
 from asterion.pathlight import (
     MetricFilter,
     PathlightCatalog,
+    ProposalCandidate,
     TraceFilter,
+    map_opik_exports,
     project_trace_flow,
+    read_export_batch,
     read_diagnosis_bundle,
     read_evaluation_bundle,
+    trace_graph_from_mapping,
+    validate_external_observation,
+    write_export_batch,
 )
+from asterion.pathlight._private_file import read_private_file, write_private_file
 from asterion.pathlight.experiment import ExperimentCatalog, read_experiment_bundle
 from asterion.workflow_evidence import read_workflow_observation_bundle
 
@@ -96,6 +107,101 @@ def _execute(args: argparse.Namespace) -> object:
             proposal.to_mapping()
             for proposal in read_diagnosis_bundle(_diagnosis_path(args.diagnosis_file)).proposals
         ]
+    if args.command == "export":
+        if args.export_command == "opik":
+            traces = tuple(
+                trace_graph_from_mapping(trace)
+                for value in (args.evidence_file or ())
+                for trace in read_workflow_observation_bundle(
+                    _absolute_canonical_paths((value,), "workflow-evidence.json")[0]
+                ).pathlight_traces
+            )
+            experiments = tuple(
+                read_experiment_bundle(path)
+                for path in _optional_absolute_paths(
+                    args.experiment_file or (), "pathlight-experiment.json"
+                )
+            )
+            evaluations = tuple(
+                read_evaluation_bundle(path)
+                for path in _optional_absolute_paths(
+                    args.evaluation_file or (), "pathlight-evaluations.json"
+                )
+            )
+            diagnoses = tuple(
+                read_diagnosis_bundle(path)
+                for path in _optional_absolute_paths(
+                    args.diagnosis_file or (), "pathlight-diagnosis.json"
+                )
+            )
+            if not any((traces, experiments, evaluations, diagnoses)):
+                raise ValueError("Pathlight export input is missing")
+            batch = write_export_batch(
+                _absolute_root(args.queue_root),
+                map_opik_exports(
+                    traces=traces,
+                    experiments=experiments,
+                    evaluations=evaluations,
+                    diagnoses=diagnoses,
+                ),
+            )
+            return {
+                "batch_sha256": batch.batch_sha256,
+                "envelope_count": len(batch.envelopes),
+                "mapping_version": "1.0.0",
+                "network_operation_count": 0,
+            }
+        if args.export_command == "inspect":
+            return read_export_batch(_absolute_batch_path(args.batch_file)).to_mapping()
+    if args.command == "import":
+        if args.import_command == "opik-observation":
+            source = _absolute_canonical_paths(
+                (args.observation_file,), "pathlight-external-observation.json"
+            )[0]
+            raw = read_private_file(source, 1_000_000)
+            observation = validate_external_observation(json.loads(raw))
+            if observation.connector != "opik":
+                raise ValueError("Pathlight observation connector is invalid")
+            payload = dict(observation.payload)
+            required = {
+                "change_sha256",
+                "scope_sha256",
+                "success_criteria_sha256",
+                "stop_criteria_sha256",
+                "budget_sha256",
+                "status",
+            }
+            if (
+                observation.observation_kind != "optimization-suggestion"
+                or set(payload) != required
+                or payload["status"] != "proposed"
+            ):
+                raise ValueError("Pathlight observation is not a proposal candidate")
+            candidate = ProposalCandidate(
+                observation.observation_sha256,
+                _sha_payload(payload["change_sha256"]),
+                _sha_payload(payload["scope_sha256"]),
+                _sha_payload(payload["success_criteria_sha256"]),
+                _sha_payload(payload["stop_criteria_sha256"]),
+                _sha_payload(payload["budget_sha256"]),
+            )
+            output_root = _private_output_root(args.output_root)
+            _write_idempotent_private(
+                output_root
+                / f"external-observation-{observation.observation_sha256}.json",
+                observation.to_mapping(),
+            )
+            _write_idempotent_private(
+                output_root
+                / f"proposal-candidate-{candidate.proposal_candidate_sha256}.json",
+                candidate.to_mapping(),
+            )
+            return {
+                "external_observation_sha256": observation.observation_sha256,
+                "proposal_candidate_sha256": candidate.proposal_candidate_sha256,
+                "execution_authorized": False,
+                "network_operation_count": 0,
+            }
     raise ValueError("invalid pathlight command")
 
 
@@ -125,6 +231,51 @@ def _diagnosis_path(value: str) -> Path:
     return _absolute_canonical_paths((value,), "pathlight-diagnosis.json")[0]
 
 
+def _absolute_root(value: str) -> Path:
+    path = Path(value)
+    if not path.is_absolute() or path != path.resolve():
+        raise ValueError("pathlight root is invalid")
+    return path
+
+
+def _absolute_batch_path(value: str) -> Path:
+    path = Path(value)
+    if (
+        not path.is_absolute()
+        or re.fullmatch(r"batch-[0-9a-f]{64}\.json", path.name) is None
+    ):
+        raise ValueError("pathlight batch path is invalid")
+    return path
+
+
+def _private_output_root(value: str) -> Path:
+    root = _absolute_root(value)
+    metadata = os.stat(root, follow_symlinks=False)
+    if (
+        root.is_symlink()
+        or not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+        or metadata.st_uid != os.getuid()
+    ):
+        raise ValueError("pathlight output root is invalid")
+    return root
+
+
+def _write_idempotent_private(path: Path, mapping: Mapping[str, object]) -> None:
+    encoded = json.dumps(mapping, sort_keys=True, separators=(",", ":")).encode()
+    if path.exists() or path.is_symlink():
+        if not hmac.compare_digest(read_private_file(path, 1_000_000), encoded):
+            raise ValueError("pathlight output conflicts")
+        return
+    write_private_file(path, encoded)
+
+
+def _sha_payload(value: object) -> str:
+    if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise ValueError("pathlight imported digest is invalid")
+    return value
+
+
 def _absolute_canonical_paths(values: Sequence[str], filename: str) -> tuple[Path, ...]:
     if not values:
         raise ValueError("pathlight input is missing")
@@ -132,6 +283,14 @@ def _absolute_canonical_paths(values: Sequence[str], filename: str) -> tuple[Pat
     if any(not path.is_absolute() or path.name != filename for path in paths):
         raise ValueError("pathlight input is invalid")
     return paths
+
+
+def _optional_absolute_paths(
+    values: Sequence[str], filename: str
+) -> tuple[Path, ...]:
+    if not values:
+        return ()
+    return _absolute_canonical_paths(values, filename)
 
 
 def _json_copy(value: object) -> object:
@@ -215,6 +374,27 @@ def _parser() -> argparse.ArgumentParser:
     )
     proposal_list = proposal_commands.add_parser("list", add_help=False)
     _add_diagnosis_file(proposal_list)
+
+    export = commands.add_parser("export", add_help=False)
+    export_commands = export.add_subparsers(
+        dest="export_command", required=True, parser_class=_Parser
+    )
+    export_opik = export_commands.add_parser("opik", add_help=False)
+    export_opik.add_argument("--evidence-file", action="append")
+    export_opik.add_argument("--experiment-file", action="append")
+    export_opik.add_argument("--evaluation-file", action="append")
+    export_opik.add_argument("--diagnosis-file", action="append")
+    export_opik.add_argument("--queue-root", required=True)
+    export_inspect = export_commands.add_parser("inspect", add_help=False)
+    export_inspect.add_argument("--batch-file", required=True)
+
+    import_command = commands.add_parser("import", add_help=False)
+    import_commands = import_command.add_subparsers(
+        dest="import_command", required=True, parser_class=_Parser
+    )
+    import_opik = import_commands.add_parser("opik-observation", add_help=False)
+    import_opik.add_argument("--observation-file", required=True)
+    import_opik.add_argument("--output-root", required=True)
     return parser
 
 

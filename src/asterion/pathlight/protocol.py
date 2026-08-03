@@ -528,3 +528,17 @@ def validate_trace_graph(graph: Mapping[str, object]) -> None:
     actual = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
     if not hmac.compare_digest(expected, actual):
         raise PathlightError("Pathlight graph digest mismatches")
+
+
+def trace_graph_from_mapping(graph: Mapping[str, object]) -> TraceGraph:
+    """Validate and reconstruct one immutable trace graph mapping."""
+
+    validate_trace_graph(graph)
+    canonical = _graph_without_digest(graph, allow_digest=True)
+    events = canonical["events"]
+    if type(events) is not list:
+        raise PathlightError("Pathlight graph events are invalid")
+    return TraceGraph(
+        cast(str, canonical["trace_id"]),
+        tuple(_event_from_mapping(event) for event in events),
+    )

@@ -4,6 +4,7 @@ import io
 import hashlib
 import json
 import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -14,6 +15,7 @@ from asterion.cli import main
 from asterion.pathlight import (
     DiagnosisBundle,
     EvaluationRecord,
+    ExternalObservation,
     Finding,
     MetricContract,
     Proposal,
@@ -22,6 +24,7 @@ from asterion.pathlight import (
     write_diagnosis_bundle,
     write_evaluation_bundle,
 )
+from asterion.pathlight._private_file import write_private_file
 from asterion.pathlight.experiment import (
     CaseTrial,
     DatasetSnapshot,
@@ -177,6 +180,148 @@ def _experiment_bundle(*, reverse: bool = False) -> ExperimentBundle:
 
 
 class PathlightCliTests(unittest.TestCase):
+    def test_opik_export_and_inspect_are_offline_private_and_idempotent(self) -> None:
+        contract, evaluation = _evaluation(750_000)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            evaluations = root / "pathlight-evaluations.json"
+            write_evaluation_bundle(evaluations, (evaluation,), (contract,))
+            queue = root / "queue"
+            queue.mkdir(mode=0o700)
+            outputs = []
+            for _ in range(2):
+                stdout = io.StringIO()
+                code = main(
+                    [
+                        "pathlight",
+                        "export",
+                        "opik",
+                        "--evaluation-file",
+                        str(evaluations),
+                        "--queue-root",
+                        str(queue),
+                    ],
+                    entry_points=(FailIfLoadedEntryPoint(),),
+                    stdout=stdout,
+                )
+                self.assertEqual(code, 0)
+                outputs.append(json.loads(stdout.getvalue()))
+
+            self.assertEqual(outputs[0], outputs[1])
+            self.assertEqual(outputs[0]["network_operation_count"], 0)
+            self.assertEqual(outputs[0]["envelope_count"], 1)
+            batches = tuple(queue.glob("batch-*.json"))
+            self.assertEqual(len(batches), 1)
+            self.assertEqual(stat.S_IMODE(batches[0].stat().st_mode), 0o600)
+
+            inspected = io.StringIO()
+            code = main(
+                [
+                    "pathlight",
+                    "export",
+                    "inspect",
+                    "--batch-file",
+                    str(batches[0]),
+                ],
+                entry_points=(FailIfLoadedEntryPoint(),),
+                stdout=inspected,
+            )
+            self.assertEqual(code, 0)
+            payload = json.loads(inspected.getvalue())
+            self.assertEqual(payload["batch_sha256"], outputs[0]["batch_sha256"])
+            self.assertEqual(
+                payload["envelopes"][0]["payload"]["value_microunits"],
+                750_000,
+            )
+
+    def test_opik_export_rejects_unsafe_queue_without_loading_provider(self) -> None:
+        contract, evaluation = _evaluation(1)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            evaluations = root / "pathlight-evaluations.json"
+            write_evaluation_bundle(evaluations, (evaluation,), (contract,))
+            queue = root / "queue"
+            queue.mkdir(mode=0o755)
+            stderr = io.StringIO()
+
+            code = main(
+                [
+                    "pathlight",
+                    "export",
+                    "opik",
+                    "--evaluation-file",
+                    str(evaluations),
+                    "--queue-root",
+                    str(queue),
+                ],
+                entry_points=(FailIfLoadedEntryPoint(),),
+                stderr=stderr,
+            )
+
+            self.assertEqual(code, 2)
+            self.assertEqual(
+                stderr.getvalue(), "asterion pathlight: request is invalid\n"
+            )
+            self.assertEqual(tuple(queue.iterdir()), ())
+
+    def test_opik_observation_import_creates_only_nonexecuting_candidate(self) -> None:
+        observation = ExternalObservation(
+            "opik",
+            _digest("connector"),
+            "1.0.0",
+            _digest("subject"),
+            _digest("external-event"),
+            "optimization-suggestion",
+            {
+                "change_sha256": _digest("change"),
+                "scope_sha256": _digest("scope"),
+                "success_criteria_sha256": _digest("success"),
+                "stop_criteria_sha256": _digest("stop"),
+                "budget_sha256": _digest("budget"),
+                "status": "proposed",
+            },
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            source = root / "pathlight-external-observation.json"
+            write_private_file(
+                source,
+                json.dumps(
+                    observation.to_mapping(), sort_keys=True, separators=(",", ":")
+                ).encode(),
+            )
+            output = root / "imported"
+            output.mkdir(mode=0o700)
+            stdout = io.StringIO()
+
+            code = main(
+                [
+                    "pathlight",
+                    "import",
+                    "opik-observation",
+                    "--observation-file",
+                    str(source),
+                    "--output-root",
+                    str(output),
+                ],
+                entry_points=(FailIfLoadedEntryPoint(),),
+                stdout=stdout,
+            )
+
+            self.assertEqual(code, 0)
+            result = json.loads(stdout.getvalue())
+            self.assertFalse(result["execution_authorized"])
+            self.assertEqual(result["network_operation_count"], 0)
+            files = tuple(sorted(output.iterdir()))
+            self.assertEqual(len(files), 2)
+            self.assertTrue(
+                all(stat.S_IMODE(path.stat().st_mode) == 0o600 for path in files)
+            )
+            candidate = json.loads(
+                next(path for path in files if "proposal-candidate" in path.name).read_text()
+            )
+            self.assertFalse(candidate["execution_authorized"])
+
     def test_diagnosis_show_and_proposal_list_are_provider_free_canonical_json(self) -> None:
         observed = Finding(
             "observed", _digest("subject"), (_digest("evaluation"),), (), "confirmed", _digest("observed")

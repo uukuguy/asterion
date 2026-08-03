@@ -36,6 +36,7 @@ from asterion.pathlight.protocol import (
     TraceEvent,
     TraceGraph,
     trace_graph_digest,
+    trace_graph_from_mapping,
     validate_trace_graph,
 )
 from asterion.pathlight.runtime_observation import (
@@ -92,6 +93,7 @@ __all__ = (
     "TraceEvent",
     "TraceGraph",
     "trace_graph_digest",
+    "trace_graph_from_mapping",
     "validate_trace_graph",
     "ContextSegmentSummary",
     "ContextFrameObservation",
