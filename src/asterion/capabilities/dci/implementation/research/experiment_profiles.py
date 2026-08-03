@@ -1514,17 +1514,23 @@ def reserve_full_execution_operation(
             raise ExperimentAuthorizationError(
                 f"full execution {label} operation budget is exhausted"
             )
-        upper_bound = _usd_decimal(upper_bound_value)
-        projected = (
-            record.actual_cost_usd + record.reserved_cost_usd + upper_bound
+        configured_upper_bound = _usd_decimal(upper_bound_value)
+        remaining = (
+            _usd_decimal(record.snapshot.max_cost_usd)
+            - record.actual_cost_usd
+            - record.reserved_cost_usd
         )
-        if projected > _usd_decimal(record.snapshot.max_cost_usd):
+        if configured_upper_bound > remaining and record.active_reservations:
             raise ExperimentAuthorizationError("full execution USD budget is exhausted")
+        upper_bound = min(configured_upper_bound, remaining)
+        if upper_bound <= 0:
+            raise ExperimentAuthorizationError("full execution USD budget is exhausted")
+        issued_upper_bound = float(upper_bound)
         token = secrets.token_hex(32)
         reservation = _issue_reservation(
             scope_id=scope_id,
             kind=kind,
-            upper_bound_usd=upper_bound_value,
+            upper_bound_usd=issued_upper_bound,
             _authorization_token=record.snapshot.issuance_token,
             _reservation_token=token,
         )

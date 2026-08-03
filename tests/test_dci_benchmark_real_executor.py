@@ -292,6 +292,8 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
         self.assertEqual(authority.planned_judge_operations, 0)
         self.assertEqual(authority.max_judge_operations, 0)
         self.assertEqual(authority.max_cost_usd, 1.0)
+        self.assertEqual(authority.max_agent_cost_per_operation_usd, 1.0)
+        self.assertEqual(calls[0].max_concurrency, 1)
         self.assertEqual(authority.selected_query_counts, (10,))
         self.assertEqual(calls[0].experiment_scope_id, "bright.biology.main.full")
         self.assertEqual(

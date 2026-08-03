@@ -169,7 +169,7 @@ def _coverage_execution_config_sha256(
                 "task_id": task_id,
                 "mode": _REAL_TASK_MODES[task_id],
                 "max_turns": _REAL_TASK_EXECUTION[task_id][0],
-                "max_concurrency": _REAL_TASK_EXECUTION[task_id][1],
+                "max_concurrency": 1,
                 "max_native_attempts": _REAL_TASK_NATIVE_ATTEMPTS[task_id],
                 "case_limit": 10,
                 "externalize_tool_results": True,
@@ -336,6 +336,8 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 invocation.task_id,
                 (self._max_turns, 1),
             )
+            if coverage_registry is not None:
+                max_concurrency = 1
             if payload.case_limit > 50:
                 max_concurrency = 2
             request = BenchmarkRequest(
@@ -570,13 +572,14 @@ def _authorize_full_request(
     judge_operations = (
         payload.case_limit if request.mode == "qa" else int(not coverage_case10)
     )
-    # The authorization ledger reserves an operation's full upper bound before
-    # it starts, then replaces that reservation with its actual spend.  A
-    # per-operation bound equal to the total envelope therefore makes a
-    # sequential batch fail after its first case, even when that case was
-    # inexpensive.  Ten reservation slots preserve the finite total budget
-    # while leaving normal DeepSeek/Pi operations ample headroom.
-    operation_limit = float(payload.amount) / 10
+    # Coverage tasks run sequentially so one unusually long case may use the
+    # task's remaining envelope without allowing concurrent reservations to
+    # exceed that envelope. Other full runs retain their established slots.
+    operation_limit = (
+        float(payload.amount)
+        if coverage_case10
+        else float(payload.amount) / 10
+    )
     authority = authorize_full_execution(
         profile=profile,
         scope_ids=(scope_id,),
