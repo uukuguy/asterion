@@ -581,20 +581,20 @@ def build_workflow_observation_bundle(
     for record in records:
         if not isinstance(record, Mapping):
             raise WorkflowEvidenceError("workflow observation record is invalid")
-        if record.get("schema") == "asterion.workflow-evidence/v1":
-            validate_workflow_evidence(record)
+        copied_record = _json_copy(record)
+        if not isinstance(copied_record, dict):
+            raise WorkflowEvidenceError("workflow observation record is invalid")
+        if copied_record.get("schema") == "asterion.workflow-evidence/v1":
+            validate_workflow_evidence(copied_record)
         else:
-            _validate_failure_observation(record)
-        run_id = record["run_id"]
+            _validate_failure_observation(copied_record)
+        run_id = copied_record["run_id"]
         assert isinstance(run_id, str)
         if run_id in seen_run_ids:
             raise WorkflowEvidenceError(
                 "workflow observation run identity is duplicated"
             )
         seen_run_ids.add(run_id)
-        copied_record = _json_copy(record)
-        if not isinstance(copied_record, dict):
-            raise WorkflowEvidenceError("workflow observation record is invalid")
         serialized_records.append(copied_record)
 
     serialized_traces: list[dict[str, object]] = []
