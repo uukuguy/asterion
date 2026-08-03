@@ -29,6 +29,35 @@ _COVERAGE_TASK_IDS = (
 
 
 class DciOperatorCoverageInputTests(unittest.TestCase):
+    def test_sourced_resource_env_anchors_relative_pi_root_for_worktree(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory).resolve()
+            worktree = parent / "worktree"
+            worktree.mkdir()
+            configuration_root = parent / "operator-config"
+            configuration_root.mkdir()
+            env_file = configuration_root / ".env"
+            env_file.write_text(
+                "ASTERION_DCI_RESOURCE_ROOT="
+                f"{configuration_root}\n"
+                "DCI_PI_DIR=./pi\n",
+                encoding="utf-8",
+            )
+
+            config = load_operator_config(
+                worktree,
+                environment={
+                    "ASTERION_DCI_RESOURCE_ROOT": str(configuration_root),
+                    "DCI_PI_DIR": "./pi",
+                },
+            )
+            paths = resolve_dci_paths(
+                config.repo_root,
+                environment=config.benchmark_inputs.private_environment,
+            )
+
+        self.assertEqual(paths.pi.repo_dir, configuration_root / "pi")
+
     def test_dotenv_relative_pi_root_is_anchored_to_dotenv_for_worktree(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory).resolve()

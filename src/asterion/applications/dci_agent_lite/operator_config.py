@@ -62,7 +62,17 @@ def load_operator_config(
     """Translate DCI environment aliases into private package and host inputs."""
 
     root = Path(repo_root).resolve()
+    process = dict(os.environ if environment is None else environment)
     env_path = root / ".env" if env_file is None else Path(env_file).resolve()
+    if env_file is None and not env_path.is_file():
+        resource_value = process.get("ASTERION_DCI_RESOURCE_ROOT", "").strip()
+        if resource_value:
+            resource_root = Path(resource_value).expanduser()
+            if not resource_root.is_absolute():
+                resource_root = root / resource_root
+            resource_env = resource_root.resolve() / ".env"
+            if resource_env.is_file():
+                env_path = resource_env
     dotenv = (
         {
             key: value
@@ -72,7 +82,6 @@ def load_operator_config(
         if env_path.is_file()
         else {}
     )
-    process = dict(os.environ if environment is None else environment)
     merged = {**dotenv, **process}
     for name in _DOTENV_RELATIVE_PATH_KEYS:
         if name not in dotenv or (
