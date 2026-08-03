@@ -8,12 +8,71 @@ from pathlib import Path
 
 from asterion.capabilities.dci.implementation.research.trajectory_resolution import (
     _parse_gold_manifest,
+    _matches_truncated_line,
+    _tool_result_text,
     validate_gold_manifest_bytes,
     validate_public_resolution_summary,
 )
 
 
 class DciCoverageOnlyTrajectoryTests(unittest.TestCase):
+    def test_pi_structured_tool_result_extracts_one_bound_text(self) -> None:
+        self.assertEqual(
+            _tool_result_text(
+                {
+                    "content": [{"type": "text", "text": "observed body"}],
+                    "details": {"linesTruncated": False},
+                }
+            ),
+            "observed body",
+        )
+        self.assertEqual(
+            _tool_result_text(
+                {
+                    "content": [{"type": "text", "text": "truncated"}],
+                    "details": {
+                        "truncation": {
+                            "truncated": True,
+                            "content": "complete output",
+                        }
+                    },
+                }
+            ),
+            "complete output",
+        )
+        for value in (
+            {"content": []},
+            {"content": [{"type": "image", "text": "body"}]},
+            {"content": [{"type": "text", "text": "one"}, {"type": "text", "text": "two"}]},
+            {"content": [{"type": "text", "text": "body", "extra": True}]},
+            {"content": [{"type": "text", "text": "body"}], "unknown": {}},
+        ):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                _tool_result_text(value)
+
+    def test_line_truncation_requires_explicit_marker_and_long_exact_prefix(self) -> None:
+        prefix = "x" * 499
+        self.assertTrue(
+            _matches_truncated_line(
+                f"{prefix}... [truncated]",
+                f"{prefix}full remainder",
+                lines_truncated=True,
+            )
+        )
+        for observed, truncated in (
+            (f"{prefix}... [truncated]", False),
+            ("short... [truncated]", True),
+            (prefix, True),
+        ):
+            with self.subTest(observed=observed, truncated=truncated):
+                self.assertFalse(
+                    _matches_truncated_line(
+                        observed,
+                        f"{prefix}full remainder",
+                        lines_truncated=truncated,
+                    )
+                )
+
     def test_legacy_span_bearing_public_summary_remains_compatible(self) -> None:
         summary = {
             "schema": "dci.trajectory-resolution-summary/v1",

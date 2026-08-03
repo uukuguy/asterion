@@ -110,6 +110,7 @@ class _ToolObservation:
     name: str
     arguments: dict[str, object]
     output: str
+    lines_truncated: bool
     external_digest: str
 
 
@@ -548,12 +549,64 @@ def validate_gold_manifest_bytes(
     return dataset_id, query_id, tuple(document.document_id for document in documents)
 
 
+def _tool_result_text(value: object) -> str:
+    """Normalize the closed Pi text-result shape without accepting extra content."""
+
+    if type(value) is str:
+        return value
+    if type(value) is not dict or set(value) not in (
+        {"content"},
+        {"content", "details"},
+    ):
+        raise TrajectoryResolutionError("DCI tool result evidence is invalid")
+    content = value.get("content")
+    details = value.get("details")
+    if (
+        type(content) is not list
+        or len(content) != 1
+        or type(content[0]) is not dict
+        or set(content[0]) != {"type", "text"}
+        or content[0].get("type") != "text"
+        or type(content[0].get("text")) is not str
+        or "details" in value
+        and type(details) is not dict
+    ):
+        raise TrajectoryResolutionError("DCI tool result evidence is invalid")
+    text = content[0]["text"]
+    truncation = details.get("truncation") if type(details) is dict else None
+    if truncation is not None:
+        if (
+            type(truncation) is not dict
+            or truncation.get("truncated") is not True
+            or type(truncation.get("content")) is not str
+        ):
+            raise TrajectoryResolutionError("DCI tool result evidence is invalid")
+        text = truncation["content"]
+    return text
+
+
+def _tool_result_lines_truncated(value: object) -> bool:
+    if type(value) is str:
+        return False
+    if type(value) is not dict:
+        raise TrajectoryResolutionError("DCI tool result evidence is invalid")
+    details = value.get("details")
+    if details is None:
+        return False
+    if type(details) is not dict:
+        raise TrajectoryResolutionError("DCI tool result evidence is invalid")
+    lines_truncated = details.get("linesTruncated", False)
+    if type(lines_truncated) is not bool:
+        raise TrajectoryResolutionError("DCI tool result evidence is invalid")
+    return lines_truncated
+
+
 def _externalized_observations(
     run_dir: Path,
     events: tuple[dict[str, Any], ...],
 ) -> tuple[tuple[_ToolObservation, ...], tuple[_Snapshot, ...]]:
     calls: dict[str, tuple[str, dict[str, object]]] = {}
-    results: dict[str, str] = {}
+    results: dict[str, tuple[str, bool, bool]] = {}
     order: list[str] = []
     for event in events:
         payload = event["payload"]
@@ -574,16 +627,20 @@ def _externalized_observations(
             order.append(call_id)
         elif event["type"] == "tool.result":
             call_id = payload.get("call_id")
-            output = payload.get("output")
+            is_error = payload.get("is_error")
             if (
                 type(call_id) is not str
                 or call_id not in calls
                 or call_id in results
-                or payload.get("is_error") is not False
-                or type(output) is not str
+                or type(is_error) is not bool
             ):
                 raise TrajectoryResolutionError("DCI tool result evidence is invalid")
-            results[call_id] = output
+            output = payload.get("output")
+            results[call_id] = (
+                _tool_result_text(output),
+                is_error,
+                _tool_result_lines_truncated(output),
+            )
         elif event["type"] not in {
             "run.started",
             "run.completed",
@@ -622,9 +679,15 @@ def _externalized_observations(
     snapshots: list[_Snapshot] = []
     for call_id in order:
         name, arguments = calls[call_id]
+        protocol_text, is_error, lines_truncated = results[call_id]
         document, snapshot = documents[call_id]
         message = document.get("message")
         content = message.get("content") if type(message) is dict else None
+        message_output = (
+            {"content": content, "details": message.get("details")}
+            if type(message) is dict and "details" in message
+            else {"content": content}
+        )
         texts = (
             [part.get("text") for part in content if type(part) is dict and part.get("type") == "text"]
             if type(content) is list
@@ -636,17 +699,27 @@ def _externalized_observations(
             or message.get("role") != "toolResult"
             or message.get("toolCallId") != call_id
             or message.get("toolName") != name
+            or message.get("isError") is not is_error
             or len(texts) != 1
             or type(texts[0]) is not str
-            or texts[0] != results[call_id]
+            or _tool_result_text(message_output) != protocol_text
+            or _tool_result_lines_truncated(message_output) is not lines_truncated
         ):
             raise TrajectoryResolutionError(
                 "DCI externalized tool result does not bind protocol output"
             )
-        observations.append(
-            _ToolObservation(call_id, name, arguments, texts[0], snapshot.sha256)
-        )
         snapshots.append(snapshot)
+        if not is_error:
+            observations.append(
+                _ToolObservation(
+                    call_id,
+                    name,
+                    arguments,
+                    protocol_text,
+                    lines_truncated,
+                    snapshot.sha256,
+                )
+            )
     return tuple(observations), tuple(snapshots)
 
 
@@ -730,7 +803,16 @@ def _matched_line_alignment(
     expected_text: str | None,
 ) -> dict[str, object] | None:
     span = _line_span(document.body, line_number)
-    if span is None or (expected_text is not None and span[2] != expected_text):
+    if span is None:
+        return None
+    if expected_text is not None and not (
+        span[2].strip() == expected_text.strip()
+        or _matches_truncated_line(
+            expected_text,
+            span[2],
+            lines_truncated=observation.lines_truncated,
+        )
+    ):
         return None
     start, end, text = span
     return {
@@ -743,6 +825,16 @@ def _matched_line_alignment(
         "end": end,
         "observation": output_line,
     }
+
+
+def _matches_truncated_line(
+    observed: str, actual: str, *, lines_truncated: bool
+) -> bool:
+    if not lines_truncated or observed.count("...") != 1:
+        return False
+    prefix, _marker = observed.split("...", 1)
+    prefix = prefix.strip()
+    return len(prefix) >= 499 and actual.strip().startswith(prefix)
 
 
 def _output_alignments(
