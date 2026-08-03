@@ -19,6 +19,7 @@ _RESOURCE_NAME = "dci-pathlight-observation.ts"
 _MANIFEST_NAME = "pathlight-observation-manifest.json"
 _EXTENSION_VERSION = "0.3.0"
 _CONTRACT_VERSION = "dci.pathlight-provider-request-capture/v1"
+_EXPECTED_SHA256 = "56631fc678af4a18218680fb44005379e842fa21e56633fa38c9eccb760c268f"
 _PRIVATE_RECORD_SCHEMA = "dci.private-provider-request/v1"
 _SAFE_OBSERVATION_SCHEMA = "dci.provider-request-observation/v1"
 _MANIFEST_KEYS = {
@@ -102,15 +103,15 @@ def _read_regular_file(path: Path, *, maximum_bytes: int) -> bytes:
             os.close(descriptor)
     except PathlightObservationExtensionError:
         raise
-    except (OSError, ValueError) as error:
-        raise _invalid() from error
+    except (OSError, ValueError):
+        raise _invalid() from None
 
 
 def _parse_manifest(raw: bytes) -> dict[str, object]:
     try:
         value = json.loads(raw)
-    except (UnicodeError, json.JSONDecodeError) as error:
-        raise _invalid() from error
+    except (UnicodeError, json.JSONDecodeError):
+        raise _invalid() from None
     if not isinstance(value, dict) or set(value) != _MANIFEST_KEYS:
         raise _invalid()
     if (
@@ -123,6 +124,7 @@ def _parse_manifest(raw: bytes) -> dict[str, object]:
         or not 0 < value["byte_length"] <= _MAX_RESOURCE_BYTES
         or not isinstance(value.get("sha256"), str)
         or re.fullmatch(r"[0-9a-f]{64}", value["sha256"]) is None
+        or value["sha256"] != _EXPECTED_SHA256
     ):
         raise _invalid()
     return value
@@ -148,12 +150,16 @@ def _has_exact_source_identity(text: str) -> bool:
 
 def _validate_source(source: bytes, manifest: dict[str, object]) -> str:
     digest = hashlib.sha256(source).hexdigest()
-    if len(source) != manifest["byte_length"] or digest != manifest["sha256"]:
+    if (
+        len(source) != manifest["byte_length"]
+        or digest != manifest["sha256"]
+        or digest != _EXPECTED_SHA256
+    ):
         raise _invalid()
     try:
         text = source.decode("utf-8")
-    except UnicodeError as error:
-        raise _invalid() from error
+    except UnicodeError:
+        raise _invalid() from None
 
     import_matches = tuple(_IMPORT_STATEMENT.finditer(text))
     without_allowed_imports = list(text)
@@ -207,14 +213,8 @@ def resolve_pathlight_observation_extension() -> Iterator[
             )
     except PathlightObservationExtensionError:
         raise
-    except (
-        FileNotFoundError,
-        ModuleNotFoundError,
-        OSError,
-        TypeError,
-        ValueError,
-    ) as error:
-        raise _invalid() from error
+    except Exception:
+        raise _invalid() from None
 
 
 __all__ = (

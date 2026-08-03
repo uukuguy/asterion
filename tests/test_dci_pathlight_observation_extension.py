@@ -8,6 +8,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import traceback
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -90,7 +91,7 @@ class PathlightObservationExtensionTests(unittest.TestCase):
                 self.subTest(missing=missing),
                 tempfile.TemporaryDirectory() as temporary,
             ):
-                root = Path(temporary)
+                root = Path(temporary) / "SENTINEL_PRIVATE_PATH"
                 write_fixture(root)
                 root.joinpath(missing).unlink()
                 with (
@@ -105,7 +106,34 @@ class PathlightObservationExtensionTests(unittest.TestCase):
                     str(raised.exception),
                     "DCI Pathlight observation extension is invalid",
                 )
-                self.assertNotIn(str(root), str(raised.exception))
+                self.assertIsNone(raised.exception.__cause__)
+                rendered = "".join(traceback.format_exception(raised.exception))
+                self.assertNotIn("SENTINEL_PRIVATE_PATH", rendered)
+                self.assertNotIn(str(root), rendered)
+
+    def test_unexpected_resource_error_is_redacted_without_a_cause(self) -> None:
+        with patch.object(
+            self.module.resources,
+            "files",
+            side_effect=RuntimeError("SENTINEL_PRIVATE_CONTENT /SENTINEL_PRIVATE_PATH"),
+        ):
+            try:
+                with self.module.resolve_pathlight_observation_extension():
+                    pass
+            except Exception as error:
+                raised = error
+            else:
+                self.fail("resource failure was accepted")
+
+        self.assertIsInstance(raised, self.module.PathlightObservationExtensionError)
+        self.assertEqual(
+            str(raised),
+            "DCI Pathlight observation extension is invalid",
+        )
+        self.assertIsNone(raised.__cause__)
+        rendered = "".join(traceback.format_exception(raised))
+        self.assertNotIn("SENTINEL_PRIVATE_CONTENT", rendered)
+        self.assertNotIn("SENTINEL_PRIVATE_PATH", rendered)
 
     def test_symlink_and_non_regular_resources_fail_closed(self) -> None:
         for unsafe_name, unsafe_kind in (
@@ -182,6 +210,52 @@ class PathlightObservationExtensionTests(unittest.TestCase):
                     with self.module.resolve_pathlight_observation_extension():
                         pass
 
+    def test_actual_and_declared_oversize_resources_fail_closed(self) -> None:
+        cases = (
+            (
+                "source",
+                b"x" * (self.module._MAX_RESOURCE_BYTES + 1),
+                None,
+            ),
+            (
+                "manifest",
+                SOURCE,
+                b" " * (self.module._MAX_MANIFEST_BYTES + 1),
+            ),
+        )
+        for name, source, manifest_suffix in cases:
+            with (
+                self.subTest(name=name),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                write_fixture(root, source=source)
+                if manifest_suffix is not None:
+                    root.joinpath(MANIFEST_NAME).write_bytes(
+                        json.dumps(manifest_for()).encode("utf-8") + manifest_suffix
+                    )
+                with (
+                    self.resolve_from(root),
+                    self.assertRaises(self.module.PathlightObservationExtensionError),
+                ):
+                    with self.module.resolve_pathlight_observation_extension():
+                        pass
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            write_fixture(root)
+            manifest = manifest_for()
+            manifest["byte_length"] = self.module._MAX_RESOURCE_BYTES + 1
+            root.joinpath(MANIFEST_NAME).write_text(
+                json.dumps(manifest), encoding="utf-8"
+            )
+            with (
+                self.resolve_from(root),
+                self.assertRaises(self.module.PathlightObservationExtensionError),
+            ):
+                with self.module.resolve_pathlight_observation_extension():
+                    pass
+
         for transform in (
             lambda value: {**value, "private_path": "/SENTINEL_PRIVATE"},
             lambda value: {key: item for key, item in value.items() if key != "sha256"},
@@ -211,6 +285,29 @@ class PathlightObservationExtensionTests(unittest.TestCase):
             SOURCE + b'\npi.registerProvider("sentinel", {});\n',
             SOURCE + b'\npi.registerTool({ name: "sentinel" });\n',
             SOURCE + b'\npi.registerCommand("sentinel", () => undefined);\n',
+        )
+        for index, source in enumerate(mutations):
+            with self.subTest(index=index), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                write_fixture(root, source=source)
+                with (
+                    self.resolve_from(root),
+                    self.assertRaises(self.module.PathlightObservationExtensionError),
+                ):
+                    with self.module.resolve_pathlight_observation_extension():
+                        pass
+
+    def test_recomputed_manifest_cannot_authorize_obfuscated_source(self) -> None:
+        mutations = (
+            SOURCE
+            + b'\nconst method = "register" + "Tool";\n'
+            + b'pi[method]({ name: "sentinel" });\n',
+            SOURCE
+            + b'\nconst method = "o" + "n";\n'
+            + b'pi[method]("before_" + "provider_request", () => undefined);\n',
+            SOURCE
+            + b'\nconst publish = pi["append" + "Entry"].bind(pi);\n'
+            + b'publish("dci-provider-request-raw", event.payload);\n',
         )
         for index, source in enumerate(mutations):
             with self.subTest(index=index), tempfile.TemporaryDirectory() as temporary:
