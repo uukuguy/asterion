@@ -64,10 +64,9 @@ const resources = [
         throw new Error("Pathlight observation source identity is missing");
       }
       return {
-        schema: "dci.pathlight-observation-manifest/v1",
-        capture_contract_version: captureContractVersion,
-        private_record_schema: privateRecordSchema,
-        safe_observation_schema: safeObservationSchema,
+        schema: "dci.pathlight-observation-extension-manifest/v1",
+        extension_version: "0.3.0",
+        contract_version: captureContractVersion,
         resource: "dci-pathlight-observation.ts",
         byte_length: sourceBytes.length,
         sha256: createHash("sha256").update(sourceBytes).digest("hex"),
@@ -110,13 +109,17 @@ async function atomicWrite(path, bytes) {
   }
 }
 
+const synchronized = [];
 for (const resource of resources) {
   await regularFile(resource.source);
   const sourceBytes = await readFile(resource.source);
   const sourceText = sourceBytes.toString("utf8");
   const manifest = `${JSON.stringify(resource.manifest(sourceText, sourceBytes), null, 2)}\n`;
+  synchronized.push({ resource, sourceBytes, manifest });
+}
 
-  if (checkOnly) {
+if (checkOnly) {
+  for (const { resource, sourceBytes, manifest } of synchronized) {
     const mirrored = await existingBytes(resource.destination);
     const recordedManifest = await existingBytes(resource.manifestPath);
     if (
@@ -127,7 +130,10 @@ for (const resource of resources) {
     ) {
       throw new Error("context extension runtime resource is out of sync");
     }
-  } else {
+  }
+} else {
+  // Validate every source and construct every manifest before mutating any mirror.
+  for (const { resource, sourceBytes, manifest } of synchronized) {
     await atomicWrite(resource.destination, sourceBytes);
     await atomicWrite(resource.manifestPath, manifest);
   }

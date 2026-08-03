@@ -132,6 +132,8 @@ DCI_PACKAGED_RESOURCE_CLOSURE = {
     "capabilities/dci/resources/paper-selected-id-manifests.json",
     "capabilities/dci/resources/pi/context-extension-manifest.json",
     "capabilities/dci/resources/pi/dci-context-extension.ts",
+    "capabilities/dci/resources/pi/dci-pathlight-observation.ts",
+    "capabilities/dci/resources/pi/pathlight-observation-manifest.json",
     "capabilities/dci/resources/reproduction-result.schema.json",
     "capabilities/dci/resources/reproduction-target.schema.json",
     "capabilities/dci/resources/reproduction-targets.json",
@@ -262,7 +264,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
             if name.endswith(".py")
         }
         self.assertEqual(declared, reachable)
-        self.assertEqual(len(DCI_COMPLETE_IMPLEMENTATION_RESOURCES), 72)
+        self.assertEqual(len(DCI_COMPLETE_IMPLEMENTATION_RESOURCES), 74)
 
     def test_transitive_identity_contains_explicit_packaged_resource_closure(
         self,

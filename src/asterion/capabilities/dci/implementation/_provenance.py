@@ -72,6 +72,8 @@ DCI_COMPLETE_IMPLEMENTATION_RESOURCES: tuple[str, ...] = tuple(sorted((
     "capabilities/dci/resources/paper-selected-id-manifests.json",
     "capabilities/dci/resources/pi/context-extension-manifest.json",
     "capabilities/dci/resources/pi/dci-context-extension.ts",
+    "capabilities/dci/resources/pi/dci-pathlight-observation.ts",
+    "capabilities/dci/resources/pi/pathlight-observation-manifest.json",
     "capabilities/dci/resources/reproduction-result.schema.json",
     "capabilities/dci/resources/reproduction-target.schema.json",
     "capabilities/dci/resources/reproduction-targets.json",

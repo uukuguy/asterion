@@ -21,6 +21,7 @@ EXPECTED_MODULES = {
         "context_profiles.py",
         "effective_config.py",
         "experiment_profiles.py",
+        "pathlight_observation.py",
         "prompts.py",
         "system_prompt.py",
         "trajectory_resolution.py",

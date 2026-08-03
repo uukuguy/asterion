@@ -1,0 +1,8 @@
+{
+  "schema": "dci.pathlight-observation-extension-manifest/v1",
+  "extension_version": "0.3.0",
+  "contract_version": "dci.pathlight-provider-request-capture/v1",
+  "resource": "dci-pathlight-observation.ts",
+  "byte_length": 15665,
+  "sha256": "56631fc678af4a18218680fb44005379e842fa21e56633fa38c9eccb760c268f"
+}
