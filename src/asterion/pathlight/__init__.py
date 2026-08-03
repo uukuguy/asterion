@@ -88,6 +88,12 @@ from asterion.pathlight.dashboard import (
     DashboardSnapshot,
     validate_dashboard_snapshot,
 )
+from asterion.pathlight.dashboard_server import (
+    DashboardApplication,
+    DashboardResponse,
+    serve_dashboard,
+    validate_dashboard_bind,
+)
 
 __all__ = (
     "PathlightError",
@@ -164,4 +170,8 @@ __all__ = (
     "DASHBOARD_SNAPSHOT_SCHEMA",
     "DashboardSnapshot",
     "validate_dashboard_snapshot",
+    "DashboardApplication",
+    "DashboardResponse",
+    "serve_dashboard",
+    "validate_dashboard_bind",
 )

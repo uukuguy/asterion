@@ -110,7 +110,7 @@ git commit -m "feat: add Pathlight Dashboard snapshot"
 - Consumes: `DashboardSnapshot.to_mapping()`.
 - Produces: `DashboardApplication(snapshot).response(method, target)` and `serve_dashboard(snapshot, host, port)`.
 
-- [ ] **Step 1: Write failing route and security tests**
+- [x] **Step 1: Write failing route and security tests**
 
 ```python
 def test_api_is_read_only_same_origin_and_path_free(self) -> None:
@@ -127,13 +127,13 @@ def test_non_loopback_host_is_rejected_before_server_creation(self) -> None:
         validate_dashboard_bind("0.0.0.0", 8123)
 ```
 
-- [ ] **Step 2: Run the focused tests and confirm the server is absent**
+- [x] **Step 2: Run the focused tests and confirm the server is absent**
 
 Run: `uv run python -m unittest -v tests.test_pathlight_dashboard`
 
 Expected: FAIL because `DashboardApplication` is not defined.
 
-- [ ] **Step 3: Implement pure route dispatch and the HTTP adapter**
+- [x] **Step 3: Implement pure route dispatch and the HTTP adapter**
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -159,13 +159,13 @@ def serve_dashboard(snapshot: DashboardSnapshot, *, host: str, port: int) -> Non
 
 Route only the exact API paths, exact trace UUID segments, `/`, `/app.js`, and `/styles.css`. Ignore query strings only after strict parsing; reject traversal, encoded slashes, fragments, unknown methods, and oversized targets. Use `ThreadingHTTPServer` only after bind validation, suppress request logging that could reveal targets, and emit fixed error bodies.
 
-- [ ] **Step 4: Run API, protocol, and redaction tests**
+- [x] **Step 4: Run API, protocol, and redaction tests**
 
 Run: `uv run python -m unittest -v tests.test_pathlight_dashboard tests.test_pathlight_protocol tests.test_pathlight_private_file`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the read API**
+- [x] **Step 5: Commit the read API**
 
 ```bash
 git add src/asterion/pathlight/dashboard_server.py tests/test_pathlight_dashboard.py

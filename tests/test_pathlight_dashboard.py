@@ -12,6 +12,10 @@ from asterion.pathlight import (
     validate_dashboard_snapshot,
 )
 from asterion.workflow_evidence.storage import WorkflowObservationBundle
+from asterion.pathlight.dashboard_server import (
+    DashboardApplication,
+    validate_dashboard_bind,
+)
 
 
 TRACE_ID = "00000000-0000-4000-8000-000000000101"
@@ -107,6 +111,81 @@ class PathlightDashboardSnapshotTests(unittest.TestCase):
             "private_path",
         ):
             self.assertNotIn(forbidden, rendered)
+
+
+class PathlightDashboardApplicationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.snapshot = DashboardSnapshot.build(workflow_bundles=(_workflow_bundle(),))
+
+    def test_api_is_read_only_safe_and_same_origin(self) -> None:
+        app = DashboardApplication(self.snapshot)
+        response = app.response("GET", "/api/pathlight/v1/snapshot")
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.media_type, "application/json; charset=utf-8")
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertIn("default-src 'self'", response.headers["Content-Security-Policy"])
+        self.assertNotIn("Access-Control-Allow-Origin", response.headers)
+        self.assertEqual(json.loads(response.body), self.snapshot.to_mapping())
+        self.assertEqual(app.response("POST", "/api/pathlight/v1/snapshot").status, 405)
+
+    def test_api_routes_exact_trace_flow_and_head(self) -> None:
+        app = DashboardApplication(self.snapshot)
+        routes = {
+            "/api/pathlight/v1/summary": dict(self.snapshot.summary),
+            "/api/pathlight/v1/traces": self.snapshot.to_mapping()["traces"],
+            f"/api/pathlight/v1/traces/{TRACE_ID}": self.snapshot.to_mapping()[
+                "traces"
+            ][0],
+            f"/api/pathlight/v1/traces/{TRACE_ID}/flow": self.snapshot.to_mapping()[
+                "flows"
+            ][0],
+            "/api/pathlight/v1/evaluations": [],
+            "/api/pathlight/v1/experiments": [],
+            "/api/pathlight/v1/diagnoses": [],
+        }
+        for target, expected in routes.items():
+            with self.subTest(target=target):
+                response = app.response("GET", target)
+                self.assertEqual(response.status, 200)
+                self.assertEqual(json.loads(response.body), expected)
+                head = app.response("HEAD", target)
+                self.assertEqual(head.status, 200)
+                self.assertEqual(head.body, b"")
+                self.assertEqual(
+                    head.headers["Content-Length"], str(len(response.body))
+                )
+
+    def test_api_rejects_unknown_or_malformed_targets_with_fixed_errors(self) -> None:
+        app = DashboardApplication(self.snapshot)
+        responses = (
+            app.response("GET", "/api/pathlight/v1/traces/unknown"),
+            app.response("GET", "/api/pathlight/v1/../snapshot"),
+            app.response("GET", "/api/pathlight/v1/snapshot?secret=value"),
+            app.response("OPTIONS", "/api/pathlight/v1/snapshot"),
+        )
+        self.assertEqual(
+            [response.status for response in responses], [404, 404, 404, 405]
+        )
+        rendered = b"".join(response.body for response in responses)
+        self.assertNotIn(b"unknown", rendered)
+        self.assertNotIn(b"secret", rendered)
+
+    def test_non_loopback_or_invalid_port_is_rejected(self) -> None:
+        for host, port in (
+            ("0.0.0.0", 8123),
+            ("192.0.2.1", 8123),
+            ("127.0.0.1", -1),
+            ("127.0.0.1", 65536),
+            ("127.0.0.1", True),
+        ):
+            with self.subTest(host=host, port=port), self.assertRaises(PathlightError):
+                validate_dashboard_bind(host, port)
+        self.assertEqual(validate_dashboard_bind("127.0.0.1", 0), ("127.0.0.1", 0))
+        self.assertEqual(validate_dashboard_bind("::1", 8123), ("::1", 8123))
+        self.assertEqual(
+            validate_dashboard_bind("localhost", 8123), ("localhost", 8123)
+        )
 
 
 if __name__ == "__main__":
