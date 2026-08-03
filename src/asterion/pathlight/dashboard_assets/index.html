@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>Pathlight Dashboard</title>
+    <meta name="description" content="Asterion 工作流路径观察、评估与证据缺口工作台">
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#workflow-main">跳到工作流主线</a>
+    <header class="topbar">
+      <div class="brand-block">
+        <span class="brand-mark" aria-hidden="true">PL</span>
+        <div>
+          <p class="eyebrow">Asterion · workflow observability</p>
+          <h1>Pathlight Dashboard</h1>
+        </div>
+      </div>
+      <div id="snapshot-status" class="snapshot-status" role="status" aria-live="polite">
+        正在验证安全快照…
+      </div>
+    </header>
+
+    <section class="metric-strip" aria-label="快照摘要">
+      <div><span id="count-traces">—</span><small>Traces</small></div>
+      <div><span id="count-models">—</span><small>模型调用</small></div>
+      <div><span id="count-tools">—</span><small>工具调用</small></div>
+      <div><span id="count-evaluations">—</span><small>评估</small></div>
+      <div class="gap-metric"><span id="count-gaps">—</span><small>证据缺口</small></div>
+    </section>
+
+    <main class="workspace" aria-label="Pathlight 运行路径工作台">
+      <aside class="run-panel" aria-labelledby="run-list-title">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">RUN INDEX</p>
+            <h2 id="run-list-title">运行列表</h2>
+          </div>
+          <span id="visible-run-count" class="count-pill">0</span>
+        </div>
+        <label class="search-label" for="trace-filter">筛选 opaque trace ID</label>
+        <input id="trace-filter" type="search" autocomplete="off" placeholder="输入摘要…">
+        <div id="trace-list" class="trace-list" role="listbox" aria-label="Trace 列表"></div>
+      </aside>
+
+      <section id="workflow-main" class="flow-panel" aria-labelledby="flow-title" tabindex="-1">
+        <div class="panel-heading flow-heading">
+          <div>
+            <p class="eyebrow">CONTEXT DATAFLOW</p>
+            <h2 id="flow-title">ContextFrame 工作流主线</h2>
+          </div>
+          <span id="flow-status" class="status-badge status-missing">未选择</span>
+        </div>
+        <p id="flow-description" class="panel-description">
+          选择一个运行，沿 ContextFrame → 模型调用 → 工具调用观察输入输出边界。
+        </p>
+        <ol id="flow-list" class="flow-list" aria-label="工作流节点"></ol>
+      </section>
+
+      <aside class="inspector-panel" aria-labelledby="inspector-title">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">NODE INSPECTOR</p>
+            <h2 id="inspector-title">节点检查器</h2>
+          </div>
+        </div>
+        <p id="inspector-empty" class="empty-copy">选择主线节点查看结构化摘要。</p>
+        <dl id="inspector-fields" class="inspector-fields"></dl>
+      </aside>
+    </main>
+
+    <section class="analysis" aria-labelledby="analysis-title">
+      <div class="analysis-heading">
+        <div>
+          <p class="eyebrow">CROSS-RUN ANALYSIS</p>
+          <h2 id="analysis-title">评估、实验与诊断</h2>
+        </div>
+        <div class="tab-list" role="tablist" aria-label="分析视图">
+          <button id="tab-evaluations" role="tab" aria-selected="true" aria-controls="analysis-content" data-tab="evaluations">评估</button>
+          <button id="tab-experiments" role="tab" aria-selected="false" aria-controls="analysis-content" data-tab="experiments">实验</button>
+          <button id="tab-diagnoses" role="tab" aria-selected="false" aria-controls="analysis-content" data-tab="diagnoses">诊断与缺口</button>
+        </div>
+      </div>
+      <div id="analysis-content" class="analysis-content" role="tabpanel" aria-live="polite"></div>
+    </section>
+
+    <footer>
+      <span>只读 · provider-free · operator-local</span>
+      <code id="snapshot-digest">snapshot —</code>
+    </footer>
+  </body>
+</html>

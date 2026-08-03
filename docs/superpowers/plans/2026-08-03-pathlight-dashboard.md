@@ -185,7 +185,7 @@ git commit -m "feat: serve read-only Pathlight Dashboard API"
 - Consumes: `GET /api/pathlight/v1/snapshot` and exact trace/flow routes.
 - Produces: keyboard-accessible trace selection, flow timeline, node inspector, evaluation, experiment, and diagnosis views.
 
-- [ ] **Step 1: Write failing asset and redaction tests**
+- [x] **Step 1: Write failing asset and redaction tests**
 
 ```python
 def test_packaged_interface_contains_product_views_without_external_resources(self) -> None:
@@ -199,13 +199,13 @@ def test_packaged_interface_contains_product_views_without_external_resources(se
     self.assertNotRegex(html + script + css, r"https?://|@import|localStorage")
 ```
 
-- [ ] **Step 2: Run the focused test and confirm assets are absent**
+- [x] **Step 2: Run the focused test and confirm assets are absent**
 
 Run: `uv run python -m unittest -v tests.test_pathlight_dashboard`
 
 Expected: FAIL with a 404 asset response.
 
-- [ ] **Step 3: Implement the static application**
+- [x] **Step 3: Implement the static application**
 
 ```javascript
 const state = { snapshot: null, traceId: null, selectedNode: null, tab: "flow" };
@@ -220,13 +220,13 @@ async function loadSnapshot() {
 
 Build semantic regions for the status bar, trace list, central ordered flow, node inspector, and evaluation/experiment/diagnosis tabs. Render all dynamic values through `textContent`; never use `innerHTML`. Show `missing` as a first-class amber evidence-gap row. Add focus-visible styles, skip link, ARIA labels, responsive single-column layout, and reduced-motion rules. Do not add icons, remote fonts, analytics, persistence, or mutation controls.
 
-- [ ] **Step 4: Run interface, server, and wheel file tests**
+- [x] **Step 4: Run interface, server, and wheel file tests**
 
 Run: `uv run python -m unittest -v tests.test_pathlight_dashboard`
 
 Expected: PASS and all three assets are returned with exact media types.
 
-- [ ] **Step 5: Commit the interface**
+- [x] **Step 5: Commit the interface**
 
 ```bash
 git add src/asterion/pathlight/dashboard_assets src/asterion/pathlight/dashboard_server.py tests/test_pathlight_dashboard.py

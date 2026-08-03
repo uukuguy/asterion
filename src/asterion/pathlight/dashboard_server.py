@@ -8,6 +8,7 @@ import socket
 from collections.abc import Mapping
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib.resources import files
 from types import MappingProxyType
 
 from asterion.pathlight.dashboard import (
@@ -23,6 +24,13 @@ _TRACE_ID = re.compile(
 )
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 _READ_METHODS = frozenset({"GET", "HEAD"})
+_ASSETS = MappingProxyType(
+    {
+        "/": ("index.html", "text/html; charset=utf-8"),
+        "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+        "/styles.css": ("styles.css", "text/css; charset=utf-8"),
+    }
+)
 _FIXED_HEADERS = MappingProxyType(
     {
         "Cache-Control": "no-store",
@@ -66,6 +74,8 @@ class DashboardApplication:
                 raise ValueError
             if method not in _READ_METHODS:
                 return _response(method, 405, {"error": "method-not-allowed"})
+            if target in _ASSETS:
+                return _asset_response(method, target)
             value = self._route(target)
             rendered = _response(method, 200, value)
             return rendered
@@ -152,6 +162,23 @@ def _valid_target(target: str) -> bool:
 
 def _response(method: str, status: int, value: object) -> DashboardResponse:
     body = json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return _body_response(
+        method,
+        status,
+        "application/json; charset=utf-8",
+        body,
+    )
+
+
+def _asset_response(method: str, target: str) -> DashboardResponse:
+    name, media_type = _ASSETS[target]
+    body = files("asterion.pathlight").joinpath("dashboard_assets", name).read_bytes()
+    return _body_response(method, 200, media_type, body)
+
+
+def _body_response(
+    method: str, status: int, media_type: str, body: bytes
+) -> DashboardResponse:
     headers = {
         **_FIXED_HEADERS,
         "Content-Length": str(len(body)),
@@ -160,7 +187,7 @@ def _response(method: str, status: int, value: object) -> DashboardResponse:
         headers["Allow"] = "GET, HEAD"
     return DashboardResponse(
         status=status,
-        media_type="application/json; charset=utf-8",
+        media_type=media_type,
         headers=MappingProxyType(headers),
         body=b"" if method == "HEAD" else body,
     )

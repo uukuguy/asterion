@@ -187,6 +187,48 @@ class PathlightDashboardApplicationTests(unittest.TestCase):
             validate_dashboard_bind("localhost", 8123), ("localhost", 8123)
         )
 
+    def test_packaged_interface_is_workflow_first_and_has_no_external_resources(
+        self,
+    ) -> None:
+        app = DashboardApplication(self.snapshot)
+        html_response = app.response("GET", "/")
+        script_response = app.response("GET", "/app.js")
+        style_response = app.response("GET", "/styles.css")
+
+        self.assertEqual(html_response.status, 200)
+        self.assertEqual(html_response.media_type, "text/html; charset=utf-8")
+        self.assertEqual(script_response.media_type, "text/javascript; charset=utf-8")
+        self.assertEqual(style_response.media_type, "text/css; charset=utf-8")
+        html = html_response.body.decode()
+        script = script_response.body.decode()
+        style = style_response.body.decode()
+        combined = html + script + style
+        self.assertIn("Pathlight Dashboard", html)
+        self.assertIn("ContextFrame", combined)
+        self.assertIn("证据缺口", combined)
+        self.assertIn("/api/pathlight/v1/snapshot", script)
+        for forbidden in (
+            "http://",
+            "https://",
+            "@import",
+            "localStorage",
+            "innerHTML",
+            "eval(",
+        ):
+            self.assertNotIn(forbidden, combined)
+        self.assertIn("prefers-reduced-motion", style)
+
+    def test_static_assets_are_head_safe_and_unknown_assets_are_not_found(self) -> None:
+        app = DashboardApplication(self.snapshot)
+        for target in ("/", "/app.js", "/styles.css"):
+            with self.subTest(target=target):
+                get = app.response("GET", target)
+                head = app.response("HEAD", target)
+                self.assertEqual(head.status, 200)
+                self.assertEqual(head.body, b"")
+                self.assertEqual(head.headers["Content-Length"], str(len(get.body)))
+        self.assertEqual(app.response("GET", "/favicon.ico").status, 404)
+
 
 if __name__ == "__main__":
     unittest.main()
