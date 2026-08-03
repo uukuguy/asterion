@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import re
 import socket
+import webbrowser
 from collections.abc import Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
@@ -131,11 +133,20 @@ def validate_dashboard_bind(host: str, port: int) -> tuple[str, int]:
 
 
 def serve_dashboard(
-    snapshot: DashboardSnapshot, *, host: str = "127.0.0.1", port: int = 0
+    snapshot: DashboardSnapshot,
+    *,
+    host: str = "127.0.0.1",
+    port: int = 0,
+    open_browser: bool = False,
+    on_ready: Callable[[str], None] | None = None,
 ) -> None:
     """Serve one validated snapshot in the foreground until interrupted."""
 
     checked_host, checked_port = validate_dashboard_bind(host, port)
+    if type(open_browser) is not bool or (
+        on_ready is not None and not callable(on_ready)
+    ):
+        raise PathlightError("Pathlight Dashboard launch is invalid")
     application = DashboardApplication(snapshot)
     handler = _handler_for(application)
     server_type: type[ThreadingHTTPServer] = (
@@ -143,6 +154,12 @@ def serve_dashboard(
     )
     server = server_type((checked_host, checked_port), handler)
     try:
+        address = "[::1]" if checked_host == "::1" else checked_host
+        url = f"http://{address}:{server.server_address[1]}/"
+        if on_ready is not None:
+            on_ready(url)
+        if open_browser:
+            webbrowser.open(url, new=2)
         server.serve_forever()
     except KeyboardInterrupt:
         pass

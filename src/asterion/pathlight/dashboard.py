@@ -165,7 +165,7 @@ def validate_dashboard_snapshot(mapping: Mapping[str, object]) -> DashboardSnaps
             _trace_mapping(value) for value in _exact_list(mapping["traces"])
         )
         evaluations = tuple(
-            _evaluation_bundle_from_mapping(value).to_mapping()
+            _evaluation_mapping(_evaluation_bundle_from_mapping(value))
             for value in _exact_list(mapping["evaluations"])
         )
         experiments = tuple(
@@ -219,7 +219,7 @@ def _snapshot_components(
     normalized_evaluations = tuple(
         sorted(
             (
-                _evaluation_bundle_from_mapping(value).to_mapping()
+                _evaluation_mapping(_evaluation_bundle_from_mapping(value))
                 for value in evaluations
             ),
             key=lambda value: value["bundle_sha256"],

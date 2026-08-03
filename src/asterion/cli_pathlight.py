@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import NoReturn, TextIO
 
 from asterion.pathlight import (
+    DashboardSnapshot,
     MetricFilter,
     PathlightCatalog,
     ProposalCandidate,
@@ -24,7 +25,9 @@ from asterion.pathlight import (
     read_diagnosis_bundle,
     read_evaluation_bundle,
     trace_graph_from_mapping,
+    serve_dashboard,
     validate_external_observation,
+    validate_dashboard_bind,
     write_export_batch,
 )
 from asterion.pathlight._private_file import read_private_file, write_private_file
@@ -55,15 +58,17 @@ def main(
     assert stderr is not None
     try:
         args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
-        result = _execute(args)
-        stdout.write(json.dumps(_json_copy(result), sort_keys=True, separators=(",", ":")) + "\n")
+        result = _execute(args, stdout=stdout)
+        stdout.write(
+            json.dumps(_json_copy(result), sort_keys=True, separators=(",", ":")) + "\n"
+        )
         return 0
     except Exception:
         stderr.write(_ERROR)
         return 2
 
 
-def _execute(args: argparse.Namespace) -> object:
+def _execute(args: argparse.Namespace, *, stdout: TextIO) -> object:
     if args.command == "trace":
         catalog = _catalog_from_evidence(args.evidence_file)
         if args.trace_command == "list":
@@ -105,8 +110,66 @@ def _execute(args: argparse.Namespace) -> object:
     if args.command == "proposal":
         return [
             proposal.to_mapping()
-            for proposal in read_diagnosis_bundle(_diagnosis_path(args.diagnosis_file)).proposals
+            for proposal in read_diagnosis_bundle(
+                _diagnosis_path(args.diagnosis_file)
+            ).proposals
         ]
+    if args.command == "dashboard":
+        validate_dashboard_bind(args.host, args.port)
+        snapshot = DashboardSnapshot.build(
+            workflow_bundles=tuple(
+                read_workflow_observation_bundle(path)
+                for path in _optional_absolute_paths(
+                    args.evidence_file or (), "workflow-evidence.json"
+                )
+            ),
+            evaluation_bundles=tuple(
+                read_evaluation_bundle(path)
+                for path in _optional_absolute_paths(
+                    args.evaluation_file or (), "pathlight-evaluations.json"
+                )
+            ),
+            experiment_bundles=tuple(
+                read_experiment_bundle(path)
+                for path in _optional_absolute_paths(
+                    args.experiment_file or (), "pathlight-experiment.json"
+                )
+            ),
+            diagnosis_bundles=tuple(
+                read_diagnosis_bundle(path)
+                for path in _optional_absolute_paths(
+                    args.diagnosis_file or (), "pathlight-diagnosis.json"
+                )
+            ),
+        )
+
+        def ready(url: str) -> None:
+            stdout.write(
+                json.dumps(
+                    {
+                        "snapshot_sha256": snapshot.snapshot_sha256,
+                        "status": "serving",
+                        "url": url,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n"
+            )
+            stdout.flush()
+
+        serve_dashboard(
+            snapshot,
+            host=args.host,
+            port=args.port,
+            open_browser=args.open,
+            on_ready=ready,
+        )
+        return {
+            "snapshot_sha256": snapshot.snapshot_sha256,
+            "status": "stopped",
+            "network_operation_count": 0,
+        }
     if args.command == "export":
         if args.export_command == "opik":
             traces = tuple(
@@ -285,9 +348,7 @@ def _absolute_canonical_paths(values: Sequence[str], filename: str) -> tuple[Pat
     return paths
 
 
-def _optional_absolute_paths(
-    values: Sequence[str], filename: str
-) -> tuple[Path, ...]:
+def _optional_absolute_paths(values: Sequence[str], filename: str) -> tuple[Path, ...]:
     if not values:
         return ()
     return _absolute_canonical_paths(values, filename)
@@ -307,7 +368,9 @@ def _json_copy(value: object) -> object:
 
 def _parser() -> argparse.ArgumentParser:
     parser = _Parser(prog="asterion pathlight", add_help=False)
-    commands = parser.add_subparsers(dest="command", required=True, parser_class=_Parser)
+    commands = parser.add_subparsers(
+        dest="command", required=True, parser_class=_Parser
+    )
     trace = commands.add_parser("trace", add_help=False)
     trace_commands = trace.add_subparsers(
         dest="trace_command", required=True, parser_class=_Parser
@@ -374,6 +437,15 @@ def _parser() -> argparse.ArgumentParser:
     )
     proposal_list = proposal_commands.add_parser("list", add_help=False)
     _add_diagnosis_file(proposal_list)
+
+    dashboard = commands.add_parser("dashboard", add_help=True)
+    dashboard.add_argument("--evidence-file", action="append")
+    dashboard.add_argument("--evaluation-file", action="append")
+    dashboard.add_argument("--experiment-file", action="append")
+    dashboard.add_argument("--diagnosis-file", action="append")
+    dashboard.add_argument("--host", default="127.0.0.1")
+    dashboard.add_argument("--port", type=int, default=8765)
+    dashboard.add_argument("--open", action="store_true")
 
     export = commands.add_parser("export", add_help=False)
     export_commands = export.add_subparsers(

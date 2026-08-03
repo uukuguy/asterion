@@ -244,7 +244,7 @@ git commit -m "feat: add workflow-first Pathlight Dashboard"
 - Consumes: existing exact-file readers, `DashboardSnapshot.build`, and `serve_dashboard`.
 - Produces: `asterion pathlight dashboard [--evidence-file FILE] [--evaluation-file FILE] [--experiment-file FILE] [--diagnosis-file FILE] [--host 127.0.0.1] [--port 0] [--open]`.
 
-- [ ] **Step 1: Write failing CLI preflight tests**
+- [x] **Step 1: Write failing CLI preflight tests**
 
 ```python
 def test_dashboard_cli_validates_all_inputs_before_serving_without_provider(self) -> None:
@@ -260,13 +260,13 @@ def test_dashboard_cli_validates_all_inputs_before_serving_without_provider(self
 
 Add cases for non-loopback hosts, relative paths, wrong basenames, tampered input, empty input, provider-loading sentinels, and browser opening only when `--open` is supplied.
 
-- [ ] **Step 2: Run CLI tests and confirm the command is absent**
+- [x] **Step 2: Run CLI tests and confirm the command is absent**
 
 Run: `uv run python -m unittest -v tests.test_pathlight_cli tests.test_pathlight_dashboard`
 
 Expected: FAIL because `dashboard` is not a recognized Pathlight command.
 
-- [ ] **Step 3: Implement explicit input assembly and foreground serving**
+- [x] **Step 3: Implement explicit input assembly and foreground serving**
 
 ```python
 if args.command == "dashboard":
@@ -282,13 +282,13 @@ if args.command == "dashboard":
 
 Preflight every file and build the complete snapshot before server creation. Keep the process in the foreground. Browser opening uses the exact loopback URL after the server has bound and is opt-in only. A normal `KeyboardInterrupt` closes the server without a traceback or provider load.
 
-- [ ] **Step 4: Run CLI and complete related Pathlight tests**
+- [x] **Step 4: Run CLI and complete related Pathlight tests**
 
 Run: `uv run python -m unittest -v tests.test_pathlight_cli tests.test_pathlight_dashboard tests.test_pathlight_query tests.test_pathlight_experiment tests.test_pathlight_diagnosis`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the CLI**
+- [x] **Step 5: Commit the CLI**
 
 ```bash
 git add src/asterion/cli_pathlight.py tests/test_pathlight_cli.py tests/test_pathlight_dashboard.py

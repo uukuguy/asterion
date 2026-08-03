@@ -54,7 +54,12 @@ def _trace() -> dict[str, object]:
         (
             TraceEvent.start(TRACE_ID, root, None, 1, "task", timestamp_ns=1),
             TraceEvent.terminal(
-                TRACE_ID, root, 2, "completed", timestamp_ns=2, attributes={"duration_ns": 1}
+                TRACE_ID,
+                root,
+                2,
+                "completed",
+                timestamp_ns=2,
+                attributes={"duration_ns": 1},
             ),
         ),
     ).to_mapping()
@@ -83,10 +88,17 @@ def _evaluation(value_microunits: int) -> tuple[MetricContract, EvaluationRecord
 
 
 def _experiment_bundle(*, reverse: bool = False) -> ExperimentBundle:
-    dataset = DatasetSnapshot(_digest("dataset-contract"), _digest("dataset"), 1, "1.0.0")
+    dataset = DatasetSnapshot(
+        _digest("dataset-contract"), _digest("dataset"), 1, "1.0.0"
+    )
     evaluator = EvaluatorContract(
-        _digest("metric"), "rule", _digest("implementation"), _digest("input"),
-        _digest("output"), _digest("failure"), "1.0.0",
+        _digest("metric"),
+        "rule",
+        _digest("implementation"),
+        _digest("input"),
+        _digest("output"),
+        _digest("failure"),
+        "1.0.0",
     )
     baseline = Variant(
         *(
@@ -125,7 +137,9 @@ def _experiment_bundle(*, reverse: bool = False) -> ExperimentBundle:
         _digest("scope"),
         baseline.variant_sha256,
         (candidate.variant_sha256,),
-        _digest("assignment"), (evaluator.evaluator_contract_sha256,), _digest("budget"),
+        _digest("assignment"),
+        (evaluator.evaluator_contract_sha256,),
+        _digest("budget"),
         _digest("stop"),
     )
     baseline_evaluation = EvaluationRecord(
@@ -180,6 +194,111 @@ def _experiment_bundle(*, reverse: bool = False) -> ExperimentBundle:
 
 
 class PathlightCliTests(unittest.TestCase):
+    def test_dashboard_cli_validates_inputs_and_serves_without_provider(self) -> None:
+        contract, evaluation = _evaluation(750_000)
+        with tempfile.TemporaryDirectory() as directory:
+            evaluations = Path(directory).resolve() / "pathlight-evaluations.json"
+            write_evaluation_bundle(evaluations, (evaluation,), (contract,))
+            stdout = io.StringIO()
+            with patch("asterion.cli_pathlight.serve_dashboard") as serve:
+                code = main(
+                    [
+                        "pathlight",
+                        "dashboard",
+                        "--evaluation-file",
+                        str(evaluations),
+                        "--host",
+                        "127.0.0.1",
+                        "--port",
+                        "8765",
+                    ],
+                    entry_points=(FailIfLoadedEntryPoint(),),
+                    stdout=stdout,
+                )
+
+            self.assertEqual(code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "stopped")
+            snapshot = serve.call_args.args[0]
+            self.assertEqual(snapshot.summary["evaluation_count"], 1)
+            self.assertEqual(serve.call_args.kwargs["host"], "127.0.0.1")
+            self.assertEqual(serve.call_args.kwargs["port"], 8765)
+            self.assertFalse(serve.call_args.kwargs["open_browser"])
+            self.assertTrue(callable(serve.call_args.kwargs["on_ready"]))
+
+    def test_dashboard_cli_opens_browser_only_when_explicit(self) -> None:
+        contract, evaluation = _evaluation(1)
+        with tempfile.TemporaryDirectory() as directory:
+            evaluations = Path(directory).resolve() / "pathlight-evaluations.json"
+            write_evaluation_bundle(evaluations, (evaluation,), (contract,))
+            with patch("asterion.cli_pathlight.serve_dashboard") as serve:
+                code = main(
+                    [
+                        "pathlight",
+                        "dashboard",
+                        "--evaluation-file",
+                        str(evaluations),
+                        "--open",
+                    ],
+                    entry_points=(FailIfLoadedEntryPoint(),),
+                    stdout=io.StringIO(),
+                )
+
+        self.assertEqual(code, 0)
+        self.assertTrue(serve.call_args.kwargs["open_browser"])
+
+    def test_dashboard_cli_rejects_empty_relative_tampered_and_nonloopback_inputs(
+        self,
+    ) -> None:
+        cases = (
+            ["pathlight", "dashboard"],
+            [
+                "pathlight",
+                "dashboard",
+                "--evaluation-file",
+                "relative/pathlight-evaluations.json",
+            ],
+            [
+                "pathlight",
+                "dashboard",
+                "--evaluation-file",
+                "/private/pathlight-evaluations.json",
+                "--host",
+                "0.0.0.0",
+            ],
+        )
+        for arguments in cases:
+            with self.subTest(arguments=arguments):
+                stderr = io.StringIO()
+                with patch("asterion.cli_pathlight.serve_dashboard") as serve:
+                    code = main(arguments, stderr=stderr)
+                self.assertEqual(code, 2)
+                self.assertEqual(
+                    stderr.getvalue(), "asterion pathlight: request is invalid\n"
+                )
+                serve.assert_not_called()
+
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory).resolve() / "pathlight-evaluations.json"
+            source.write_text("{}")
+            os.chmod(source, 0o600)
+            stderr = io.StringIO()
+            with patch("asterion.cli_pathlight.serve_dashboard") as serve:
+                code = main(
+                    [
+                        "pathlight",
+                        "dashboard",
+                        "--evaluation-file",
+                        str(source),
+                    ],
+                    stderr=stderr,
+                )
+            self.assertEqual(code, 2)
+            self.assertEqual(
+                stderr.getvalue(), "asterion pathlight: request is invalid\n"
+            )
+            serve.assert_not_called()
+
     def test_opik_export_and_inspect_are_offline_private_and_idempotent(self) -> None:
         contract, evaluation = _evaluation(750_000)
         with tempfile.TemporaryDirectory() as directory:
@@ -318,20 +437,38 @@ class PathlightCliTests(unittest.TestCase):
                 all(stat.S_IMODE(path.stat().st_mode) == 0o600 for path in files)
             )
             candidate = json.loads(
-                next(path for path in files if "proposal-candidate" in path.name).read_text()
+                next(
+                    path for path in files if "proposal-candidate" in path.name
+                ).read_text()
             )
             self.assertFalse(candidate["execution_authorized"])
 
-    def test_diagnosis_show_and_proposal_list_are_provider_free_canonical_json(self) -> None:
+    def test_diagnosis_show_and_proposal_list_are_provider_free_canonical_json(
+        self,
+    ) -> None:
         observed = Finding(
-            "observed", _digest("subject"), (_digest("evaluation"),), (), "confirmed", _digest("observed")
+            "observed",
+            _digest("subject"),
+            (_digest("evaluation"),),
+            (),
+            "confirmed",
+            _digest("observed"),
         )
         hypothesis = Finding(
-            "hypothesis", _digest("subject"), (observed.finding_sha256,), (), "medium", _digest("hypothesis")
+            "hypothesis",
+            _digest("subject"),
+            (observed.finding_sha256,),
+            (),
+            "medium",
+            _digest("hypothesis"),
         )
         proposal = Proposal(
             hypothesis.finding_sha256,
-            _digest("change"), _digest("scope"), _digest("success"), _digest("stop"), _digest("budget"),
+            _digest("change"),
+            _digest("scope"),
+            _digest("success"),
+            _digest("stop"),
+            _digest("budget"),
         )
         bundle = DiagnosisBundle.build(
             experiment_bundle_sha256s=(_digest("experiment"),),
@@ -352,11 +489,16 @@ class PathlightCliTests(unittest.TestCase):
                 )
                 self.assertEqual(code, 0)
                 payload = json.loads(stdout.getvalue())
-                self.assertEqual(stdout.getvalue(), json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n")
+                self.assertEqual(
+                    stdout.getvalue(),
+                    json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+                )
                 outputs.append(stdout.getvalue())
 
         self.assertEqual(json.loads(outputs[0])["bundle_sha256"], bundle.bundle_sha256)
-        self.assertEqual(json.loads(outputs[1])[0]["proposal_sha256"], proposal.proposal_sha256)
+        self.assertEqual(
+            json.loads(outputs[1])[0]["proposal_sha256"], proposal.proposal_sha256
+        )
 
     def test_experiment_show_and_trials_are_provider_free_canonical_json(self) -> None:
         bundle = _experiment_bundle()
@@ -394,7 +536,8 @@ class PathlightCliTests(unittest.TestCase):
                     payload = json.loads(stdout.getvalue())
                     self.assertEqual(
                         stdout.getvalue(),
-                        json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+                        json.dumps(payload, sort_keys=True, separators=(",", ":"))
+                        + "\n",
                     )
                     command_outputs.append(stdout.getvalue())
                 outputs.append((command_outputs[0], command_outputs[1]))
@@ -411,8 +554,13 @@ class PathlightCliTests(unittest.TestCase):
 
         code = main(
             [
-                "pathlight", "experiment", "show", "--experiment-file",
-                "SENTINEL_PRIVATE_PATH_AND_PROMPT", "--experiment-sha256", "invalid",
+                "pathlight",
+                "experiment",
+                "show",
+                "--experiment-file",
+                "SENTINEL_PRIVATE_PATH_AND_PROMPT",
+                "--experiment-sha256",
+                "invalid",
             ],
             stderr=stderr,
         )
@@ -429,8 +577,13 @@ class PathlightCliTests(unittest.TestCase):
         ):
             code = main(
                 [
-                    "pathlight", "experiment", "show", "--experiment-file",
-                    "/private/pathlight-experiment.json", "--experiment-sha256", "0" * 64,
+                    "pathlight",
+                    "experiment",
+                    "show",
+                    "--experiment-file",
+                    "/private/pathlight-experiment.json",
+                    "--experiment-sha256",
+                    "0" * 64,
                 ],
                 stderr=stderr,
             )
@@ -504,7 +657,14 @@ class PathlightCliTests(unittest.TestCase):
             write_workflow_observation_bundle(bundle, (), pathlight_traces=(_trace(),))
             for arguments, expected in (
                 (
-                    ["trace", "show", "--evidence-file", str(bundle), "--trace-id", TRACE_ID],
+                    [
+                        "trace",
+                        "show",
+                        "--evidence-file",
+                        str(bundle),
+                        "--trace-id",
+                        TRACE_ID,
+                    ],
                     TRACE_ID,
                 ),
                 (
@@ -527,15 +687,25 @@ class PathlightCliTests(unittest.TestCase):
                     self.assertEqual(code, 0)
                     payload = json.loads(stdout.getvalue())
                     self.assertEqual(
-                        payload["trace_id"] if isinstance(payload, dict) else payload[0]["sequence"],
+                        payload["trace_id"]
+                        if isinstance(payload, dict)
+                        else payload[0]["sequence"],
                         expected,
                     )
-                    self.assertEqual(stdout.getvalue(), json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n")
+                    self.assertEqual(
+                        stdout.getvalue(),
+                        json.dumps(payload, sort_keys=True, separators=(",", ":"))
+                        + "\n",
+                    )
 
-    def test_trace_flow_is_provider_free_and_emits_canonical_mainline_json(self) -> None:
+    def test_trace_flow_is_provider_free_and_emits_canonical_mainline_json(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             bundle = Path(directory).resolve() / "workflow-evidence.json"
-            write_workflow_observation_bundle(bundle, (), pathlight_traces=(_rich_trace(),))
+            write_workflow_observation_bundle(
+                bundle, (), pathlight_traces=(_rich_trace(),)
+            )
             stdout = io.StringIO()
 
             code = main(
@@ -554,15 +724,21 @@ class PathlightCliTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         payload = json.loads(stdout.getvalue())
-        self.assertEqual([item["kind"] for item in payload], [
-            "context-frame", "model-call", "tool-call", "context-frame", "model-call"
-        ])
-        self.assertEqual(stdout.getvalue(), json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n")
+        self.assertEqual(
+            [item["kind"] for item in payload],
+            ["context-frame", "model-call", "tool-call", "context-frame", "model-call"],
+        )
+        self.assertEqual(
+            stdout.getvalue(),
+            json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+        )
 
     def test_trace_flow_rejects_nonprivate_evidence_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             bundle = Path(directory).resolve() / "workflow-evidence.json"
-            write_workflow_observation_bundle(bundle, (), pathlight_traces=(_rich_trace(),))
+            write_workflow_observation_bundle(
+                bundle, (), pathlight_traces=(_rich_trace(),)
+            )
             os.chmod(bundle, 0o640)
             stderr = io.StringIO()
 
@@ -582,13 +758,17 @@ class PathlightCliTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual(stderr.getvalue(), "asterion pathlight: request is invalid\n")
 
-    def test_metric_query_and_exact_evaluation_comparison_are_provider_free(self) -> None:
+    def test_metric_query_and_exact_evaluation_comparison_are_provider_free(
+        self,
+    ) -> None:
         first_contract, baseline = _evaluation(100)
         second_contract, candidate = _evaluation(125)
         self.assertEqual(first_contract, second_contract)
         with tempfile.TemporaryDirectory() as directory:
             evaluations = Path(directory).resolve() / "pathlight-evaluations.json"
-            write_evaluation_bundle(evaluations, (baseline, candidate), (first_contract,))
+            write_evaluation_bundle(
+                evaluations, (baseline, candidate), (first_contract,)
+            )
             stdout = io.StringIO()
             code = main(
                 [
@@ -603,7 +783,9 @@ class PathlightCliTests(unittest.TestCase):
                 stdout=stdout,
             )
             self.assertEqual(code, 0)
-            self.assertEqual(json.loads(stdout.getvalue())[0]["metric_name"], "accuracy")
+            self.assertEqual(
+                json.loads(stdout.getvalue())[0]["metric_name"], "accuracy"
+            )
             stdout = io.StringIO()
             code = main(
                 [
@@ -623,7 +805,9 @@ class PathlightCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(stdout.getvalue())["delta_microunits"], 25)
 
-    def test_metric_query_deduplicates_shared_contract_across_evaluation_files(self) -> None:
+    def test_metric_query_deduplicates_shared_contract_across_evaluation_files(
+        self,
+    ) -> None:
         contract, first = _evaluation(100)
         _, second = _evaluation(125)
         with tempfile.TemporaryDirectory() as directory:
