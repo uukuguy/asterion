@@ -64,6 +64,7 @@ def _observation(fixture: dict[str, object]) -> _ToolObservation:
         name=call["name"],
         arguments=call["arguments"],
         output=call["output"],
+        lines_truncated=False,
         external_digest="0" * 64,
     )
 
@@ -185,6 +186,7 @@ class TestDciTrajectoryResolutionFixtures(unittest.TestCase):
             name=observation.name,
             arguments={"command": "rg -n gold unknown-token.txt"},
             output="unknown.txt:3:gold text\ndoc-a.txt:3:not gold text\n",
+            lines_truncated=False,
             external_digest=observation.external_digest,
         )
 
