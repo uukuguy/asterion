@@ -606,6 +606,10 @@ def run_pi_research(
             stderr_text=stderr_text,
             release_lock=False,
         )
+        try:
+            recorder.persist_workflow_evidence()
+        except Exception:
+            pass
         return DciRunResult(
             output_dir=destination,
             final_text=final_text,

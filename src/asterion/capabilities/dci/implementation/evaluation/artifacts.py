@@ -11,6 +11,8 @@ import secrets
 import socket
 import stat
 import subprocess
+import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,12 +26,21 @@ from asterion.capabilities.dci.implementation.runtime.run import (
     prelude_questions_fingerprint,
     validate_dci_run_request,
 )
-from asterion.runtime.host import RunEvent
+from asterion.runtime.host import RunEvent, RunRequest
 from asterion.runtime.protocol import (
     MAX_DEADLINE_MS,
     PROTOCOL_VERSION,
     validate_event_stream,
     validate_run_request,
+)
+from asterion.runtimes.pi_observation import (
+    PiObservationBuilder,
+    PiObservationCheckpoint,
+)
+from asterion.workflow_evidence import (
+    build_workflow_observation_bundle,
+    project_completed_runtime_evidence,
+    read_workflow_observation_bundle_mapping,
 )
 
 if TYPE_CHECKING:
@@ -68,6 +79,24 @@ _PAPER_OPERATION_KEYS = {
 _PAPER_OPERATION_PLAN = ("qa-agent", "qa-judge", "ir-agent")
 _HEX_SHA256 = re.compile(r"[0-9a-f]{64}")
 _PUBLIC_EVIDENCE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]*")
+
+
+def _pathlight_trace_id(run_id: str, *, attempt: int) -> str:
+    digest = hashlib.sha256(
+        json.dumps(
+            {
+                "domain": "asterion.dci.pathlight-trace-id/v1",
+                "run_id": run_id,
+                "attempt": attempt,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return (
+        f"{digest[:8]}-{digest[8:12]}-4{digest[13:16]}-"
+        f"8{digest[17:20]}-{digest[20:32]}"
+    )
 
 
 class DciArtifactError(RuntimeError):
@@ -2303,6 +2332,17 @@ class DciRunRecorder:
             self.protocol_events_path = self.protocol_dir / self._protocol_events_name
             _write_exclusive_text_at(self._protocol_fd, self._protocol_events_name, "")
             self.normalized: list[dict[str, object]] = []
+            self._pathlight_last_timestamp_ns: int | None = None
+            self._pathlight_invocation_started_ns = self._pathlight_timestamp()
+            self._pathlight_observation_builder: PiObservationBuilder | None = (
+                PiObservationBuilder(time.monotonic_ns)
+            )
+            self._pathlight_observation_checkpoint: PiObservationCheckpoint = (
+                self._pathlight_observation_builder.checkpoint()
+            )
+            self._pathlight_event_observations: list[
+                tuple[dict[str, object], int, int]
+            ] = []
             self._restore_tool_timing_indexes()
             capabilities = map_pi_capabilities(request.tools)
             protocol_request = _protocol_request_for_attempt(
@@ -2311,6 +2351,7 @@ class DciRunRecorder:
                 timeout_seconds=request.timeout_seconds,
             )
             validate_run_request(protocol_request)
+            self._pathlight_run_id = str(protocol_request["run_id"])
             _write_exclusive_json_at(
                 self._protocol_fd, self._protocol_request_name, protocol_request
             )
@@ -2508,14 +2549,44 @@ class DciRunRecorder:
         self._write()
 
     def _emit_normalized(self, event: dict[str, object]) -> None:
+        observed_started_ns = self._pathlight_timestamp()
         self.normalized.append(dict(event))
         self._append_at(
             self._protocol_directory_fd(), self._protocol_events_name, event
         )
+        observed_ended_ns = self._pathlight_timestamp()
+        self._pathlight_event_observations.append(
+            (dict(event), observed_started_ns, observed_ended_ns)
+        )
+
+    def _pathlight_timestamp(self) -> int:
+        value = time.monotonic_ns()
+        if (
+            self._pathlight_last_timestamp_ns is not None
+            and value <= self._pathlight_last_timestamp_ns
+        ):
+            value = self._pathlight_last_timestamp_ns + 1
+        self._pathlight_last_timestamp_ns = value
+        return value
+
+    def _observe_pathlight_event(self, event: dict[str, object]) -> None:
+        builder = self._pathlight_observation_builder
+        if builder is None:
+            return
+        try:
+            builder.consume(event, self._pathlight_timestamp())
+            event_type = event.get("type")
+            if event_type == "agent_start":
+                self._pathlight_observation_checkpoint = builder.checkpoint()
+            elif event_type == "agent_end" and "willRetry" in event:
+                builder.rollback(self._pathlight_observation_checkpoint)
+        except Exception:
+            self._pathlight_observation_builder = None
 
     def record_event(self, event: dict[str, object]) -> None:
         self._ensure_open()
         try:
+            self._observe_pathlight_event(event)
             self._append_at(self._root_fd, "events.jsonl", event)
             self.adapter.consume(event)
             self.state["event_count"] += 1
@@ -2630,6 +2701,47 @@ class DciRunRecorder:
         finally:
             if release_lock:
                 self.close()
+
+    def persist_workflow_evidence(self) -> None:
+        """Project and publish safe workflow evidence for one completed attempt."""
+
+        self._ensure_open()
+        if self.state.get("status") != "completed" or not self._finalized:
+            raise DciArtifactError("DCI workflow evidence state is invalid")
+        builder = self._pathlight_observation_builder
+        native_observation = (
+            None if builder is None else builder.complete(self._pathlight_run_id)
+        )
+        projected = project_completed_runtime_evidence(
+            request=RunRequest(
+                run_id=self._pathlight_run_id,
+                input_text=self.request.question,
+                requested_capabilities=tuple(map_pi_capabilities(self.request.tools)),
+            ),
+            event_observations=tuple(self._pathlight_event_observations),
+            native_observation=native_observation,
+            runtime_id="pi.dci-native",
+            trace_id=_pathlight_trace_id(
+                self._pathlight_run_id, attempt=self._attempt_index + 1
+            ),
+            invocation_started_ns=self._pathlight_invocation_started_ns,
+            invocation_ended_ns=self._pathlight_timestamp(),
+        )
+        bundle = build_workflow_observation_bundle(
+            (projected.record,), pathlight_traces=(projected.trace,)
+        )
+        self.write_workflow_evidence(bundle)
+
+    def write_workflow_evidence(self, bundle: Mapping[str, object]) -> None:
+        """Publish one validated standard bundle through the pinned run directory."""
+
+        self._ensure_open()
+        if self.state.get("status") != "completed" or not self._finalized:
+            raise DciArtifactError("DCI workflow evidence state is invalid")
+        read_workflow_observation_bundle_mapping(bundle)
+        _write_exclusive_json_at(
+            self._root_fd, "workflow-evidence.json", dict(bundle)
+        )
 
     def add_note(self, note: str) -> None:
         """Persist one caller-generated safe diagnostic note in every native view."""
