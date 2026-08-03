@@ -14,7 +14,7 @@ import time
 from collections.abc import Callable, Mapping
 from importlib import resources
 from pathlib import Path
-from typing import Any, TextIO
+from typing import Any, NoReturn, TextIO
 
 from asterion.capabilities.dci.implementation.config import PI_MIN_NODE_VERSION, PI_MIN_NODE_VERSION_TEXT
 from asterion.capabilities.dci.implementation.config import parse_node_version
@@ -54,6 +54,52 @@ _DCI_CUMULATIVE_KEYS = {
     "summaryAttempts",
     "summarySuccesses",
 }
+_PROVIDER_REQUEST_CUSTOM_TYPE = "dci-provider-request-observation"
+_KNOWN_DCI_CUSTOM_TYPES = {
+    "dci-context-telemetry",
+    "dci-context-state",
+    _PROVIDER_REQUEST_CUSTOM_TYPE,
+}
+_PROVIDER_REQUEST_DATA_KEYS = {
+    "schema",
+    "request_index",
+    "capture_status",
+    "payload_sha256",
+    "payload_bytes",
+    "shape_sha256",
+    "field_count",
+    "leaf_count",
+    "text_characters",
+    "segments",
+    "missing_evidence",
+    "summary_sha256",
+}
+_PROVIDER_REQUEST_SEGMENT_KEYS = {
+    "segment_index",
+    "role",
+    "structure_kind",
+    "content_sha256",
+    "content_length",
+    "source_call_sha256",
+    "missing_evidence",
+    "segment_sha256",
+}
+_PROVIDER_REQUEST_ROLES = {
+    "system",
+    "user",
+    "assistant",
+    "tool-result",
+    "unknown",
+}
+_PROVIDER_REQUEST_STRUCTURE_KINDS = {
+    "message",
+    "tool-result",
+    "contract",
+    "missing",
+}
+_PRIVATE_FD_VARIABLE = "ASTERION_DCI_PATHLIGHT_PRIVATE_FD"
+_PRIVATE_CONTRACT_VARIABLE = "ASTERION_DCI_PATHLIGHT_CAPTURE_CONTRACT"
+_GET_ENTRIES_SHAPE_ERROR = "Pi RPC get_entries shape is invalid"
 
 
 def _probe_node(candidate: str, environment: Mapping[str, str]) -> bool:
@@ -418,6 +464,130 @@ def _validated_dci_entries(values: list[object]) -> tuple[dict[str, Any], ...]:
     return tuple(validated)
 
 
+def _invalid_provider_request_entries() -> NoReturn:
+    raise RuntimeError(_GET_ENTRIES_SHAPE_ERROR) from None
+
+
+def _is_digest(value: object) -> bool:
+    return (
+        type(value) is str
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _is_nonnegative_integer(value: object) -> bool:
+    return type(value) is int and value >= 0
+
+
+def _validated_provider_request_segment(
+    value: object, expected_index: int
+) -> dict[str, Any]:
+    if type(value) is not dict or set(value) != _PROVIDER_REQUEST_SEGMENT_KEYS:
+        _invalid_provider_request_entries()
+    content_digest = value.get("content_sha256")
+    content_length = value.get("content_length")
+    if (
+        value.get("segment_index") != expected_index
+        or type(value.get("segment_index")) is not int
+        or value.get("role") not in _PROVIDER_REQUEST_ROLES
+        or value.get("structure_kind") not in _PROVIDER_REQUEST_STRUCTURE_KINDS
+        or not (
+            (content_digest is None and content_length is None)
+            or (_is_digest(content_digest) and _is_nonnegative_integer(content_length))
+        )
+        or not (
+            value.get("source_call_sha256") is None
+            or _is_digest(value.get("source_call_sha256"))
+        )
+        or type(value.get("missing_evidence")) is not bool
+        or not _is_digest(value.get("segment_sha256"))
+    ):
+        _invalid_provider_request_entries()
+    return dict(value)
+
+
+def _validated_provider_request_entries(
+    values: list[object],
+) -> tuple[dict[str, Any], ...]:
+    validated: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for value in values:
+        if type(value) is not dict:
+            continue
+        custom_type = value.get("customType")
+        if value.get("type") == "custom" and custom_type not in _KNOWN_DCI_CUSTOM_TYPES:
+            _invalid_provider_request_entries()
+        if custom_type != _PROVIDER_REQUEST_CUSTOM_TYPE:
+            continue
+        if set(value) != _DCI_ENTRY_KEYS or value.get("type") != "custom":
+            _invalid_provider_request_entries()
+        entry_id = value.get("id")
+        if (
+            type(entry_id) is not str
+            or not entry_id
+            or entry_id in seen_ids
+            or type(value.get("timestamp")) is not str
+            or not value["timestamp"]
+            or not (
+                value.get("parentId") is None
+                or type(value.get("parentId")) is str
+            )
+        ):
+            _invalid_provider_request_entries()
+        data = value.get("data")
+        if type(data) is not dict or set(data) != _PROVIDER_REQUEST_DATA_KEYS:
+            _invalid_provider_request_entries()
+        expected_request_index = len(validated) + 1
+        if (
+            data.get("schema") != "dci.provider-request-observation/v1"
+            or data.get("capture_status") != "captured"
+            or type(data.get("request_index")) is not int
+            or data.get("request_index") != expected_request_index
+            or not _is_digest(data.get("payload_sha256"))
+            or not _is_digest(data.get("shape_sha256"))
+            or not _is_digest(data.get("summary_sha256"))
+            or not all(
+                _is_nonnegative_integer(data.get(key))
+                for key in (
+                    "payload_bytes",
+                    "field_count",
+                    "leaf_count",
+                    "text_characters",
+                )
+            )
+        ):
+            _invalid_provider_request_entries()
+        segments = data.get("segments")
+        missing_evidence = data.get("missing_evidence")
+        if (
+            type(segments) is not list
+            or not segments
+            or type(missing_evidence) is not list
+            or missing_evidence not in ([], ["context-segment"])
+        ):
+            _invalid_provider_request_entries()
+        copied_data = dict(data)
+        copied_segments = [
+            _validated_provider_request_segment(segment, index)
+            for index, segment in enumerate(segments)
+        ]
+        expected_missing_evidence = (
+            ["context-segment"]
+            if any(segment["missing_evidence"] for segment in copied_segments)
+            else []
+        )
+        if missing_evidence != expected_missing_evidence:
+            _invalid_provider_request_entries()
+        copied_data["segments"] = copied_segments
+        copied_data["missing_evidence"] = list(missing_evidence)
+        copied_entry = dict(value)
+        copied_entry["data"] = copied_data
+        seen_ids.add(entry_id)
+        validated.append(copied_entry)
+    return tuple(validated)
+
+
 class PiRpcClient:
     """Synchronous Pi JSONL-RPC lifecycle copied into the Asterion product boundary."""
 
@@ -443,6 +613,9 @@ class PiRpcClient:
         context_profile: str | None = None,
         context_contract: str | None = None,
         session_file: Path | None = None,
+        observation_extension_path: Path | None = None,
+        observation_fd: int | None = None,
+        observation_contract: str | None = None,
     ) -> None:
         context_identity = (extension_path, context_profile, context_contract)
         if any(value is not None for value in context_identity) and not all(
@@ -462,6 +635,28 @@ class PiRpcClient:
             not isinstance(session_file, Path) or not session_file.is_absolute()
         ):
             raise ValueError("Pi session identity is invalid")
+        observation_identity = (
+            observation_extension_path,
+            observation_fd,
+            observation_contract,
+        )
+        if any(value is not None for value in observation_identity) and not all(
+            value is not None for value in observation_identity
+        ):
+            raise ValueError("Pi observation extension identity is invalid")
+        if observation_extension_path is not None and (
+            not isinstance(observation_extension_path, Path)
+            or not observation_extension_path.is_absolute()
+        ):
+            raise ValueError("Pi observation extension identity is invalid")
+        if observation_fd is not None and (
+            type(observation_fd) is not int or observation_fd < 0
+        ):
+            raise ValueError("Pi observation extension identity is invalid")
+        if observation_contract is not None and (
+            not isinstance(observation_contract, str) or not observation_contract
+        ):
+            raise ValueError("Pi observation extension identity is invalid")
         self.package_dir = Path(package_dir)
         self.cwd = Path(cwd)
         self.agent_dir = Path(agent_dir)
@@ -481,6 +676,9 @@ class PiRpcClient:
         self.context_profile = context_profile
         self.context_contract = context_contract
         self.session_file = session_file
+        self.observation_extension_path = observation_extension_path
+        self.observation_fd = observation_fd
+        self.observation_contract = observation_contract
         self.proc: subprocess.Popen[bytes] | None = None
         self.command: list[str] | None = None
         self.stderr_chunks: list[str] = []
@@ -502,6 +700,10 @@ class PiRpcClient:
                     "--dci-context-contract",
                     self.context_contract,
                 ]
+            )
+        if self.observation_extension_path is not None:
+            context_args.extend(
+                ["--extension", str(self.observation_extension_path)]
             )
         if self.session_file is not None:
             context_args.extend(["--session", str(self.session_file)])
@@ -526,12 +728,19 @@ class PiRpcClient:
         """Build the Pi child environment without replacing inherited Node settings."""
 
         selected_node = "node" if node_bin is None else node_bin
-        return _pi_child_environment(
+        environment = _pi_child_environment(
             package_dir=self.package_dir,
             agent_dir=self.agent_dir,
             node_bin=selected_node,
             node_max_old_space_size_mb=self.node_max_old_space_size_mb,
         )
+        environment.pop(_PRIVATE_FD_VARIABLE, None)
+        environment.pop(_PRIVATE_CONTRACT_VARIABLE, None)
+        if self.observation_fd is not None:
+            assert self.observation_contract is not None
+            environment[_PRIVATE_FD_VARIABLE] = str(self.observation_fd)
+            environment[_PRIVATE_CONTRACT_VARIABLE] = self.observation_contract
+        return environment
 
     def start(self) -> None:
         if self.proc is not None:
@@ -546,7 +755,18 @@ class PiRpcClient:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            pass_fds=self.inherited_fds,
+            pass_fds=tuple(
+                sorted(
+                    {
+                        *self.inherited_fds,
+                        *(
+                            (self.observation_fd,)
+                            if self.observation_fd is not None
+                            else ()
+                        ),
+                    }
+                )
+            ),
         )
         self._stdout_queue = queue.Queue()
         self._stdout_thread = threading.Thread(target=self._drain_stdout, daemon=True)
@@ -671,11 +891,9 @@ class PiRpcClient:
                     raise RuntimeError("Pi RPC get_state shape is invalid")
             return state
 
-    def get_entries(
+    def _request_entries(
         self, *, since: str | None = None, timeout_seconds: float = 10.0
-    ) -> tuple[dict[str, Any], ...]:
-        """Return only closed, body-free DCI extension entries from Pi."""
-
+    ) -> list[object]:
         if since is not None and (not isinstance(since, str) or not since):
             raise ValueError("Pi RPC get_entries cursor is invalid")
         request_id = self._next_id()
@@ -705,7 +923,42 @@ class PiRpcClient:
                 leaf_id is None or isinstance(leaf_id, str)
             ):
                 raise RuntimeError("Pi RPC get_entries shape is invalid")
-            return _validated_dci_entries(entries)
+            expected_parent = since
+            seen_ids: set[str] = set()
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    raise RuntimeError(_GET_ENTRIES_SHAPE_ERROR) from None
+                entry_id = entry.get("id")
+                if (
+                    not isinstance(entry_id, str)
+                    or not entry_id
+                    or entry_id in seen_ids
+                    or entry.get("parentId") != expected_parent
+                ):
+                    raise RuntimeError(_GET_ENTRIES_SHAPE_ERROR) from None
+                seen_ids.add(entry_id)
+                expected_parent = entry_id
+            if leaf_id != expected_parent:
+                raise RuntimeError(_GET_ENTRIES_SHAPE_ERROR) from None
+            return entries
+
+    def get_entries(
+        self, *, since: str | None = None, timeout_seconds: float = 10.0
+    ) -> tuple[dict[str, Any], ...]:
+        """Return only closed, body-free context-policy entries from Pi."""
+
+        return _validated_dci_entries(
+            self._request_entries(since=since, timeout_seconds=timeout_seconds)
+        )
+
+    def get_provider_request_entries(
+        self, *, timeout_seconds: float = 10.0
+    ) -> tuple[dict[str, Any], ...]:
+        """Return only closed, body-free provider-request observations from Pi."""
+
+        return _validated_provider_request_entries(
+            self._request_entries(timeout_seconds=timeout_seconds)
+        )
 
     def prompt_and_wait(
         self,

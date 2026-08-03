@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import subprocess
 import shutil
@@ -46,6 +47,66 @@ def _client(root: Path) -> PiRpcClient:
 
 
 class DciPiRpcProxyTests(unittest.TestCase):
+    def test_observation_values_exist_only_in_copied_child_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            observation_path = root / "SENTINEL-observation.ts"
+            client = _client(root)
+            client = PiRpcClient(
+                package_dir=client.package_dir,
+                cwd=client.cwd,
+                agent_dir=client.agent_dir,
+                provider=client.provider,
+                model=client.model,
+                tools=client.tools,
+                show_tools=client.show_tools,
+                system_prompt_file=None,
+                append_system_prompt_file=None,
+                extra_args=(),
+                literal_extra_args=(),
+                keep_session=False,
+                node_max_old_space_size_mb=None,
+                observation_extension_path=observation_path,
+                observation_fd=37,
+                observation_contract="SENTINEL-private-contract/v1",
+            )
+            inherited = {
+                "PATH": "/usr/bin",
+                "ASTERION_DCI_PATHLIGHT_PRIVATE_FD": "SENTINEL-attacker-fd",
+                "ASTERION_DCI_PATHLIGHT_CAPTURE_CONTRACT": "SENTINEL-attacker-contract",
+            }
+            with patch.dict("os.environ", inherited, clear=True):
+                before = dict(os.environ)
+                environment = client._child_environment(node_bin="/usr/bin/node")
+                after = dict(os.environ)
+
+        self.assertEqual(before, after)
+        self.assertEqual(environment["ASTERION_DCI_PATHLIGHT_PRIVATE_FD"], "37")
+        self.assertEqual(
+            environment["ASTERION_DCI_PATHLIGHT_CAPTURE_CONTRACT"],
+            "SENTINEL-private-contract/v1",
+        )
+        self.assertNotIn(str(observation_path), environment.values())
+
+    def test_absent_observation_configuration_scrubs_inherited_private_values(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            client = _client(Path(directory).resolve())
+            inherited = {
+                "PATH": "/usr/bin",
+                "ASTERION_DCI_PATHLIGHT_PRIVATE_FD": "SENTINEL-attacker-fd",
+                "ASTERION_DCI_PATHLIGHT_CAPTURE_CONTRACT": "SENTINEL-attacker-contract",
+            }
+            with patch.dict("os.environ", inherited, clear=True):
+                before = dict(os.environ)
+                environment = client._child_environment(node_bin="/usr/bin/node")
+                after = dict(os.environ)
+
+        self.assertEqual(before, after)
+        self.assertNotIn("ASTERION_DCI_PATHLIGHT_PRIVATE_FD", environment)
+        self.assertNotIn("ASTERION_DCI_PATHLIGHT_CAPTURE_CONTRACT", environment)
+
     def test_proxy_config_installs_node_fetch_dispatcher_without_secret_in_options(
         self,
     ) -> None:
