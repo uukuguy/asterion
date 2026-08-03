@@ -30,7 +30,7 @@
 - Consumes: `WorkflowObservationBundle`, `EvaluationBundle`, `ExperimentBundle`, `DiagnosisBundle`, `project_trace_flow`.
 - Produces: `DashboardSnapshot.build`, `DashboardSnapshot.to_mapping`, and `validate_dashboard_snapshot(mapping)`.
 
-- [ ] **Step 1: Write failing snapshot tests**
+- [x] **Step 1: Write failing snapshot tests**
 
 ```python
 def test_snapshot_is_deterministic_safe_and_marks_missing_flow(self) -> None:
@@ -47,13 +47,13 @@ def test_snapshot_is_deterministic_safe_and_marks_missing_flow(self) -> None:
     self.assertTrue(mapping["summary"]["evidence_gap_count"] >= 1)
 ```
 
-- [ ] **Step 2: Run the focused test and confirm the contract is absent**
+- [x] **Step 2: Run the focused test and confirm the contract is absent**
 
 Run: `uv run python -m unittest -v tests.test_pathlight_dashboard`
 
 Expected: FAIL because `DashboardSnapshot` is not defined.
 
-- [ ] **Step 3: Implement the closed snapshot contract**
+- [x] **Step 3: Implement the closed snapshot contract**
 
 ```python
 DASHBOARD_SNAPSHOT_SCHEMA = "asterion.pathlight-dashboard-snapshot/v1"
@@ -87,13 +87,13 @@ class DashboardSnapshot:
 
 Use existing validators before copying any mapping. Sort every collection by its canonical digest/identity, reject duplicate identities, project flows only through `project_trace_flow`, calculate fixed integer counts, and content-address the unsigned canonical mapping. Represent an empty flow for a trace as an evidence gap; do not synthesize ContextFrame nodes.
 
-- [ ] **Step 4: Run snapshot and existing Pathlight contract tests**
+- [x] **Step 4: Run snapshot and existing Pathlight contract tests**
 
 Run: `uv run python -m unittest -v tests.test_pathlight_dashboard tests.test_pathlight_flow tests.test_pathlight_query tests.test_pathlight_runtime_observation`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the snapshot boundary**
+- [x] **Step 5: Commit the snapshot boundary**
 
 ```bash
 git add src/asterion/pathlight/dashboard.py src/asterion/pathlight/__init__.py tests/test_pathlight_dashboard.py

@@ -83,6 +83,11 @@ from asterion.pathlight.interop import (
     write_export_batch,
 )
 from asterion.pathlight.opik import OPIK_MAPPING_VERSION, map_opik_exports
+from asterion.pathlight.dashboard import (
+    DASHBOARD_SNAPSHOT_SCHEMA,
+    DashboardSnapshot,
+    validate_dashboard_snapshot,
+)
 
 __all__ = (
     "PathlightError",
@@ -156,4 +161,7 @@ __all__ = (
     "read_export_receipts",
     "OPIK_MAPPING_VERSION",
     "map_opik_exports",
+    "DASHBOARD_SNAPSHOT_SCHEMA",
+    "DashboardSnapshot",
+    "validate_dashboard_snapshot",
 )
