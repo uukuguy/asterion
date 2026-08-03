@@ -6,6 +6,7 @@ import stat
 import tempfile
 import unittest
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 from asterion.pathlight.interop import (
@@ -83,8 +84,10 @@ class PathlightInteropContractTests(unittest.TestCase):
 
         envelope = ExportEnvelope("opik", "1.0.0", "span.upsert", "a" * 64, payload)
 
+        serialized_payload = cast(dict[str, object], envelope.to_mapping()["payload"])
+        self.assertIsInstance(serialized_payload, dict)
         self.assertEqual(
-            envelope.to_mapping()["payload"]["missing_evidence_labels"],
+            serialized_payload["missing_evidence_labels"],
             ["model-request-boundary"],
         )
         for labels in (
@@ -99,7 +102,7 @@ class PathlightInteropContractTests(unittest.TestCase):
                     "1.0.0",
                     "span.upsert",
                     "a" * 64,
-                    {**payload, "missing_evidence_labels": labels},
+                    {**payload, "missing_evidence_labels": labels},  # type: ignore[arg-type]
                 )
 
     def test_export_envelope_rejects_private_unknown_or_ambiguous_payloads(
@@ -124,6 +127,26 @@ class PathlightInteropContractTests(unittest.TestCase):
             ):
                 ExportEnvelope(**valid, payload=payload)  # type: ignore[arg-type]
         self.assertFalse(_HostileMapping.method_called)
+
+    def test_export_envelope_rejects_arbitrary_digest_and_version_keys(self) -> None:
+        valid_payload = {"trace_sha256": "b" * 64, "status": "completed"}
+        for key, value in (
+            ("SENTINEL_PRIVATE_RAW_sha256", "c" * 64),
+            ("provider_sha256", "c" * 64),
+            ("model_sha256", "c" * 64),
+            ("config_sha256", "c" * 64),
+            ("private_path_sha256", "c" * 64),
+            ("SENTINEL_PRIVATE_RAW_version", "1.0.0"),
+            ("provider_version", "1.0.0"),
+        ):
+            with self.subTest(key=key), self.assertRaises(PathlightError):
+                ExportEnvelope(
+                    "opik",
+                    "1.0.0",
+                    "trace.upsert",
+                    "a" * 64,
+                    {**valid_payload, key: value},
+                )
 
     def test_export_envelope_validator_rejects_digest_or_field_drift(self) -> None:
         envelope = ExportEnvelope(
@@ -207,6 +230,30 @@ class PathlightInteropContractTests(unittest.TestCase):
         mapping["execution_authorized"] = True
         with self.assertRaises(PathlightError):
             validate_proposal_candidate(mapping)
+
+    def test_external_observation_rejects_arbitrary_digest_and_version_keys(
+        self,
+    ) -> None:
+        valid_payload = {"change_sha256": "d" * 64, "status": "proposed"}
+        for key, value in (
+            ("SENTINEL_PRIVATE_RAW_sha256", "e" * 64),
+            ("provider_sha256", "e" * 64),
+            ("model_sha256", "e" * 64),
+            ("config_sha256", "e" * 64),
+            ("private_path_sha256", "e" * 64),
+            ("SENTINEL_PRIVATE_RAW_version", "1.0.0"),
+            ("model_version", "1.0.0"),
+        ):
+            with self.subTest(key=key), self.assertRaises(PathlightError):
+                ExternalObservation(
+                    connector="opik",
+                    connector_identity_sha256="a" * 64,
+                    mapping_version="1.0.0",
+                    local_subject_sha256="b" * 64,
+                    external_event_sha256="c" * 64,
+                    observation_kind="optimization-suggestion",
+                    payload={**valid_payload, key: value},
+                )
 
     def test_offline_batch_is_private_sorted_deduplicated_and_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -98,6 +98,40 @@ _REQUEST_INTEGER_FIELDS = frozenset(
         "text_characters",
     }
 )
+_REQUEST_DIGEST_FIELDS = frozenset(
+    {
+        "private_reference_sha256",
+        "request_sha256",
+        "request_shape_sha256",
+    }
+)
+_REQUEST_METADATA_FIELDS = frozenset(
+    {*_REQUEST_DIGEST_FIELDS, *_REQUEST_INTEGER_FIELDS, "missing_evidence_labels"}
+)
+_DIGEST_PAYLOAD_FIELDS = frozenset(
+    {
+        "baseline_variant_sha256",
+        "budget_sha256",
+        "case_trial_sha256",
+        "change_sha256",
+        "content_sha256",
+        "dataset_item_sha256",
+        "dataset_snapshot_sha256",
+        "evaluation_sha256",
+        "experiment_plan_sha256",
+        "finding_sha256",
+        "metric_contract_sha256",
+        "proposal_sha256",
+        "scope_sha256",
+        "span_sha256",
+        "stop_criteria_sha256",
+        "success_criteria_sha256",
+        "trace_sha256",
+        "variant_sha256",
+        *_REQUEST_DIGEST_FIELDS,
+    }
+)
+_VERSION_PAYLOAD_FIELDS = frozenset({"snapshot_version"})
 _SAFE_BOOLEAN_FIELDS = frozenset(
     {"execution_authorized", "requires_operator_authorization"}
 )
@@ -130,6 +164,87 @@ _SAFE_STRING_VALUES = frozenset(
         "thread",
         "experiment",
         "case-trial",
+    }
+)
+_EXPORT_PAYLOAD_FIELDS_BY_EVENT_KIND = {
+    "trace.upsert": frozenset({"trace_sha256", "kind", "status", "duration_ns"}),
+    "span.upsert": frozenset(
+        {
+            "span_sha256",
+            "trace_sha256",
+            "sequence",
+            "kind",
+            "status",
+            "duration_ns",
+            *_REQUEST_METADATA_FIELDS,
+        }
+    ),
+    "thread.upsert": frozenset(),
+    "dataset.upsert": frozenset(
+        {
+            "dataset_snapshot_sha256",
+            "content_sha256",
+            "total_count",
+            "snapshot_version",
+        }
+    ),
+    "experiment.upsert": frozenset(
+        {
+            "experiment_plan_sha256",
+            "dataset_snapshot_sha256",
+            "baseline_variant_sha256",
+            "scope_sha256",
+            "status",
+            "requires_operator_authorization",
+            "execution_authorized",
+        }
+    ),
+    "case-trial.upsert": frozenset(
+        {
+            "case_trial_sha256",
+            "experiment_plan_sha256",
+            "dataset_item_sha256",
+            "variant_sha256",
+            "trace_sha256",
+            "evidence_state",
+        }
+    ),
+    "evaluation.upsert": frozenset(
+        {
+            "evaluation_sha256",
+            "trace_sha256",
+            "metric_contract_sha256",
+            "dataset_snapshot_sha256",
+            "scope_sha256",
+            "selected_count",
+            "total_count",
+            "status",
+            "value_microunits",
+            "metric_name",
+        }
+    ),
+    "trial-history.upsert": frozenset(),
+    "proposal.observe": frozenset(
+        {
+            "proposal_sha256",
+            "finding_sha256",
+            "change_sha256",
+            "scope_sha256",
+            "status",
+            "requires_operator_authorization",
+            "execution_authorized",
+        }
+    ),
+    "decision.observe": frozenset(),
+}
+_EXTERNAL_OBSERVATION_PAYLOAD_FIELDS = frozenset(
+    {
+        "budget_sha256",
+        "change_sha256",
+        "scope_sha256",
+        "status",
+        "stop_criteria_sha256",
+        "success_criteria_sha256",
     }
 )
 _ENVELOPE_FIELDS = frozenset(
@@ -219,24 +334,22 @@ def _event_kind(value: object) -> ExportEventKind:
 
 
 def _safe_payload(
-    value: object, *, allow_request_metadata: bool = False
+    value: object, *, allowed_fields: frozenset[str]
 ) -> MappingProxyType[str, SafeScalar]:
     if type(value) is not dict:
         raise ValueError
     copied: dict[str, SafeScalar] = {}
     for key in sorted(value):
         item = value[key]
-        if type(key) is not str:
+        if type(key) is not str or key not in allowed_fields:
             raise ValueError
-        if key.endswith("_sha256"):
+        if key in _DIGEST_PAYLOAD_FIELDS:
             copied[key] = _sha256(item)
-        elif key in _SAFE_INTEGER_FIELDS or (
-            allow_request_metadata and key in _REQUEST_INTEGER_FIELDS
-        ):
+        elif key in _SAFE_INTEGER_FIELDS or key in _REQUEST_INTEGER_FIELDS:
             if type(item) is not int or item < 0:
                 raise ValueError
             copied[key] = item
-        elif allow_request_metadata and key == "missing_evidence_labels":
+        elif key == "missing_evidence_labels":
             if (
                 type(item) is not tuple
                 or not item
@@ -256,7 +369,7 @@ def _safe_payload(
             if type(item) is not str or item not in METRIC_NAMES:
                 raise ValueError
             copied[key] = item
-        elif key.endswith("_version"):
+        elif key in _VERSION_PAYLOAD_FIELDS:
             copied[key] = _semver(item)
         elif key in {"status", "kind", "evidence_state"}:
             if type(item) is not str or item not in _SAFE_STRING_VALUES:
@@ -304,7 +417,10 @@ class ExportEnvelope:
             _semver(self.mapping_version)
             _event_kind(self.event_kind)
             _sha256(self.local_object_sha256)
-            payload = _safe_payload(self.payload, allow_request_metadata=True)
+            payload = _safe_payload(
+                self.payload,
+                allowed_fields=_EXPORT_PAYLOAD_FIELDS_BY_EVENT_KIND[self.event_kind],
+            )
         except Exception:
             raise PathlightError("Pathlight export envelope is invalid") from None
         object.__setattr__(self, "payload", payload)
@@ -407,7 +523,9 @@ class ExternalObservation:
                 or self.observation_kind not in _OBSERVATION_KINDS
             ):
                 raise ValueError
-            payload = _safe_payload(self.payload)
+            payload = _safe_payload(
+                self.payload, allowed_fields=_EXTERNAL_OBSERVATION_PAYLOAD_FIELDS
+            )
         except Exception:
             raise PathlightError("Pathlight external observation is invalid") from None
         object.__setattr__(self, "payload", payload)
