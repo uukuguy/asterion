@@ -55,6 +55,7 @@ from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks impo
 from asterion.capabilities.dci.implementation.research.experiment_profiles import (
     authorize_full_execution,
     authorized_scope_output_root,
+    cancel_full_execution_authorization_snapshot,
     cancel_full_execution_authorization,
     consumed_full_execution_authorization_snapshot,
     resolve_experiment_profile,
@@ -299,6 +300,8 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
         cancellation: CancellationSignal,
         on_progress: Callable[[BenchmarkProgressEvent], None],
     ) -> BenchmarkTaskResult:
+        payload: DciBenchmarkInvocationPayload | None = None
+        request: BenchmarkRequest | None = None
         try:
             payload = _real_payload(invocation, cancellation, on_progress)
             mode = _REAL_TASK_MODES.get(invocation.task_id, "qa")
@@ -317,6 +320,13 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 self._paths,
                 self._runtime_options,
                 judge_config,
+            )
+            on_progress(
+                BenchmarkProgressEvent(
+                    sequence=1,
+                    status="task.real.readiness.completed",
+                    task_id=invocation.task_id,
+                )
             )
             if mode == "qa" and self._judge_connectivity_probe is not None:
                 self._judge_connectivity_probe(judge_config)
@@ -359,10 +369,24 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 resume_policy="compatible",
                 coverage_registry=coverage_registry,
             )
+            on_progress(
+                BenchmarkProgressEvent(
+                    sequence=2,
+                    status="task.real.authorization.started",
+                    task_id=invocation.task_id,
+                )
+            )
             request = _authorize_full_request(request, payload, invocation.task_id)
             on_progress(
                 BenchmarkProgressEvent(
-                    sequence=1,
+                    sequence=3,
+                    status="task.real.authorization.completed",
+                    task_id=invocation.task_id,
+                )
+            )
+            on_progress(
+                BenchmarkProgressEvent(
+                    sequence=4,
                     status="task.real.started",
                     task_id=invocation.task_id,
                 )
@@ -404,7 +428,7 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 )
             on_progress(
                 BenchmarkProgressEvent(
-                    sequence=2,
+                    sequence=5,
                     status="task.real.completed",
                     task_id=invocation.task_id,
                 )
@@ -418,6 +442,9 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 ),
             )
         except DciBenchmarkExecutorError:
+            failed_result = _failed_coverage_execution(invocation, payload, request)
+            if failed_result is not None:
+                return failed_result
             raise
         except asyncio.CancelledError:
             return _cancelled(
@@ -426,7 +453,59 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 else "qa.bamboogle.github-sample50"
             )
         except Exception:
+            failed_result = _failed_coverage_execution(invocation, payload, request)
+            if failed_result is not None:
+                return failed_result
             _fail()
+
+
+def _failed_coverage_execution(
+    invocation: object,
+    payload: DciBenchmarkInvocationPayload | None,
+    request: BenchmarkRequest | None,
+) -> BenchmarkTaskResult | None:
+    if (
+        not isinstance(invocation, BenchmarkTaskInvocation)
+        or payload is None
+        or payload.coverage_registry is None
+        or request is None
+        or request.full_execution_authorization is None
+        or payload.amount is None
+    ):
+        return None
+    authorized = _cost_microusd(payload.amount)
+    try:
+        receipt = cancel_full_execution_authorization_snapshot(
+            request.full_execution_authorization
+        )
+        ledger = receipt.get("ledger")
+        if type(ledger) is not dict:
+            raise ValueError
+        actual = ledger.get("actual_cost_usd")
+        if isinstance(actual, bool) or not isinstance(actual, (int, float)):
+            raise ValueError
+        consumed = _cost_microusd(Decimal(str(actual)))
+        if consumed > authorized:
+            raise ValueError
+        artifacts = tuple(
+            sorted(
+                (
+                    f"coverage-actual-microusd.{consumed}",
+                    f"coverage-authorized-microusd.{authorized}",
+                )
+            )
+        )
+    except Exception:
+        artifacts = (
+            f"coverage-authorized-microusd.{authorized}",
+            f"coverage-upper-microusd.{authorized}",
+        )
+    return BenchmarkTaskResult(
+        task_id=invocation.task_id,
+        status="failed",
+        case_count=0,
+        artifact_ids=artifacts,
+    )
 
 
 def _authorize_full_request(

@@ -1661,8 +1661,46 @@ def consumed_full_execution_authorization_snapshot(
             )
         record.finalized = True
         record.settled_reservations.clear()
-        return {
-            "schema": "dci.full-execution-authorization-receipt/v1",
+        return _full_execution_receipt(
+            record,
+            schema="dci.full-execution-authorization-receipt/v1",
+        )
+
+
+def cancel_full_execution_authorization_snapshot(
+    authorization: FullExecutionAuthorization,
+) -> dict[str, object]:
+    """Cancel an authority and return its conservative body-free cost ledger."""
+
+    with _AUTHORIZATION_LOCK:
+        record = _validate_authorization(authorization, require_active=False)
+        if record.finalized:
+            raise ExperimentAuthorizationError(
+                "full execution authorization is inactive"
+            )
+        for item in tuple(record.active_reservations.values()):
+            _settle_reservation(record, item.issuer, item, item.upper_bound_usd)
+        record.cancelled = True
+        snapshot = record.snapshot
+        for scope_id in snapshot.authorized_scope_ids:
+            _validate_scope_output(record, scope_id)
+        _validate_output_identity(record.manifest_output, "manifest output")
+        record.finalized = True
+        record.settled_reservations.clear()
+        return _full_execution_receipt(
+            record,
+            schema="dci.full-execution-authorization-cancellation-receipt/v1",
+        )
+
+
+def _full_execution_receipt(
+    record: _AuthorizationRecord,
+    *,
+    schema: str,
+) -> dict[str, object]:
+    snapshot = record.snapshot
+    return {
+            "schema": schema,
             "profile_id": snapshot.profile_id,
             "profile_sha256": snapshot.profile_sha256,
             "dataset_inventory_sha256": snapshot.dataset_inventory_sha256,

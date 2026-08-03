@@ -303,6 +303,45 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
             ),
         )
 
+    def test_coverage_runner_failure_closes_zero_cost_authority(self) -> None:
+        async def runner(_request, *, paths):
+            del paths
+            raise RuntimeError("SENTINEL-PRIVATE-RUNNER-FAILURE")
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            registry = _write_bright_source_coverage(root)
+            result = RealDciBenchmarkExecutor(
+                paths=_paths(root),
+                runtime_options=DciRuntimeOptions(),
+                judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
+                benchmark_runner=runner,
+                readiness_probe=lambda *_args: None,
+            ).execute(
+                _invocation(
+                    root,
+                    task_id="bright.biology",
+                    profile_id="bright.biology",
+                    selection_variant="main",
+                    coverage_registry=registry,
+                    case_limit=10,
+                    amount=Decimal("1"),
+                ),
+                cancellation=MutableCancellation(),
+                on_progress=lambda _event: None,
+            )
+
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.case_count, 0)
+        self.assertEqual(
+            result.artifact_ids,
+            (
+                "coverage-actual-microusd.0",
+                "coverage-authorized-microusd.1000000",
+            ),
+        )
+        self.assertNotIn("SENTINEL-PRIVATE-RUNNER-FAILURE", repr(result))
+
     def test_real_ir_executor_enables_exact_coverage_observation_without_judge(
         self,
     ) -> None:
@@ -613,7 +652,13 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
         self.assertEqual(request.resume_policy, "compatible")
         self.assertEqual(
             tuple(event.status for event in progress),
-            ("task.real.started", "task.real.completed"),
+            (
+                "task.real.readiness.completed",
+                "task.real.authorization.started",
+                "task.real.authorization.completed",
+                "task.real.started",
+                "task.real.completed",
+            ),
         )
         self.assertNotIn("SENTINEL-SECRET", repr(result))
 

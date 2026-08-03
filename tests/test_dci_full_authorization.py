@@ -35,6 +35,7 @@ from asterion.capabilities.dci.implementation.research.experiment_profiles impor
     authorize_full_execution,
     consume_full_execution_authorization,
     cancel_full_execution_authorization,
+    cancel_full_execution_authorization_snapshot,
     consumed_full_execution_authorization_snapshot,
     fail_full_execution_operation,
     reconcile_full_execution_operation,
@@ -1362,6 +1363,29 @@ class FullExecutionBudgetTests(unittest.TestCase):
             reconcile_full_execution_operation(authority, completed, 0.1)
             fail_full_execution_operation(authority, failed)
             cancel_full_execution_authorization(authority)
+
+    def test_cancellation_snapshot_settles_active_upper_bound_and_zero_unused(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            unused = authorize(Path(temporary) / "unused")
+            unused_receipt = cancel_full_execution_authorization_snapshot(unused)
+            self.assertEqual(receipt_ledger(unused_receipt)["actual_cost_usd"], 0.0)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            active = authorize(
+                Path(temporary) / "active",
+                max_agents=1,
+                max_judges=0,
+                max_cost=2.0,
+                max_agent_cost=2.0,
+            )
+            self.consume(active)
+            reserve_full_execution_operation(active, self.scope_id, "agent")
+            active_receipt = cancel_full_execution_authorization_snapshot(active)
+            ledger = receipt_ledger(active_receipt)
+            self.assertEqual(ledger["reserved_cost_usd"], 0.0)
+            self.assertEqual(ledger["actual_cost_usd"], 2.0)
+            self.assertTrue(ledger["cancelled"])
+            self.assertTrue(ledger["finalized"])
 
     def test_receipt_waits_for_drain_and_contains_exact_body_free_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

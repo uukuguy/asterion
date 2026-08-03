@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import hashlib
 from collections.abc import Callable
 from pathlib import Path
 
@@ -48,6 +49,73 @@ GAMMA_REF = CapabilityRef("example.gamma", "1.0.0")
 
 
 class BenchmarkExecutionTests(unittest.TestCase):
+    def test_executor_exception_records_safe_structured_failure_observation(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            evidence = RecordingEvidence(
+                LocalPrivateBenchmarkEvidenceStore(Path(temp_dir) / "evidence")
+            )
+            result = BenchmarkRunner(
+                output_directory_factory=RecordingOutputFactory(
+                    Path(temp_dir) / "outputs"
+                ),
+            ).run(
+                plan(),
+                implementations=benchmark_bindings(plan()),
+                executor=ExplodingExecutor([]),
+                evidence=evidence,
+                cancellation=ManualCancellation(),
+            )
+
+        progress = [
+            event
+            for kind, event in evidence.events
+            if kind == "progress" and event is not None
+        ]
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(
+            progress[-2],
+            BenchmarkProgressEvent(
+                sequence=3,
+                status="task.failure-observed",
+                task_id="example.alpha",
+                failure_stage="task-execution",
+                failure_class="unknown",
+                failure_sha256=hashlib.sha256(
+                    b"task-execution\0RuntimeError"
+                ).hexdigest(),
+            ),
+        )
+        self.assertNotIn("SECRET-EXECUTOR-FAILURE", repr(progress))
+
+    def test_failed_executor_result_records_structured_failure_observation(self) -> None:
+        with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
+            evidence = RecordingEvidence(
+                LocalPrivateBenchmarkEvidenceStore(Path(temp_dir) / "evidence")
+            )
+            result = BenchmarkRunner(
+                output_directory_factory=RecordingOutputFactory(
+                    Path(temp_dir) / "outputs"
+                ),
+            ).run(
+                plan(),
+                implementations=benchmark_bindings(plan()),
+                executor=RecordingExecutor(
+                    [], statuses={"example.alpha": "failed"}
+                ),
+                evidence=evidence,
+                cancellation=ManualCancellation(),
+            )
+
+        progress = [
+            event
+            for kind, event in evidence.events
+            if kind == "progress" and event is not None
+        ]
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(progress[-2].status, "task.failure-observed")
+        self.assertEqual(progress[-2].failure_stage, "task-execution")
+        self.assertEqual(progress[-2].failure_class, "unknown")
+
     def test_tasks_execute_once_and_sequentially(self) -> None:
         with tempfile.TemporaryDirectory(dir=Path.cwd()) as temp_dir:
             calls: list[tuple[str, str]] = []

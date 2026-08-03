@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import NoReturn, Protocol, runtime_checkable
@@ -167,7 +168,18 @@ class BenchmarkRunner:
             )
 
         try:
-            output_directory = self._output_directory_factory(plan, task)
+            try:
+                output_directory = self._output_directory_factory(plan, task)
+            except Exception as error:
+                return self._observed_failure(
+                    task_id,
+                    error,
+                    stage="output-allocation",
+                    failure_class="configuration",
+                    evidence=evidence,
+                    next_sequence=next_sequence,
+                    progress_count=progress_count,
+                )
             request = BenchmarkTaskRequest(
                 run_id=plan.run_id,
                 suite_ref=plan.suite.suite_ref,
@@ -175,21 +187,75 @@ class BenchmarkRunner:
                 case_limit=plan.case_limit,
                 output_directory=output_directory,
             )
-            invocation = implementation.build_invocation(request)
+            try:
+                invocation = implementation.build_invocation(request)
+            except Exception as error:
+                return self._observed_failure(
+                    task_id,
+                    error,
+                    stage="invocation-binding",
+                    failure_class="configuration",
+                    evidence=evidence,
+                    next_sequence=next_sequence,
+                    progress_count=progress_count,
+                )
             if (
                 not isinstance(invocation, BenchmarkTaskInvocation)
                 or invocation.task_id != task_id
                 or invocation.binding_id != task.task.binding_id
             ):
-                result = _failed_result(task_id)
-            else:
-                result = executor.execute(
-                    invocation,
-                    cancellation=cancellation,
-                    on_progress=append_progress,
+                return self._observed_failure(
+                    task_id,
+                    ValueError("invalid benchmark invocation identity"),
+                    stage="invocation-binding",
+                    failure_class="configuration",
+                    evidence=evidence,
+                    next_sequence=next_sequence,
+                    progress_count=progress_count,
                 )
+            else:
+                try:
+                    result = executor.execute(
+                        invocation,
+                        cancellation=cancellation,
+                        on_progress=append_progress,
+                    )
+                except BenchmarkEvidenceError:
+                    raise
+                except Exception as error:
+                    return self._observed_failure(
+                        task_id,
+                        error,
+                        stage="task-execution",
+                        failure_class="unknown",
+                        evidence=evidence,
+                        next_sequence=next_sequence,
+                        progress_count=progress_count,
+                    )
             if result.task_id != task_id or result.case_count > plan.case_limit:
-                result = _failed_result(task_id)
+                return self._observed_failure(
+                    task_id,
+                    ValueError("invalid benchmark task result"),
+                    stage="result-validation",
+                    failure_class="parsing",
+                    evidence=evidence,
+                    next_sequence=next_sequence,
+                    progress_count=progress_count,
+                )
+            if result.status == "failed":
+                evidence.append_progress(
+                    BenchmarkProgressEvent(
+                        sequence=next_sequence + progress_count,
+                        status="task.failure-observed",
+                        task_id=task_id,
+                        failure_stage="task-execution",
+                        failure_class="unknown",
+                        failure_sha256=hashlib.sha256(
+                            b"task-execution\0BenchmarkTaskResult"
+                        ).hexdigest(),
+                    )
+                )
+                progress_count += 1
         except BenchmarkEvidenceError:
             raise
         except KeyboardInterrupt:
@@ -198,11 +264,47 @@ class BenchmarkRunner:
                 status="cancelled",
                 case_count=0,
             )
-        except Exception:
-            result = _failed_result(task_id)
+        except Exception as error:
+            return self._observed_failure(
+                task_id,
+                error,
+                stage="result-validation",
+                failure_class="parsing",
+                evidence=evidence,
+                next_sequence=next_sequence,
+                progress_count=progress_count,
+            )
 
         evidence.finish_task(result)
         return _TaskExecutionResult(result=result, progress_count=progress_count)
+
+    def _observed_failure(
+        self,
+        task_id: str,
+        error: Exception,
+        *,
+        stage: str,
+        failure_class: str,
+        evidence: BenchmarkEvidenceStore,
+        next_sequence: int,
+        progress_count: int,
+    ) -> _TaskExecutionResult:
+        failure_sha256 = hashlib.sha256(
+            f"{stage}\0{type(error).__name__}".encode("utf-8")
+        ).hexdigest()
+        evidence.append_progress(
+            BenchmarkProgressEvent(
+                sequence=next_sequence + progress_count,
+                status="task.failure-observed",
+                task_id=task_id,
+                failure_stage=stage,
+                failure_class=failure_class,
+                failure_sha256=failure_sha256,
+            )
+        )
+        result = _failed_result(task_id)
+        evidence.finish_task(result)
+        return _TaskExecutionResult(result=result, progress_count=progress_count + 1)
 
 
 class _TaskExecutionResult:

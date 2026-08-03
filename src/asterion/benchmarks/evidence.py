@@ -24,6 +24,7 @@ from asterion.capability_packages import CapabilityPackageRef
 _JSON_MAX_BYTES = 1024 * 1024
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 _STATUS = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _RUN_TERMINAL_PROGRESS = frozenset({"run.completed", "run.failed", "run.cancelled"})
 _SECRET_FRAGMENTS = ("secret", "credential", "password", "token", "answer", "prompt")
 _O_DIRECTORY = getattr(os, "O_DIRECTORY", None)
@@ -51,12 +52,48 @@ class BenchmarkProgressEvent:
     sequence: int
     status: str
     task_id: str | None = None
+    failure_stage: str | None = None
+    failure_class: str | None = None
+    failure_sha256: str | None = None
 
     def __post_init__(self) -> None:
         _positive_int(self.sequence)
         _safe_status(self.status)
         if self.task_id is not None:
             _identifier(self.task_id)
+        failure = (
+            self.failure_stage,
+            self.failure_class,
+            self.failure_sha256,
+        )
+        if self.status == "task.failure-observed":
+            if (
+                self.task_id is None
+                or self.failure_stage not in {
+                    "output-allocation",
+                    "invocation-binding",
+                    "task-execution",
+                    "result-validation",
+                }
+                or self.failure_class not in {
+                    "authorization",
+                    "cancelled",
+                    "configuration",
+                    "evaluation",
+                    "model-refusal",
+                    "network",
+                    "parsing",
+                    "rate-limit",
+                    "timeout",
+                    "tool-protocol",
+                    "unknown",
+                }
+                or not isinstance(self.failure_sha256, str)
+                or _SHA256.fullmatch(self.failure_sha256) is None
+            ):
+                _fail("benchmark progress event is invalid")
+        elif any(value is not None for value in failure):
+            _fail("benchmark progress event is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -774,6 +811,10 @@ def _progress_event_dict(event: BenchmarkProgressEvent) -> Mapping[str, object]:
     }
     if event.task_id is not None:
         value["task_id"] = event.task_id
+    if event.failure_stage is not None:
+        value["failure_stage"] = event.failure_stage
+        value["failure_class"] = event.failure_class
+        value["failure_sha256"] = event.failure_sha256
     return value
 
 
@@ -832,18 +873,42 @@ def _task_result_from_json(value: object) -> BenchmarkTaskResult:
 
 
 def _progress_event_from_json(value: Mapping[str, object]) -> BenchmarkProgressEvent:
-    if set(value) not in ({"sequence", "status"}, {"sequence", "status", "task_id"}):
+    if set(value) not in (
+        {"sequence", "status"},
+        {"sequence", "status", "task_id"},
+        {
+            "sequence",
+            "status",
+            "task_id",
+            "failure_stage",
+            "failure_class",
+            "failure_sha256",
+        },
+    ):
         _fail("benchmark evidence resume is invalid")
     sequence = value.get("sequence")
     status = value.get("status")
     task_id = value.get("task_id")
+    failure_stage = value.get("failure_stage")
+    failure_class = value.get("failure_class")
+    failure_sha256 = value.get("failure_sha256")
     if (
         type(sequence) is not int
         or not isinstance(status, str)
         or (task_id is not None and not isinstance(task_id, str))
+        or (failure_stage is not None and not isinstance(failure_stage, str))
+        or (failure_class is not None and not isinstance(failure_class, str))
+        or (failure_sha256 is not None and not isinstance(failure_sha256, str))
     ):
         _fail("benchmark evidence resume is invalid")
-    return BenchmarkProgressEvent(sequence=sequence, status=status, task_id=task_id)
+    return BenchmarkProgressEvent(
+        sequence=sequence,
+        status=status,
+        task_id=task_id,
+        failure_stage=failure_stage,
+        failure_class=failure_class,
+        failure_sha256=failure_sha256,
+    )
 
 
 def _root_exists(root: Path) -> bool:
