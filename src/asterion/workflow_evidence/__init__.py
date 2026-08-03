@@ -15,7 +15,9 @@ from asterion.workflow_evidence.runtime import (
 )
 from asterion.workflow_evidence.storage import (
     WorkflowObservationBundle,
+    build_workflow_observation_bundle,
     read_workflow_observation_bundle,
+    read_workflow_observation_bundle_mapping,
     validate_workflow_observation_bundle,
     write_workflow_observation_bundle,
 )
@@ -23,6 +25,7 @@ from asterion.workflow_evidence.storage import (
 __all__ = [
     "WorkflowEvidenceError",
     "WorkflowObservationBundle",
+    "build_workflow_observation_bundle",
     "CompletedRuntimeEvidence",
     "compare_workflow_evidence",
     "collect_workflow_evidence",
@@ -31,6 +34,7 @@ __all__ = [
     "project_completed_runtime_evidence",
     "diagnose_workflow_comparison",
     "read_workflow_observation_bundle",
+    "read_workflow_observation_bundle_mapping",
     "validate_workflow_observation_bundle",
     "validate_workflow_evidence",
     "write_workflow_observation_bundle",

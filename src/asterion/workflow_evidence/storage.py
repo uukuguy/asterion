@@ -555,21 +555,27 @@ def _freeze(value: object) -> object:
     return value
 
 
-def write_workflow_observation_bundle(
-    path: Path,
+def read_workflow_observation_bundle_mapping(
+    document: Mapping[str, object],
+) -> WorkflowObservationBundle:
+    """Validate an in-memory bundle through the canonical immutable reader."""
+
+    try:
+        detached = _json_copy(document)
+        return _validate_and_freeze_bundle(detached)
+    except WorkflowEvidenceError:
+        raise
+    except Exception:
+        raise WorkflowEvidenceError("workflow observation bundle is invalid") from None
+
+
+def build_workflow_observation_bundle(
     records: Sequence[Mapping[str, object]],
     *,
     pathlight_traces: Sequence[Mapping[str, object]] = (),
-) -> None:
-    """Write validated records once to a caller-selected canonical target."""
+) -> dict[str, object]:
+    """Build one detached canonical bundle without selecting a filesystem path."""
 
-    if (
-        path.name != "workflow-evidence.json"
-        or not path.parent.is_dir()
-        or path.exists()
-        or path.is_symlink()
-    ):
-        raise WorkflowEvidenceError("workflow observation target is invalid")
     serialized_records: list[dict[str, object]] = []
     seen_run_ids: set[str] = set()
     for record in records:
@@ -586,22 +592,30 @@ def write_workflow_observation_bundle(
                 "workflow observation run identity is duplicated"
             )
         seen_run_ids.add(run_id)
-        serialized_records.append(dict(record))
+        copied_record = _json_copy(record)
+        if not isinstance(copied_record, dict):
+            raise WorkflowEvidenceError("workflow observation record is invalid")
+        serialized_records.append(copied_record)
+
     serialized_traces: list[dict[str, object]] = []
     seen_trace_ids: set[str] = set()
     for trace in pathlight_traces:
         if not isinstance(trace, Mapping):
             raise WorkflowEvidenceError("Pathlight trace is invalid")
+        copied_trace = _json_copy(trace)
+        if not isinstance(copied_trace, dict):
+            raise WorkflowEvidenceError("Pathlight trace is invalid")
         try:
-            validate_trace_graph(trace)
+            validate_trace_graph(copied_trace)
         except PathlightError:
             raise WorkflowEvidenceError("Pathlight trace is invalid") from None
-        trace_id = trace["trace_id"]
+        trace_id = copied_trace["trace_id"]
         assert isinstance(trace_id, str)
         if trace_id in seen_trace_ids:
             raise WorkflowEvidenceError("Pathlight trace identity is duplicated")
         seen_trace_ids.add(trace_id)
-        serialized_traces.append(_serialize_pathlight_trace(trace))
+        serialized_traces.append(copied_trace)
+
     bundle: dict[str, object] = {
         "schema": "asterion.workflow-observation-bundle/v1",
         "records": serialized_records,
@@ -610,6 +624,28 @@ def write_workflow_observation_bundle(
     bundle["bundle_sha256"] = hashlib.sha256(
         json.dumps(bundle, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+    read_workflow_observation_bundle_mapping(bundle)
+    return bundle
+
+
+def write_workflow_observation_bundle(
+    path: Path,
+    records: Sequence[Mapping[str, object]],
+    *,
+    pathlight_traces: Sequence[Mapping[str, object]] = (),
+) -> None:
+    """Write validated records once to a caller-selected canonical target."""
+
+    if (
+        path.name != "workflow-evidence.json"
+        or not path.parent.is_dir()
+        or path.exists()
+        or path.is_symlink()
+    ):
+        raise WorkflowEvidenceError("workflow observation target is invalid")
+    bundle = build_workflow_observation_bundle(
+        records, pathlight_traces=pathlight_traces
+    )
     encoded = json.dumps(bundle, sort_keys=True, separators=(",", ":")).encode("utf-8")
     try:
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

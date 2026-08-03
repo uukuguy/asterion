@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from asterion.pathlight import TraceEvent, TraceGraph
+import asterion.workflow_evidence as workflow_evidence
 from asterion.workflow_evidence import (
     WorkflowObservationBundle,
     WorkflowEvidenceError,
@@ -203,6 +204,39 @@ def _mutated_bundle_path(root: Path, mutation: str) -> Path:
 
 
 class WorkflowEvidenceStorageTests(unittest.TestCase):
+    def test_builds_the_same_validated_bundle_without_a_path(self) -> None:
+        builder = getattr(
+            workflow_evidence, "build_workflow_observation_bundle", None
+        )
+        mapping_reader = getattr(
+            workflow_evidence, "read_workflow_observation_bundle_mapping", None
+        )
+        self.assertIsNotNone(builder)
+        self.assertIsNotNone(mapping_reader)
+        assert builder is not None and mapping_reader is not None
+        trace = _completed_pathlight_trace()
+
+        mapping = builder(
+            (_completed_record(),),
+            pathlight_traces=(trace,),
+        )
+        bundle = mapping_reader(mapping)
+
+        self.assertEqual(
+            mapping["schema"], "asterion.workflow-observation-bundle/v1"
+        )
+        self.assertEqual(bundle.bundle_sha256, mapping["bundle_sha256"])
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory).resolve() / "workflow-evidence.json"
+            write_workflow_observation_bundle(
+                target,
+                (_completed_record(),),
+                pathlight_traces=(trace,),
+            )
+            self.assertEqual(
+                json.loads(target.read_text(encoding="utf-8")), mapping
+            )
+
     def test_rich_trace_round_trips_without_losing_safe_observation_attributes(
         self,
     ) -> None:
