@@ -30,7 +30,7 @@
 - Consumes: `RunRequest`, one complete normalized event sequence, `RuntimeObservationBatch | None`, observed event timestamps, explicit runtime ID, and trace ID.
 - Produces: `CompletedRuntimeEvidence(record, trace)` and the exact `project_completed_runtime_evidence` signature shown in Step 3.
 
-- [ ] **Step 1: Write failing completed-projection tests**
+- [x] **Step 1: Write failing completed-projection tests**
 
 Add tests which reuse the existing valid Pi-native observation fixtures and assert:
 
@@ -51,13 +51,13 @@ self.assertNotIn("SENTINEL_PRIVATE_PROMPT", json.dumps(projected.trace))
 
 Add fail-closed cases for an incomplete stream, a mismatched native run digest, tool lineage mismatch, nonmonotonic timestamps, an invalid trace ID, and hostile mappings. The native mismatch must degrade to the existing fallback trace, not invent rich frames.
 
-- [ ] **Step 2: Run the focused tests and confirm the API is absent**
+- [x] **Step 2: Run the focused tests and confirm the API is absent**
 
 Run: `uv run python -m unittest -v tests.test_workflow_evidence_runtime`
 
 Expected: FAIL because `CompletedRuntimeEvidence` and `project_completed_runtime_evidence` are not exported.
 
-- [ ] **Step 3: Implement the immutable completed-runtime projector**
+- [x] **Step 3: Implement the immutable completed-runtime projector**
 
 Add this public shape:
 
@@ -109,7 +109,7 @@ def project_completed_runtime_evidence(
 
 Validate `request.to_mapping()`, the complete event stream, identities, timestamp order, and supplied native observation. Cross-check the native run digest and tool summaries against the normalized stream using the same rules as `ObservedRuntimeClient`. Create a fresh `MemoryPathlightRecorder`, call the existing `_RuntimePathlightProjection`, require one valid snapshot, and return deep-frozen safe mappings. If native observation is absent or cross-checking fails, produce the existing explicit missing-evidence fallback; malformed event streams or public arguments fail closed.
 
-- [ ] **Step 4: Run runtime and Pathlight protocol tests**
+- [x] **Step 4: Run runtime and Pathlight protocol tests**
 
 Run:
 
@@ -122,7 +122,7 @@ uv run python -m unittest -v \
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit the completed-runtime boundary**
+- [x] **Step 5: Commit the completed-runtime boundary**
 
 ```bash
 git add src/asterion/workflow_evidence/runtime.py \
@@ -142,7 +142,7 @@ git commit -m "feat: project completed runtime evidence"
 - Consumes: safe workflow records and validated Pathlight trace mappings.
 - Produces: `build_workflow_observation_bundle(records, *, pathlight_traces) -> Mapping[str, object]`; the existing file writer delegates to it.
 
-- [ ] **Step 1: Write failing pure-bundle tests**
+- [x] **Step 1: Write failing pure-bundle tests**
 
 ```python
 mapping = build_workflow_observation_bundle(
@@ -155,13 +155,13 @@ self.assertEqual(read_workflow_observation_bundle_mapping(mapping).bundle_sha256
 
 Assert byte-for-byte semantic equivalence with the existing writer, deterministic digest/order, duplicate run/trace rejection, hostile mapping rejection, and no sentinel leakage.
 
-- [ ] **Step 2: Run storage tests and confirm the builder is absent**
+- [x] **Step 2: Run storage tests and confirm the builder is absent**
 
 Run: `uv run python -m unittest -v tests.test_workflow_evidence_storage`
 
 Expected: FAIL because the pure builder and mapping reader are not exported.
 
-- [ ] **Step 3: Refactor construction out of the path writer**
+- [x] **Step 3: Refactor construction out of the path writer**
 
 Implement:
 
@@ -187,7 +187,7 @@ def read_workflow_observation_bundle_mapping(
 
 Use the current writer's exact closed validation and serialization path, calculate `bundle_sha256` once, validate the resulting mapping through the same immutable reader, and return a detached ordinary mapping. Change `write_workflow_observation_bundle` to validate the target and serialize this mapping without changing its on-disk contract.
 
-- [ ] **Step 4: Run storage, query, Dashboard, and CLI tests**
+- [x] **Step 4: Run storage, query, Dashboard, and CLI tests**
 
 Run:
 
@@ -201,7 +201,7 @@ uv run python -m unittest -v \
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit reusable bundle construction**
+- [x] **Step 5: Commit reusable bundle construction**
 
 ```bash
 git add src/asterion/workflow_evidence/storage.py \
@@ -222,7 +222,7 @@ git commit -m "refactor: expose validated workflow bundles"
 - Consumes: raw Pi events, normalized adapter emissions, `PiObservationBuilder`, completed-runtime projection, and pure workflow bundle construction.
 - Produces: a descriptor-relative, immutable `workflow-evidence.json` inside each newly completed native generation.
 
-- [ ] **Step 1: Write failing DCI recorder integration tests**
+- [x] **Step 1: Write failing DCI recorder integration tests**
 
 Build a fake Pi RPC client that emits a closed sequence containing:
 
@@ -235,17 +235,17 @@ Build a fake Pi RPC client that emits a closed sequence containing:
 
 Run `run_pi_research`, read `workflow-evidence.json` with the public reader, and assert one trace, one ContextFrame, one model call, one completed tool call, correct lineage, and absence of every sentinel/provider/model/path string. Add retry rollback, missing observation, existing-target, failed-run, cancellation, and writer-exception cases. None may change the native terminal result or overwrite evidence.
 
-- [ ] **Step 2: Run the new tests and confirm no bundle exists**
+- [x] **Step 2: Run the new tests and confirm no bundle exists**
 
 Run: `uv run python -m unittest -v tests.test_dci_pathlight_capture`
 
 Expected: FAIL because native DCI completion does not write `workflow-evidence.json`.
 
-- [ ] **Step 3: Capture Pi observation and normalized timing as a side channel**
+- [x] **Step 3: Capture Pi observation and normalized timing as a side channel**
 
 Initialize a `PiObservationBuilder` and observation checkpoint per recorder attempt. In `record_event`, consume the raw event, reset the checkpoint at `agent_start`, and rollback when an `agent_end` carries `willRetry`. In `_emit_normalized`, retain the mapping and strictly increasing monotonic start/end values without changing protocol emission. Any observation exception disables only rich observation for that attempt.
 
-- [ ] **Step 4: Project and write the completed bundle through pinned authority**
+- [x] **Step 4: Project and write the completed bundle through pinned authority**
 
 After successful `recorder.finalize(status="completed", final_text=final_text, stderr_text=stderr_text, release_lock=False)`, build a generic `RunRequest` from the exact DCI run identity/question/capabilities, complete and validate the native observation, project completed runtime evidence, and build the standard bundle. Add a narrow recorder method:
 
@@ -260,7 +260,7 @@ def write_workflow_evidence(self, bundle: Mapping[str, object]) -> None:
 
 Use the actual canonical mapping method implemented in Task 2 rather than inventing fields. Catch observation/persistence errors outside execution semantics, clean any staging file, and return the already completed `DciRunResult` unchanged.
 
-- [ ] **Step 5: Run DCI capture, artifact, runtime, and benchmark tests**
+- [x] **Step 5: Run DCI capture, artifact, runtime, and benchmark tests**
 
 Run:
 
@@ -277,7 +277,7 @@ uv run python -m unittest -v \
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit DCI prospective capture**
+- [x] **Step 6: Commit DCI prospective capture**
 
 ```bash
 git add src/asterion/capabilities/dci/implementation/evaluation/artifacts.py \
@@ -300,7 +300,7 @@ git commit -m "feat: persist DCI Pathlight traces"
 - Consumes: one fresh `dci.bright.biology@1.0.0` execution and its native `workflow-evidence.json`.
 - Produces: exact trace/frame/model/tool/gap counts, snapshot digest, cost and terminal-state evidence, plus reproducible foreground commands.
 
-- [ ] **Step 1: Run provider-free verification before spending**
+- [x] **Step 1: Run provider-free verification before spending**
 
 Run:
 
@@ -316,11 +316,11 @@ make promotion-check
 
 Expected: PASS before any provider call.
 
-- [ ] **Step 2: Prepare fresh exact inputs in the foreground shell**
+- [x] **Step 2: Prepare fresh exact inputs in the foreground shell**
 
 Clear relevant inherited Agent/Judge/proxy variables, source the repository `.env`, confirm DeepSeek readiness without printing secrets, create a fresh canonical source lock and a fresh evidence root, and record their non-secret digests. Do not reuse v7/v8 roots or authorization receipts.
 
-- [ ] **Step 3: Execute exactly one Bright Biology case in the foreground**
+- [x] **Step 3: Execute exactly one Bright Biology case in the foreground**
 
 Run `uv run asterion-dci benchmark run` with:
 
@@ -334,11 +334,15 @@ Run `uv run asterion-dci benchmark run` with:
 
 Expected: one terminal completed task, one Agent operation, zero Judge operations, no background process, and one immutable native `workflow-evidence.json`. If preflight or execution fails, diagnose from the structured failure boundary; do not silently rerun or expand scope.
 
-- [ ] **Step 4: Validate the real trace and Dashboard snapshot**
+Actual: the authorized case completed 1/1 in the foreground with zero Judge work. Pre-provider failures were retained and diagnosed before the successful attempt; they consumed zero model tokens. The successful run wrote one immutable native bundle.
+
+- [x] **Step 4: Validate the real trace and Dashboard snapshot**
 
 Read the new bundle through `read_workflow_observation_bundle`, query it through `asterion pathlight trace list/flow`, and build/start a Dashboard snapshot using the exact `--evidence-file`. Confirm at least one trace, one ContextFrame, and one model call; record the actual tool count, missing-evidence labels, terminal status, bundle digest, trace digest, snapshot digest, time, and actual cost. Stop the foreground Dashboard with `Ctrl-C`.
 
-- [ ] **Step 5: Run repository-wide verification**
+Actual: the native bundle remains immutable and truthfully contains fallback evidence because two observer defects existed at execution time. After fixing them, an independent offline companion was projected from that exact run's retained raw and protocol events. It contains 6 ContextFrames, 6 completed model calls, and 18 completed tool calls; CLI and the foreground Dashboard agree. Its synthetic monotonic timestamps prove ordering only, not execution timing. Exact provider request/context segments remain explicit gaps.
+
+- [x] **Step 5: Run repository-wide verification**
 
 Run:
 
@@ -349,7 +353,9 @@ make promotion-check
 
 Expected: PASS with no provider execution in either verification command.
 
-- [ ] **Step 6: Update Chinese status documents truthfully**
+Actual: `make check` passed 1192 Python tests plus TypeScript, Rust, lint, docs, and build gates. `make promotion-check` passed 22 commands with `provider_operations=0` and `full_dataset=no`.
+
+- [x] **Step 6: Update Chinese status documents truthfully**
 
 Record the new one-case evidence separately from historical 848-case results. State whether final ContextFrame persistence is verified, which gaps remain, and why this does not change or reproduce any benchmark score. Mark every plan checkbox only after its exact evidence exists.
 

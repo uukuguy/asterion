@@ -7,6 +7,24 @@ benchmark 实例的实现清单、验证台账和运行手册。
 外部 benchmark。验证状态只使用 `Not rerun`、`Verified-local`、
 `External-limited`、`Verified-bounded` 和 `Verified-full`。
 
+## Pathlight 前瞻单例核验
+
+为验证今后的 DCI 执行能否直接被观察、跟踪和调优，Bright Biology 已额外完成一条获批的
+前台运行：1/1 成功、0 次 Judge、59.68 秒、成本 $0.084855，18 次工具调用全部成功；该例
+nDCG@10 为 0.339160。它只验证执行与采集链路，不改变下表 103/103 的正式结果，也不能拿
+单例分数和论文全量分数比较。
+
+成功运行保留了当时写出的不可变原生 bundle；修复观察器后，又从同一份原始事件生成独立的
+离线 companion，验证出 6 个 ContextFrame、6 次完成的模型调用和 18 次完成的工具调用。
+CLI 与前台 Dashboard 得到同样的 30 节点主线，Dashboard 快照摘要为
+`431ed5f79a4231d693f2971b01f779907eeb7dba7f566c10286d9a3709c83e8d`，且没有外部网络
+操作。companion 使用合成顺序时间戳，因此只证明节点顺序，不充当真实耗时证据。
+
+当前 Pi 事件没有精确 provider request，故 6 个上下文帧和 6 次模型调用均保留
+`context-segment` / `model-request` 缺口；可见消息—模型—工具的数据流已经可查，但完整
+system/hidden 输入仍不可声称已采集。详细根因、摘要和边界见
+[Pathlight DCI 差分诊断](PATHLIGHT-DCI-DIAGNOSIS.md)。
+
 | 实例 | 实现/验证 | 已跑/总量 | 结果 | 核心配置与证据 | 历史推进记录 |
 |---|---|---:|---|---|---|
 | `dci.bcplus.level3@1.0.0` | implemented / Verified-bounded | 50/830 | 34%（17/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $4.29；`run-480faa…65ff`；resume 未新增生成 | 实现并完成 `dci.bcplus.main@1.0.0` 的 50 条版本 |

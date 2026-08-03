@@ -2,6 +2,38 @@
 
 本报告由六项已完成 historical evidence 的 provider-free Pathlight 恢复与诊断生成。它只包含数值、摘要关系和预先固定的中文说明；不包含 operator 路径、案例标识、提示、答案、payload 或 provider/model/config 值。
 
+## 前瞻采集闭环（单例核验）
+
+获批的一条 Bright Biology 前瞻核验已经在前台完成：1/1 成功、0 次 Judge、墙钟
+59.68 秒、Agent 成本 $0.084855，使用 62,521 个输入 token 和 1,973 个输出 token；
+18 次工具调用全部成功，其中 grep 13 次、read 5 次。本例 nDCG@10 为
+0.339160，但单例结果既不是该实例总分，也不能用于和论文全量结果比较。
+
+这次运行同时暴露并修复了五个执行/观察问题：worktree 中相对 Pi 路径锚定错误、已过期
+OAuth 的正常刷新链路、Node 原生 fetch 未使用已配置代理、`willRetry: null` 被误判为重试，
+以及当前 Pi 版本不发送 `provider_request_context`。前三项曾分别产生 0 case、0 token 或
+`fetch failed`，没有额外模型费用；后两项使成功运行当时写出的原生 bundle 只能诚实降级。
+相关修复为 `ecb0395`、`780921e` 和 `f80bcf5`。
+
+成功运行的原生不可变 bundle 摘要为
+`69b9d21af9c2960aeb5e5809af46199e3b1f8784a76138e51f404e693a24f5c7`，trace 摘要为
+`6d25ce045feb192b8fa47be0737c47a4a08cf14a85e18b238978711f1a031b8e`。它保持原样，
+没有因修复而覆盖。修复后从同一次运行的 486 条原始事件和 298 条标准事件离线重投影了一个
+独立 companion；bundle 摘要为
+`57cddb940e866b5633df438dcf017eb874bece14b9d4d9b9ce83a0ba4355e910`，trace 摘要为
+`61749c6888e623af0a0ac4fd533076ec835c3a7cbe8363ebc41b49c8948057be`。它验证出一条
+30 节点主线：6 个 ContextFrame、6 次完成的模型调用、18 次完成的工具调用。companion 的
+时间戳只是严格递增的离线序号，不是执行耗时证据；真实耗时仍来自原生运行账本。
+
+由于 Pi 没有给出精确 provider request，6 个 ContextFrame 与 6 次模型调用均明确标记
+`context-segment` / `model-request` 缺口。Pathlight 能跟踪可见消息和工具结果的纵向关系，
+但不会把它冒充包含 system/hidden 内容的完整最终调用输入。之后由 `f80bcf5` 版本产生的新运行
+会直接写出这种主线，不需要本次再调用模型。
+
+同一 companion 已通过 `pathlight trace list/flow` 和前台 Dashboard 核验。Dashboard 快照摘要为
+`431ed5f79a4231d693f2971b01f779907eeb7dba7f566c10286d9a3709c83e8d`，显示 1 条完成
+trace、6/6/18 节点和 1 类显式证据缺口；服务停止时网络操作计数为 0。
+
 ## Coverage 实验状态（已完成）
 
 获批的 v8 有限实验已以前台串行方式完成：五个数据集各 10/10，共 50 次 Agent、
