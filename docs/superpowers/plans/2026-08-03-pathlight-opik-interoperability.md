@@ -33,7 +33,7 @@
 - Consumes: canonical JSON-compatible mappings already validated by Pathlight.
 - Produces: `ExportEnvelope`, `ExportReceipt`, `ExternalObservation`, `ProposalCandidate`, `validate_*` functions, and exact schema constants.
 
-- [ ] **Step 1: Write failing closed-contract tests**
+- [x] **Step 1: Write failing closed-contract tests**
 
 ```python
 def test_export_envelope_is_content_addressed_and_rejects_unknown_payload_fields():
@@ -51,13 +51,13 @@ def test_export_envelope_is_content_addressed_and_rejects_unknown_payload_fields
 
 Cover exact field sets, sorted payload keys, digest mismatch, hostile mapping subclasses, booleans-as-integers, unknown connector/event kind, and proposal candidates that attempt to set execution authority.
 
-- [ ] **Step 2: Run the test and verify it fails**
+- [x] **Step 2: Run the test and verify it fails**
 
 Run: `uv run python -m unittest -v tests.test_pathlight_interop`
 
 Expected: FAIL because `asterion.pathlight.interop` does not exist.
 
-- [ ] **Step 3: Implement the minimal contracts**
+- [x] **Step 3: Implement the minimal contracts**
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -83,7 +83,7 @@ class ExportReceipt:
 
 Implement `ExternalObservation` with connector identity, mapping version, local subject digest, external event digest, observation kind, safe payload, and immutable digest. Implement `ProposalCandidate` with an external observation digest plus change/scope/success/stop/budget digests and hard-coded `execution_authorized=False`.
 
-- [ ] **Step 4: Run focused tests and checks**
+- [x] **Step 4: Run focused tests and checks**
 
 Run: `uv run python -m unittest -v tests.test_pathlight_interop`
 
@@ -93,7 +93,7 @@ Run: `uv run ruff check src/asterion/pathlight/interop.py tests/test_pathlight_i
 
 Expected: both PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/asterion/pathlight/interop.py src/asterion/pathlight/__init__.py tests/test_pathlight_interop.py
@@ -110,7 +110,7 @@ git commit -m "feat: add Pathlight interoperability contracts"
 - Consumes: `Sequence[ExportEnvelope]`, operator-owned queue root, and validated `ExportReceipt` values.
 - Produces: `write_export_batch(root, envelopes) -> ExportBatch`, `read_export_batch(path)`, `record_export_receipt(root, receipt)`, and `read_export_receipts(root)`.
 
-- [ ] **Step 1: Write failing persistence tests**
+- [x] **Step 1: Write failing persistence tests**
 
 ```python
 def test_offline_batch_is_private_atomic_sorted_and_idempotent():
@@ -123,23 +123,23 @@ def test_offline_batch_is_private_atomic_sorted_and_idempotent():
 
 Also test symlink rejection, root mode/ownership checks, no-replace publication races, malformed or oversized files, receipt attempt monotonicity, terminal/delivered state preventing later retries, and 401 mapping to an `authentication` receipt rather than a task failure.
 
-- [ ] **Step 2: Run the test and verify it fails**
+- [x] **Step 2: Run the test and verify it fails**
 
 Run: `uv run python -m unittest -v tests.test_pathlight_interop`
 
 Expected: FAIL because queue functions are missing.
 
-- [ ] **Step 3: Implement atomic private persistence**
+- [x] **Step 3: Implement atomic private persistence**
 
 Use descriptor-relative open/stat/link/rename patterns already established in `pathlight/_private_file.py`; require an existing canonical 0700 root owned by the current uid, write 0600 canonical JSON, fsync before publication, never follow symlinks, and name batches by `batch-<sha256>.json`. Duplicate envelopes collapse by idempotency key only when the canonical bytes match.
 
-- [ ] **Step 4: Run tests and checks**
+- [x] **Step 4: Run tests and checks**
 
 Run: `uv run python -m unittest -v tests.test_pathlight_interop tests.test_pathlight_private_file`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/asterion/pathlight/interop.py tests/test_pathlight_interop.py
@@ -157,7 +157,7 @@ git commit -m "feat: persist offline Pathlight export queues"
 - Consumes: validated `TraceGraph`, `ExperimentBundle`, `EvaluationBundle`, and `DiagnosisBundle` objects.
 - Produces: `map_opik_exports(..., mapping_version="1.0.0") -> tuple[ExportEnvelope, ...]`.
 
-- [ ] **Step 1: Write failing mapping/redaction tests**
+- [x] **Step 1: Write failing mapping/redaction tests**
 
 ```python
 def test_opik_mapping_links_experiment_trial_trace_and_feedback_without_bodies():
@@ -175,23 +175,23 @@ def test_opik_mapping_links_experiment_trial_trace_and_feedback_without_bodies()
 
 Test stable ordering, repeated mapping identity, exact local digest links, missing trace/metric references failing closed, no provider/model names, no raw event attributes, and Opik IDs absent from authoritative identities.
 
-- [ ] **Step 2: Run the test and verify it fails**
+- [x] **Step 2: Run the test and verify it fails**
 
 Run: `uv run python -m unittest -v tests.test_pathlight_opik`
 
 Expected: FAIL because the mapper does not exist.
 
-- [ ] **Step 3: Implement the whitelist mapper**
+- [x] **Step 3: Implement the whitelist mapper**
 
 Map trace status/kind/component digests and numeric timing/counts; experiment/dataset/variant/trial digests and evidence state; evaluation metric contract digest, value, coverage counts, and status; proposal/finding digests and authorization-required flags. Do not serialize source file paths, trace event attributes outside the approved scalar whitelist, or any model/tool content.
 
-- [ ] **Step 4: Run focused and redaction tests**
+- [x] **Step 4: Run focused and redaction tests**
 
 Run: `uv run python -m unittest -v tests.test_pathlight_opik tests.test_pathlight_protocol tests.test_pathlight_experiment tests.test_pathlight_evaluation tests.test_pathlight_diagnosis`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/asterion/pathlight/opik.py src/asterion/pathlight/__init__.py tests/test_pathlight_opik.py
@@ -208,7 +208,7 @@ git commit -m "feat: map safe Pathlight records for Opik"
 - Consumes: absolute canonical Pathlight bundle paths and an existing canonical 0700 queue root.
 - Produces: `asterion pathlight export opik ... --queue-root ROOT`, `export inspect --batch-file FILE`, and `import opik-observation --observation-file FILE --output-root ROOT`.
 
-- [ ] **Step 1: Write failing CLI tests**
+- [x] **Step 1: Write failing CLI tests**
 
 ```python
 code = main([
@@ -221,23 +221,23 @@ assert json.loads(stdout.getvalue())["network_operation_count"] == 0
 
 Cover deterministic re-run, missing/relative/wrong-basename paths, invalid root modes, sentinel redaction, input mutation after open, unknown mapping versions, hostile imported fields, and import output remaining `execution_authorized=false`.
 
-- [ ] **Step 2: Run the test and verify it fails**
+- [x] **Step 2: Run the test and verify it fails**
 
 Run: `uv run python -m unittest -v tests.test_pathlight_cli`
 
 Expected: FAIL because `export` and `import` commands are absent.
 
-- [ ] **Step 3: Implement the commands**
+- [x] **Step 3: Implement the commands**
 
 Extend `_parser()` with exact subcommands. Reuse current bundle readers, call the mapper and queue writer, and emit only batch digest, envelope count, mapping version, and `network_operation_count: 0`. Inspection returns canonical safe envelope mappings. Import validates a connector-signed/digest-bound local file and persists only `ExternalObservation`/`ProposalCandidate`; it never loads providers or executes a proposal.
 
-- [ ] **Step 4: Run CLI and provider-free boundary tests**
+- [x] **Step 4: Run CLI and provider-free boundary tests**
 
 Run: `uv run python -m unittest -v tests.test_pathlight_cli tests.test_pathlight_opik tests.test_pathlight_interop`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/asterion/cli_pathlight.py tests/test_pathlight_cli.py
@@ -256,11 +256,11 @@ git commit -m "feat: add offline Pathlight Opik CLI"
 - Consumes: implemented CLI and passing commands.
 - Produces: operator runbook, exact trust boundary, compatibility statement, and verified status.
 
-- [ ] **Step 1: Add the offline runbook**
+- [x] **Step 1: Add the offline runbook**
 
 Document creating a 0700 queue, exporting verified Pathlight files without network, inspecting the safe batch, handing it to an operator-owned adapter, recording a delivery receipt, and importing an external suggestion only as a non-executing candidate. State that no Opik package is required for prepare/inspect/import validation.
 
-- [ ] **Step 2: Run complete verification**
+- [x] **Step 2: Run complete verification**
 
 Run: `uv run python -m unittest -v tests.test_pathlight_interop tests.test_pathlight_opik tests.test_pathlight_cli tests.test_pathlight_protocol tests.test_pathlight_experiment tests.test_pathlight_evaluation tests.test_pathlight_diagnosis`
 
@@ -270,11 +270,11 @@ Run: `make lint && make docs-check && make promotion-check`
 
 Expected: PASS.
 
-- [ ] **Step 3: Verify provider-free packaging**
+- [x] **Step 3: Verify provider-free packaging**
 
 Build/install the wheel in an isolated environment and execute the offline export/inspect path without `opik`, provider credentials, or network. Expected: command succeeds, produces only 0600 queue files, and reports zero network operations.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-08-02-asterion-pathlight-design.md docs/status/PATHLIGHT-DCI-DIAGNOSIS.md

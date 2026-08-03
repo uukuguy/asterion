@@ -28,14 +28,27 @@ Earth Science 和 Robotics 已有较高或完整覆盖却仍低分，差距还�
 
 真实 Pi 轨迹最初被错误记为零覆盖，原因是工具结果采用结构化 `content/details` 形态，长行还会
 携带明确的截断标志；旧解析器只接受裸字符串和逐字完整行。提交 `972bc13` 已以严格形态校验、
-错误结果排除、空白规范化和显式长前缀绑定修复，并对 50/50 真实轨迹重新验证。新诊断产物摘要为
-`56c5ea15af2d6f8888a0133fde4e4d62d2e1014441e127fd51f58e87eac26f09`。
+错误结果排除、空白规范化和显式长前缀绑定修复，并对 50/50 真实轨迹重新验证。coverage 摘要随后
+被规范成 5 个真实 Pathlight EvaluationRecord，避免把 evidence 摘要冒充评价身份；最终诊断
+产物摘要为 `8241222ea6411422e27efd0f6e6d469c8bc1301c77bf017f1fa6a28f9fd7d8c8`。
 
 当前 50 条的 retained coverage 均不可用：现有 evidence 能证明工具输出中出现过 gold，
 但没有保存可验证的最后一次 LLM 调用上下文帧，因此还不能证明这些证据最终进入模型上下文。
 这是 Pathlight 基础采集层的明确缺口，也是下一步先补调用边界与上下文帧、再做查询分解实验的
 原因。coverage 闭包现已把检索查询分解门槛从 `blocked-by-coverage` 打开为
 `ready-for-authorization`；它没有自动授权后续模型实验。
+
+## Opik 离线互操作状态
+
+最新诊断、六个 experiment、六项历史 evaluation bundle 和新增的五条 coverage evaluation 已
+通过 Pathlight–Opik 1.0.0 白名单映射，生成 1721 个幂等 envelope；批次摘要为
+`3ba1d6d212b083375f5764c246c8cae6189910f64a3fb2cca6379d3be98a32ce`，文件权限 0600，
+`network_operation_count=0`。批次包含 dataset、experiment、case trial、evaluation 和 proposal
+关系，不包含 prompt、答案、语料、工具/模型 payload、provider 配置、凭据、私有路径或 Opik UUID。
+
+该批次只是 operator-owned adapter 的离线输入，不代表已经发送到 Opik。Opik 的 401、限流、
+网络或服务错误只能写成 `ExportReceipt`，不得改变任何 benchmark、trace 或 evaluation 结果；
+Opik 导回的优化建议只能形成未授权的 `ProposalCandidate`。
 
 ## 已证实事实
 

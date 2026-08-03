@@ -1,7 +1,7 @@
 # Asterion Pathlight 设计
 
 **日期：** 2026-08-02  
-**状态：** Core、查询与评估已验证；诊断、受控优化与 Opik 互操作待实现
+**状态：** Core、查询、评估、诊断与 Opik 离线互操作已验证；运行时上下文补全与 Dashboard 待实现
 **名称：** Asterion Pathlight — 路径可观测、评估与受控优化
 
 ## 目标
@@ -248,9 +248,40 @@ variant 和 failure category 的交并条件。未知字段、私有字段和不
 
 ### CLI
 
-提供 `trace list/show/tail`、`metrics query`、`evaluate compare`、`diagnose` 和
-`proposal create/review/execute`。所有 human-readable 输出与 JSON 输出都遵守安全层；执行
-proposal 复用显式 authorization、成本上限和 cancellation，绝不以已有 trace 授权。
+提供 `trace list/show/tail`、`metrics query`、`evaluate compare`、`diagnose`、
+`proposal create/review/execute`、`export opik/inspect` 和 `import opik-observation`。所有
+human-readable 输出与 JSON 输出都遵守安全层；执行 proposal 复用显式 authorization、成本上限
+和 cancellation，绝不以已有 trace 或外部建议授权。
+
+### Opik 离线操作模式
+
+第一阶段实现不安装或调用 Opik SDK。`export opik` 读取已经验证的 Pathlight evidence、experiment、
+evaluation 与 diagnosis 文件，把白名单字段映射成 `ExportEnvelope`，再写入操作员拥有的 0700
+目录中的 0600 幂等批次。`export inspect` 只校验并显示这个安全批次；真正的网络发送、认证、重试
+与 Opik 对象 UUID 由 runner 外的 operator-owned adapter 负责，并用 `ExportReceipt` 回写结果。
+
+```bash
+install -d -m 700 "$PATHLIGHT_OPIK_QUEUE"
+uv run asterion pathlight export opik \
+  --experiment-file /absolute/path/pathlight-experiment.json \
+  --evaluation-file /absolute/path/pathlight-evaluations.json \
+  --diagnosis-file /absolute/path/pathlight-diagnosis.json \
+  --queue-root "$PATHLIGHT_OPIK_QUEUE"
+
+uv run asterion pathlight export inspect \
+  --batch-file "$PATHLIGHT_OPIK_QUEUE/batch-<sha256>.json"
+```
+
+反向输入必须是 0600 的 `pathlight-external-observation.json`。优化建议只能转成
+`ProposalCandidate`，其 `requires_operator_authorization=true` 且
+`execution_authorized=false`；导入命令不执行建议，也不加载 provider：
+
+```bash
+install -d -m 700 "$PATHLIGHT_OPIK_IMPORT"
+uv run asterion pathlight import opik-observation \
+  --observation-file /absolute/path/pathlight-external-observation.json \
+  --output-root "$PATHLIGHT_OPIK_IMPORT"
+```
 
 ### Dashboard（最后实现）
 

@@ -39,6 +39,11 @@ Pathlight coverage 有限实验已完成五项各 10/10：共 50 次 Agent、0 �
 可验证帧，因此 retained coverage 仍不可用；这项框架采集缺口必须先于新的模型优化实验修复。
 完整分母、成本、摘要和结论边界见上述中文诊断文档。
 
+上述六项历史结果、五条 coverage 评价和最新诊断已经生成 Pathlight–Opik 1.0.0 离线批次：
+1721 个安全 envelope，批次摘要
+`3ba1d6d212b083375f5764c246c8cae6189910f64a3fb2cca6379d3be98a32ce`，网络调用为 0。
+这证明本地映射与队列闭环可用，不表示已向 Opik 服务发送数据；外部发送仍由操作员适配器负责。
+
 ## 推荐核验包的全量执行台账
 
 推荐核验包共 848 条：Bright Biology 103、Earth Science 116、Economics 103、Robotics 101、
