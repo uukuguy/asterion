@@ -52,11 +52,24 @@ key/value、provider/model/config 身份、实际 FD 和私有路径只保留在
 可与 Asterion 单调时钟交叉验证的精确调用边界时间，所以仍诚实保留闭合枚举值
 `model-request-boundary`。这不是自由文本错误原因，也不能被解释为已观测到完整单调边界。
 
-这些结果只证明实现与 provider-free 公共边界。上面的旧单例原生 bundle 仍不可变，离线
-companion 没有被提升为 native evidence，旧单例 nDCG@10 仍为 0.339160，任何正式实例分数也
-没有变化。本轮没有产生新的真实运行。下一条 Bright Biology 单例若要验证原生精确请求采集，
-必须使用新的 source lock 与 evidence root，并获得一次单独、明确的执行授权；现有计划、配置、
-缓存和历史批准都不授予这次调用权限。
+精确请求采集实现后，另一条已获批的 Bright Biology 历史单例完成 1/1、0 次 Judge：墙钟
+31.43 秒、Agent 成本 $0.0480122、47,901 tokens，7 次工具调用全部成功；单例 nDCG@10 为
+0.339160。它的封存 capture 含 4 个连续 provider request，而 Pi 只产生 3 个 assistant response。
+provider-free 重投影证明对齐关系为 request 1→response 1、request 2→response 2、request 4→
+response 3；request 3 位于 compaction telemetry 周围，是一次没有 assistant `message_end` 的
+compaction request-only 调用。
+
+因此 request 3 缺少 response、token usage 和 model identity 是诚实的缺失证据，不是 Agent
+失败，也不应触发 benchmark retry 或改变评分。该节点仍保留 `model-request-boundary`；由于精确
+request 已经交叉验证，它不再含 `model-request` 缺口。offline companion 共显示 4 个
+ContextFrame、4 个 model-call、3 个已观测 response 和 7 个成功工具调用，并已通过 reader、
+`trace show/flow`、Dashboard 与 Pathlight–Opik 离线白名单验证。
+
+这些结果只修正基础设施的调用对齐与可观测性。它们既不解释、也不改善 Bright 相对论文参照的
+分数差距；上面的旧单例和本次历史单例原生 bundle 都保持不可变，offline companion 没有被提升为
+native evidence，任何正式实例分数也没有变化。下一条 Bright Biology 单例若要验证新的 native
+闭环，必须使用新的 source lock 与 evidence root，并获得一次单独、明确的执行授权；现有计划、
+配置、缓存和历史批准都不授予这次调用权限。
 
 ## Coverage 实验状态（已完成）
 

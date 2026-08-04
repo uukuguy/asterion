@@ -19,6 +19,11 @@ uv run asterion pathlight evaluate compare --evaluation-file /absolute/operator/
 只接受准确的 baseline/candidate evaluation SHA-256 identities。`trace tail` 读取当前的不可变
 snapshot，不轮询、不 follow，也不会连接私有 evidence store。
 
+除规范的 `workflow-evidence.json` 外，查询命令也可读取经过同一严格验证的精确文件名
+`workflow-evidence.provider-calls.offline.json`。`trace show/tail/flow` 可以如实显示其中没有
+assistant response 的 request-only model-call 节点及其证据缺口；这些公共命令没有读取私有 capture
+或返回 raw payload 的端点，不能用来取得 prompt、答案、工具正文、provider/model 配置或私有路径。
+
 ## 应用运行证据
 
 `asterion run` 默认只输出既有的公开结果，不会自动捕获或写入 workflow evidence 或

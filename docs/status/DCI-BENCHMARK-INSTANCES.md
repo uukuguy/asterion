@@ -25,17 +25,25 @@ CLI 与前台 Dashboard 得到同样的 30 节点主线，Dashboard 快照摘要
 system/hidden 输入仍不可声称已采集。详细根因、摘要和边界见
 [Pathlight DCI 差分诊断](PATHLIGHT-DCI-DIAGNOSIS.md)。
 
-精确请求双通道现已实现，但本轮只做 provider-free 夹具核验，没有调用 Agent、Judge、模型、
-provider 或网络。私有原始 JSON 只允许进入 host 拥有的 0600 descriptor；公共 CLI
+精确请求双通道实现后，另一条已获批的 Bright Biology 历史单例完成 1/1、0 次 Judge：墙钟
+31.43 秒、Agent 成本 $0.0480122、共 47,901 tokens，7 次工具调用全部成功。私有通道验证出
+4 个连续 provider request，Pi 可见事件形成 3 个 assistant response；该例 nDCG@10 同为
+0.339160，但它仍只是单例结果，不是 benchmark 分数，也不改变下表 103/103 的正式结果。
+
+随后只使用该次运行已经封存的证据做 provider-free 重投影，没有再次调用 Agent、Judge、模型、
+provider 或网络。独立 offline companion 显示 4 个 ContextFrame、4 个 model-call、3 个已观测
+assistant response 和 7 个成功工具调用；`model-request` 缺口已经关闭。request 3 是 compaction
+request-only 调用，因此诚实保留 response、usage、model identity 和调用边界缺口。原始 JSON
+只允许进入 host 拥有并已封存为 0400 的私有 capture；公共 CLI
 `trace show/tail/flow`、Dashboard snapshot/API/assets 与 Opik 离线 envelope 只保留已交叉验证的
 request/shape 摘要、字节/字段/叶子/文本计数和私有引用摘要。`trace list` 保持聚合目录契约，
-只给出 trace 摘要、缺口计数和定位信息，不展开逐请求结构。夹具还验证公共字节不含原始
+只给出 trace 摘要、缺口计数和定位信息，不展开逐请求结构。真实 companion 与夹具均验证公共字节不含原始
 payload、key/value、provider/model/config 身份、实际 FD 或私有路径。
 
 新实现闭合了 `model-request` body 缺口，但 hook 没有提供可与 Asterion 单调时钟交叉验证的
-边界时间，因此公共主线继续显式保留固定枚举 `model-request-boundary`。旧单例原生 bundle
-仍不可变；同源离线 companion 没有升级为 native，单例 0.339160 与表中 103/103 正式分数均
-未改变，也没有新增真实案例。下一次 Bright Biology 单例原生核验必须获得单独明确授权，并
+边界时间，因此公共主线继续显式保留固定枚举 `model-request-boundary`。两条历史单例的原生
+bundle 均保持不可变；offline companion 不替代、覆盖或升级为 native evidence，单例 0.339160
+与表中 103/103 正式分数均未改变。任何下一次 Bright Biology 单例原生核验仍须获得单独明确授权，并
 使用新的 source lock 和 evidence root；本文档、现有配置、缓存或旧批准都不构成执行权限。
 
 | 实例 | 实现/验证 | 已跑/总量 | 结果 | 核心配置与证据 | 历史推进记录 |
