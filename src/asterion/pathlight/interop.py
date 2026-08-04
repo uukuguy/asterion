@@ -87,6 +87,25 @@ _SAFE_INTEGER_FIELDS = frozenset(
         "tool_call_count",
         "total_count",
         "value_microunits",
+        "baseline_completed_count",
+        "candidate_completed_count",
+        "baseline_agent_cost_microusd",
+        "candidate_agent_cost_microusd",
+        "baseline_input_tokens",
+        "candidate_input_tokens",
+        "baseline_output_tokens",
+        "candidate_output_tokens",
+        "baseline_elapsed_ns",
+        "candidate_elapsed_ns",
+    }
+)
+_SAFE_SIGNED_INTEGER_FIELDS = frozenset(
+    {
+        "baseline_mean_microunits",
+        "candidate_mean_microunits",
+        "mean_gain_microunits",
+        "cost_increase_microunits",
+        "time_increase_microunits",
     }
 )
 _REQUEST_INTEGER_FIELDS = frozenset(
@@ -111,6 +130,7 @@ _REQUEST_METADATA_FIELDS = frozenset(
 _DIGEST_PAYLOAD_FIELDS = frozenset(
     {
         "baseline_variant_sha256",
+        "candidate_variant_sha256",
         "budget_sha256",
         "case_trial_sha256",
         "change_sha256",
@@ -126,6 +146,9 @@ _DIGEST_PAYLOAD_FIELDS = frozenset(
         "span_sha256",
         "stop_criteria_sha256",
         "success_criteria_sha256",
+        "trial_history_sha256",
+        "decision_sha256",
+        "operator_approval_sha256",
         "trace_sha256",
         "variant_sha256",
         *_REQUEST_DIGEST_FIELDS,
@@ -164,6 +187,16 @@ _SAFE_STRING_VALUES = frozenset(
         "thread",
         "experiment",
         "case-trial",
+        "complete",
+        "incomplete",
+        "quality-and-efficiency-met",
+        "quality-threshold-missed",
+        "cost-threshold-exceeded",
+        "time-threshold-exceeded",
+        "multiple-thresholds-missed",
+        "incomplete-trials",
+        "comparison-invalid",
+        "evidence-closure-invalid",
     }
 )
 _EXPORT_PAYLOAD_FIELDS_BY_EVENT_KIND = {
@@ -223,7 +256,30 @@ _EXPORT_PAYLOAD_FIELDS_BY_EVENT_KIND = {
             "metric_name",
         }
     ),
-    "trial-history.upsert": frozenset(),
+    "trial-history.upsert": frozenset(
+        {
+            "trial_history_sha256",
+            "experiment_plan_sha256",
+            "baseline_variant_sha256",
+            "candidate_variant_sha256",
+            "evidence_state",
+            "baseline_completed_count",
+            "candidate_completed_count",
+            "baseline_mean_microunits",
+            "candidate_mean_microunits",
+            "mean_gain_microunits",
+            "baseline_agent_cost_microusd",
+            "candidate_agent_cost_microusd",
+            "cost_increase_microunits",
+            "baseline_input_tokens",
+            "candidate_input_tokens",
+            "baseline_output_tokens",
+            "candidate_output_tokens",
+            "baseline_elapsed_ns",
+            "candidate_elapsed_ns",
+            "time_increase_microunits",
+        }
+    ),
     "proposal.observe": frozenset(
         {
             "proposal_sha256",
@@ -235,7 +291,18 @@ _EXPORT_PAYLOAD_FIELDS_BY_EVENT_KIND = {
             "execution_authorized",
         }
     ),
-    "decision.observe": frozenset(),
+    "decision.observe": frozenset(
+        {
+            "decision_sha256",
+            "trial_history_sha256",
+            "proposal_sha256",
+            "finding_sha256",
+            "success_criteria_sha256",
+            "operator_approval_sha256",
+            "result",
+            "reason",
+        }
+    ),
 }
 _EXTERNAL_OBSERVATION_PAYLOAD_FIELDS = frozenset(
     {
@@ -349,6 +416,10 @@ def _safe_payload(
             if type(item) is not int or item < 0:
                 raise ValueError
             copied[key] = item
+        elif key in _SAFE_SIGNED_INTEGER_FIELDS:
+            if type(item) is not int:
+                raise ValueError
+            copied[key] = item
         elif key == "missing_evidence_labels":
             if (
                 type(item) is not tuple
@@ -371,7 +442,7 @@ def _safe_payload(
             copied[key] = item
         elif key in _VERSION_PAYLOAD_FIELDS:
             copied[key] = _semver(item)
-        elif key in {"status", "kind", "evidence_state"}:
+        elif key in {"status", "kind", "evidence_state", "result", "reason"}:
             if type(item) is not str or item not in _SAFE_STRING_VALUES:
                 raise ValueError
             copied[key] = item

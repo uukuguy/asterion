@@ -11,6 +11,12 @@ from asterion.pathlight.diagnosis import DiagnosisBundle
 from asterion.pathlight.evaluation import EvaluationBundle, EvaluationRecord
 from asterion.pathlight.experiment import ExperimentBundle
 from asterion.pathlight.interop import ExportEnvelope
+from asterion.pathlight.optimization import (
+    Decision,
+    OptimizationBundle,
+    TrialHistory,
+    validate_optimization_closure,
+)
 from asterion.pathlight.protocol import (
     PathlightError,
     TraceEvent,
@@ -42,6 +48,7 @@ def map_opik_exports(
     experiments: Sequence[ExperimentBundle] = (),
     evaluations: Sequence[EvaluationBundle] = (),
     diagnoses: Sequence[DiagnosisBundle] = (),
+    optimizations: Sequence[OptimizationBundle] = (),
     mapping_version: str = OPIK_MAPPING_VERSION,
 ) -> tuple[ExportEnvelope, ...]:
     """Map complete local Pathlight objects into deterministic safe mirror events."""
@@ -53,6 +60,7 @@ def map_opik_exports(
         experiment_values = _exact_sequence(experiments, ExperimentBundle)
         evaluation_values = _exact_sequence(evaluations, EvaluationBundle)
         diagnosis_values = _exact_sequence(diagnoses, DiagnosisBundle)
+        optimization_values = _exact_sequence(optimizations, OptimizationBundle)
         trace_sha256s: set[str] = set()
         envelopes: list[ExportEnvelope] = []
         for trace in trace_values:
@@ -97,6 +105,20 @@ def map_opik_exports(
             if not set(diagnosis.evaluation_sha256s) <= evaluation_sha256s:
                 raise ValueError
             envelopes.extend(_diagnosis_envelopes(diagnosis, mapping_version))
+
+        optimization_sha256s: set[str] = set()
+        for optimization in optimization_values:
+            if optimization.bundle_sha256 in optimization_sha256s:
+                raise ValueError
+            optimization_sha256s.add(optimization.bundle_sha256)
+            validate_optimization_closure(
+                optimization,
+                workflow_trace_sha256s=tuple(sorted(trace_sha256s)),
+                experiment_bundles=experiment_values,
+                evaluation_bundles=evaluation_values,
+                diagnosis_bundles=diagnosis_values,
+            )
+            envelopes.extend(_optimization_envelopes(optimization, mapping_version))
 
         for record in evaluation_records.values():
             envelopes.append(
@@ -283,6 +305,71 @@ def _diagnosis_envelopes(
             },
         )
         for proposal in bundle.proposals
+    )
+
+
+def _optimization_envelopes(
+    bundle: OptimizationBundle, mapping_version: str
+) -> tuple[ExportEnvelope, ...]:
+    values: list[ExportEnvelope] = []
+    for history in bundle.histories:
+        values.append(_trial_history_envelope(history, mapping_version))
+    for decision in bundle.decisions:
+        values.append(_decision_envelope(decision, mapping_version))
+    return tuple(values)
+
+
+def _trial_history_envelope(
+    history: TrialHistory, mapping_version: str
+) -> ExportEnvelope:
+    payload = {
+        "trial_history_sha256": history.trial_history_sha256,
+        "experiment_plan_sha256": history.experiment_plan_sha256,
+        "baseline_variant_sha256": history.baseline_variant_sha256,
+        "candidate_variant_sha256": history.candidate_variant_sha256,
+        "evidence_state": history.evidence_state,
+        "baseline_completed_count": history.baseline_completed_count,
+        "candidate_completed_count": history.candidate_completed_count,
+        "baseline_agent_cost_microusd": history.baseline_agent_cost_microusd,
+        "candidate_agent_cost_microusd": history.candidate_agent_cost_microusd,
+        "baseline_input_tokens": history.baseline_input_tokens,
+        "candidate_input_tokens": history.candidate_input_tokens,
+        "baseline_output_tokens": history.baseline_output_tokens,
+        "candidate_output_tokens": history.candidate_output_tokens,
+        "baseline_elapsed_ns": history.baseline_elapsed_ns,
+        "candidate_elapsed_ns": history.candidate_elapsed_ns,
+    }
+    for name in (
+        "baseline_mean_microunits",
+        "candidate_mean_microunits",
+        "mean_gain_microunits",
+        "cost_increase_microunits",
+        "time_increase_microunits",
+    ):
+        value = getattr(history, name)
+        if value is not None:
+            payload[name] = value
+    return ExportEnvelope(
+        "opik", mapping_version, "trial-history.upsert", history.trial_history_sha256, payload
+    )
+
+
+def _decision_envelope(decision: Decision, mapping_version: str) -> ExportEnvelope:
+    return ExportEnvelope(
+        "opik",
+        mapping_version,
+        "decision.observe",
+        decision.decision_sha256,
+        {
+            "decision_sha256": decision.decision_sha256,
+            "trial_history_sha256": decision.trial_history_sha256,
+            "proposal_sha256": decision.proposal_sha256,
+            "finding_sha256": decision.finding_sha256,
+            "success_criteria_sha256": decision.success_criteria_sha256,
+            "operator_approval_sha256": decision.operator_approval_sha256,
+            "result": decision.result,
+            "reason": decision.reason,
+        },
     )
 
 

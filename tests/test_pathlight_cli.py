@@ -26,6 +26,7 @@ from asterion.pathlight import (
     TraceGraph,
     write_diagnosis_bundle,
     write_evaluation_bundle,
+    write_optimization_bundle,
 )
 from asterion.pathlight._private_file import write_private_file
 from asterion.pathlight.experiment import (
@@ -48,6 +49,7 @@ from tests.test_workflow_evidence_runtime import (
     _request,
     _verified_provider_request_batch,
 )
+from tests.test_pathlight_optimization import _optimization_bundle
 
 
 TRACE_ID = "00000000-0000-4000-8000-000000000001"
@@ -1399,6 +1401,56 @@ class PathlightCliTests(unittest.TestCase):
 
         self.assertEqual(code, 2)
         self.assertEqual(stderr.getvalue(), "asterion pathlight: request is invalid\n")
+
+
+class TestPathlightOptimizationCli(unittest.TestCase):
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name).resolve()
+        self.file = self.root / "pathlight-optimization.json"
+        self.bundle, _ = _optimization_bundle()
+        write_optimization_bundle(self.file, self.bundle)
+        self.history = self.bundle.histories[0].trial_history_sha256
+        self.decision = self.bundle.decisions[0].decision_sha256
+        self.stdout = io.StringIO()
+        self.stderr = io.StringIO()
+
+    def tearDown(self) -> None:
+        self.directory.cleanup()
+
+    def test_optimization_commands_are_provider_free_canonical_json(self) -> None:
+        with patch("asterion.cli_pathlight._provider_should_not_load", create=True) as provider:
+            for argv in (
+                ["optimization", "history", "--optimization-file", str(self.file), "--history", self.history],
+                ["optimization", "decision", "--optimization-file", str(self.file), "--decision", self.decision],
+                ["optimization", "trials", "--optimization-file", str(self.file), "--history", self.history, "--variant-role", "candidate"],
+            ):
+                with self.subTest(argv=argv):
+                    self.stdout.seek(0)
+                    self.stdout.truncate(0)
+                    self.assertEqual(main(["pathlight", *argv], stdout=self.stdout, stderr=self.stderr), 0)
+                    payload = json.loads(self.stdout.getvalue())
+                    self.assertEqual(
+                        self.stdout.getvalue(),
+                        json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+                    )
+                    self.assertNotIn("SENTINEL", self.stdout.getvalue())
+            provider.assert_not_called()
+
+    def test_optimization_rejects_noncanonical_or_invalid_queries(self) -> None:
+        wrong_name = self.root / "optimization.json"
+        requests = (
+            ["optimization", "history", "--optimization-file", str(wrong_name), "--history", self.history],
+            ["optimization", "history", "--optimization-file", "pathlight-optimization.json", "--history", self.history],
+            ["optimization", "history", "--optimization-file", str(self.file), "--history", "0" * 64],
+            ["optimization", "trials", "--optimization-file", str(self.file), "--history", self.history, "--variant-role", "unknown"],
+            ["optimization", "decision", "--optimization-file", str(self.file), "--decision", self.decision, "--extra"],
+        )
+        for argv in requests:
+            with self.subTest(argv=argv):
+                stderr = io.StringIO()
+                self.assertEqual(main(["pathlight", *argv], stderr=stderr), 2)
+                self.assertEqual(stderr.getvalue(), "asterion pathlight: request is invalid\n")
 
 
 if __name__ == "__main__":

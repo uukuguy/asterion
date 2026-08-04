@@ -19,6 +19,13 @@ from asterion.pathlight.experiment import (
     ExperimentPlan,
     Variant,
 )
+from asterion.pathlight.optimization import (
+    Decision,
+    OptimizationBundle,
+    OptimizationCriteria,
+    OptimizationTrial,
+    TrialHistory,
+)
 from asterion.pathlight.opik import map_opik_exports
 from asterion.pathlight.protocol import (
     PathlightError,
@@ -200,6 +207,122 @@ def _fixture() -> tuple[
     return trace, experiment, evaluations, diagnosis
 
 
+def _optimization_fixture() -> tuple[
+    tuple[TraceGraph, ...],
+    ExperimentBundle,
+    EvaluationBundle,
+    DiagnosisBundle,
+    OptimizationBundle,
+]:
+    traces = tuple(
+        TraceGraph.build(
+            _opaque(index),
+            (
+                TraceEvent.start(
+                    _opaque(index), _opaque(index + 10), None, 1, "task", timestamp_ns=1
+                ),
+                TraceEvent.complete(
+                    _opaque(index), _opaque(index + 10), 2, timestamp_ns=2
+                ),
+            ),
+        )
+        for index in (100, 200)
+    )
+    baseline_trace, candidate_trace = traces
+    metric = MetricContract("ndcg-at-10", "ratio", True, "1.0.0")
+    dataset = DatasetSnapshot(_digest("dataset-contract"), _digest("dataset"), 1, "1.0.0")
+    evaluator = EvaluatorContract(
+        metric.metric_contract_sha256,
+        "rule",
+        _digest("implementation"),
+        _digest("input"),
+        _digest("output"),
+        _digest("failure"),
+        "1.0.0",
+    )
+    baseline = Variant(*(_digest(f"baseline-{index}") for index in range(9)))
+    candidate = Variant(*(_digest(f"candidate-{index}") for index in range(9)))
+    plan = ExperimentPlan(
+        dataset.dataset_snapshot_sha256,
+        _digest("scope"),
+        baseline.variant_sha256,
+        (candidate.variant_sha256,),
+        _digest("assignment"),
+        (evaluator.evaluator_contract_sha256,),
+        _digest("budget"),
+        _digest("stop"),
+        _digest("authorization"),
+    )
+    item = _digest("item")
+    trace_sha256s = tuple(
+        trace.to_mapping()["trace_sha256"] for trace in traces
+    )
+    assert all(isinstance(value, str) for value in trace_sha256s)
+    baseline_evaluation = EvaluationRecord(
+        trace_sha256s[0], metric.metric_contract_sha256, dataset.dataset_snapshot_sha256,
+        plan.scope_sha256, 400_000, 1, 1, "observed"
+    )
+    candidate_evaluation = EvaluationRecord(
+        trace_sha256s[1], metric.metric_contract_sha256, dataset.dataset_snapshot_sha256,
+        plan.scope_sha256, 500_000, 1, 1, "observed"
+    )
+    baseline_case = CaseTrial(
+        plan.experiment_plan_sha256, item, baseline.variant_sha256, trace_sha256s[0],
+        (baseline_evaluation.evaluation_sha256,), "observed", ()
+    )
+    candidate_case = CaseTrial(
+        plan.experiment_plan_sha256, item, candidate.variant_sha256, trace_sha256s[1],
+        (candidate_evaluation.evaluation_sha256,), "observed", ()
+    )
+    experiment = ExperimentBundle.build(
+        datasets=(dataset,), evaluators=(evaluator,), variants=(baseline, candidate),
+        plans=(plan,), trials=(baseline_case, candidate_case),
+        evaluations=(baseline_evaluation, candidate_evaluation),
+    )
+    evaluations = tuple(sorted((baseline_evaluation, candidate_evaluation), key=lambda item: item.evaluation_sha256))
+    evaluation_document = {
+        "schema": EVALUATION_BUNDLE_SCHEMA,
+        "metric_contracts": [metric.to_mapping()],
+        "evaluations": [item.to_mapping() for item in evaluations],
+    }
+    evaluation_bundle = EvaluationBundle(
+        (metric,), evaluations,
+        hashlib.sha256(json.dumps(evaluation_document, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+    )
+    observed = Finding("observed", experiment.bundle_sha256, (baseline_evaluation.evaluation_sha256,), (), "confirmed", _digest("observed"))
+    finding = Finding("hypothesis", experiment.bundle_sha256, (observed.finding_sha256,), (), "medium", _digest("finding"))
+    proposal = Proposal(
+        finding.finding_sha256, _digest("change"), plan.scope_sha256,
+        _digest("proposal-success"), _digest("proposal-stop"), _digest("proposal-budget"),
+    )
+    diagnosis = DiagnosisBundle.build(
+        experiment_bundle_sha256s=(experiment.bundle_sha256,),
+        evaluation_sha256s=tuple(item.evaluation_sha256 for item in evaluations),
+        findings=(observed, finding), proposals=(proposal,),
+    )
+    trials = (
+        OptimizationTrial(plan.experiment_plan_sha256, baseline_case.case_trial_sha256, item, "baseline", baseline.variant_sha256, trace_sha256s[0], baseline_evaluation.evaluation_sha256, "completed", None, 100, 10, 20, 1_000),
+        OptimizationTrial(plan.experiment_plan_sha256, candidate_case.case_trial_sha256, item, "candidate", candidate.variant_sha256, trace_sha256s[1], candidate_evaluation.evaluation_sha256, "completed", None, 120, 10, 20, 1_100),
+    )
+    history = TrialHistory.build(
+        experiment_plan=plan, baseline_variant=baseline, candidate_variant=candidate,
+        trials=trials, evaluations=evaluations, expected_dataset_item_sha256s=(item,),
+    )
+    decision = Decision.derive(
+        proposal_sha256=proposal.proposal_sha256, finding_sha256=finding.finding_sha256,
+        history=history, criteria=OptimizationCriteria(50_000, 250_000, 250_000),
+        operator_approval_sha256=_digest("operator-approval"),
+    )
+    optimization = OptimizationBundle.build(
+        experiment_bundle_sha256s=(experiment.bundle_sha256,),
+        evaluation_bundle_sha256s=(evaluation_bundle.bundle_sha256,),
+        diagnosis_bundle_sha256s=(diagnosis.bundle_sha256,),
+        trace_sha256s=tuple(sorted(trace_sha256s)), trials=trials,
+        histories=(history,), decisions=(decision,),
+    )
+    return traces, experiment, evaluation_bundle, diagnosis, optimization
+
+
 class PathlightOpikMappingTests(unittest.TestCase):
     def test_mapping_links_safe_trace_experiment_trial_evaluation_and_proposal(
         self,
@@ -379,6 +502,59 @@ class PathlightOpikMappingTests(unittest.TestCase):
                 evaluations=(evaluations,),
                 diagnoses=(diagnosis,),
                 mapping_version="2.0.0",
+            )
+
+    def test_mapping_emits_safe_history_and_decision_envelopes(self) -> None:
+        traces, experiment, evaluations, diagnosis, optimization = _optimization_fixture()
+
+        envelopes = map_opik_exports(
+            traces=traces,
+            experiments=(experiment,),
+            evaluations=(evaluations,),
+            diagnoses=(diagnosis,),
+            optimizations=(optimization,),
+        )
+
+        payloads = {
+            item.event_kind: item.to_mapping()["payload"] for item in envelopes
+            if item.event_kind in {"trial-history.upsert", "decision.observe"}
+        }
+        self.assertEqual(set(payloads), {"trial-history.upsert", "decision.observe"})
+        self.assertEqual(
+            set(payloads["trial-history.upsert"]),
+            {
+                "trial_history_sha256", "experiment_plan_sha256",
+                "baseline_variant_sha256", "candidate_variant_sha256", "evidence_state",
+                "baseline_completed_count", "candidate_completed_count",
+                "baseline_mean_microunits", "candidate_mean_microunits",
+                "mean_gain_microunits", "baseline_agent_cost_microusd",
+                "candidate_agent_cost_microusd", "cost_increase_microunits",
+                "baseline_input_tokens", "candidate_input_tokens",
+                "baseline_output_tokens", "candidate_output_tokens",
+                "baseline_elapsed_ns", "candidate_elapsed_ns", "time_increase_microunits",
+            },
+        )
+        self.assertEqual(
+            set(payloads["decision.observe"]),
+            {
+                "decision_sha256", "trial_history_sha256", "proposal_sha256",
+                "finding_sha256", "success_criteria_sha256",
+                "operator_approval_sha256", "result", "reason",
+            },
+        )
+        self.assertNotIn("SENTINEL", json.dumps([item.to_mapping() for item in envelopes]))
+
+    def test_mapping_rejects_missing_or_duplicate_optimization_closure(self) -> None:
+        traces, experiment, evaluations, diagnosis, optimization = _optimization_fixture()
+        with self.assertRaises(PathlightError):
+            map_opik_exports(
+                traces=traces, experiments=(experiment,), evaluations=(evaluations,),
+                optimizations=(optimization,),
+            )
+        with self.assertRaises(PathlightError):
+            map_opik_exports(
+                traces=traces, experiments=(experiment,), evaluations=(evaluations,),
+                diagnoses=(diagnosis,), optimizations=(optimization, optimization),
             )
 
 
