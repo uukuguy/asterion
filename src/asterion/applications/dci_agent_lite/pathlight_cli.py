@@ -99,6 +99,20 @@ def main(
                 package_sources=package_sources,
                 host_factory=experiment_host_factory,
             )
+        if values[0] == "optimization":
+            from asterion.applications.dci_agent_lite.pathlight_optimization_cli import (
+                main as optimization_main,
+            )
+
+            return optimization_main(
+                values[1:],
+                stdout=stdout,
+                stderr=stderr,
+                repo_root=(Path.cwd() if repo_root is None else repo_root),
+                env_file=env_file,
+                environment=environment,
+                package_sources=package_sources,
+            )
         if values[0] == "recover":
             output = _recover(values[1:])
         elif values[0] == "diagnose":
@@ -533,7 +547,10 @@ def _publish_staged_tree(root: Path, staging: Path) -> None:
                 finally:
                     os.close(target_child)
                     os.close(source_child)
-            elif stat.S_ISREG(source.st_mode) and stat.S_IMODE(source.st_mode) == 0o600:
+            elif stat.S_ISREG(source.st_mode) and stat.S_IMODE(source.st_mode) in {
+                0o400,
+                0o600,
+            }:
                 os.link(
                     name,
                     name,
