@@ -202,18 +202,37 @@ def _directory_flags() -> int:
         os.O_RDONLY
         | os.O_DIRECTORY
         | os.O_NOFOLLOW
+        | os.O_NONBLOCK
         | getattr(os, "O_CLOEXEC", 0)
     )
 
 
 def _open_private_directory(path: Path) -> int:
-    descriptor = os.open(path, _directory_flags())
+    descriptor = -1
     try:
+        descriptor = os.open(path.anchor, _directory_flags())
+        if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            _invalid()
+        for component in path.parts[1:]:
+            child = -1
+            try:
+                child = os.open(component, _directory_flags(), dir_fd=descriptor)
+                if not stat.S_ISDIR(os.fstat(child).st_mode):
+                    _invalid()
+                previous = descriptor
+                descriptor = child
+                child = -1
+                _close_quietly(previous)
+            finally:
+                if child >= 0:
+                    _close_quietly(child)
         _validate_private_directory(descriptor)
-        return descriptor
-    except Exception:
-        _close_quietly(descriptor)
-        raise
+        result = descriptor
+        descriptor = -1
+        return result
+    finally:
+        if descriptor >= 0:
+            _close_quietly(descriptor)
 
 
 def _open_private_directory_at(directory_fd: int, name: str) -> int:
@@ -328,6 +347,8 @@ def _observe_native_events(
     events = _jsonl_mappings(raw)
     builder = PiObservationBuilder(lambda: 0)
     safe_entries: list[dict[str, object]] = []
+    checkpoint = builder.checkpoint()
+    safe_entry_count = 0
     for sequence, event in enumerate(events, 1):
         builder.consume(event, sequence, native_event_sequence=sequence)
         marker = _provider_marker(event)
@@ -335,6 +356,13 @@ def _observe_native_events(
             index, safe = marker
             builder.observe_provider_request_marker(index, sequence)
             safe_entries.append(safe)
+        event_type = event.get("type")
+        if event_type == "agent_start":
+            checkpoint = builder.checkpoint()
+            safe_entry_count = len(safe_entries)
+        elif event_type == "agent_end" and event.get("willRetry") is True:
+            builder.rollback(checkpoint)
+            del safe_entries[safe_entry_count:]
     if not safe_entries:
         _invalid()
     return builder, tuple(safe_entries)

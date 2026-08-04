@@ -484,6 +484,120 @@ class ProviderCallRecoveryTests(unittest.TestCase):
                 self.assertFalse(self.companion.exists())
                 _write_private(path, saved, mode)
 
+    def test_rejects_intermediate_symlink_in_generation_root(self) -> None:
+        linked_parent = Path(self.temporary.name).resolve() / "linked-parent"
+        linked_parent.symlink_to(self.root.parent, target_is_directory=True)
+        traversed_root = linked_parent / self.root.name
+
+        self._assert_invalid(
+            traversed_root, traversed_root / COMPANION_NAME
+        )
+
+        self.assertFalse(self.companion.exists())
+
+    def test_retry_replay_discards_abandoned_attempt_evidence(self) -> None:
+        native_events = [
+            json.loads(line)
+            for line in (self.root / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        first_entry = native_events[0]["entry"]
+        assert isinstance(first_entry, dict)
+        first_safe = first_entry["data"]
+        assert isinstance(first_safe, dict)
+        abandoned_call = f"abandoned-call-{SENTINEL}"
+        abandoned_response = {
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": f"abandoned-response-{SENTINEL}"}
+                ],
+                "stopReason": "stop",
+                "usage": {"input": 999, "output": 999},
+            },
+        }
+        retry_events = [
+            {"type": "agent_start"},
+            _marker(first_safe, 1),
+            _message_start(),
+            {
+                "type": "tool_execution_start",
+                "toolCallId": abandoned_call,
+                "toolName": "filesystem.grep",
+                "args": {"query": f"abandoned-argument-{SENTINEL}"},
+            },
+            {
+                "type": "tool_execution_end",
+                "toolCallId": abandoned_call,
+                "result": f"abandoned-result-{SENTINEL}",
+                "isError": False,
+            },
+            abandoned_response,
+            {"type": "agent_end", "willRetry": True},
+            {"type": "agent_start"},
+            *native_events,
+            {"type": "agent_end"},
+        ]
+        _write_private(self.root / "events.jsonl", _jsonl(retry_events))
+
+        bundle = recover_provider_call_companion(self.root, self.companion)
+
+        traces = bundle["pathlight_traces"]
+        assert isinstance(traces, tuple)
+        trace = traces[0]
+        assert isinstance(trace, Mapping)
+        events = trace["events"]
+        assert isinstance(events, tuple)
+        starts = [event for event in events if event["status"] == "started"]
+        frames = [
+            event
+            for event in starts
+            if event["kind"] == "context-frame"
+            and "frame_index" in event["attributes"]
+        ]
+        calls = [event for event in starts if event["kind"] == "model-call"]
+        tools = [event for event in starts if event["kind"] == "tool-call"]
+        self.assertEqual((len(frames), len(calls), len(tools)), (4, 4, 7))
+        self.assertEqual(
+            tuple(event["attributes"]["request_index"] for event in calls),
+            (1, 2, 3, 4),
+        )
+        self.assertEqual(
+            sum("response_sha256" in event["attributes"] for event in calls), 3
+        )
+        expected_response = _message_end(1)["message"]
+        assert isinstance(expected_response, dict)
+        expected_content = expected_response["content"]
+        abandoned_message = abandoned_response["message"]
+        assert isinstance(abandoned_message, dict)
+        abandoned_content = abandoned_message["content"]
+        expected_response_sha256 = hashlib.sha256(
+            json.dumps(
+                expected_content,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        abandoned_response_sha256 = hashlib.sha256(
+            json.dumps(
+                abandoned_content,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        self.assertEqual(
+            calls[0]["attributes"]["response_sha256"], expected_response_sha256
+        )
+        self.assertNotEqual(
+            calls[0]["attributes"]["response_sha256"], abandoned_response_sha256
+        )
+        rendered = json.dumps(bundle, default=dict, sort_keys=True)
+        self.assertNotIn(hashlib.sha256(abandoned_call.encode()).hexdigest(), rendered)
+        self.assertNotIn("filesystem.grep", rendered)
+        self.assertNotIn(SENTINEL, rendered)
+
     def test_rolls_back_owned_inode_and_preserves_concurrent_replacement(self) -> None:
         module = __import__(
             "asterion.capabilities.dci.implementation.pathlight.provider_call_recovery",
