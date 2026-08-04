@@ -6,15 +6,33 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import tempfile
 import unittest
+from collections.abc import Sequence
+from contextlib import nullcontext
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import Mock, patch
 
+from asterion.benchmarks import BenchmarkTaskExecutor
 from asterion.benchmarks.evidence import BenchmarkRunResult, BenchmarkTaskResult
+from asterion.applications.dci_agent_lite.benchmark_host import DciBenchmarkHost
+from asterion.applications.dci_agent_lite.benchmark_instances import DciBenchmarkInstance
+from asterion.capability_packages.sources.base import CapabilityPackageSource
 from asterion.applications.dci_agent_lite.operator_config import DciOperatorConfig
 from asterion.capabilities.dci.implementation.operator_inputs import DciBenchmarkOperatorInputs
+from asterion.capabilities.dci.implementation.pathlight.recovery import (
+    read_completed_dci_run,
+)
+from asterion.capabilities.dci.implementation.pathlight.conversion import (
+    recovered_run_to_evaluation_bundle,
+    recovered_run_to_experiment,
+)
+from asterion.workflow_evidence import write_workflow_observation_bundle
+from asterion.capabilities.dci.implementation.research.query_planning import QueryPlanningContract
 
 from asterion.applications.dci_agent_lite.pathlight_optimization_cli import (
     PLAN_FILENAME,
@@ -39,6 +57,7 @@ from tests.test_dci_pathlight_diagnosis import _DATASETS, _coverage_pack, _run
 
 
 _GATE_FILENAME = AUTHORIZATION_GATE_REPORT_FILENAME
+_NATIVE_FIXTURE = Path(__file__).parent / "fixtures" / "dci" / "pathlight-recovery"
 
 
 def _sha(value: str) -> str:
@@ -172,7 +191,7 @@ class _OptimizationFixture:
     def close(self) -> None:
         self.temp.cleanup()
 
-    def prepare(self) -> tuple[int, dict[str, object], Mock]:
+    def prepare(self, *, real_source_lock: bool = False) -> tuple[int, dict[str, object], Mock]:
         stdout, stderr = io.StringIO(), io.StringIO()
         provider = Mock()
         with (
@@ -181,14 +200,14 @@ class _OptimizationFixture:
                 "asterion.applications.dci_agent_lite.pathlight_optimization_cli.load_operator_config",
                 return_value=self.config,
             ),
-            patch(
+            (nullcontext() if real_source_lock else patch(
                 "asterion.applications.dci_agent_lite.pathlight_optimization_cli.resolve_benchmark_source_lock",
                 return_value=object(),
-            ),
-            patch(
+            )),
+            (nullcontext() if real_source_lock else patch(
                 "asterion.applications.dci_agent_lite.pathlight_optimization_cli.write_benchmark_source_lock",
                 side_effect=_write_lock,
-            ),
+            )),
             patch("asterion.applications.dci_agent_lite.pathlight_optimization_cli.DciBenchmarkHost", provider, create=True),
         ):
             code = main(
@@ -372,7 +391,7 @@ class TestPrepare(unittest.TestCase):
     def test_plan_reader_rejects_recomputed_variant_or_config_tampering(self) -> None:
         fixture = _OptimizationFixture()
         self.addCleanup(fixture.close)
-        self.assertEqual(fixture.prepare()[0], 0)
+        self.assertEqual(fixture.prepare(real_source_lock=True)[0], 0)
         path = fixture.output / PLAN_FILENAME
         original = json.loads(path.read_text(encoding="utf-8"))
         for field, source in (
@@ -416,7 +435,7 @@ class TestAuthorization(unittest.TestCase):
     def test_authorization_rejects_variant_or_execution_config_drift(self) -> None:
         fixture = _OptimizationFixture()
         self.addCleanup(fixture.close)
-        self.assertEqual(fixture.prepare()[0], 0)
+        self.assertEqual(fixture.prepare(real_source_lock=True)[0], 0)
         plan = read_optimization_plan(fixture.output / PLAN_FILENAME)
         authorization = fixture.root / "authorization.json"
         for field in (
@@ -594,6 +613,73 @@ class NetworkFailure(Exception):
     pass
 
 
+class _NativeEvidenceExecutor(BenchmarkTaskExecutor):
+    """Controlled executor fixture which emits the native DCI closure."""
+
+    def __init__(self, calls: list[tuple[str, Decimal | None]], *, fail_first: bool = False) -> None:
+        self.calls = calls
+        self.fail_first = fail_first
+
+    def execute(self, invocation: object, **_kwargs: object) -> BenchmarkTaskResult:
+        payload = getattr(invocation, "private_payload")
+        task_id = getattr(invocation, "task_id")
+        output = getattr(payload, "output_directory")
+        self.calls.append((task_id, getattr(payload, "amount")))
+        assert isinstance(output, Path)
+        output.mkdir(parents=True)
+        for source in _NATIVE_FIXTURE.iterdir():
+            shutil.copy2(source, output / source.name)
+        analysis_path = output / "analysis.json"
+        analysis = json.loads(analysis_path.read_text(encoding="utf-8"))
+        rows = []
+        for index in range(10):
+            row = dict(analysis["per_query_metrics"][index % 2])
+            row["query_id"] = f"q-{index:03d}"
+            row["ndcg_at_10"] = 0.5 if index < 5 else 1.0
+            rows.append(row)
+        analysis["per_query_metrics"] = rows
+        analysis_path.write_text(json.dumps(analysis, sort_keys=True), encoding="utf-8")
+        (output / "batch-state.json").write_text(
+            json.dumps({"schema": "asterion.dci.batch-state/v1", "status": "completed", "counts": {"total": 10, "failed": 0}}),
+            encoding="utf-8",
+        )
+        summary = output / "summary.json"
+        summary.write_text(
+            json.dumps({"schema": "asterion.dci.batch-summary/v1", "counts": {"total": 10, "failed_runs": 0}, "ndcg_at_10": 0.75}),
+            encoding="utf-8",
+        )
+        results = output / "results.jsonl"
+        results.write_text("".join(json.dumps({"schema": "asterion.dci.batch-result/v1", "query_id": f"q-{index:03d}", "status": "completed", "mode": "ir"}) + "\n" for index in range(10)), encoding="utf-8")
+        config_path = output / "config.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config["dataset"]["dataset_id"] = task_id
+        config["selection"]["selected_rows"] = 10
+        summary = output / "summary.json"
+        results = output / "results.jsonl"
+        config["artifact_digests"]["summary.json"] = hashlib.sha256(summary.read_bytes()).hexdigest()
+        config["artifact_digests"]["results.jsonl"] = hashlib.sha256(results.read_bytes()).hexdigest()
+        config_path.write_text(json.dumps(config, sort_keys=True), encoding="utf-8")
+        config_path.chmod(0o600)
+        record = {
+            "schema": "asterion.workflow-evidence/v1", "run_id": "native-run",
+            "input_digest": "a" * 64, "terminal_status": "completed", "tools": [],
+            "usage": {"input_tokens": 3, "output_tokens": 2}, "artifacts": [],
+        }
+        record["graph_sha256"] = hashlib.sha256(
+            json.dumps(record, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        write_workflow_observation_bundle(output / "workflow-evidence.json", (record,))
+        for path in output.iterdir():
+            path.chmod(0o600)
+        output.chmod(0o700)
+        output.parent.chmod(0o700)
+        output.parent.parent.chmod(0o700)
+        if self.fail_first and len(self.calls) == 1:
+            return BenchmarkTaskResult(task_id, "failed", 0)
+        artifact = "coverage-actual-microusd.17" if len(self.calls) == 1 else "coverage-upper-microusd.1000000"
+        return BenchmarkTaskResult(task_id, "completed", 10, (artifact,))
+
+
 def _execute_optimization(
     fixture: _OptimizationFixture,
     *,
@@ -629,6 +715,94 @@ def _execute_optimization(
 
 
 class TestExecute(unittest.TestCase):
+    def test_real_dci_host_failed_task_uses_persisted_progress_and_has_no_native_claim(self) -> None:
+        fixture = _OptimizationFixture()
+        self.addCleanup(fixture.close)
+        self.assertEqual(fixture.prepare(real_source_lock=True)[0], 0)
+        plan = read_optimization_plan(fixture.output / PLAN_FILENAME)
+        authorization = fixture.root / "authorization.json"
+        write_private_file(authorization, _canonical_bytes(_authorization(plan)))
+        calls: list[tuple[str, Decimal | None]] = []
+
+        def host_factory(**kwargs: object) -> object:
+            return DciBenchmarkHost(
+                instance=cast(DciBenchmarkInstance, kwargs["instance"]), operator_config=cast(DciOperatorConfig, kwargs["operator_config"]),
+                package_sources=cast(Sequence[CapabilityPackageSource] | None, kwargs["package_sources"]), query_planning_contract=cast(QueryPlanningContract, kwargs["query_planning_contract"]),
+                query_planning_prompt_file=cast(Path | None, kwargs["query_planning_prompt_file"]),
+            )
+
+        with (
+            patch("asterion.applications.dci_agent_lite.pathlight_optimization_cli.load_operator_config", return_value=fixture.config),
+            patch.object(DciBenchmarkHost, "_default_executor", return_value=_NativeEvidenceExecutor(calls, fail_first=True)),
+        ):
+            self.assertEqual(main(
+                ("execute", "--plan-file", str(fixture.output / PLAN_FILENAME),
+                 "--authorization-file", str(authorization), "--output-root", str(fixture.output)),
+                stdout=io.StringIO(), stderr=io.StringIO(), repo_root=fixture.root,
+                env_file=None, environment={}, host_factory=host_factory,
+            ), 0)
+        receipt = json.loads((fixture.output / "receipts" / "receipt-1-0000.json").read_text())
+        self.assertEqual((receipt["status"], receipt["failure_category"], receipt["native_evidence_state"]), ("failed", "model-business", "unavailable"))
+        self.assertTrue(all(receipt[name] is None for name in (
+            "recovered_run_sha256", "experiment_bundle_sha256", "evaluation_bundle_sha256",
+            "workflow_bundle_set_sha256", "input_tokens", "output_tokens", "total_tokens",
+        )))
+
+    def test_real_dci_host_projects_native_receipts_and_revalidates_on_resume(self) -> None:
+        fixture = _OptimizationFixture()
+        self.addCleanup(fixture.close)
+        self.assertEqual(fixture.prepare(real_source_lock=True)[0], 0)
+        plan = read_optimization_plan(fixture.output / PLAN_FILENAME)
+        authorization = fixture.root / "authorization.json"
+        write_private_file(authorization, _canonical_bytes(_authorization(plan)))
+        calls: list[tuple[str, Decimal | None]] = []
+
+        def host_factory(**kwargs: object) -> object:
+            return DciBenchmarkHost(
+                instance=cast(DciBenchmarkInstance, kwargs["instance"]), operator_config=cast(DciOperatorConfig, kwargs["operator_config"]),
+                package_sources=cast(Sequence[CapabilityPackageSource] | None, kwargs["package_sources"]),
+                query_planning_contract=cast(QueryPlanningContract, kwargs["query_planning_contract"]),
+                query_planning_prompt_file=cast(Path | None, kwargs["query_planning_prompt_file"]),
+            )
+
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with (
+            patch("asterion.applications.dci_agent_lite.pathlight_optimization_cli.load_operator_config", return_value=fixture.config),
+            patch.object(DciBenchmarkHost, "_default_executor", return_value=_NativeEvidenceExecutor(calls)),
+        ):
+            code = main(
+                ("execute", "--plan-file", str(fixture.output / PLAN_FILENAME),
+                 "--authorization-file", str(authorization), "--output-root", str(fixture.output)),
+                stdout=stdout, stderr=stderr, repo_root=fixture.root, env_file=None,
+                environment={}, host_factory=host_factory,
+            )
+        self.assertEqual(code, 0, stderr.getvalue())
+        self.assertEqual(len(calls), 8)
+        self.assertTrue(all(amount == Decimal("1") for _task, amount in calls))
+        receipt = json.loads((fixture.output / "receipts" / "receipt-1-0000.json").read_text())
+        self.assertEqual(receipt["completed_case_count"], 10)
+        self.assertEqual(receipt["cost_microusd"], 17)
+        self.assertEqual(receipt["cost_source"], "actual")
+        self.assertEqual((receipt["input_tokens"], receipt["output_tokens"], receipt["total_tokens"]), (3, 2, 5))
+        self.assertTrue(all(receipt[name] for name in (
+            "recovered_run_sha256", "experiment_bundle_sha256", "evaluation_bundle_sha256", "workflow_bundle_set_sha256",
+        )))
+        upper = json.loads((fixture.output / "receipts" / "receipt-2-0000.json").read_text())
+        self.assertEqual((upper["cost_source"], upper["cost_microusd"]), ("conservative", 1_000_000))
+        native = next((fixture.output / "evidence" / "bright.biology" / "baseline" / "outputs").glob("*/*"))
+        recovered = read_completed_dci_run(native, "bright.biology")
+        self.assertEqual(receipt["recovered_run_sha256"], recovered.recovered_run_sha256)
+        self.assertEqual(receipt["experiment_bundle_sha256"], recovered_run_to_experiment(recovered).bundle_sha256)
+        self.assertEqual(receipt["evaluation_bundle_sha256"], recovered_run_to_evaluation_bundle(recovered).bundle_sha256)
+        (native / "workflow-evidence.json").chmod(0o600)
+        (native / "workflow-evidence.json").write_text("{}", encoding="utf-8")
+        self.assertEqual(main(
+            ("resume", "--plan-file", str(fixture.output / PLAN_FILENAME),
+             "--authorization-file", str(authorization), "--output-root", str(fixture.output)),
+            stdout=io.StringIO(), stderr=io.StringIO(), repo_root=fixture.root,
+            env_file=None, environment={}, host_factory=host_factory,
+        ), 2)
+
     def test_execute_preflights_all_tasks_then_runs_exact_order_once(self) -> None:
         fixture = _OptimizationFixture()
         self.addCleanup(fixture.close)
@@ -770,7 +944,9 @@ class TestExecute(unittest.TestCase):
             ("model", {"bright.biology.baseline": ["failed"]}, 0, "model-business", "terminal"),
             ("cancelled", {"bright.biology.baseline": ["cancelled"]}, 130, "cancelled", "cancelled"),
             ("observation", {"bright.biology.baseline": ["observation-invalid"]}, 0, "observation-invalid", "completed"),
-            ("actual", {"bright.biology.baseline": ["actual:17"]}, 0, "none", "completed"),
+            # A host-shaped fake cannot claim native closure: a completed
+            # result without real DCI artifacts is observation-invalid.
+            ("actual", {"bright.biology.baseline": ["actual:17"]}, 0, "observation-invalid", "completed"),
         )
         for name, outcomes, expected_code, category, expected_status in cases:
             with self.subTest(name=name):
@@ -781,7 +957,11 @@ class TestExecute(unittest.TestCase):
                 self.assertEqual(code, expected_code)
                 receipt = json.loads((fixture.output / "receipts" / "receipt-1-0000.json").read_text())
                 self.assertEqual(receipt["failure_category"], category)
-                self.assertEqual(receipt["tokens"], 0)
+                self.assertEqual(
+                    (receipt["input_tokens"], receipt["output_tokens"], receipt["total_tokens"]),
+                    (None, None, None),
+                )
+                self.assertIn(receipt["native_evidence_state"], {"invalid", "unavailable"})
                 if name == "actual":
                     self.assertEqual(receipt["cost_microusd"], 17)
                     self.assertEqual(receipt["cost_source"], "actual")

@@ -50,6 +50,11 @@ from asterion.capabilities.dci.implementation.pathlight.diagnosis import (
 )
 from asterion.capabilities.dci.implementation.pathlight.recovery import (
     _domain_digest as _recovery_digest,
+    read_completed_dci_run,
+)
+from asterion.capabilities.dci.implementation.pathlight.conversion import (
+    recovered_run_to_evaluation_bundle,
+    recovered_run_to_experiment,
 )
 from asterion.capabilities.dci.implementation.research.query_planning import (
     BASELINE_QUERY_PLAN,
@@ -64,6 +69,7 @@ from asterion.capabilities.dci.implementation.datasets import (
 from asterion.pathlight._private_file import read_private_file, write_private_file
 from asterion.pathlight.diagnosis import Proposal, read_diagnosis_bundle
 from asterion.pathlight.experiment import Variant
+from asterion.workflow_evidence import read_workflow_observation_bundle
 
 
 PLAN_FILENAME = "pathlight-bright-optimization.json"
@@ -529,11 +535,16 @@ def _execute(
         try:
             providers = host.load_selected_providers(payloads, authorization_claim)
             result = host.run(execution_plan, providers, evidence_root=evidence_root)
-            status, cases, category = _result_terminal(result, task_id=str(task["dataset_id"]))
+            status, cases, category = _result_terminal(
+                result, task_id=str(task["dataset_id"]), evidence_root=evidence_root
+            )
             maximum = task.get("max_cost_microusd")
             if type(maximum) is not int:
                 raise ValueError
-            cost, source = _result_cost(result, task_id=str(task["dataset_id"]), maximum=maximum)
+            cost, source = (
+                (maximum, "conservative") if status != "completed"
+                else _result_cost(result, task_id=str(task["dataset_id"]), maximum=maximum)
+            )
         except KeyboardInterrupt:
             status, cases, category = "cancelled", 0, "cancelled"
             maximum = task.get("max_cost_microusd")
@@ -551,11 +562,14 @@ def _execute(
                 raise ValueError
             cost, source = maximum, "conservative"
         elapsed_ns = time.monotonic_ns() - started
+        native = _native_receipt_projection(evidence_root, str(task["dataset_id"]), expected_case_count=cases) if status == "completed" else None
+        if status == "completed" and native is None:
+            category = "observation-invalid"
         receipt = _publish_receipt(
             output_root / "receipts", plan=plan, authorization=authorization, task=task,
             receipts=receipts, run_id=run_id, status=status, completed_case_count=cases,
             cost_microusd=cost, cost_source=source, elapsed_ns=elapsed_ns,
-            failure_category=category,
+            failure_category=category, native=native,
         )
         receipts = (*receipts, receipt)
         if category in _INFRASTRUCTURE_FAILURES:
@@ -681,7 +695,9 @@ def _create_host(
     )
 
 
-def _result_terminal(result: object, *, task_id: str) -> tuple[str, int, str]:
+def _result_terminal(
+    result: object, *, task_id: str, evidence_root: Path | None = None
+) -> tuple[str, int, str]:
     if not isinstance(result, BenchmarkRunResult):
         raise ValueError
     matches = [item for item in result.tasks if item.task_id == task_id]
@@ -691,12 +707,44 @@ def _result_terminal(result: object, *, task_id: str) -> tuple[str, int, str]:
     if result.status == "cancelled" or task.status == "cancelled":
         return "cancelled", 0, "cancelled"
     if result.status == "failed" or task.status == "failed":
-        return "failed", min(task.case_count, 10), "model-business"
+        category = _native_failure_category(evidence_root, task_id)
+        if category is None:
+            raise ValueError
+        return "failed", min(task.case_count, 10), category
     if result.status != "completed" or task.status != "completed" or task.case_count != 10:
         raise ValueError
-    if "pathlight-observation-invalid" in task.artifact_ids:
-        return "completed", 10, "observation-invalid"
     return "completed", 10, "none"
+
+
+def _native_failure_category(evidence_root: Path | None, task_id: str) -> str | None:
+    """Classify a failed native task from persisted progress, never its text."""
+
+    if evidence_root is None or not (evidence_root / "runs").exists():
+        # Legacy host-shaped test doubles have no generic evidence store.  The
+        # production DCI host always has one and takes the strict branch below.
+        return "model-business"
+    try:
+        paths = tuple(sorted(evidence_root.glob("runs/*/progress/*.json")))
+        observations = []
+        for path in paths:
+            value = json.loads(
+                read_private_file(path, _MAX_DOCUMENT_BYTES), object_pairs_hook=_unique_object
+            )
+            if type(value) is dict and value.get("status") == "task.failure-observed" and value.get("task_id") == task_id:
+                observations.append(value.get("failure_class"))
+        if len(observations) != 1:
+            raise ValueError
+        native = observations[0]
+        mapping = {
+            "authorization": "authorization", "network": "network",
+            "rate-limit": "rate-limit", "timeout": "timeout",
+            "model-refusal": "model-business", "evaluation": "model-business",
+            "parsing": "model-business", "tool-protocol": "model-business",
+            "unknown": "model-business",
+        }
+        return mapping.get(native) if isinstance(native, str) else None
+    except Exception:
+        return None
 
 
 def _result_cost(result: object, *, task_id: str, maximum: int) -> tuple[int, str]:
@@ -731,6 +779,73 @@ def _infrastructure_failure_category(error: BaseException) -> str | None:
     return None
 
 
+def _native_receipt_projection(
+    evidence_root: Path, expected_dataset_id: str, *, expected_case_count: int = 10,
+) -> dict[str, object] | None:
+    """Return a digest-only receipt projection from one completed native run.
+
+    This is deliberately a reader, rather than a claim made by the benchmark
+    result.  It accepts exactly the one output tree a fresh task root may own
+    and reuses the existing recovery and workflow evidence validators.
+    """
+
+    try:
+        outputs = evidence_root / "outputs"
+        _private_directory(evidence_root)
+        _private_directory(outputs)
+        runs = tuple(sorted(outputs.iterdir(), key=lambda path: path.name))
+        if len(runs) != 1 or not runs[0].is_dir() or runs[0].is_symlink():
+            raise ValueError
+        task_roots = tuple(sorted(runs[0].iterdir(), key=lambda path: path.name))
+        if (
+            len(task_roots) != 1
+            or task_roots[0].name != expected_dataset_id
+            or not task_roots[0].is_dir()
+            or task_roots[0].is_symlink()
+        ):
+            raise ValueError
+        native_root = task_roots[0]
+        recovered = read_completed_dci_run(native_root, expected_dataset_id)
+        if recovered.selected_count != expected_case_count or recovered.total_count != expected_case_count:
+            raise ValueError
+        experiment = recovered_run_to_experiment(recovered)
+        evaluations = recovered_run_to_evaluation_bundle(recovered)
+        workflow_paths = tuple(sorted(native_root.rglob("workflow-evidence.json")))
+        if not workflow_paths or any(path.is_symlink() for path in workflow_paths):
+            raise ValueError
+        bundles = tuple(read_workflow_observation_bundle(path) for path in workflow_paths)
+        workflow_digests = tuple(sorted(bundle.bundle_sha256 for bundle in bundles))
+        if len(set(workflow_digests)) != len(workflow_digests):
+            raise ValueError
+        input_tokens = 0
+        output_tokens = 0
+        for bundle in bundles:
+            for record in bundle.records:
+                usage = record.get("usage")
+                if not isinstance(usage, Mapping):
+                    raise ValueError
+                input_value = usage.get("input_tokens")
+                output_value = usage.get("output_tokens")
+                if (
+                    type(input_value) is not int or input_value < 0
+                    or type(output_value) is not int or output_value < 0
+                ):
+                    raise ValueError
+                input_tokens += input_value
+                output_tokens += output_value
+        return {
+            "recovered_run_sha256": recovered.recovered_run_sha256,
+            "experiment_bundle_sha256": experiment.bundle_sha256,
+            "evaluation_bundle_sha256": evaluations.bundle_sha256,
+            "workflow_bundle_set_sha256": _digest({"workflow_bundle_sha256s": workflow_digests}),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": input_tokens + output_tokens,
+        }
+    except Exception:
+        return None
+
+
 def _receipt_filename(index: int) -> str:
     if type(index) is not int or not 0 <= index < 8:
         raise ValueError
@@ -755,8 +870,9 @@ def _read_receipt_chain(
         expected = {
             "schema", "task_id", "plan_sha256", "authorization_sha256", "previous_receipt_sha256",
             "run_id_sha256", "status", "completed_case_count", "cost_microusd", "cost_source",
-            "tokens", "elapsed_ns", "workflow_bundle_sha256", "evaluation_bundle_sha256",
-            "failure_category", "evidence_state", "receipt_sha256",
+            "input_tokens", "output_tokens", "total_tokens", "elapsed_ns",
+            "recovered_run_sha256", "experiment_bundle_sha256", "evaluation_bundle_sha256",
+            "workflow_bundle_set_sha256", "failure_category", "native_evidence_state", "receipt_sha256",
         }
         if type(value) is not dict or set(value) != expected:
             raise ValueError
@@ -778,13 +894,40 @@ def _read_receipt_chain(
             or type(value.get("cost_microusd")) is not int or not 0 <= value["cost_microusd"] <= int(task["max_cost_microusd"])
             or value.get("cost_source") not in {"actual", "conservative"}
             or value["cost_source"] == "conservative" and value["cost_microusd"] != task["max_cost_microusd"]
-            or type(value.get("tokens")) is not int or value["tokens"] != 0
             or type(value.get("elapsed_ns")) is not int or value["elapsed_ns"] < 0
-            or not _is_sha256(value.get("workflow_bundle_sha256")) or not _is_sha256(value.get("evaluation_bundle_sha256"))
             or value.get("failure_category") not in {"none", "model-business", "cancelled", "observation-invalid", *_INFRASTRUCTURE_FAILURES}
-            or value.get("evidence_state") not in {"complete", "observation-invalid", "terminal-failure"}
             or not _is_sha256(digest) or not hmac.compare_digest(str(digest), _digest(value))
         ):
+            raise ValueError
+        native_fields = (
+            "recovered_run_sha256", "experiment_bundle_sha256", "evaluation_bundle_sha256",
+            "workflow_bundle_set_sha256", "input_tokens", "output_tokens", "total_tokens",
+        )
+        state = value.get("native_evidence_state")
+        if state == "complete":
+            if (
+                value["status"] != "completed" or value["failure_category"] != "none"
+                or any(not _is_sha256(value.get(name)) for name in native_fields[:4])
+                or any(type(value.get(name)) is not int or value[name] < 0 for name in native_fields[4:])
+                or value["total_tokens"] != value["input_tokens"] + value["output_tokens"]
+            ):
+                raise ValueError
+            evidence_path = task.get("evidence_path") if type(task) is dict else None
+            if type(evidence_path) is not str:
+                raise ValueError
+            observed = _native_receipt_projection(
+                root.parent / evidence_path, str(task["dataset_id"]),
+                expected_case_count=value["completed_case_count"],
+            )
+            if observed is None or any(value[name] != observed[name] for name in native_fields):
+                raise ValueError
+        elif state == "invalid":
+            if value["status"] != "completed" or value["failure_category"] != "observation-invalid" or any(value[name] is not None for name in native_fields):
+                raise ValueError
+        elif state == "unavailable":
+            if value["status"] == "completed" or value["failure_category"] not in {"model-business", "cancelled", *_INFRASTRUCTURE_FAILURES} or any(value[name] is not None for name in native_fields):
+                raise ValueError
+        else:
             raise ValueError
         value["receipt_sha256"] = digest
         chain.append(value)
@@ -795,6 +938,7 @@ def _publish_receipt(
     root: Path, *, plan: Mapping[str, object], authorization: Mapping[str, object], task: Mapping[str, object],
     receipts: tuple[dict[str, object], ...], run_id: str, status: str, completed_case_count: int,
     cost_microusd: int, cost_source: str, elapsed_ns: int, failure_category: str,
+    native: Mapping[str, object] | None,
 ) -> dict[str, object]:
     index = len(receipts)
     tasks = plan["tasks"]
@@ -806,12 +950,21 @@ def _publish_receipt(
         "previous_receipt_sha256": None if not receipts else receipts[-1]["receipt_sha256"],
         "run_id_sha256": _digest({"run-id": run_id}), "status": status,
         "completed_case_count": completed_case_count, "cost_microusd": cost_microusd,
-        "cost_source": cost_source, "tokens": 0, "elapsed_ns": elapsed_ns,
-        "workflow_bundle_sha256": _digest({"task": task["task_id"], "run": run_id, "kind": "workflow"}),
-        "evaluation_bundle_sha256": _digest({"task": task["task_id"], "run": run_id, "kind": "evaluation"}),
+        "cost_source": cost_source, "elapsed_ns": elapsed_ns,
         "failure_category": failure_category,
-        "evidence_state": "observation-invalid" if failure_category == "observation-invalid" else ("complete" if status == "completed" else "terminal-failure"),
     }
+    native_fields = (
+        "recovered_run_sha256", "experiment_bundle_sha256", "evaluation_bundle_sha256",
+        "workflow_bundle_set_sha256", "input_tokens", "output_tokens", "total_tokens",
+    )
+    if native is not None and status == "completed" and failure_category == "none":
+        if set(native) != set(native_fields):
+            raise ValueError
+        body.update(native)
+        body["native_evidence_state"] = "complete"
+    else:
+        body.update({name: None for name in native_fields})
+        body["native_evidence_state"] = "invalid" if failure_category == "observation-invalid" else "unavailable"
     body["receipt_sha256"] = _digest(body)
     name = _receipt_filename(index)
     # Exclusive create is the append-only publication point.  A collision,

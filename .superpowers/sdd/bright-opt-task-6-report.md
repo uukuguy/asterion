@@ -63,8 +63,41 @@ execute/resume chain to the supplied authorization digest, uses the existing
 contract, and quarantines unknown-failure evidence so a later explicit resume
 is not wedged.
 
-Native workflow/recovery artifacts are not yet emitted by the benchmark result
-contract for Bright optimization.  Consequently, the receipt's current
-workflow/evaluation digest fields are not sufficient as a Task 7 re-read
-contract; a subsequent native-evidence adapter must replace them with
-`read_completed_dci_run` plus recovered Experiment/Evaluation bundle digests.
+Receipts now project and bind actual native evidence.  For each successful
+task the coordinator re-reads the one private native output tree with
+`read_completed_dci_run`, converts it with `recovered_run_to_experiment` and
+`recovered_run_to_evaluation_bundle`, and reads every canonical
+`workflow-evidence.json` using the existing safe workflow reader.  The closed
+receipt contains only recomputable digests (`recovered_run_sha256`, experiment,
+evaluation and sorted workflow-bundle-set digests) plus input/output/total
+tokens.  Resume and terminal receipt-chain validation recompute that same
+projection, so tampering or removal of native artifacts rejects before any
+provider load.
+
+Completed output that cannot close this projection is explicitly
+`observation-invalid`, with all native digest/token fields null.  Failed,
+cancelled, and infrastructure receipts are `native_evidence_state=unavailable`
+and likewise retain null native fields: zeroes and synthetic hashes cannot
+stand in for unavailable evidence.  Failed DCI runs obtain their category from
+the persisted generic evidence-store progress record rather than treating all
+failures as model business failures.
+
+Additional focused verification passed on 2026-08-04:
+
+```text
+uv run python -m unittest -v tests.test_dci_pathlight_optimization_cli tests.test_dci_benchmark_host tests.test_dci_benchmark_real_executor tests.test_dci_pathlight_recovery tests.test_workflow_evidence_storage
+# 90 tests passed
+uv run pyright src/asterion/applications/dci_agent_lite/pathlight_optimization_cli.py tests/test_dci_pathlight_optimization_cli.py
+# 0 errors, 0 warnings
+uv run ruff check src/asterion/applications/dci_agent_lite/pathlight_optimization_cli.py tests/test_dci_pathlight_optimization_cli.py
+# All checks passed
+git diff --check
+# passed
+```
+
+The native-host test uses an actual `DciBenchmarkHost` with a controlled
+`BenchmarkTaskExecutor`, exercising discover/source-lock/payload/resolve/draft/
+authorize/provider-loading/generic runner/evidence-store/result-type phases for
+all eight Bright tasks.  It proves per-task `Decimal("1")` authority,
+case-limit 10, zero Judge operations, single native attempt, actual and upper
+coverage artifacts, and the complete preflight barrier before provider load.
