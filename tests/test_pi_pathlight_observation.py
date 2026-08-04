@@ -276,6 +276,90 @@ class PiObservationBuilderTests(unittest.TestCase):
                 ("missing", "completed"),
             )
 
+    def test_rejected_alignment_evidence_is_restored_by_rollback(self) -> None:
+        def consume_response(
+            builder: PiObservationBuilder, sequence: int, text: str
+        ) -> None:
+            builder.consume(
+                {
+                    "type": "message_start",
+                    "message": {
+                        "role": "assistant",
+                        "provider": "provider",
+                        "model": "model",
+                        "content": [],
+                    },
+                },
+                9,
+            )
+            builder.consume(
+                _assistant_end(text, input_tokens=3, output_tokens=1),
+                10,
+                native_event_sequence=sequence,
+            )
+
+        for name, reject in (
+            ("marker", lambda builder: builder.observe_provider_request_marker(2, 2)),
+            ("response", lambda builder: consume_response(builder, 0, "discarded")),
+        ):
+            with self.subTest(name=name):
+                builder = PiObservationBuilder(_clock)
+                checkpoint = builder.checkpoint()
+                reject(builder)
+                builder.rollback(checkpoint)
+                builder.observe_provider_request_marker(1, 20)
+                consume_response(builder, 30, "kept")
+                request = _verified_request(1)
+
+                builder.reconcile_provider_requests((request,))
+                batch = builder.complete("run")
+
+                self.assertEqual(batch.provider_requests, (request,))
+                self.assertEqual(batch.model_calls[0].response_sha256, _digest("kept"))
+
+    def test_invalid_response_sequences_fall_back_atomically(self) -> None:
+        def consume_response(
+            builder: PiObservationBuilder, sequence: int, timestamp: int
+        ) -> None:
+            builder.consume(
+                {
+                    "type": "message_start",
+                    "message": {
+                        "role": "assistant",
+                        "provider": "provider",
+                        "model": "model",
+                        "content": [],
+                    },
+                },
+                timestamp - 1,
+            )
+            builder.consume(
+                _assistant_end("response", input_tokens=3, output_tokens=1),
+                timestamp,
+                native_event_sequence=sequence,
+            )
+
+        for name, sequences in (
+            ("bool", (True,)),
+            ("zero", (0,)),
+            ("negative", (-1,)),
+            ("duplicate", (10, 10)),
+            ("decreasing", (20, 10)),
+        ):
+            with self.subTest(name=name):
+                builder = PiObservationBuilder(_clock)
+                for index in range(1, len(sequences) + 1):
+                    builder.observe_provider_request_marker(index, index * 2)
+                for index, sequence in enumerate(sequences, start=1):
+                    consume_response(builder, sequence, index * 20)
+                inferred = builder.complete("run")
+
+                builder.reconcile_provider_requests(
+                    tuple(_verified_request(index) for index in range(1, len(sequences) + 1))
+                )
+
+                self.assertEqual(builder.complete("run"), inferred)
+
     def test_reconciles_verified_provider_request_atomically(self) -> None:
         builder = PiObservationBuilder(_clock)
         builder.consume(_provider_context(1, [_user("inferred-private")]), 10)

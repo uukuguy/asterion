@@ -35,6 +35,7 @@ class PiObservationCheckpoint:
     message_count: int
     marker_count: int
     response_sequence_count: int
+    reconciliation_invalid: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +141,7 @@ class PiObservationBuilder:
             message_count=len(self._messages),
             marker_count=len(self._provider_request_markers),
             response_sequence_count=len(self._response_sequence_drafts),
+            reconciliation_invalid=self._reconciliation_invalid,
         )
 
     def observe_provider_request_marker(
@@ -231,6 +233,7 @@ class PiObservationBuilder:
             or checkpoint.message_count < 0
             or checkpoint.marker_count < 0
             or checkpoint.response_sequence_count < 0
+            or type(checkpoint.reconciliation_invalid) is not bool
             or checkpoint.frame_count > len(self._frames)
             or checkpoint.model_call_count > len(self._model_calls)
             or checkpoint.tool_count > len(self._tools)
@@ -256,6 +259,7 @@ class PiObservationBuilder:
         del self._messages[checkpoint.message_count :]
         del self._provider_request_markers[checkpoint.marker_count :]
         del self._response_sequence_drafts[checkpoint.response_sequence_count :]
+        self._reconciliation_invalid = checkpoint.reconciliation_invalid
         self._inferred_call_open = False
         if reconciliation_crossed:
             self._provider_requests = ()
