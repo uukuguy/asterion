@@ -20,7 +20,9 @@ from typing import TYPE_CHECKING, Any, Callable
 
 from asterion.adapters.pi import PiProtocolAdapter, map_pi_capabilities
 from asterion.capabilities.dci.implementation.config import DciPaths
-from asterion.capabilities.dci.implementation.reproduction.provenance import collect_pi_provenance
+from asterion.capabilities.dci.implementation.reproduction.provenance import (
+    collect_pi_provenance,
+)
 from asterion.capabilities.dci.implementation.runtime.run import (
     DciRunRequest,
     prelude_questions_fingerprint,
@@ -44,9 +46,15 @@ from asterion.workflow_evidence import (
 )
 
 if TYPE_CHECKING:
-    from asterion.capabilities.dci.implementation.evaluation.provider_requests import ProviderRequestCapture
-    from asterion.capabilities.dci.implementation.research.context_extension import ResolvedContextExtension
-    from asterion.capabilities.dci.implementation.research.context_profiles import DciContextProfile
+    from asterion.capabilities.dci.implementation.evaluation.provider_requests import (
+        ProviderRequestCapture,
+    )
+    from asterion.capabilities.dci.implementation.research.context_extension import (
+        ResolvedContextExtension,
+    )
+    from asterion.capabilities.dci.implementation.research.context_profiles import (
+        DciContextProfile,
+    )
     from asterion.pathlight import ProviderRequestObservation
 
 try:
@@ -96,8 +104,7 @@ def _pathlight_trace_id(run_id: str, *, attempt: int) -> str:
         ).encode("utf-8")
     ).hexdigest()
     return (
-        f"{digest[:8]}-{digest[8:12]}-4{digest[13:16]}-"
-        f"8{digest[17:20]}-{digest[20:32]}"
+        f"{digest[:8]}-{digest[8:12]}-4{digest[13:16]}-8{digest[17:20]}-{digest[20:32]}"
     )
 
 
@@ -126,21 +133,25 @@ _POLICY_NUMERIC_KEYS = _POLICY_STATE_KEYS - {
 def _validated_policy_state(value: object) -> dict[str, object]:
     if not isinstance(value, dict) or set(value) != _POLICY_STATE_KEYS:
         raise DciArtifactError("DCI context policy evidence is invalid")
-    if any(
-        isinstance(value.get(key), bool)
-        or not isinstance(value.get(key), int)
-        or value[key] < 0
-        for key in _POLICY_NUMERIC_KEYS
-    ) or not (
-        value.get("preservedTurns") is None
-        or (
-            not isinstance(value.get("preservedTurns"), bool)
-            and isinstance(value.get("preservedTurns"), int)
-            and value["preservedTurns"] >= 0
+    if (
+        any(
+            isinstance(value.get(key), bool)
+            or not isinstance(value.get(key), int)
+            or value[key] < 0
+            for key in _POLICY_NUMERIC_KEYS
         )
-    ) or any(
-        not isinstance(value.get(key), bool)
-        for key in ("compactionPending", "summarySuppressed")
+        or not (
+            value.get("preservedTurns") is None
+            or (
+                not isinstance(value.get("preservedTurns"), bool)
+                and isinstance(value.get("preservedTurns"), int)
+                and value["preservedTurns"] >= 0
+            )
+        )
+        or any(
+            not isinstance(value.get(key), bool)
+            for key in ("compactionPending", "summarySuppressed")
+        )
     ):
         raise DciArtifactError("DCI context policy evidence is invalid")
     return dict(value)
@@ -177,9 +188,7 @@ class DciContextTelemetry:
             or not isinstance(value.get("extensionVersion"), str)
         ):
             raise DciArtifactError("DCI context policy evidence is invalid")
-        state = _validated_policy_state(
-            {key: value[key] for key in _POLICY_STATE_KEYS}
-        )
+        state = _validated_policy_state({key: value[key] for key in _POLICY_STATE_KEYS})
         return cls(
             event=value["event"],
             profile=value["profile"],
@@ -1136,8 +1145,7 @@ def validate_resumable_run_evidence(
         question = lock.read_text("question.txt")
         final = (
             lock.read_text("final.txt").rstrip("\n")
-            if isinstance(state.get("assistant_text"), str)
-            and state["assistant_text"]
+            if isinstance(state.get("assistant_text"), str) and state["assistant_text"]
             else ""
         )
         stderr = lock.read_text("stderr.txt")
@@ -1786,7 +1794,9 @@ def _context_policy_identity(
                 return _context_policy_identity(request, resolved)
         except ContextExtensionError as error:
             raise DciArtifactError("DCI context policy identity is invalid") from error
-    from asterion.capabilities.dci.implementation.research.context_profiles import context_policy_identity
+    from asterion.capabilities.dci.implementation.research.context_profiles import (
+        context_policy_identity,
+    )
 
     try:
         return context_policy_identity(profile, extension)
@@ -1821,9 +1831,7 @@ def _validate_recorder_resume_state(
         "model": request.model,
         "tools": request.tools,
         "max_turns": request.max_turns,
-        "runtime_context_control": _context_policy_identity(
-            request, context_extension
-        ),
+        "runtime_context_control": _context_policy_identity(request, context_extension),
         "runtime_context_level": request.runtime_context_level,
         "pi_context_session": (
             {
@@ -2106,6 +2114,30 @@ def _resume_preflight(
         raise
 
 
+def _dci_provider_request_marker(event: Mapping[str, object]) -> int | None:
+    """Return a closed DCI provider-request marker candidate without copying it."""
+
+    if event.get("type") != "entry_appended":
+        return None
+    entry = event.get("entry")
+    if not isinstance(entry, Mapping) or entry.get("type") != "custom":
+        return None
+    if entry.get("customType") != "dci-provider-request-observation":
+        return None
+    data = entry.get("data")
+    if not isinstance(data, Mapping):
+        return -1
+    index = data.get("request_index")
+    if (
+        data.get("schema") != "dci.provider-request-observation/v1"
+        or data.get("capture_status") != "captured"
+        or type(index) is not int
+        or index < 1
+    ):
+        return -1
+    return index
+
+
 class DciRunRecorder:
     """Persist raw and processed DCI run evidence without crossing product boundaries."""
 
@@ -2130,9 +2162,7 @@ class DciRunRecorder:
         self.lock = (
             DciRunLock.acquire(self.output_dir, create=not resume)
             if directory_fd is None
-            else DciRunLock.acquire_fd(
-                directory_fd, path=self.output_dir, wait=False
-            )
+            else DciRunLock.acquire_fd(directory_fd, path=self.output_dir, wait=False)
         )
         self._root_fd = self.lock._directory_fd
         self._protocol_fd: int | None = None
@@ -2335,6 +2365,7 @@ class DciRunRecorder:
             _write_exclusive_text_at(self._protocol_fd, self._protocol_events_name, "")
             self.normalized: list[dict[str, object]] = []
             self._pathlight_last_timestamp_ns: int | None = None
+            self._pathlight_native_event_sequence = 0
             self._pathlight_invocation_started_ns = self._pathlight_timestamp()
             self._pathlight_observation_builder: PiObservationBuilder | None = (
                 PiObservationBuilder(time.monotonic_ns)
@@ -2443,9 +2474,7 @@ class DciRunRecorder:
     def _write_context_policy(self) -> None:
         if self.context_policy is None:
             return
-        _atomic_write_json_at(
-            self._root_fd, "context-policy.json", self.context_policy
-        )
+        _atomic_write_json_at(self._root_fd, "context-policy.json", self.context_policy)
         reference = self.state.get("context_policy")
         if not isinstance(reference, dict):
             raise DciArtifactError("DCI context policy evidence is invalid")
@@ -2453,9 +2482,7 @@ class DciRunRecorder:
             json_document_bytes(self.context_policy)
         ).hexdigest()
 
-    def record_context_policy(
-        self, entries: tuple[dict[str, object], ...]
-    ) -> None:
+    def record_context_policy(self, entries: tuple[dict[str, object], ...]) -> None:
         """Persist one attempt's validated, body-free Pi policy entries."""
 
         self._ensure_open()
@@ -2492,8 +2519,7 @@ class DciRunRecorder:
             else:
                 if (
                     not isinstance(data, dict)
-                    or set(data)
-                    != {"schema", "profile", "contractVersion", "state"}
+                    or set(data) != {"schema", "profile", "contractVersion", "state"}
                     or data.get("schema") != "dci.context-state/v2"
                     or data.get("profile") != profile.name
                     or data.get("contractVersion") != profile.contract_version
@@ -2553,7 +2579,9 @@ class DciRunRecorder:
     def open_provider_request_capture(self) -> ProviderRequestCapture:
         """Create the private request capture inside this pinned generation."""
 
-        from asterion.capabilities.dci.implementation.evaluation.provider_requests import ProviderRequestCapture
+        from asterion.capabilities.dci.implementation.evaluation.provider_requests import (
+            ProviderRequestCapture,
+        )
 
         self._ensure_open()
         return ProviderRequestCapture.open_at(self._root_fd)
@@ -2593,12 +2621,24 @@ class DciRunRecorder:
         self._pathlight_last_timestamp_ns = value
         return value
 
-    def _observe_pathlight_event(self, event: dict[str, object]) -> None:
+    def _observe_pathlight_event(
+        self, event: dict[str, object], native_event_sequence: int
+    ) -> None:
         builder = self._pathlight_observation_builder
         if builder is None:
             return
         try:
-            builder.consume(event, self._pathlight_timestamp())
+            builder.consume(
+                event,
+                self._pathlight_timestamp(),
+                native_event_sequence=native_event_sequence,
+            )
+            marker = _dci_provider_request_marker(event)
+            if marker is not None:
+                builder.observe_provider_request_marker(
+                    marker if marker > 0 else 0,
+                    native_event_sequence,
+                )
             event_type = event.get("type")
             if event_type == "agent_start":
                 self._pathlight_observation_checkpoint = builder.checkpoint()
@@ -2610,7 +2650,8 @@ class DciRunRecorder:
     def record_event(self, event: dict[str, object]) -> None:
         self._ensure_open()
         try:
-            self._observe_pathlight_event(event)
+            self._pathlight_native_event_sequence += 1
+            self._observe_pathlight_event(event, self._pathlight_native_event_sequence)
             self._append_at(self._root_fd, "events.jsonl", event)
             self.adapter.consume(event)
             self.state["event_count"] += 1
@@ -2763,9 +2804,7 @@ class DciRunRecorder:
         if self.state.get("status") != "completed" or not self._finalized:
             raise DciArtifactError("DCI workflow evidence state is invalid")
         read_workflow_observation_bundle_mapping(bundle)
-        _write_exclusive_json_at(
-            self._root_fd, "workflow-evidence.json", dict(bundle)
-        )
+        _write_exclusive_json_at(self._root_fd, "workflow-evidence.json", dict(bundle))
 
     def add_note(self, note: str) -> None:
         """Persist one caller-generated safe diagnostic note in every native view."""
@@ -3252,13 +3291,9 @@ def bind_paper_benchmark_evidence(
                 "judge_responses_store",
             )
         )
-        or not (
-            judge["judge_thinking"] is None
-            or type(judge["judge_thinking"]) is str
-        )
+        or not (judge["judge_thinking"] is None or type(judge["judge_thinking"]) is str)
         or any(
-            isinstance(judge[name], bool)
-            or not isinstance(judge[name], (int, float))
+            isinstance(judge[name], bool) or not isinstance(judge[name], (int, float))
             for name in (
                 "judge_input_price_per_1m",
                 "judge_cached_input_price_per_1m",
@@ -3344,19 +3379,15 @@ def bind_paper_benchmark_evidence(
         raise ValueError("paper benchmark Judge evidence is invalid") from None
     if (
         not isinstance(judge_evidence, dict)
-        or set(judge_evidence)
-        != {"schema", "accepted", "evaluation_sha256"}
-        or judge_evidence.get("schema")
-        != "asterion.dci.paper-judge-evidence/v1"
+        or set(judge_evidence) != {"schema", "accepted", "evaluation_sha256"}
+        or judge_evidence.get("schema") != "asterion.dci.paper-judge-evidence/v1"
         or judge_evidence.get("accepted") is not True
         or judge_evidence.get("evaluation_sha256")
         != hashlib.sha256(evaluation_raw).hexdigest()
         or not isinstance(evaluation, dict)
         or evaluation.get("is_correct") is not True
         or any(evaluation.get(name) != judge[name] for name in judge_public_keys)
-        or _HEX_SHA256.fullmatch(
-            str(evaluation.get("judge_request_fingerprint"))
-        )
+        or _HEX_SHA256.fullmatch(str(evaluation.get("judge_request_fingerprint")))
         is None
     ):
         raise ValueError("paper benchmark Judge evidence is invalid")
