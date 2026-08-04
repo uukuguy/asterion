@@ -46,6 +46,53 @@ bundle 均保持不可变；offline companion 不替代、覆盖或升级为 nat
 与表中 103/103 正式分数均未改变。任何下一次 Bright Biology 单例原生核验仍须获得单独明确授权，并
 使用新的 source lock 和 evidence root；本文档、现有配置、缓存或旧批准都不构成执行权限。
 
+### 最新原生双通道核验（2026-08-04）
+
+在成本与重试授权边界提交 `fa58d17` 后，首次获批的单例执行正确限制为 Agent 1 次、Judge
+0 次、总成本与单次 Agent 成本上限均为 `$0.20`，但最终答案恢复过程仍被旧代码硬限制为
+1 个 turn。该次运行只执行一个 native attempt，实际产生 6 次模型请求、8 次成功 `grep`、
+32,600 tokens 和 `$0.0312362` Agent 成本，随后失败；它没有生成原生 workflow bundle，
+因此没有被写成 PASS，也没有进入 Dashboard 成功证据。
+
+提交 `7bfcbb5` 让主请求与一次性最终答案恢复共享有限 turn 预算，同时保留取消、deadline、
+空结果 fail-closed，以及原调用无 turn 上限时恢复仍最多 1 turn 的边界。完整 provider-free
+`make check` 通过 1,300 个 Python、51 个 TypeScript 和 19 个 Rust 测试后，运营者另行批准了
+一次同范围的新运行。新运行使用全新的 source lock 和 evidence root，在前台完成 1/1：
+
+- 墙钟 `36.638241` 秒；Agent 成本 `$0.0327504`；69,414 tokens；8 次 `grep` 全部成功；
+  Judge 0 次；单例 nDCG@10 为 `0.3391602052736161`。
+- 原生 `workflow-evidence.json` 自身以 0600 写出并通过严格 reader，bundle 摘要为
+  `3dcdb69ca895097df086fe82ad1ef07fa2a486a79df7f59082d7aeea66bd3c68`；没有使用
+  offline companion 代替原生证据。
+- 私有 capture 与原生主线一致地记录 4 个连续 provider request；公共 flow 为 4 个
+  ContextFrame、4 个 model-call 和 8 个 tool-call，共 16 个节点。第 3 个是 compaction
+  request-only 节点，保留 `model-identity`、`model-response`、`token-usage` 和
+  `model-request-boundary` 缺口；其余 3 个调用都有响应，只保留
+  `model-request-boundary`。4 个调用均没有 `model-request` 缺口。
+- 前台 Dashboard 快照摘要为
+  `0799cbc43804f0341126cb272fc22ad0c1fd0678cd0bd7e020b1ddfadd2c4a47`：1 条完成
+  trace、4/4/8 主线、16 个 flow 节点、0 个 Pathlight evaluation。这里的 0 是因为本次只向
+  Dashboard 输入 workflow bundle；DCI 单例 nDCG 仍由 benchmark summary 记录。页面和只读
+  API 不含问题正文、provider/model 身份或私有路径，写方法返回 405；检查后服务已停止，
+  外部网络操作为 0。
+
+本次核验使用的可重复命令形状如下。`FRESH_LOCK` 与 `FRESH_EVIDENCE` 必须属于一次全新的、
+私有且绝对的运行目录；命令中的 `$0.20` 和单次 native attempt 是执行授权的一部分：
+
+```bash
+uv run asterion-dci benchmark run \
+  --instance dci.bright.biology@1.0.0 \
+  --case-limit 1 \
+  --max-cost-usd 0.20 \
+  --max-native-attempts 1 \
+  --capability-source-lock "$FRESH_LOCK" \
+  --evidence-root "$FRESH_EVIDENCE" \
+  --execute
+```
+
+该单例只证明“执行—原生采集—Pathlight CLI—Dashboard”闭环已经可用，不改变下表
+Bright Biology 103/103 的正式结果，也不能用单例 `0.339160` 与论文全量分数比较。
+
 | 实例 | 实现/验证 | 已跑/总量 | 结果 | 核心配置与证据 | 历史推进记录 |
 |---|---|---:|---|---|---|
 | `dci.bcplus.level3@1.0.0` | implemented / Verified-bounded | 50/830 | 34%（17/50） | `gpt-5.6-luna` / `deepseek-v4-flash`；约 $4.29；`run-480faa…65ff`；resume 未新增生成 | 实现并完成 `dci.bcplus.main@1.0.0` 的 50 条版本 |
