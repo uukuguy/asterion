@@ -556,6 +556,7 @@ The fixed plan fields are:
 {
     "schema": "asterion.dci.pathlight.bright-optimization-plan/v1",
     "diagnosis_bundle_sha256": sha,
+    "authorization_gate_report_sha256": sha,
     "proposal_sha256": sha,
     "finding_sha256": sha,
     "scope_sha256": sha,
@@ -586,6 +587,15 @@ The fixed plan fields are:
     "plan_sha256": sha,
 }
 ```
+
+`authorization_gate_report_sha256` is the digest of the DCI-owned private
+`pathlight-dci-authorization-gate.json` emitted atomically by a real
+coverage-complete `DciDiagnosisReport`.  `prepare` takes the report through
+the exact `--gate-report-file` option, requires its canonical absolute
+basename and mode-0600 descriptor boundary, and closes its diagnosis,
+proposal, and scope identities before writing the inactive plan.  The report
+contains only fixed enums, counts, and opaque coverage plan/receipt/evidence
+digests; it never includes prompt, case, path, provider, or payload content.
 
 Each task fixes dataset ID, instance selector, role, query-plan digest, 10 selected IDs, case-limit 10, one native attempt, zero Judge, task cost ceiling 1,000,000 microusd, and relative evidence/receipt locations. Publish with private staging and cleanup copied from the hardened coverage coordinator, without importing DCI helpers into generic Pathlight.
 

@@ -12,7 +12,6 @@ import hashlib
 import hmac
 import json
 import os
-import re
 import stat
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -25,9 +24,16 @@ from asterion.applications.dci_agent_lite.benchmark_source_lock import (
     resolve_benchmark_source_lock,
     write_benchmark_source_lock,
 )
+from asterion.applications.dci_agent_lite.benchmark_host import (
+    optimization_execution_config_sha256,
+)
 from asterion.applications.dci_agent_lite.operator_config import (
     DciOperatorConfig,
     load_operator_config,
+)
+from asterion.capabilities.dci.implementation.pathlight.diagnosis import (
+    AUTHORIZATION_GATE_REPORT_FILENAME,
+    read_authorization_gate_report,
 )
 from asterion.capabilities.dci.implementation.pathlight.recovery import (
     _domain_digest as _recovery_digest,
@@ -44,6 +50,7 @@ from asterion.capabilities.dci.implementation.datasets import (
 )
 from asterion.pathlight._private_file import read_private_file, write_private_file
 from asterion.pathlight.diagnosis import Proposal, read_diagnosis_bundle
+from asterion.pathlight.experiment import Variant
 
 
 PLAN_FILENAME = "pathlight-bright-optimization.json"
@@ -65,7 +72,6 @@ _DATASETS = (
     "bright.robotics",
 )
 _ROLES = ("baseline", "candidate")
-_RECEIPT_NAME = re.compile(r"^receipt-[1-8]-[0-9]{4}\\.json$")
 
 
 def main(
@@ -125,7 +131,13 @@ def _prepare(
     package_sources: Sequence[object] | None,
 ) -> dict[str, object]:
     options = _exact_options(
-        arguments, {"--diagnosis-file", "--proposal-sha256", "--output-root"}
+        arguments,
+        {
+            "--diagnosis-file",
+            "--gate-report-file",
+            "--proposal-sha256",
+            "--output-root",
+        },
     )
     output_root = _operator_root(options["--output-root"])
     if any(output_root.iterdir()):
@@ -134,6 +146,15 @@ def _prepare(
     proposal = _query_decomposition_proposal(
         diagnosis, options["--proposal-sha256"]
     )
+    gate = read_authorization_gate_report(
+        _gate_report_path(options["--gate-report-file"])
+    )
+    if (
+        gate["diagnosis_bundle_sha256"] != diagnosis.bundle_sha256
+        or gate["query_proposal_sha256"] != proposal.proposal_sha256
+        or gate["query_scope_sha256"] != proposal.scope_sha256
+    ):
+        raise ValueError
     # Passing a non-existent explicit path prevents load_operator_config from
     # falling back to ``repo_root/.env``.  Only caller-supplied environment is
     # consumed, and no provider is constructed on this path.
@@ -169,11 +190,31 @@ def _prepare(
         candidate_digest = query_planning_contract_sha256(candidate_contract)
         if hmac.compare_digest(baseline_digest, candidate_digest):
             raise ValueError
-        tasks = _tasks(selections, baseline_digest, candidate_digest)
+        baseline_variant, candidate_variant = _optimization_variants(
+            baseline_digest, candidate_digest
+        )
+        baseline_config = optimization_execution_config_sha256(
+            config.benchmark_inputs.private_environment, baseline_contract
+        )
+        candidate_config = optimization_execution_config_sha256(
+            config.benchmark_inputs.private_environment, candidate_contract
+        )
+        if hmac.compare_digest(baseline_config, candidate_config):
+            raise ValueError
+        tasks = _tasks(
+            selections,
+            baseline_digest,
+            candidate_digest,
+            baseline_variant.variant_sha256,
+            candidate_variant.variant_sha256,
+            baseline_config,
+            candidate_config,
+        )
         output_stat = os.stat(output_root, follow_symlinks=False)
         body = {
             "schema": _PLAN_SCHEMA,
             "diagnosis_bundle_sha256": diagnosis.bundle_sha256,
+            "authorization_gate_report_sha256": gate["gate_report_sha256"],
             "proposal_sha256": proposal.proposal_sha256,
             "finding_sha256": proposal.finding_sha256,
             "scope_sha256": proposal.scope_sha256,
@@ -185,6 +226,10 @@ def _prepare(
             "selected_case_scope_sha256": _selected_scope(selections),
             "baseline_query_plan_sha256": baseline_digest,
             "candidate_query_plan_sha256": candidate_digest,
+            "baseline_variant_sha256": baseline_variant.variant_sha256,
+            "candidate_variant_sha256": candidate_variant.variant_sha256,
+            "baseline_execution_config_sha256": baseline_config,
+            "candidate_execution_config_sha256": candidate_config,
             "candidate_prompt_path": str(candidate_prompt.relative_to(staging)),
             "output_root_device": output_stat.st_dev,
             "output_root_inode": output_stat.st_ino,
@@ -242,7 +287,13 @@ def _prepare_selections(root: Path, config: DciOperatorConfig) -> dict[str, dict
 
 
 def _tasks(
-    selections: Mapping[str, Mapping[str, object]], baseline_digest: str, candidate_digest: str
+    selections: Mapping[str, Mapping[str, object]],
+    baseline_digest: str,
+    candidate_digest: str,
+    baseline_variant: str,
+    candidate_variant: str,
+    baseline_config: str,
+    candidate_config: str,
 ) -> list[dict[str, object]]:
     tasks: list[dict[str, object]] = []
     for dataset_id in _DATASETS:
@@ -255,6 +306,8 @@ def _tasks(
                     "instance_selector": f"dci.{dataset_id}@1.0.0",
                     "variant_role": role,
                     "query_plan_sha256": baseline_digest if role == "baseline" else candidate_digest,
+                    "variant_sha256": baseline_variant if role == "baseline" else candidate_variant,
+                    "execution_config_sha256": baseline_config if role == "baseline" else candidate_config,
                     "selection_path": f"selections/{dataset_id}.json",
                     "selection_sha256": selection["selection_sha256"],
                     "selected_ids_sha256": selection["selected_ids_sha256"],
@@ -268,6 +321,46 @@ def _tasks(
                 }
             )
     return tasks
+
+
+def _optimization_variants(
+    baseline_query_plan_sha256: str, candidate_query_plan_sha256: str
+) -> tuple[Variant, Variant]:
+    """Return the two generic Variant identities for the sole query-plan axis."""
+
+    common = {
+        "assembly_sha256": _digest("asterion-safe/pi:assembly"),
+        "package_set_sha256": _digest("asterion-safe/pi:package-set"),
+        "implementation_sha256": _digest("asterion-safe/pi:implementation"),
+        "runtime_sha256": _digest("asterion-safe/pi:runtime"),
+        "model_sha256": _digest("asterion-safe/pi:model"),
+        "toolset_sha256": _digest("asterion-safe/pi:toolset"),
+        "policy_sha256": _digest("asterion-safe/pi:policy"),
+    }
+
+    def build(query_plan_sha256: str) -> Variant:
+        return Variant(
+            **common,
+            prompt_contract_sha256=query_plan_sha256,
+            change_sha256=_digest(
+                {
+                    "schema": "asterion.dci.pathlight.query-plan-change/v1",
+                    "query_plan_sha256": query_plan_sha256,
+                }
+            ),
+        )
+
+    baseline, candidate = build(baseline_query_plan_sha256), build(candidate_query_plan_sha256)
+    baseline_mapping = baseline.to_mapping()
+    candidate_mapping = candidate.to_mapping()
+    differences = {
+        name
+        for name in baseline_mapping
+        if baseline_mapping[name] != candidate_mapping[name]
+    }
+    if differences != {"prompt_contract_sha256", "change_sha256", "variant_sha256"}:
+        raise ValueError
+    return baseline, candidate
 
 
 def _validate_prepared_closure(root: Path, plan: Mapping[str, object], config: DciOperatorConfig) -> None:
@@ -304,41 +397,14 @@ def _status(arguments: tuple[str, ...]) -> dict[str, object]:
         raise ValueError
     receipts = output_root / "receipts"
     _private_directory(receipts)
-    completed = 0
-    failed = 0
-    cost = 0
-    for path in receipts.iterdir():
-        if _RECEIPT_NAME.fullmatch(path.name) is None:
-            raise ValueError
-        receipt = _json_private(path)
-        if type(receipt) is not dict:
-            raise ValueError
-        fields = {"schema", "plan_sha256", "status", "agent_operations", "judge_operations", "cost_microusd", "receipt_sha256"}
-        digest = receipt.pop("receipt_sha256", None)
-        if (
-            set(receipt) != fields - {"receipt_sha256"}
-            or receipt.get("schema") != "asterion.dci.pathlight.bright-optimization-receipt/v1"
-            or receipt.get("plan_sha256") != plan["plan_sha256"]
-            or receipt.get("status") not in {"completed", "failed", "cancelled"}
-            or any(type(receipt.get(name)) is not int for name in ("agent_operations", "judge_operations", "cost_microusd"))
-            or not 0 <= receipt["agent_operations"] <= _MAX_AGENT_OPERATIONS
-            or receipt["judge_operations"] != _MAX_JUDGE_OPERATIONS
-            or not 0 <= receipt["cost_microusd"] <= _MAX_COST_MICROUSD
-            or not _is_sha256(digest)
-            or not hmac.compare_digest(str(digest), _digest(receipt))
-        ):
-            raise ValueError
-        completed += receipt["agent_operations"]
-        failed += receipt["status"] == "failed"
-        cost += receipt["cost_microusd"]
-    if completed > _MAX_AGENT_OPERATIONS or cost > _MAX_COST_MICROUSD:
+    if any(receipts.iterdir()):
         raise ValueError
     return {
-        "status": "prepared" if completed == 0 else "partial",
-        "completed_agent_operations": completed,
+        "status": "prepared",
+        "completed_agent_operations": 0,
         "completed_judge_operations": 0,
-        "consumed_cost_microusd": cost,
-        "infrastructure_failure_count": failed,
+        "consumed_cost_microusd": 0,
+        "infrastructure_failure_count": 0,
         "max_agent_operations": _MAX_AGENT_OPERATIONS,
         "max_judge_operations": _MAX_JUDGE_OPERATIONS,
         "max_cost_microusd": _MAX_COST_MICROUSD,
@@ -349,10 +415,12 @@ def _status(arguments: tuple[str, ...]) -> dict[str, object]:
 def _read_plan(path: Path) -> dict[str, object]:
     value = _json_private(path)
     fields = {
-        "schema", "diagnosis_bundle_sha256", "proposal_sha256", "finding_sha256", "scope_sha256",
+        "schema", "diagnosis_bundle_sha256", "authorization_gate_report_sha256", "proposal_sha256", "finding_sha256", "scope_sha256",
         "success_criteria_sha256", "stop_criteria_sha256", "budget_sha256", "source_lock_path",
         "source_lock_sha256", "selected_case_scope_sha256", "baseline_query_plan_sha256",
-        "candidate_query_plan_sha256", "candidate_prompt_path", "output_root_device", "output_root_inode",
+        "candidate_query_plan_sha256", "baseline_variant_sha256", "candidate_variant_sha256",
+        "baseline_execution_config_sha256", "candidate_execution_config_sha256",
+        "candidate_prompt_path", "output_root_device", "output_root_inode",
         "max_agent_operations", "max_judge_operations", "max_cost_microusd", "max_infrastructure_failures",
         "max_native_attempts", "execution_authorized", "tasks", "plan_sha256",
     }
@@ -362,9 +430,11 @@ def _read_plan(path: Path) -> dict[str, object]:
     root_device = value.get("output_root_device")
     root_inode = value.get("output_root_inode")
     hashes = (
-        "diagnosis_bundle_sha256", "proposal_sha256", "finding_sha256", "scope_sha256",
+        "diagnosis_bundle_sha256", "authorization_gate_report_sha256", "proposal_sha256", "finding_sha256", "scope_sha256",
         "success_criteria_sha256", "stop_criteria_sha256", "budget_sha256", "source_lock_sha256",
         "selected_case_scope_sha256", "baseline_query_plan_sha256", "candidate_query_plan_sha256",
+        "baseline_variant_sha256", "candidate_variant_sha256",
+        "baseline_execution_config_sha256", "candidate_execution_config_sha256",
     )
     if (
         value.get("schema") != _PLAN_SCHEMA
@@ -393,8 +463,9 @@ def _read_authorization(path: Path, *, plan: Mapping[str, object]) -> dict[str, 
     canonical_plan = _read_plan_mapping(plan)
     value = _json_private(path)
     fields = {
-        "schema", "plan_sha256", "diagnosis_bundle_sha256", "proposal_sha256", "finding_sha256", "scope_sha256",
+        "schema", "plan_sha256", "diagnosis_bundle_sha256", "authorization_gate_report_sha256", "proposal_sha256", "finding_sha256", "scope_sha256",
         "source_lock_sha256", "selected_case_scope_sha256", "baseline_query_plan_sha256", "candidate_query_plan_sha256",
+        "baseline_variant_sha256", "candidate_variant_sha256", "baseline_execution_config_sha256", "candidate_execution_config_sha256",
         "output_root_device", "output_root_inode", "max_agent_operations", "max_judge_operations", "max_cost_microusd",
         "max_infrastructure_failures", "max_native_attempts", "execution_authorized", "operator_approval_sha256", "authorization_sha256",
     }
@@ -402,8 +473,9 @@ def _read_authorization(path: Path, *, plan: Mapping[str, object]) -> dict[str, 
         raise ValueError
     digest = value.pop("authorization_sha256", None)
     bound = (
-        "plan_sha256", "diagnosis_bundle_sha256", "proposal_sha256", "finding_sha256", "scope_sha256",
+        "plan_sha256", "diagnosis_bundle_sha256", "authorization_gate_report_sha256", "proposal_sha256", "finding_sha256", "scope_sha256",
         "source_lock_sha256", "selected_case_scope_sha256", "baseline_query_plan_sha256", "candidate_query_plan_sha256",
+        "baseline_variant_sha256", "candidate_variant_sha256", "baseline_execution_config_sha256", "candidate_execution_config_sha256",
         "output_root_device", "output_root_inode", "max_agent_operations", "max_judge_operations", "max_cost_microusd",
         "max_infrastructure_failures", "max_native_attempts",
     )
@@ -441,16 +513,18 @@ def _validate_plan_value(value: dict[str, object]) -> None:
         root_device = value.get("output_root_device")
         root_inode = value.get("output_root_inode")
         hashes = (
-            "diagnosis_bundle_sha256", "proposal_sha256", "finding_sha256", "scope_sha256",
+            "diagnosis_bundle_sha256", "authorization_gate_report_sha256", "proposal_sha256", "finding_sha256", "scope_sha256",
             "success_criteria_sha256", "stop_criteria_sha256", "budget_sha256", "source_lock_sha256",
             "selected_case_scope_sha256", "baseline_query_plan_sha256", "candidate_query_plan_sha256",
         )
         if (
             set(value) != {
-                "schema", "diagnosis_bundle_sha256", "proposal_sha256", "finding_sha256", "scope_sha256",
+                "schema", "diagnosis_bundle_sha256", "authorization_gate_report_sha256", "proposal_sha256", "finding_sha256", "scope_sha256",
                 "success_criteria_sha256", "stop_criteria_sha256", "budget_sha256", "source_lock_path",
                 "source_lock_sha256", "selected_case_scope_sha256", "baseline_query_plan_sha256",
-                "candidate_query_plan_sha256", "candidate_prompt_path", "output_root_device", "output_root_inode",
+                "candidate_query_plan_sha256", "baseline_variant_sha256", "candidate_variant_sha256",
+                "baseline_execution_config_sha256", "candidate_execution_config_sha256",
+                "candidate_prompt_path", "output_root_device", "output_root_inode",
                 "max_agent_operations", "max_judge_operations", "max_cost_microusd", "max_infrastructure_failures",
                 "max_native_attempts", "execution_authorized", "tasks",
             }
@@ -478,7 +552,8 @@ def _validate_plan_value(value: dict[str, object]) -> None:
 
 def _validate_tasks(raw: object, plan: Mapping[str, object]) -> None:
     fields = {
-        "task_id", "dataset_id", "instance_selector", "variant_role", "query_plan_sha256", "selection_path",
+        "task_id", "dataset_id", "instance_selector", "variant_role", "query_plan_sha256", "variant_sha256",
+        "execution_config_sha256", "selection_path",
         "selection_sha256", "selected_ids_sha256", "selected_case_sha256s", "case_limit", "native_attempt_limit",
         "max_judge_operations", "max_cost_microusd", "evidence_path", "receipt_path",
     }
@@ -493,6 +568,8 @@ def _validate_tasks(raw: object, plan: Mapping[str, object]) -> None:
             or item.get("instance_selector") != f"dci.{dataset_id}@1.0.0"
             or item.get("variant_role") != role
             or item.get("query_plan_sha256") != plan[f"{role}_query_plan_sha256"]
+            or item.get("variant_sha256") != plan[f"{role}_variant_sha256"]
+            or item.get("execution_config_sha256") != plan[f"{role}_execution_config_sha256"]
             or item.get("selection_path") != f"selections/{dataset_id}.json"
             or not _is_sha256(item.get("selection_sha256"))
             or not _is_sha256(item.get("selected_ids_sha256"))
@@ -697,6 +774,13 @@ def _private_directory(path: Path) -> None:
 def _absolute_path(value: str) -> Path:
     path = Path(value)
     if type(value) is not str or "\x00" in value or not path.is_absolute() or path != path.resolve():
+        raise ValueError
+    return path
+
+
+def _gate_report_path(value: str) -> Path:
+    path = _absolute_path(value)
+    if path.name != AUTHORIZATION_GATE_REPORT_FILENAME:
         raise ValueError
     return path
 

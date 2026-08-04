@@ -13,6 +13,7 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Literal
 
 from asterion.capabilities.dci.implementation.pathlight.conversion import (
@@ -32,11 +33,15 @@ from asterion.pathlight.diagnosis import (
     Proposal,
     validate_finding,
 )
+from asterion.pathlight._private_file import read_private_file, write_private_file
 from asterion.pathlight.evaluation import EvaluationRecord, MetricContract
 from asterion.pathlight.experiment import ExperimentBundle
 
 
 _ERROR = "DCI diagnosis is invalid"
+AUTHORIZATION_GATE_REPORT_FILENAME = "pathlight-dci-authorization-gate.json"
+_AUTHORIZATION_GATE_REPORT_SCHEMA = "asterion.dci.pathlight.authorization-gate-report/v1"
+_MAX_GATE_REPORT_BYTES = 64 * 1024
 _MAX_INT = (1 << 63) - 1
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _REQUIRED: dict[str, tuple[Literal["ir", "qa"], Literal["ndcg-at-10", "accuracy"], int]] = {
@@ -1098,6 +1103,171 @@ class DciDiagnosisReport:
 
     def to_mapping(self) -> dict[str, object]:
         return {**self._unsigned_mapping(), "report_sha256": self.report_sha256}
+
+
+def write_authorization_gate_report(report: DciDiagnosisReport, path: Path) -> None:
+    """Publish one coverage-complete, DCI-owned authorization gate report.
+
+    The report is evidence of a completed coverage observation only; it never
+    grants execution authority.  It is deliberately emitted from a verified
+    ``DciDiagnosisReport`` while the diagnosis command still owns its atomic
+    publication staging tree.
+    """
+
+    try:
+        if (
+            type(report) is not DciDiagnosisReport
+            or not isinstance(path, Path)
+            or path.name != AUTHORIZATION_GATE_REPORT_FILENAME
+            or report.coverage_experiment is None
+            or not report.coverage_experiment.complete
+            or report.query_decomposition_gate != "ready-for-authorization"
+        ):
+            raise ValueError
+        coverage = report.coverage_experiment
+        query = next(
+            item
+            for item in report.proposals
+            if item.code == "retrieval-query-decomposition"
+        )
+        if (
+            query.proposal_sha256
+            not in {item.proposal_sha256 for item in report.diagnosis_bundle.proposals}
+        ):
+            raise ValueError
+        value: dict[str, object] = {
+            "schema": _AUTHORIZATION_GATE_REPORT_SCHEMA,
+            "diagnosis_bundle_sha256": report.diagnosis_bundle.bundle_sha256,
+            "diagnosis_report_sha256": report.report_sha256,
+            "query_proposal_sha256": query.proposal_sha256,
+            "query_scope_sha256": query.case_scope_sha256,
+            "coverage_experiment_sha256": coverage.experiment_sha256,
+            "coverage_plan_sha256": coverage.plan_sha256,
+            "coverage_proposal_sha256": coverage.proposal_sha256,
+            "coverage_scope_sha256": coverage.scope_sha256,
+            "coverage_variant_sha256": coverage.variant_sha256,
+            "coverage_registry_set_sha256": coverage.registry_set_sha256,
+            "coverage_authorization_sha256": coverage.authorization_sha256,
+            "coverage_receipt_set_sha256": coverage.receipt_set_sha256,
+            "coverage_evidence_set_sha256": _digest(
+                "authorization-gate-evidence-set",
+                [
+                    {
+                        "dataset_id": item.dataset_id,
+                        "evidence_sha256": item.evidence_sha256,
+                    }
+                    for item in coverage.datasets
+                ],
+            ),
+            "coverage_dataset_count": len(coverage.datasets),
+            "coverage_agent_operation_count": coverage.agent_operation_count,
+            "coverage_judge_operation_count": coverage.judge_operation_count,
+            "coverage_infrastructure_failure_count": (
+                coverage.infrastructure_failure_count
+            ),
+            "coverage_complete": True,
+            "query_decomposition_gate": "ready-for-authorization",
+        }
+        value["gate_report_sha256"] = _canonical_gate_digest(value)
+        encoded = _canonical_gate_bytes(value)
+        _validate_authorization_gate_report(value)
+        write_private_file(path, encoded)
+    except Exception:
+        raise DciDiagnosisError(_ERROR) from None
+
+
+def read_authorization_gate_report(path: Path) -> dict[str, object]:
+    """Read a descriptor-verified, authorization-ready DCI gate report."""
+
+    try:
+        if not isinstance(path, Path) or path.name != AUTHORIZATION_GATE_REPORT_FILENAME:
+            raise ValueError
+        encoded = read_private_file(path, _MAX_GATE_REPORT_BYTES)
+        value = json.loads(encoded, object_pairs_hook=_unique_gate_object)
+        if encoded != _canonical_gate_bytes(value) or type(value) is not dict:
+            raise ValueError
+        _validate_authorization_gate_report(value)
+        return dict(value)
+    except Exception:
+        raise DciDiagnosisError(_ERROR) from None
+
+
+def _validate_authorization_gate_report(value: object) -> None:
+    fields = {
+        "schema",
+        "diagnosis_bundle_sha256",
+        "diagnosis_report_sha256",
+        "query_proposal_sha256",
+        "query_scope_sha256",
+        "coverage_experiment_sha256",
+        "coverage_plan_sha256",
+        "coverage_proposal_sha256",
+        "coverage_scope_sha256",
+        "coverage_variant_sha256",
+        "coverage_registry_set_sha256",
+        "coverage_authorization_sha256",
+        "coverage_receipt_set_sha256",
+        "coverage_evidence_set_sha256",
+        "coverage_dataset_count",
+        "coverage_agent_operation_count",
+        "coverage_judge_operation_count",
+        "coverage_infrastructure_failure_count",
+        "coverage_complete",
+        "query_decomposition_gate",
+        "gate_report_sha256",
+    }
+    if type(value) is not dict or set(value) != fields:
+        raise ValueError
+    unsigned = dict(value)
+    digest = unsigned.pop("gate_report_sha256")
+    hashes = (
+        "diagnosis_bundle_sha256",
+        "diagnosis_report_sha256",
+        "query_proposal_sha256",
+        "query_scope_sha256",
+        "coverage_experiment_sha256",
+        "coverage_plan_sha256",
+        "coverage_proposal_sha256",
+        "coverage_scope_sha256",
+        "coverage_variant_sha256",
+        "coverage_registry_set_sha256",
+        "coverage_authorization_sha256",
+        "coverage_receipt_set_sha256",
+        "coverage_evidence_set_sha256",
+    )
+    if (
+        unsigned.get("schema") != _AUTHORIZATION_GATE_REPORT_SCHEMA
+        or any(_sha256(unsigned.get(name)) != unsigned.get(name) for name in hashes)
+        or unsigned.get("coverage_dataset_count") != len(_COVERAGE_DATASETS)
+        or unsigned.get("coverage_agent_operation_count") != 50
+        or unsigned.get("coverage_judge_operation_count") != 0
+        or unsigned.get("coverage_infrastructure_failure_count") != 0
+        or unsigned.get("coverage_complete") is not True
+        or unsigned.get("query_decomposition_gate") != "ready-for-authorization"
+        or _sha256(digest) != digest
+        or not hmac.compare_digest(str(digest), _canonical_gate_digest(unsigned))
+    ):
+        raise ValueError
+
+
+def _canonical_gate_bytes(value: object) -> bytes:
+    return (
+        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        + "\n"
+    ).encode("utf-8")
+
+
+def _canonical_gate_digest(value: object) -> str:
+    return hashlib.sha256(_canonical_gate_bytes(value)).hexdigest()
+
+
+def _unique_gate_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError
+        value[key] = item
+    return value
 
 
 def _copy_workflow_metrics(value: object) -> DciWorkflowMetrics:

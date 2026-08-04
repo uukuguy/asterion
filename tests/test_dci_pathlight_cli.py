@@ -20,6 +20,10 @@ from asterion.capabilities.dci.implementation.pathlight.conversion import (
     recovered_run_to_evaluation_bundle,
     recovered_run_to_experiment,
 )
+from asterion.capabilities.dci.implementation.pathlight.diagnosis import (
+    AUTHORIZATION_GATE_REPORT_FILENAME,
+    read_authorization_gate_report,
+)
 from asterion.capabilities.dci.implementation.pathlight.recovery import (
     DciRecoveredRun,
     write_recovered_run,
@@ -199,6 +203,14 @@ class TestDciPathlightCli(unittest.TestCase):
             )
 
             self.assertEqual(code, 0)
+            gate = output / AUTHORIZATION_GATE_REPORT_FILENAME
+            self.assertEqual(gate.stat().st_mode & 0o777, 0o600)
+            gate_report = read_authorization_gate_report(gate)
+            self.assertEqual(
+                gate_report["query_decomposition_gate"],
+                "ready-for-authorization",
+            )
+            self.assertTrue(gate_report["coverage_complete"])
             rendered = (
                 output / "pathlight-dci-diagnosis.zh-CN.md"
             ).read_text(encoding="utf-8")

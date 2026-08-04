@@ -20,10 +20,13 @@ from asterion.capabilities.dci.implementation.pathlight.conversion import (
     recovered_run_to_experiment,
 )
 from asterion.capabilities.dci.implementation.pathlight.diagnosis import (
+    AUTHORIZATION_GATE_REPORT_FILENAME,
     DciCoverageExperimentObservation,
     coverage_evaluation_values,
     diagnose_recommended_pack,
+    read_authorization_gate_report,
     render_chinese_diagnosis,
+    write_authorization_gate_report,
 )
 from asterion.capabilities.dci.implementation.pathlight.recovery import (
     DCI_RECOVERY_FILENAME,
@@ -191,6 +194,8 @@ def _diagnose(
     }
     if coverage_experiment is not None:
         targets["evaluations"] = output_root / EVALUATION_BUNDLE_FILENAME
+        if coverage_experiment.complete:
+            targets["gate"] = output_root / AUTHORIZATION_GATE_REPORT_FILENAME
     _require_absent(tuple(targets.values()))
     recovered = tuple(_read_verified_recovery(root) for root in roots)
     if tuple(sorted(run.dataset_id for run in recovered)) != _TARGET_DATASET_IDS:
@@ -211,6 +216,8 @@ def _diagnose(
     }
     if coverage_experiment is not None:
         staging_targets["evaluations"] = staging_root / EVALUATION_BUNDLE_FILENAME
+        if coverage_experiment.complete:
+            staging_targets["gate"] = staging_root / AUTHORIZATION_GATE_REPORT_FILENAME
     failed = False
     try:
         write_diagnosis_bundle(report.diagnosis_bundle, staging_targets["diagnosis"])
@@ -220,6 +227,8 @@ def _diagnose(
             write_evaluation_bundle(
                 staging_targets["evaluations"], evaluations, (contract,)
             )
+        if coverage_experiment is not None and coverage_experiment.complete:
+            write_authorization_gate_report(report, staging_targets["gate"])
         if read_diagnosis_bundle(
             staging_targets["diagnosis"]
         ) != report.diagnosis_bundle or not hmac.compare_digest(
@@ -232,6 +241,14 @@ def _diagnose(
             if (
                 stored.evaluations != coverage_values[1]
                 or stored.metric_contracts != (coverage_values[0],)
+            ):
+                raise ValueError
+        if coverage_experiment is not None and coverage_experiment.complete:
+            gate = read_authorization_gate_report(staging_targets["gate"])
+            if (
+                gate["diagnosis_bundle_sha256"]
+                != report.diagnosis_bundle.bundle_sha256
+                or gate["diagnosis_report_sha256"] != report.report_sha256
             ):
                 raise ValueError
         _publish_staged_outputs(

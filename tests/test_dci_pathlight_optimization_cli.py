@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -22,6 +23,10 @@ from asterion.applications.dci_agent_lite.pathlight_optimization_cli import (
     read_optimization_plan,
 )
 from asterion.pathlight._private_file import write_private_file
+
+
+_GATE_SCHEMA = "asterion.dci.pathlight.authorization-gate-report/v1"
+_GATE_FILENAME = "pathlight-dci-authorization-gate.json"
 
 
 def _sha(value: str) -> str:
@@ -105,6 +110,39 @@ def _write_lock(_lock: object, target: Path) -> None:
     write_private_file(target, b'{"protocol":"test"}\n')
 
 
+def _gate(
+    diagnosis: SimpleNamespace, query: SimpleNamespace, *, complete: bool = True
+) -> dict[str, object]:
+    """A canonical DCI-owned gate-report fixture; never an execution authority."""
+
+    value: dict[str, object] = {
+        "schema": _GATE_SCHEMA,
+        "diagnosis_bundle_sha256": diagnosis.bundle_sha256,
+        "diagnosis_report_sha256": _sha("diagnosis report"),
+        "query_proposal_sha256": query.proposal_sha256,
+        "query_scope_sha256": query.scope_sha256,
+        "coverage_experiment_sha256": _sha("coverage experiment"),
+        "coverage_plan_sha256": _sha("coverage plan"),
+        "coverage_proposal_sha256": _sha("coverage proposal"),
+        "coverage_scope_sha256": _sha("coverage scope"),
+        "coverage_variant_sha256": _sha("coverage variant"),
+        "coverage_registry_set_sha256": _sha("coverage registry set"),
+        "coverage_authorization_sha256": _sha("coverage authorization"),
+        "coverage_receipt_set_sha256": _sha("coverage receipts"),
+        "coverage_evidence_set_sha256": _sha("coverage evidence"),
+        "coverage_dataset_count": 5,
+        "coverage_agent_operation_count": 50,
+        "coverage_judge_operation_count": 0,
+        "coverage_infrastructure_failure_count": 0,
+        "coverage_complete": complete,
+        "query_decomposition_gate": (
+            "ready-for-authorization" if complete else "blocked-by-coverage"
+        ),
+    }
+    value["gate_report_sha256"] = _digest(value)
+    return value
+
+
 class _OptimizationFixture:
     def __init__(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -148,7 +186,21 @@ class _OptimizationFixture:
             ),
         )
         self.config = SimpleNamespace(
-            benchmark_inputs=SimpleNamespace(dataset_roots=self.datasets)
+            benchmark_inputs=SimpleNamespace(
+                dataset_roots=self.datasets, private_environment={}
+            )
+        )
+        self.gate = self.root / _GATE_FILENAME
+        write_private_file(
+            self.gate,
+            (
+                json.dumps(
+                    _gate(self.diagnosis, self.query),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n"
+            ).encode(),
         )
 
     def close(self) -> None:
@@ -180,6 +232,7 @@ class _OptimizationFixture:
                 (
                     "prepare",
                     "--diagnosis-file", str(self.root / "diagnosis.json"),
+                    "--gate-report-file", str(self.gate),
                     "--proposal-sha256", self.query.proposal_sha256,
                     "--output-root", str(self.output),
                 ),
@@ -199,6 +252,7 @@ def _authorization(plan: dict[str, object]) -> dict[str, object]:
         "schema": _AUTHORIZATION_SCHEMA,
         "plan_sha256": plan["plan_sha256"],
         "diagnosis_bundle_sha256": plan["diagnosis_bundle_sha256"],
+        "authorization_gate_report_sha256": plan["authorization_gate_report_sha256"],
         "proposal_sha256": plan["proposal_sha256"],
         "finding_sha256": plan["finding_sha256"],
         "scope_sha256": plan["scope_sha256"],
@@ -206,6 +260,10 @@ def _authorization(plan: dict[str, object]) -> dict[str, object]:
         "selected_case_scope_sha256": plan["selected_case_scope_sha256"],
         "baseline_query_plan_sha256": plan["baseline_query_plan_sha256"],
         "candidate_query_plan_sha256": plan["candidate_query_plan_sha256"],
+        "baseline_variant_sha256": plan["baseline_variant_sha256"],
+        "candidate_variant_sha256": plan["candidate_variant_sha256"],
+        "baseline_execution_config_sha256": plan["baseline_execution_config_sha256"],
+        "candidate_execution_config_sha256": plan["candidate_execution_config_sha256"],
         "output_root_device": plan["output_root_device"],
         "output_root_inode": plan["output_root_inode"],
         "max_agent_operations": 80,
@@ -246,8 +304,91 @@ class TestPrepare(unittest.TestCase):
         self.assertIsInstance(tasks, list)
         assert isinstance(tasks, list)
         self.assertEqual(len(tasks), 8)
+        self.assertNotEqual(
+            plan["baseline_variant_sha256"], plan["candidate_variant_sha256"]
+        )
+        self.assertNotEqual(
+            plan["baseline_execution_config_sha256"],
+            plan["candidate_execution_config_sha256"],
+        )
+        for task in tasks:
+            self.assertEqual(
+                task["variant_sha256"],
+                plan[f"{task['variant_role']}_variant_sha256"],
+            )
+            self.assertEqual(
+                task["execution_config_sha256"],
+                plan[f"{task['variant_role']}_execution_config_sha256"],
+            )
         self.assertNotIn("SENTINEL_PRIVATE_QUERY", json.dumps(output))
         provider.assert_not_called()
+
+    def test_prepare_rejects_missing_incomplete_tampered_or_unsafe_gate_report(self) -> None:
+        for mutation in (
+            "missing",
+            "incomplete",
+            "tampered",
+            "mode",
+            "symlink",
+            "fifo",
+            "oversized",
+        ):
+            with self.subTest(mutation=mutation):
+                fixture = _OptimizationFixture()
+                self.addCleanup(fixture.close)
+                if mutation == "missing":
+                    fixture.gate.unlink()
+                elif mutation == "incomplete":
+                    fixture.gate.unlink()
+                    write_private_file(
+                        fixture.gate,
+                        (
+                            json.dumps(
+                                _gate(fixture.diagnosis, fixture.query, complete=False),
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            )
+                            + "\n"
+                        ).encode(),
+                    )
+                elif mutation == "tampered":
+                    value = _gate(fixture.diagnosis, fixture.query)
+                    value["query_scope_sha256"] = "0" * 64
+                    fixture.gate.unlink()
+                    write_private_file(
+                        fixture.gate,
+                        (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+                    )
+                elif mutation == "mode":
+                    fixture.gate.chmod(0o644)
+                else:
+                    if mutation == "symlink":
+                        target = fixture.root / "gate-target.json"
+                        fixture.gate.rename(target)
+                        fixture.gate.symlink_to(target)
+                    elif mutation == "fifo":
+                        fixture.gate.unlink()
+                        os.mkfifo(fixture.gate, 0o600)
+                    else:
+                        fixture.gate.write_bytes(b"x" * ((1 << 16) + 1))
+                        fixture.gate.chmod(0o600)
+                stdout, stderr = io.StringIO(), io.StringIO()
+                code = main(
+                    (
+                        "prepare",
+                        "--diagnosis-file", str(fixture.root / "diagnosis.json"),
+                        "--gate-report-file", str(fixture.gate),
+                        "--proposal-sha256", fixture.query.proposal_sha256,
+                        "--output-root", str(fixture.output),
+                    ),
+                    stdout=stdout,
+                    stderr=stderr,
+                    repo_root=fixture.root,
+                    env_file=None,
+                    environment={},
+                )
+                self.assertEqual(code, 2)
+                self.assertEqual(stdout.getvalue(), "")
 
 
 class TestAuthorization(unittest.TestCase):
@@ -264,6 +405,35 @@ class TestAuthorization(unittest.TestCase):
         self.assertEqual(value["max_agent_operations"], 80)
         self.assertEqual(value["max_judge_operations"], 0)
 
+    def test_authorization_rejects_variant_or_execution_config_drift(self) -> None:
+        fixture = _OptimizationFixture()
+        self.addCleanup(fixture.close)
+        self.assertEqual(fixture.prepare()[0], 0)
+        plan = read_optimization_plan(fixture.output / PLAN_FILENAME)
+        authorization = fixture.root / "authorization.json"
+        for field in (
+            "baseline_variant_sha256",
+            "candidate_variant_sha256",
+            "baseline_execution_config_sha256",
+            "candidate_execution_config_sha256",
+        ):
+            with self.subTest(field=field):
+                value = _authorization(plan)
+                value[field] = "0" * 64
+                value["authorization_sha256"] = _digest(
+                    {key: item for key, item in value.items() if key != "authorization_sha256"}
+                )
+                write_private_file(
+                    authorization,
+                    (
+                        json.dumps(value, sort_keys=True, separators=(",", ":"))
+                        + "\n"
+                    ).encode(),
+                )
+                with self.assertRaises(ValueError):
+                    read_optimization_authorization(authorization, plan=plan)
+                authorization.unlink()
+
     def test_authorization_rejects_mutated_boundaries_and_unsafe_file_modes(self) -> None:
         fixture = _OptimizationFixture()
         self.addCleanup(fixture.close)
@@ -274,6 +444,7 @@ class TestAuthorization(unittest.TestCase):
         for field in (
             "plan_sha256",
             "diagnosis_bundle_sha256",
+            "authorization_gate_report_sha256",
             "proposal_sha256",
             "finding_sha256",
             "scope_sha256",
@@ -281,6 +452,10 @@ class TestAuthorization(unittest.TestCase):
             "selected_case_scope_sha256",
             "baseline_query_plan_sha256",
             "candidate_query_plan_sha256",
+            "baseline_variant_sha256",
+            "candidate_variant_sha256",
+            "baseline_execution_config_sha256",
+            "candidate_execution_config_sha256",
             "output_root_device",
             "output_root_inode",
             "max_agent_operations",
@@ -326,6 +501,21 @@ class TestStatus(unittest.TestCase):
         output = json.loads(stdout.getvalue())
         self.assertEqual((code, output["completed_agent_operations"]), (0, 0))
         provider.assert_not_called()
+
+    def test_status_rejects_every_receipt_before_task_six_exists(self) -> None:
+        fixture = _OptimizationFixture()
+        self.addCleanup(fixture.close)
+        self.assertEqual(fixture.prepare()[0], 0)
+        receipt = fixture.output / "receipts" / "receipt-1-0000.json"
+        write_private_file(receipt, b"{}\n")
+        stdout, stderr = io.StringIO(), io.StringIO()
+        self.assertEqual(
+            main(
+                ("status", "--plan-file", str(fixture.output / PLAN_FILENAME), "--output-root", str(fixture.output)),
+                stdout=stdout, stderr=stderr, repo_root=fixture.root, env_file=None, environment={},
+            ),
+            2,
+        )
 
 
 class TestRouting(unittest.TestCase):

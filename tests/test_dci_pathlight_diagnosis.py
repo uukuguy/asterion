@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import tempfile
 import unittest
 from dataclasses import replace
+from pathlib import Path
 from typing import Literal
 
 from asterion.capabilities.dci.implementation.pathlight.diagnosis import (
+    AUTHORIZATION_GATE_REPORT_FILENAME,
     DciAggregateWorkflowMetrics,
     DciCoverageDatasetObservation,
     DciCoverageExperimentObservation,
@@ -19,7 +22,9 @@ from asterion.capabilities.dci.implementation.pathlight.diagnosis import (
     DciWorkflowMetrics,
     diagnose_recommended_pack,
     coverage_evaluation_values,
+    read_authorization_gate_report,
     render_chinese_diagnosis,
+    write_authorization_gate_report,
 )
 
 from asterion.capabilities.dci.implementation.pathlight.recovery import (
@@ -232,6 +237,28 @@ class TestDciPathlightDiagnosis(unittest.TestCase):
             {item.evidence_sha256 for item in coverage.datasets}
             .isdisjoint(report.diagnosis_bundle.evaluation_sha256s)
         )
+
+    def test_only_complete_real_diagnosis_can_publish_a_gate_report(self) -> None:
+        ready = diagnose_recommended_pack(
+            self.six_runs, coverage_experiment=_coverage_pack()
+        )
+        blocked = diagnose_recommended_pack(
+            self.six_runs, coverage_experiment=_coverage_pack(available_queries=9)
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            root.chmod(0o700)
+            path = root / AUTHORIZATION_GATE_REPORT_FILENAME
+            write_authorization_gate_report(ready, path)
+            stored = read_authorization_gate_report(path)
+            self.assertEqual(
+                stored["diagnosis_bundle_sha256"], ready.diagnosis_bundle.bundle_sha256
+            )
+            self.assertEqual(stored["diagnosis_report_sha256"], ready.report_sha256)
+            self.assertTrue(stored["coverage_complete"])
+            path.unlink()
+            with self.assertRaises(DciDiagnosisError):
+                write_authorization_gate_report(blocked, path)
 
     def test_partial_or_integrity_failed_coverage_keeps_gate_blocked(self) -> None:
         for coverage in (
