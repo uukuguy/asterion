@@ -128,6 +128,21 @@ class PathlightInteropContractTests(unittest.TestCase):
                 ExportEnvelope(**valid, payload=payload)  # type: ignore[arg-type]
         self.assertFalse(_HostileMapping.method_called)
 
+    def test_export_envelope_rejects_cross_field_enum_values(self) -> None:
+        digest = "a" * 64
+        for event_kind, payload in (
+            (
+                "decision.observe",
+                {"result": "quality-and-efficiency-met"},
+            ),
+            ("decision.observe", {"reason": "accepted"}),
+            ("trial-history.upsert", {"evidence_state": "observed"}),
+            ("case-trial.upsert", {"evidence_state": "complete"}),
+        ):
+            with self.subTest(event_kind=event_kind, payload=payload):
+                with self.assertRaises(PathlightError):
+                    ExportEnvelope("opik", "1.0.0", event_kind, digest, payload)  # type: ignore[arg-type]
+
     def test_export_envelope_rejects_arbitrary_digest_and_version_keys(self) -> None:
         valid_payload = {"trace_sha256": "b" * 64, "status": "completed"}
         for key, value in (

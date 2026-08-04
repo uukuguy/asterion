@@ -311,16 +311,33 @@ def _diagnosis_envelopes(
 def _optimization_envelopes(
     bundle: OptimizationBundle, mapping_version: str
 ) -> tuple[ExportEnvelope, ...]:
+    decisions_by_history: dict[str, Decision] = {}
+    history_sha256s = {history.trial_history_sha256 for history in bundle.histories}
+    for decision in bundle.decisions:
+        if (
+            decision.trial_history_sha256 not in history_sha256s
+            or decision.trial_history_sha256 in decisions_by_history
+        ):
+            raise PathlightError("Pathlight Opik export mapping is invalid")
+        decisions_by_history[decision.trial_history_sha256] = decision
+    if set(decisions_by_history) != history_sha256s:
+        raise PathlightError("Pathlight Opik export mapping is invalid")
     values: list[ExportEnvelope] = []
     for history in bundle.histories:
-        values.append(_trial_history_envelope(history, mapping_version))
+        values.append(
+            _trial_history_envelope(
+                history,
+                decisions_by_history[history.trial_history_sha256].success_criteria_sha256,
+                mapping_version,
+            )
+        )
     for decision in bundle.decisions:
         values.append(_decision_envelope(decision, mapping_version))
     return tuple(values)
 
 
 def _trial_history_envelope(
-    history: TrialHistory, mapping_version: str
+    history: TrialHistory, success_criteria_sha256: str, mapping_version: str
 ) -> ExportEnvelope:
     payload = {
         "trial_history_sha256": history.trial_history_sha256,
@@ -328,6 +345,7 @@ def _trial_history_envelope(
         "baseline_variant_sha256": history.baseline_variant_sha256,
         "candidate_variant_sha256": history.candidate_variant_sha256,
         "evidence_state": history.evidence_state,
+        "success_criteria_sha256": success_criteria_sha256,
         "baseline_completed_count": history.baseline_completed_count,
         "candidate_completed_count": history.candidate_completed_count,
         "baseline_agent_cost_microusd": history.baseline_agent_cost_microusd,

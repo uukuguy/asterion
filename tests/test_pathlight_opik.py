@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import unittest
+from typing import cast
 
 from asterion.pathlight.diagnosis import DiagnosisBundle, Finding, Proposal
 from asterion.pathlight.evaluation import (
@@ -27,6 +28,7 @@ from asterion.pathlight.optimization import (
     TrialHistory,
 )
 from asterion.pathlight.opik import map_opik_exports
+import asterion.pathlight.opik as opik
 from asterion.pathlight.protocol import (
     PathlightError,
     TraceEvent,
@@ -525,6 +527,7 @@ class PathlightOpikMappingTests(unittest.TestCase):
             {
                 "trial_history_sha256", "experiment_plan_sha256",
                 "baseline_variant_sha256", "candidate_variant_sha256", "evidence_state",
+                "success_criteria_sha256",
                 "baseline_completed_count", "candidate_completed_count",
                 "baseline_mean_microunits", "candidate_mean_microunits",
                 "mean_gain_microunits", "baseline_agent_cost_microusd",
@@ -542,7 +545,20 @@ class PathlightOpikMappingTests(unittest.TestCase):
                 "operator_approval_sha256", "result", "reason",
             },
         )
+        self.assertEqual(
+            payloads["trial-history.upsert"]["success_criteria_sha256"],
+            payloads["decision.observe"]["success_criteria_sha256"],
+        )
         self.assertNotIn("SENTINEL", json.dumps([item.to_mapping() for item in envelopes]))
+
+    def test_mapping_rejects_history_without_a_paired_decision(self) -> None:
+        _, _, _, _, optimization = _optimization_fixture()
+        incomplete = object.__new__(OptimizationBundle)
+        object.__setattr__(incomplete, "histories", optimization.histories)
+        object.__setattr__(incomplete, "decisions", ())
+
+        with self.assertRaises(PathlightError):
+            opik._optimization_envelopes(cast(OptimizationBundle, incomplete), "1.0.0")
 
     def test_mapping_rejects_missing_or_duplicate_optimization_closure(self) -> None:
         traces, experiment, evaluations, diagnosis, optimization = _optimization_fixture()

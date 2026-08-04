@@ -158,47 +158,6 @@ _VERSION_PAYLOAD_FIELDS = frozenset({"snapshot_version"})
 _SAFE_BOOLEAN_FIELDS = frozenset(
     {"execution_authorized", "requires_operator_authorization"}
 )
-_SAFE_STRING_VALUES = frozenset(
-    {
-        "accepted",
-        "artifact",
-        "assembly",
-        "cancelled",
-        "context-frame",
-        "completed",
-        "evaluation",
-        "failed",
-        "host-service",
-        "inconclusive",
-        "missing",
-        "model-call",
-        "observed",
-        "plan",
-        "proposed",
-        "recovered",
-        "rejected",
-        "runtime",
-        "skipped",
-        "started",
-        "task",
-        "tool-call",
-        "trace",
-        "span",
-        "thread",
-        "experiment",
-        "case-trial",
-        "complete",
-        "incomplete",
-        "quality-and-efficiency-met",
-        "quality-threshold-missed",
-        "cost-threshold-exceeded",
-        "time-threshold-exceeded",
-        "multiple-thresholds-missed",
-        "incomplete-trials",
-        "comparison-invalid",
-        "evidence-closure-invalid",
-    }
-)
 _EXPORT_PAYLOAD_FIELDS_BY_EVENT_KIND = {
     "trace.upsert": frozenset({"trace_sha256", "kind", "status", "duration_ns"}),
     "span.upsert": frozenset(
@@ -263,6 +222,7 @@ _EXPORT_PAYLOAD_FIELDS_BY_EVENT_KIND = {
             "baseline_variant_sha256",
             "candidate_variant_sha256",
             "evidence_state",
+            "success_criteria_sha256",
             "baseline_completed_count",
             "candidate_completed_count",
             "baseline_mean_microunits",
@@ -304,6 +264,50 @@ _EXPORT_PAYLOAD_FIELDS_BY_EVENT_KIND = {
         }
     ),
 }
+_STRING_VALUES_BY_EXPORT_EVENT_KIND: dict[str, Mapping[str, frozenset[str]]] = {
+    "trace.upsert": {
+        "kind": frozenset(
+            {
+                "artifact", "assembly", "context-frame", "evaluation",
+                "host-service", "model-call", "plan", "runtime", "task", "tool-call",
+            }
+        ),
+        "status": frozenset({"completed", "failed", "cancelled", "skipped"}),
+    },
+    "span.upsert": {
+        "kind": frozenset(
+            {
+                "artifact", "assembly", "context-frame", "evaluation",
+                "host-service", "model-call", "plan", "runtime", "task", "tool-call",
+            }
+        ),
+        "status": frozenset({"completed", "failed", "cancelled", "skipped"}),
+    },
+    "thread.upsert": {},
+    "dataset.upsert": {},
+    "experiment.upsert": {"status": frozenset({"proposed"})},
+    "case-trial.upsert": {
+        "evidence_state": frozenset({"observed", "recovered", "missing"})
+    },
+    "evaluation.upsert": {
+        "status": frozenset({"observed", "recovered", "missing"})
+    },
+    "trial-history.upsert": {
+        "evidence_state": frozenset({"complete", "incomplete"})
+    },
+    "proposal.observe": {"status": frozenset({"proposed"})},
+    "decision.observe": {
+        "result": frozenset({"accepted", "rejected", "inconclusive"}),
+        "reason": frozenset(
+            {
+                "quality-and-efficiency-met", "quality-threshold-missed",
+                "cost-threshold-exceeded", "time-threshold-exceeded",
+                "multiple-thresholds-missed", "incomplete-trials",
+                "comparison-invalid", "evidence-closure-invalid",
+            }
+        ),
+    },
+}
 _EXTERNAL_OBSERVATION_PAYLOAD_FIELDS = frozenset(
     {
         "budget_sha256",
@@ -314,6 +318,7 @@ _EXTERNAL_OBSERVATION_PAYLOAD_FIELDS = frozenset(
         "success_criteria_sha256",
     }
 )
+_EXTERNAL_SAFE_STRING_VALUES = {"status": frozenset({"proposed"})}
 _ENVELOPE_FIELDS = frozenset(
     {
         "schema",
@@ -401,7 +406,10 @@ def _event_kind(value: object) -> ExportEventKind:
 
 
 def _safe_payload(
-    value: object, *, allowed_fields: frozenset[str]
+    value: object,
+    *,
+    allowed_fields: frozenset[str],
+    string_values_by_field: Mapping[str, frozenset[str]],
 ) -> MappingProxyType[str, SafeScalar]:
     if type(value) is not dict:
         raise ValueError
@@ -442,8 +450,8 @@ def _safe_payload(
             copied[key] = item
         elif key in _VERSION_PAYLOAD_FIELDS:
             copied[key] = _semver(item)
-        elif key in {"status", "kind", "evidence_state", "result", "reason"}:
-            if type(item) is not str or item not in _SAFE_STRING_VALUES:
+        elif key in string_values_by_field:
+            if type(item) is not str or item not in string_values_by_field[key]:
                 raise ValueError
             copied[key] = item
         else:
@@ -491,6 +499,9 @@ class ExportEnvelope:
             payload = _safe_payload(
                 self.payload,
                 allowed_fields=_EXPORT_PAYLOAD_FIELDS_BY_EVENT_KIND[self.event_kind],
+                string_values_by_field=_STRING_VALUES_BY_EXPORT_EVENT_KIND[
+                    self.event_kind
+                ],
             )
         except Exception:
             raise PathlightError("Pathlight export envelope is invalid") from None
@@ -595,7 +606,9 @@ class ExternalObservation:
             ):
                 raise ValueError
             payload = _safe_payload(
-                self.payload, allowed_fields=_EXTERNAL_OBSERVATION_PAYLOAD_FIELDS
+                self.payload,
+                allowed_fields=_EXTERNAL_OBSERVATION_PAYLOAD_FIELDS,
+                string_values_by_field=_EXTERNAL_SAFE_STRING_VALUES,
             )
         except Exception:
             raise PathlightError("Pathlight external observation is invalid") from None
