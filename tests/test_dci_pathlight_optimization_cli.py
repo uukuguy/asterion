@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 import os
+import stat
 import shutil
 import tempfile
 import unittest
@@ -1193,6 +1194,67 @@ class TestExecute(unittest.TestCase):
                     stdout=io.StringIO(), stderr=io.StringIO(), repo_root=fixture.root,
                     env_file=None, environment={},
                 ), 2)
+
+
+class TestFinalize(unittest.TestCase):
+    def test_finalize_without_native_receipts_publishes_inconclusive_closure_provider_free(self) -> None:
+        fixture = _OptimizationFixture()
+        self.addCleanup(fixture.close)
+        self.assertEqual(fixture.prepare()[0], 0)
+        plan = read_optimization_plan(fixture.output / PLAN_FILENAME)
+        authorization = fixture.root / "authorization.json"
+        write_private_file(authorization, _canonical_bytes(_authorization(plan)))
+        stdout, stderr = io.StringIO(), io.StringIO()
+
+        code = main(
+            (
+                "finalize", "--plan-file", str(fixture.output / PLAN_FILENAME),
+                "--authorization-file", str(authorization), "--diagnosis-file", str(fixture.diagnosis_file),
+                "--output-root", str(fixture.output),
+            ),
+            stdout=stdout, stderr=stderr, repo_root=fixture.root, env_file=fixture.root / ".env", environment={},
+        )
+
+        self.assertEqual(code, 0, stderr.getvalue())
+        result = json.loads(stdout.getvalue())
+        self.assertEqual(result["decision"], "inconclusive")
+        self.assertEqual(result["reason"], "incomplete-trials")
+        report = (fixture.output / "pathlight-bright-optimization.zh-CN.md").read_text(encoding="utf-8")
+        self.assertIn("40 条基线 + 40 条候选", report)
+        self.assertIn("不能作为论文复现", report)
+        self.assertNotIn("SENTINEL_PRIVATE_QUERY", report)
+        names = {
+            "pathlight-experiment.json", "pathlight-evaluations.json", "pathlight-optimization.json",
+            "pathlight-diagnosis.json", "pathlight-bright-optimization.zh-CN.md",
+        }
+        self.assertTrue(all((fixture.output / name).is_file() for name in names))
+        self.assertTrue(all(stat.S_IMODE((fixture.output / name).stat().st_mode) == 0o600 for name in names))
+        unchanged = {name: (fixture.output / name).read_bytes() for name in names}
+        rerun_stdout, rerun_stderr = io.StringIO(), io.StringIO()
+        self.assertEqual(main(
+            (
+                "finalize", "--plan-file", str(fixture.output / PLAN_FILENAME),
+                "--authorization-file", str(authorization), "--diagnosis-file", str(fixture.diagnosis_file),
+                "--output-root", str(fixture.output),
+            ), stdout=rerun_stdout, stderr=rerun_stderr, repo_root=fixture.root,
+            env_file=fixture.root / ".env", environment={},
+        ), 0, rerun_stderr.getvalue())
+        conflict = fixture.output / "pathlight-evaluations.json"
+        conflict.chmod(0o600)
+        conflict.write_bytes(b"conflict")
+        conflict.chmod(0o600)
+        conflict_stdout, conflict_stderr = io.StringIO(), io.StringIO()
+        self.assertEqual(main(
+            (
+                "finalize", "--plan-file", str(fixture.output / PLAN_FILENAME),
+                "--authorization-file", str(authorization), "--diagnosis-file", str(fixture.diagnosis_file),
+                "--output-root", str(fixture.output),
+            ), stdout=conflict_stdout, stderr=conflict_stderr, repo_root=fixture.root,
+            env_file=fixture.root / ".env", environment={},
+        ), 2)
+        for name, expected in unchanged.items():
+            if name != conflict.name:
+                self.assertEqual((fixture.output / name).read_bytes(), expected)
 
 
 class TestRouting(unittest.TestCase):

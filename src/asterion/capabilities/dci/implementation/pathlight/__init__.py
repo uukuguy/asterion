@@ -33,6 +33,15 @@ from .provider_call_recovery import (
     DciProviderCallRecoveryError,
     recover_provider_call_companion,
 )
+from .optimization import (
+    BRIGHT_OPTIMIZATION_CRITERIA,
+    BrightNativeBatch,
+    BrightOptimizationClosure,
+    DciBrightOptimizationError,
+    finalize_bright_optimization,
+    read_native_case_lineage,
+    render_bright_optimization_chinese,
+)
 
 __all__ = (
     "DciRecoveredCase",
@@ -60,4 +69,11 @@ __all__ = (
     "render_chinese_diagnosis",
     "DciProviderCallRecoveryError",
     "recover_provider_call_companion",
+    "BRIGHT_OPTIMIZATION_CRITERIA",
+    "BrightNativeBatch",
+    "BrightOptimizationClosure",
+    "DciBrightOptimizationError",
+    "finalize_bright_optimization",
+    "read_native_case_lineage",
+    "render_bright_optimization_chinese",
 )

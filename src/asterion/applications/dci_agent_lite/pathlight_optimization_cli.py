@@ -56,6 +56,11 @@ from asterion.capabilities.dci.implementation.pathlight.conversion import (
     recovered_run_to_evaluation_bundle,
     recovered_run_to_experiment,
 )
+from asterion.capabilities.dci.implementation.pathlight.optimization import (
+    BrightNativeBatch,
+    finalize_bright_optimization,
+    render_bright_optimization_chinese,
+)
 from asterion.capabilities.dci.implementation.research.query_planning import (
     BASELINE_QUERY_PLAN,
     DECOMPOSED_QUERY_PLAN,
@@ -68,7 +73,11 @@ from asterion.capabilities.dci.implementation.datasets import (
 )
 from asterion.pathlight._private_file import read_private_file, write_private_file
 from asterion.pathlight.diagnosis import Proposal, read_diagnosis_bundle
+from asterion.pathlight.diagnosis import write_diagnosis_bundle
+from asterion.pathlight.evaluation import write_evaluation_bundle
 from asterion.pathlight.experiment import Variant
+from asterion.pathlight.experiment import write_experiment_bundle
+from asterion.pathlight.optimization import write_optimization_bundle
 from asterion.workflow_evidence import read_workflow_observation_bundle
 
 
@@ -123,6 +132,8 @@ def main(
             )
         elif values[0] == "status":
             result = _status(values[1:])
+        elif values[0] == "finalize":
+            result = _finalize(values[1:])
         elif values[0] in {"execute", "resume"}:
             command = _execute(
                 values[1:],
@@ -1036,6 +1047,116 @@ def _receipt_int(receipt: Mapping[str, object], name: str) -> int:
     if type(value) is not int:
         raise ValueError
     return value
+
+
+def _finalize(arguments: tuple[str, ...]) -> dict[str, object]:
+    """Re-read native evidence and publish one provider-free finalization."""
+
+    options = _exact_options(
+        arguments,
+        {"--plan-file", "--authorization-file", "--diagnosis-file", "--output-root"},
+    )
+    plan_path = _absolute_path(options["--plan-file"])
+    output_root = _operator_root(options["--output-root"])
+    if plan_path.parent != output_root:
+        raise ValueError
+    plan = _read_plan(plan_path)
+    authorization = _read_authorization(_absolute_path(options["--authorization-file"]), plan=plan)
+    _validate_execution_root(output_root, plan)
+    receipts = _read_receipt_chain(
+        output_root / "receipts", plan=plan,
+        authorization_sha256=str(authorization["authorization_sha256"]),
+    )
+    diagnosis = read_diagnosis_bundle(_absolute_path(options["--diagnosis-file"]))
+    if diagnosis.bundle_sha256 != plan["diagnosis_bundle_sha256"]:
+        raise ValueError
+    tasks = plan.get("tasks")
+    if type(tasks) is not list or len(tasks) != 8:
+        raise ValueError
+    batches: list[BrightNativeBatch] = []
+    for receipt, task in zip(receipts, tasks):
+        if type(task) is not dict:
+            raise ValueError
+        evidence_root = output_root / str(task["evidence_path"])
+        native_root = _native_root(evidence_root, str(task["dataset_id"])) if receipt["native_evidence_state"] == "complete" else None
+        recovered = read_completed_dci_run(native_root, str(task["dataset_id"])) if native_root is not None else None
+        bundles = _workflow_bundle_sha256s(native_root) if native_root is not None else ()
+        if native_root is not None and _digest({"workflow_bundle_sha256s": list(bundles)}) != receipt["workflow_bundle_set_sha256"]:
+            raise ValueError
+        batches.append(BrightNativeBatch(str(task["dataset_id"]), str(task["variant_role"]), receipt, recovered, bundles, native_root))
+    closure = finalize_bright_optimization(
+        plan=plan, authorization=authorization, receipts=receipts, native_batches=batches, diagnosis=diagnosis,
+    )
+    report = render_bright_optimization_chinese(closure)
+    _publish_finalization(output_root, closure, report)
+    return {
+        "experiment_bundle_sha256": closure.experiment.bundle_sha256,
+        "evaluation_bundle_sha256": closure.evaluations.bundle_sha256,
+        "optimization_bundle_sha256": closure.optimization.bundle_sha256,
+        "diagnosis_bundle_sha256": closure.diagnosis.bundle_sha256,
+        "decision": closure.optimization.decisions[0].result,
+        "reason": closure.optimization.decisions[0].reason,
+    }
+
+
+def _native_root(evidence_root: Path, expected_dataset_id: str) -> Path:
+    _private_directory(evidence_root)
+    outputs = evidence_root / "outputs"
+    _private_directory(outputs)
+    runs = tuple(sorted(outputs.iterdir(), key=lambda item: item.name))
+    if len(runs) != 1 or not runs[0].is_dir() or runs[0].is_symlink():
+        raise ValueError
+    roots = tuple(sorted(runs[0].iterdir(), key=lambda item: item.name))
+    if len(roots) != 1 or roots[0].name != expected_dataset_id or not roots[0].is_dir() or roots[0].is_symlink():
+        raise ValueError
+    return roots[0]
+
+
+def _workflow_bundle_sha256s(native_root: Path) -> tuple[str, ...]:
+    paths = tuple(sorted(native_root.rglob("workflow-evidence.json")))
+    if not paths or any(path.is_symlink() for path in paths):
+        raise ValueError
+    values = tuple(sorted(read_workflow_observation_bundle(path).bundle_sha256 for path in paths))
+    if len(values) != len(set(values)):
+        raise ValueError
+    return values
+
+
+def _publish_finalization(output_root: Path, closure: object, report: str) -> None:
+    """Stage all five values, reject conflicts first, then exclusively publish."""
+
+    from asterion.capabilities.dci.implementation.pathlight.optimization import BrightOptimizationClosure
+    if type(closure) is not BrightOptimizationClosure or type(report) is not str:
+        raise ValueError
+    staging = _create_staging_root(output_root)
+    try:
+        write_experiment_bundle(closure.experiment, staging / "pathlight-experiment.json")
+        write_evaluation_bundle(
+            staging / "pathlight-evaluations.json",
+            closure.evaluations.evaluations,
+            closure.evaluations.metric_contracts,
+        )
+        write_optimization_bundle(staging / "pathlight-optimization.json", closure.optimization)
+        write_diagnosis_bundle(closure.diagnosis, staging / "pathlight-diagnosis.json")
+        write_private_file(staging / "pathlight-bright-optimization.zh-CN.md", report.encode("utf-8"))
+        names = tuple(sorted(path.name for path in staging.iterdir()))
+        if names != (
+            "pathlight-bright-optimization.zh-CN.md", "pathlight-diagnosis.json", "pathlight-evaluations.json",
+            "pathlight-experiment.json", "pathlight-optimization.json",
+        ):
+            raise ValueError
+        for name in names:
+            current = output_root / name
+            staged = staging / name
+            if current.exists() or current.is_symlink():
+                if read_private_file(current, _MAX_DOCUMENT_BYTES) != read_private_file(staged, _MAX_DOCUMENT_BYTES):
+                    raise ValueError
+        for name in names:
+            current = output_root / name
+            if not current.exists():
+                os.rename(staging / name, current)
+    finally:
+        _cleanup_staging_tree(output_root, staging)
 
 
 def _status(arguments: tuple[str, ...]) -> dict[str, object]:
