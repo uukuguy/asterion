@@ -51,3 +51,20 @@ infrastructure stop, partial and terminal resume, source/selection/prompt/
 plan/root drift rejection, unknown-failure closure, and receipt-chain attack
 matrix (truncation, extra, mode, symlink, FIFO, reorder and overspend).  No
 provider was called while validating this change.
+
+## Follow-up hardening
+
+The coordinator now constructs a fresh `DciOperatorConfig` per task with an
+exact `DciBenchmarkOperatorInputs.amount` derived from the remaining task and
+global microdollar budget; `max_native_attempts` remains exactly one.  It reads
+terminal receipt chains before loading operator configuration, binds each
+execute/resume chain to the supplied authorization digest, uses the existing
+`coverage-actual-microusd.*` / `coverage-upper-microusd.*` cost artifact
+contract, and quarantines unknown-failure evidence so a later explicit resume
+is not wedged.
+
+Native workflow/recovery artifacts are not yet emitted by the benchmark result
+contract for Bright optimization.  Consequently, the receipt's current
+workflow/evaluation digest fields are not sufficient as a Task 7 re-read
+contract; a subsequent native-evidence adapter must replace them with
+`read_completed_dci_run` plus recovered Experiment/Evaluation bundle digests.

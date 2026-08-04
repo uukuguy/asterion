@@ -16,6 +16,7 @@ import re
 import stat
 import time
 from collections.abc import Callable, Mapping, Sequence
+from decimal import Decimal
 from pathlib import Path
 from typing import TextIO, cast
 
@@ -35,6 +36,7 @@ from asterion.applications.dci_agent_lite.benchmark_instances import (
 from asterion.benchmarks.cli import BenchmarkCommandHost
 from asterion.benchmarks.evidence import BenchmarkRunResult
 from asterion.capability_packages.sources.base import CapabilityPackageSource
+from asterion.capabilities.dci.implementation.operator_inputs import DciBenchmarkOperatorInputs
 from asterion.applications.dci_agent_lite.operator_config import (
     DciOperatorConfig,
     load_operator_config,
@@ -444,14 +446,10 @@ def _execute(
         _absolute_path(options["--authorization-file"]), plan=plan
     )
     _validate_execution_root(output_root, plan)
-    config = load_operator_config(
-        repo_root,
-        env_file=env_file,
-        environment=environment,
-        max_native_attempts=_MAX_NATIVE_ATTEMPTS,
+    receipts = _read_receipt_chain(
+        output_root / "receipts", plan=plan,
+        authorization_sha256=str(authorization["authorization_sha256"]),
     )
-    _validate_execution_tree(output_root, plan, config)
-    receipts = _read_receipt_chain(output_root / "receipts", plan=plan)
     tasks = plan["tasks"]
     if type(tasks) is not list:
         raise ValueError
@@ -459,6 +457,16 @@ def _execute(
         return 0, _receipt_status(plan, receipts)
     if sum(item["failure_category"] in _INFRASTRUCTURE_FAILURES for item in receipts) >= _MAX_INFRASTRUCTURE_FAILURES:
         return 1, _receipt_status(plan, receipts)
+    config = load_operator_config(
+        repo_root,
+        env_file=env_file,
+        environment=environment,
+        max_native_attempts=_MAX_NATIVE_ATTEMPTS,
+    )
+    _validate_execution_tree(output_root, plan, config)
+    global_maximum = plan.get("max_cost_microusd")
+    if type(global_maximum) is not int:
+        raise ValueError
 
     prepared: list[tuple[Mapping[str, object], BenchmarkCommandHost, object, object, object]] = []
     completed = {str(receipt["task_id"]) for receipt in receipts}
@@ -469,9 +477,18 @@ def _execute(
             raise ValueError
         if str(task["task_id"]) in completed:
             continue
+        maximum = task.get("max_cost_microusd")
+        if type(maximum) is not int:
+            raise ValueError
+        global_remaining = global_maximum - sum(
+            _receipt_int(receipt, "cost_microusd") for receipt in receipts
+        )
+        if not 1 <= global_remaining <= global_maximum:
+            raise ValueError
         instance = select_benchmark_instance(str(task["instance_selector"]))
         host = _create_host(
-            host_factory, instance=instance, config=config, package_sources=package_sources,
+            host_factory, instance=instance,
+            config=_config_with_amount(config, min(maximum, global_remaining)), package_sources=package_sources,
             task=task, output_root=output_root, plan=plan,
         )
         metadata = host.discover_metadata(
@@ -526,6 +543,7 @@ def _execute(
         except BaseException as error:
             category = _infrastructure_failure_category(error)
             if category is None:
+                _quarantine_unknown_evidence(output_root, evidence_root, str(task["task_id"]))
                 raise ValueError from None
             status, cases = "failed", 0
             maximum = task.get("max_cost_microusd")
@@ -596,6 +614,40 @@ def _fresh_evidence_root(path: Path) -> None:
     _private_directory(path)
 
 
+def _quarantine_unknown_evidence(output_root: Path, evidence_root: Path, task_id: str) -> None:
+    """Preserve unknown provider writes without wedging a later explicit resume."""
+    if not evidence_root.exists():
+        return
+    quarantine = output_root / "evidence-quarantine"
+    if not quarantine.exists():
+        quarantine.mkdir(mode=0o700)
+    _private_directory(quarantine)
+    digest = _digest({"task": task_id, "root": str(evidence_root)})
+    target = quarantine / f"{digest}.unknown"
+    if target.exists() or target.is_symlink():
+        raise ValueError
+    os.rename(evidence_root, target)
+
+
+def _config_with_amount(config: DciOperatorConfig, cost_microusd: int) -> DciOperatorConfig:
+    """Bind the real DCI payload to the remaining exact task/global ceiling."""
+    if type(cost_microusd) is not int or not 1 <= cost_microusd <= 1_000_000:
+        raise ValueError
+    inputs = config.benchmark_inputs
+    return DciOperatorConfig(
+        repo_root=config.repo_root,
+        benchmark_inputs=DciBenchmarkOperatorInputs(
+            dataset_roots=inputs.dataset_roots,
+            corpus_roots=inputs.corpus_roots,
+            private_environment=inputs.private_environment,
+            coverage_registry_roots=inputs.coverage_registry_roots,
+            amount=Decimal(cost_microusd) / Decimal(1_000_000),
+        ),
+        host_service_options=config.host_service_options,
+        max_native_attempts=_MAX_NATIVE_ATTEMPTS,
+    )
+
+
 def _create_host(
     factory: Callable[..., object] | None,
     *,
@@ -653,12 +705,15 @@ def _result_cost(result: object, *, task_id: str, maximum: int) -> tuple[int, st
     matches = [item for item in result.tasks if item.task_id == task_id]
     if len(matches) != 1:
         raise ValueError
-    actual = [item.removeprefix("pathlight-actual-microusd.") for item in matches[0].artifact_ids if item.startswith("pathlight-actual-microusd.")]
+    artifacts = matches[0].artifact_ids
+    actual = [item.removeprefix("coverage-actual-microusd.") for item in artifacts if item.startswith("coverage-actual-microusd.")]
     if len(actual) == 1 and actual[0].isdigit() and str(int(actual[0])) == actual[0]:
         value = int(actual[0])
         if 0 <= value <= maximum:
             return value, "actual"
-    return maximum, "conservative"
+    if f"coverage-upper-microusd.{maximum}" in artifacts or not actual:
+        return maximum, "conservative"
+    raise ValueError
 
 
 def _infrastructure_failure_category(error: BaseException) -> str | None:
@@ -682,7 +737,9 @@ def _receipt_filename(index: int) -> str:
     return f"receipt-{index + 1}-0000.json"
 
 
-def _read_receipt_chain(root: Path, *, plan: Mapping[str, object]) -> tuple[dict[str, object], ...]:
+def _read_receipt_chain(
+    root: Path, *, plan: Mapping[str, object], authorization_sha256: str | None = None,
+) -> tuple[dict[str, object], ...]:
     _private_directory(root)
     paths = tuple(sorted(root.iterdir(), key=lambda item: item.name))
     if any(not path.is_file() or _RECEIPT_NAME.fullmatch(path.name) is None for path in paths):
@@ -711,6 +768,8 @@ def _read_receipt_chain(root: Path, *, plan: Mapping[str, object]) -> tuple[dict
             or value.get("task_id") != task.get("task_id")
             or value.get("plan_sha256") != plan.get("plan_sha256")
             or not _is_sha256(value.get("authorization_sha256"))
+            or authorization_sha256 is not None and value.get("authorization_sha256") != authorization_sha256
+            or authorization_sha256 is None and chain and value.get("authorization_sha256") != chain[0]["authorization_sha256"]
             or value.get("previous_receipt_sha256") != previous
             or not _is_sha256(value.get("run_id_sha256"))
             or value.get("status") not in {"completed", "failed", "cancelled"}

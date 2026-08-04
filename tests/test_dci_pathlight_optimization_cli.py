@@ -13,6 +13,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from asterion.benchmarks.evidence import BenchmarkRunResult, BenchmarkTaskResult
+from asterion.applications.dci_agent_lite.operator_config import DciOperatorConfig
+from asterion.capabilities.dci.implementation.operator_inputs import DciBenchmarkOperatorInputs
 
 from asterion.applications.dci_agent_lite.pathlight_optimization_cli import (
     PLAN_FILENAME,
@@ -149,10 +151,16 @@ class _OptimizationFixture:
             == next(item for item in self.report.proposals if item.code == "retrieval-query-decomposition").proposal_sha256
         )
         self.query_scope = self.query.scope_sha256
-        self.config = SimpleNamespace(
-            benchmark_inputs=SimpleNamespace(
-                dataset_roots=self.datasets, private_environment={}
-            )
+        self.config = DciOperatorConfig(
+            repo_root=self.root,
+            benchmark_inputs=DciBenchmarkOperatorInputs(
+                dataset_roots=self.datasets,
+                corpus_roots={dataset: self.root for dataset in self.datasets},
+                private_environment={},
+                amount=None,
+            ),
+            host_service_options={},
+            max_native_attempts=1,
         )
         self.diagnosis_file = self.root / DIAGNOSIS_BUNDLE_FILENAME
         self.report_file = self.root / DCI_DIAGNOSIS_REPORT_FILENAME
@@ -575,7 +583,7 @@ class _RecordingOptimizationHost:
         elif status.startswith("actual:"):
             _prefix, amount = status.split(":", 1)
             status = "completed"
-            artifact_ids = (f"pathlight-actual-microusd.{amount}",)
+            artifact_ids = (f"coverage-actual-microusd.{amount}",)
         return BenchmarkRunResult(
             status,
             (BenchmarkTaskResult(self.task_id.rsplit(".", 1)[0], status, 10 if status == "completed" else 0, artifact_ids),),
@@ -600,7 +608,11 @@ def _execute_optimization(
     recorded = [] if events is None else events
     values = {} if outcomes is None else outcomes
 
-    def host_factory(*, task: object, **_kwargs: object) -> object:
+    def host_factory(*, task: object, operator_config: object, **_kwargs: object) -> object:
+        amount = getattr(getattr(operator_config, "benchmark_inputs"), "amount")
+        if amount is None or not 0 < amount <= 1:
+            raise AssertionError("real task host did not receive its bounded amount")
+        recorded.append(f"budget:{getattr(task, 'get')('task_id')}:{amount}")
         return _RecordingOptimizationHost(getattr(task, "get")("task_id"), recorded, values)
 
     stdout, stderr = io.StringIO(), io.StringIO()
@@ -863,6 +875,8 @@ class TestExecute(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual([event for event in events if event.startswith("provider:")], ["provider:bright.biology.baseline"])
         self.assertFalse(any((fixture.output / "receipts").iterdir()))
+        self.assertFalse((fixture.output / "evidence" / "bright.biology" / "baseline").exists())
+        self.assertTrue(any((fixture.output / "evidence-quarantine").iterdir()))
 
     def test_receipt_reader_rejects_private_file_attack_matrix(self) -> None:
         for mutation in ("truncate", "extra", "mode", "symlink", "fifo", "cost"):
