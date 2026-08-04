@@ -113,6 +113,169 @@ def _verified_request(
 
 
 class PiObservationBuilderTests(unittest.TestCase):
+    def test_reconciles_request_only_compaction_call_by_native_sequence(self) -> None:
+        builder = PiObservationBuilder(lambda: 0)
+        for index, sequence, response_sequence, text in (
+            (1, 2, 10, "first"),
+            (2, 20, 30, "second"),
+            (3, 40, None, None),
+            (4, 60, 70, "final"),
+        ):
+            builder.observe_provider_request_marker(index, sequence)
+            if response_sequence is None:
+                continue
+            builder.consume(
+                {
+                    "type": "message_start",
+                    "message": {
+                        "role": "assistant",
+                        "provider": "provider",
+                        "model": "model",
+                        "content": [],
+                    },
+                },
+                response_sequence - 1,
+                native_event_sequence=response_sequence - 1,
+            )
+            builder.consume(
+                {
+                    "type": "message_end",
+                    "message": {
+                        "role": "assistant",
+                        "provider": "provider",
+                        "model": "model",
+                        "content": text,
+                        "usage": {"input": 3, "output": 1},
+                        "stopReason": "stop",
+                    },
+                },
+                response_sequence,
+                native_event_sequence=response_sequence,
+            )
+        requests = tuple(_verified_request(index) for index in range(1, 5))
+        builder.reconcile_provider_requests(requests)
+        batch = builder.complete("run")
+
+        self.assertEqual(tuple(call.request_index for call in batch.model_calls), (1, 2, 3, 4))
+        self.assertEqual(
+            tuple(call.status for call in batch.model_calls),
+            ("completed", "completed", "missing", "completed"),
+        )
+        self.assertIsNone(batch.model_calls[2].response_sha256)
+        self.assertEqual(batch.model_calls[3].response_sha256, _digest("final"))
+        self.assertNotIn("model-request", batch.missing_evidence)
+        self.assertIn("model-response", batch.missing_evidence)
+
+    def test_reconciliation_marker_failures_are_atomic(self) -> None:
+        def builder_with_one_response(
+            markers: tuple[tuple[int, int], ...],
+        ) -> PiObservationBuilder:
+            builder = PiObservationBuilder(_clock)
+            for index, sequence in markers:
+                builder.observe_provider_request_marker(index, sequence)
+            builder.consume(
+                {
+                    "type": "message_start",
+                    "message": {
+                        "role": "assistant",
+                        "provider": "provider",
+                        "model": "model",
+                        "content": [],
+                    },
+                },
+                9,
+                native_event_sequence=9,
+            )
+            builder.consume(
+                _assistant_end("response", input_tokens=3, output_tokens=1),
+                10,
+                native_event_sequence=10,
+            )
+            return builder
+
+        for name, markers in (
+            ("duplicate-index", ((1, 2), (1, 20))),
+            ("index-gap", ((1, 2), (3, 20))),
+            ("sequence-reversal", ((1, 20), (2, 2))),
+        ):
+            with self.subTest(name=name):
+                builder = builder_with_one_response(markers)
+                inferred = builder.complete("run")
+                builder.reconcile_provider_requests(
+                    tuple(_verified_request(index) for index in range(1, 3))
+                )
+                self.assertEqual(builder.complete("run"), inferred)
+
+        with self.subTest(name="response-before-every-marker"):
+            builder = PiObservationBuilder(_clock)
+            builder.consume(
+                {
+                    "type": "message_start",
+                    "message": {
+                        "role": "assistant",
+                        "provider": "provider",
+                        "model": "model",
+                        "content": [],
+                    },
+                },
+                9,
+                native_event_sequence=9,
+            )
+            builder.consume(
+                _assistant_end("response", input_tokens=3, output_tokens=1),
+                10,
+                native_event_sequence=10,
+            )
+            builder.observe_provider_request_marker(1, 20)
+            inferred = builder.complete("run")
+            builder.reconcile_provider_requests((_verified_request(1),))
+            self.assertEqual(builder.complete("run"), inferred)
+
+        with self.subTest(name="partial-verified-requests"):
+            builder = builder_with_one_response(((1, 2), (2, 20)))
+            inferred = builder.complete("run")
+            builder.reconcile_provider_requests((_verified_request(1),))
+            self.assertEqual(builder.complete("run"), inferred)
+
+        with self.subTest(name="rollback-across-marker-and-response"):
+            builder = PiObservationBuilder(_clock)
+            checkpoint = builder.checkpoint()
+            builder.observe_provider_request_marker(1, 2)
+            builder.consume(
+                {
+                    "type": "message_start",
+                    "message": {
+                        "role": "assistant",
+                        "provider": "provider",
+                        "model": "model",
+                        "content": [],
+                    },
+                },
+                9,
+                native_event_sequence=9,
+            )
+            builder.consume(
+                _assistant_end("discarded", input_tokens=3, output_tokens=1),
+                10,
+                native_event_sequence=10,
+            )
+            builder.reconcile_provider_requests((_verified_request(1),))
+            builder.rollback(checkpoint)
+            self.assertEqual(
+                builder.complete("run"), PiObservationBuilder(_clock).complete("run")
+            )
+
+        with self.subTest(name="latest-wins-retry"):
+            builder = builder_with_one_response(((1, 2), (2, 4)))
+            builder.reconcile_provider_requests(
+                (_verified_request(1), _verified_request(2))
+            )
+            batch = builder.complete("run")
+            self.assertEqual(
+                tuple(call.status for call in batch.model_calls),
+                ("missing", "completed"),
+            )
+
     def test_reconciles_verified_provider_request_atomically(self) -> None:
         builder = PiObservationBuilder(_clock)
         builder.consume(_provider_context(1, [_user("inferred-private")]), 10)
