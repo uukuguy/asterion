@@ -14,7 +14,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, cast
 
 from asterion.capabilities.dci.implementation.pathlight.conversion import (
     DciReferenceComparison,
@@ -31,6 +31,7 @@ from asterion.pathlight.diagnosis import (
     DiagnosisBundle,
     Finding,
     Proposal,
+    validate_diagnosis_bundle,
     validate_finding,
 )
 from asterion.pathlight._private_file import read_private_file, write_private_file
@@ -40,7 +41,9 @@ from asterion.pathlight.experiment import ExperimentBundle
 
 _ERROR = "DCI diagnosis is invalid"
 AUTHORIZATION_GATE_REPORT_FILENAME = "pathlight-dci-authorization-gate.json"
+DCI_DIAGNOSIS_REPORT_FILENAME = "pathlight-dci-diagnosis-report.json"
 _AUTHORIZATION_GATE_REPORT_SCHEMA = "asterion.dci.pathlight.authorization-gate-report/v1"
+_DCI_DIAGNOSIS_REPORT_SCHEMA = "asterion.dci.pathlight.diagnosis-report-companion/v1"
 _MAX_GATE_REPORT_BYTES = 64 * 1024
 _MAX_INT = (1 << 63) - 1
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -1105,6 +1108,212 @@ class DciDiagnosisReport:
         return {**self._unsigned_mapping(), "report_sha256": self.report_sha256}
 
 
+def write_dci_diagnosis_report(report: DciDiagnosisReport, path: Path) -> None:
+    """Persist a safe, exact DCI diagnosis-report companion in the publish tree."""
+
+    try:
+        if (
+            type(report) is not DciDiagnosisReport
+            or not isinstance(path, Path)
+            or path.name != DCI_DIAGNOSIS_REPORT_FILENAME
+        ):
+            raise ValueError
+        report_mapping = report.to_mapping()
+        decoded = _dci_diagnosis_report_from_mapping(report_mapping)
+        if decoded != report:
+            raise ValueError
+        value = {
+            "schema": _DCI_DIAGNOSIS_REPORT_SCHEMA,
+            "diagnosis_bundle_sha256": report.diagnosis_bundle.bundle_sha256,
+            "report_sha256": report.report_sha256,
+            "report": report_mapping,
+        }
+        encoded = _canonical_gate_bytes(value)
+        _validate_dci_diagnosis_report_document(value)
+        write_private_file(path, encoded)
+    except Exception:
+        raise DciDiagnosisError(_ERROR) from None
+
+
+def read_dci_diagnosis_report(path: Path) -> DciDiagnosisReport:
+    """Read one canonical DCI report and reconstruct its verified safe model."""
+
+    try:
+        if not isinstance(path, Path) or path.name != DCI_DIAGNOSIS_REPORT_FILENAME:
+            raise ValueError
+        encoded = read_private_file(path, _MAX_GATE_REPORT_BYTES)
+        value = json.loads(encoded, object_pairs_hook=_unique_gate_object)
+        if encoded != _canonical_gate_bytes(value):
+            raise ValueError
+        return _validate_dci_diagnosis_report_document(value)
+    except Exception:
+        raise DciDiagnosisError(_ERROR) from None
+
+
+def _validate_dci_diagnosis_report_document(value: object) -> DciDiagnosisReport:
+    if type(value) is not dict or set(value) != {
+        "schema", "diagnosis_bundle_sha256", "report_sha256", "report"
+    } or value.get("schema") != _DCI_DIAGNOSIS_REPORT_SCHEMA:
+        raise ValueError
+    report = _dci_diagnosis_report_from_mapping(value.get("report"))
+    if (
+        value.get("diagnosis_bundle_sha256") != report.diagnosis_bundle.bundle_sha256
+        or value.get("report_sha256") != report.report_sha256
+    ):
+        raise ValueError
+    return report
+
+
+def _dci_diagnosis_report_from_mapping(value: object) -> DciDiagnosisReport:
+    if type(value) is not dict or value.get("schema") != "asterion.dci.pathlight-diagnosis-report/v1":
+        raise ValueError
+    report_sha256 = value.get("report_sha256")
+    observations = cast(list[Any] | None, value.get("observations"))
+    components = cast(list[Any] | None, value.get("component_comparisons"))
+    findings = cast(list[Any] | None, value.get("findings"))
+    proposals = cast(list[Any] | None, value.get("proposals"))
+    coverage = value.get("coverage_experiment")
+    if not all(type(items) is list for items in (observations, components, findings, proposals)):
+        raise ValueError
+    observations = cast(list[Any], observations)
+    components = cast(list[Any], components)
+    findings = cast(list[Any], findings)
+    proposals = cast(list[Any], proposals)
+    parsed_coverage = None if coverage is None else _coverage_from_mapping(coverage)
+    report = DciDiagnosisReport(
+        observations=tuple(_observation_from_mapping(item) for item in observations),
+        component_comparisons=tuple(
+            DciComponentComparison(**cast(Any, _mapping(item))) for item in components
+        ),
+        findings=tuple(validate_finding(_mapping(item)) for item in findings),
+        missing_evidence=tuple(_string_list(value.get("missing_evidence"))),
+        hypothesis_codes=tuple(_string_list(value.get("hypothesis_codes"))),
+        proposals=tuple(_proposal_summary_from_mapping(item) for item in proposals),
+        aggregate_workflow_metrics=DciAggregateWorkflowMetrics(**cast(Any, _mapping(value.get("aggregate_workflow_metrics")))),
+        diagnosis_bundle=validate_diagnosis_bundle(_mapping(value.get("diagnosis_bundle"))),
+        coverage_experiment=parsed_coverage,
+        query_decomposition_gate=value.get("query_decomposition_gate", "blocked-by-coverage"),
+    )
+    if (
+        report_sha256 != report.report_sha256
+        or _canonical_gate_bytes(report.to_mapping()) != _canonical_gate_bytes(value)
+    ):
+        raise ValueError
+    return report
+
+
+def _mapping(value: object) -> dict[str, object]:
+    if type(value) is not dict:
+        raise ValueError
+    return value
+
+
+def _string_list(value: object) -> list[str]:
+    if type(value) is not list or any(type(item) is not str for item in value):
+        raise ValueError
+    return value
+
+
+def _observation_from_mapping(value: object) -> DciDatasetObservation:
+    mapping = dict(_mapping(value))
+    workflow = DciWorkflowMetrics(**cast(Any, _mapping(mapping.pop("workflow_metrics"))))
+    coverage = mapping.pop("coverage", None)
+    if coverage is not None:
+        coverage_mapping = _mapping(coverage)
+        mapping.update(
+            {
+                "coverage_available_queries": coverage_mapping["available_queries"],
+                "coverage_total_queries": coverage_mapping["total_queries"],
+                "coverage_median_any_microunits": coverage_mapping["median_any_microunits"],
+                "coverage_median_mean_microunits": coverage_mapping["median_mean_microunits"],
+                "coverage_median_all_microunits": coverage_mapping["median_all_microunits"],
+                "retained_available_queries": coverage_mapping["retained_available_queries"],
+                "retained_median_microunits": coverage_mapping["retained_median_microunits"],
+                "tool_observation_count": coverage_mapping["tool_observation_count"],
+                "surfaced_gold_count": coverage_mapping["surfaced_gold_count"],
+                "model_call_count": coverage_mapping["model_call_count"],
+                "context_frame_count": coverage_mapping["context_frame_count"],
+                "missing_boundary_count": coverage_mapping["missing_boundary_count"],
+                "integrity_failure_count": coverage_mapping["integrity_failure_count"],
+                "coverage_evidence_sha256": coverage_mapping["evidence_sha256"],
+            }
+        )
+    return DciDatasetObservation(**cast(Any, mapping), workflow_metrics=workflow)
+
+
+def _proposal_summary_from_mapping(value: object) -> DciProposalSummary:
+    mapping = dict(_mapping(value))
+    return DciProposalSummary(
+        **cast(Any, {
+            **mapping,
+            "dataset_case_counts": tuple(tuple(item) for item in cast(list[Any], mapping["dataset_case_counts"])),
+            "dataset_case_scope_sha256s": tuple(
+                tuple(item) for item in cast(list[Any], mapping["dataset_case_scope_sha256s"])
+            ),
+        })
+    )
+
+
+def _coverage_from_mapping(value: object) -> DciCoverageExperimentObservation:
+    mapping = dict(_mapping(value))
+    datasets = cast(list[Any], mapping.pop("datasets"))
+    experiment_sha256 = mapping.pop("experiment_sha256")
+    if type(datasets) is not list:
+        raise ValueError
+    coverage = DciCoverageExperimentObservation(
+        **cast(Any, mapping),
+        datasets=tuple(DciCoverageDatasetObservation(**cast(Any, _mapping(item))) for item in datasets),
+    )
+    if coverage.experiment_sha256 != experiment_sha256:
+        raise ValueError
+    return coverage
+
+
+def authorization_gate_report_mapping(report: DciDiagnosisReport) -> dict[str, object]:
+    """Derive the only authorization-ready gate mapping from a verified report."""
+
+    if (
+        type(report) is not DciDiagnosisReport
+        or report.coverage_experiment is None
+        or not report.coverage_experiment.complete
+        or report.query_decomposition_gate != "ready-for-authorization"
+    ):
+        raise ValueError
+    coverage = report.coverage_experiment
+    query = next(
+        item for item in report.proposals if item.code == "retrieval-query-decomposition"
+    )
+    generic_query = next(
+        item
+        for item in report.diagnosis_bundle.proposals
+        if item.proposal_sha256 == query.proposal_sha256
+    )
+    value: dict[str, object] = {
+        "schema": _AUTHORIZATION_GATE_REPORT_SCHEMA,
+        "diagnosis_bundle_sha256": report.diagnosis_bundle.bundle_sha256,
+        "diagnosis_report_sha256": report.report_sha256,
+        "query_proposal_sha256": query.proposal_sha256,
+        "query_scope_sha256": generic_query.scope_sha256,
+        "coverage_experiment_sha256": coverage.experiment_sha256,
+        "coverage_plan_sha256": coverage.plan_sha256,
+        "coverage_proposal_sha256": coverage.proposal_sha256,
+        "coverage_scope_sha256": coverage.scope_sha256,
+        "coverage_variant_sha256": coverage.variant_sha256,
+        "coverage_registry_set_sha256": coverage.registry_set_sha256,
+        "coverage_authorization_sha256": coverage.authorization_sha256,
+        "coverage_receipt_set_sha256": coverage.receipt_set_sha256,
+        "coverage_evidence_set_sha256": _digest("authorization-gate-evidence-set", [{"dataset_id": item.dataset_id, "evidence_sha256": item.evidence_sha256} for item in coverage.datasets]),
+        "coverage_dataset_count": len(coverage.datasets),
+        "coverage_agent_operation_count": coverage.agent_operation_count,
+        "coverage_judge_operation_count": coverage.judge_operation_count,
+        "coverage_infrastructure_failure_count": coverage.infrastructure_failure_count,
+        "coverage_complete": True,
+        "query_decomposition_gate": "ready-for-authorization",
+    }
+    value["gate_report_sha256"] = _canonical_gate_digest(value)
+    return value
+
+
 def write_authorization_gate_report(report: DciDiagnosisReport, path: Path) -> None:
     """Publish one coverage-complete, DCI-owned authorization gate report.
 
@@ -1124,51 +1333,7 @@ def write_authorization_gate_report(report: DciDiagnosisReport, path: Path) -> N
             or report.query_decomposition_gate != "ready-for-authorization"
         ):
             raise ValueError
-        coverage = report.coverage_experiment
-        query = next(
-            item
-            for item in report.proposals
-            if item.code == "retrieval-query-decomposition"
-        )
-        if (
-            query.proposal_sha256
-            not in {item.proposal_sha256 for item in report.diagnosis_bundle.proposals}
-        ):
-            raise ValueError
-        value: dict[str, object] = {
-            "schema": _AUTHORIZATION_GATE_REPORT_SCHEMA,
-            "diagnosis_bundle_sha256": report.diagnosis_bundle.bundle_sha256,
-            "diagnosis_report_sha256": report.report_sha256,
-            "query_proposal_sha256": query.proposal_sha256,
-            "query_scope_sha256": query.case_scope_sha256,
-            "coverage_experiment_sha256": coverage.experiment_sha256,
-            "coverage_plan_sha256": coverage.plan_sha256,
-            "coverage_proposal_sha256": coverage.proposal_sha256,
-            "coverage_scope_sha256": coverage.scope_sha256,
-            "coverage_variant_sha256": coverage.variant_sha256,
-            "coverage_registry_set_sha256": coverage.registry_set_sha256,
-            "coverage_authorization_sha256": coverage.authorization_sha256,
-            "coverage_receipt_set_sha256": coverage.receipt_set_sha256,
-            "coverage_evidence_set_sha256": _digest(
-                "authorization-gate-evidence-set",
-                [
-                    {
-                        "dataset_id": item.dataset_id,
-                        "evidence_sha256": item.evidence_sha256,
-                    }
-                    for item in coverage.datasets
-                ],
-            ),
-            "coverage_dataset_count": len(coverage.datasets),
-            "coverage_agent_operation_count": coverage.agent_operation_count,
-            "coverage_judge_operation_count": coverage.judge_operation_count,
-            "coverage_infrastructure_failure_count": (
-                coverage.infrastructure_failure_count
-            ),
-            "coverage_complete": True,
-            "query_decomposition_gate": "ready-for-authorization",
-        }
-        value["gate_report_sha256"] = _canonical_gate_digest(value)
+        value = authorization_gate_report_mapping(report)
         encoded = _canonical_gate_bytes(value)
         _validate_authorization_gate_report(value)
         write_private_file(path, encoded)

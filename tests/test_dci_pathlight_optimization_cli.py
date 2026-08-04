@@ -17,16 +17,23 @@ from asterion.applications.dci_agent_lite.pathlight_optimization_cli import (
     _AUTHORIZATION_SCHEMA,
     _diagnosis_digest,
     _digest,
-    _proposal_scope,
     main,
     read_optimization_authorization,
     read_optimization_plan,
 )
 from asterion.pathlight._private_file import write_private_file
+from asterion.pathlight.diagnosis import DIAGNOSIS_BUNDLE_FILENAME, write_diagnosis_bundle
+from asterion.capabilities.dci.implementation.pathlight.diagnosis import (
+    AUTHORIZATION_GATE_REPORT_FILENAME,
+    DCI_DIAGNOSIS_REPORT_FILENAME,
+    diagnose_recommended_pack,
+    write_authorization_gate_report,
+    write_dci_diagnosis_report,
+)
+from tests.test_dci_pathlight_diagnosis import _DATASETS, _coverage_pack, _run
 
 
-_GATE_SCHEMA = "asterion.dci.pathlight.authorization-gate-report/v1"
-_GATE_FILENAME = "pathlight-dci-authorization-gate.json"
+_GATE_FILENAME = AUTHORIZATION_GATE_REPORT_FILENAME
 
 
 def _sha(value: str) -> str:
@@ -110,39 +117,6 @@ def _write_lock(_lock: object, target: Path) -> None:
     write_private_file(target, b'{"protocol":"test"}\n')
 
 
-def _gate(
-    diagnosis: SimpleNamespace, query: SimpleNamespace, *, complete: bool = True
-) -> dict[str, object]:
-    """A canonical DCI-owned gate-report fixture; never an execution authority."""
-
-    value: dict[str, object] = {
-        "schema": _GATE_SCHEMA,
-        "diagnosis_bundle_sha256": diagnosis.bundle_sha256,
-        "diagnosis_report_sha256": _sha("diagnosis report"),
-        "query_proposal_sha256": query.proposal_sha256,
-        "query_scope_sha256": query.scope_sha256,
-        "coverage_experiment_sha256": _sha("coverage experiment"),
-        "coverage_plan_sha256": _sha("coverage plan"),
-        "coverage_proposal_sha256": _sha("coverage proposal"),
-        "coverage_scope_sha256": _sha("coverage scope"),
-        "coverage_variant_sha256": _sha("coverage variant"),
-        "coverage_registry_set_sha256": _sha("coverage registry set"),
-        "coverage_authorization_sha256": _sha("coverage authorization"),
-        "coverage_receipt_set_sha256": _sha("coverage receipts"),
-        "coverage_evidence_set_sha256": _sha("coverage evidence"),
-        "coverage_dataset_count": 5,
-        "coverage_agent_operation_count": 50,
-        "coverage_judge_operation_count": 0,
-        "coverage_infrastructure_failure_count": 0,
-        "coverage_complete": complete,
-        "query_decomposition_gate": (
-            "ready-for-authorization" if complete else "blocked-by-coverage"
-        ),
-    }
-    value["gate_report_sha256"] = _digest(value)
-    return value
-
-
 class _OptimizationFixture:
     def __init__(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -160,48 +134,29 @@ class _OptimizationFixture:
             path = self.root / f"{dataset}.jsonl"
             path.write_bytes(_bright_rows())
             self.datasets[dataset] = path
-        selected = {
-            dataset: {
-                "selected_case_sha256s": sorted(
-                    [
-                        hashlib.sha256(
-                            (
-                                "asterion.dci.pathlight.query-id/v1\\0"
-                                + json.dumps(str(index), separators=(",", ":"))
-                            ).encode()
-                        ).hexdigest()
-                        for index in range(10)
-                    ]
-                )
-            }
-            for dataset in self.datasets
-        }
-        self.coverage, self.query = _proposal(_proposal_scope(selected))
-        self.diagnosis = SimpleNamespace(
-            bundle_sha256=_sha("diagnosis"),
-            proposals=(self.coverage, self.query),
-            findings=(
-                SimpleNamespace(finding_sha256=self.coverage.finding_sha256),
-                SimpleNamespace(finding_sha256=self.query.finding_sha256),
-            ),
+        self.report = diagnose_recommended_pack(
+            tuple(_run(*dataset) for dataset in _DATASETS),
+            coverage_experiment=_coverage_pack(),
         )
+        self.diagnosis = self.report.diagnosis_bundle
+        self.query = next(
+            proposal
+            for proposal in self.diagnosis.proposals
+            if proposal.proposal_sha256
+            == next(item for item in self.report.proposals if item.code == "retrieval-query-decomposition").proposal_sha256
+        )
+        self.query_scope = self.query.scope_sha256
         self.config = SimpleNamespace(
             benchmark_inputs=SimpleNamespace(
                 dataset_roots=self.datasets, private_environment={}
             )
         )
+        self.diagnosis_file = self.root / DIAGNOSIS_BUNDLE_FILENAME
+        self.report_file = self.root / DCI_DIAGNOSIS_REPORT_FILENAME
         self.gate = self.root / _GATE_FILENAME
-        write_private_file(
-            self.gate,
-            (
-                json.dumps(
-                    _gate(self.diagnosis, self.query),
-                    sort_keys=True,
-                    separators=(",", ":"),
-                )
-                + "\n"
-            ).encode(),
-        )
+        write_diagnosis_bundle(self.diagnosis, self.diagnosis_file)
+        write_dci_diagnosis_report(self.report, self.report_file)
+        write_authorization_gate_report(self.report, self.gate)
 
     def close(self) -> None:
         self.temp.cleanup()
@@ -210,10 +165,7 @@ class _OptimizationFixture:
         stdout, stderr = io.StringIO(), io.StringIO()
         provider = Mock()
         with (
-            patch(
-                "asterion.applications.dci_agent_lite.pathlight_optimization_cli.read_diagnosis_bundle",
-                return_value=self.diagnosis,
-            ),
+            patch("asterion.applications.dci_agent_lite.pathlight_optimization_cli._proposal_scope", return_value=self.query_scope),
             patch(
                 "asterion.applications.dci_agent_lite.pathlight_optimization_cli.load_operator_config",
                 return_value=self.config,
@@ -231,7 +183,8 @@ class _OptimizationFixture:
             code = main(
                 (
                     "prepare",
-                    "--diagnosis-file", str(self.root / "diagnosis.json"),
+                    "--diagnosis-file", str(self.diagnosis_file),
+                    "--diagnosis-report-file", str(self.report_file),
                     "--gate-report-file", str(self.gate),
                     "--proposal-sha256", self.query.proposal_sha256,
                     "--output-root", str(self.output),
@@ -332,6 +285,8 @@ class TestPrepare(unittest.TestCase):
             "symlink",
             "fifo",
             "oversized",
+            "report-tampered",
+            "gate-recomputed",
         ):
             with self.subTest(mutation=mutation):
                 fixture = _OptimizationFixture()
@@ -339,21 +294,33 @@ class TestPrepare(unittest.TestCase):
                 if mutation == "missing":
                     fixture.gate.unlink()
                 elif mutation == "incomplete":
+                    blocked = diagnose_recommended_pack(
+                        tuple(_run(*dataset) for dataset in _DATASETS),
+                        coverage_experiment=_coverage_pack(available_queries=9),
+                    )
+                    fixture.report_file.unlink()
+                    write_dci_diagnosis_report(blocked, fixture.report_file)
+                elif mutation == "tampered":
+                    value = json.loads(fixture.gate.read_text(encoding="utf-8"))
+                    value["query_scope_sha256"] = "0" * 64
                     fixture.gate.unlink()
                     write_private_file(
                         fixture.gate,
-                        (
-                            json.dumps(
-                                _gate(fixture.diagnosis, fixture.query, complete=False),
-                                sort_keys=True,
-                                separators=(",", ":"),
-                            )
-                            + "\n"
-                        ).encode(),
+                        (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode(),
                     )
-                elif mutation == "tampered":
-                    value = _gate(fixture.diagnosis, fixture.query)
+                elif mutation == "report-tampered":
+                    fixture.report_file.unlink()
+                    write_private_file(fixture.report_file, b"{}\n")
+                elif mutation == "gate-recomputed":
+                    value = json.loads(fixture.gate.read_text(encoding="utf-8"))
                     value["query_scope_sha256"] = "0" * 64
+                    value["gate_report_sha256"] = _digest(
+                        {
+                            key: item
+                            for key, item in value.items()
+                            if key != "gate_report_sha256"
+                        }
+                    )
                     fixture.gate.unlink()
                     write_private_file(
                         fixture.gate,
@@ -376,7 +343,8 @@ class TestPrepare(unittest.TestCase):
                 code = main(
                     (
                         "prepare",
-                        "--diagnosis-file", str(fixture.root / "diagnosis.json"),
+                        "--diagnosis-file", str(fixture.diagnosis_file),
+                        "--diagnosis-report-file", str(fixture.report_file),
                         "--gate-report-file", str(fixture.gate),
                         "--proposal-sha256", fixture.query.proposal_sha256,
                         "--output-root", str(fixture.output),
@@ -389,6 +357,35 @@ class TestPrepare(unittest.TestCase):
                 )
                 self.assertEqual(code, 2)
                 self.assertEqual(stdout.getvalue(), "")
+
+    def test_plan_reader_rejects_recomputed_variant_or_config_tampering(self) -> None:
+        fixture = _OptimizationFixture()
+        self.addCleanup(fixture.close)
+        self.assertEqual(fixture.prepare()[0], 0)
+        path = fixture.output / PLAN_FILENAME
+        original = json.loads(path.read_text(encoding="utf-8"))
+        for field, source in (
+            ("candidate_variant_sha256", "baseline_variant_sha256"),
+            ("candidate_execution_config_sha256", "baseline_execution_config_sha256"),
+        ):
+            with self.subTest(field=field):
+                value = dict(original)
+                value[field] = value[source]
+                value["plan_sha256"] = _digest(
+                    {key: item for key, item in value.items() if key != "plan_sha256"}
+                )
+                path.unlink()
+                write_private_file(
+                    path,
+                    (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+                )
+                with self.assertRaises(ValueError):
+                    read_optimization_plan(path)
+                path.unlink()
+                write_private_file(
+                    path,
+                    (json.dumps(original, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+                )
 
 
 class TestAuthorization(unittest.TestCase):

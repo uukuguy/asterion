@@ -14,6 +14,12 @@
   diagnosis command's existing atomic publish; it binds the generic diagnosis
   bundle and safe coverage experiment, plan, receipt, and evidence-set
   identities without including private content.
+- Added the adjacent canonical mode-0600 `pathlight-dci-diagnosis-report.json`
+  companion.  It round-trips the safe `DciDiagnosisReport`, recomputes its
+  report and generic DiagnosisBundle identities, and is published atomically
+  with the bundle and gate.  `prepare` requires all three sibling inputs and
+  re-derives the complete gate mapping from the verified report; a gate digest
+  alone is never evidence.
 - `prepare` now requires an exact absolute
   `--gate-report-file`, closes it against the diagnosis/proposal/scope, and
   rejects missing, incomplete, tampered, non-0600, symlink, FIFO, and
@@ -36,6 +42,8 @@
   Variant and Task 4 execution-config digest.
 - Before Task 6 creates a receipt schema, `status` rejects every non-empty
   receipt directory rather than interpreting an unauthenticated receipt.
+- Plan readers now reject a recomputed plan that makes the baseline/candidate
+  Variant or execution-config digests equal, before authorization can bind it.
 - One minimal direct dependency change permits the existing descriptor-safe
   staged-tree publisher to hard-link a read-only `0400` candidate prompt in
   addition to its existing `0600` private files. The query-planning contract
@@ -43,7 +51,7 @@
 
 ## Verification
 
-- `uv run python -m unittest -v tests.test_dci_pathlight_optimization_cli tests.test_dci_pathlight_diagnosis tests.test_dci_pathlight_cli tests.test_dci_query_planning tests.test_dci_benchmark_host` — 55 passing.
+- `uv run python -m unittest -v tests.test_dci_pathlight_optimization_cli tests.test_dci_pathlight_diagnosis tests.test_dci_pathlight_cli tests.test_dci_query_planning tests.test_dci_benchmark_host` — 56 passing.
 - `uv run pyright src/asterion/applications/dci_agent_lite/pathlight_optimization_cli.py src/asterion/applications/dci_agent_lite/pathlight_cli.py src/asterion/capabilities/dci/implementation/pathlight/diagnosis.py tests/test_dci_pathlight_optimization_cli.py tests/test_dci_pathlight_diagnosis.py tests/test_dci_pathlight_cli.py` — 0 errors.
 - `uv run ruff check src/asterion/applications/dci_agent_lite/pathlight_optimization_cli.py src/asterion/applications/dci_agent_lite/pathlight_cli.py src/asterion/capabilities/dci/implementation/pathlight/diagnosis.py tests/test_dci_pathlight_optimization_cli.py tests/test_dci_pathlight_diagnosis.py tests/test_dci_pathlight_cli.py` — clean.
 - `git diff --check` — clean.

@@ -33,7 +33,10 @@ from asterion.applications.dci_agent_lite.operator_config import (
 )
 from asterion.capabilities.dci.implementation.pathlight.diagnosis import (
     AUTHORIZATION_GATE_REPORT_FILENAME,
+    DCI_DIAGNOSIS_REPORT_FILENAME,
+    authorization_gate_report_mapping,
     read_authorization_gate_report,
+    read_dci_diagnosis_report,
 )
 from asterion.capabilities.dci.implementation.pathlight.recovery import (
     _domain_digest as _recovery_digest,
@@ -134,6 +137,7 @@ def _prepare(
         arguments,
         {
             "--diagnosis-file",
+            "--diagnosis-report-file",
             "--gate-report-file",
             "--proposal-sha256",
             "--output-root",
@@ -142,17 +146,24 @@ def _prepare(
     output_root = _operator_root(options["--output-root"])
     if any(output_root.iterdir()):
         raise ValueError
-    diagnosis = read_diagnosis_bundle(_absolute_path(options["--diagnosis-file"]))
+    diagnosis_path = _absolute_path(options["--diagnosis-file"])
+    report_path = _diagnosis_report_path(options["--diagnosis-report-file"])
+    gate_path = _gate_report_path(options["--gate-report-file"])
+    if diagnosis_path.parent != report_path.parent or report_path.parent != gate_path.parent:
+        raise ValueError
+    diagnosis = read_diagnosis_bundle(diagnosis_path)
+    report = read_dci_diagnosis_report(report_path)
     proposal = _query_decomposition_proposal(
         diagnosis, options["--proposal-sha256"]
     )
-    gate = read_authorization_gate_report(
-        _gate_report_path(options["--gate-report-file"])
-    )
+    gate = read_authorization_gate_report(gate_path)
+    expected_gate = authorization_gate_report_mapping(report)
     if (
-        gate["diagnosis_bundle_sha256"] != diagnosis.bundle_sha256
+        report.diagnosis_bundle != diagnosis
+        or gate["diagnosis_bundle_sha256"] != diagnosis.bundle_sha256
         or gate["query_proposal_sha256"] != proposal.proposal_sha256
         or gate["query_scope_sha256"] != proposal.scope_sha256
+        or gate != expected_gate
     ):
         raise ValueError
     # Passing a non-existent explicit path prevents load_operator_config from
@@ -450,6 +461,8 @@ def _read_plan(path: Path) -> dict[str, object]:
         or value.get("max_native_attempts") != _MAX_NATIVE_ATTEMPTS
         or value.get("execution_authorized") is not False
         or hmac.compare_digest(str(value["baseline_query_plan_sha256"]), str(value["candidate_query_plan_sha256"]))
+        or hmac.compare_digest(str(value["baseline_variant_sha256"]), str(value["candidate_variant_sha256"]))
+        or hmac.compare_digest(str(value["baseline_execution_config_sha256"]), str(value["candidate_execution_config_sha256"]))
         or not _is_sha256(digest) or not hmac.compare_digest(str(digest), _digest(value))
     ):
         raise ValueError
@@ -516,6 +529,8 @@ def _validate_plan_value(value: dict[str, object]) -> None:
             "diagnosis_bundle_sha256", "authorization_gate_report_sha256", "proposal_sha256", "finding_sha256", "scope_sha256",
             "success_criteria_sha256", "stop_criteria_sha256", "budget_sha256", "source_lock_sha256",
             "selected_case_scope_sha256", "baseline_query_plan_sha256", "candidate_query_plan_sha256",
+            "baseline_variant_sha256", "candidate_variant_sha256",
+            "baseline_execution_config_sha256", "candidate_execution_config_sha256",
         )
         if (
             set(value) != {
@@ -541,6 +556,8 @@ def _validate_plan_value(value: dict[str, object]) -> None:
             or value.get("max_native_attempts") != _MAX_NATIVE_ATTEMPTS
             or value.get("execution_authorized") is not False
             or hmac.compare_digest(str(value["baseline_query_plan_sha256"]), str(value["candidate_query_plan_sha256"]))
+            or hmac.compare_digest(str(value["baseline_variant_sha256"]), str(value["candidate_variant_sha256"]))
+            or hmac.compare_digest(str(value["baseline_execution_config_sha256"]), str(value["candidate_execution_config_sha256"]))
             or not _is_sha256(digest)
             or not hmac.compare_digest(str(digest), _digest(value))
         ):
@@ -781,6 +798,13 @@ def _absolute_path(value: str) -> Path:
 def _gate_report_path(value: str) -> Path:
     path = _absolute_path(value)
     if path.name != AUTHORIZATION_GATE_REPORT_FILENAME:
+        raise ValueError
+    return path
+
+
+def _diagnosis_report_path(value: str) -> Path:
+    path = _absolute_path(value)
+    if path.name != DCI_DIAGNOSIS_REPORT_FILENAME:
         raise ValueError
     return path
 
