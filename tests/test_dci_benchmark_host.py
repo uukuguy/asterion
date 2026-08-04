@@ -9,6 +9,7 @@ from asterion.applications.dci_agent_lite.benchmark_host import (
     DciBenchmarkHost,
     DciBenchmarkHostError,
     DciLoadedBenchmarkProviders,
+    optimization_execution_config_sha256,
 )
 from asterion.applications.dci_agent_lite.benchmark_instances import (
     select_benchmark_instance,
@@ -20,6 +21,12 @@ from asterion.applications.dci_agent_lite.benchmark_source_lock import (
 from asterion.applications.dci_agent_lite.operator_config import load_operator_config
 from asterion.benchmarks import BenchmarkTaskRequest
 from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
+from asterion.capabilities.dci.implementation.research.query_planning import (
+    BASELINE_QUERY_PLAN,
+    DECOMPOSED_QUERY_PLAN,
+    materialize_query_planning_prompt,
+    resolve_query_planning_contract,
+)
 
 
 class RecordingBuiltinSource:
@@ -57,6 +64,54 @@ def _resolved(host, instance, lock_path: Path):
 
 
 class DciBenchmarkHostTests(unittest.TestCase):
+    def test_candidate_query_plan_is_rejected_for_non_bright_host(self) -> None:
+        instance = select_benchmark_instance("dci.qa.bamboogle@1.0.0")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            root.chmod(0o700)
+            prompt = materialize_query_planning_prompt(DECOMPOSED_QUERY_PLAN, root)
+            with self.assertRaises(DciBenchmarkHostError):
+                DciBenchmarkHost(
+                    instance=instance,
+                    operator_config=None,
+                    query_planning_contract=resolve_query_planning_contract(
+                        DECOMPOSED_QUERY_PLAN
+                    ),
+                    query_planning_prompt_file=prompt,
+                )
+
+    def test_candidate_query_plan_rejects_an_unbound_executor_factory(self) -> None:
+        instance = select_benchmark_instance("dci.bright.biology@1.0.0")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            root.chmod(0o700)
+            prompt = materialize_query_planning_prompt(DECOMPOSED_QUERY_PLAN, root)
+            with self.assertRaises(DciBenchmarkHostError):
+                DciBenchmarkHost(
+                    instance=instance,
+                    operator_config=None,
+                    query_planning_contract=resolve_query_planning_contract(
+                        DECOMPOSED_QUERY_PLAN
+                    ),
+                    query_planning_prompt_file=prompt,
+                    executor_factory=lambda _instance: object(),
+                )
+
+    def test_optimization_config_digest_changes_only_with_query_plan_contract(self) -> None:
+        environment = {"DEEPSEEK_API_KEY": "SENTINEL-PRIVATE-KEY"}
+        baseline = optimization_execution_config_sha256(
+            environment,
+            resolve_query_planning_contract(BASELINE_QUERY_PLAN),
+        )
+        candidate = optimization_execution_config_sha256(
+            environment,
+            resolve_query_planning_contract(DECOMPOSED_QUERY_PLAN),
+        )
+
+        self.assertNotEqual(baseline, candidate)
+        self.assertNotIn("SENTINEL-PRIVATE-KEY", baseline)
+        self.assertNotIn("SENTINEL-PRIVATE-KEY", candidate)
+
     def test_local_host_plans_authorizes_and_rehydrates_private_bindings(self) -> None:
         instance = select_benchmark_instance("dci.local-fixture@1.0.0")
         source = RecordingBuiltinSource()

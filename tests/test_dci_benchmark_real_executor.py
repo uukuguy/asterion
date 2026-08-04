@@ -6,6 +6,7 @@ import json
 import tempfile
 import threading
 import unittest
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
@@ -38,6 +39,11 @@ from asterion.capabilities.dci.implementation.research.experiment_profiles impor
 )
 from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import (
     canonical_sha256,
+)
+from asterion.capabilities.dci.implementation.research.query_planning import (
+    DECOMPOSED_QUERY_PLAN,
+    materialize_query_planning_prompt,
+    resolve_query_planning_contract,
 )
 
 
@@ -145,6 +151,65 @@ def _write_bright_source_coverage(
 
 
 class RealDciBenchmarkExecutorTests(unittest.TestCase):
+    def test_candidate_only_adds_the_exact_private_prompt_override(self) -> None:
+        requests = []
+
+        async def runner(request, *, paths):
+            del paths
+            requests.append(request)
+            return BenchmarkResult(
+                output_root=request.output_root,
+                counts={"total": 1, "completed": 1, "failed": 0},
+            )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            private_root = root / "private-query-plan"
+            private_root.mkdir(mode=0o700)
+            private_root.chmod(0o700)
+            candidate_file = materialize_query_planning_prompt(
+                DECOMPOSED_QUERY_PLAN, private_root
+            )
+            for contract, prompt_file in (
+                (None, None),
+                (resolve_query_planning_contract(DECOMPOSED_QUERY_PLAN), candidate_file),
+            ):
+                query_planning_options = (
+                    {}
+                    if contract is None
+                    else {
+                        "query_planning_contract": contract,
+                        "query_planning_prompt_file": prompt_file,
+                    }
+                )
+                executor = RealDciBenchmarkExecutor(
+                    paths=_paths(root),
+                    runtime_options=DciRuntimeOptions(),
+                    judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
+                    benchmark_runner=runner,
+                    readiness_probe=lambda *_args: None,
+                    **query_planning_options,
+                )
+                result = executor.execute(
+                    _invocation(
+                        root,
+                        task_id="bright.biology",
+                        profile_id="bright.biology",
+                        selection_variant="main",
+                    ),
+                    cancellation=MutableCancellation(),
+                    on_progress=lambda _event: None,
+                )
+                self.assertEqual(result.status, "completed")
+
+        baseline, candidate = requests
+        self.assertIsNone(baseline.append_system_prompt_file)
+        self.assertEqual(candidate.append_system_prompt_file, candidate_file)
+        self.assertEqual(
+            replace(baseline, append_system_prompt_file=None),
+            replace(candidate, append_system_prompt_file=None),
+        )
+
     def test_native_attempt_limit_requires_exact_integer_one(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp).resolve()

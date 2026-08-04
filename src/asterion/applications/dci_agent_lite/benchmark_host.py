@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -59,6 +61,15 @@ from asterion.capabilities.dci.implementation.config import (
     resolve_dci_runtime_options,
 )
 from asterion.capabilities.dci.implementation.evaluation.judge import JudgeConfig
+from asterion.capabilities.dci.implementation.research.query_planning import (
+    BASELINE_QUERY_PLAN,
+    DECOMPOSED_QUERY_PLAN,
+    QueryPlanningContract,
+    QueryPlanningError,
+    query_planning_contract_sha256,
+    resolve_query_planning_contract,
+    validate_materialized_query_planning_prompt,
+)
 from asterion.runtime.host import CancellationSignal
 
 
@@ -98,6 +109,34 @@ def coverage_execution_config_sha256(
     )
 
 
+def optimization_execution_config_sha256(
+    environment: Mapping[str, str],
+    query_planning_contract: QueryPlanningContract,
+) -> str:
+    """Digest the public effective optimization configuration, without private input."""
+
+    try:
+        value = {
+            "base_execution_config_sha256": coverage_execution_config_sha256(
+                environment
+            ),
+            "query_planning_contract_sha256": query_planning_contract_sha256(
+                query_planning_contract
+            ),
+            "schema": "asterion.dci.optimization-execution-config/v1",
+        }
+        return hashlib.sha256(
+            json.dumps(
+                value,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+    except (QueryPlanningError, TypeError, ValueError):
+        _fail()
+
+
 @dataclass(frozen=True, slots=True)
 class _DciResolvedSelection:
     resolution: InstalledBenchmarkResolution = field(repr=False)
@@ -123,6 +162,8 @@ class DciBenchmarkHost:
         operator_config: DciOperatorConfig | None,
         package_sources: Sequence[CapabilityPackageSource] | None = None,
         cancellation: CancellationSignal | None = None,
+        query_planning_contract: QueryPlanningContract | None = None,
+        query_planning_prompt_file: Path | None = None,
         executor_factory: (
             Callable[[DciBenchmarkInstance], BenchmarkTaskExecutor] | None
         ) = None,
@@ -141,6 +182,22 @@ class DciBenchmarkHost:
         self._authorizer = DciBenchmarkExecutionAuthorizer(instance)
         self._draft_plan: ResolvedBenchmarkPlan | None = None
         self._cancellation = _NeverCancelled() if cancellation is None else cancellation
+        self._query_planning_contract, self._query_planning_prompt_file = (
+            _resolve_query_planning_binding(
+                query_planning_contract,
+                query_planning_prompt_file,
+            )
+        )
+        if (
+            self._query_planning_contract.contract_id == DECOMPOSED_QUERY_PLAN
+            and (
+                instance.executor_profile != _REAL_AGENT_EXECUTOR_PROFILE
+                or not instance.task_ids
+                or any(not task_id.startswith("bright.") for task_id in instance.task_ids)
+                or executor_factory is not None
+            )
+        ):
+            _fail()
         self._executor_factory = executor_factory
 
     def discover_metadata(
@@ -387,6 +444,8 @@ class DciBenchmarkHost:
                 runtime_options=_real_agent_runtime_options(environment),
                 judge_config=JudgeConfig.from_environment(environment),
                 experiment_profile=_REAL_AGENT_EXPERIMENT_PROFILE,
+                query_planning_contract=self._query_planning_contract,
+                query_planning_prompt_file=self._query_planning_prompt_file,
                 max_turns=100,
                 max_native_attempts=config.max_native_attempts,
                 judge_connectivity_probe=verify_judge_connectivity,
@@ -497,6 +556,30 @@ class DciBenchmarkHost:
             _fail()
 
 
+def _resolve_query_planning_binding(
+    contract: QueryPlanningContract | None,
+    prompt_file: Path | None,
+) -> tuple[QueryPlanningContract, Path | None]:
+    try:
+        selected = (
+            resolve_query_planning_contract(BASELINE_QUERY_PLAN)
+            if contract is None
+            else contract
+        )
+        query_planning_contract_sha256(selected)
+        resolved = resolve_query_planning_contract(selected.contract_id)
+        if prompt_file is None:
+            validate_materialized_query_planning_prompt(
+                resolved.contract_id,
+                None,
+            )
+            return resolved, None
+        validate_materialized_query_planning_prompt(resolved.contract_id, prompt_file)
+        return resolved, prompt_file
+    except (QueryPlanningError, TypeError, ValueError):
+        _fail()
+
+
 def _fail() -> NoReturn:
     raise DciBenchmarkHostError("DCI benchmark host is invalid") from None
 
@@ -512,4 +595,5 @@ __all__ = (
     "DciBenchmarkHostError",
     "DciLoadedBenchmarkProviders",
     "coverage_execution_config_sha256",
+    "optimization_execution_config_sha256",
 )

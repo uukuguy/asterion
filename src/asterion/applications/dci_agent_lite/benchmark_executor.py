@@ -60,6 +60,15 @@ from asterion.capabilities.dci.implementation.research.experiment_profiles impor
     consumed_full_execution_authorization_snapshot,
     resolve_experiment_profile,
 )
+from asterion.capabilities.dci.implementation.research.query_planning import (
+    BASELINE_QUERY_PLAN,
+    DECOMPOSED_QUERY_PLAN,
+    QueryPlanningContract,
+    QueryPlanningError,
+    query_planning_contract_sha256,
+    resolve_query_planning_contract,
+    validate_materialized_query_planning_prompt,
+)
 from asterion.capabilities.dci.implementation.runtime.pi_rpc import (
     resolve_node_bin,
 )
@@ -263,6 +272,8 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
         runtime_options: DciRuntimeOptions,
         judge_config: JudgeConfig,
         experiment_profile: str = _DEFAULT_EXPERIMENT_PROFILE,
+        query_planning_contract: QueryPlanningContract | None = None,
+        query_planning_prompt_file: Path | None = None,
         max_turns: int = 100,
         max_native_attempts: int | None = None,
         benchmark_runner: Callable[..., Any] = run_benchmark_async,
@@ -289,6 +300,12 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
         self._runtime_options = runtime_options
         self._judge_config = judge_config
         self._experiment_profile = experiment_profile
+        self._query_planning_contract, self._query_planning_prompt_file = (
+            _resolve_query_planning_binding(
+                query_planning_contract,
+                query_planning_prompt_file,
+            )
+        )
         self._max_turns = max_turns
         self._max_native_attempts = max_native_attempts
         self._benchmark_runner = benchmark_runner
@@ -309,6 +326,16 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
         try:
             payload = _real_payload(invocation, cancellation, on_progress)
             mode = _REAL_TASK_MODES.get(invocation.task_id, "qa")
+            if (
+                self._query_planning_contract.contract_id == DECOMPOSED_QUERY_PLAN
+                and (mode != "ir" or not invocation.task_id.startswith("bright."))
+            ):
+                _fail()
+            if self._query_planning_prompt_file is not None:
+                validate_materialized_query_planning_prompt(
+                    self._query_planning_contract.contract_id,
+                    self._query_planning_prompt_file,
+                )
             coverage_registry = payload.coverage_registry
             if coverage_registry is not None and (
                 mode != "ir" or invocation.task_id not in _COVERAGE_TASK_IDS
@@ -376,6 +403,7 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 ),
                 resume_policy="compatible",
                 coverage_registry=coverage_registry,
+                append_system_prompt_file=self._query_planning_prompt_file,
             )
             on_progress(
                 BenchmarkProgressEvent(
@@ -526,6 +554,34 @@ def _failed_coverage_execution(
         case_count=0,
         artifact_ids=artifacts,
     )
+
+
+def _resolve_query_planning_binding(
+    contract: QueryPlanningContract | None,
+    prompt_file: Path | None,
+) -> tuple[QueryPlanningContract, Path | None]:
+    """Resolve the sole allowed Bright optimization variable before execution."""
+
+    try:
+        selected = (
+            resolve_query_planning_contract(BASELINE_QUERY_PLAN)
+            if contract is None
+            else contract
+        )
+        query_planning_contract_sha256(selected)
+        resolved = resolve_query_planning_contract(selected.contract_id)
+        if selected.contract_id == BASELINE_QUERY_PLAN:
+            if prompt_file is not None:
+                _fail()
+            return resolved, None
+        if selected.contract_id != DECOMPOSED_QUERY_PLAN or prompt_file is None:
+            _fail()
+        validate_materialized_query_planning_prompt(selected.contract_id, prompt_file)
+        return resolved, prompt_file
+    except DciBenchmarkExecutorError:
+        raise
+    except (QueryPlanningError, TypeError, ValueError):
+        _fail()
 
 
 def _authorize_full_request(

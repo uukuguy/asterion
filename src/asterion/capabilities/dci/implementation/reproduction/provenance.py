@@ -38,6 +38,7 @@ DCI_COMPLETE_IMPLEMENTATION_RESOURCES: tuple[str, ...] = tuple(sorted((
     "capabilities/dci/implementation/reproduction/paper_benchmarks.py",
     "capabilities/dci/implementation/runtime/pi_rpc.py",
     "capabilities/dci/implementation/research/prompts.py",
+    "capabilities/dci/implementation/research/query_planning.py",
     "capabilities/dci/implementation/research/pathlight_observation.py",
     "capabilities/dci/implementation/reproduction/provenance.py",
     "capabilities/dci/implementation/reproduction/reproduction.py",

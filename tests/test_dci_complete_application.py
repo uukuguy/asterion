@@ -97,6 +97,7 @@ DCI_EXECUTABLE_SOURCE_ROOTS = (
     "capabilities/dci/implementation/evaluation/evaluation.py",
     "capabilities/dci/implementation/evaluation/judge.py",
     "capabilities/dci/implementation/pathlight/coverage.py",
+    "capabilities/dci/implementation/research/query_planning.py",
     "capabilities/dci/implementation/runtime/run.py",
     "capabilities/dci/implementation/services.py",
 )
@@ -264,7 +265,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
             if name.endswith(".py")
         }
         self.assertEqual(declared, reachable)
-        self.assertEqual(len(DCI_COMPLETE_IMPLEMENTATION_RESOURCES), 76)
+        self.assertEqual(len(DCI_COMPLETE_IMPLEMENTATION_RESOURCES), 77)
 
     def test_transitive_identity_contains_explicit_packaged_resource_closure(
         self,
