@@ -1136,9 +1136,14 @@ class PiRpcClient:
                 raise RuntimeError(
                     f"RPC prompt timed out after {timeout_seconds:g} seconds"
                 )
+            recovery_turns = (
+                1 if max_turns is None else max_turns - turns
+            )
+            if recovery_turns <= 0:
+                return final_text
             return final_text + self.prompt_and_wait(
                 final_answer_recovery,
-                max_turns=1,
+                max_turns=recovery_turns,
                 timeout_seconds=remaining,
                 on_event=on_event,
                 cancel_event=cancel_event,
