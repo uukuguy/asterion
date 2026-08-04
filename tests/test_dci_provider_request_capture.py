@@ -14,6 +14,7 @@ from unittest.mock import patch
 from asterion.capabilities.dci.implementation.evaluation.provider_requests import (
     ProviderRequestCapture,
     ProviderRequestCaptureError,
+    _json_stringify,
     _summarize_payload,
     read_sealed_provider_requests_at,
 )
@@ -545,6 +546,60 @@ class ProviderRequestCaptureTests(unittest.TestCase):
             self.assertEqual(observation.segments[0].content_length, 1)
         finally:
             capture.close()
+
+    def test_json_stringify_matches_ecmascript_property_enumeration_recursively(
+        self,
+    ) -> None:
+        source = (
+            '{"z":"last","10":"ten","2":"two","01":"leading",'
+            '"-0":"minus","4294967295":"max","4294967294":"index",'
+            '"nested":{"b":1,"3":"three","1":"one",'
+            '"01":"nested-leading"},"array":[{"5":"five","0":"zero",'
+            '"x":"x","-0":"minus"}]}'
+        )
+        expected_node_output = (
+            '{"2":"two","10":"ten","4294967294":"index","z":"last",'
+            '"01":"leading","-0":"minus","4294967295":"max",'
+            '"nested":{"1":"one","3":"three","b":1,'
+            '"01":"nested-leading"},"array":[{"0":"zero","5":"five",'
+            '"x":"x","-0":"minus"}]}'
+        )
+
+        self.assertEqual(_json_stringify(json.loads(source)), expected_node_output)
+
+    def test_capture_accepts_node_order_and_rejects_insertion_order_drift(
+        self,
+    ) -> None:
+        noncanonical = (
+            '{"z":"last","10":"ten","2":"two","01":"leading",'
+            '"-0":"minus","4294967295":"max","4294967294":"index",'
+            '"nested":{"b":1,"3":"three","1":"one",'
+            '"01":"nested-leading"},"array":[{"5":"five","0":"zero",'
+            '"x":"x","-0":"minus"}]}'
+        )
+        canonical = (
+            '{"2":"two","10":"ten","4294967294":"index","z":"last",'
+            '"01":"leading","-0":"minus","4294967295":"max",'
+            '"nested":{"1":"one","3":"three","b":1,'
+            '"01":"nested-leading"},"array":[{"0":"zero","5":"five",'
+            '"x":"x","-0":"minus"}]}'
+        )
+        canonical_raw, canonical_safe = _captured_payload_json_pair(canonical)
+        canonical_capture = self._open_in_child("property-order-canonical")
+        try:
+            self._write(canonical_capture, canonical_raw)
+            (observation,) = canonical_capture.validate((canonical_safe,))
+            self.assertEqual(observation.payload_bytes, len(canonical.encode()))
+        finally:
+            canonical_capture.close()
+
+        drift_raw, drift_safe = _captured_payload_json_pair(noncanonical)
+        drift_capture = self._open_in_child("property-order-drift")
+        try:
+            self._write(drift_capture, drift_raw)
+            self._assert_invalid(drift_capture, (drift_safe,))
+        finally:
+            drift_capture.close()
 
     def test_payload_json_must_be_an_ecmascript_number_round_trip(self) -> None:
         impossible_literals = (

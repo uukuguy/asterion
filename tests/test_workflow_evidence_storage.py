@@ -5,9 +5,11 @@ import json
 import os
 import stat
 import tempfile
+import traceback
 import unittest
 from collections.abc import ItemsView, Iterator, Mapping
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from asterion.pathlight import TraceEvent, TraceGraph
@@ -204,6 +206,23 @@ def _mutated_bundle_path(root: Path, mutation: str) -> Path:
 
 
 class WorkflowEvidenceStorageTests(unittest.TestCase):
+    def _assert_source_invalid(
+        self, path: Path, *, sentinel: str = "SENTINEL_PRIVATE_SOURCE"
+    ) -> None:
+        try:
+            read_workflow_observation_bundle(path)
+        except Exception as error:
+            raised = error
+        else:
+            self.fail("invalid workflow observation source was accepted")
+        rendered = "".join(traceback.format_exception(raised))
+        self.assertIsInstance(raised, WorkflowEvidenceError)
+        self.assertEqual(str(raised), "workflow observation source is invalid")
+        self.assertIsNone(raised.__cause__)
+        self.assertTrue(raised.__suppress_context__)
+        self.assertNotIn(sentinel, rendered)
+        self.assertNotIn(str(path), rendered)
+
     def test_builds_the_same_validated_bundle_without_a_path(self) -> None:
         builder = getattr(
             workflow_evidence, "build_workflow_observation_bundle", None
@@ -450,6 +469,224 @@ class WorkflowEvidenceStorageTests(unittest.TestCase):
                 self.assertRaises(WorkflowEvidenceError),
             ):
                 read_workflow_observation_bundle(path)
+
+    def test_reader_opens_every_component_nofollow_and_nonblocking(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            nested = root / "one" / "two"
+            nested.mkdir(parents=True)
+            path = nested / "workflow-evidence.json"
+            write_workflow_observation_bundle(path, (_completed_record(),))
+            original_open = os.open
+            opened_flags: list[int] = []
+
+            def record_open(
+                name: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+                flags: int,
+                mode: int = 0o777,
+                *,
+                dir_fd: int | None = None,
+            ) -> int:
+                opened_flags.append(flags)
+                return original_open(name, flags, mode, dir_fd=dir_fd)
+
+            with patch(
+                "asterion.workflow_evidence.storage.os.open", side_effect=record_open
+            ):
+                read_workflow_observation_bundle(path)
+
+        self.assertGreaterEqual(len(opened_flags), 4)
+        self.assertTrue(all(flags & os.O_NOFOLLOW for flags in opened_flags))
+        self.assertTrue(all(flags & os.O_NONBLOCK for flags in opened_flags))
+
+    def test_reader_rejects_file_type_owner_mode_and_size_drift(self) -> None:
+        module = __import__(
+            "asterion.workflow_evidence.storage", fromlist=["_read_bundle_document"]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+
+            fifo = root / "fifo" / "workflow-evidence.json"
+            fifo.parent.mkdir()
+            os.mkfifo(fifo, 0o600)
+            original_open = os.open
+
+            def guard_fifo_open(
+                name: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+                flags: int,
+                mode: int = 0o777,
+                *,
+                dir_fd: int | None = None,
+            ) -> int:
+                if name == fifo.name and dir_fd is not None and not flags & os.O_NONBLOCK:
+                    raise OSError("SENTINEL_PRIVATE_SOURCE")
+                return original_open(name, flags, mode, dir_fd=dir_fd)
+
+            with self.subTest(case="fifo"), patch.object(
+                module.os, "open", side_effect=guard_fifo_open
+            ):
+                self._assert_source_invalid(fifo)
+
+            for case in ("symlink", "directory", "wrong-mode"):
+                with self.subTest(case=case):
+                    child = root / case
+                    child.mkdir()
+                    path = child / "workflow-evidence.json"
+                    if case == "symlink":
+                        backing = child / "SENTINEL_PRIVATE_SOURCE"
+                        write_workflow_observation_bundle(
+                            backing.with_name("workflow-evidence.json"),
+                            (_completed_record(),),
+                        )
+                        target = child / "valid-source.json"
+                        path.rename(target)
+                        path.symlink_to(target.name)
+                    elif case == "directory":
+                        path.mkdir(mode=0o600)
+                    else:
+                        write_workflow_observation_bundle(path, (_completed_record(),))
+                        path.chmod(0o640)
+                    self._assert_source_invalid(path)
+
+            owner_path = root / "owner" / "workflow-evidence.json"
+            owner_path.parent.mkdir()
+            write_workflow_observation_bundle(owner_path, (_completed_record(),))
+            real_fstat = os.fstat
+
+            def foreign_owner(descriptor: int):
+                metadata = real_fstat(descriptor)
+                if not stat.S_ISREG(metadata.st_mode):
+                    return metadata
+                return SimpleNamespace(
+                    st_mode=metadata.st_mode,
+                    st_uid=os.geteuid() + 1,
+                    st_dev=metadata.st_dev,
+                    st_ino=metadata.st_ino,
+                    st_size=metadata.st_size,
+                    st_mtime_ns=metadata.st_mtime_ns,
+                )
+
+            with self.subTest(case="foreign-owner"), patch.object(
+                module.os, "fstat", side_effect=foreign_owner
+            ):
+                self._assert_source_invalid(owner_path)
+
+            oversized_path = root / "oversized" / "workflow-evidence.json"
+            oversized_path.parent.mkdir()
+            write_workflow_observation_bundle(oversized_path, (_completed_record(),))
+
+            def oversized(descriptor: int):
+                metadata = real_fstat(descriptor)
+                if not stat.S_ISREG(metadata.st_mode):
+                    return metadata
+                return SimpleNamespace(
+                    st_mode=metadata.st_mode,
+                    st_uid=metadata.st_uid,
+                    st_dev=metadata.st_dev,
+                    st_ino=metadata.st_ino,
+                    st_size=64 * 1024 * 1024 + 1,
+                    st_mtime_ns=metadata.st_mtime_ns,
+                )
+
+            with self.subTest(case="oversized"), patch.object(
+                module.os, "fstat", side_effect=oversized
+            ), patch.object(module.os, "pread") as pread:
+                self._assert_source_invalid(oversized_path)
+            pread.assert_not_called()
+
+    def test_reader_requires_stable_exact_bounded_held_fd_read(self) -> None:
+        module = __import__(
+            "asterion.workflow_evidence.storage", fromlist=["_read_bundle_document"]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            path = root / "workflow-evidence.json"
+            write_workflow_observation_bundle(path, (_completed_record(),))
+            source_size = path.stat().st_size
+            real_fstat = os.fstat
+            real_pread = os.pread
+            calls: list[tuple[int, int]] = []
+
+            def bounded_pread(descriptor: int, count: int, offset: int) -> bytes:
+                calls.append((count, offset))
+                return real_pread(descriptor, count, offset)
+
+            with self.subTest(case="bounded-valid"), patch.object(
+                module.os, "pread", side_effect=bounded_pread
+            ):
+                read_workflow_observation_bundle(path)
+            self.assertTrue(calls)
+            self.assertTrue(all(0 < count <= 1024 * 1024 for count, _ in calls))
+            self.assertEqual(calls[-1], (1, source_size))
+
+            regular_fstat_calls = 0
+
+            def replacement_metadata(descriptor: int):
+                nonlocal regular_fstat_calls
+                metadata = real_fstat(descriptor)
+                if not stat.S_ISREG(metadata.st_mode):
+                    return metadata
+                regular_fstat_calls += 1
+                if regular_fstat_calls == 1:
+                    return metadata
+                return SimpleNamespace(
+                    st_mode=metadata.st_mode,
+                    st_uid=metadata.st_uid,
+                    st_dev=metadata.st_dev,
+                    st_ino=metadata.st_ino + 1,
+                    st_size=metadata.st_size,
+                    st_mtime_ns=metadata.st_mtime_ns,
+                )
+
+            with self.subTest(case="replacement"), patch.object(
+                module.os, "fstat", side_effect=replacement_metadata
+            ):
+                self._assert_source_invalid(path)
+
+            with self.subTest(case="missing-bytes"), patch.object(
+                module.os, "pread", return_value=b""
+            ):
+                self._assert_source_invalid(path)
+
+            def extra_byte(descriptor: int, count: int, offset: int) -> bytes:
+                if offset == source_size:
+                    return b"x"
+                return real_pread(descriptor, count, offset)
+
+            with self.subTest(case="extra-bytes"), patch.object(
+                module.os, "pread", side_effect=extra_byte
+            ):
+                self._assert_source_invalid(path)
+
+            mutated = False
+
+            def mutate_during_read(descriptor: int, count: int, offset: int) -> bytes:
+                nonlocal mutated
+                chunk = real_pread(descriptor, count, offset)
+                if not mutated:
+                    mutated = True
+                    metadata = path.stat()
+                    os.utime(
+                        path,
+                        ns=(metadata.st_atime_ns, metadata.st_mtime_ns + 1_000_000),
+                    )
+                return chunk
+
+            with self.subTest(case="mutation"), patch.object(
+                module.os, "pread", side_effect=mutate_during_read
+            ):
+                self._assert_source_invalid(path)
+
+    def test_reader_rejects_duplicate_json_keys_with_fixed_unchained_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / "workflow-evidence.json"
+            path.write_text(
+                '{"schema":"SENTINEL_PRIVATE_SOURCE","schema":"duplicate"}',
+                encoding="utf-8",
+            )
+            path.chmod(0o600)
+
+            self._assert_source_invalid(path)
 
     def test_reads_written_bundle_as_immutable_validated_value(self) -> None:
         trace = _completed_pathlight_trace()

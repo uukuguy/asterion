@@ -126,7 +126,7 @@ class PiObservationBuilder:
                 self._consume_tool_end(event)
             elif event_type == "message_end":
                 response = self._consume_message_end(event)
-                if response is not None and native_event_sequence is not None:
+                if response is not None:
                     self._record_response_sequence(native_event_sequence, response)
         except Exception:
             # This is a non-authoritative side channel.  A hostile or future
@@ -165,7 +165,7 @@ class PiObservationBuilder:
                 and native_event_sequence <= previous_sequence
             )
         ):
-            self._reconciliation_invalid = True
+            self._invalidate_reconciliation()
             return
         self._provider_requests = ()
         self._reconciled_model_calls = None
@@ -279,7 +279,7 @@ class PiObservationBuilder:
 
         if any(not frame.valid for frame in self._frames):
             return _empty_batch(run_id)
-        if self._provider_requests:
+        if self._provider_requests and not self._reconciliation_invalid:
             try:
                 return self._completed_batch(
                     run_id, self._provider_requests, self._reconciled_model_calls
@@ -378,8 +378,13 @@ class PiObservationBuilder:
             not isinstance(message, Mapping)
             or message.get("role") != "assistant"
             or len(self._model_calls) != len(self._frames)
-            or any(not call.response_observed for call in self._model_calls)
         ):
+            return
+        if self._inferred_call_open:
+            self._frames.pop()
+            self._model_calls.pop()
+            self._inferred_call_open = False
+        elif any(not call.response_observed for call in self._model_calls):
             return
         self._provider_requests = ()
         self._reconciled_model_calls = None
@@ -470,8 +475,10 @@ class PiObservationBuilder:
         return response
 
     def _record_response_sequence(
-        self, native_event_sequence: int, response: _ModelCallDraft
+        self, native_event_sequence: object, response: _ModelCallDraft
     ) -> None:
+        self._provider_requests = ()
+        self._reconciled_model_calls = None
         previous_sequence = (
             self._response_sequence_drafts[-1][0]
             if self._response_sequence_drafts
@@ -485,14 +492,21 @@ class PiObservationBuilder:
                 and native_event_sequence <= previous_sequence
             )
         ):
-            self._reconciliation_invalid = True
+            self._invalidate_reconciliation()
             return
+        assert isinstance(native_event_sequence, int)
         self._response_sequence_drafts.append((native_event_sequence, response))
+
+    def _invalidate_reconciliation(self) -> None:
+        self._reconciliation_invalid = True
+        self._provider_requests = ()
+        self._reconciled_model_calls = None
 
     def _mark_invalid(self) -> None:
         # A sentinel is counted by checkpoints, making retry rollback restore
         # the prior trustworthy state without expanding their public shape.
         self._retry_native_starts = None
+        self._invalidate_reconciliation()
         self._frames.append(_FrameDraft(0, 0, (), False))
 
     def _completed_tools(self) -> tuple[ToolCallObservation, ...]:

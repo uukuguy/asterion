@@ -35,10 +35,7 @@ from asterion.runtime.protocol import (
     validate_event_stream,
     validate_run_request,
 )
-from asterion.runtimes.pi_observation import (
-    PiObservationBuilder,
-    PiObservationCheckpoint,
-)
+from asterion.runtimes.pi_observation import PiObservationBuilder
 from asterion.workflow_evidence import (
     build_workflow_observation_bundle,
     project_completed_runtime_evidence,
@@ -2114,8 +2111,26 @@ def _resume_preflight(
         raise
 
 
-def _dci_provider_request_marker(event: Mapping[str, object]) -> int | None:
-    """Return a closed DCI provider-request marker candidate without copying it."""
+def _provider_request_safe_digest(value: object) -> str | None:
+    if not isinstance(value, Mapping):
+        return None
+    try:
+        encoded = json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8", errors="strict")
+    except (TypeError, ValueError, UnicodeError):
+        return None
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _dci_provider_request_marker(
+    event: Mapping[str, object],
+) -> tuple[int, str | None] | None:
+    """Return one closed DCI provider-request marker candidate and safe digest."""
 
     if event.get("type") != "entry_appended":
         return None
@@ -2126,7 +2141,7 @@ def _dci_provider_request_marker(event: Mapping[str, object]) -> int | None:
         return None
     data = entry.get("data")
     if not isinstance(data, Mapping):
-        return -1
+        return (-1, None)
     index = data.get("request_index")
     if (
         data.get("schema") != "dci.provider-request-observation/v1"
@@ -2134,8 +2149,8 @@ def _dci_provider_request_marker(event: Mapping[str, object]) -> int | None:
         or type(index) is not int
         or index < 1
     ):
-        return -1
-    return index
+        return (-1, None)
+    return (index, _provider_request_safe_digest(data))
 
 
 class DciRunRecorder:
@@ -2370,9 +2385,7 @@ class DciRunRecorder:
             self._pathlight_observation_builder: PiObservationBuilder | None = (
                 PiObservationBuilder(time.monotonic_ns)
             )
-            self._pathlight_observation_checkpoint: PiObservationCheckpoint = (
-                self._pathlight_observation_builder.checkpoint()
-            )
+            self._pathlight_provider_marker_digests: list[str] = []
             self._pathlight_event_observations: list[
                 tuple[dict[str, object], int, int]
             ] = []
@@ -2587,7 +2600,9 @@ class DciRunRecorder:
         return ProviderRequestCapture.open_at(self._root_fd)
 
     def reconcile_provider_requests(
-        self, observations: tuple[ProviderRequestObservation, ...]
+        self,
+        observations: tuple[ProviderRequestObservation, ...],
+        safe_entries: tuple[dict[str, object], ...],
     ) -> None:
         """Best-effort reconcile verified requests without affecting execution."""
 
@@ -2596,6 +2611,15 @@ class DciRunRecorder:
         if builder is None:
             return
         try:
+            if type(safe_entries) is not tuple:
+                return
+            safe_digests = tuple(
+                _provider_request_safe_digest(entry) for entry in safe_entries
+            )
+            if any(digest is None for digest in safe_digests) or safe_digests != tuple(
+                self._pathlight_provider_marker_digests
+            ):
+                return
             builder.reconcile_provider_requests(observations)
         except Exception:
             return
@@ -2635,15 +2659,13 @@ class DciRunRecorder:
             )
             marker = _dci_provider_request_marker(event)
             if marker is not None:
+                request_index, safe_digest = marker
                 builder.observe_provider_request_marker(
-                    marker if marker > 0 else 0,
+                    request_index if request_index > 0 and safe_digest is not None else 0,
                     native_event_sequence,
                 )
-            event_type = event.get("type")
-            if event_type == "agent_start":
-                self._pathlight_observation_checkpoint = builder.checkpoint()
-            elif event_type == "agent_end" and event.get("willRetry") is True:
-                builder.rollback(self._pathlight_observation_checkpoint)
+                if request_index > 0 and safe_digest is not None:
+                    self._pathlight_provider_marker_digests.append(safe_digest)
         except Exception:
             self._pathlight_observation_builder = None
 

@@ -673,7 +673,9 @@ def run_pi_research(
                 sealed = True
             if observations is not None and sealed:
                 try:
-                    recorder.reconcile_provider_requests(observations)
+                    recorder.reconcile_provider_requests(
+                        observations, provider_request_safe_entries
+                    )
                 except Exception:
                     pass
         normalized_events = recorder.finalize(

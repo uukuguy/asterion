@@ -78,6 +78,18 @@ def _assistant_end(
     }
 
 
+def _assistant_start(provider: str, model: str) -> dict[str, object]:
+    return {
+        "type": "message_start",
+        "message": {
+            "role": "assistant",
+            "provider": provider,
+            "model": model,
+            "content": [],
+        },
+    }
+
+
 def _verified_request(
     request_index: int,
     *,
@@ -113,6 +125,98 @@ def _verified_request(
 
 
 class PiObservationBuilderTests(unittest.TestCase):
+    def test_stale_message_start_cannot_lend_identity_to_later_response(self) -> None:
+        builder = PiObservationBuilder(_clock)
+        builder.observe_provider_request_marker(1, 1)
+        builder.consume(
+            _assistant_start("stale-provider", "stale-model"),
+            2,
+            native_event_sequence=2,
+        )
+        builder.observe_provider_request_marker(2, 3)
+        builder.consume(
+            _assistant_start("final-provider", "final-model"),
+            4,
+            native_event_sequence=4,
+        )
+        builder.consume(
+            _assistant_end("final", input_tokens=3, output_tokens=1),
+            5,
+            native_event_sequence=5,
+        )
+
+        builder.reconcile_provider_requests(
+            (_verified_request(1), _verified_request(2))
+        )
+        batch = builder.complete("run")
+
+        self.assertEqual(
+            tuple(call.status for call in batch.model_calls),
+            ("missing", "completed"),
+        )
+        self.assertIsNone(batch.model_calls[0].model_sha256)
+        self.assertEqual(
+            batch.model_calls[1].model_sha256,
+            _digest(
+                json.dumps(
+                    {"provider": "final-provider", "model": "final-model"},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            ),
+        )
+
+    def test_consumed_response_without_native_sequence_rejects_reconciliation(
+        self,
+    ) -> None:
+        builder = PiObservationBuilder(_clock)
+        builder.observe_provider_request_marker(1, 1)
+        builder.consume(
+            _assistant_start("provider", "model"),
+            2,
+            native_event_sequence=2,
+        )
+        builder.consume(
+            _assistant_end("response", input_tokens=3, output_tokens=1),
+            3,
+        )
+        inferred = builder.complete("run")
+
+        builder.reconcile_provider_requests((_verified_request(1),))
+
+        self.assertEqual(builder.complete("run"), inferred)
+        self.assertEqual(builder.complete("run").provider_requests, ())
+
+    def test_invalid_marker_or_response_revokes_cached_reconciliation(self) -> None:
+        def reconciled_request_only() -> PiObservationBuilder:
+            builder = PiObservationBuilder(_clock)
+            builder.observe_provider_request_marker(1, 1)
+            builder.consume(
+                _assistant_start("provider", "model"),
+                2,
+                native_event_sequence=2,
+            )
+            builder.reconcile_provider_requests((_verified_request(1),))
+            self.assertEqual(
+                builder.complete("run").provider_requests,
+                (_verified_request(1),),
+            )
+            return builder
+
+        with self.subTest(case="marker"):
+            builder = reconciled_request_only()
+            builder.observe_provider_request_marker(1, 3)
+            self.assertEqual(builder.complete("run").provider_requests, ())
+
+        with self.subTest(case="response"):
+            builder = reconciled_request_only()
+            builder.consume(
+                _assistant_end("response", input_tokens=3, output_tokens=1),
+                3,
+                native_event_sequence=0,
+            )
+            self.assertEqual(builder.complete("run").provider_requests, ())
+
     def test_reconciles_request_only_compaction_call_by_native_sequence(self) -> None:
         builder = PiObservationBuilder(lambda: 0)
         for index, sequence, response_sequence, text in (

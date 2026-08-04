@@ -766,8 +766,8 @@ def _json_stringify(value: object) -> str:
         return (
             "{"
             + ",".join(
-                f"{_json_string(key)}:{_json_stringify(item)}"
-                for key, item in mapping.items()
+                f"{_json_string(key)}:{_json_stringify(mapping[key])}"
+                for key in _ecmascript_object_keys(mapping)
             )
             + "}"
         )
@@ -778,6 +778,37 @@ def _json_stringify(value: object) -> str:
             + "]"
         )
     return _json_primitive(value)
+
+
+def _ecmascript_object_keys(mapping: dict[str, object]) -> tuple[str, ...]:
+    indexed: list[tuple[int, str]] = []
+    remaining: list[str] = []
+    for key in mapping:
+        if type(key) is not str:
+            _invalid()
+        array_index = _ecmascript_array_index(key)
+        if array_index is None:
+            remaining.append(key)
+        else:
+            indexed.append((array_index, key))
+    indexed.sort(key=lambda item: item[0])
+    return tuple(key for _index, key in indexed) + tuple(remaining)
+
+
+def _ecmascript_array_index(key: str) -> int | None:
+    if key == "0":
+        return 0
+    if (
+        not key
+        or key[0] == "0"
+        or len(key) > 10
+        or not key.isascii()
+        or not key.isdecimal()
+        or len(key) == 10
+        and key > "4294967294"
+    ):
+        return None
+    return int(key)
 
 
 def _json_primitive(value: object) -> str:

@@ -347,8 +347,6 @@ def _observe_native_events(
     events = _jsonl_mappings(raw)
     builder = PiObservationBuilder(lambda: 0)
     safe_entries: list[dict[str, object]] = []
-    checkpoint = builder.checkpoint()
-    safe_entry_count = 0
     for sequence, event in enumerate(events, 1):
         builder.consume(event, sequence, native_event_sequence=sequence)
         marker = _provider_marker(event)
@@ -356,13 +354,6 @@ def _observe_native_events(
             index, safe = marker
             builder.observe_provider_request_marker(index, sequence)
             safe_entries.append(safe)
-        event_type = event.get("type")
-        if event_type == "agent_start":
-            checkpoint = builder.checkpoint()
-            safe_entry_count = len(safe_entries)
-        elif event_type == "agent_end" and event.get("willRetry") is True:
-            builder.rollback(checkpoint)
-            del safe_entries[safe_entry_count:]
     if not safe_entries:
         _invalid()
     return builder, tuple(safe_entries)

@@ -25,6 +25,9 @@ _READABLE_BUNDLE_BASENAMES = frozenset(
         "workflow-evidence.provider-calls.offline.json",
     }
 )
+_MAX_BUNDLE_BYTES = 64 * 1024 * 1024
+_BUNDLE_READ_CHUNK_BYTES = 1024 * 1024
+_SOURCE_INVALID = "workflow observation source is invalid"
 
 
 @dataclass(frozen=True, slots=True)
@@ -424,10 +427,13 @@ def _project_failure_observation(record: Mapping[str, object]) -> dict[str, obje
 def read_workflow_observation_bundle(path: Path) -> WorkflowObservationBundle:
     """Read one canonical observation bundle into a validated immutable value."""
 
-    if path.name not in _READABLE_BUNDLE_BASENAMES:
-        raise WorkflowEvidenceError("workflow observation source is invalid")
-    document = _read_bundle_document(path)
-    return _validate_and_freeze_bundle(document)
+    try:
+        if not isinstance(path, Path) or path.name not in _READABLE_BUNDLE_BASENAMES:
+            raise ValueError(_SOURCE_INVALID)
+        document = _read_bundle_document(path)
+        return _validate_and_freeze_bundle(document)
+    except Exception:
+        raise WorkflowEvidenceError(_SOURCE_INVALID) from None
 
 
 def _read_bundle_document(path: Path) -> object:
@@ -438,32 +444,99 @@ def _read_bundle_document(path: Path) -> object:
     try:
         absolute = path.absolute()
         nofollow = getattr(os, "O_NOFOLLOW", None)
-        if nofollow is None:
-            raise OSError("no-follow descriptor opening is unavailable")
-        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | nofollow
+        nonblock = getattr(os, "O_NONBLOCK", None)
+        if nofollow is None or nonblock is None:
+            raise OSError(_SOURCE_INVALID)
+        close_on_exec = getattr(os, "O_CLOEXEC", 0)
+        directory_flags = (
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | nofollow
+            | nonblock
+            | close_on_exec
+        )
         directory_fd = os.open(absolute.anchor, directory_flags)
+        if not stat.S_ISDIR(os.fstat(directory_fd).st_mode):
+            raise OSError(_SOURCE_INVALID)
         for component in absolute.parts[1:-1]:
-            next_directory_fd = os.open(component, directory_flags, dir_fd=directory_fd)
-            os.close(directory_fd)
-            directory_fd = next_directory_fd
-        source_fd = os.open(path.name, os.O_RDONLY | nofollow, dir_fd=directory_fd)
-        source_metadata = os.fstat(source_fd)
+            next_directory_fd = -1
+            try:
+                next_directory_fd = os.open(
+                    component, directory_flags, dir_fd=directory_fd
+                )
+                if not stat.S_ISDIR(os.fstat(next_directory_fd).st_mode):
+                    raise OSError(_SOURCE_INVALID)
+                previous_directory_fd = directory_fd
+                directory_fd = next_directory_fd
+                next_directory_fd = -1
+                os.close(previous_directory_fd)
+            finally:
+                if next_directory_fd >= 0:
+                    os.close(next_directory_fd)
+        source_fd = os.open(
+            absolute.name,
+            os.O_RDONLY | nofollow | nonblock | close_on_exec,
+            dir_fd=directory_fd,
+        )
+        before = os.fstat(source_fd)
         if (
-            not stat.S_ISREG(source_metadata.st_mode)
-            or stat.S_IMODE(source_metadata.st_mode) != 0o600
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != os.geteuid()
+            or stat.S_IMODE(before.st_mode) != 0o600
+            or type(before.st_size) is not int
+            or before.st_size < 0
+            or before.st_size > _MAX_BUNDLE_BYTES
         ):
-            raise OSError("workflow observation source is not a regular file")
-        with os.fdopen(source_fd, "rb") as source:
-            source_fd = -1
-            document = json.loads(source.read().decode("utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        raise WorkflowEvidenceError("workflow observation source is invalid") from error
+            raise OSError(_SOURCE_INVALID)
+        chunks: list[bytes] = []
+        offset = 0
+        while offset < before.st_size:
+            count = min(_BUNDLE_READ_CHUNK_BYTES, before.st_size - offset)
+            chunk = os.pread(source_fd, count, offset)
+            if not chunk or len(chunk) > count:
+                raise OSError(_SOURCE_INVALID)
+            chunks.append(chunk)
+            offset += len(chunk)
+        if offset != before.st_size or os.pread(source_fd, 1, before.st_size):
+            raise OSError(_SOURCE_INVALID)
+        after = os.fstat(source_fd)
+        if (
+            not stat.S_ISREG(after.st_mode)
+            or after.st_uid != os.geteuid()
+            or stat.S_IMODE(after.st_mode) != 0o600
+            or (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+            != (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+        ):
+            raise OSError(_SOURCE_INVALID)
+        raw = b"".join(chunks)
+        if len(raw) != before.st_size:
+            raise OSError(_SOURCE_INVALID)
+        document = _load_exact_json(raw)
     finally:
         if source_fd >= 0:
             os.close(source_fd)
         if directory_fd >= 0:
             os.close(directory_fd)
     return document
+
+
+def _load_exact_json(raw: bytes) -> object:
+    def object_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(_SOURCE_INVALID)
+            result[key] = value
+        return result
+
+    def invalid_constant(_value: str) -> None:
+        raise ValueError(_SOURCE_INVALID)
+
+    return json.loads(
+        raw.decode("utf-8", errors="strict"),
+        object_pairs_hook=object_pairs,
+        parse_constant=invalid_constant,
+    )
 
 
 def _validate_and_freeze_bundle(document: object) -> WorkflowObservationBundle:

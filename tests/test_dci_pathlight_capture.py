@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import tempfile
@@ -343,6 +344,38 @@ class _MismatchedCapturedClient(_CapturedClient):
         entries = json.loads(json.dumps(self.entries))
         entries[0]["data"]["payload_sha256"] = "0" * 64
         return tuple(entries)
+
+
+class _RepositionedForgedMarkerClient(_CompactionCapturedClient):
+    def prompt_and_wait(self, message: str, *, on_event, **kwargs: object) -> str:
+        events: list[dict[str, object]] = []
+        answer = super().prompt_and_wait(message, on_event=events.append, **kwargs)
+        marker_position = next(
+            index
+            for index, event in enumerate(events)
+            if isinstance(event.get("entry"), dict)
+            and event["entry"].get("customType")
+            == "dci-provider-request-observation"
+            and isinstance(event["entry"].get("data"), dict)
+            and event["entry"]["data"].get("request_index") == 3
+        )
+        forged = json.loads(json.dumps(events.pop(marker_position)))
+        forged_data = forged["entry"]["data"]
+        assert isinstance(forged_data, dict)
+        forged_data["payload_sha256"] = "f" * 64
+        next_marker_position = next(
+            index
+            for index, event in enumerate(events)
+            if isinstance(event.get("entry"), dict)
+            and event["entry"].get("customType")
+            == "dci-provider-request-observation"
+            and isinstance(event["entry"].get("data"), dict)
+            and event["entry"]["data"].get("request_index") == 4
+        )
+        events.insert(next_marker_position, forged)
+        for event in events:
+            on_event(event)
+        return answer
 
 
 class _MissingCapturedClient(_CapturedClient):
@@ -986,6 +1019,39 @@ class DciPathlightCaptureTests(unittest.TestCase):
             ):
                 self.assertNotIn(private, rendered)
 
+    def test_repositioned_same_index_forged_marker_preserves_inferred_fallback(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            output = root / "forged-marker"
+            request = DciRunRequest(
+                run_id="forged-marker-run",
+                question=f"question-{_SENTINEL}",
+                cwd=root,
+                tools="read",
+                timeout_seconds=None,
+            )
+            with patch(
+                "asterion.capabilities.dci.implementation.runtime.run.PiRpcClient",
+                _RepositionedForgedMarkerClient,
+            ):
+                result = run_pi_research(_paths(root), request, output_dir=output)
+
+            bundle = read_workflow_observation_bundle(output / "workflow-evidence.json")
+            trace = bundle.pathlight_traces[0]
+            model_starts = _started_events(trace, "model-call")
+            self.assertEqual(result.status, "completed")
+            self.assertEqual(len(model_starts), 3)
+            self.assertTrue(
+                all(
+                    "request_shape_sha256" not in event["attributes"]
+                    and "private_reference_sha256" not in event["attributes"]
+                    for event in model_starts
+                )
+            )
+            self.assertNotIn("f" * 64, json.dumps(trace, default=dict))
+
     def test_provider_marker_failure_is_observation_only(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
@@ -1043,7 +1109,16 @@ class DciPathlightCaptureTests(unittest.TestCase):
                     {"type": "agent_end"},
                 ):
                     recorder.record_event(event)
-                recorder.reconcile_provider_requests((_verified_provider_request(1),))
+                recorder.reconcile_provider_requests(
+                    (_verified_provider_request(1),),
+                    (
+                        {
+                            "schema": "dci.provider-request-observation/v1",
+                            "capture_status": "captured",
+                            "request_index": 1,
+                        },
+                    ),
+                )
                 recorder.finalize(
                     status="completed",
                     final_text=f"answer-{_SENTINEL}",
@@ -1347,7 +1422,7 @@ class DciPathlightCaptureTests(unittest.TestCase):
                 )
             )
 
-    def test_retry_rolls_back_provider_markers(self) -> None:
+    def test_retry_retains_process_global_requests_responses_and_tools(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             output = root / "retry"
@@ -1380,6 +1455,18 @@ class DciPathlightCaptureTests(unittest.TestCase):
                         "message": {"role": "assistant", "content": []},
                     },
                     {
+                        "type": "tool_execution_start",
+                        "toolCallId": "abandoned-call",
+                        "toolName": "read",
+                        "args": {"path": "abandoned-private"},
+                    },
+                    {
+                        "type": "tool_execution_end",
+                        "toolCallId": "abandoned-call",
+                        "result": "abandoned-private-result",
+                        "isError": False,
+                    },
+                    {
                         "type": "message_end",
                         "message": _assistant_message(
                             "abandoned", input_tokens=5, output_tokens=1
@@ -1387,17 +1474,6 @@ class DciPathlightCaptureTests(unittest.TestCase):
                     },
                     {"type": "agent_end", "willRetry": True},
                     {"type": "agent_start"},
-                    {
-                        "type": "entry_appended",
-                        "entry": _provider_entry(
-                            {
-                                "schema": "dci.provider-request-observation/v1",
-                                "capture_status": "captured",
-                                "request_index": 1,
-                            },
-                            1,
-                        ),
-                    },
                     {
                         "type": "entry_appended",
                         "entry": _provider_entry(
@@ -1422,7 +1498,19 @@ class DciPathlightCaptureTests(unittest.TestCase):
                 ):
                     recorder.record_event(event)
                 recorder.reconcile_provider_requests(
-                    (_verified_provider_request(1), _verified_provider_request(2))
+                    (_verified_provider_request(1), _verified_provider_request(2)),
+                    (
+                        {
+                            "schema": "dci.provider-request-observation/v1",
+                            "capture_status": "captured",
+                            "request_index": 1,
+                        },
+                        {
+                            "schema": "dci.provider-request-observation/v1",
+                            "capture_status": "captured",
+                            "request_index": 2,
+                        },
+                    ),
                 )
                 recorder.finalize(
                     status="completed", final_text="kept", release_lock=False
@@ -1430,11 +1518,32 @@ class DciPathlightCaptureTests(unittest.TestCase):
                 recorder.persist_workflow_evidence()
 
             bundle = read_workflow_observation_bundle(output / "workflow-evidence.json")
-            model_starts = _started_events(bundle.pathlight_traces[0], "model-call")
+            trace = bundle.pathlight_traces[0]
+            model_starts = _started_events(trace, "model-call")
             self.assertEqual(len(model_starts), 2)
-            self.assertNotIn("response_sha256", model_starts[0]["attributes"])
+            self.assertEqual(
+                tuple(item["attributes"]["request_index"] for item in model_starts),
+                (1, 2),
+            )
+            self.assertIn("response_sha256", model_starts[0]["attributes"])
             self.assertFalse(model_starts[0]["attributes"]["boundary_observed"])
             self.assertIn("response_sha256", model_starts[1]["attributes"])
+            self.assertEqual(
+                model_starts[0]["attributes"]["response_sha256"],
+                hashlib.sha256(
+                    json.dumps(
+                        [{"type": "text", "text": "abandoned"}],
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode()
+                ).hexdigest(),
+            )
+            tool_starts = _started_events(trace, "tool-call")
+            self.assertEqual(len(tool_starts), 1)
+            self.assertEqual(
+                tool_starts[0]["attributes"]["call_id"],
+                hashlib.sha256(b"abandoned-call").hexdigest(),
+            )
 
     def test_existing_workflow_bundle_is_not_overwritten(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

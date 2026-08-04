@@ -502,15 +502,15 @@ class ProviderCallRecoveryTests(unittest.TestCase):
 
         self.assertFalse(self.companion.exists())
 
-    def test_retry_replay_discards_abandoned_attempt_evidence(self) -> None:
-        native_events = [
-            json.loads(line)
-            for line in (self.root / "events.jsonl").read_text(encoding="utf-8").splitlines()
-        ]
-        first_entry = native_events[0]["entry"]
-        assert isinstance(first_entry, dict)
-        first_safe = first_entry["data"]
-        assert isinstance(first_safe, dict)
+    def test_retry_replay_retains_process_global_attempt_evidence(self) -> None:
+        pairs = [_private_pair(index) for index in range(1, 6)]
+        safe_entries = [safe for _raw, safe in pairs]
+        _write_private(
+            self.root / "provider-requests.jsonl",
+            b"".join(raw for raw, _safe in pairs),
+            0o400,
+        )
+        native_events = _native_fixture(safe_entries[1:])
         abandoned_call = f"abandoned-call-{SENTINEL}"
         abandoned_response = {
             "type": "message_end",
@@ -525,7 +525,7 @@ class ProviderCallRecoveryTests(unittest.TestCase):
         }
         retry_events = [
             {"type": "agent_start"},
-            _marker(first_safe, 1),
+            _marker(safe_entries[0], 1),
             _message_start(),
             {
                 "type": "tool_execution_start",
@@ -546,6 +546,35 @@ class ProviderCallRecoveryTests(unittest.TestCase):
             {"type": "agent_end"},
         ]
         _write_private(self.root / "events.jsonl", _jsonl(retry_events))
+        _request, protocol_events = _protocol_fixture()
+        protocol_events[1:1] = [
+            RunEvent(
+                "offline-recovery-run",
+                1,
+                "tool.call",
+                {
+                    "call_id": abandoned_call,
+                    "name": "filesystem.grep",
+                    "arguments": {"query": f"abandoned-argument-{SENTINEL}"},
+                },
+            ).to_mapping(),
+            RunEvent(
+                "offline-recovery-run",
+                1,
+                "tool.result",
+                {
+                    "call_id": abandoned_call,
+                    "output": f"abandoned-result-{SENTINEL}",
+                    "is_error": False,
+                },
+            ).to_mapping(),
+        ]
+        for sequence, event in enumerate(protocol_events, 1):
+            event["sequence"] = sequence
+        _write_private(
+            self.root / "protocol/attempt-0001.events.jsonl",
+            _jsonl(protocol_events),
+        )
 
         bundle = recover_provider_call_companion(self.root, self.companion)
 
@@ -564,13 +593,13 @@ class ProviderCallRecoveryTests(unittest.TestCase):
         ]
         calls = [event for event in starts if event["kind"] == "model-call"]
         tools = [event for event in starts if event["kind"] == "tool-call"]
-        self.assertEqual((len(frames), len(calls), len(tools)), (4, 4, 7))
+        self.assertEqual((len(frames), len(calls), len(tools)), (5, 5, 8))
         self.assertEqual(
             tuple(event["attributes"]["request_index"] for event in calls),
-            (1, 2, 3, 4),
+            (1, 2, 3, 4, 5),
         )
         self.assertEqual(
-            sum("response_sha256" in event["attributes"] for event in calls), 3
+            sum("response_sha256" in event["attributes"] for event in calls), 4
         )
         expected_response = _message_end(1)["message"]
         assert isinstance(expected_response, dict)
@@ -595,14 +624,17 @@ class ProviderCallRecoveryTests(unittest.TestCase):
             ).encode("utf-8")
         ).hexdigest()
         self.assertEqual(
-            calls[0]["attributes"]["response_sha256"], expected_response_sha256
-        )
-        self.assertNotEqual(
             calls[0]["attributes"]["response_sha256"], abandoned_response_sha256
         )
+        self.assertEqual(
+            calls[1]["attributes"]["response_sha256"], expected_response_sha256
+        )
         rendered = json.dumps(bundle, default=dict, sort_keys=True)
-        self.assertNotIn(hashlib.sha256(abandoned_call.encode()).hexdigest(), rendered)
-        self.assertNotIn("filesystem.grep", rendered)
+        self.assertIn(hashlib.sha256(abandoned_call.encode()).hexdigest(), rendered)
+        self.assertIn(
+            hashlib.sha256(b"filesystem.grep").hexdigest(),
+            rendered,
+        )
         self.assertNotIn(SENTINEL, rendered)
 
     def test_recovers_canonical_unicode_provider_payloads_without_raw_content(
