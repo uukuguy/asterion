@@ -101,3 +101,28 @@ authorize/provider-loading/generic runner/evidence-store/result-type phases for
 all eight Bright tasks.  It proves per-task `Decimal("1")` authority,
 case-limit 10, zero Judge operations, single native attempt, actual and upper
 coverage artifacts, and the complete preflight barrier before provider load.
+
+## Receipt re-review closure
+
+Native failure evidence is now fail-closed: only explicit persisted
+`model-refusal`, `evaluation`, `parsing`, or `tool-protocol` classes project to
+model-business.  A persisted `unknown` class quarantines the task evidence,
+publishes no receipt, and leaves a later explicit resume able to start a fresh
+task root.
+
+Cost reconciliation requires exactly one
+`coverage-authorized-microusd.<task-limit>` artifact.  It then accepts exactly
+one canonical actual amount with no upper artifact, or one exact upper artifact
+with no actual amount.  Missing, duplicated, contradictory, malformed, or
+wrong-limit cost artifacts reject rather than silently becoming conservative.
+
+For each successful 10-case Bright task, native projection now requires exactly
+10 unique completed workflow records, unique bundle/run/input/source identities,
+and workflow input-plus-output tokens equal to the recovered cases' aggregate
+agent tokens.  The workflow projection and recovered case contracts have no
+shared public case key (`run/input/source` hashes versus recovered dataset/case
+source hashes), so this release does not claim a fabricated per-case mapping;
+it closes the boundary through exact count, identity uniqueness, token equality,
+and exclusive task evidence-root ownership.  Missing, duplicate, extra, or
+token-mismatched workflow evidence invalidates the projection and receipt replay
+recomputes these same constraints.

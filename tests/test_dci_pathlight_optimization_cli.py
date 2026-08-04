@@ -40,6 +40,8 @@ from asterion.applications.dci_agent_lite.pathlight_optimization_cli import (
     _canonical_bytes,
     _diagnosis_digest,
     _digest,
+    _native_receipt_projection,
+    _result_cost,
     main,
     read_optimization_authorization,
     read_optimization_plan,
@@ -595,14 +597,21 @@ class _RecordingOptimizationHost:
                 "cancelled",
                 (BenchmarkTaskResult(self.task_id.rsplit(".", 1)[0], "cancelled", 0),),
             )
-        artifact_ids: tuple[str, ...] = ()
+        artifact_ids: tuple[str, ...] = (
+            "coverage-authorized-microusd.1000000", "coverage-upper-microusd.1000000"
+        )
         if status == "observation-invalid":
             status = "completed"
-            artifact_ids = ("pathlight-observation-invalid",)
+            artifact_ids = (
+                "coverage-authorized-microusd.1000000", "coverage-upper-microusd.1000000",
+                "pathlight-observation-invalid",
+            )
         elif status.startswith("actual:"):
             _prefix, amount = status.split(":", 1)
             status = "completed"
-            artifact_ids = (f"coverage-actual-microusd.{amount}",)
+            artifact_ids = (
+                f"coverage-actual-microusd.{amount}", "coverage-authorized-microusd.1000000",
+            )
         return BenchmarkRunResult(
             status,
             (BenchmarkTaskResult(self.task_id.rsplit(".", 1)[0], status, 10 if status == "completed" else 0, artifact_ids),),
@@ -660,24 +669,33 @@ class _NativeEvidenceExecutor(BenchmarkTaskExecutor):
         config["artifact_digests"]["results.jsonl"] = hashlib.sha256(results.read_bytes()).hexdigest()
         config_path.write_text(json.dumps(config, sort_keys=True), encoding="utf-8")
         config_path.chmod(0o600)
-        record = {
-            "schema": "asterion.workflow-evidence/v1", "run_id": "native-run",
-            "input_digest": "a" * 64, "terminal_status": "completed", "tools": [],
-            "usage": {"input_tokens": 3, "output_tokens": 2}, "artifacts": [],
-        }
-        record["graph_sha256"] = hashlib.sha256(
-            json.dumps(record, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
-        write_workflow_observation_bundle(output / "workflow-evidence.json", (record,))
-        for path in output.iterdir():
-            path.chmod(0o600)
+        for index in range(10):
+            workflow_root = output / f"case-{index}"
+            workflow_root.mkdir(mode=0o700)
+            record = {
+                "schema": "asterion.workflow-evidence/v1", "run_id": f"native-run-{index}",
+                "input_digest": f"{index:064x}", "terminal_status": "completed", "tools": [],
+                "usage": {"input_tokens": 100, "output_tokens": 50}, "artifacts": [],
+            }
+            record["graph_sha256"] = hashlib.sha256(
+                json.dumps(record, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+            write_workflow_observation_bundle(
+                workflow_root / "workflow-evidence.json", (record,)
+            )
+        for path in output.rglob("*"):
+            path.chmod(0o700 if path.is_dir() else 0o600)
         output.chmod(0o700)
         output.parent.chmod(0o700)
         output.parent.parent.chmod(0o700)
         if self.fail_first and len(self.calls) == 1:
             return BenchmarkTaskResult(task_id, "failed", 0)
-        artifact = "coverage-actual-microusd.17" if len(self.calls) == 1 else "coverage-upper-microusd.1000000"
-        return BenchmarkTaskResult(task_id, "completed", 10, (artifact,))
+        artifacts = (
+            ("coverage-actual-microusd.17", "coverage-authorized-microusd.1000000")
+            if len(self.calls) == 1
+            else ("coverage-authorized-microusd.1000000", "coverage-upper-microusd.1000000")
+        )
+        return BenchmarkTaskResult(task_id, "completed", 10, artifacts)
 
 
 def _execute_optimization(
@@ -715,7 +733,34 @@ def _execute_optimization(
 
 
 class TestExecute(unittest.TestCase):
-    def test_real_dci_host_failed_task_uses_persisted_progress_and_has_no_native_claim(self) -> None:
+    def test_result_cost_requires_exact_authorized_and_exclusive_actual_or_upper_artifacts(self) -> None:
+        valid_actual = (
+            "coverage-actual-microusd.17", "coverage-authorized-microusd.1000000"
+        )
+        valid_upper = (
+            "coverage-authorized-microusd.1000000", "coverage-upper-microusd.1000000"
+        )
+        invalid = (
+            (),
+            ("coverage-actual-microusd.17",),
+            ("coverage-authorized-microusd.1", "coverage-upper-microusd.1000000"),
+            ("coverage-authorized-microusd.1000000", "coverage-upper-microusd.1"),
+            ("coverage-actual-microusd.01", "coverage-authorized-microusd.1000000"),
+            ("coverage-actual-microusd.17", "coverage-authorized-microusd.1000000", "coverage-upper-microusd.1000000"),
+        )
+
+        def result(artifacts: tuple[str, ...]) -> BenchmarkRunResult:
+            return BenchmarkRunResult(
+                "completed", (BenchmarkTaskResult("bright.biology", "completed", 10, artifacts),)
+            )
+
+        self.assertEqual(_result_cost(result(valid_actual), task_id="bright.biology", maximum=1_000_000), (17, "actual"))
+        self.assertEqual(_result_cost(result(valid_upper), task_id="bright.biology", maximum=1_000_000), (1_000_000, "conservative"))
+        for artifacts in invalid:
+            with self.subTest(artifacts=artifacts), self.assertRaises(ValueError):
+                _result_cost(result(artifacts), task_id="bright.biology", maximum=1_000_000)
+
+    def test_real_dci_host_unknown_progress_failure_quarantines_and_resume_is_not_wedged(self) -> None:
         fixture = _OptimizationFixture()
         self.addCleanup(fixture.close)
         self.assertEqual(fixture.prepare(real_source_lock=True)[0], 0)
@@ -740,13 +785,15 @@ class TestExecute(unittest.TestCase):
                  "--authorization-file", str(authorization), "--output-root", str(fixture.output)),
                 stdout=io.StringIO(), stderr=io.StringIO(), repo_root=fixture.root,
                 env_file=None, environment={}, host_factory=host_factory,
+            ), 2)
+            self.assertFalse(any((fixture.output / "receipts").iterdir()))
+            self.assertTrue(any((fixture.output / "evidence-quarantine").iterdir()))
+            self.assertEqual(main(
+                ("resume", "--plan-file", str(fixture.output / PLAN_FILENAME),
+                 "--authorization-file", str(authorization), "--output-root", str(fixture.output)),
+                stdout=io.StringIO(), stderr=io.StringIO(), repo_root=fixture.root,
+                env_file=None, environment={}, host_factory=host_factory,
             ), 0)
-        receipt = json.loads((fixture.output / "receipts" / "receipt-1-0000.json").read_text())
-        self.assertEqual((receipt["status"], receipt["failure_category"], receipt["native_evidence_state"]), ("failed", "model-business", "unavailable"))
-        self.assertTrue(all(receipt[name] is None for name in (
-            "recovered_run_sha256", "experiment_bundle_sha256", "evaluation_bundle_sha256",
-            "workflow_bundle_set_sha256", "input_tokens", "output_tokens", "total_tokens",
-        )))
 
     def test_real_dci_host_projects_native_receipts_and_revalidates_on_resume(self) -> None:
         fixture = _OptimizationFixture()
@@ -783,7 +830,7 @@ class TestExecute(unittest.TestCase):
         self.assertEqual(receipt["completed_case_count"], 10)
         self.assertEqual(receipt["cost_microusd"], 17)
         self.assertEqual(receipt["cost_source"], "actual")
-        self.assertEqual((receipt["input_tokens"], receipt["output_tokens"], receipt["total_tokens"]), (3, 2, 5))
+        self.assertEqual((receipt["input_tokens"], receipt["output_tokens"], receipt["total_tokens"]), (1000, 500, 1500))
         self.assertTrue(all(receipt[name] for name in (
             "recovered_run_sha256", "experiment_bundle_sha256", "evaluation_bundle_sha256", "workflow_bundle_set_sha256",
         )))
@@ -794,14 +841,66 @@ class TestExecute(unittest.TestCase):
         self.assertEqual(receipt["recovered_run_sha256"], recovered.recovered_run_sha256)
         self.assertEqual(receipt["experiment_bundle_sha256"], recovered_run_to_experiment(recovered).bundle_sha256)
         self.assertEqual(receipt["evaluation_bundle_sha256"], recovered_run_to_evaluation_bundle(recovered).bundle_sha256)
-        (native / "workflow-evidence.json").chmod(0o600)
-        (native / "workflow-evidence.json").write_text("{}", encoding="utf-8")
+        tampered_workflow = next(native.glob("case-*/workflow-evidence.json"))
+        tampered_workflow.chmod(0o600)
+        tampered_workflow.write_text("{}", encoding="utf-8")
         self.assertEqual(main(
             ("resume", "--plan-file", str(fixture.output / PLAN_FILENAME),
              "--authorization-file", str(authorization), "--output-root", str(fixture.output)),
             stdout=io.StringIO(), stderr=io.StringIO(), repo_root=fixture.root,
             env_file=None, environment={}, host_factory=host_factory,
         ), 2)
+
+    def test_native_projection_rejects_missing_duplicate_extra_and_token_mismatched_workflows(self) -> None:
+        fixture = _OptimizationFixture()
+        self.addCleanup(fixture.close)
+        self.assertEqual(fixture.prepare(real_source_lock=True)[0], 0)
+        plan = read_optimization_plan(fixture.output / PLAN_FILENAME)
+        authorization = fixture.root / "authorization.json"
+        write_private_file(authorization, _canonical_bytes(_authorization(plan)))
+        calls: list[tuple[str, Decimal | None]] = []
+
+        def host_factory(**kwargs: object) -> object:
+            return DciBenchmarkHost(
+                instance=cast(DciBenchmarkInstance, kwargs["instance"]), operator_config=cast(DciOperatorConfig, kwargs["operator_config"]),
+                package_sources=cast(Sequence[CapabilityPackageSource] | None, kwargs["package_sources"]),
+                query_planning_contract=cast(QueryPlanningContract, kwargs["query_planning_contract"]),
+                query_planning_prompt_file=cast(Path | None, kwargs["query_planning_prompt_file"]),
+            )
+
+        with (
+            patch("asterion.applications.dci_agent_lite.pathlight_optimization_cli.load_operator_config", return_value=fixture.config),
+            patch.object(DciBenchmarkHost, "_default_executor", return_value=_NativeEvidenceExecutor(calls)),
+        ):
+            self.assertEqual(main(
+                ("execute", "--plan-file", str(fixture.output / PLAN_FILENAME),
+                 "--authorization-file", str(authorization), "--output-root", str(fixture.output)),
+                stdout=io.StringIO(), stderr=io.StringIO(), repo_root=fixture.root,
+                env_file=None, environment={}, host_factory=host_factory,
+            ), 0)
+        native = next((fixture.output / "evidence" / "bright.biology" / "baseline" / "outputs").glob("*/*"))
+        workflows = tuple(sorted(native.glob("case-*/workflow-evidence.json")))
+        self.assertEqual(len(workflows), 10)
+        extra = native / "case-extra"
+        shutil.copytree(workflows[0].parent, extra)
+        for path in extra.rglob("*"):
+            path.chmod(0o700 if path.is_dir() else 0o600)
+        self.assertIsNone(_native_receipt_projection(native.parent.parent.parent, "bright.biology"))
+        shutil.rmtree(extra)
+        replacement = workflows[0]
+        replacement.unlink()
+        altered = {
+            "schema": "asterion.workflow-evidence/v1", "run_id": "replacement-run",
+            "input_digest": "f" * 64, "terminal_status": "completed", "tools": [],
+            "usage": {"input_tokens": 1, "output_tokens": 2}, "artifacts": [],
+        }
+        altered["graph_sha256"] = hashlib.sha256(
+            json.dumps(altered, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        write_workflow_observation_bundle(replacement, (altered,))
+        self.assertIsNone(_native_receipt_projection(native.parent.parent.parent, "bright.biology"))
+        workflows[-1].unlink()
+        self.assertIsNone(_native_receipt_projection(native.parent.parent.parent, "bright.biology"))
 
     def test_execute_preflights_all_tasks_then_runs_exact_order_once(self) -> None:
         fixture = _OptimizationFixture()

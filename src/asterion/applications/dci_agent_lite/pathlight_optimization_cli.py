@@ -740,7 +740,6 @@ def _native_failure_category(evidence_root: Path | None, task_id: str) -> str | 
             "rate-limit": "rate-limit", "timeout": "timeout",
             "model-refusal": "model-business", "evaluation": "model-business",
             "parsing": "model-business", "tool-protocol": "model-business",
-            "unknown": "model-business",
         }
         return mapping.get(native) if isinstance(native, str) else None
     except Exception:
@@ -754,12 +753,16 @@ def _result_cost(result: object, *, task_id: str, maximum: int) -> tuple[int, st
     if len(matches) != 1:
         raise ValueError
     artifacts = matches[0].artifact_ids
+    authorized = [item for item in artifacts if item.startswith("coverage-authorized-microusd.")]
     actual = [item.removeprefix("coverage-actual-microusd.") for item in artifacts if item.startswith("coverage-actual-microusd.")]
-    if len(actual) == 1 and actual[0].isdigit() and str(int(actual[0])) == actual[0]:
+    upper = [item for item in artifacts if item.startswith("coverage-upper-microusd.")]
+    if authorized != [f"coverage-authorized-microusd.{maximum}"]:
+        raise ValueError
+    if len(actual) == 1 and not upper and actual[0].isdigit() and str(int(actual[0])) == actual[0]:
         value = int(actual[0])
         if 0 <= value <= maximum:
             return value, "actual"
-    if f"coverage-upper-microusd.{maximum}" in artifacts or not actual:
+    if not actual and upper == [f"coverage-upper-microusd.{maximum}"]:
         return maximum, "conservative"
     raise ValueError
 
@@ -819,8 +822,31 @@ def _native_receipt_projection(
             raise ValueError
         input_tokens = 0
         output_tokens = 0
+        record_count = 0
+        run_identities: set[str] = set()
+        input_identities: set[str] = set()
+        source_identities: set[str] = set()
         for bundle in bundles:
             for record in bundle.records:
+                if record.get("terminal_status") != "completed":
+                    raise ValueError
+                run_identity = record.get("run_sha256")
+                input_identity = record.get("input_sha256")
+                source_identity = record.get("source_graph_sha256")
+                if (
+                    not _is_sha256(run_identity) or not _is_sha256(input_identity)
+                    or not _is_sha256(source_identity)
+                    or run_identity in run_identities
+                    or input_identity in input_identities
+                    or source_identity in source_identities
+                ):
+                    raise ValueError
+                assert isinstance(run_identity, str)
+                assert isinstance(input_identity, str)
+                assert isinstance(source_identity, str)
+                run_identities.add(run_identity)
+                input_identities.add(input_identity)
+                source_identities.add(source_identity)
                 usage = record.get("usage")
                 if not isinstance(usage, Mapping):
                     raise ValueError
@@ -833,6 +859,16 @@ def _native_receipt_projection(
                     raise ValueError
                 input_tokens += input_value
                 output_tokens += output_value
+                record_count += 1
+        if (
+            record_count != expected_case_count
+            or len(run_identities) != expected_case_count
+            or len(input_identities) != expected_case_count
+            or len(source_identities) != expected_case_count
+            or input_tokens + output_tokens
+            != sum(case.agent_total_tokens for case in recovered.cases)
+        ):
+            raise ValueError
         return {
             "recovered_run_sha256": recovered.recovered_run_sha256,
             "experiment_bundle_sha256": experiment.bundle_sha256,
