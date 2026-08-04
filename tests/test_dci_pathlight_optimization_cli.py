@@ -16,7 +16,7 @@ from contextlib import nullcontext
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import Mock, patch
 
 from asterion.benchmarks import BenchmarkTaskExecutor
@@ -1274,8 +1274,8 @@ class TestFinalize(unittest.TestCase):
             for path in sorted((fixture.output / "receipts").iterdir())
         )
         batches: list[BrightNativeBatch] = []
-        for task, receipt in zip(plan["tasks"], receipts, strict=True):
-            assert isinstance(task, dict)
+        tasks = cast(list[dict[str, object]], plan["tasks"])
+        for task, receipt in zip(tasks, receipts, strict=True):
             root = next((fixture.output / str(task["evidence_path"]) / "outputs").glob("*/*"))
             bundles = tuple(sorted(
                 read_workflow_observation_bundle(path).bundle_sha256
@@ -1290,10 +1290,12 @@ class TestFinalize(unittest.TestCase):
         bad_selection = json.loads(json.dumps(plan))
         selected = cast(list[str], bad_selection["tasks"][1]["selected_case_sha256s"])
         selected[0] = "0" * 64
+        recovered_run = batches[0].recovered_run
+        assert recovered_run is not None
         cases = (
             ("wrong-selected-item", bad_selection, tuple(batches)),
             ("duplicate-pair", plan, (*batches[:-1], batches[-2])),
-            ("wrong-metric", plan, (replace(batches[0], recovered_run=replace(batches[0].recovered_run, metric_name="accuracy")), *batches[1:])),
+            ("wrong-metric", plan, (replace(batches[0], recovered_run=replace(recovered_run, metric_name="accuracy")), *batches[1:])),
         )
         for name, candidate_plan, candidate_batches in cases:
             with self.subTest(name=name):
@@ -1631,7 +1633,7 @@ class TestFinalize(unittest.TestCase):
         original_link = os.link
         publish_count = 0
 
-        def fail_third_publish(*args: object, **kwargs: object) -> None:
+        def fail_third_publish(*args: Any, **kwargs: Any) -> None:
             nonlocal publish_count
             # The production publisher is descriptor-relative.  Only the
             # staging-to-root hard links are transaction publication points.
