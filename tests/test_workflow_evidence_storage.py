@@ -260,6 +260,33 @@ class WorkflowEvidenceStorageTests(unittest.TestCase):
             },
         )
 
+    def test_reader_accepts_only_exact_safe_bundle_basenames(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            canonical = root / "workflow-evidence.json"
+            write_workflow_observation_bundle(canonical, (_completed_record(),))
+            offline = root / "workflow-evidence.provider-calls.offline.json"
+            canonical.rename(offline)
+
+            self.assertEqual(
+                read_workflow_observation_bundle(offline).records[0]["run_sha256"],
+                _text_digest("run-1"),
+            )
+
+            for basename in (
+                "renamed-offline.json",
+                "workflow-evidence.provider-calls.offline.json.bak",
+                "other.json",
+            ):
+                with self.subTest(basename=basename):
+                    candidate = root / basename
+                    candidate.write_bytes(offline.read_bytes())
+                    with self.assertRaisesRegex(
+                        WorkflowEvidenceError,
+                        "^workflow observation source is invalid$",
+                    ):
+                        read_workflow_observation_bundle(candidate)
+
     def test_reader_projects_completed_record_identifiers_as_sha256(self) -> None:
         run_id = "/private/SECRET-RUN"
         tool_name = "/private/SECRET-TOOL"
@@ -577,10 +604,16 @@ class WorkflowEvidenceStorageTests(unittest.TestCase):
                 write_workflow_observation_bundle(existing, (_completed_record(),))
 
             self.assertEqual(existing.read_text(encoding="utf-8"), "keep")
-            with self.assertRaises(ValueError):
-                write_workflow_observation_bundle(
-                    root / "other.json", (_completed_record(),)
-                )
+            for target_name in (
+                "other.json",
+                "workflow-evidence.provider-calls.offline.json",
+            ):
+                with self.subTest(target_name=target_name), self.assertRaises(
+                    ValueError
+                ):
+                    write_workflow_observation_bundle(
+                        root / target_name, (_completed_record(),)
+                    )
 
     def test_writes_validated_pathlight_traces_into_bundle_digest(self) -> None:
         record = _completed_record()

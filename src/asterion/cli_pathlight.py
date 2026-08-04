@@ -36,6 +36,12 @@ from asterion.workflow_evidence import read_workflow_observation_bundle
 
 
 _ERROR = "asterion pathlight: request is invalid\n"
+_WORKFLOW_EVIDENCE_BASENAMES = frozenset(
+    {
+        "workflow-evidence.json",
+        "workflow-evidence.provider-calls.offline.json",
+    }
+)
 
 
 class _Parser(argparse.ArgumentParser):
@@ -119,9 +125,7 @@ def _execute(args: argparse.Namespace, *, stdout: TextIO) -> object:
         snapshot = DashboardSnapshot.build(
             workflow_bundles=tuple(
                 read_workflow_observation_bundle(path)
-                for path in _optional_absolute_paths(
-                    args.evidence_file or (), "workflow-evidence.json"
-                )
+                for path in _optional_workflow_evidence_paths(args.evidence_file or ())
             ),
             evaluation_bundles=tuple(
                 read_evaluation_bundle(path)
@@ -173,10 +177,10 @@ def _execute(args: argparse.Namespace, *, stdout: TextIO) -> object:
     if args.command == "export":
         if args.export_command == "opik":
             traces = tuple(
-                trace_graph_from_mapping(trace)
+                trace_graph_from_mapping(_json_copy(trace))
                 for value in (args.evidence_file or ())
                 for trace in read_workflow_observation_bundle(
-                    _absolute_canonical_paths((value,), "workflow-evidence.json")[0]
+                    _absolute_workflow_evidence_paths((value,))[0]
                 ).pathlight_traces
             )
             experiments = tuple(
@@ -269,7 +273,7 @@ def _execute(args: argparse.Namespace, *, stdout: TextIO) -> object:
 
 
 def _catalog_from_evidence(values: Sequence[str]) -> PathlightCatalog:
-    paths = _absolute_canonical_paths(values, "workflow-evidence.json")
+    paths = _absolute_workflow_evidence_paths(values)
     return PathlightCatalog.build(
         tuple(read_workflow_observation_bundle(path) for path in paths), (), ()
     )
@@ -352,6 +356,24 @@ def _optional_absolute_paths(values: Sequence[str], filename: str) -> tuple[Path
     if not values:
         return ()
     return _absolute_canonical_paths(values, filename)
+
+
+def _absolute_workflow_evidence_paths(values: Sequence[str]) -> tuple[Path, ...]:
+    if not values:
+        raise ValueError("pathlight input is missing")
+    paths = tuple(Path(value) for value in values)
+    if any(
+        not path.is_absolute() or path.name not in _WORKFLOW_EVIDENCE_BASENAMES
+        for path in paths
+    ):
+        raise ValueError("pathlight input is invalid")
+    return paths
+
+
+def _optional_workflow_evidence_paths(values: Sequence[str]) -> tuple[Path, ...]:
+    if not values:
+        return ()
+    return _absolute_workflow_evidence_paths(values)
 
 
 def _json_copy(value: object) -> object:

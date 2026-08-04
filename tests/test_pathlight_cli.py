@@ -108,6 +108,17 @@ def _trace() -> dict[str, object]:
     ).to_mapping()
 
 
+def _write_offline_workflow_bundle(
+    root: Path,
+    trace: dict[str, object],
+) -> Path:
+    canonical = root / "workflow-evidence.json"
+    write_workflow_observation_bundle(canonical, (), pathlight_traces=(trace,))
+    offline = root / "workflow-evidence.provider-calls.offline.json"
+    canonical.rename(offline)
+    return offline
+
+
 def _digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -395,6 +406,161 @@ def _experiment_bundle(*, reverse: bool = False) -> ExperimentBundle:
 
 
 class PathlightCliTests(unittest.TestCase):
+    def test_trace_show_and_flow_accept_exact_offline_companion(self) -> None:
+        _, trace = _verified_provider_request_fixture()
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = _write_offline_workflow_bundle(
+                Path(directory).resolve(), trace
+            )
+            outputs: list[str] = []
+            for arguments in (
+                ["trace", "show", "--trace-id", VERIFIED_TRACE_ID],
+                ["trace", "flow", "--trace-id", VERIFIED_TRACE_ID],
+            ):
+                with self.subTest(arguments=arguments):
+                    stdout = io.StringIO()
+                    code = main(
+                        [
+                            "pathlight",
+                            *arguments,
+                            "--evidence-file",
+                            str(bundle),
+                        ],
+                        entry_points=(FailIfLoadedEntryPoint(),),
+                        stdout=stdout,
+                    )
+                    self.assertEqual(code, 0)
+                    outputs.append(stdout.getvalue())
+
+        for output in outputs:
+            for sentinel in PRIVATE_PROVIDER_REQUEST_SENTINELS:
+                with self.subTest(sentinel=sentinel):
+                    self.assertNotIn(sentinel, output)
+
+    def test_dashboard_accepts_exact_offline_companion(self) -> None:
+        _, trace = _verified_provider_request_fixture()
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = _write_offline_workflow_bundle(
+                Path(directory).resolve(), trace
+            )
+            with patch("asterion.cli_pathlight.serve_dashboard") as serve:
+                code = main(
+                    [
+                        "pathlight",
+                        "dashboard",
+                        "--evidence-file",
+                        str(bundle),
+                    ],
+                    entry_points=(FailIfLoadedEntryPoint(),),
+                    stdout=io.StringIO(),
+                )
+
+        self.assertEqual(code, 0)
+        rendered = json.dumps(serve.call_args.args[0].to_mapping(), sort_keys=True)
+        for sentinel in PRIVATE_PROVIDER_REQUEST_SENTINELS:
+            with self.subTest(sentinel=sentinel):
+                self.assertNotIn(sentinel, rendered)
+
+    def test_opik_export_accepts_exact_offline_companion(self) -> None:
+        _, trace = _verified_provider_request_fixture()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            bundle = _write_offline_workflow_bundle(root, trace)
+            queue = root / "queue"
+            queue.mkdir(mode=0o700)
+            stdout = io.StringIO()
+            code = main(
+                [
+                    "pathlight",
+                    "export",
+                    "opik",
+                    "--evidence-file",
+                    str(bundle),
+                    "--queue-root",
+                    str(queue),
+                ],
+                entry_points=(FailIfLoadedEntryPoint(),),
+                stdout=stdout,
+            )
+            self.assertEqual(code, 0)
+            rendered = stdout.getvalue() + next(queue.iterdir()).read_text()
+            for sentinel in PRIVATE_PROVIDER_REQUEST_SENTINELS:
+                with self.subTest(sentinel=sentinel):
+                    self.assertNotIn(sentinel, rendered)
+
+    def test_public_read_surfaces_reject_offline_companion_near_misses(self) -> None:
+        _, trace = _verified_provider_request_fixture()
+        for basename in (
+            "renamed-offline.json",
+            "workflow-evidence.provider-calls.offline.json.bak",
+            "other.json",
+        ):
+            with (
+                self.subTest(basename=basename),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                root = Path(directory).resolve()
+                offline = _write_offline_workflow_bundle(root, trace)
+                candidate = root / basename
+                candidate.write_bytes(offline.read_bytes())
+
+                trace_error = io.StringIO()
+                trace_code = main(
+                    [
+                        "pathlight",
+                        "trace",
+                        "show",
+                        "--evidence-file",
+                        str(candidate),
+                        "--trace-id",
+                        VERIFIED_TRACE_ID,
+                    ],
+                    stderr=trace_error,
+                )
+                self.assertEqual(trace_code, 2)
+                self.assertEqual(
+                    trace_error.getvalue(), "asterion pathlight: request is invalid\n"
+                )
+
+                dashboard_error = io.StringIO()
+                with patch("asterion.cli_pathlight.serve_dashboard") as serve:
+                    dashboard_code = main(
+                        [
+                            "pathlight",
+                            "dashboard",
+                            "--evidence-file",
+                            str(candidate),
+                        ],
+                        stderr=dashboard_error,
+                    )
+                self.assertEqual(dashboard_code, 2)
+                self.assertEqual(
+                    dashboard_error.getvalue(),
+                    "asterion pathlight: request is invalid\n",
+                )
+                serve.assert_not_called()
+
+                queue = root / "queue"
+                queue.mkdir(mode=0o700)
+                opik_error = io.StringIO()
+                opik_code = main(
+                    [
+                        "pathlight",
+                        "export",
+                        "opik",
+                        "--evidence-file",
+                        str(candidate),
+                        "--queue-root",
+                        str(queue),
+                    ],
+                    stderr=opik_error,
+                )
+                self.assertEqual(opik_code, 2)
+                self.assertEqual(
+                    opik_error.getvalue(), "asterion pathlight: request is invalid\n"
+                )
+                self.assertEqual(tuple(queue.iterdir()), ())
+
     def test_dashboard_cli_validates_inputs_and_serves_without_provider(self) -> None:
         contract, evaluation = _evaluation(750_000)
         with tempfile.TemporaryDirectory() as directory:

@@ -19,6 +19,12 @@ from asterion.workflow_evidence.collector import (
 )
 
 _PROJECTION_SCHEMA = "asterion.workflow-observation-projection/v1"
+_READABLE_BUNDLE_BASENAMES = frozenset(
+    {
+        "workflow-evidence.json",
+        "workflow-evidence.provider-calls.offline.json",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -418,7 +424,7 @@ def _project_failure_observation(record: Mapping[str, object]) -> dict[str, obje
 def read_workflow_observation_bundle(path: Path) -> WorkflowObservationBundle:
     """Read one canonical observation bundle into a validated immutable value."""
 
-    if path.name != "workflow-evidence.json":
+    if path.name not in _READABLE_BUNDLE_BASENAMES:
         raise WorkflowEvidenceError("workflow observation source is invalid")
     document = _read_bundle_document(path)
     return _validate_and_freeze_bundle(document)
