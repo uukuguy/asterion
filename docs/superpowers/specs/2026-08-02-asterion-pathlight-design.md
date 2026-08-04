@@ -1,7 +1,7 @@
 # Asterion Pathlight 设计
 
 **日期：** 2026-08-02  
-**状态：** Core、查询、评估、诊断、受控优化、Opik 离线互操作与 operator-local Dashboard 已实现；Bright 4×10 真实 A/B 为 ready-for-authorization / Not rerun
+**状态：** Core、查询、评估、诊断、受控优化、Opik 离线互操作与 operator-local Dashboard 已实现；Bright A/B 实现为 provider-free verified，真实运行因 coverage 重核验而处于 blocked-by-coverage-reverification / Not rerun
 **名称：** Asterion Pathlight — 路径可观测、评估与受控优化
 
 ## 目标
@@ -114,6 +114,20 @@ ContextFrame。Pathlight 分两阶段处理，避免以大规模重跑掩盖缺�
 诊断输出严格分为已证实事实、待验证假设和证据缺口。初始候选实验可以涉及语料/检索工具适配、
 上下文保真或压缩、结果解析和去重、领域检索策略、超时/重试策略；它们不是预设根因。每项只先
 在小样本上做受预算约束的 A/B 验证，并有预先声明的目标指标与停止条件。
+
+### Coverage 证据更正（2026-08-05）
+
+旧 v8 receipt 虽曾显示五项各 10/10，但原生配置的 dataset identity 是本地夹具
+`dataset.local`，不是计划要求的 Bright/BEIR 数据集。该批 coverage、评价、诊断和 gate 均为
+`historical-invalid` / `non-authoritative`；receipt、Dashboard 或 Opik 镜像都不能替代原生 seal，
+也不能授予优化实验执行权。
+
+新的 5×10 coverage 计划已 provider-free 生成，计划摘要为
+`5c1a18927edb7f5519c738caa1e64ae1f2c927b1f1c9fa30678d89544cdb363e`，状态为
+`prepared` / 未授权，固定 50 次 Agent、0 次 Judge、$5 和累计 2 次基础设施失败停止。它必须在
+另行精确授权后以前台执行，并由 provider-free reader 重新闭合 plan、authorization、receipt、
+原生 dataset identity、trajectory、workflow trace 与 evaluation。只有随后重新生成的 diagnosis
+和 gate 才能作为 4×10 A/B 的 prepare 前提。
 
 ## API、CLI 和 Dashboard
 
@@ -282,8 +296,10 @@ Evaluation、TrialHistory、Decision、查询、Dashboard 和 Opik 安全映射�
 进入 framework 模块。它固定比较四个 Bright 数据集各 10 例的基线/候选，最多 80 次 Agent、
 0 次 Judge、8,000,000 微美元，每个原生案例最多一次尝试；收据链累计两次基础设施失败即停止。
 
-当前真实 A/B 未运行，状态为 `ready-for-authorization` / `Not rerun`。provider-free 的准备、
-查询和执行后收口入口如下；变量只指向操作员私有文件，公共产物不得展开其值：
+当前真实 A/B 未运行，实现为 provider-free verified，运行状态为
+`blocked-by-coverage-reverification` / `Not rerun`。以下 provider-free 准备、查询和执行后收口
+入口只能在 fresh 5×10 coverage 通过真实 seal、并重新生成 diagnosis/gate 后使用；变量只指向
+操作员私有文件，公共产物不得展开其值：
 
 ```bash
 uv run asterion-dci pathlight optimization prepare \
@@ -350,11 +366,13 @@ Span 时序；辅助视图为评估、实验历史、诊断和证据缺口。它
 发布的无外部依赖 HTML/CSS/JavaScript，使用同源只读 API，不使用 CDN、远程字体、分析脚本或
 浏览器持久化。没有 ContextFrame 的历史运行显示为 `missing`，不根据结果反推节点。
 
-2026-08-03 使用六项现有 DCI 安全实验、最新五条 coverage evaluation 和诊断闭包完成前台核验：
+2026-08-03 使用六项现有 DCI 安全实验、当时的五条 coverage evaluation 和诊断闭包完成前台核验：
 快照摘要为 `eb21c3b98b8a2e1ed511ad26a447ba47ff746c65bbf156beef8dfe46c7157435`，包含 6 个
 experiment、848 个 trial、859 个 evaluation、21 个 finding 和 2 个 proposal。由于这些 848 条
 历史运行没有 Pathlight trace graph，Dashboard 如实显示 0 条 trace 主线和 854 个证据缺口；这
 证明现有结果/评估/诊断可观察，不表示历史最终 LLM ContextFrame 已被恢复。
+此后原生身份复核已把五条 coverage evaluation 降为 `historical-invalid` /
+`non-authoritative`；Dashboard 的历史展示不构成原生 seal 或 authorization gate。
 
 ## 分期交付
 

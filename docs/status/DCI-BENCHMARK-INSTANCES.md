@@ -117,24 +117,50 @@ Bright Biology 103/103 的正式结果，也不能用单例 `0.339160` 与论文
 六项已完成 evidence 已经由 provider-free Pathlight 命令恢复、交叉验证并诊断；安全的数值观察、证据缺口和未获授权的两项最小实验提案见
 [Pathlight DCI 差分诊断](PATHLIGHT-DCI-DIAGNOSIS.md)。该诊断中的论文数值为 reference-only，不能作为完全复现或跨配置可比性的结论。
 
-Pathlight coverage 有限实验已完成五项各 10/10：共 50 次 Agent、0 次 Judge、
-0 失败，实际成本 $2.950832。其 observed gold mean coverage 中位数分别为 Biology
-0.758772、Earth Science 0.833333、Economics 0.214285、Robotics 1.000000、SciFact
-1.000000。Economics 显示明显的检索覆盖不足；Earth Science 与 Robotics 已找到大部分或
-全部 gold 却仍低分，说明还需检查排序、证据选择和最终输出。最后一次 LLM 调用上下文尚未形成
-可验证帧，因此 retained coverage 仍不可用；这项框架采集缺口必须先于新的模型优化实验修复。
-完整分母、成本、摘要和结论边界见上述中文诊断文档。
+Pathlight 旧 v8 coverage receipt 曾记录五项各 10/10、50 次 Agent、0 次 Judge、$2.950832，
+但原生闭包复核发现其 dataset identity 是本地夹具 `dataset.local`，不是四项 Bright 与 BEIR
+SciFact。该批数据及其 coverage、评价和 gate 现均为 `historical-invalid` /
+`non-authoritative`，不得用于解释分差或授权后续 A/B。先前公开的 coverage 数值只保留在中文
+诊断文档中作为失效历史。
 
-上述六项历史结果、五条 coverage 评价和最新诊断已经生成 Pathlight–Opik 1.0.0 离线批次：
+fresh 5×10 coverage 计划已经 provider-free 生成，计划摘要为
+`5c1a18927edb7f5519c738caa1e64ae1f2c927b1f1c9fa30678d89544cdb363e`，状态为
+`prepared` / **尚未授权**；准备过程没有调用 Agent、Judge、provider 或网络。计划固定五个数据集
+各 10 条，最多 50 次 Agent、0 次 Judge、$5，累计 2 次基础设施失败即停止。真实 dataset
+identity、trajectory、workflow trace、receipt
+和 evaluation 全部 seal 后，才重新运行带 coverage plan/authorization/output 参数的 provider-free
+`pathlight diagnose`，并据此准备 4×10 A/B。
+
+fresh coverage 完成后，重新诊断必须把三项 coverage 参数作为一个整体传入；缺少任一项都会
+fail closed：
+
+```bash
+uv run asterion-dci pathlight diagnose \
+  --recovery-root "$BIOLOGY_RECOVERY_ROOT" \
+  --recovery-root "$EARTH_SCIENCE_RECOVERY_ROOT" \
+  --recovery-root "$ECONOMICS_RECOVERY_ROOT" \
+  --recovery-root "$ROBOTICS_RECOVERY_ROOT" \
+  --recovery-root "$SCIFACT_RECOVERY_ROOT" \
+  --recovery-root "$BAMBOOGLE_RECOVERY_ROOT" \
+  --coverage-plan-file "$FRESH_COVERAGE_ROOT/pathlight-coverage-experiment.json" \
+  --coverage-authorization-file "$FRESH_COVERAGE_AUTHORIZATION_FILE" \
+  --coverage-output-root "$FRESH_COVERAGE_ROOT" \
+  --output-root "$FRESH_DIAGNOSIS_ROOT"
+```
+
+上述六项历史结果、旧 coverage 评价和旧诊断曾生成 Pathlight–Opik 1.0.0 离线批次：
 1721 个安全 envelope，批次摘要
 `3ba1d6d212b083375f5764c246c8cae6189910f64a3fb2cca6379d3be98a32ce`，网络调用为 0。
-这证明本地映射与队列闭环可用，不表示已向 Opik 服务发送数据；外部发送仍由操作员适配器负责。
+这证明本地映射与队列闭环可用，不表示已向 Opik 服务发送数据；其中 coverage 相关成员现为
+`historical-invalid` / `non-authoritative`，外部镜像不能成为 authorization gate。外部发送仍由
+操作员适配器负责。
 
-同一组安全 experiment/evaluation/diagnosis 已通过 Pathlight Dashboard 前台核验：6 个 experiment、
+同一组历史 experiment/evaluation/diagnosis 曾通过 Pathlight Dashboard 前台核验：6 个 experiment、
 848 个 trial、859 个 evaluation、21 个 finding、2 个 proposal；快照摘要为
 `eb21c3b98b8a2e1ed511ad26a447ba47ff746c65bbf156beef8dfe46c7157435`。历史运行没有 Pathlight
 trace graph，因此界面明确显示 0 条 ContextFrame 主线和 854 个证据缺口，不把最终结果伪造成
-调用过程。完整启动方式与安全边界见 [Pathlight 设计](../superpowers/specs/2026-08-02-asterion-pathlight-design.md)。
+调用过程。Dashboard 展示不改变旧 coverage 的失效状态。完整启动方式与安全边界见
+[Pathlight 设计](../superpowers/specs/2026-08-02-asterion-pathlight-design.md)。
 
 ## Bright 查询分解 A/B（跨实例优化核验）
 
@@ -143,14 +169,16 @@ trace graph，因此界面明确显示 0 条 ContextFrame 主线和 854 个证�
 `dci.bright.economics@1.0.0` 和 `dci.bright.robotics@1.0.0` 上各固定选择 10 例，分别执行
 基线查询规划与查询分解候选，用原生 nDCG@10、trace、成本和时延做逐例配对。
 
-控制链和离线决策收口已经实现；真实 40 条基线加 40 条候选尚未执行，当前状态是
-`ready-for-authorization` / `Not rerun`。因此本文档没有候选得分、收益或优化成功结论。固定
+控制链和离线决策收口已经实现并通过 provider-free 验证；真实 40 条基线加 40 条候选尚未执行，
+当前状态是 `blocked-by-coverage-reverification` / `Not rerun`。因此本文档没有候选得分、收益或
+优化成功结论。必须先完成另行授权的 fresh 5×10 coverage 并生成真实 seal，才能准备 A/B。固定
 边界为最多 80 次 Agent、0 次 Judge、总成本不超过 $8、每例最多一次原生尝试；收据链累计达到
 2 次授权/网络/限流/超时/host-service 基础设施失败后停止。既有诊断、计划批准或 `.env` 都不
 等于本次执行授权。
 
-准备和状态查询可在不加载 provider 的情况下执行；下列路径变量仅用于操作员本机，不得将实际
-值写回公开台账：
+准备和状态查询可在不加载 provider 的情况下执行，但当前不得使用旧 v8 gate。下列命令只适用于
+fresh 5×10 coverage 重诊断生成新 gate 之后；路径变量仅用于操作员本机，不得将实际值写回公开
+台账：
 
 ```bash
 uv run asterion-dci pathlight optimization prepare \

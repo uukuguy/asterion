@@ -71,16 +71,17 @@ native evidence，任何正式实例分数也没有变化。下一条 Bright Bio
 闭环，必须使用新的 source lock 与 evidence root，并获得一次单独、明确的执行授权；现有计划、
 配置、缓存和历史批准都不授予这次调用权限。
 
-## Coverage 实验状态（已完成）
+## Coverage 实验状态（旧 v8 无效，等待重新核验）
 
-获批的 v8 有限实验已以前台串行方式完成：五个数据集各 10/10，共 50 次 Agent、
-0 次 Judge、0 次失败，实际成本 2,950,832 微美元（$2.950832）。执行绑定摘要为
-`0ca6151fbef02c009729fffba4a588de298a596a342788a54644a34cfe84c3fd`，计划摘要为
-`143350e02c518f073c26e32074ce73636c21d859522cd4818b21a904f06faf98`；50 条轨迹生成的
-coverage experiment 摘要为
-`8deb7710947e56672e7e13eeb0268b7bf0eaeea222617012f4b46fcea85f23de`。
+旧 v8 receipt 曾记录五项各 10/10、共 50 次 Agent、0 次 Judge、0 次失败和 $2.950832，
+但后续原生闭包复核已证伪这次 coverage：原生配置中的 dataset identity 是本地夹具
+`dataset.local`，不是计划要求的四项 Bright 与 BEIR SciFact。receipt 的“完成”不能替代原生
+身份闭合，因此旧 v8 **不是有效的 Bright/BEIR coverage，不得用作 authorization gate**。
 
-| 数据集 | v8 nDCG@10（10 条） | 实际成本 | gold coverage any/mean/all 中位数 | 浮现 gold / 工具观测 |
+下表只保留先前公开数值以解释历史，不再支持任何机制结论；整表状态均为
+`historical-invalid` / `non-authoritative`：
+
+| 数据集标签 | 旧 v8 nDCG@10（10 条） | 旧记录成本 | 旧 gold coverage any/mean/all 中位数 | 旧浮现 gold / 工具观测 |
 |---|---:|---:|---:|---:|
 | Bright Biology | 0.581166 | $0.540605 | 1.000000 / 0.758772 / 0.000000 | 39 / 136 |
 | Bright Earth Science | 0.258671 | $0.538526 | 1.000000 / 0.833333 / 0.500000 | 14 / 133 |
@@ -88,31 +89,69 @@ coverage experiment 摘要为
 | Bright Robotics | 0.473500 | $0.727880 | 1.000000 / 1.000000 / 1.000000 | 23 / 219 |
 | BEIR SciFact | 0.787501 | $0.511019 | 1.000000 / 1.000000 / 1.000000 | 13 / 145 |
 
-这些 10 条结果用于定位工作流环节，不替代 103/116/103/101/300 条全量分数，也不能与
-论文全量分数直接作统计结论。它们足以排除“Bright 四项都因为完全没有找到 gold 文档”这一
-单一解释：Economics 的 mean coverage 只有 0.214285，检索覆盖不足是强候选原因；
-Earth Science 和 Robotics 已有较高或完整覆盖却仍低分，差距还发生在检索之后的排序、证据
-选择或最终输出阶段；SciFact 的完整覆盖与接近论文的分数构成同配置参照。Biology 处于两者
-之间。上述只是机制定位，不是因果证明。
+解析器、结构化过程证据和 provider-free coverage reader 已经实现并通过本地验证，但这些实现
+不能修复或升级旧 v8 的错误原生身份。旧 v8 的 coverage、retained coverage、评价记录、诊断和
+门报告均不可作为真实 Bright/BEIR 证据。当前查询分解门槛是
+`blocked-by-coverage-reverification`。
 
-真实 Pi 轨迹最初被错误记为零覆盖，原因是工具结果采用结构化 `content/details` 形态，长行还会
-携带明确的截断标志；旧解析器只接受裸字符串和逐字完整行。提交 `972bc13` 已以严格形态校验、
-错误结果排除、空白规范化和显式长前缀绑定修复，并对 50/50 真实轨迹重新验证。coverage 摘要随后
-被规范成 5 个真实 Pathlight EvaluationRecord，避免把 evidence 摘要冒充评价身份；最终诊断
-产物摘要为 `8241222ea6411422e27efd0f6e6d469c8bc1301c77bf017f1fa6a28f9fd7d8c8`。
+全新的 5×10 coverage 计划现已 provider-free 生成，计划摘要为
+`5c1a18927edb7f5519c738caa1e64ae1f2c927b1f1c9fa30678d89544cdb363e`；准备阶段
+没有调用 Agent、Judge、provider 或网络，状态为 `prepared` / **尚未授权**。范围是 Bright
+Biology、Earth Science、Economics、
+Robotics 与 BEIR SciFact 各 10 条，共最多 50 次 Agent、0 次 Judge、$5、累计 2 次基础设施失败
+即停止。新运行必须使用新计划、新的精确 0600 authorization 和新的 0700 output root；旧
+receipt、旧授权、`.env`、缓存和本文档都不授予执行权。只有五项原生 dataset identity、逐例
+trajectory/workflow trace、receipt 与 evaluation 全部通过真实 seal 后，才能重新生成 diagnosis
+和 authorization gate。
 
-当前 50 条的 retained coverage 均不可用：现有 evidence 能证明工具输出中出现过 gold，
-但没有保存可验证的最后一次 LLM 调用上下文帧，因此还不能证明这些证据最终进入模型上下文。
-这是 Pathlight 基础采集层的明确缺口，也是下一步先补调用边界与上下文帧、再做查询分解实验的
-原因。coverage 闭包现已把检索查询分解门槛从 `blocked-by-coverage` 打开为
-`ready-for-authorization`；它没有自动授权后续模型实验。
+### Fresh 5×10 coverage 与重新诊断命令
+
+以下命令中的变量只代表操作员拥有的私有文件位置；不得把其实际值、案例 ID 或 payload 写入
+公开文档。`prepare`、`status` 和执行后的 `diagnose` 读取均为 provider-free；只有 `execute`
+会在单独授权后调用 Agent。
+
+```bash
+install -d -m 700 "$FRESH_COVERAGE_ROOT"
+uv run asterion-dci pathlight experiment prepare \
+  --diagnosis-file "$PATHLIGHT_DIAGNOSIS_ROOT/pathlight-diagnosis.json" \
+  --proposal-sha256 "$COVERAGE_PROPOSAL" \
+  --output-root "$FRESH_COVERAGE_ROOT"
+
+# 获得与新计划及 output root 精确绑定的 0600 authorization 后，前台执行
+uv run asterion-dci pathlight experiment execute \
+  --plan-file "$FRESH_COVERAGE_ROOT/pathlight-coverage-experiment.json" \
+  --authorization-file "$FRESH_COVERAGE_AUTHORIZATION_FILE" \
+  --output-root "$FRESH_COVERAGE_ROOT"
+
+uv run asterion-dci pathlight experiment status \
+  --plan-file "$FRESH_COVERAGE_ROOT/pathlight-coverage-experiment.json" \
+  --authorization-file "$FRESH_COVERAGE_AUTHORIZATION_FILE" \
+  --output-root "$FRESH_COVERAGE_ROOT"
+
+install -d -m 700 "$FRESH_DIAGNOSIS_ROOT"
+uv run asterion-dci pathlight diagnose \
+  --recovery-root "$BIOLOGY_RECOVERY_ROOT" \
+  --recovery-root "$EARTH_SCIENCE_RECOVERY_ROOT" \
+  --recovery-root "$ECONOMICS_RECOVERY_ROOT" \
+  --recovery-root "$ROBOTICS_RECOVERY_ROOT" \
+  --recovery-root "$SCIFACT_RECOVERY_ROOT" \
+  --recovery-root "$BAMBOOGLE_RECOVERY_ROOT" \
+  --coverage-plan-file "$FRESH_COVERAGE_ROOT/pathlight-coverage-experiment.json" \
+  --coverage-authorization-file "$FRESH_COVERAGE_AUTHORIZATION_FILE" \
+  --coverage-output-root "$FRESH_COVERAGE_ROOT" \
+  --output-root "$FRESH_DIAGNOSIS_ROOT"
+```
+
+`diagnose` 的三个 coverage 参数必须同时出现；它会重新读取精确 authorization、receipt chain、
+原生 benchmark、trajectory 与 workflow evidence，拒绝不完整、被替换或身份不一致的闭包。
 
 ## Bright 查询分解 A/B 状态（尚未执行）
 
 Pathlight 已实现 Bright 查询分解 A/B 的完整控制链：从既有诊断闭包准备不可变计划，读取精确
 授权，按固定顺序执行或续跑，查看收据进度，再从原生 benchmark 与 workflow evidence 生成
 Experiment、Evaluation、TrialHistory、Decision、更新后的 Diagnosis 和中文报告。当前真实
-4×10 A/B **尚未执行**，状态为 `ready-for-authorization` / `Not rerun`；测试夹具中的 80 条
+4×10 A/B **尚未执行**，实现为 provider-free verified，运行状态为
+`blocked-by-coverage-reverification` / `Not rerun`；测试夹具中的 80 条
 闭环只验证实现，不是外部模型结果，也没有新的 Bright 分数。
 
 ### 固定范围和停止边界
@@ -126,6 +165,10 @@ Experiment、Evaluation、TrialHistory、Decision、更新后的 Diagnosis 和�
   trace、逐例配对或评价证据不能被提升为成功结论。
 
 ### 可执行的准备、查询和收口命令
+
+以下 A/B 命令当前不能以旧 v8 diagnosis/gate 执行。只有 fresh 5×10 coverage 通过真实 seal，且
+上一节 `diagnose` 生成新的闭合 diagnosis 与 gate 后，才进入本节的 4×10 `prepare`；两阶段授权
+彼此独立，coverage authorization 不能复用于 A/B。
 
 以下变量只代表操作员本机的私有位置，不应把它们的实际值复制进公开报告。`prepare` 是
 provider-free 的，但它需要从当前进程环境解析四个数据源；因此在干净 shell 中清除旧值并加载
@@ -212,11 +255,14 @@ uv run asterion-dci pathlight optimization finalize \
 
 ## Opik 离线互操作状态
 
-最新诊断、六个 experiment、六项历史 evaluation bundle 和新增的五条 coverage evaluation 已
+旧诊断、六个 experiment、六项历史 evaluation bundle 和五条现已失效的 coverage evaluation 曾
 通过 Pathlight–Opik 1.0.0 白名单映射，生成 1721 个幂等 envelope；批次摘要为
 `3ba1d6d212b083375f5764c246c8cae6189910f64a3fb2cca6379d3be98a32ce`，文件权限 0600，
 `network_operation_count=0`。批次包含 dataset、experiment、case trial、evaluation 和 proposal
 关系，不包含 prompt、答案、语料、工具/模型 payload、provider 配置、凭据、私有路径或 Opik UUID。
+
+该批次中的 coverage 与由其导出的 gate 现统一标为 `historical-invalid` / `non-authoritative`；
+Opik 镜像不能恢复原生 dataset identity，也不得据此授权 A/B。
 
 该批次只是 operator-owned adapter 的离线输入，不代表已经发送到 Opik。Opik 的 401、限流、
 网络或服务错误只能写成 `ExportReceipt`，不得改变任何 benchmark、trace 或 evaluation 结果；
@@ -329,7 +375,7 @@ Opik 导回的优化建议只能形成未授权的 `ProposalCandidate`。
 
 ## Pathlight Dashboard 核验
 
-现有六项 DCI experiment、最新五条 coverage evaluation 和诊断闭包已通过同一个只读
+现有六项 DCI experiment 与历史诊断曾通过同一个只读
 `DashboardSnapshot` 验证并以前台服务启动；没有执行 Agent、Judge 或外部网络请求。快照摘要为
 `eb21c3b98b8a2e1ed511ad26a447ba47ff746c65bbf156beef8dfe46c7157435`，包含：
 
@@ -337,6 +383,9 @@ Opik 导回的优化建议只能形成未授权的 `ProposalCandidate`。
 - 859 个唯一 evaluation；
 - 21 个 finding、2 个未获执行权的 proposal；
 - 0 条历史 trace/ContextFrame 主线、854 个显式证据缺口。
+
+其中五条 coverage evaluation 已随旧 v8 原生身份复核而失效；Dashboard 展示不构成证据 seal，
+也不能把这些记录提升为 authorization gate。
 
 最后一行不是 Dashboard 失败：早期 848 条 DCI evidence 只恢复了结果、指标和实验谱系，没有
 Pathlight trace graph；界面因此拒绝伪造 ContextFrame。后续新运行只要产生已验证的
@@ -346,6 +395,6 @@ Pathlight trace graph；界面因此拒绝伪造 ContextFrame。后续新运行�
 
 ## 最小受控实验
 
-- 覆盖率观测：状态 completed；五项各 10/10，50 次 Agent、0 次 Judge、0 失败，实际成本 2950832 微美元。
+- 覆盖率观测：旧 v8 为 `historical-invalid` / `non-authoritative`；fresh 5×10 尚未获执行授权。
 - 最终调用上下文采集：provider-free 框架工作，先补齐每次 LLM/tool 调用前后的结构化边界、上下文帧与失败原因，不重跑模型。
-- 检索查询分解：状态 proposed；coverage 前提已满足，但仍须在上下文采集闭环后单独授权；最多 80 次 Agent 操作，成本上限 8000000 微美元；最小平均 nDCG 增益 50000 微单位，成本或时间增长上限 250000 微单位；覆盖 4 个数据集、每项 10 例。
+- 检索查询分解：状态 proposed；实现已通过 provider-free 验证，但运行门槛为 `blocked-by-coverage-reverification` / `Not rerun`。先完成另行授权的 5×10 coverage 和真实 seal，再准备 4×10 A/B；A/B 原有 80 次 Agent、0 次 Judge、8000000 微美元及预注册成功/停止条件不变。

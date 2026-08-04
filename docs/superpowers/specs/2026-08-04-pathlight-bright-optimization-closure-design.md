@@ -1,10 +1,18 @@
 # Pathlight Bright 差分诊断与优化闭环设计
 
 **日期：** 2026-08-04  
-**状态：** 已批准，待实施  
+**状态：** 已批准；实现已通过 provider-free 验证；真实 A/B 为 `blocked-by-coverage-reverification` / `Not rerun`
 **范围：** Pathlight 通用优化生命周期，以及 DCI Bright 查询分解首个产品适配器
 
 ## 目标
+
+**当前证据更正：** 旧 v8 receipt 对应的原生 dataset identity 是 `dataset.local` 夹具，而不是
+Bright/BEIR，因此旧 coverage、诊断和 gate 均为 `historical-invalid` /
+`non-authoritative`。新的 5×10 coverage 计划已 provider-free 生成（计划摘要
+`5c1a18927edb7f5519c738caa1e64ae1f2c927b1f1c9fa30678d89544cdb363e`，50 次 Agent、
+0 次 Judge、$5、累计 2 次基础设施失败停止），但尚未授权。
+必须先完成该 coverage 的真实 seal，再生成新的 diagnosis/gate，之后才可准备本设计的 4×10
+A/B。此更正不改变下文已批准的 A/B 目标、80/0/$8 预算和停止规则。
 
 Pathlight 已能把一次真实 DCI 运行投影为可验证的 ContextFrame、模型调用和工具调用主线，
 也已恢复 Bright、SciFact 与 Bamboogle 的历史结果并形成安全诊断。然而，当前实现尚未把一个
@@ -174,7 +182,8 @@ Proposal 的预注册规则结果，不构成“查询分解对所有 Bright 子
 - execution-config digest、预算、停止规则和 output-root identity；
 - `execution_authorized=false` 的 0600 plan。
 
-prepare 必须证明 coverage prerequisite 已完成且 Proposal gate 为 `ready-for-authorization`。
+prepare 必须证明 fresh coverage prerequisite 已通过原生 seal 且新 Proposal gate 为
+`ready-for-authorization`。旧 v8 gate 必须 fail closed，不能进入 prepare。
 旧 trace、`.env`、缓存、计划文件或先前授权均不能改变该字段。
 
 ### Authorization

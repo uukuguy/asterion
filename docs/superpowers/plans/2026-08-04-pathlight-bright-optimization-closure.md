@@ -8,6 +8,17 @@
 
 **Tech Stack:** Python 3.14 dataclasses, canonical JSON, `unittest`, existing Pathlight Experiment/Evaluation/Diagnosis APIs, DCI benchmark host, Pi native workflow observation, operator-local HTML/CSS/JavaScript Dashboard.
 
+**Current status correction (2026-08-05):** The A/B implementation is provider-free
+verified, but the real run is `blocked-by-coverage-reverification` / `Not rerun`.
+The former v8 coverage closure is `historical-invalid` / `non-authoritative` because
+its native dataset identity is the `dataset.local` fixture, not Bright/BEIR. A fresh
+5×10 coverage plan has been prepared provider-free (plan digest
+`5c1a18927edb7f5519c738caa1e64ae1f2c927b1f1c9fa30678d89544cdb363e`; 50 Agent,
+0 Judge, $5, two infrastructure failures) and remains
+unauthorized. Its separately authorized native seal and a newly generated
+diagnosis/gate now precede Task 5 prepare and Task 9 A/B authority. This correction
+does not change the approved A/B goal, 80/0/$8 budget, or stop rules below.
+
 ## Global Constraints
 
 - Preserve `CLI/host → selected provider → assembly → catalog/composer → exact implementations → runner → runtime/host services`.
@@ -892,7 +903,7 @@ git diff --check
 rg -n "PASS|Verified|已完成|已验证" docs/status/PATHLIGHT-DCI-DIAGNOSIS.md docs/status/DCI-BENCHMARK-INSTANCES.md
 ```
 
-Every PASS/Verified claim must cite a fresh command and correct boundary. The unexecuted A/B remains `Not rerun` or `ready-for-authorization`.
+Every PASS/Verified claim must cite a fresh command and correct boundary. The A/B implementation is provider-free verified; the unexecuted real A/B remains `blocked-by-coverage-reverification` / `Not rerun` until fresh coverage is sealed and a new diagnosis/gate exists.
 
 - [ ] **Step 5: Perform independent code, security, and completion review**
 
