@@ -107,6 +107,109 @@ Earth Science 和 Robotics 已有较高或完整覆盖却仍低分，差距还�
 原因。coverage 闭包现已把检索查询分解门槛从 `blocked-by-coverage` 打开为
 `ready-for-authorization`；它没有自动授权后续模型实验。
 
+## Bright 查询分解 A/B 状态（尚未执行）
+
+Pathlight 已实现 Bright 查询分解 A/B 的完整控制链：从既有诊断闭包准备不可变计划，读取精确
+授权，按固定顺序执行或续跑，查看收据进度，再从原生 benchmark 与 workflow evidence 生成
+Experiment、Evaluation、TrialHistory、Decision、更新后的 Diagnosis 和中文报告。当前真实
+4×10 A/B **尚未执行**，状态为 `ready-for-authorization` / `Not rerun`；测试夹具中的 80 条
+闭环只验证实现，不是外部模型结果，也没有新的 Bright 分数。
+
+### 固定范围和停止边界
+
+- 数据范围：Bright Biology、Earth Science、Economics、Robotics 各固定 10 例；基线与候选各跑
+  一次，共最多 80 次 Agent 操作。
+- Judge：0 次；本实验沿用各实例自身的 nDCG@10 评估，不增加 LLM Judge。
+- 总成本上限：8,000,000 微美元（$8）；每个原生案例最多 1 次尝试。
+- 累计 2 次基础设施类失败后停止；类别限于授权、网络、限流、超时和 host service。
+- 最终结论可能是 `accepted`、`rejected` 或 `inconclusive`。缺少或不可信的收据、成本、原生
+  trace、逐例配对或评价证据不能被提升为成功结论。
+
+### 可执行的准备、查询和收口命令
+
+以下变量只代表操作员本机的私有位置，不应把它们的实际值复制进公开报告。`prepare` 是
+provider-free 的，但它需要从当前进程环境解析四个数据源；因此在干净 shell 中清除旧值并加载
+仓库 `.env`。输出根必须是当前用户拥有、权限 0700 的空目录。
+
+```bash
+# 先进入仅保留命令搜索、用户身份和代理变量的干净前台 shell
+env -i HOME="$HOME" PATH="$PATH" USER="$USER" SHELL="$SHELL" TERM="${TERM:-}" \
+  HTTP_PROXY="${HTTP_PROXY:-}" HTTPS_PROXY="${HTTPS_PROXY:-}" NO_PROXY="${NO_PROXY:-}" \
+  zsh -f
+
+# 以下命令在这个新 shell 中执行；.env 成为 DCI 配置的唯一来源
+set -a
+source .env
+set +a
+
+export PATHLIGHT_DIAGNOSIS_ROOT="/absolute/operator-owned/diagnosis-root"
+export FRESH_OPTIMIZATION_ROOT="/absolute/operator-owned/empty-optimization-root"
+export QUERY_DECOMPOSITION_PROPOSAL="<64-hex-proposal-sha256>"
+
+install -d -m 700 "$FRESH_OPTIMIZATION_ROOT"
+uv run asterion-dci pathlight optimization prepare \
+  --diagnosis-file "$PATHLIGHT_DIAGNOSIS_ROOT/pathlight-diagnosis.json" \
+  --diagnosis-report-file "$PATHLIGHT_DIAGNOSIS_ROOT/pathlight-dci-diagnosis-report.json" \
+  --gate-report-file "$PATHLIGHT_DIAGNOSIS_ROOT/pathlight-dci-authorization-gate.json" \
+  --proposal-sha256 "$QUERY_DECOMPOSITION_PROPOSAL" \
+  --output-root "$FRESH_OPTIMIZATION_ROOT"
+
+uv run asterion-dci pathlight optimization status \
+  --plan-file "$FRESH_OPTIMIZATION_ROOT/pathlight-bright-optimization.json" \
+  --output-root "$FRESH_OPTIMIZATION_ROOT"
+```
+
+第一次 `status` 应显示 `status=prepared`、已完成 Agent/Judge 均为 0，以及固定的 80/0/$8
+上限。此时计划中的 `execution_authorized` 仍为 `false`，计划、`.env`、历史批准和缓存都不授予
+执行权。
+
+获得针对该计划和该输出根的单独精确授权后，才可在前台运行；中断后只能在同一授权边界内
+显式调用 `resume`，不能自动续跑：
+
+```bash
+uv run asterion-dci pathlight optimization execute \
+  --plan-file "$FRESH_OPTIMIZATION_ROOT/pathlight-bright-optimization.json" \
+  --authorization-file "$FRESH_AUTHORIZATION_FILE" \
+  --output-root "$FRESH_OPTIMIZATION_ROOT"
+
+uv run asterion-dci pathlight optimization status \
+  --plan-file "$FRESH_OPTIMIZATION_ROOT/pathlight-bright-optimization.json" \
+  --output-root "$FRESH_OPTIMIZATION_ROOT"
+
+# 仅在同一授权尚有效且确需续跑时人工调用
+uv run asterion-dci pathlight optimization resume \
+  --plan-file "$FRESH_OPTIMIZATION_ROOT/pathlight-bright-optimization.json" \
+  --authorization-file "$FRESH_AUTHORIZATION_FILE" \
+  --output-root "$FRESH_OPTIMIZATION_ROOT"
+
+# 执行终止后离线读取原生证据并发布决策；本命令不调用模型
+uv run asterion-dci pathlight optimization finalize \
+  --plan-file "$FRESH_OPTIMIZATION_ROOT/pathlight-bright-optimization.json" \
+  --authorization-file "$FRESH_AUTHORIZATION_FILE" \
+  --diagnosis-file "$PATHLIGHT_DIAGNOSIS_ROOT/pathlight-diagnosis.json" \
+  --output-root "$FRESH_OPTIMIZATION_ROOT"
+```
+
+### 精确授权文档
+
+授权文件必须为权限 0600 的
+`asterion.dci.pathlight.bright-optimization-authorization/v1` JSON。它不是把
+`execution_authorized` 从计划中原地改成 `true`，而是一个单独文件：以下边界字段必须与刚刚
+读取的计划逐项完全相等。
+
+| 绑定类别 | 必须从计划原样复制的字段 |
+|---|---|
+| 诊断与提案 | `plan_sha256`、`diagnosis_bundle_sha256`、`authorization_gate_report_sha256`、`proposal_sha256`、`finding_sha256`、`scope_sha256` |
+| 数据与实现 | `source_lock_sha256`、`selected_case_scope_sha256`、`baseline_query_plan_sha256`、`candidate_query_plan_sha256`、`baseline_variant_sha256`、`candidate_variant_sha256`、`baseline_execution_config_sha256`、`candidate_execution_config_sha256` |
+| 输出根 | `output_root_device`、`output_root_inode` |
+| 有限预算 | `max_agent_operations=80`、`max_judge_operations=0`、`max_cost_microusd=8000000`、`max_infrastructure_failures=2`、`max_native_attempts=1` |
+
+授权体还必须包含 `execution_authorized=true` 和操作员审批记录的
+`operator_approval_sha256`；最后对不含 `authorization_sha256` 的整个对象按 UTF-8、键排序、
+紧凑分隔符并以换行结尾做 SHA-256，写回 `authorization_sha256`。任何字段漂移、摘要错误、
+文件权限错误、输出根 inode 改变或额外字段都会在加载 provider 前失败。授权应只在操作员明确
+批准上述有限范围后生成；本文档本身不构成授权。
+
 ## Opik 离线互操作状态
 
 最新诊断、六个 experiment、六项历史 evaluation bundle 和新增的五条 coverage evaluation 已

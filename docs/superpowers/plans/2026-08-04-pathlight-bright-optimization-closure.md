@@ -814,6 +814,7 @@ git commit -m "feat: finalize Bright optimization decisions"
 ### Task 8: Close Provider-Free Verification, Documentation, and Review
 
 **Files:**
+- Modify: `docs/superpowers/plans/2026-08-04-pathlight-bright-optimization-closure.md` (correct the verification boundary if repository-wide debt is discovered)
 - Modify: `docs/status/PATHLIGHT-DCI-DIAGNOSIS.md`
 - Modify: `docs/status/DCI-BENCHMARK-INSTANCES.md`
 - Modify: `docs/superpowers/specs/2026-08-02-asterion-pathlight-design.md`
@@ -839,11 +840,36 @@ uv run python -m unittest -v \
   tests.test_dci_benchmark_host \
   tests.test_dci_pathlight_optimization \
   tests.test_dci_pathlight_optimization_cli
-uv run pyright src tests
+uv run pyright \
+  src/asterion/pathlight/__init__.py \
+  src/asterion/pathlight/_private_file.py \
+  src/asterion/pathlight/dashboard.py \
+  src/asterion/pathlight/dashboard_server.py \
+  src/asterion/pathlight/interop.py \
+  src/asterion/pathlight/opik.py \
+  src/asterion/pathlight/optimization.py \
+  src/asterion/cli_pathlight.py \
+  src/asterion/applications/dci_agent_lite/pathlight_cli.py \
+  src/asterion/applications/dci_agent_lite/pathlight_optimization_cli.py \
+  src/asterion/applications/dci_agent_lite/benchmark_executor.py \
+  src/asterion/applications/dci_agent_lite/benchmark_host.py \
+  src/asterion/capabilities/dci/implementation/pathlight/optimization.py \
+  src/asterion/capabilities/dci/implementation/research/query_planning.py \
+  tests/test_pathlight_optimization.py \
+  tests/test_pathlight_cli.py \
+  tests/test_pathlight_dashboard.py \
+  tests/test_pathlight_interop.py \
+  tests/test_pathlight_opik.py \
+  tests/test_dci_query_planning.py \
+  tests/test_dci_pathlight_optimization.py \
+  tests/test_dci_pathlight_optimization_cli.py
 uv run ruff check src tests
 ```
 
-Expected: all PASS and zero provider/network operations.
+Expected: all PASS and zero provider/network operations. 该精确 Pyright 集合覆盖本计划新增的
+通用 Pathlight 优化边界、DCI 协调器、查询规划和对应的新测试；仓库其余历史类型债务不在本功能
+验收范围内，且不得被误报为通过。全仓运行与发行边界仍由下面的 `make check` 和
+`make promotion-check` 负责。
 
 - [ ] **Step 2: Run full repository and distribution gates**
 

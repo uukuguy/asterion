@@ -136,6 +136,48 @@ Pathlight coverage 有限实验已完成五项各 10/10：共 50 次 Agent、0 �
 trace graph，因此界面明确显示 0 条 ContextFrame 主线和 854 个证据缺口，不把最终结果伪造成
 调用过程。完整启动方式与安全边界见 [Pathlight 设计](../superpowers/specs/2026-08-02-asterion-pathlight-design.md)。
 
+## Bright 查询分解 A/B（跨实例优化核验）
+
+这不是新增的 benchmark 实例，也不改变四个 Bright 实例已经完成的全量基线。它是在
+`dci.bright.biology@1.0.0`、`dci.bright.earth-science@1.0.0`、
+`dci.bright.economics@1.0.0` 和 `dci.bright.robotics@1.0.0` 上各固定选择 10 例，分别执行
+基线查询规划与查询分解候选，用原生 nDCG@10、trace、成本和时延做逐例配对。
+
+控制链和离线决策收口已经实现；真实 40 条基线加 40 条候选尚未执行，当前状态是
+`ready-for-authorization` / `Not rerun`。因此本文档没有候选得分、收益或优化成功结论。固定
+边界为最多 80 次 Agent、0 次 Judge、总成本不超过 $8、每例最多一次原生尝试；收据链累计达到
+2 次授权/网络/限流/超时/host-service 基础设施失败后停止。既有诊断、计划批准或 `.env` 都不
+等于本次执行授权。
+
+准备和状态查询可在不加载 provider 的情况下执行；下列路径变量仅用于操作员本机，不得将实际
+值写回公开台账：
+
+```bash
+uv run asterion-dci pathlight optimization prepare \
+  --diagnosis-file "$PATHLIGHT_DIAGNOSIS_ROOT/pathlight-diagnosis.json" \
+  --diagnosis-report-file "$PATHLIGHT_DIAGNOSIS_ROOT/pathlight-dci-diagnosis-report.json" \
+  --gate-report-file "$PATHLIGHT_DIAGNOSIS_ROOT/pathlight-dci-authorization-gate.json" \
+  --proposal-sha256 "$QUERY_DECOMPOSITION_PROPOSAL" \
+  --output-root "$FRESH_OPTIMIZATION_ROOT"
+
+uv run asterion-dci pathlight optimization status \
+  --plan-file "$FRESH_OPTIMIZATION_ROOT/pathlight-bright-optimization.json" \
+  --output-root "$FRESH_OPTIMIZATION_ROOT"
+
+# 真实执行结束后，离线生成 Experiment/Evaluation/TrialHistory/Decision 和中文报告
+uv run asterion-dci pathlight optimization finalize \
+  --plan-file "$FRESH_OPTIMIZATION_ROOT/pathlight-bright-optimization.json" \
+  --authorization-file "$FRESH_AUTHORIZATION_FILE" \
+  --diagnosis-file "$PATHLIGHT_DIAGNOSIS_ROOT/pathlight-diagnosis.json" \
+  --output-root "$FRESH_OPTIMIZATION_ROOT"
+```
+
+计划、授权字段、前台 `execute/resume` 命令和停止语义见
+[Pathlight DCI 差分诊断](PATHLIGHT-DCI-DIAGNOSIS.md#bright-查询分解-ab-状态尚未执行)。授权必须
+使用 `asterion.dci.pathlight.bright-optimization-authorization/v1`，逐项绑定计划摘要、诊断/
+提案摘要、所选范围、基线/候选实现与执行配置、输出根设备/inode 以及 80/0/$8/2/1 边界；权限
+必须为 0600。任何漂移都会在 provider 加载前拒绝。
+
 ## 推荐核验包的全量执行台账
 
 推荐核验包共 848 条：Bright Biology 103、Earth Science 116、Economics 103、Robotics 101、
