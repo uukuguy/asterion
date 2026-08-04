@@ -176,13 +176,16 @@ def _execute(args: argparse.Namespace, *, stdout: TextIO) -> object:
         }
     if args.command == "export":
         if args.export_command == "opik":
-            traces = tuple(
-                trace_graph_from_mapping(_json_copy(trace))
-                for value in (args.evidence_file or ())
-                for trace in read_workflow_observation_bundle(
+            traces = []
+            for value in args.evidence_file or ():
+                bundle = read_workflow_observation_bundle(
                     _absolute_workflow_evidence_paths((value,))[0]
-                ).pathlight_traces
-            )
+                )
+                for trace in bundle.pathlight_traces:
+                    detached = _json_copy(trace)
+                    if not isinstance(detached, Mapping):
+                        raise ValueError("pathlight input is invalid")
+                    traces.append(trace_graph_from_mapping(detached))
             experiments = tuple(
                 read_experiment_bundle(path)
                 for path in _optional_absolute_paths(
@@ -206,7 +209,7 @@ def _execute(args: argparse.Namespace, *, stdout: TextIO) -> object:
             batch = write_export_batch(
                 _absolute_root(args.queue_root),
                 map_opik_exports(
-                    traces=traces,
+                    traces=tuple(traces),
                     experiments=experiments,
                     evaluations=evaluations,
                     diagnoses=diagnoses,
