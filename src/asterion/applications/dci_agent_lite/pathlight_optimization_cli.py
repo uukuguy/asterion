@@ -12,10 +12,12 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import stat
-from collections.abc import Mapping, Sequence
+import time
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import TextIO
+from typing import TextIO, cast
 
 from asterion.applications.dci_agent_lite.benchmark_instances import (
     select_benchmark_instance,
@@ -27,6 +29,12 @@ from asterion.applications.dci_agent_lite.benchmark_source_lock import (
 from asterion.applications.dci_agent_lite.benchmark_host import (
     optimization_execution_config_sha256,
 )
+from asterion.applications.dci_agent_lite.benchmark_instances import (
+    DciBenchmarkInstance,
+)
+from asterion.benchmarks.cli import BenchmarkCommandHost
+from asterion.benchmarks.evidence import BenchmarkRunResult
+from asterion.capability_packages.sources.base import CapabilityPackageSource
 from asterion.applications.dci_agent_lite.operator_config import (
     DciOperatorConfig,
     load_operator_config,
@@ -61,6 +69,7 @@ _PLAN_SCHEMA = "asterion.dci.pathlight.bright-optimization-plan/v1"
 _AUTHORIZATION_SCHEMA = "asterion.dci.pathlight.bright-optimization-authorization/v1"
 _SELECTION_SCHEMA = "asterion.dci.pathlight.bright-selected-cases/v1"
 _SOURCE_LOCK_FILENAME = "pathlight-bright-optimization-source-lock.json"
+_RECEIPT_SCHEMA = "asterion.dci.pathlight.bright-optimization-receipt/v1"
 _ERROR = "asterion-dci: command failed\n"
 _MAX_DOCUMENT_BYTES = 1 << 20
 _MAX_AGENT_OPERATIONS = 80
@@ -75,6 +84,8 @@ _DATASETS = (
     "bright.robotics",
 )
 _ROLES = ("baseline", "candidate")
+_RECEIPT_NAME = re.compile(r"^receipt-[1-8]-0000\.json$")
+_RUN_ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 
 
 def main(
@@ -86,15 +97,16 @@ def main(
     env_file: Path | None,
     environment: Mapping[str, str] | None,
     package_sources: Sequence[object] | None = None,
+    host_factory: Callable[..., object] | None = None,
 ) -> int:
-    """Run only a provider-free Bright optimization command."""
+    """Run the bounded Bright optimization coordinator."""
 
-    del env_file  # Preparation is intentionally unable to read dotenv files.
     try:
         values = tuple(arguments)
         if not values:
             raise ValueError
         if values[0] == "prepare":
+            # Preparation intentionally cannot read dotenv files.
             result = _prepare(
                 values[1:],
                 repo_root=repo_root,
@@ -103,6 +115,17 @@ def main(
             )
         elif values[0] == "status":
             result = _status(values[1:])
+        elif values[0] in {"execute", "resume"}:
+            command = _execute(
+                values[1:],
+                repo_root=repo_root,
+                env_file=env_file,
+                environment=environment,
+                package_sources=package_sources,
+                host_factory=host_factory,
+            )
+            stdout.write(json.dumps(command[1], sort_keys=True, separators=(",", ":")) + "\n")
+            return command[0]
         else:
             raise ValueError
         stdout.write(json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n")
@@ -393,6 +416,380 @@ def _validate_prepared_closure(root: Path, plan: Mapping[str, object], config: D
         raise ValueError
 
 
+def _execute(
+    arguments: tuple[str, ...],
+    *,
+    repo_root: Path,
+    env_file: Path | None,
+    environment: Mapping[str, str] | None,
+    package_sources: Sequence[object] | None,
+    host_factory: Callable[..., object] | None,
+) -> tuple[int, dict[str, object]]:
+    """Preflight the complete immutable tree, then execute one foreground pass.
+
+    The intentionally two-phase structure means a malformed later task can
+    never cause an earlier task to load a provider.  A receipt is terminal for
+    its task; resume only considers the remaining never-started tasks.
+    """
+
+    options = _exact_options(
+        arguments, {"--plan-file", "--authorization-file", "--output-root"}
+    )
+    plan_path = _absolute_path(options["--plan-file"])
+    output_root = _operator_root(options["--output-root"])
+    if plan_path.parent != output_root:
+        raise ValueError
+    plan = _read_plan(plan_path)
+    authorization = _read_authorization(
+        _absolute_path(options["--authorization-file"]), plan=plan
+    )
+    _validate_execution_root(output_root, plan)
+    config = load_operator_config(
+        repo_root,
+        env_file=env_file,
+        environment=environment,
+        max_native_attempts=_MAX_NATIVE_ATTEMPTS,
+    )
+    _validate_execution_tree(output_root, plan, config)
+    receipts = _read_receipt_chain(output_root / "receipts", plan=plan)
+    tasks = plan["tasks"]
+    if type(tasks) is not list:
+        raise ValueError
+    if len(receipts) == len(tasks):
+        return 0, _receipt_status(plan, receipts)
+    if sum(item["failure_category"] in _INFRASTRUCTURE_FAILURES for item in receipts) >= _MAX_INFRASTRUCTURE_FAILURES:
+        return 1, _receipt_status(plan, receipts)
+
+    prepared: list[tuple[Mapping[str, object], BenchmarkCommandHost, object, object, object]] = []
+    completed = {str(receipt["task_id"]) for receipt in receipts}
+    # All provider-free host resolution is completed for every remaining task
+    # before any provider is constructed.
+    for task in tasks:
+        if type(task) is not dict:
+            raise ValueError
+        if str(task["task_id"]) in completed:
+            continue
+        instance = select_benchmark_instance(str(task["instance_selector"]))
+        host = _create_host(
+            host_factory, instance=instance, config=config, package_sources=package_sources,
+            task=task, output_root=output_root, plan=plan,
+        )
+        metadata = host.discover_metadata(
+            application_ref=instance.application_ref, suite_ref=instance.suite_ref
+        )
+        source_lock = host.resolve_source_lock(output_root / str(plan["source_lock_path"]))
+        payloads = host.open_selected_payloads(metadata, source_lock)
+        resolved = host.resolve_application(
+            payloads, application_ref=instance.application_ref, suite_ref=instance.suite_ref
+        )
+        draft = host.create_plan(
+            resolved, application_ref=instance.application_ref, suite_ref=instance.suite_ref,
+            case_limit=10, execute=False, authorization=None, resume_run_id=None,
+        )
+        if getattr(draft, "case_limit", None) != 10:
+            raise ValueError
+        prepared.append((task, host, payloads, resolved, draft))
+
+    infrastructure_failures = sum(
+        item["failure_category"] in _INFRASTRUCTURE_FAILURES for item in receipts
+    )
+    for task, host, payloads, resolved, _draft in prepared:
+        instance = select_benchmark_instance(str(task["instance_selector"]))
+        evidence_root = output_root / str(task["evidence_path"])
+        _fresh_evidence_root(evidence_root)
+        authorization_claim = host.authorize_execution(
+            application_ref=instance.application_ref, suite_ref=instance.suite_ref,
+            case_limit=10, evidence_root=evidence_root, resume_run_id=None,
+        )
+        execution_plan = host.create_plan(
+            resolved, application_ref=instance.application_ref, suite_ref=instance.suite_ref,
+            case_limit=10, execute=True, authorization=authorization_claim, resume_run_id=None,
+        )
+        run_id = getattr(execution_plan, "run_id", None)
+        if type(run_id) is not str or _RUN_ID.fullmatch(run_id) is None:
+            raise ValueError
+        started = time.monotonic_ns()
+        try:
+            providers = host.load_selected_providers(payloads, authorization_claim)
+            result = host.run(execution_plan, providers, evidence_root=evidence_root)
+            status, cases, category = _result_terminal(result, task_id=str(task["dataset_id"]))
+            maximum = task.get("max_cost_microusd")
+            if type(maximum) is not int:
+                raise ValueError
+            cost, source = _result_cost(result, task_id=str(task["dataset_id"]), maximum=maximum)
+        except KeyboardInterrupt:
+            status, cases, category = "cancelled", 0, "cancelled"
+            maximum = task.get("max_cost_microusd")
+            if type(maximum) is not int:
+                raise ValueError
+            cost, source = maximum, "conservative"
+        except BaseException as error:
+            category = _infrastructure_failure_category(error)
+            if category is None:
+                raise ValueError from None
+            status, cases = "failed", 0
+            maximum = task.get("max_cost_microusd")
+            if type(maximum) is not int:
+                raise ValueError
+            cost, source = maximum, "conservative"
+        elapsed_ns = time.monotonic_ns() - started
+        receipt = _publish_receipt(
+            output_root / "receipts", plan=plan, authorization=authorization, task=task,
+            receipts=receipts, run_id=run_id, status=status, completed_case_count=cases,
+            cost_microusd=cost, cost_source=source, elapsed_ns=elapsed_ns,
+            failure_category=category,
+        )
+        receipts = (*receipts, receipt)
+        if category in _INFRASTRUCTURE_FAILURES:
+            infrastructure_failures += 1
+            if infrastructure_failures >= _MAX_INFRASTRUCTURE_FAILURES:
+                return 1, _receipt_status(plan, receipts)
+        if status == "cancelled":
+            return 130, _receipt_status(plan, receipts)
+    return (0 if len(receipts) == len(tasks) else 1), _receipt_status(plan, receipts)
+
+
+_INFRASTRUCTURE_FAILURES = frozenset({"authorization", "network", "rate-limit", "timeout", "host-service"})
+
+
+def _validate_execution_root(root: Path, plan: Mapping[str, object]) -> None:
+    metadata = os.stat(root, follow_symlinks=False)
+    if (
+        root.is_symlink() or not stat.S_ISDIR(metadata.st_mode)
+        or (metadata.st_dev, metadata.st_ino) != (plan["output_root_device"], plan["output_root_inode"])
+    ):
+        raise ValueError
+    _private_directory(root / "receipts")
+
+
+def _validate_execution_tree(root: Path, plan: Mapping[str, object], config: DciOperatorConfig) -> None:
+    _validate_plan_tree(root, plan)
+    if _file_sha256(root / str(plan["source_lock_path"])) != plan["source_lock_sha256"]:
+        raise ValueError
+    for role, contract_id in (("baseline", BASELINE_QUERY_PLAN), ("candidate", DECOMPOSED_QUERY_PLAN)):
+        contract = resolve_query_planning_contract(contract_id)
+        if query_planning_contract_sha256(contract) != plan[f"{role}_query_plan_sha256"]:
+            raise ValueError
+        if optimization_execution_config_sha256(config.benchmark_inputs.private_environment, contract) != plan[f"{role}_execution_config_sha256"]:
+            raise ValueError
+    for dataset in _DATASETS:
+        raw_selection = _json_private(root / "selections" / f"{dataset}.json")
+        if type(raw_selection) is not dict:
+            raise ValueError
+        selection = _selection(raw_selection)
+        source = _read_source(Path(config.benchmark_inputs.dataset_roots[dataset]))
+        rows = load_bright_benchmark_rows_bytes(source)
+        selected = tuple(sorted(_recovery_digest("query-id", row.query_id) for row in rows))[:10]
+        if (
+            hashlib.sha256(source).hexdigest() != selection["dataset_source_sha256"]
+            or list(selected) != selection["selected_case_sha256s"]
+        ):
+            raise ValueError
+
+
+def _fresh_evidence_root(path: Path) -> None:
+    # Evidence is product-private and task-unique.  A pre-created tree could
+    # smuggle compatible generic-run state into a new coordinator task.
+    if path.exists() or path.is_symlink():
+        raise ValueError
+    path.mkdir(parents=True, mode=0o700)
+    _private_directory(path)
+
+
+def _create_host(
+    factory: Callable[..., object] | None,
+    *,
+    instance: DciBenchmarkInstance,
+    config: DciOperatorConfig,
+    package_sources: Sequence[object] | None,
+    task: Mapping[str, object],
+    output_root: Path,
+    plan: Mapping[str, object],
+) -> BenchmarkCommandHost:
+    role = task.get("variant_role")
+    if role not in _ROLES:
+        raise ValueError
+    contract = resolve_query_planning_contract(
+        BASELINE_QUERY_PLAN if role == "baseline" else DECOMPOSED_QUERY_PLAN
+    )
+    prompt = None if role == "baseline" else output_root / str(plan["candidate_prompt_path"])
+    if factory is not None:
+        candidate = factory(
+            instance=instance, operator_config=config, package_sources=package_sources,
+            query_planning_contract=contract, query_planning_prompt_file=prompt, task=task,
+        )
+        if not isinstance(candidate, BenchmarkCommandHost):
+            raise ValueError
+        return candidate
+    from asterion.applications.dci_agent_lite.benchmark_host import DciBenchmarkHost
+    return DciBenchmarkHost(
+        instance=instance, operator_config=config,
+        package_sources=cast(Sequence[CapabilityPackageSource] | None, package_sources),
+        query_planning_contract=contract, query_planning_prompt_file=prompt,
+    )
+
+
+def _result_terminal(result: object, *, task_id: str) -> tuple[str, int, str]:
+    if not isinstance(result, BenchmarkRunResult):
+        raise ValueError
+    matches = [item for item in result.tasks if item.task_id == task_id]
+    if len(matches) != 1:
+        raise ValueError
+    task = matches[0]
+    if result.status == "cancelled" or task.status == "cancelled":
+        return "cancelled", 0, "cancelled"
+    if result.status == "failed" or task.status == "failed":
+        return "failed", min(task.case_count, 10), "model-business"
+    if result.status != "completed" or task.status != "completed" or task.case_count != 10:
+        raise ValueError
+    if "pathlight-observation-invalid" in task.artifact_ids:
+        return "completed", 10, "observation-invalid"
+    return "completed", 10, "none"
+
+
+def _result_cost(result: object, *, task_id: str, maximum: int) -> tuple[int, str]:
+    if not isinstance(result, BenchmarkRunResult) or maximum != 1_000_000:
+        raise ValueError
+    matches = [item for item in result.tasks if item.task_id == task_id]
+    if len(matches) != 1:
+        raise ValueError
+    actual = [item.removeprefix("pathlight-actual-microusd.") for item in matches[0].artifact_ids if item.startswith("pathlight-actual-microusd.")]
+    if len(actual) == 1 and actual[0].isdigit() and str(int(actual[0])) == actual[0]:
+        value = int(actual[0])
+        if 0 <= value <= maximum:
+            return value, "actual"
+    return maximum, "conservative"
+
+
+def _infrastructure_failure_category(error: BaseException) -> str | None:
+    name = type(error).__name__.lower()
+    if "timeout" in name:
+        return "timeout"
+    if "rate" in name or "throttle" in name:
+        return "rate-limit"
+    if "network" in name or "connection" in name:
+        return "network"
+    if "authoriz" in name:
+        return "authorization"
+    if "host" in name or "service" in name:
+        return "host-service"
+    return None
+
+
+def _receipt_filename(index: int) -> str:
+    if type(index) is not int or not 0 <= index < 8:
+        raise ValueError
+    return f"receipt-{index + 1}-0000.json"
+
+
+def _read_receipt_chain(root: Path, *, plan: Mapping[str, object]) -> tuple[dict[str, object], ...]:
+    _private_directory(root)
+    paths = tuple(sorted(root.iterdir(), key=lambda item: item.name))
+    if any(not path.is_file() or _RECEIPT_NAME.fullmatch(path.name) is None for path in paths):
+        raise ValueError
+    tasks = plan.get("tasks")
+    if type(tasks) is not list or len(paths) > len(tasks):
+        raise ValueError
+    chain: list[dict[str, object]] = []
+    for index, path in enumerate(paths):
+        if path.name != _receipt_filename(index):
+            raise ValueError
+        value = _json_private(path)
+        expected = {
+            "schema", "task_id", "plan_sha256", "authorization_sha256", "previous_receipt_sha256",
+            "run_id_sha256", "status", "completed_case_count", "cost_microusd", "cost_source",
+            "tokens", "elapsed_ns", "workflow_bundle_sha256", "evaluation_bundle_sha256",
+            "failure_category", "evidence_state", "receipt_sha256",
+        }
+        if type(value) is not dict or set(value) != expected:
+            raise ValueError
+        digest = value.pop("receipt_sha256")
+        task = tasks[index]
+        previous = None if not chain else chain[-1]["receipt_sha256"]
+        if (
+            type(task) is not dict or value.get("schema") != _RECEIPT_SCHEMA
+            or value.get("task_id") != task.get("task_id")
+            or value.get("plan_sha256") != plan.get("plan_sha256")
+            or not _is_sha256(value.get("authorization_sha256"))
+            or value.get("previous_receipt_sha256") != previous
+            or not _is_sha256(value.get("run_id_sha256"))
+            or value.get("status") not in {"completed", "failed", "cancelled"}
+            or type(value.get("completed_case_count")) is not int or not 0 <= value["completed_case_count"] <= 10
+            or value["status"] == "completed" and value["completed_case_count"] != 10
+            or type(value.get("cost_microusd")) is not int or not 0 <= value["cost_microusd"] <= int(task["max_cost_microusd"])
+            or value.get("cost_source") not in {"actual", "conservative"}
+            or value["cost_source"] == "conservative" and value["cost_microusd"] != task["max_cost_microusd"]
+            or type(value.get("tokens")) is not int or value["tokens"] != 0
+            or type(value.get("elapsed_ns")) is not int or value["elapsed_ns"] < 0
+            or not _is_sha256(value.get("workflow_bundle_sha256")) or not _is_sha256(value.get("evaluation_bundle_sha256"))
+            or value.get("failure_category") not in {"none", "model-business", "cancelled", "observation-invalid", *_INFRASTRUCTURE_FAILURES}
+            or value.get("evidence_state") not in {"complete", "observation-invalid", "terminal-failure"}
+            or not _is_sha256(digest) or not hmac.compare_digest(str(digest), _digest(value))
+        ):
+            raise ValueError
+        value["receipt_sha256"] = digest
+        chain.append(value)
+    return tuple(chain)
+
+
+def _publish_receipt(
+    root: Path, *, plan: Mapping[str, object], authorization: Mapping[str, object], task: Mapping[str, object],
+    receipts: tuple[dict[str, object], ...], run_id: str, status: str, completed_case_count: int,
+    cost_microusd: int, cost_source: str, elapsed_ns: int, failure_category: str,
+) -> dict[str, object]:
+    index = len(receipts)
+    tasks = plan["tasks"]
+    if type(tasks) is not list or tasks[index] != task or status not in {"completed", "failed", "cancelled"}:
+        raise ValueError
+    body: dict[str, object] = {
+        "schema": _RECEIPT_SCHEMA, "task_id": task["task_id"], "plan_sha256": plan["plan_sha256"],
+        "authorization_sha256": authorization["authorization_sha256"],
+        "previous_receipt_sha256": None if not receipts else receipts[-1]["receipt_sha256"],
+        "run_id_sha256": _digest({"run-id": run_id}), "status": status,
+        "completed_case_count": completed_case_count, "cost_microusd": cost_microusd,
+        "cost_source": cost_source, "tokens": 0, "elapsed_ns": elapsed_ns,
+        "workflow_bundle_sha256": _digest({"task": task["task_id"], "run": run_id, "kind": "workflow"}),
+        "evaluation_bundle_sha256": _digest({"task": task["task_id"], "run": run_id, "kind": "evaluation"}),
+        "failure_category": failure_category,
+        "evidence_state": "observation-invalid" if failure_category == "observation-invalid" else ("complete" if status == "completed" else "terminal-failure"),
+    }
+    body["receipt_sha256"] = _digest(body)
+    name = _receipt_filename(index)
+    # Exclusive create is the append-only publication point.  A collision,
+    # including an attacker-created nonregular child, is never overwritten.
+    write_private_file(root / name, _canonical_bytes(body))
+    return _read_receipt_chain(root, plan=plan)[-1]
+
+
+def _receipt_status(plan: Mapping[str, object], receipts: tuple[dict[str, object], ...]) -> dict[str, object]:
+    infra = sum(item["failure_category"] in _INFRASTRUCTURE_FAILURES for item in receipts)
+    complete = sum(_receipt_int(item, "completed_case_count") for item in receipts)
+    if len(receipts) == 8:
+        status = "completed" if all(item["status"] == "completed" for item in receipts) else "terminal"
+    elif receipts and receipts[-1]["status"] == "cancelled":
+        status = "cancelled"
+    elif infra >= _MAX_INFRASTRUCTURE_FAILURES:
+        status = "failed"
+    elif receipts:
+        status = "partial"
+    else:
+        status = "prepared"
+    return {
+        "status": status, "completed_agent_operations": complete, "completed_judge_operations": 0,
+        "consumed_cost_microusd": sum(_receipt_int(item, "cost_microusd") for item in receipts),
+        "infrastructure_failure_count": infra, "max_agent_operations": plan["max_agent_operations"],
+        "max_judge_operations": plan["max_judge_operations"], "max_cost_microusd": plan["max_cost_microusd"],
+        "plan_sha256": plan["plan_sha256"],
+    }
+
+
+def _receipt_int(receipt: Mapping[str, object], name: str) -> int:
+    value = receipt.get(name)
+    if type(value) is not int:
+        raise ValueError
+    return value
+
+
 def _status(arguments: tuple[str, ...]) -> dict[str, object]:
     options = _exact_options(arguments, {"--plan-file", "--output-root"})
     plan_path = _absolute_path(options["--plan-file"])
@@ -407,20 +804,7 @@ def _status(arguments: tuple[str, ...]) -> dict[str, object]:
     ):
         raise ValueError
     receipts = output_root / "receipts"
-    _private_directory(receipts)
-    if any(receipts.iterdir()):
-        raise ValueError
-    return {
-        "status": "prepared",
-        "completed_agent_operations": 0,
-        "completed_judge_operations": 0,
-        "consumed_cost_microusd": 0,
-        "infrastructure_failure_count": 0,
-        "max_agent_operations": _MAX_AGENT_OPERATIONS,
-        "max_judge_operations": _MAX_JUDGE_OPERATIONS,
-        "max_cost_microusd": _MAX_COST_MICROUSD,
-        "plan_sha256": plan["plan_sha256"],
-    }
+    return _receipt_status(plan, _read_receipt_chain(receipts, plan=plan))
 
 
 def _read_plan(path: Path) -> dict[str, object]:

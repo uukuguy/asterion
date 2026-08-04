@@ -12,9 +12,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from asterion.benchmarks.evidence import BenchmarkRunResult, BenchmarkTaskResult
+
 from asterion.applications.dci_agent_lite.pathlight_optimization_cli import (
     PLAN_FILENAME,
     _AUTHORIZATION_SCHEMA,
+    _canonical_bytes,
     _diagnosis_digest,
     _digest,
     main,
@@ -513,6 +516,390 @@ class TestStatus(unittest.TestCase):
             ),
             2,
         )
+
+
+class _RecordingOptimizationHost:
+    """A real-host-shaped fake: it records every required host lifecycle phase."""
+
+    def __init__(
+        self, task_id: str, events: list[str], outcomes: dict[str, list[str]] | None = None
+    ) -> None:
+        self.task_id = task_id
+        self.events = events
+        self.outcomes = {} if outcomes is None else outcomes
+
+    def discover_metadata(self, **_kwargs: object) -> object:
+        self.events.append(f"preflight:{self.task_id}:metadata")
+        return object()
+
+    def resolve_source_lock(self, _path: Path) -> object:
+        self.events.append(f"preflight:{self.task_id}:lock")
+        return object()
+
+    def open_selected_payloads(self, _metadata: object, _lock: object) -> object:
+        self.events.append(f"preflight:{self.task_id}:payload")
+        return object()
+
+    def resolve_application(self, _payloads: object, **_kwargs: object) -> object:
+        self.events.append(f"preflight:{self.task_id}:application")
+        return object()
+
+    def create_plan(self, _resolved: object, *, execute: bool, **_kwargs: object) -> object:
+        if not execute:
+            self.events.append(f"preflight:{self.task_id}:plan")
+        return SimpleNamespace(case_limit=10, run_id=f"run-{self.task_id}")
+
+    def authorize_execution(self, **_kwargs: object) -> object:
+        self.events.append(f"authorize:{self.task_id}")
+        return object()
+
+    def load_selected_providers(self, _payloads: object, _authorization: object) -> object:
+        self.events.append(f"provider:{self.task_id}")
+        return object()
+
+    def run(self, _plan: object, _providers: object, **_kwargs: object) -> BenchmarkRunResult:
+        self.events.append(f"run:{self.task_id}")
+        outcome = self.outcomes.get(self.task_id, ["completed"])
+        status = outcome.pop(0) if outcome else "completed"
+        if status == "network":
+            raise NetworkFailure()
+        if status == "cancelled":
+            return BenchmarkRunResult(
+                "cancelled",
+                (BenchmarkTaskResult(self.task_id.rsplit(".", 1)[0], "cancelled", 0),),
+            )
+        artifact_ids: tuple[str, ...] = ()
+        if status == "observation-invalid":
+            status = "completed"
+            artifact_ids = ("pathlight-observation-invalid",)
+        elif status.startswith("actual:"):
+            _prefix, amount = status.split(":", 1)
+            status = "completed"
+            artifact_ids = (f"pathlight-actual-microusd.{amount}",)
+        return BenchmarkRunResult(
+            status,
+            (BenchmarkTaskResult(self.task_id.rsplit(".", 1)[0], status, 10 if status == "completed" else 0, artifact_ids),),
+        )
+
+
+class NetworkFailure(Exception):
+    pass
+
+
+def _execute_optimization(
+    fixture: _OptimizationFixture,
+    *,
+    command: str = "execute",
+    outcomes: dict[str, list[str]] | None = None,
+    events: list[str] | None = None,
+) -> tuple[int, dict[str, object], list[str]]:
+    authorization = fixture.root / "authorization.json"
+    if not authorization.exists():
+        plan = read_optimization_plan(fixture.output / PLAN_FILENAME)
+        write_private_file(authorization, _canonical_bytes(_authorization(plan)))
+    recorded = [] if events is None else events
+    values = {} if outcomes is None else outcomes
+
+    def host_factory(*, task: object, **_kwargs: object) -> object:
+        return _RecordingOptimizationHost(getattr(task, "get")("task_id"), recorded, values)
+
+    stdout, stderr = io.StringIO(), io.StringIO()
+    with patch(
+        "asterion.applications.dci_agent_lite.pathlight_optimization_cli.load_operator_config",
+        return_value=fixture.config,
+    ):
+        code = main(
+            (command, "--plan-file", str(fixture.output / PLAN_FILENAME), "--authorization-file", str(authorization), "--output-root", str(fixture.output)),
+            stdout=stdout, stderr=stderr, repo_root=fixture.root, env_file=None,
+            environment={}, host_factory=host_factory,
+        )
+    return code, json.loads(stdout.getvalue()) if stdout.getvalue() else {}, recorded
+
+
+class TestExecute(unittest.TestCase):
+    def test_execute_preflights_all_tasks_then_runs_exact_order_once(self) -> None:
+        fixture = _OptimizationFixture()
+        self.addCleanup(fixture.close)
+        self.assertEqual(fixture.prepare()[0], 0)
+        plan = read_optimization_plan(fixture.output / PLAN_FILENAME)
+        authorization = fixture.root / "authorization.json"
+        write_private_file(
+            authorization,
+            (json.dumps(_authorization(plan), sort_keys=True, separators=(",", ":")) + "\n").encode(),
+        )
+        events: list[str] = []
+
+        def host_factory(*, task: object, **_kwargs: object) -> object:
+            return _RecordingOptimizationHost(getattr(task, "get")("task_id"), events)
+
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch(
+            "asterion.applications.dci_agent_lite.pathlight_optimization_cli.load_operator_config",
+            return_value=fixture.config,
+        ):
+            code = main(
+                (
+                    "execute",
+                    "--plan-file", str(fixture.output / PLAN_FILENAME),
+                    "--authorization-file", str(authorization),
+                    "--output-root", str(fixture.output),
+                ),
+                stdout=stdout,
+                stderr=stderr,
+                repo_root=fixture.root,
+                env_file=None,
+                environment={},
+                host_factory=host_factory,
+            )
+        self.assertEqual(code, 0, stderr.getvalue())
+        self.assertEqual(json.loads(stdout.getvalue())["status"], "completed")
+        self.assertEqual(
+            [event for event in events if event.startswith("run:")],
+            [
+                f"run:{dataset}.{role}"
+                for dataset in ("bright.biology", "bright.earth-science", "bright.economics", "bright.robotics")
+                for role in ("baseline", "candidate")
+            ],
+        )
+        first_provider = next(index for index, event in enumerate(events) if event.startswith("provider:"))
+        self.assertEqual(sum(event.startswith("preflight:") for event in events[:first_provider]), 40)
+        receipts = sorted((fixture.output / "receipts").glob("receipt-*.json"))
+        self.assertEqual(len(receipts), 8)
+        self.assertTrue(all(path.stat().st_mode & 0o777 == 0o600 for path in receipts))
+
+    def test_two_infrastructure_failures_stop_before_the_next_task(self) -> None:
+        fixture = _OptimizationFixture()
+        self.addCleanup(fixture.close)
+        self.assertEqual(fixture.prepare()[0], 0)
+        plan = read_optimization_plan(fixture.output / PLAN_FILENAME)
+        authorization = fixture.root / "authorization.json"
+        write_private_file(authorization, _canonical_bytes(_authorization(plan)))
+        events: list[str] = []
+        outcomes = {
+            "bright.biology.baseline": ["network"],
+            "bright.biology.candidate": ["network"],
+        }
+
+        def host_factory(*, task: object, **_kwargs: object) -> object:
+            return _RecordingOptimizationHost(getattr(task, "get")("task_id"), events, outcomes)
+
+        with patch(
+            "asterion.applications.dci_agent_lite.pathlight_optimization_cli.load_operator_config",
+            return_value=fixture.config,
+        ):
+            code = main(
+                ("execute", "--plan-file", str(fixture.output / PLAN_FILENAME), "--authorization-file", str(authorization), "--output-root", str(fixture.output)),
+                stdout=io.StringIO(), stderr=io.StringIO(), repo_root=fixture.root,
+                env_file=None, environment={}, host_factory=host_factory,
+            )
+        self.assertEqual(code, 1)
+        self.assertEqual([event for event in events if event.startswith("run:")], [
+            "run:bright.biology.baseline", "run:bright.biology.candidate",
+        ])
+        receipts = sorted((fixture.output / "receipts").glob("receipt-*.json"))
+        self.assertEqual(len(receipts), 2)
+        self.assertEqual(json.loads(receipts[0].read_text())["failure_category"], "network")
+
+    def test_resume_is_provider_free_after_all_tasks_are_terminal(self) -> None:
+        fixture = _OptimizationFixture()
+        self.addCleanup(fixture.close)
+        self.assertEqual(fixture.prepare()[0], 0)
+        plan = read_optimization_plan(fixture.output / PLAN_FILENAME)
+        authorization = fixture.root / "authorization.json"
+        write_private_file(authorization, _canonical_bytes(_authorization(plan)))
+        events: list[str] = []
+        outcomes = {"bright.biology.baseline": ["failed"]}
+
+        def host_factory(*, task: object, **_kwargs: object) -> object:
+            return _RecordingOptimizationHost(getattr(task, "get")("task_id"), events, outcomes)
+
+        with patch(
+            "asterion.applications.dci_agent_lite.pathlight_optimization_cli.load_operator_config",
+            return_value=fixture.config,
+        ):
+            self.assertEqual(main(
+                ("execute", "--plan-file", str(fixture.output / PLAN_FILENAME), "--authorization-file", str(authorization), "--output-root", str(fixture.output)),
+                stdout=io.StringIO(), stderr=io.StringIO(), repo_root=fixture.root,
+                env_file=None, environment={}, host_factory=host_factory,
+            ), 0)
+            count = len(events)
+            self.assertEqual(main(
+                ("resume", "--plan-file", str(fixture.output / PLAN_FILENAME), "--authorization-file", str(authorization), "--output-root", str(fixture.output)),
+                stdout=io.StringIO(), stderr=io.StringIO(), repo_root=fixture.root,
+                env_file=None, environment={}, host_factory=host_factory,
+            ), 0)
+        self.assertEqual(len(events), count)
+
+    def test_status_rejects_reordered_or_forged_receipt_chain(self) -> None:
+        fixture = _OptimizationFixture()
+        self.addCleanup(fixture.close)
+        self.assertEqual(fixture.prepare()[0], 0)
+        plan = read_optimization_plan(fixture.output / PLAN_FILENAME)
+        authorization = fixture.root / "authorization.json"
+        write_private_file(authorization, _canonical_bytes(_authorization(plan)))
+        with patch(
+            "asterion.applications.dci_agent_lite.pathlight_optimization_cli.load_operator_config",
+            return_value=fixture.config,
+        ):
+            self.assertEqual(main(
+                ("execute", "--plan-file", str(fixture.output / PLAN_FILENAME), "--authorization-file", str(authorization), "--output-root", str(fixture.output)),
+                stdout=io.StringIO(), stderr=io.StringIO(), repo_root=fixture.root,
+                env_file=None, environment={}, host_factory=lambda **kwargs: _RecordingOptimizationHost(kwargs["task"]["task_id"], []),
+            ), 0)
+        original = fixture.output / "receipts" / "receipt-2-0000.json"
+        original.rename(fixture.output / "receipts" / "receipt-3-0000.json")
+        self.assertEqual(main(
+            ("status", "--plan-file", str(fixture.output / PLAN_FILENAME), "--output-root", str(fixture.output)),
+            stdout=io.StringIO(), stderr=io.StringIO(), repo_root=fixture.root, env_file=None, environment={},
+        ), 2)
+
+    def test_terminal_failure_cancellation_observation_and_cost_semantics(self) -> None:
+        cases = (
+            ("model", {"bright.biology.baseline": ["failed"]}, 0, "model-business", "terminal"),
+            ("cancelled", {"bright.biology.baseline": ["cancelled"]}, 130, "cancelled", "cancelled"),
+            ("observation", {"bright.biology.baseline": ["observation-invalid"]}, 0, "observation-invalid", "completed"),
+            ("actual", {"bright.biology.baseline": ["actual:17"]}, 0, "none", "completed"),
+        )
+        for name, outcomes, expected_code, category, expected_status in cases:
+            with self.subTest(name=name):
+                fixture = _OptimizationFixture()
+                self.addCleanup(fixture.close)
+                self.assertEqual(fixture.prepare()[0], 0)
+                code, output, events = _execute_optimization(fixture, outcomes=outcomes)
+                self.assertEqual(code, expected_code)
+                receipt = json.loads((fixture.output / "receipts" / "receipt-1-0000.json").read_text())
+                self.assertEqual(receipt["failure_category"], category)
+                self.assertEqual(receipt["tokens"], 0)
+                if name == "actual":
+                    self.assertEqual(receipt["cost_microusd"], 17)
+                    self.assertEqual(receipt["cost_source"], "actual")
+                else:
+                    self.assertEqual(receipt["cost_microusd"], 1_000_000)
+                self.assertEqual(output["status"], expected_status)
+                if name == "cancelled":
+                    self.assertEqual([event for event in events if event.startswith("run:")], ["run:bright.biology.baseline"])
+
+    def test_partial_resume_skips_terminal_task_and_executes_only_unstarted_tasks(self) -> None:
+        fixture = _OptimizationFixture()
+        self.addCleanup(fixture.close)
+        self.assertEqual(fixture.prepare()[0], 0)
+        events: list[str] = []
+        code, _output, events = _execute_optimization(
+            fixture, outcomes={"bright.biology.baseline": ["cancelled"]}, events=events
+        )
+        self.assertEqual(code, 130)
+        count = len(events)
+        code, output, events = _execute_optimization(fixture, command="resume", events=events)
+        self.assertEqual(code, 0)
+        self.assertEqual(output["status"], "terminal")
+        self.assertNotIn("run:bright.biology.baseline", events[count:])
+        self.assertEqual(len([event for event in events if event.startswith("run:")]), 8)
+
+    def test_preflight_rejects_source_selection_and_prompt_drift_before_host_creation(self) -> None:
+        for mutation in ("plan", "root", "source", "selection", "prompt"):
+            with self.subTest(mutation=mutation):
+                fixture = _OptimizationFixture()
+                self.addCleanup(fixture.close)
+                self.assertEqual(fixture.prepare()[0], 0)
+                plan = read_optimization_plan(fixture.output / PLAN_FILENAME)
+                write_private_file(fixture.root / "authorization.json", _canonical_bytes(_authorization(plan)))
+                if mutation == "plan":
+                    path = fixture.output / PLAN_FILENAME
+                    path.chmod(0o600)
+                    data = json.loads(path.read_text())
+                    data["candidate_execution_config_sha256"] = "0" * 64
+                    data["plan_sha256"] = _digest({key: value for key, value in data.items() if key != "plan_sha256"})
+                    path.unlink()
+                    write_private_file(path, _canonical_bytes(data))
+                elif mutation == "root":
+                    # A different operator root cannot satisfy plan parent and
+                    # recorded device/inode identity.
+                    stdout, stderr = io.StringIO(), io.StringIO()
+                    self.assertEqual(main(
+                        ("execute", "--plan-file", str(fixture.output / PLAN_FILENAME), "--authorization-file", str(fixture.root / "authorization.json"), "--output-root", str(fixture.root)),
+                        stdout=stdout, stderr=stderr, repo_root=fixture.root, env_file=None,
+                        environment={}, host_factory=lambda **_kwargs: (_ for _ in ()).throw(AssertionError()),
+                    ), 2)
+                    continue
+                elif mutation == "source":
+                    fixture.datasets["bright.biology"].write_bytes(_bright_rows() + b"\n")
+                elif mutation == "selection":
+                    path = fixture.output / "selections" / "bright.biology.json"
+                    path.chmod(0o600)
+                    data = json.loads(path.read_text())
+                    data["selected_case_sha256s"] = list(reversed(data["selected_case_sha256s"]))
+                    data["selected_ids_sha256"] = _digest(data["selected_case_sha256s"])
+                    data["selection_sha256"] = _digest({key: value for key, value in data.items() if key != "selection_sha256"})
+                    path.unlink()
+                    write_private_file(path, _canonical_bytes(data))
+                else:
+                    path = fixture.output / str(plan["candidate_prompt_path"])
+                    path.chmod(0o600)
+                    path.write_text("drift", encoding="utf-8")
+                    path.chmod(0o400)
+                events: list[str] = []
+                code, _output, events = _execute_optimization(fixture, events=events)
+                self.assertEqual(code, 2)
+                self.assertEqual(events, [])
+
+    def test_unknown_host_failure_is_not_receipted(self) -> None:
+        fixture = _OptimizationFixture()
+        self.addCleanup(fixture.close)
+        self.assertEqual(fixture.prepare()[0], 0)
+        events: list[str] = []
+
+        class UnexpectedFailure(Exception):
+            pass
+
+        original = _RecordingOptimizationHost.run
+
+        def fail_unknown(self: _RecordingOptimizationHost, *args: object, **kwargs: object) -> BenchmarkRunResult:
+            if self.task_id == "bright.biology.baseline":
+                raise UnexpectedFailure()
+            return original(self, *args, **kwargs)
+
+        with patch.object(_RecordingOptimizationHost, "run", fail_unknown):
+            code, _output, events = _execute_optimization(fixture, events=events)
+        self.assertEqual(code, 2)
+        self.assertEqual([event for event in events if event.startswith("provider:")], ["provider:bright.biology.baseline"])
+        self.assertFalse(any((fixture.output / "receipts").iterdir()))
+
+    def test_receipt_reader_rejects_private_file_attack_matrix(self) -> None:
+        for mutation in ("truncate", "extra", "mode", "symlink", "fifo", "cost"):
+            with self.subTest(mutation=mutation):
+                fixture = _OptimizationFixture()
+                self.addCleanup(fixture.close)
+                self.assertEqual(fixture.prepare()[0], 0)
+                self.assertEqual(_execute_optimization(fixture)[0], 0)
+                receipts = fixture.output / "receipts"
+                target = receipts / "receipt-1-0000.json"
+                if mutation == "truncate":
+                    target.chmod(0o600)
+                    target.write_bytes(b"{")
+                    target.chmod(0o600)
+                elif mutation == "extra":
+                    write_private_file(receipts / "receipt-9-0000.json", b"{}\n")
+                elif mutation == "mode":
+                    target.chmod(0o644)
+                elif mutation == "symlink":
+                    copied = receipts / "target.json"
+                    target.rename(copied)
+                    target.symlink_to(copied)
+                elif mutation == "fifo":
+                    target.unlink()
+                    os.mkfifo(target, 0o600)
+                else:
+                    target.chmod(0o600)
+                    data = json.loads(target.read_text())
+                    data["cost_microusd"] = 1_000_001
+                    data["receipt_sha256"] = _digest({key: value for key, value in data.items() if key != "receipt_sha256"})
+                    target.unlink()
+                    write_private_file(target, _canonical_bytes(data))
+                self.assertEqual(main(
+                    ("status", "--plan-file", str(fixture.output / PLAN_FILENAME), "--output-root", str(fixture.output)),
+                    stdout=io.StringIO(), stderr=io.StringIO(), repo_root=fixture.root,
+                    env_file=None, environment={},
+                ), 2)
 
 
 class TestRouting(unittest.TestCase):
