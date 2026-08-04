@@ -244,7 +244,7 @@ def render_bright_optimization_chinese(closure: BrightOptimizationClosure) -> st
         "",
         "范围：40 条基线 + 40 条候选；每个数据集固定 10 个相同条目。",
         f"Decision：{decision.result}（{decision.reason}）。",
-        "本报告描述已注册比较，不主张查询分解导致任何结果。",
+        "本报告描述已注册比较，不作因果主张。",
         "",
         "## 数据集结果",
     ]
@@ -420,15 +420,14 @@ def _receipt_int(receipt: Mapping[str, object], name: str) -> int:
 
 def _dataset_aggregates(batches: Mapping[tuple[str, str], BrightNativeBatch], datasets: tuple[DatasetSnapshot, ...], metric: MetricContract) -> tuple[EvaluationRecord, ...]:
     result: list[EvaluationRecord] = []
-    dataset_by_native = {dataset.content_sha256: dataset for dataset in datasets}
     for batch in batches.values():
         run = batch.recovered_run
         if run is None:
             continue
-        dataset = dataset_by_native.get(_digest({"native": run.dataset_snapshot_sha256}))
+        dataset = next((item for item in datasets if item.dataset_contract_sha256 == _digest({"dataset_id": batch.dataset_id, "contract": "bright/v1"})), None)
         if dataset is None:
             raise ValueError
-        result.append(EvaluationRecord(_digest({"aggregate": run.recovered_run_sha256}), metric.metric_contract_sha256, dataset.dataset_snapshot_sha256, _digest({"dataset": batch.dataset_id}), run.metric_value_microunits, 10, 10, "recovered"))
+        result.append(EvaluationRecord(_digest({"aggregate": run.recovered_run_sha256, "variant_role": batch.variant_role}), metric.metric_contract_sha256, dataset.dataset_snapshot_sha256, _digest({"dataset": batch.dataset_id, "variant_role": batch.variant_role}), run.metric_value_microunits, 10, 10, "recovered"))
     return tuple(result)
 
 

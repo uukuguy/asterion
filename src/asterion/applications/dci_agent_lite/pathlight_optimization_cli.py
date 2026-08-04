@@ -1151,12 +1151,27 @@ def _publish_finalization(output_root: Path, closure: object, report: str) -> No
             if current.exists() or current.is_symlink():
                 if read_private_file(current, _MAX_DOCUMENT_BYTES) != read_private_file(staged, _MAX_DOCUMENT_BYTES):
                     raise ValueError
-        for name in names:
-            current = output_root / name
-            if not current.exists():
-                os.rename(staging / name, current)
+        # Publish only missing outputs through the descriptor-relative,
+        # inode-guarded link transaction shared by the public Pathlight CLI.
+        # A publication fault rolls back every link it created, preserving any
+        # pre-existing byte-identical outputs and leaving no partial closure.
+        missing = tuple(name for name in names if not (output_root / name).exists())
+        if missing:
+            from asterion.applications.dci_agent_lite.pathlight_cli import _publish_staged_outputs
+            _publish_staged_outputs(output_root, staging, missing)
     finally:
-        _cleanup_staging_tree(output_root, staging)
+        try:
+            _cleanup_staging_tree(output_root, staging)
+        except Exception as cleanup_error:
+            # A transient cleanup failure must not strand private staging
+            # evidence.  Retry once before surfacing the original failure;
+            # the cleanup primitive remains descriptor-relative and refuses
+            # anything it no longer owns.
+            try:
+                _cleanup_staging_tree(output_root, staging)
+            except Exception:
+                pass
+            raise cleanup_error
 
 
 def _status(arguments: tuple[str, ...]) -> dict[str, object]:
