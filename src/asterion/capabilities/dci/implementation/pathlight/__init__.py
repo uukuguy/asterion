@@ -29,6 +29,10 @@ from .diagnosis import (
     diagnose_recommended_pack,
     render_chinese_diagnosis,
 )
+from .provider_call_recovery import (
+    DciProviderCallRecoveryError,
+    recover_provider_call_companion,
+)
 
 __all__ = (
     "DciRecoveredCase",
@@ -54,4 +58,6 @@ __all__ = (
     "DciWorkflowMetrics",
     "diagnose_recommended_pack",
     "render_chinese_diagnosis",
+    "DciProviderCallRecoveryError",
+    "recover_provider_call_companion",
 )

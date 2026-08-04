@@ -136,21 +136,7 @@ class ProviderRequestCapture:
             if self._fd < 0 or type(safe_entries) is not tuple:
                 _invalid()
             raw, snapshot = _read_held_capture(self._fd)
-            records = _parse_records(raw)
-            if len(records) != len(safe_entries):
-                _invalid()
-            observations = tuple(
-                _validate_pair(index, line, record, safe)
-                for index, (line, record, safe) in enumerate(
-                    zip(
-                        (item for item in raw.removesuffix(b"\n").split(b"\n") if item),
-                        records,
-                        safe_entries,
-                        strict=True,
-                    ),
-                    1,
-                )
-            )
+            observations = _validate_raw_safe_batch(raw, snapshot, safe_entries)
             self._validated_snapshot = snapshot
             return observations
         except ProviderRequestCaptureError:
@@ -254,6 +240,91 @@ def _read_held_capture(
         after.st_ino,
         after.st_size,
         after.st_mtime_ns,
+    )
+
+
+def read_sealed_provider_requests_at(
+    directory_fd: int,
+    safe_entries: tuple[dict[str, object], ...],
+) -> tuple[ProviderRequestObservation, ...]:
+    """Validate one sealed private capture through a caller-held directory FD."""
+
+    descriptor = -1
+    try:
+        if type(directory_fd) is not int or directory_fd < 0:
+            _invalid()
+        descriptor = os.open(
+            _CAPTURE_NAME,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+            dir_fd=directory_fd,
+        )
+        raw, snapshot = _read_sealed_capture(descriptor)
+        return _validate_raw_safe_batch(raw, snapshot, safe_entries)
+    except ProviderRequestCaptureError:
+        raise
+    except Exception:
+        _invalid()
+    finally:
+        if descriptor >= 0:
+            _close_quietly(descriptor)
+
+
+def _read_sealed_capture(
+    descriptor: int,
+) -> tuple[bytes, tuple[int, int, int, int]]:
+    before = os.fstat(descriptor)
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or before.st_uid != os.geteuid()
+        or stat.S_IMODE(before.st_mode) != 0o400
+        or before.st_size < 0
+        or before.st_size > _MAX_CAPTURE_BYTES
+    ):
+        _invalid()
+    chunks: list[bytes] = []
+    offset = 0
+    while offset < before.st_size:
+        chunk = os.pread(descriptor, min(1024 * 1024, before.st_size - offset), offset)
+        if not chunk:
+            _invalid()
+        chunks.append(chunk)
+        offset += len(chunk)
+    if os.pread(descriptor, 1, before.st_size):
+        _invalid()
+    after = os.fstat(descriptor)
+    snapshot = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+    if (
+        not stat.S_ISREG(after.st_mode)
+        or after.st_uid != os.geteuid()
+        or stat.S_IMODE(after.st_mode) != 0o400
+        or snapshot
+        != (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+    ):
+        _invalid()
+    return b"".join(chunks), snapshot
+
+
+def _validate_raw_safe_batch(
+    raw: bytes,
+    snapshot: tuple[int, int, int, int],
+    safe_entries: tuple[dict[str, object], ...],
+) -> tuple[ProviderRequestObservation, ...]:
+    if (
+        type(snapshot) is not tuple
+        or len(snapshot) != 4
+        or any(type(value) is not int or value < 0 for value in snapshot)
+        or type(safe_entries) is not tuple
+    ):
+        _invalid()
+    records = _parse_records(raw)
+    if len(records) != len(safe_entries):
+        _invalid()
+    lines = () if not raw else tuple(raw[:-1].split(b"\n"))
+    return tuple(
+        _validate_pair(index, line, record, safe)
+        for index, (line, record, safe) in enumerate(
+            zip(lines, records, safe_entries, strict=True), 1
+        )
     )
 
 

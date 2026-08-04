@@ -8,11 +8,13 @@ import tempfile
 import traceback
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from asterion.capabilities.dci.implementation.evaluation.provider_requests import (
     ProviderRequestCapture,
     ProviderRequestCaptureError,
+    read_sealed_provider_requests_at,
 )
 from asterion.pathlight import ProviderRequestObservation
 
@@ -199,6 +201,184 @@ class ProviderRequestCaptureTests(unittest.TestCase):
             self.assertEqual(capture.validate(()), ())
         finally:
             capture.close()
+
+    def test_reads_sealed_capture_by_held_descriptor(self) -> None:
+        raws: list[bytes] = []
+        safe_entries: list[dict[str, object]] = []
+        for index, name in enumerate(("valid-simple.json", "valid-tools.json"), 1):
+            raw, safe = _captured_pair(_fixture(name), index)
+            raws.append(raw)
+            safe_entries.append(safe)
+        target = self.root / CAPTURE_NAME
+        target.write_bytes(b"".join(raws))
+        target.chmod(0o400)
+
+        observations = read_sealed_provider_requests_at(
+            self.directory_fd, tuple(safe_entries)
+        )
+
+        self.assertIsInstance(observations, tuple)
+        self.assertEqual(tuple(item.request_index for item in observations), (1, 2))
+        self.assertTrue(
+            all(type(item) is ProviderRequestObservation for item in observations)
+        )
+        self.assertEqual(
+            observations[0].private_reference_sha256,
+            hashlib.sha256(raws[0].removesuffix(b"\n")).hexdigest(),
+        )
+        with self.assertRaises(AttributeError):
+            observations[0].payload_bytes = 0  # type: ignore[misc]
+
+    def test_sealed_reader_rejects_trust_boundary_drift(self) -> None:
+        module = __import__(
+            "asterion.capabilities.dci.implementation.evaluation.provider_requests",
+            fromlist=["_MAX_CAPTURE_BYTES"],
+        )
+        valid_raw, valid_safe = _captured_pair(_fixture("valid-simple.json"))
+        sentinel = "SENTINEL_SEALED_PROVIDER_REQUEST"
+
+        def assert_invalid(
+            directory_fd: int,
+            safe_entries: tuple[dict[str, object], ...] = (valid_safe,),
+        ) -> None:
+            try:
+                read_sealed_provider_requests_at(directory_fd, safe_entries)
+            except Exception as error:
+                raised = error
+            else:
+                self.fail("sealed trust-boundary drift was accepted")
+            rendered = "".join(traceback.format_exception(raised))
+            self.assertIsInstance(raised, ProviderRequestCaptureError)
+            self.assertEqual(str(raised), FIXED_ERROR)
+            self.assertIsNone(raised.__cause__)
+            self.assertNotIn(sentinel, rendered)
+
+        def sealed_child(name: str, raw: bytes = valid_raw) -> tuple[Path, int]:
+            root = self.root / name
+            root.mkdir()
+            target = root / CAPTURE_NAME
+            target.write_bytes(raw)
+            target.chmod(0o400)
+            return target, os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+
+        for kind in ("mode-0600", "symlink", "fifo", "directory"):
+            with self.subTest(kind=kind):
+                root = self.root / kind
+                root.mkdir()
+                target = root / CAPTURE_NAME
+                if kind == "mode-0600":
+                    target.write_bytes(valid_raw)
+                    target.chmod(0o600)
+                elif kind == "symlink":
+                    backing = root / sentinel
+                    backing.write_bytes(valid_raw)
+                    backing.chmod(0o400)
+                    target.symlink_to(backing.name)
+                elif kind == "fifo":
+                    os.mkfifo(target, 0o400)
+                else:
+                    target.mkdir(mode=0o400)
+                directory_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    assert_invalid(directory_fd)
+                finally:
+                    os.close(directory_fd)
+
+        target, directory_fd = sealed_child("foreign-owner")
+        try:
+            metadata = target.stat()
+            foreign = SimpleNamespace(
+                st_mode=metadata.st_mode,
+                st_uid=os.geteuid() + 1,
+                st_dev=metadata.st_dev,
+                st_ino=metadata.st_ino,
+                st_size=metadata.st_size,
+                st_mtime_ns=metadata.st_mtime_ns,
+            )
+            with self.subTest(kind="foreign-owner"), patch.object(
+                module.os, "fstat", return_value=foreign
+            ):
+                assert_invalid(directory_fd)
+        finally:
+            os.close(directory_fd)
+
+        target, directory_fd = sealed_child("replacement-inode")
+        try:
+            metadata = target.stat()
+            before = SimpleNamespace(
+                st_mode=metadata.st_mode,
+                st_uid=metadata.st_uid,
+                st_dev=metadata.st_dev,
+                st_ino=metadata.st_ino,
+                st_size=metadata.st_size,
+                st_mtime_ns=metadata.st_mtime_ns,
+            )
+            after = SimpleNamespace(**vars(before))
+            after.st_ino += 1
+            with self.subTest(kind="replacement-inode"), patch.object(
+                module.os, "fstat", side_effect=(before, after)
+            ):
+                assert_invalid(directory_fd)
+        finally:
+            os.close(directory_fd)
+
+        target, directory_fd = sealed_child("oversize")
+        try:
+            metadata = target.stat()
+            oversized = SimpleNamespace(
+                st_mode=metadata.st_mode,
+                st_uid=metadata.st_uid,
+                st_dev=metadata.st_dev,
+                st_ino=metadata.st_ino,
+                st_size=module._MAX_CAPTURE_BYTES + 1,
+                st_mtime_ns=metadata.st_mtime_ns,
+            )
+            with self.subTest(kind="oversize"), patch.object(
+                module.os, "fstat", return_value=oversized
+            ), patch.object(module.os, "pread") as pread:
+                assert_invalid(directory_fd)
+            pread.assert_not_called()
+        finally:
+            os.close(directory_fd)
+
+        target, directory_fd = sealed_child("content-mutation")
+        try:
+            real_pread = os.pread
+
+            def mutate_after_read(descriptor: int, count: int, offset: int) -> bytes:
+                chunk = real_pread(descriptor, count, offset)
+                target.chmod(0o600)
+                target.write_bytes(valid_raw.replace(b"captured", b"capturex", 1))
+                target.chmod(0o400)
+                return chunk
+
+            with self.subTest(kind="content-mutation"), patch.object(
+                module.os, "pread", side_effect=mutate_after_read
+            ):
+                assert_invalid(directory_fd)
+        finally:
+            os.close(directory_fd)
+
+        malformed_cases = {
+            "missing-newline": valid_raw.rstrip(b"\n"),
+            "malformed-record": (sentinel + "\n").encode(),
+        }
+        for kind, raw in malformed_cases.items():
+            with self.subTest(kind=kind):
+                _target, directory_fd = sealed_child(kind, raw)
+                try:
+                    assert_invalid(directory_fd)
+                finally:
+                    os.close(directory_fd)
+
+        _target, directory_fd = sealed_child("raw-safe-drift")
+        try:
+            with self.subTest(kind="raw-safe-drift"):
+                assert_invalid(
+                    directory_fd, ({**valid_safe, "payload_sha256": "0" * 64},)
+                )
+        finally:
+            os.close(directory_fd)
 
     def test_validated_capture_seals_read_only_and_closes_writable_descriptor(
         self,
