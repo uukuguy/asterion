@@ -256,10 +256,11 @@ def _optimization_fixture() -> tuple[
         _digest("authorization"),
     )
     item = _digest("item")
-    trace_sha256s = tuple(
+    raw_trace_sha256s = tuple(
         trace.to_mapping()["trace_sha256"] for trace in traces
     )
-    assert all(isinstance(value, str) for value in trace_sha256s)
+    assert all(isinstance(value, str) for value in raw_trace_sha256s)
+    trace_sha256s = cast(tuple[str, ...], raw_trace_sha256s)
     baseline_evaluation = EvaluationRecord(
         trace_sha256s[0], metric.metric_contract_sha256, dataset.dataset_snapshot_sha256,
         plan.scope_sha256, 400_000, 1, 1, "observed"
@@ -397,18 +398,20 @@ class PathlightOpikMappingTests(unittest.TestCase):
         envelopes = map_opik_exports(traces=(trace,))
 
         model_spans = tuple(
-            item.to_mapping()["payload"]
+            cast(dict[str, object], item.to_mapping()["payload"])
             for item in envelopes
             if item.event_kind == "span.upsert"
-            and item.to_mapping()["payload"]["kind"] == "model-call"
-            and "request_sha256" in item.to_mapping()["payload"]
+            and cast(dict[str, object], item.to_mapping()["payload"])["kind"]
+            == "model-call"
+            and "request_sha256"
+            in cast(dict[str, object], item.to_mapping()["payload"])
         )
         self.assertEqual(len(model_spans), len(batch.provider_requests))
         requests_by_index = {
             request.request_index: request for request in batch.provider_requests
         }
         for payload in model_spans:
-            request = requests_by_index[payload["request_index"]]
+            request = requests_by_index[cast(int, payload["request_index"])]
             expected = {
                 "request_sha256": request.payload_sha256,
                 "request_shape_sha256": request.shape_sha256,
@@ -439,10 +442,11 @@ class PathlightOpikMappingTests(unittest.TestCase):
 
         envelopes = map_opik_exports(traces=(trace,))
         model_spans = tuple(
-            item.to_mapping()["payload"]
+            cast(dict[str, object], item.to_mapping()["payload"])
             for item in envelopes
             if item.event_kind == "span.upsert"
-            and item.to_mapping()["payload"]["kind"] == "model-call"
+            and cast(dict[str, object], item.to_mapping()["payload"])["kind"]
+            == "model-call"
         )
 
         self.assertEqual(len(model_spans), 4)
@@ -451,7 +455,9 @@ class PathlightOpikMappingTests(unittest.TestCase):
         }
         self.assertEqual(
             {
-                index: tuple(payload["missing_evidence_labels"])
+                index: tuple(
+                    cast(list[object], payload["missing_evidence_labels"])
+                )
                 for index, payload in payloads_by_request.items()
             },
             {
@@ -518,7 +524,10 @@ class PathlightOpikMappingTests(unittest.TestCase):
         )
 
         payloads = {
-            item.event_kind: item.to_mapping()["payload"] for item in envelopes
+            item.event_kind: cast(
+                dict[str, object], item.to_mapping()["payload"]
+            )
+            for item in envelopes
             if item.event_kind in {"trial-history.upsert", "decision.observe"}
         }
         self.assertEqual(set(payloads), {"trial-history.upsert", "decision.observe"})

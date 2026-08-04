@@ -4,17 +4,20 @@ import copy
 import hashlib
 import json
 import unittest
+from typing import cast
 from unittest.mock import patch
 
 from asterion.pathlight import (
     DashboardSnapshot,
     DiagnosisBundle,
+    EvaluationBundle,
     Finding,
     PathlightError,
     TraceEvent,
     TraceGraph,
     validate_dashboard_snapshot,
 )
+from asterion.pathlight.experiment import ExperimentBundle
 from asterion.workflow_evidence.storage import WorkflowObservationBundle
 from asterion.pathlight.dashboard_server import (
     DashboardApplication,
@@ -120,16 +123,18 @@ class PathlightDashboardSnapshotTests(unittest.TestCase):
 
         self.assertEqual(first, second)
         mapping = first.to_mapping()
+        summary = cast(dict[str, object], mapping["summary"])
+        flows = cast(list[dict[str, object]], mapping["flows"])
         self.assertEqual(mapping["schema"], "asterion.pathlight-dashboard-snapshot/v2")
-        self.assertEqual(mapping["summary"]["optimization_history_count"], 0)
+        self.assertEqual(summary["optimization_history_count"], 0)
         self.assertEqual(
-            mapping["summary"]["decision_counts"],
+            summary["decision_counts"],
             {"accepted": 0, "inconclusive": 0, "rejected": 0},
         )
-        self.assertEqual(mapping["summary"]["trace_count"], 1)
-        self.assertEqual(mapping["summary"]["evidence_gap_count"], 1)
-        self.assertEqual(mapping["flows"][0]["nodes"], [])
-        self.assertTrue(mapping["flows"][0]["missing_evidence"])
+        self.assertEqual(summary["trace_count"], 1)
+        self.assertEqual(summary["evidence_gap_count"], 1)
+        self.assertEqual(flows[0]["nodes"], [])
+        self.assertTrue(flows[0]["missing_evidence"])
         self.assertEqual(validate_dashboard_snapshot(mapping), first)
 
     def test_snapshot_rejects_empty_duplicate_and_tampered_inputs(self) -> None:
@@ -144,7 +149,7 @@ class PathlightDashboardSnapshotTests(unittest.TestCase):
             workflow_bundles=(_workflow_bundle(),)
         ).to_mapping()
         tampered = copy.deepcopy(mapping)
-        tampered["summary"]["trace_count"] = 2
+        cast(dict[str, object], tampered["summary"])["trace_count"] = 2
         with self.assertRaises(PathlightError):
             validate_dashboard_snapshot(tampered)
         tampered = copy.deepcopy(mapping)
@@ -204,9 +209,15 @@ class PathlightDashboardApplicationTests(unittest.TestCase):
             PathlightError, "Dashboard snapshot is invalid"
         ):
             DashboardSnapshot.build(
-                evaluation_bundles=dependencies["evaluation_bundles"],
-                experiment_bundles=dependencies["experiment_bundles"],
-                diagnosis_bundles=dependencies["diagnosis_bundles"],
+                evaluation_bundles=cast(
+                    tuple[EvaluationBundle, ...], dependencies["evaluation_bundles"]
+                ),
+                experiment_bundles=cast(
+                    tuple[ExperimentBundle, ...], dependencies["experiment_bundles"]
+                ),
+                diagnosis_bundles=cast(
+                    tuple[DiagnosisBundle, ...], dependencies["diagnosis_bundles"]
+                ),
                 optimization_bundles=(optimization,),
             )
 
@@ -234,15 +245,14 @@ class PathlightDashboardApplicationTests(unittest.TestCase):
 
     def test_api_routes_exact_trace_flow_and_head(self) -> None:
         app = DashboardApplication(self.snapshot)
+        snapshot_mapping = self.snapshot.to_mapping()
+        traces = cast(list[dict[str, object]], snapshot_mapping["traces"])
+        flows = cast(list[dict[str, object]], snapshot_mapping["flows"])
         routes = {
             "/api/pathlight/v1/summary": dict(self.snapshot.summary),
-            "/api/pathlight/v1/traces": self.snapshot.to_mapping()["traces"],
-            f"/api/pathlight/v1/traces/{TRACE_ID}": self.snapshot.to_mapping()[
-                "traces"
-            ][0],
-            f"/api/pathlight/v1/traces/{TRACE_ID}/flow": self.snapshot.to_mapping()[
-                "flows"
-            ][0],
+            "/api/pathlight/v1/traces": traces,
+            f"/api/pathlight/v1/traces/{TRACE_ID}": traces[0],
+            f"/api/pathlight/v1/traces/{TRACE_ID}/flow": flows[0],
             "/api/pathlight/v1/evaluations": [],
             "/api/pathlight/v1/experiments": [],
             "/api/pathlight/v1/diagnoses": [],
@@ -380,19 +390,24 @@ class PathlightDashboardApplicationTests(unittest.TestCase):
         )
         self.assertEqual(api_mapping, snapshot_mapping)
 
+        flows = cast(list[dict[str, object]], snapshot_mapping["flows"])
+        nodes = cast(list[dict[str, object]], flows[0]["nodes"])
         model_nodes = [
             node
-            for node in snapshot_mapping["flows"][0]["nodes"]
+            for node in nodes
             if node["kind"] == "model-call"
         ]
         self.assertEqual(len(model_nodes), 4)
-        attributes_by_request = {
-            node["attributes"]["request_index"]: node["attributes"]
-            for node in model_nodes
-        }
+        attributes_by_request: dict[int, dict[str, object]] = {}
+        for node in model_nodes:
+            attributes = cast(dict[str, object], node["attributes"])
+            request_index = cast(int, attributes["request_index"])
+            attributes_by_request[request_index] = attributes
         self.assertEqual(
             {
-                index: tuple(attributes["missing_evidence_labels"])
+                index: tuple(
+                    cast(list[object], attributes["missing_evidence_labels"])
+                )
                 for index, attributes in attributes_by_request.items()
             },
             {

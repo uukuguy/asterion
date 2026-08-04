@@ -8,7 +8,7 @@ import stat
 import tempfile
 import unittest
 from pathlib import Path
-from typing import TypeVar
+from typing import TypeVar, cast
 from unittest.mock import patch
 
 from asterion.cli import main
@@ -1204,24 +1204,29 @@ class PathlightCliTests(unittest.TestCase):
             ),
             4: ("model-request-boundary",),
         }
+        show_output = cast(dict[str, object], outputs["show"])
+        show_events = cast(list[dict[str, object]], show_output["events"])
+        flow_nodes = cast(list[dict[str, object]], outputs["flow"])
         model_events = [
             event
-            for event in outputs["show"]["events"]
+            for event in show_events
             if event["kind"] == "model-call" and event["status"] == "started"
         ]
         model_nodes = [
-            node for node in outputs["flow"] if node["kind"] == "model-call"
+            node for node in flow_nodes if node["kind"] == "model-call"
         ]
         self.assertEqual(len(model_events), 4)
         self.assertEqual(len(model_nodes), 4)
         for surface, items in (("show", model_events), ("flow", model_nodes)):
-            attributes_by_request = {
-                item["attributes"]["request_index"]: item["attributes"]
-                for item in items
-            }
+            attributes_by_request = {}
+            for item in items:
+                attributes = cast(dict[str, object], item["attributes"])
+                attributes_by_request[attributes["request_index"]] = attributes
             self.assertEqual(
                 {
-                    index: tuple(attributes["missing_evidence_labels"])
+                    index: tuple(
+                        cast(list[object], attributes["missing_evidence_labels"])
+                    )
                     for index, attributes in attributes_by_request.items()
                 },
                 expected_labels,
