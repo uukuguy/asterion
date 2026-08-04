@@ -388,6 +388,7 @@ class DciBenchmarkHost:
                 judge_config=JudgeConfig.from_environment(environment),
                 experiment_profile=_REAL_AGENT_EXPERIMENT_PROFILE,
                 max_turns=100,
+                max_native_attempts=config.max_native_attempts,
                 judge_connectivity_probe=verify_judge_connectivity,
             )
         _fail()

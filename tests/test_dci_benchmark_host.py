@@ -179,6 +179,7 @@ class DciBenchmarkHostTests(unittest.TestCase):
             config = load_operator_config(
                 root,
                 environment={"DEEPSEEK_API_KEY": "PRIVATE-JUDGE-KEY"},
+                max_native_attempts=1,
             )
             sentinel = object()
             with patch(
@@ -194,6 +195,7 @@ class DciBenchmarkHostTests(unittest.TestCase):
         arguments = executor.call_args.kwargs
         self.assertEqual(arguments["experiment_profile"], "asterion-safe/pi")
         self.assertEqual(arguments["max_turns"], 100)
+        self.assertEqual(arguments["max_native_attempts"], 1)
         self.assertEqual(arguments["runtime_options"].runtime, "pi")
         self.assertEqual(arguments["runtime_options"].provider, "openai-codex")
         self.assertEqual(arguments["runtime_options"].model, "gpt-5.6-luna")

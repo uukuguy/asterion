@@ -264,6 +264,7 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
         judge_config: JudgeConfig,
         experiment_profile: str = _DEFAULT_EXPERIMENT_PROFILE,
         max_turns: int = 100,
+        max_native_attempts: int | None = None,
         benchmark_runner: Callable[..., Any] = run_benchmark_async,
         readiness_probe: Callable[..., None] | None = None,
         judge_connectivity_probe: Callable[[JudgeConfig], None] | None = None,
@@ -275,6 +276,8 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
             or experiment_profile not in _EXPERIMENT_PROFILES
             or type(max_turns) is not int
             or max_turns < 1
+            or max_native_attempts is not None
+            and (type(max_native_attempts) is not int or max_native_attempts != 1)
             or not callable(benchmark_runner)
             or readiness_probe is not None
             and not callable(readiness_probe)
@@ -287,6 +290,7 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
         self._judge_config = judge_config
         self._experiment_profile = experiment_profile
         self._max_turns = max_turns
+        self._max_native_attempts = max_native_attempts
         self._benchmark_runner = benchmark_runner
         self._readiness_probe = (
             _default_readiness_probe if readiness_probe is None else readiness_probe
@@ -360,8 +364,10 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 corpus=payload.corpus,
                 max_concurrency=max_concurrency,
                 max_turns=max_turns,
-                max_native_attempts=_REAL_TASK_NATIVE_ATTEMPTS.get(
-                    invocation.task_id, 2
+                max_native_attempts=(
+                    self._max_native_attempts
+                    if self._max_native_attempts is not None
+                    else _REAL_TASK_NATIVE_ATTEMPTS.get(invocation.task_id, 2)
                 ),
                 conversation_features=(
                     DciConversationFeatures(externalize_tool_results=True)
@@ -535,7 +541,12 @@ def _authorize_full_request(
         and task_id in _COVERAGE_TASK_IDS
         and payload.case_limit == 10
     )
-    if scope_id is None or payload.case_limit <= 50 and not coverage_case10:
+    bounded_authorization = payload.case_limit <= 50 and payload.amount is not None
+    if scope_id is None or (
+        payload.case_limit <= 50
+        and not coverage_case10
+        and not bounded_authorization
+    ):
         return request
     if (
         payload.amount is None
@@ -545,12 +556,16 @@ def _authorize_full_request(
     ):
         _fail()
     scope = resolve_paper_experiment_scope(scope_id)
-    if not coverage_case10 and payload.case_limit != scope.selection_count:
+    if (
+        not coverage_case10
+        and not bounded_authorization
+        and payload.case_limit != scope.selection_count
+    ):
         _fail()
     benchmark = resolve_paper_benchmark(scope.dataset_id)
     raw, binding = read_paper_benchmark_dataset(payload.dataset, benchmark)
     selected_ids_sha256 = scope.selected_ids_sha256
-    if coverage_case10:
+    if coverage_case10 or bounded_authorization:
         if benchmark.dataset_id.startswith("bright."):
             rows = load_bright_benchmark_rows_bytes(
                 raw, expected_count=benchmark.source_count
@@ -564,34 +579,37 @@ def _authorize_full_request(
         if len(rows) < payload.case_limit:
             _fail()
         selected_rows = rows[: payload.case_limit]
-        registry_path = payload.coverage_registry
-        if not isinstance(registry_path, Path):
-            _fail()
-        registry = validate_coverage_registry_root(
-            registry_path,
-            corpus_dir=payload.corpus,
-            expected_dataset_id=task_id,
-            expected_count=payload.case_limit,
-        )
-        if registry.selected_ids_sha256 != canonical_sha256(
-            tuple(row.query_id for row in selected_rows)
-        ):
-            _fail()
+        if coverage_case10:
+            registry_path = payload.coverage_registry
+            if not isinstance(registry_path, Path):
+                _fail()
+            registry = validate_coverage_registry_root(
+                registry_path,
+                corpus_dir=payload.corpus,
+                expected_dataset_id=task_id,
+                expected_count=payload.case_limit,
+            )
+            if registry.selected_ids_sha256 != canonical_sha256(
+                tuple(row.query_id for row in selected_rows)
+            ):
+                _fail()
         selected_ids_sha256 = canonical_sha256(
             tuple(sorted(row.query_id for row in selected_rows))
         )
     profile = resolve_experiment_profile(_DEFAULT_EXPERIMENT_PROFILE)
-    judge_operations = (
-        payload.case_limit if request.mode == "qa" else int(not coverage_case10)
-    )
+    judge_operations = payload.case_limit if request.mode == "qa" else 0
     # Coverage tasks run sequentially so one unusually long case may use the
     # task's remaining envelope without allowing concurrent reservations to
     # exceed that envelope. Other full runs retain their established slots.
-    operation_limit = (
-        float(payload.amount)
-        if coverage_case10
-        else float(payload.amount) / 10
-    )
+    if coverage_case10:
+        operation_limit = float(payload.amount)
+    elif bounded_authorization:
+        operation_limit = float(payload.amount) / min(
+            request.max_concurrency,
+            payload.case_limit,
+        )
+    else:
+        operation_limit = float(payload.amount) / 10
     authority = authorize_full_execution(
         profile=profile,
         scope_ids=(scope_id,),

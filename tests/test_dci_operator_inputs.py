@@ -29,6 +29,17 @@ _COVERAGE_TASK_IDS = (
 
 
 class DciOperatorCoverageInputTests(unittest.TestCase):
+    def test_native_attempt_limit_requires_exact_integer_one(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for value in (True, 1.0):
+                with self.subTest(value=value), self.assertRaises(ValueError):
+                    load_operator_config(
+                        root,
+                        environment={},
+                        max_native_attempts=value,
+                    )
+
     def test_sourced_resource_env_anchors_relative_pi_root_for_worktree(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory).resolve()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import tempfile
 import threading
@@ -34,6 +35,9 @@ from asterion.capabilities.dci.implementation.research.experiment_profiles impor
     consume_full_execution_authorization,
     reconcile_full_execution_operation,
     reserve_full_execution_operation,
+)
+from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks import (
+    canonical_sha256,
 )
 
 
@@ -141,6 +145,108 @@ def _write_bright_source_coverage(
 
 
 class RealDciBenchmarkExecutorTests(unittest.TestCase):
+    def test_native_attempt_limit_requires_exact_integer_one(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            for value in (True, 1.0):
+                with self.subTest(value=value), self.assertRaises(
+                    DciBenchmarkExecutorError
+                ):
+                    RealDciBenchmarkExecutor(
+                        paths=_paths(root),
+                        runtime_options=DciRuntimeOptions(),
+                        judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
+                        max_native_attempts=value,
+                    )
+
+    def test_bounded_bright_binds_supplied_cost_before_agent(self) -> None:
+        calls = []
+
+        async def runner(request, *, paths):
+            del paths
+            calls.append(request)
+            authority = request.full_execution_authorization
+            self.assertIsNotNone(authority)
+            consume_full_execution_authorization(
+                authority,
+                request.experiment_scope_id,
+                request.dataset_input_binding,
+            )
+            reservation = reserve_full_execution_operation(
+                authority,
+                request.experiment_scope_id,
+                "agent",
+            )
+            self.assertEqual(reservation.upper_bound_usd, 0.2)
+            with self.assertRaises(ExperimentAuthorizationError):
+                reserve_full_execution_operation(
+                    authority,
+                    request.experiment_scope_id,
+                    "agent",
+                )
+            with self.assertRaises(ExperimentAuthorizationError):
+                reserve_full_execution_operation(
+                    authority,
+                    request.experiment_scope_id,
+                    "judge",
+                )
+            reconcile_full_execution_operation(authority, reservation, 0.05)
+            return BenchmarkResult(
+                output_root=request.output_root,
+                counts={"total": 1, "completed": 1, "failed": 0},
+            )
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            _write_bright_source_coverage(root)
+            expected_dataset_sha256 = hashlib.sha256(
+                (root / "dataset.jsonl").read_bytes()
+            ).hexdigest()
+            result = RealDciBenchmarkExecutor(
+                paths=_paths(root),
+                runtime_options=DciRuntimeOptions(),
+                judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
+                max_native_attempts=1,
+                benchmark_runner=runner,
+                readiness_probe=lambda *_args: None,
+            ).execute(
+                _invocation(
+                    root,
+                    task_id="bright.biology",
+                    profile_id="bright.biology",
+                    selection_variant="main",
+                    case_limit=1,
+                    amount=Decimal("0.20"),
+                ),
+                cancellation=MutableCancellation(),
+                on_progress=lambda _event: None,
+            )
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(len(calls), 1)
+        authority = calls[0].full_execution_authorization
+        self.assertIsNotNone(authority)
+        self.assertEqual(authority.max_agent_operations, 1)
+        self.assertEqual(authority.max_judge_operations, 0)
+        self.assertEqual(authority.max_cost_usd, 0.2)
+        self.assertEqual(authority.max_agent_cost_per_operation_usd, 0.2)
+        self.assertEqual(authority.max_judge_cost_per_operation_usd, 0.2)
+        self.assertEqual(authority.selected_query_counts, (1,))
+        self.assertEqual(
+            authority.bounded_selected_ids_sha256,
+            (canonical_sha256(("0",)),),
+        )
+        self.assertEqual(
+            authority.dataset_input_bindings,
+            (calls[0].dataset_input_binding,),
+        )
+        self.assertEqual(
+            calls[0].dataset_input_binding.raw_content_sha256,
+            expected_dataset_sha256,
+        )
+        self.assertEqual(calls[0].experiment_scope_id, "bright.biology.main.full")
+        self.assertEqual(calls[0].max_native_attempts, 1)
+
     def test_coverage_authority_accepts_exact_bright_source_rows(self) -> None:
         calls: list[object] = []
 

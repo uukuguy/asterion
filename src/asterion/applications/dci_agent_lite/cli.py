@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 import json
 from collections.abc import Callable, Mapping, Sequence
-from decimal import Decimal
+from decimal import Decimal, DecimalException
 from pathlib import Path
 from typing import TextIO
 
@@ -118,11 +118,31 @@ def main(
             )
         try:
             budget_value, remainder = _take_option(remainder, "--max-cost-usd")
+            native_attempts_value, remainder = _take_option(
+                remainder,
+                "--max-native-attempts",
+            )
             benchmark_amount = amount if budget_value is None else Decimal(budget_value)
-            if benchmark_amount is not None and benchmark_amount <= 0:
+            if benchmark_amount is not None and (
+                type(benchmark_amount) is not Decimal
+                or not benchmark_amount.is_finite()
+                or benchmark_amount <= 0
+            ):
+                raise ValueError
+            max_native_attempts = (
+                None
+                if native_attempts_value is None
+                else int(native_attempts_value, 10)
+            )
+            if max_native_attempts not in {None, 1}:
                 raise ValueError
             instance, delegated_arguments = _benchmark_selection(remainder)
-        except DciBenchmarkInstanceError:
+            if (
+                max_native_attempts is not None
+                and not _execution_host_ready(delegated_arguments)
+            ):
+                raise ValueError
+        except (DciBenchmarkInstanceError, DecimalException, ValueError):
             stderr.write("asterion-dci: command failed\n")
             return 2
         selected_benchmark_host = benchmark_host
@@ -138,6 +158,7 @@ def main(
                             env_file=env_file,
                             environment=environment,
                             amount=benchmark_amount,
+                            max_native_attempts=max_native_attempts,
                         )
                     )
                 else:
@@ -153,6 +174,7 @@ def main(
                             env_file=env_file,
                             environment=environment,
                             amount=benchmark_amount,
+                            max_native_attempts=max_native_attempts,
                         )
                     )
                     selected_benchmark_host = DciBenchmarkHost(

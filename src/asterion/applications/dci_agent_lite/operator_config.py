@@ -40,6 +40,7 @@ class DciOperatorConfig:
     repo_root: Path = field(repr=False)
     benchmark_inputs: DciBenchmarkOperatorInputs = field(repr=False)
     host_service_options: Mapping[str, Mapping[str, str]] = field(repr=False)
+    max_native_attempts: int | None = None
 
     def public_summary(self) -> dict[str, object]:
         """Return a body-free readiness summary safe for public presentation."""
@@ -48,6 +49,7 @@ class DciOperatorConfig:
             "amount_configured": self.benchmark_inputs.amount is not None,
             "benchmark_task_count": len(self.benchmark_inputs.dataset_roots),
             "host_service_ids": sorted(self.host_service_options),
+            "max_native_attempts": self.max_native_attempts,
         }
 
 
@@ -58,9 +60,14 @@ def load_operator_config(
     environment: Mapping[str, str] | None = None,
     resource_root: Path | None = None,
     amount: Decimal | None = None,
+    max_native_attempts: int | None = None,
 ) -> DciOperatorConfig:
     """Translate DCI environment aliases into private package and host inputs."""
 
+    if max_native_attempts is not None and (
+        type(max_native_attempts) is not int or max_native_attempts != 1
+    ):
+        raise ValueError("DCI operator native attempt limit is invalid")
     root = Path(repo_root).resolve()
     process = dict(os.environ if environment is None else environment)
     env_path = root / ".env" if env_file is None else Path(env_file).resolve()
@@ -138,6 +145,7 @@ def load_operator_config(
         host_service_options=MappingProxyType(
             {"corpus.local-root": MappingProxyType({"root": str(corpus_root)})}
         ),
+        max_native_attempts=max_native_attempts,
     )
 
 

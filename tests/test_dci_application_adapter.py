@@ -5,6 +5,7 @@ import io
 import json
 import tempfile
 import unittest
+from decimal import Decimal
 from pathlib import Path
 from typing import cast
 from unittest.mock import patch
@@ -29,6 +30,93 @@ ASSEMBLIES = (
 
 
 class TestDciApplicationAdapter(unittest.TestCase):
+    def test_native_attempt_limit_rejects_non_one_before_provider_loading(
+        self,
+    ) -> None:
+        with patch(
+            "asterion.applications.dci_agent_lite.cli.load_operator_config",
+            side_effect=AssertionError("private config must not load"),
+        ):
+            code = main(
+                [
+                    "benchmark",
+                    "run",
+                    "--instance",
+                    "dci.bright.biology@1.0.0",
+                    "--max-native-attempts",
+                    "2",
+                    "--execute",
+                    "--capability-source-lock",
+                    "/private/source-lock.json",
+                    "--evidence-root",
+                    "/private/evidence",
+                ],
+                stdout=io.StringIO(),
+                stderr=io.StringIO(),
+            )
+
+        self.assertEqual(code, 2)
+
+    def test_cost_limit_rejects_nonfinite_values_before_provider_loading(
+        self,
+    ) -> None:
+        for value in ("NaN", "Infinity", "-Infinity"):
+            with (
+                self.subTest(value=value),
+                patch(
+                    "asterion.applications.dci_agent_lite.cli.load_operator_config",
+                    side_effect=AssertionError("private config must not load"),
+                ),
+            ):
+                code = main(
+                    [
+                        "benchmark",
+                        "run",
+                        "--instance",
+                        "dci.bright.biology@1.0.0",
+                        "--max-cost-usd",
+                        value,
+                        "--execute",
+                        "--capability-source-lock",
+                        "/private/source-lock.json",
+                        "--evidence-root",
+                        "/private/evidence",
+                    ],
+                    stdout=io.StringIO(),
+                    stderr=io.StringIO(),
+                )
+
+            self.assertEqual(code, 2)
+
+    def test_injected_cost_limit_requires_exact_decimal_before_provider_loading(
+        self,
+    ) -> None:
+        for value in (True, 1.0):
+            with (
+                self.subTest(value=value),
+                patch(
+                    "asterion.applications.dci_agent_lite.cli.load_operator_config",
+                    side_effect=AssertionError("private config must not load"),
+                ),
+            ):
+                code = main(
+                    [
+                        "benchmark",
+                        "run",
+                        "--instance",
+                        "dci.bright.biology@1.0.0",
+                        "--execute",
+                        "--capability-source-lock",
+                        "/private/source-lock.json",
+                        "--evidence-root",
+                        "/private/evidence",
+                    ],
+                    amount=value,
+                    stdout=io.StringIO(),
+                    stderr=io.StringIO(),
+                )
+                self.assertEqual(code, 2)
+
     def test_benchmark_lock_is_metadata_only(self) -> None:
         from tests.test_dci_benchmark_source_lock import RecordingSource
 
@@ -300,7 +388,11 @@ class TestDciApplicationAdapter(unittest.TestCase):
                     "benchmark",
                     "run",
                     "--instance",
-                    "dci.qa.bamboogle@1.0.0",
+                    "dci.bright.biology@1.0.0",
+                    "--max-cost-usd",
+                    "0.20",
+                    "--max-native-attempts",
+                    "1",
                     "--execute",
                     "--capability-source-lock",
                     str(source_lock),
@@ -321,6 +413,8 @@ class TestDciApplicationAdapter(unittest.TestCase):
         self.assertEqual(code, 0)
         config = cast(DciOperatorConfig, calls[0])
         self.assertNotIn(sentinel, repr(config))
+        self.assertEqual(config.benchmark_inputs.amount, Decimal("0.20"))
+        self.assertEqual(config.max_native_attempts, 1)
         self.assertEqual(
             config.benchmark_inputs.private_environment["DCI_API_TOKEN"],
             sentinel,
@@ -334,7 +428,7 @@ class TestDciApplicationAdapter(unittest.TestCase):
                 "--application",
                 "dci.complete-application@1.0.0",
                 "--suite",
-                "dci.qa.bamboogle.paper-full125@1.0.0",
+                "dci.bright.biology@1.0.0",
                 "--case-limit",
                 "1",
                 "--execute",
