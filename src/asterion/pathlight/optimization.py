@@ -516,6 +516,15 @@ class Decision:
                 _require_sha256(value)
             for value in (self.minimum_mean_gain_microunits, self.maximum_cost_increase_microunits, self.maximum_time_increase_microunits):
                 _require_nonnegative_int(value)
+            criteria = OptimizationCriteria(
+                self.minimum_mean_gain_microunits,
+                self.maximum_cost_increase_microunits,
+                self.maximum_time_increase_microunits,
+            )
+            if not hmac.compare_digest(
+                self.success_criteria_sha256, criteria.success_criteria_sha256
+            ):
+                raise ValueError
             if type(self.result) is not str or self.result not in {"accepted", "rejected", "inconclusive"}:
                 raise ValueError
             if type(self.reason) is not str or self.reason not in {
@@ -803,6 +812,21 @@ def validate_optimization_closure(
         diagnoses = cast(dict[str, DiagnosisBundle], _verified_bundles(diagnosis_bundles, DiagnosisBundle, lambda value: validate_diagnosis_bundle(value.to_mapping())))
         if not set(verified.trace_sha256s) <= traces or not set(verified.experiment_bundle_sha256s) <= set(experiments) or not set(verified.evaluation_bundle_sha256s) <= set(evaluations) or not set(verified.diagnosis_bundle_sha256s) <= set(diagnoses):
             raise ValueError
+        experiments = {
+            identity: value
+            for identity, value in experiments.items()
+            if identity in verified.experiment_bundle_sha256s
+        }
+        evaluations = {
+            identity: value
+            for identity, value in evaluations.items()
+            if identity in verified.evaluation_bundle_sha256s
+        }
+        diagnoses = {
+            identity: value
+            for identity, value in diagnoses.items()
+            if identity in verified.diagnosis_bundle_sha256s
+        }
         case_by_id = {trial.case_trial_sha256: trial for item in experiments.values() for trial in item.trials}
         evaluation_by_id = {record.evaluation_sha256: record for item in evaluations.values() for record in item.evaluations}
         plan_by_id = {plan.experiment_plan_sha256: plan for item in experiments.values() for plan in item.plans}

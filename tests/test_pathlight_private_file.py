@@ -287,6 +287,22 @@ class TestPathlightPrivateFile(unittest.TestCase):
             write_private_file(path, _PAYLOAD)
             self.assertEqual(read_private_file(path, _MAX_BYTES), _PAYLOAD)
 
+    def test_reader_rejects_owner_mismatch_with_mocked_uid(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory).resolve() / _FILENAME
+            write_private_file(path, _PAYLOAD)
+            with patch("asterion.pathlight._private_file.os.getuid", return_value=os.getuid() + 1), self.assertRaises(PrivateFileError):
+                read_private_file(path, _MAX_BYTES)
+
+    def test_snapshot_rejects_root_or_child_owner_mismatch_with_mocked_uid(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve() / "evidence"
+            root.mkdir(mode=0o700)
+            root.chmod(0o700)
+            write_private_file(root / "one.json", _PAYLOAD)
+            with patch("asterion.pathlight._private_file.os.getuid", return_value=os.getuid() + 1), self.assertRaises(PrivateFileError):
+                read_private_file_snapshot(root, ("one.json",), {"one.json": _MAX_BYTES})
+
     def test_snapshot_rejects_child_entry_identity_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve() / "evidence"

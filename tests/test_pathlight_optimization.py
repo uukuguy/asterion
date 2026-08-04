@@ -30,6 +30,7 @@ from asterion.pathlight.optimization import (
     TrialHistory,
     Decision,
     read_optimization_bundle,
+    validate_decision,
     validate_optimization_bundle,
     validate_optimization_closure,
     validate_optimization_criteria,
@@ -265,6 +266,27 @@ class TestTrialHistory(unittest.TestCase):
         history = TrialHistory.build(**_complete_closure(candidate_values=(401_000, 499_000)).history_inputs)
         self.assertEqual(_derive(history).result, "rejected")
 
+    def test_means_use_half_even_rounding_and_zero_baselines_are_bounded(self) -> None:
+        tied = TrialHistory.build(**_complete_closure(
+            baseline_values=(1, 2), candidate_values=(2, 3),
+        ).history_inputs)
+        self.assertEqual((tied.baseline_mean_microunits, tied.candidate_mean_microunits), (2, 2))
+        zero = TrialHistory.build(**_complete_closure(
+            baseline_cost=0, candidate_cost=1, baseline_time=0, candidate_time=1,
+        ).history_inputs)
+        self.assertEqual((zero.cost_increase_microunits, zero.time_increase_microunits), (1_000_001, 1_000_001))
+
+    def test_decision_rejects_forged_criteria_digest(self) -> None:
+        history = TrialHistory.build(**_complete_closure().history_inputs)
+        mapping = _derive(history).to_mapping()
+        mapping["success_criteria_sha256"] = _sha("forged-criteria")
+        unsigned = {key: value for key, value in mapping.items() if key != "decision_sha256"}
+        mapping["decision_sha256"] = hashlib.sha256(
+            json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        with self.assertRaises(PathlightError):
+            validate_decision(mapping)
+
 
 class TestOptimizationStorage(unittest.TestCase):
     def test_bundle_round_trip_requires_internal_and_external_closure(self) -> None:
@@ -289,6 +311,57 @@ class TestOptimizationStorage(unittest.TestCase):
         values = catalog.list_trials(history.trial_history_sha256, variant_role="candidate")
         self.assertEqual(len(values), 2)
         self.assertNotIn("SENTINEL", json.dumps(values))
+
+    def test_undeclared_external_bundles_cannot_supply_case_evaluation_or_proposal(self) -> None:
+        bundle, dependencies = _optimization_bundle()
+        unrelated_experiment = ExperimentBundle.build(
+            datasets=(), evaluators=(), variants=(), plans=(), trials=(), evaluations=(),
+        )
+        unrelated_evaluations = EvaluationBundle((), (), hashlib.sha256(
+            b'{"evaluations":[],"metric_contracts":[],"schema":"asterion.pathlight-evaluations/v1"}'
+        ).hexdigest())
+        unrelated_observed = Finding(
+            "observed", _sha("unrelated-subject"), (_sha("unrelated-evaluation"),),
+            (), "confirmed", _sha("unrelated-finding"),
+        )
+        unrelated_hypothesis = Finding(
+            "hypothesis", _sha("unrelated-subject"), (unrelated_observed.finding_sha256,),
+            (), "medium", _sha("unrelated-hypothesis"),
+        )
+        unrelated_proposal = Proposal(
+            unrelated_hypothesis.finding_sha256, _sha("unrelated-change"),
+            _sha("unrelated-scope"), _sha("unrelated-criteria"), _sha("unrelated-stop"),
+            _sha("unrelated-budget"),
+        )
+        unrelated_diagnosis = DiagnosisBundle.build(
+            experiment_bundle_sha256s=(_sha("unrelated-experiment"),),
+            evaluation_sha256s=(_sha("unrelated-evaluation"),),
+            findings=(unrelated_observed, unrelated_hypothesis), proposals=(unrelated_proposal,),
+        )
+        actual_experiments = cast(tuple[ExperimentBundle, ...], dependencies["experiment_bundles"])
+        actual_evaluations = cast(tuple[EvaluationBundle, ...], dependencies["evaluation_bundles"])
+        actual_diagnoses = cast(tuple[DiagnosisBundle, ...], dependencies["diagnosis_bundles"])
+        for kind, experiments, evaluations, diagnoses in (
+            ("case", (unrelated_experiment,), actual_evaluations, actual_diagnoses),
+            ("evaluation", actual_experiments, (unrelated_evaluations,), actual_diagnoses),
+            ("proposal", actual_experiments, actual_evaluations, (unrelated_diagnosis,)),
+        ):
+            with self.subTest(kind=kind):
+                undeclared = OptimizationBundle.build(
+                    experiment_bundle_sha256s=tuple(value.bundle_sha256 for value in experiments),
+                    evaluation_bundle_sha256s=tuple(value.bundle_sha256 for value in evaluations),
+                    diagnosis_bundle_sha256s=tuple(value.bundle_sha256 for value in diagnoses),
+                    trace_sha256s=bundle.trace_sha256s, trials=bundle.trials,
+                    histories=bundle.histories, decisions=bundle.decisions,
+                )
+                with self.assertRaises(PathlightError):
+                    validate_optimization_closure(
+                        undeclared,
+                        workflow_trace_sha256s=cast(Any, dependencies["workflow_trace_sha256s"]),
+                        experiment_bundles=(unrelated_experiment, *actual_experiments),
+                        evaluation_bundles=(unrelated_evaluations, *actual_evaluations),
+                        diagnosis_bundles=(unrelated_diagnosis, *actual_diagnoses),
+                    )
 
     def test_store_and_mapping_reject_hostile_inputs(self) -> None:
         bundle, _ = _optimization_bundle()

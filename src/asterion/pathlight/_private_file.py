@@ -230,11 +230,19 @@ def read_private_file_snapshot(
 
 
 def _is_private_regular(metadata: os.stat_result) -> bool:
-    return stat.S_ISREG(metadata.st_mode) and stat.S_IMODE(metadata.st_mode) == 0o600
+    return (
+        stat.S_ISREG(metadata.st_mode)
+        and stat.S_IMODE(metadata.st_mode) == 0o600
+        and metadata.st_uid == os.getuid()
+    )
 
 
 def _is_private_directory(metadata: os.stat_result) -> bool:
-    return stat.S_ISDIR(metadata.st_mode) and stat.S_IMODE(metadata.st_mode) == 0o700
+    return (
+        stat.S_ISDIR(metadata.st_mode)
+        and stat.S_IMODE(metadata.st_mode) == 0o700
+        and metadata.st_uid == os.getuid()
+    )
 
 
 def _nofollow_flag() -> int:
