@@ -245,6 +245,93 @@ function renderDiagnoses(container) {
   container.append(stack);
 }
 
+function optimizationTrials(snapshot) {
+  return snapshot.optimizations.flatMap((bundle) => bundle.trials);
+}
+
+function traceForDigest(trace_sha256) {
+  return state.snapshot.traces.find((trace) => trace.trace_sha256 === trace_sha256);
+}
+
+function appendTraceLink(parent, trial) {
+  if (trial.status !== "completed" || !trial.trace_sha256) {
+    appendText(parent, "span", trial.status, "trace-meta");
+    return;
+  }
+  const trace = traceForDigest(trial.trace_sha256);
+  if (!trace) {
+    appendText(parent, "span", "trace unavailable", "trace-meta");
+    return;
+  }
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "trace-link";
+  button.addEventListener("click", () => {
+    state.traceId = trace.trace_id;
+    state.selectedNode = null;
+    window.location.hash = "workflow-main";
+    render();
+  });
+  appendText(button, "code", shortDigest(trial.trace_sha256, 16));
+  parent.append(button);
+}
+
+function renderOptimizationTrials(container, history) {
+  const trials = optimizationTrials(state.snapshot);
+  const trialIds = new Set([
+    ...history.baseline_optimization_trial_sha256s,
+    ...history.candidate_optimization_trial_sha256s,
+  ]);
+  const paired = new Map();
+  trials.filter((trial) => trialIds.has(trial.optimization_trial_sha256)).forEach((trial) => {
+    const pair = paired.get(trial.dataset_item_sha256) || {};
+    pair[trial.variant_role] = trial;
+    paired.set(trial.dataset_item_sha256, pair);
+  });
+  const table = document.createElement("table");
+  const head = document.createElement("thead");
+  const row = document.createElement("tr");
+  ["Dataset item", "Baseline", "Candidate", "Trace flow"].forEach((label) => appendText(row, "th", label));
+  head.append(row);
+  table.append(head);
+  const body = document.createElement("tbody");
+  [...paired.entries()].sort(([left], [right]) => left.localeCompare(right)).forEach(([dataset, pair]) => {
+    const item = document.createElement("tr");
+    appendText(item, "td", shortDigest(dataset, 16));
+    appendText(item, "td", pair.baseline ? `${pair.baseline.status} · ${pair.baseline.agent_cost_microusd}μ$` : "missing");
+    appendText(item, "td", pair.candidate ? `${pair.candidate.status} · ${pair.candidate.agent_cost_microusd}μ$` : "missing");
+    const links = document.createElement("td");
+    if (pair.baseline) appendTraceLink(links, pair.baseline);
+    if (pair.candidate) appendTraceLink(links, pair.candidate);
+    item.append(links);
+    body.append(item);
+  });
+  table.append(body);
+  container.append(table);
+}
+
+function renderOptimizations(container) {
+  if (!state.snapshot.optimizations.length) {
+    appendText(container, "p", "当前快照没有优化决策。", "empty-copy");
+    return;
+  }
+  state.snapshot.optimizations.forEach((bundle) => {
+    bundle.decisions.forEach((decision) => {
+      const record = document.createElement("article");
+      record.className = `record decision-${decision.result}`;
+      appendText(record, "h3", `Optimization decision · ${decision.result}`);
+      appendText(record, "p", `reason ${decision.reason} · decision ${shortDigest(decision.decision_sha256, 16)}`);
+      const history = bundle.histories.find((item) => item.trial_history_sha256 === decision.trial_history_sha256);
+      if (!history) return;
+      appendText(record, "p", `evidence ${history.evidence_state} · mean gain ${history.mean_gain_microunits ?? "missing"}μ · cost ${history.cost_increase_microunits ?? "missing"}μ · time ${history.time_increase_microunits ?? "missing"}μ`);
+      appendText(record, "p", `thresholds: gain ≥ ${decision.minimum_mean_gain_microunits}μ · cost ≤ ${decision.maximum_cost_increase_microunits}μ · time ≤ ${decision.maximum_time_increase_microunits}μ`);
+      if (history.evidence_state !== "complete") appendText(record, "p", "证据不完整：不会把该历史解释为接受或拒绝。", "evidence-gap");
+      renderOptimizationTrials(record, history);
+      container.append(record);
+    });
+  });
+}
+
 function renderAnalysis() {
   document.querySelectorAll("[data-tab]").forEach((button) => {
     button.setAttribute("aria-selected", String(button.dataset.tab === state.tab));
@@ -254,6 +341,7 @@ function renderAnalysis() {
   if (state.tab === "evaluations") renderEvaluations(container);
   if (state.tab === "experiments") renderExperiments(container);
   if (state.tab === "diagnoses") renderDiagnoses(container);
+  if (state.tab === "optimizations") renderOptimizations(container);
 }
 
 function render() {

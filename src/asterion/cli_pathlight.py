@@ -155,6 +155,12 @@ def _execute(args: argparse.Namespace, *, stdout: TextIO) -> object:
                     args.diagnosis_file or (), "pathlight-diagnosis.json"
                 )
             ),
+            optimization_bundles=tuple(
+                read_optimization_bundle(path)
+                for path in _optional_absolute_paths(
+                    args.optimization_file or (), "pathlight-optimization.json"
+                )
+            ),
         )
 
         def ready(url: str) -> None:
@@ -505,6 +511,7 @@ def _parser() -> argparse.ArgumentParser:
     dashboard.add_argument("--evaluation-file", action="append")
     dashboard.add_argument("--experiment-file", action="append")
     dashboard.add_argument("--diagnosis-file", action="append")
+    dashboard.add_argument("--optimization-file", action="append")
     dashboard.add_argument("--host", default="127.0.0.1")
     dashboard.add_argument("--port", type=int, default=8765)
     dashboard.add_argument("--open", action="store_true")

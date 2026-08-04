@@ -254,6 +254,11 @@ td code { font-family: var(--mono); }
 .record { padding: 0.8rem; border: 1px solid var(--line-soft); border-left: 2px solid var(--accent); background: #0a1922; }
 .record h3 { margin: 0 0 0.55rem; font: 0.75rem var(--mono); }
 .record p { color: var(--muted); font-size: 0.7rem; line-height: 1.55; }
+.record.decision-accepted { border-left-color: var(--ok); }
+.record.decision-rejected { border-left-color: var(--fail); }
+.record.decision-inconclusive { border-left-color: var(--missing); }
+.trace-link { margin: 0.1rem 0.35rem 0.1rem 0; padding: 0.2rem 0.35rem; border: 1px solid var(--line); border-radius: 0.2rem; background: transparent; color: var(--accent); cursor: pointer; }
+.trace-link:hover { border-color: var(--accent); background: var(--accent-soft); }
 
 footer { display: flex; justify-content: space-between; gap: 1rem; padding: 0.9rem clamp(1rem, 3vw, 2.5rem); color: var(--muted); font-size: 0.68rem; }
 footer code { font-family: var(--mono); }

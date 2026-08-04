@@ -21,6 +21,7 @@ from asterion.pathlight.dashboard_server import (
     serve_dashboard,
     validate_dashboard_bind,
 )
+from tests.test_pathlight_optimization import _optimization_bundle
 from tests.test_pathlight_cli import (
     PRIVATE_PER_CALL_SENTINELS,
     PRIVATE_PROVIDER_REQUEST_SENTINELS,
@@ -119,7 +120,12 @@ class PathlightDashboardSnapshotTests(unittest.TestCase):
 
         self.assertEqual(first, second)
         mapping = first.to_mapping()
-        self.assertEqual(mapping["schema"], "asterion.pathlight-dashboard-snapshot/v1")
+        self.assertEqual(mapping["schema"], "asterion.pathlight-dashboard-snapshot/v2")
+        self.assertEqual(mapping["summary"]["optimization_history_count"], 0)
+        self.assertEqual(
+            mapping["summary"]["decision_counts"],
+            {"accepted": 0, "inconclusive": 0, "rejected": 0},
+        )
         self.assertEqual(mapping["summary"]["trace_count"], 1)
         self.assertEqual(mapping["summary"]["evidence_gap_count"], 1)
         self.assertEqual(mapping["flows"][0]["nodes"], [])
@@ -139,6 +145,10 @@ class PathlightDashboardSnapshotTests(unittest.TestCase):
         ).to_mapping()
         tampered = copy.deepcopy(mapping)
         tampered["summary"]["trace_count"] = 2
+        with self.assertRaises(PathlightError):
+            validate_dashboard_snapshot(tampered)
+        tampered = copy.deepcopy(mapping)
+        tampered["schema"] = "asterion.pathlight-dashboard-snapshot/v1"
         with self.assertRaises(PathlightError):
             validate_dashboard_snapshot(tampered)
 
@@ -187,6 +197,29 @@ class PathlightDashboardApplicationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.snapshot = DashboardSnapshot.build(workflow_bundles=(_workflow_bundle(),))
 
+    def test_optimization_inputs_require_complete_external_closure(self) -> None:
+        optimization, dependencies = _optimization_bundle()
+
+        with self.assertRaisesRegex(
+            PathlightError, "Dashboard snapshot is invalid"
+        ):
+            DashboardSnapshot.build(
+                evaluation_bundles=dependencies["evaluation_bundles"],
+                experiment_bundles=dependencies["experiment_bundles"],
+                diagnosis_bundles=dependencies["diagnosis_bundles"],
+                optimization_bundles=(optimization,),
+            )
+
+    def test_assets_describe_optimization_decisions_without_private_values(self) -> None:
+        app = DashboardApplication(self.snapshot)
+        html = app.response("GET", "/").body.decode()
+        script = app.response("GET", "/app.js").body.decode()
+
+        self.assertIn("Optimization decision", html)
+        self.assertIn("trial_history_sha256", script)
+        self.assertIn("trace_sha256", script)
+        self.assertNotIn("SENTINEL_PRIVATE", html + script)
+
     def test_api_is_read_only_safe_and_same_origin(self) -> None:
         app = DashboardApplication(self.snapshot)
         response = app.response("GET", "/api/pathlight/v1/snapshot")
@@ -213,6 +246,7 @@ class PathlightDashboardApplicationTests(unittest.TestCase):
             "/api/pathlight/v1/evaluations": [],
             "/api/pathlight/v1/experiments": [],
             "/api/pathlight/v1/diagnoses": [],
+            "/api/pathlight/v1/optimizations": [],
         }
         for target, expected in routes.items():
             with self.subTest(target=target):

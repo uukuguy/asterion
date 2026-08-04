@@ -25,6 +25,11 @@ from asterion.pathlight.experiment import (
     ExperimentBundle,
     validate_experiment_bundle,
 )
+from asterion.pathlight.optimization import (
+    OptimizationBundle,
+    validate_optimization_bundle,
+    validate_optimization_closure,
+)
 from asterion.pathlight.flow import project_trace_flow
 from asterion.pathlight.protocol import (
     PathlightError,
@@ -36,7 +41,7 @@ from asterion.workflow_evidence.storage import (
 )
 
 
-DASHBOARD_SNAPSHOT_SCHEMA = "asterion.pathlight-dashboard-snapshot/v1"
+DASHBOARD_SNAPSHOT_SCHEMA = "asterion.pathlight-dashboard-snapshot/v2"
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _FIELDS = frozenset(
@@ -48,6 +53,7 @@ _FIELDS = frozenset(
         "evaluations",
         "experiments",
         "diagnoses",
+        "optimizations",
         "snapshot_sha256",
     }
 )
@@ -64,9 +70,19 @@ _SUMMARY_FIELDS = frozenset(
         "proposal_count",
         "evidence_gap_count",
         "status_counts",
+        "optimization_history_count",
+        "decision_counts",
     }
 )
 _STATUS_COUNT_FIELDS = frozenset({"completed", "failed", "cancelled", "skipped"})
+_DECISION_COUNT_FIELDS = frozenset({"accepted", "rejected", "inconclusive"})
+_OPTIMIZATION_IDENTITY_FIELDS = MappingProxyType(
+    {
+        "trials": "optimization_trial_sha256",
+        "histories": "trial_history_sha256",
+        "decisions": "decision_sha256",
+    }
+)
 _FLOW_FIELDS = frozenset({"trace_id", "trace_sha256", "nodes", "missing_evidence"})
 
 
@@ -79,6 +95,7 @@ class DashboardSnapshot:
     evaluations: tuple[Mapping[str, object], ...]
     experiments: tuple[Mapping[str, object], ...]
     diagnoses: tuple[Mapping[str, object], ...]
+    optimizations: tuple[Mapping[str, object], ...]
     summary: Mapping[str, object]
     snapshot_sha256: str
 
@@ -89,15 +106,19 @@ class DashboardSnapshot:
                 self.evaluations,
                 self.experiments,
                 self.diagnoses,
+                self.optimizations,
             )
-            traces, flows, evaluations, experiments, diagnoses, summary = canonical
+            traces, flows, evaluations, experiments, diagnoses, optimizations, summary = canonical
+            _validate_snapshot_optimization_lineage(
+                traces, evaluations, experiments, diagnoses, optimizations
+            )
             if _json_value(self.flows) != _json_value(flows):
                 raise ValueError
             if _json_value(self.summary) != _json_value(summary):
                 raise ValueError
             supplied = _require_sha256(self.snapshot_sha256)
             unsigned = _unsigned_mapping(
-                traces, flows, evaluations, experiments, diagnoses, summary
+                traces, flows, evaluations, experiments, diagnoses, optimizations, summary
             )
             if not hmac.compare_digest(supplied, _canonical_digest(unsigned)):
                 raise ValueError
@@ -108,6 +129,7 @@ class DashboardSnapshot:
         object.__setattr__(self, "evaluations", _freeze_sequence(evaluations))
         object.__setattr__(self, "experiments", _freeze_sequence(experiments))
         object.__setattr__(self, "diagnoses", _freeze_sequence(diagnoses))
+        object.__setattr__(self, "optimizations", _freeze_sequence(optimizations))
         object.__setattr__(self, "summary", _freeze_mapping(summary))
         _validate_public_shapes(self)
 
@@ -119,6 +141,7 @@ class DashboardSnapshot:
         evaluation_bundles: Sequence[EvaluationBundle] = (),
         experiment_bundles: Sequence[ExperimentBundle] = (),
         diagnosis_bundles: Sequence[DiagnosisBundle] = (),
+        optimization_bundles: Sequence[OptimizationBundle] = (),
     ) -> DashboardSnapshot:
         """Build a deterministic snapshot from already-validated safe values."""
 
@@ -127,15 +150,21 @@ class DashboardSnapshot:
             evaluations = _evaluation_bundle_mappings(evaluation_bundles)
             experiments = _experiment_bundle_mappings(experiment_bundles)
             diagnoses = _diagnosis_bundle_mappings(diagnosis_bundles)
-            if not any((traces, evaluations, experiments, diagnoses)):
+            optimizations = _optimization_bundle_mappings(optimization_bundles)
+            _validate_optimization_lineage(
+                optimization_bundles,
+                traces,
+                experiment_bundles,
+                evaluation_bundles,
+                diagnosis_bundles,
+            )
+            if not any((traces, evaluations, experiments, diagnoses, optimizations)):
                 raise ValueError
             components = _snapshot_components(
-                traces, evaluations, experiments, diagnoses
+                traces, evaluations, experiments, diagnoses, optimizations
             )
             unsigned = _unsigned_mapping(*components)
             return cls(*components[:-1], components[-1], _canonical_digest(unsigned))
-        except PathlightError:
-            raise
         except Exception:
             raise PathlightError("Pathlight Dashboard snapshot is invalid") from None
 
@@ -147,6 +176,7 @@ class DashboardSnapshot:
                 self.evaluations,
                 self.experiments,
                 self.diagnoses,
+                self.optimizations,
                 self.summary,
             ),
             "snapshot_sha256": self.snapshot_sha256,
@@ -176,7 +206,16 @@ def validate_dashboard_snapshot(mapping: Mapping[str, object]) -> DashboardSnaps
             validate_diagnosis_bundle(_exact_mapping(value)).to_mapping()
             for value in _exact_list(mapping["diagnoses"])
         )
-        components = _snapshot_components(traces, evaluations, experiments, diagnoses)
+        optimizations = tuple(
+            validate_optimization_bundle(_exact_mapping(value)).to_mapping()
+            for value in _exact_list(mapping["optimizations"])
+        )
+        components = _snapshot_components(
+            traces, evaluations, experiments, diagnoses, optimizations
+        )
+        _validate_snapshot_optimization_lineage(
+            components[0], components[2], components[3], components[4], components[5]
+        )
         supplied_flows = _exact_list(mapping["flows"])
         supplied_summary = _exact_mapping(mapping["summary"])
         if _json_value(supplied_flows) != _json_value(components[1]):
@@ -190,6 +229,7 @@ def validate_dashboard_snapshot(mapping: Mapping[str, object]) -> DashboardSnaps
             components[3],
             components[4],
             components[5],
+            components[6],
             _require_sha256(mapping["snapshot_sha256"]),
         )
     except Exception:
@@ -201,7 +241,9 @@ def _snapshot_components(
     evaluations: Sequence[Mapping[str, object]],
     experiments: Sequence[Mapping[str, object]],
     diagnoses: Sequence[Mapping[str, object]],
+    optimizations: Sequence[Mapping[str, object]],
 ) -> tuple[
+    tuple[Mapping[str, object], ...],
     tuple[Mapping[str, object], ...],
     tuple[Mapping[str, object], ...],
     tuple[Mapping[str, object], ...],
@@ -212,7 +254,7 @@ def _snapshot_components(
     normalized_traces = tuple(
         sorted(
             (_trace_mapping(value) for value in traces),
-            key=lambda value: value["trace_id"],
+            key=lambda value: cast(str, value["trace_id"]),
         )
     )
     _reject_duplicate(normalized_traces, "trace_id")
@@ -222,7 +264,7 @@ def _snapshot_components(
                 _evaluation_mapping(_evaluation_bundle_from_mapping(value))
                 for value in evaluations
             ),
-            key=lambda value: value["bundle_sha256"],
+            key=lambda value: cast(str, value["bundle_sha256"]),
         )
     )
     _reject_duplicate(normalized_evaluations, "bundle_sha256")
@@ -234,7 +276,7 @@ def _snapshot_components(
                 ).to_mapping()
                 for value in experiments
             ),
-            key=lambda value: value["bundle_sha256"],
+            key=lambda value: cast(str, value["bundle_sha256"]),
         )
     )
     _reject_duplicate(normalized_experiments, "bundle_sha256")
@@ -246,16 +288,30 @@ def _snapshot_components(
                 ).to_mapping()
                 for value in diagnoses
             ),
-            key=lambda value: value["bundle_sha256"],
+            key=lambda value: cast(str, value["bundle_sha256"]),
         )
     )
     _reject_duplicate(normalized_diagnoses, "bundle_sha256")
+    normalized_optimizations = tuple(
+        sorted(
+            (
+                validate_optimization_bundle(
+                    _exact_mapping(_json_value(value))
+                ).to_mapping()
+                for value in optimizations
+            ),
+            key=lambda value: cast(str, value["bundle_sha256"]),
+        )
+    )
+    _reject_duplicate(normalized_optimizations, "bundle_sha256")
+    _reject_duplicate_optimization_identities(normalized_optimizations)
     if not any(
         (
             normalized_traces,
             normalized_evaluations,
             normalized_experiments,
             normalized_diagnoses,
+            normalized_optimizations,
         )
     ):
         raise ValueError
@@ -269,6 +325,7 @@ def _snapshot_components(
         normalized_evaluations,
         normalized_experiments,
         normalized_diagnoses,
+        normalized_optimizations,
     )
     return (
         normalized_traces,
@@ -276,6 +333,7 @@ def _snapshot_components(
         normalized_evaluations,
         normalized_experiments,
         normalized_diagnoses,
+        normalized_optimizations,
         summary,
     )
 
@@ -300,6 +358,66 @@ def _validate_diagnosis_lineage(
             value not in evaluation_ids for value in referenced_evaluations
         ):
             raise ValueError
+
+
+def _reject_duplicate_optimization_identities(
+    bundles: Sequence[Mapping[str, object]],
+) -> None:
+    for collection, field in _OPTIMIZATION_IDENTITY_FIELDS.items():
+        values = tuple(
+            value[field]
+            for bundle in bundles
+            for value in cast(Sequence[Mapping[str, object]], bundle[collection])
+        )
+        if len(values) != len(set(values)):
+            raise ValueError
+
+
+def _validate_optimization_lineage(
+    bundles: Sequence[OptimizationBundle],
+    traces: Sequence[Mapping[str, object]],
+    experiments: Sequence[ExperimentBundle],
+    evaluations: Sequence[EvaluationBundle],
+    diagnoses: Sequence[DiagnosisBundle],
+) -> None:
+    trace_sha256s = tuple(cast(str, value["trace_sha256"]) for value in traces)
+    for bundle in bundles:
+        if type(bundle) is not OptimizationBundle:
+            raise ValueError
+        validate_optimization_closure(
+            bundle,
+            workflow_trace_sha256s=trace_sha256s,
+            experiment_bundles=experiments,
+            evaluation_bundles=evaluations,
+            diagnosis_bundles=diagnoses,
+        )
+
+
+def _validate_snapshot_optimization_lineage(
+    traces: Sequence[Mapping[str, object]],
+    evaluations: Sequence[Mapping[str, object]],
+    experiments: Sequence[Mapping[str, object]],
+    diagnoses: Sequence[Mapping[str, object]],
+    optimizations: Sequence[Mapping[str, object]],
+) -> None:
+    trace_sha256s = tuple(cast(str, value["trace_sha256"]) for value in traces)
+    evaluation_bundles = tuple(
+        _evaluation_bundle_from_mapping(value) for value in evaluations
+    )
+    experiment_bundles = tuple(
+        validate_experiment_bundle(_exact_mapping(value)) for value in experiments
+    )
+    diagnosis_bundles = tuple(
+        validate_diagnosis_bundle(_exact_mapping(value)) for value in diagnoses
+    )
+    for mapping in optimizations:
+        validate_optimization_closure(
+            validate_optimization_bundle(_exact_mapping(mapping)),
+            workflow_trace_sha256s=trace_sha256s,
+            experiment_bundles=experiment_bundles,
+            evaluation_bundles=evaluation_bundles,
+            diagnosis_bundles=diagnosis_bundles,
+        )
 
 
 def _traces_from_workflow_bundles(
@@ -345,6 +463,17 @@ def _diagnosis_bundle_mappings(
     return tuple(
         validate_diagnosis_bundle(bundle.to_mapping()).to_mapping()
         if type(bundle) is DiagnosisBundle
+        else _invalid_value()
+        for bundle in bundles
+    )
+
+
+def _optimization_bundle_mappings(
+    bundles: Sequence[OptimizationBundle],
+) -> tuple[Mapping[str, object], ...]:
+    return tuple(
+        validate_optimization_bundle(bundle.to_mapping()).to_mapping()
+        if type(bundle) is OptimizationBundle
         else _invalid_value()
         for bundle in bundles
     )
@@ -411,6 +540,7 @@ def _summary(
     evaluations: Sequence[Mapping[str, object]],
     experiments: Sequence[Mapping[str, object]],
     diagnoses: Sequence[Mapping[str, object]],
+    optimizations: Sequence[Mapping[str, object]],
 ) -> Mapping[str, object]:
     nodes = tuple(
         node
@@ -459,6 +589,19 @@ def _summary(
         + missing_trials
         + missing_findings,
         "status_counts": status_counts,
+        "optimization_history_count": sum(
+            len(cast(Sequence[object], value["histories"]))
+            for value in optimizations
+        ),
+        "decision_counts": {
+            decision: sum(
+                1
+                for bundle in optimizations
+                for value in cast(Sequence[Mapping[str, object]], bundle["decisions"])
+                if value["result"] == decision
+            )
+            for decision in sorted(_DECISION_COUNT_FIELDS)
+        },
     }
 
 
@@ -480,6 +623,7 @@ def _unsigned_mapping(
     evaluations: Sequence[Mapping[str, object]],
     experiments: Sequence[Mapping[str, object]],
     diagnoses: Sequence[Mapping[str, object]],
+    optimizations: Sequence[Mapping[str, object]],
     summary: Mapping[str, object],
 ) -> dict[str, object]:
     return {
@@ -490,6 +634,7 @@ def _unsigned_mapping(
         "evaluations": [_json_value(value) for value in evaluations],
         "experiments": [_json_value(value) for value in experiments],
         "diagnoses": [_json_value(value) for value in diagnoses],
+        "optimizations": [_json_value(value) for value in optimizations],
     }
 
 
@@ -559,6 +704,9 @@ def _validate_public_shapes(snapshot: DashboardSnapshot) -> None:
         raise PathlightError("Pathlight Dashboard snapshot is invalid")
     statuses = snapshot.summary["status_counts"]
     if not isinstance(statuses, Mapping) or set(statuses) != _STATUS_COUNT_FIELDS:
+        raise PathlightError("Pathlight Dashboard snapshot is invalid")
+    decisions = snapshot.summary["decision_counts"]
+    if not isinstance(decisions, Mapping) or set(decisions) != _DECISION_COUNT_FIELDS:
         raise PathlightError("Pathlight Dashboard snapshot is invalid")
     if any(set(flow) != _FLOW_FIELDS for flow in snapshot.flows):
         raise PathlightError("Pathlight Dashboard snapshot is invalid")

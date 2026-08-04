@@ -24,6 +24,7 @@ _API_PREFIX = "/api/pathlight/v1"
 _TRACE_ID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 _READ_METHODS = frozenset({"GET", "HEAD"})
 _ASSETS = MappingProxyType(
@@ -99,9 +100,39 @@ class DashboardApplication:
             f"{_API_PREFIX}/evaluations": mapping["evaluations"],
             f"{_API_PREFIX}/experiments": mapping["experiments"],
             f"{_API_PREFIX}/diagnoses": mapping["diagnoses"],
+            f"{_API_PREFIX}/optimizations": mapping["optimizations"],
         }
         if target in exact:
             return exact[target]
+        bundles = mapping["optimizations"]
+        if not isinstance(bundles, list):
+            raise ValueError
+        for collection, identity in (
+            ("history", "trial_history_sha256"),
+            ("decision", "decision_sha256"),
+        ):
+            prefix = f"{_API_PREFIX}/optimizations/{collection}/"
+            if target.startswith(prefix):
+                digest = target[len(prefix) :]
+                if _SHA256.fullmatch(digest) is None:
+                    raise ValueError
+                matches: list[Mapping[str, object]] = []
+                for bundle in bundles:
+                    if not isinstance(bundle, Mapping):
+                        raise ValueError
+                    items = bundle[
+                        "histories" if collection == "history" else "decisions"
+                    ]
+                    if not isinstance(items, list):
+                        raise ValueError
+                    matches.extend(
+                        item
+                        for item in items
+                        if isinstance(item, Mapping) and item.get(identity) == digest
+                    )
+                if len(matches) != 1:
+                    raise ValueError
+                return matches[0]
         prefix = f"{_API_PREFIX}/traces/"
         if not target.startswith(prefix):
             raise ValueError
