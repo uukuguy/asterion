@@ -800,8 +800,8 @@ git commit -m "feat: finalize Bright optimization decisions"
 - Modify: `docs/status/PATHLIGHT-DCI-DIAGNOSIS.md`
 - Modify: `docs/status/DCI-BENCHMARK-INSTANCES.md`
 - Modify: `docs/superpowers/specs/2026-08-02-asterion-pathlight-design.md`
-- Modify: `docs/status/JOURNAL.md`
-- Modify: `docs/status/RESUME-NEXT-SESSION.md`
+- Update as durable live state without adding to the task commit: `docs/status/JOURNAL.md`
+- Update as durable live state without adding to the task commit: `docs/status/RESUME-NEXT-SESSION.md`
 - Modify tests only if a gate exposes an actual defect.
 
 **Interfaces:**
@@ -858,11 +858,11 @@ Review dependency direction, public redaction, authority drift, receipt replay, 
 - [ ] **Step 6: Commit Task 8 and checkpoint before external authority**
 
 ```bash
-git add docs/status/PATHLIGHT-DCI-DIAGNOSIS.md docs/status/DCI-BENCHMARK-INSTANCES.md docs/superpowers/specs/2026-08-02-asterion-pathlight-design.md docs/status/JOURNAL.md docs/status/RESUME-NEXT-SESSION.md
+git add docs/status/PATHLIGHT-DCI-DIAGNOSIS.md docs/status/DCI-BENCHMARK-INSTANCES.md docs/superpowers/specs/2026-08-02-asterion-pathlight-design.md
 git commit -m "docs: prepare Bright optimization verification"
 ```
 
-Checkpoint must state that provider-free implementation is complete, no model run is authorized, and Task 9 requires a fresh exact plan/authorization/root.
+After the commit, append the one-line commit entry to JOURNAL and update RESUME as project-state live files without staging them. The checkpoint must state that provider-free implementation is complete, no model run is authorized, and Task 9 requires a fresh exact plan/authorization/root.
 
 ---
 
@@ -872,8 +872,8 @@ Checkpoint must state that provider-free implementation is complete, no model ru
 - Runtime private outputs under one new operator-owned 0700 root; never commit them.
 - Modify after verified execution: `docs/status/PATHLIGHT-DCI-DIAGNOSIS.md`
 - Modify after verified execution: `docs/status/DCI-BENCHMARK-INSTANCES.md`
-- Modify: `docs/status/JOURNAL.md`
-- Modify: `docs/status/RESUME-NEXT-SESSION.md`
+- Update as durable live state after the safe result commit: `docs/status/JOURNAL.md`
+- Update as durable live state after the safe result commit: `docs/status/RESUME-NEXT-SESSION.md`
 
 **Interfaces:**
 - Consumes: clean Task 8 gates, freshly prepared plan, separately supplied exact 0600 authorization, `.env` plus intentionally preserved shell proxy variables.
