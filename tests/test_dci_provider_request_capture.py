@@ -14,6 +14,7 @@ from unittest.mock import patch
 from asterion.capabilities.dci.implementation.evaluation.provider_requests import (
     ProviderRequestCapture,
     ProviderRequestCaptureError,
+    _summarize_payload,
     read_sealed_provider_requests_at,
 )
 from asterion.pathlight import ProviderRequestObservation
@@ -69,6 +70,35 @@ def _captured_pair(
 
 def _nested_array_json(depth: int, leaf: str = '"leaf"') -> str:
     return "[" * depth + leaf + "]" * depth
+
+
+def _captured_payload_json_pair(
+    payload_json: str, request_index: int = 1
+) -> tuple[bytes, dict[str, object]]:
+    payload = json.loads(payload_json)
+    payload_bytes = payload_json.encode("utf-8")
+    summary = _summarize_payload(payload, payload_bytes)
+    record = {
+        "schema": "dci.private-provider-request/v1",
+        "request_index": request_index,
+        "captured_at": "2026-08-03T04:05:06.789Z",
+        "payload_json": payload_json,
+        "payload_sha256": summary["payload_sha256"],
+        "payload_bytes": summary["payload_bytes"],
+        "shape_sha256": summary["shape_sha256"],
+        "summary_sha256": summary["summary_sha256"],
+    }
+    safe = {
+        "schema": "dci.provider-request-observation/v1",
+        "request_index": request_index,
+        "capture_status": "captured",
+        **summary,
+    }
+    return (
+        json.dumps(record, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        + b"\n",
+        safe,
+    )
 
 
 class ProviderRequestCaptureTests(unittest.TestCase):
@@ -228,6 +258,50 @@ class ProviderRequestCaptureTests(unittest.TestCase):
         )
         with self.assertRaises(AttributeError):
             observations[0].payload_bytes = 0  # type: ignore[misc]
+
+    def test_sealed_reader_accepts_canonical_unicode_and_rejects_drift(self) -> None:
+        payload = {
+            "messages": [
+                {"role": "user", "content": "中文 café 😀"},
+            ]
+        }
+        canonical = json.dumps(
+            payload, ensure_ascii=False, separators=(",", ":")
+        )
+        escaped_drift = json.dumps(
+            payload, ensure_ascii=True, separators=(",", ":")
+        )
+        self.assertNotEqual(canonical.encode("utf-8"), escaped_drift.encode("utf-8"))
+
+        raw, safe = _captured_payload_json_pair(canonical)
+        valid_root = self.root / "unicode-valid"
+        valid_root.mkdir()
+        target = valid_root / CAPTURE_NAME
+        target.write_bytes(raw)
+        target.chmod(0o400)
+        directory_fd = os.open(valid_root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            (observation,) = read_sealed_provider_requests_at(directory_fd, (safe,))
+            self.assertEqual(observation.request_index, 1)
+            self.assertEqual(observation.payload_bytes, len(canonical.encode("utf-8")))
+        finally:
+            os.close(directory_fd)
+
+        drift_raw, drift_safe = _captured_payload_json_pair(escaped_drift)
+        drift_root = self.root / "unicode-drift"
+        drift_root.mkdir()
+        drift_target = drift_root / CAPTURE_NAME
+        drift_target.write_bytes(drift_raw)
+        drift_target.chmod(0o400)
+        directory_fd = os.open(drift_root, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            with self.assertRaisesRegex(
+                ProviderRequestCaptureError, f"^{FIXED_ERROR}$"
+            ) as raised:
+                read_sealed_provider_requests_at(directory_fd, (drift_safe,))
+            self.assertIsNone(raised.exception.__cause__)
+        finally:
+            os.close(directory_fd)
 
     def test_sealed_reader_rejects_trust_boundary_drift(self) -> None:
         module = __import__(

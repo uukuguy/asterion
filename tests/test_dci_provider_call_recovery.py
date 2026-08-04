@@ -38,11 +38,18 @@ def _jsonl(values: list[dict[str, object]]) -> bytes:
     return b"".join(_json_bytes(value) + b"\n" for value in values)
 
 
-def _private_pair(request_index: int) -> tuple[bytes, dict[str, object]]:
+def _private_pair(
+    request_index: int, *, unicode_payload: bool = False
+) -> tuple[bytes, dict[str, object]]:
+    request_content = (
+        f"请求-{request_index}-café-😀-{SENTINEL}"
+        if unicode_payload
+        else f"request-{request_index}-{SENTINEL}"
+    )
     payload = {
         "messages": [
             {"role": "system", "content": f"system-{SENTINEL}"},
-            {"role": "user", "content": f"request-{request_index}-{SENTINEL}"},
+            {"role": "user", "content": request_content},
         ]
     }
     payload_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -597,6 +604,57 @@ class ProviderCallRecoveryTests(unittest.TestCase):
         self.assertNotIn(hashlib.sha256(abandoned_call.encode()).hexdigest(), rendered)
         self.assertNotIn("filesystem.grep", rendered)
         self.assertNotIn(SENTINEL, rendered)
+
+    def test_recovers_canonical_unicode_provider_payloads_without_raw_content(
+        self,
+    ) -> None:
+        pairs = [
+            _private_pair(index, unicode_payload=True) for index in range(1, 5)
+        ]
+        safe_entries = [safe for _raw, safe in pairs]
+        _write_private(
+            self.root / "provider-requests.jsonl",
+            b"".join(raw for raw, _safe in pairs),
+            0o400,
+        )
+        native_events = [
+            json.loads(line)
+            for line in (self.root / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        for event in native_events:
+            entry = event.get("entry")
+            if (
+                isinstance(entry, dict)
+                and entry.get("customType")
+                == "dci-provider-request-observation"
+            ):
+                data = entry.get("data")
+                assert isinstance(data, dict)
+                request_index = data["request_index"]
+                assert isinstance(request_index, int)
+                entry["data"] = safe_entries[request_index - 1]
+        _write_private(self.root / "events.jsonl", _jsonl(native_events))
+
+        bundle = recover_provider_call_companion(self.root, self.companion)
+
+        traces = bundle["pathlight_traces"]
+        assert isinstance(traces, tuple)
+        trace = traces[0]
+        assert isinstance(trace, Mapping)
+        events = trace["events"]
+        assert isinstance(events, tuple)
+        model_calls = [
+            event
+            for event in events
+            if event["kind"] == "model-call" and event["status"] == "started"
+        ]
+        self.assertEqual(len(model_calls), 4)
+        self.assertTrue(
+            all("private_reference_sha256" in event["attributes"] for event in model_calls)
+        )
+        rendered = json.dumps(bundle, default=dict, ensure_ascii=False, sort_keys=True)
+        for private_text in ("请求", "café", "😀"):
+            self.assertNotIn(private_text, rendered)
 
     def test_rolls_back_owned_inode_and_preserves_concurrent_replacement(self) -> None:
         module = __import__(

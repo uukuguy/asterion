@@ -419,7 +419,9 @@ def _validate_pair(
     payload_bytes = payload_json.encode("utf-8", errors="strict")
     _validate_serialized_json_depth(payload_json)
     payload = _loads_exact(payload_json, javascript_numbers=True)
-    if not hmac.compare_digest(_json_stringify(payload), payload_json):
+    if not hmac.compare_digest(
+        _json_stringify(payload).encode("utf-8", errors="strict"), payload_bytes
+    ):
         _invalid()
     summary = _summarize_payload(payload, payload_bytes)
 
