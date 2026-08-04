@@ -9,6 +9,7 @@ import time
 import sys
 import threading
 from contextlib import ExitStack
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -45,6 +46,7 @@ class DciRunRequest:
     show_tools: bool = False
     system_prompt_file: Path | None = None
     append_system_prompt_file: Path | None = None
+    query_planning_identity: Mapping[str, str] | None = None
     conversation_features: DciConversationFeatures | None = None
     pi_package_dir: Path | None = None
     pi_agent_dir: Path | None = None
@@ -181,6 +183,17 @@ def validate_dci_run_request(
             not isinstance(value, Path) or not value.is_absolute()
         ):
             raise ValueError("DCI run request is invalid")
+    try:
+        from asterion.capabilities.dci.implementation.research.query_planning import (
+            validate_query_planning_prompt_binding,
+        )
+
+        validate_query_planning_prompt_binding(
+            request.query_planning_identity,
+            request.append_system_prompt_file,
+        )
+    except ValueError:
+        raise ValueError("DCI run request is invalid") from None
     if (request.pi_session_file is None) != (request.pi_session_id is None):
         raise ValueError("DCI run request is invalid")
     if request.context_profile is None and request.pi_session_file is not None:
@@ -342,6 +355,7 @@ def resume_request_from_output_dir(
     show_tools = _required_bool(state, "show_tools")
     system_prompt = _optional_path(state, "system_prompt_file")
     append_system_prompt = _optional_path(state, "append_system_prompt_file")
+    query_planning_identity = state.get("query_planning_identity")
     stream_text = _required_bool(state, "stream_text")
     if "conversation_features" not in state:
         raise DciRunError("DCI resume validation failed")
@@ -394,6 +408,7 @@ def resume_request_from_output_dir(
         show_tools=show_tools,
         system_prompt_file=system_prompt,
         append_system_prompt_file=append_system_prompt,
+        query_planning_identity=query_planning_identity,
         conversation_features=conversation_features,
         pi_package_dir=pi_package_dir,
         pi_agent_dir=pi_agent_dir,

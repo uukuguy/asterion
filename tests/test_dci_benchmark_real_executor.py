@@ -9,6 +9,7 @@ import unittest
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 from asterion.applications.dci_agent_lite.benchmark_executor import (
@@ -204,10 +205,23 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
 
         baseline, candidate = requests
         self.assertIsNone(baseline.append_system_prompt_file)
+        self.assertIsNone(baseline.query_planning_identity)
         self.assertEqual(candidate.append_system_prompt_file, candidate_file)
         self.assertEqual(
-            replace(baseline, append_system_prompt_file=None),
-            replace(candidate, append_system_prompt_file=None),
+            candidate.query_planning_identity,
+            resolve_query_planning_contract(DECOMPOSED_QUERY_PLAN).public_identity(),
+        )
+        self.assertEqual(
+            replace(
+                baseline,
+                append_system_prompt_file=None,
+                query_planning_identity=None,
+            ),
+            replace(
+                candidate,
+                append_system_prompt_file=None,
+                query_planning_identity=None,
+            ),
         )
 
     def test_native_attempt_limit_requires_exact_integer_one(self) -> None:
@@ -221,7 +235,7 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
                         paths=_paths(root),
                         runtime_options=DciRuntimeOptions(),
                         judge_config=JudgeConfig(api_key="PRIVATE-JUDGE-KEY"),
-                        max_native_attempts=value,
+                        max_native_attempts=cast(int, value),
                     )
 
     def test_bounded_bright_binds_supplied_cost_before_agent(self) -> None:

@@ -23,6 +23,7 @@ EXPECTED_MODULES = {
         "experiment_profiles.py",
         "pathlight_observation.py",
         "prompts.py",
+        "query_planning.py",
         "system_prompt.py",
         "trajectory_resolution.py",
     },

@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 from asterion.applications.dci_agent_lite.benchmark_host import (
@@ -19,7 +20,12 @@ from asterion.applications.dci_agent_lite.benchmark_source_lock import (
     write_benchmark_source_lock,
 )
 from asterion.applications.dci_agent_lite.operator_config import load_operator_config
-from asterion.benchmarks import BenchmarkTaskRequest
+from asterion.benchmarks import (
+    BenchmarkTaskExecutor,
+    BenchmarkTaskImplementation,
+    BenchmarkTaskRequest,
+)
+from asterion.capability_packages import BenchmarkTaskBinding
 from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
 from asterion.capabilities.dci.implementation.research.query_planning import (
     BASELINE_QUERY_PLAN,
@@ -94,7 +100,9 @@ class DciBenchmarkHostTests(unittest.TestCase):
                         DECOMPOSED_QUERY_PLAN
                     ),
                     query_planning_prompt_file=prompt,
-                    executor_factory=lambda _instance: object(),
+                    executor_factory=lambda _instance: cast(
+                        BenchmarkTaskExecutor, object()
+                    ),
                 )
 
     def test_optimization_config_digest_changes_only_with_query_plan_contract(self) -> None:
@@ -156,14 +164,20 @@ class DciBenchmarkHostTests(unittest.TestCase):
                 authorization=authorization,
                 resume_run_id=None,
             )
-            providers = host.load_selected_providers(payloads, authorization)
+            providers = cast(
+                DciLoadedBenchmarkProviders,
+                host.load_selected_providers(payloads, authorization),
+            )
 
             self.assertEqual(plan.tasks, draft.tasks)
             self.assertIsInstance(providers, DciLoadedBenchmarkProviders)
             self.assertEqual(source.provider_loads, 1)
             self.assertEqual(len(providers.packages[0].benchmark_bindings), 15)
-            binding = providers.packages[0].benchmark_bindings[0]
-            invocation = binding.implementation.build_invocation(
+            binding = cast(
+                BenchmarkTaskBinding, providers.packages[0].benchmark_bindings[0]
+            )
+            implementation = cast(BenchmarkTaskImplementation, binding.implementation)
+            invocation = implementation.build_invocation(
                 BenchmarkTaskRequest(
                     run_id=plan.run_id,
                     suite_ref=instance.suite_ref,

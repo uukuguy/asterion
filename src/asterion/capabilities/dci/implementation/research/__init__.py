@@ -9,6 +9,8 @@ from .query_planning import (
     query_planning_contract_sha256,
     resolve_query_planning_contract,
     validate_materialized_query_planning_prompt,
+    validate_query_planning_prompt_binding,
+    validate_query_planning_public_identity,
 )
 
 __all__ = (
@@ -20,4 +22,6 @@ __all__ = (
     "query_planning_contract_sha256",
     "resolve_query_planning_contract",
     "validate_materialized_query_planning_prompt",
+    "validate_query_planning_prompt_binding",
+    "validate_query_planning_public_identity",
 )

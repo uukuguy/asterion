@@ -404,6 +404,11 @@ class RealDciBenchmarkExecutor(BenchmarkTaskExecutor):
                 resume_policy="compatible",
                 coverage_registry=coverage_registry,
                 append_system_prompt_file=self._query_planning_prompt_file,
+                query_planning_identity=(
+                    self._query_planning_contract.public_identity()
+                    if self._query_planning_prompt_file is not None
+                    else None
+                ),
             )
             on_progress(
                 BenchmarkProgressEvent(

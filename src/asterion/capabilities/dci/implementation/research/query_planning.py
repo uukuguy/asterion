@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import stat
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -86,6 +87,46 @@ def query_planning_contract_sha256(contract: QueryPlanningContract) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def validate_query_planning_public_identity(
+    value: object,
+) -> dict[str, str] | None:
+    """Accept only the candidate's closed public identity, or baseline absence."""
+
+    if value is None:
+        return None
+    if not isinstance(value, Mapping) or set(value) != {
+        "contract_id",
+        "contract_sha256",
+    }:
+        raise QueryPlanningError("DCI query-planning identity is invalid")
+    contract_id = value.get("contract_id")
+    contract_sha256 = value.get("contract_sha256")
+    if type(contract_id) is not str or type(contract_sha256) is not str:
+        raise QueryPlanningError("DCI query-planning identity is invalid")
+    contract = resolve_query_planning_contract(contract_id)
+    if (
+        contract is _BASELINE_CONTRACT
+        or contract_sha256 != query_planning_contract_sha256(contract)
+    ):
+        raise QueryPlanningError("DCI query-planning identity is invalid")
+    return contract.public_identity()
+
+
+def validate_query_planning_prompt_binding(
+    identity: object,
+    prompt_file: Path | None,
+) -> dict[str, str] | None:
+    """Close a candidate identity over its exact private append prompt."""
+
+    public = validate_query_planning_public_identity(identity)
+    if public is None:
+        if prompt_file is not None and _is_candidate_prompt_file(prompt_file):
+            raise QueryPlanningError("DCI query-planning identity is invalid")
+        return None
+    validate_materialized_query_planning_prompt(public["contract_id"], prompt_file)
+    return public
+
+
 def materialize_query_planning_prompt(contract_id: str, root: Path) -> Path:
     """Write the candidate append prompt below one operator-owned private root."""
 
@@ -143,6 +184,16 @@ def validate_materialized_query_planning_prompt(
         raise QueryPlanningError("DCI query-planning prompt is invalid") from error
     finally:
         os.close(root_fd)
+
+
+def _is_candidate_prompt_file(path: Path) -> bool:
+    if not isinstance(path, Path) or not path.is_absolute():
+        return False
+    try:
+        validate_materialized_query_planning_prompt(DECOMPOSED_QUERY_PLAN, path)
+    except QueryPlanningError:
+        return False
+    return True
 
 
 def _exact_contract(value: object) -> QueryPlanningContract:
@@ -284,5 +335,7 @@ __all__ = (
     "materialize_query_planning_prompt",
     "query_planning_contract_sha256",
     "resolve_query_planning_contract",
+    "validate_query_planning_prompt_binding",
+    "validate_query_planning_public_identity",
     "validate_materialized_query_planning_prompt",
 )

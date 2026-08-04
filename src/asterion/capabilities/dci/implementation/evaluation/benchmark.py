@@ -11,9 +11,9 @@ import re
 import secrets
 import stat
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
-from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -49,6 +49,11 @@ from asterion.capabilities.dci.implementation.research.prompts import (
     PromptContractError,
     prompt_contract_sha256,
     resolve_prompt_contract,
+)
+from asterion.capabilities.dci.implementation.research.query_planning import (
+    QueryPlanningError,
+    validate_query_planning_prompt_binding,
+    validate_query_planning_public_identity,
 )
 from asterion.capabilities.dci.implementation.evaluation.evaluation import (
     _load_reusable_result,
@@ -181,6 +186,7 @@ class BenchmarkRequest:
     max_native_attempts: int = 1
     system_prompt_file: Path | None = None
     append_system_prompt_file: Path | None = None
+    query_planning_identity: Mapping[str, str] | None = None
     conversation_features: DciConversationFeatures | None = None
     resume_policy: str = "compatible"
     analysis: bool = True
@@ -1222,6 +1228,13 @@ def _prepare(
     dict[str, bytes],
 ]:
     _resolution_parameters(request)
+    try:
+        query_planning_identity = validate_query_planning_prompt_binding(
+            request.query_planning_identity,
+            request.append_system_prompt_file,
+        )
+    except QueryPlanningError as error:
+        raise DciBenchmarkError("DCI query-planning binding is invalid") from error
     if request.mode not in {"qa", "ir"}:
         raise DciBenchmarkError("DCI benchmark mode is invalid")
     for value, label in (
@@ -1576,10 +1589,15 @@ def _prepare(
             continue
         raw = _read_input_snapshot(path)
         snapshots[name] = raw
-        prompt_resources[name] = {
-            "identity": str(canonical_input_identity(path)),
-            "sha256": hashlib.sha256(raw).hexdigest(),
-        }
+        prompt_resources[name] = (
+            query_planning_identity
+            if name == "append_system_prompt_file"
+            and query_planning_identity is not None
+            else {
+                "identity": str(canonical_input_identity(path)),
+                "sha256": hashlib.sha256(raw).hexdigest(),
+            }
+        )
     config: dict[str, object] = {
         "schema": "asterion.dci.batch/v1",
         "run_id": f"batch-{dataset_digest[:16]}",
@@ -1618,6 +1636,8 @@ def _prepare(
         "benchmark_prompt_contract_sha256": prompt_contract_sha256_value,
         "prompt_resources": prompt_resources,
     }
+    if query_planning_identity is not None:
+        config["query_planning"] = query_planning_identity
     if selected_profile is not None:
         config["profile_sha256"] = selected_profile.identity_sha256
         config["source_identity"] = (
@@ -1704,8 +1724,7 @@ def _prepare(
         config["ablation"] = ablation_identity
     if paper_authorization_identity is not None:
         config["paper_full_authorization"] = paper_authorization_identity
-    config["product_effective_config_sha256"] = canonical_sha256(
-        {
+    effective_config: dict[str, object] = {
             "product": config["product"],
             "runtime": config["runtime"],
             "prompt": config["benchmark_prompt_contract_sha256"],
@@ -1715,8 +1734,10 @@ def _prepare(
             "corpus_content_identity": config["corpus_content_identity"],
             "runtime_contract": config["runtime_contract"],
             "context_contract": config["context_contract"],
-        }
-    )
+    }
+    if query_planning_identity is not None:
+        effective_config["query_planning"] = query_planning_identity
+    config["product_effective_config_sha256"] = canonical_sha256(effective_config)
     config["run_fingerprint"] = _fingerprint(
         {
             key: value
@@ -1754,6 +1775,8 @@ def _prepare(
             "prompt_resources": config["prompt_resources"],
             "implementation_sha256": implementation_sha256,
         }
+        if query_planning_identity is not None:
+            identity["query_planning"] = query_planning_identity
         if resolution_config:
             identity["resolution"] = resolution_config.get("manifests", {}).get(
                 row.query_id
@@ -1833,6 +1856,13 @@ async def _run_row(
     prior_timing: dict[str, Any] | None,
 ) -> dict[str, object]:
     query = authority.query
+    try:
+        query_planning_identity = validate_query_planning_prompt_binding(
+            request.query_planning_identity,
+            request.append_system_prompt_file,
+        )
+    except QueryPlanningError as error:
+        raise DciBenchmarkError("DCI query-planning binding is invalid") from error
     prompt_contract, _prompt_contract_sha256_value = _prompt_contract_for_request(
         request
     )
@@ -1962,6 +1992,7 @@ async def _run_row(
                     max_turns=request.max_turns,
                     system_prompt_file=request.system_prompt_file,
                     append_system_prompt_file=request.append_system_prompt_file,
+                    query_planning_identity=query_planning_identity,
                     conversation_features=request.conversation_features,
                 )
                 fresh_native_request = native_request
@@ -2642,6 +2673,7 @@ def _validate_config_document(
         "profile_sha256",
         "source_identity",
         "artifact_digests",
+        "query_planning",
     }
     if (
         not expected.issubset(value)
@@ -2650,6 +2682,8 @@ def _validate_config_document(
         or not _has_selected_prompt_contract(value)
         or not _has_selected_metric_contract(value)
         or not _has_selected_paper_ir_assumption(value)
+        or not _valid_prompt_resources(value.get("prompt_resources"))
+        or not _valid_query_planning_configuration(value)
         or (
             "resolution" in value
             and not _valid_resolution_configuration(
@@ -3483,18 +3517,77 @@ def _native_evidence_fingerprint(native: _Directory, mode: str) -> str:
 
 
 def _prompt_resource_digests(request: BenchmarkRequest) -> dict[str, object]:
+    try:
+        query_planning_identity = validate_query_planning_prompt_binding(
+            request.query_planning_identity,
+            request.append_system_prompt_file,
+        )
+    except QueryPlanningError as error:
+        raise DciBenchmarkError("DCI query-planning binding is invalid") from error
     value: dict[str, object] = {}
     for name in ("system_prompt_file", "append_system_prompt_file"):
         path = getattr(request, name)
         value[name] = (
             None
             if path is None
-            else {
-                "identity": str(canonical_input_identity(path)),
-                "sha256": _file_digest(canonical_input_identity(path)),
-            }
+            else (
+                query_planning_identity
+                if name == "append_system_prompt_file"
+                and query_planning_identity is not None
+                else {
+                    "identity": str(canonical_input_identity(path)),
+                    "sha256": _file_digest(canonical_input_identity(path)),
+                }
+            )
         )
     return value
+
+
+def _valid_prompt_resources(value: object) -> bool:
+    if not isinstance(value, Mapping) or set(value) != {
+        "system_prompt_file",
+        "append_system_prompt_file",
+    }:
+        return False
+    for name, resource in value.items():
+        if resource is None:
+            continue
+        if name == "append_system_prompt_file":
+            try:
+                if validate_query_planning_public_identity(resource) is not None:
+                    continue
+            except QueryPlanningError:
+                pass
+        if (
+            not isinstance(resource, Mapping)
+            or set(resource) != {"identity", "sha256"}
+            or type(resource.get("identity")) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", str(resource.get("sha256"))) is None
+        ):
+            return False
+    return True
+
+
+def _valid_query_planning_configuration(value: Mapping[str, object]) -> bool:
+    """Require candidate public identity to match the append-prompt projection."""
+
+    prompt_resources = value.get("prompt_resources")
+    if not isinstance(prompt_resources, Mapping):
+        return False
+    append_resource = prompt_resources.get("append_system_prompt_file")
+    if "query_planning" not in value:
+        try:
+            return validate_query_planning_public_identity(append_resource) is None
+        except QueryPlanningError:
+            return True
+    configured = value["query_planning"]
+    try:
+        return (
+            validate_query_planning_public_identity(configured) == configured
+            and append_resource == configured
+        )
+    except QueryPlanningError:
+        return False
 
 
 def _file_digest(path: Path) -> str:

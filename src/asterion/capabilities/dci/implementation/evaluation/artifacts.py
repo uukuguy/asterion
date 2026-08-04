@@ -28,6 +28,9 @@ from asterion.capabilities.dci.implementation.runtime.run import (
     prelude_questions_fingerprint,
     validate_dci_run_request,
 )
+from asterion.capabilities.dci.implementation.research.query_planning import (
+    validate_query_planning_public_identity,
+)
 from asterion.runtime.host import RunEvent, RunRequest
 from asterion.runtime.protocol import (
     MAX_DEADLINE_MS,
@@ -1254,7 +1257,11 @@ def _validate_completed_view_shapes(
         state, raw_events, conversation_full, timings
     )
     _validate_processed_conversation_projection(
-        directory_fd, conversation_full, conversation, features
+        directory_fd,
+        conversation_full,
+        conversation,
+        features,
+        state.get("query_planning_identity"),
     )
     _validate_latest_context_projection(raw_events, latest_context, timings)
 
@@ -1468,9 +1475,21 @@ def _validate_processed_conversation_projection(
     full: dict[str, Any],
     processed: dict[str, Any],
     features: DciConversationFeatures,
+    query_planning_identity: object,
 ) -> None:
     expected = json.loads(json.dumps(full))
     messages = expected["messages"]
+    try:
+        candidate_query_plan = (
+            validate_query_planning_public_identity(query_planning_identity)
+            is not None
+        )
+    except ValueError as error:
+        raise DciArtifactError("DCI completed run evidence is invalid") from error
+    if candidate_query_plan:
+        messages[:] = [
+            message for message in messages if message.get("role") != "system"
+        ]
     actual_messages = processed["messages"]
     tool_indexes = [
         index
@@ -1862,6 +1881,19 @@ def _validate_recorder_resume_state(
         name not in state or not _same_typed_value(state[name], value)
         for name, value in expected.items()
     ):
+        raise DciArtifactError("DCI resume state is invalid")
+    try:
+        expected_query_planning = validate_query_planning_public_identity(
+            request.query_planning_identity
+        )
+    except ValueError as error:
+        raise DciArtifactError("DCI resume state is invalid") from error
+    if expected_query_planning is not None:
+        if not _same_typed_value(
+            state.get("query_planning_identity"), expected_query_planning
+        ):
+            raise DciArtifactError("DCI resume state is invalid")
+    elif state.get("query_planning_identity") is not None:
         raise DciArtifactError("DCI resume state is invalid")
     if "timeout_seconds" not in state or not _valid_timeout(state["timeout_seconds"]):
         raise DciArtifactError("DCI resume state is invalid")
@@ -2283,6 +2315,7 @@ class DciRunRecorder:
                         if request.append_system_prompt_file
                         else None
                     ),
+                    "query_planning_identity": request.query_planning_identity,
                     "stream_text": request.stream_text,
                     "pi_package_dir": str(paths.pi.package_dir),
                     "pi_agent_dir": str(paths.pi.agent_dir),
@@ -2909,6 +2942,12 @@ class DciRunRecorder:
         messages = conversation.get("messages", [])
         if not isinstance(messages, list):
             return conversation
+        if self.request.query_planning_identity is not None:
+            messages[:] = [
+                message
+                for message in messages
+                if not isinstance(message, dict) or message.get("role") != "system"
+            ]
         tool_messages = [
             message for message in messages if message.get("role") == "toolResult"
         ]
