@@ -27,8 +27,10 @@ from asterion.pathlight.protocol import (
     trace_graph_from_mapping,
 )
 from tests.test_pathlight_cli import (
+    PRIVATE_PER_CALL_SENTINELS,
     PRIVATE_PROVIDER_REQUEST_SENTINELS,
     PUBLIC_PROVIDER_REQUEST_FIELDS,
+    _per_call_missing_evidence_fixture,
     _verified_provider_request_fixture,
 )
 
@@ -301,6 +303,60 @@ class PathlightOpikMappingTests(unittest.TestCase):
         ).encode()
         self.assertNotIn(b'"model-request"', rendered)
         for sentinel in PRIVATE_PROVIDER_REQUEST_SENTINELS:
+            with self.subTest(sentinel=sentinel):
+                self.assertNotIn(sentinel.encode(), rendered)
+
+    def test_mapping_localizes_per_call_evidence_gaps_without_private_values(
+        self,
+    ) -> None:
+        batch, trace_mapping = _per_call_missing_evidence_fixture()
+        trace = trace_graph_from_mapping(trace_mapping)
+
+        envelopes = map_opik_exports(traces=(trace,))
+        model_spans = tuple(
+            item.to_mapping()["payload"]
+            for item in envelopes
+            if item.event_kind == "span.upsert"
+            and item.to_mapping()["payload"]["kind"] == "model-call"
+        )
+
+        self.assertEqual(len(model_spans), 4)
+        payloads_by_request = {
+            payload["request_index"]: payload for payload in model_spans
+        }
+        self.assertEqual(
+            {
+                index: tuple(payload["missing_evidence_labels"])
+                for index, payload in payloads_by_request.items()
+            },
+            {
+                1: ("model-request-boundary",),
+                2: ("model-request-boundary",),
+                3: (
+                    "model-identity",
+                    "model-request-boundary",
+                    "model-response",
+                    "token-usage",
+                ),
+                4: ("model-request-boundary",),
+            },
+        )
+        request_only = payloads_by_request[3]
+        self.assertEqual(
+            request_only["request_sha256"], batch.provider_requests[2].payload_sha256
+        )
+        for field in (
+            "model_id",
+            "response_sha256",
+            "response_length",
+            "input_tokens",
+            "output_tokens",
+        ):
+            self.assertNotIn(field, request_only)
+        rendered = json.dumps(
+            [item.to_mapping() for item in envelopes], sort_keys=True
+        ).encode()
+        for sentinel in PRIVATE_PER_CALL_SENTINELS:
             with self.subTest(sentinel=sentinel):
                 self.assertNotIn(sentinel.encode(), rendered)
 

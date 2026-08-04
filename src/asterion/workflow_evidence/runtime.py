@@ -35,23 +35,27 @@ from asterion.workflow_evidence.collector import (
 )
 
 
-_MODEL_MISSING_EVIDENCE = frozenset(
-    {
-        "model-identity",
-        "model-request",
-        "model-request-boundary",
-        "model-response",
-        "token-usage",
-    }
-)
-
-
 @dataclass(frozen=True, slots=True)
 class CompletedRuntimeEvidence:
     """One safe workflow record and trace projected after runtime completion."""
 
     record: Mapping[str, object]
     trace: Mapping[str, object]
+
+
+def _model_call_missing_labels(call: ModelCallObservation) -> tuple[str, ...]:
+    labels: list[str] = []
+    if call.model_sha256 is None:
+        labels.append("model-identity")
+    if call.request_sha256 is None:
+        labels.append("model-request")
+    if not call.boundary_observed:
+        labels.append("model-request-boundary")
+    if call.response_sha256 is None:
+        labels.append("model-response")
+    if call.input_tokens is None or call.output_tokens is None:
+        labels.append("token-usage")
+    return tuple(sorted(labels))
 
 
 def project_completed_runtime_evidence(
@@ -597,6 +601,7 @@ class _RuntimePathlightProjection:
         frame_span_id: str,
         observation: RuntimeObservationBatch,
     ) -> None:
+        missing_evidence_labels = _model_call_missing_labels(call)
         provider_request = next(
             (
                 request
@@ -610,24 +615,7 @@ class _RuntimePathlightProjection:
             "boundary_observed": call.boundary_observed,
             "observation_sha256": call.model_call_sha256,
             "missing_evidence": (
-                not call.boundary_observed
-                or call.status == "missing"
-                or call.model_sha256 is None
-                or call.request_sha256 is None
-                or call.response_sha256 is None
-                or call.input_tokens is None
-                or call.output_tokens is None
-                or any(
-                    label
-                    in {
-                        "model-identity",
-                        "model-request",
-                        "model-request-boundary",
-                        "model-response",
-                        "token-usage",
-                    }
-                    for label in observation.missing_evidence
-                )
+                call.status == "missing" or bool(missing_evidence_labels)
             ),
         }
         if call.model_sha256 is not None:
@@ -647,11 +635,6 @@ class _RuntimePathlightProjection:
                     ),
                 }
             )
-        missing_evidence_labels = tuple(
-            label
-            for label in observation.missing_evidence
-            if label in _MODEL_MISSING_EVIDENCE
-        )
         if missing_evidence_labels:
             attributes["missing_evidence_labels"] = missing_evidence_labels
         if call.response_sha256 is not None:

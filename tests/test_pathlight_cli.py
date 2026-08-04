@@ -44,6 +44,7 @@ from tests.test_pathlight_flow import _rich_trace
 from tests.test_workflow_evidence_runtime import (
     TRACE_ID as VERIFIED_TRACE_ID,
     _native_events,
+    _per_call_missing_evidence_batch,
     _request,
     _verified_provider_request_batch,
 )
@@ -70,6 +71,17 @@ PRIVATE_PROVIDER_REQUEST_SENTINELS = (
     "SENTINEL_PRIVATE_CONFIG_IDENTITY",
     "987654321",
     "/private/SENTINEL_PROVIDER_REQUEST_CAPTURE",
+)
+PRIVATE_PER_CALL_SENTINELS = (
+    *PRIVATE_PROVIDER_REQUEST_SENTINELS,
+    "SENTINEL_PRIVATE_PROMPT",
+    "SENTINEL_PRIVATE_ANSWER",
+    "SENTINEL_PRIVATE_TOOL_BODY",
+    "SENTINEL_NATIVE_INPUT",
+    "SENTINEL_NATIVE_ARGUMENT",
+    "SENTINEL_NATIVE_RESULT",
+    "private.native.tool",
+    "pi.reference",
 )
 
 
@@ -159,6 +171,89 @@ def _verified_provider_request_fixture() -> tuple[
         tools=inferred.tools,
         provider_requests=provider_requests,
         missing_evidence=("model-request-boundary",),
+    )
+    events = tuple(
+        RunEvent("native-run", sequence, event_type, payload).to_mapping()
+        for sequence, (event_type, payload) in enumerate(_native_events(), start=1)
+    )
+    projected = workflow_evidence.project_completed_runtime_evidence(
+        request=_request(),
+        event_observations=tuple(
+            (event, index * 10 + 2, index * 10 + 3)
+            for index, event in enumerate(events)
+        ),
+        native_observation=batch,
+        runtime_id="pi.reference",
+        trace_id=VERIFIED_TRACE_ID,
+        invocation_started_ns=1,
+        invocation_ended_ns=len(events) * 10 + 4,
+    )
+    return batch, json.loads(json.dumps(projected.trace, default=dict))
+
+
+def _per_call_missing_evidence_fixture() -> tuple[
+    RuntimeObservationBatch, dict[str, object]
+]:
+    raw_payload = {
+        "SENTINEL_RAW_PAYLOAD_KEY": "SENTINEL_RAW_PAYLOAD_VALUE",
+        "provider": "SENTINEL_PRIVATE_PROVIDER_IDENTITY",
+        "model": "SENTINEL_PRIVATE_MODEL_IDENTITY",
+        "config": "SENTINEL_PRIVATE_CONFIG_IDENTITY",
+        "prompt": "SENTINEL_PRIVATE_PROMPT",
+        "answer": "SENTINEL_PRIVATE_ANSWER",
+        "tool_body": "SENTINEL_PRIVATE_TOOL_BODY",
+        "raw": "SENTINEL_RAW_PROVIDER_PAYLOAD",
+    }
+    payload_json = json.dumps(raw_payload, sort_keys=True, separators=(",", ":"))
+    payload_sha256 = _digest(payload_json)
+    private_path = "/private/SENTINEL_PROVIDER_REQUEST_CAPTURE"
+    private_fd = 987654321
+    inferred = _per_call_missing_evidence_batch()
+    model_calls = tuple(
+        ModelCallObservation(
+            request_index=call.request_index,
+            frame_sha256=call.frame_sha256,
+            model_sha256=(
+                None
+                if call.model_sha256 is None
+                else _digest(raw_payload["model"])
+            ),
+            request_sha256=payload_sha256,
+            response_sha256=call.response_sha256,
+            response_length=call.response_length,
+            input_tokens=call.input_tokens,
+            output_tokens=call.output_tokens,
+            status=call.status,
+            boundary_observed=False,
+        )
+        for call in inferred.model_calls
+    )
+    provider_requests = tuple(
+        ProviderRequestObservation.build(
+            request_index=call.request_index,
+            payload_sha256=payload_sha256,
+            payload_bytes=len(payload_json.encode("utf-8")),
+            shape_sha256=_digest(
+                "object:answer,config,model,prompt,provider,raw,"
+                "SENTINEL_RAW_PAYLOAD_KEY,tool_body"
+            ),
+            field_count=len(raw_payload),
+            leaf_count=len(raw_payload),
+            text_characters=sum(len(value) for value in raw_payload.values()),
+            private_reference_sha256=_digest(
+                f"{private_path}:{private_fd}:{call.request_index}"
+            ),
+            segments=inferred.frames[0].segments,
+        )
+        for call in model_calls
+    )
+    batch = RuntimeObservationBatch.build(
+        run_sha256=inferred.run_sha256,
+        frames=inferred.frames,
+        model_calls=model_calls,
+        tools=inferred.tools,
+        provider_requests=provider_requests,
+        missing_evidence=inferred.missing_evidence,
     )
     events = tuple(
         RunEvent("native-run", sequence, event_type, payload).to_mapping()
@@ -910,6 +1005,80 @@ class PathlightCliTests(unittest.TestCase):
         for sentinel in PRIVATE_PROVIDER_REQUEST_SENTINELS:
             with self.subTest(sentinel=sentinel):
                 self.assertNotIn(sentinel.encode("utf-8"), all_public_bytes)
+
+    def test_trace_show_and_flow_localize_per_call_evidence_gaps(self) -> None:
+        batch, trace = _per_call_missing_evidence_fixture()
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = Path(directory).resolve() / "workflow-evidence.json"
+            write_workflow_observation_bundle(bundle, (), pathlight_traces=(trace,))
+            outputs: dict[str, object] = {}
+            for name, arguments in (
+                ("show", ["trace", "show", "--trace-id", VERIFIED_TRACE_ID]),
+                ("flow", ["trace", "flow", "--trace-id", VERIFIED_TRACE_ID]),
+            ):
+                stdout = io.StringIO()
+                code = main(
+                    ["pathlight", *arguments, "--evidence-file", str(bundle)],
+                    entry_points=(FailIfLoadedEntryPoint(),),
+                    stdout=stdout,
+                )
+                self.assertEqual(code, 0)
+                outputs[name] = json.loads(stdout.getvalue())
+
+        expected_labels = {
+            1: ("model-request-boundary",),
+            2: ("model-request-boundary",),
+            3: (
+                "model-identity",
+                "model-request-boundary",
+                "model-response",
+                "token-usage",
+            ),
+            4: ("model-request-boundary",),
+        }
+        model_events = [
+            event
+            for event in outputs["show"]["events"]
+            if event["kind"] == "model-call" and event["status"] == "started"
+        ]
+        model_nodes = [
+            node for node in outputs["flow"] if node["kind"] == "model-call"
+        ]
+        self.assertEqual(len(model_events), 4)
+        self.assertEqual(len(model_nodes), 4)
+        for surface, items in (("show", model_events), ("flow", model_nodes)):
+            attributes_by_request = {
+                item["attributes"]["request_index"]: item["attributes"]
+                for item in items
+            }
+            self.assertEqual(
+                {
+                    index: tuple(attributes["missing_evidence_labels"])
+                    for index, attributes in attributes_by_request.items()
+                },
+                expected_labels,
+            )
+            request_only = attributes_by_request[3]
+            provider_request = batch.provider_requests[2]
+            self.assertEqual(
+                request_only["request_sha256"], provider_request.payload_sha256
+            )
+            self.assertEqual(
+                request_only["request_shape_sha256"], provider_request.shape_sha256
+            )
+            for field in (
+                "model_id",
+                "response_sha256",
+                "response_length",
+                "input_tokens",
+                "output_tokens",
+            ):
+                with self.subTest(surface=surface, field=field):
+                    self.assertNotIn(field, request_only)
+        rendered = json.dumps(outputs, sort_keys=True).encode()
+        for sentinel in PRIVATE_PER_CALL_SENTINELS:
+            with self.subTest(sentinel=sentinel):
+                self.assertNotIn(sentinel.encode(), rendered)
 
     def test_trace_flow_rejects_nonprivate_evidence_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

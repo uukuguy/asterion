@@ -22,8 +22,10 @@ from asterion.pathlight.dashboard_server import (
     validate_dashboard_bind,
 )
 from tests.test_pathlight_cli import (
+    PRIVATE_PER_CALL_SENTINELS,
     PRIVATE_PROVIDER_REQUEST_SENTINELS,
     PUBLIC_PROVIDER_REQUEST_FIELDS,
+    _per_call_missing_evidence_fixture,
     _verified_provider_request_fixture,
 )
 
@@ -84,6 +86,23 @@ def _verified_request_workflow_bundle() -> WorkflowObservationBundle:
     )
 
     bundle_sha256 = "2" * 64
+    projection = _projection_mapping(bundle_sha256, (), (trace,))
+    return WorkflowObservationBundle(
+        records=(),
+        pathlight_traces=(trace,),
+        bundle_sha256=bundle_sha256,
+        projection_sha256=_canonical_digest(projection),
+    )
+
+
+def _per_call_missing_evidence_workflow_bundle() -> WorkflowObservationBundle:
+    _, trace = _per_call_missing_evidence_fixture()
+    from asterion.workflow_evidence.storage import (
+        _canonical_digest,
+        _projection_mapping,
+    )
+
+    bundle_sha256 = "3" * 64
     projection = _projection_mapping(bundle_sha256, (), (trace,))
     return WorkflowObservationBundle(
         records=(),
@@ -314,6 +333,58 @@ class PathlightDashboardApplicationTests(unittest.TestCase):
         for sentinel in PRIVATE_PROVIDER_REQUEST_SENTINELS:
             with self.subTest(sentinel=sentinel):
                 self.assertNotIn(sentinel.encode(), public_bytes)
+
+    def test_snapshot_serialization_localizes_per_call_evidence_gaps(self) -> None:
+        snapshot = DashboardSnapshot.build(
+            workflow_bundles=(_per_call_missing_evidence_workflow_bundle(),)
+        )
+        snapshot_mapping = snapshot.to_mapping()
+        api_mapping = json.loads(
+            DashboardApplication(snapshot).response(
+                "GET", "/api/pathlight/v1/snapshot"
+            ).body
+        )
+        self.assertEqual(api_mapping, snapshot_mapping)
+
+        model_nodes = [
+            node
+            for node in snapshot_mapping["flows"][0]["nodes"]
+            if node["kind"] == "model-call"
+        ]
+        self.assertEqual(len(model_nodes), 4)
+        attributes_by_request = {
+            node["attributes"]["request_index"]: node["attributes"]
+            for node in model_nodes
+        }
+        self.assertEqual(
+            {
+                index: tuple(attributes["missing_evidence_labels"])
+                for index, attributes in attributes_by_request.items()
+            },
+            {
+                1: ("model-request-boundary",),
+                2: ("model-request-boundary",),
+                3: (
+                    "model-identity",
+                    "model-request-boundary",
+                    "model-response",
+                    "token-usage",
+                ),
+                4: ("model-request-boundary",),
+            },
+        )
+        for field in (
+            "model_id",
+            "response_sha256",
+            "response_length",
+            "input_tokens",
+            "output_tokens",
+        ):
+            self.assertNotIn(field, attributes_by_request[3])
+        rendered = json.dumps((snapshot_mapping, api_mapping), sort_keys=True).encode()
+        for sentinel in PRIVATE_PER_CALL_SENTINELS:
+            with self.subTest(sentinel=sentinel):
+                self.assertNotIn(sentinel.encode(), rendered)
 
     def test_static_assets_are_head_safe_and_unknown_assets_are_not_found(self) -> None:
         app = DashboardApplication(self.snapshot)

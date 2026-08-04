@@ -498,6 +498,58 @@ def _verified_provider_request_batch() -> RuntimeObservationBatch:
     )
 
 
+def _per_call_missing_evidence_batch() -> RuntimeObservationBatch:
+    inferred = _batch()
+    model_calls = tuple(
+        ModelCallObservation(
+            request_index=index,
+            frame_sha256=inferred.frames[0].frame_sha256,
+            model_sha256=(None if index == 3 else _digest("private.model")),
+            request_sha256=_digest(f"SENTINEL_MODEL_REQUEST_{index}"),
+            response_sha256=(
+                None if index == 3 else _digest(f"SENTINEL_MODEL_RESPONSE_{index}")
+            ),
+            response_length=(
+                None if index == 3 else len(f"SENTINEL_MODEL_RESPONSE_{index}")
+            ),
+            input_tokens=(None if index == 3 else index + 2),
+            output_tokens=(None if index == 3 else index + 3),
+            status=("missing" if index == 3 else "completed"),
+            boundary_observed=False,
+        )
+        for index in range(1, 5)
+    )
+    provider_requests = tuple(
+        ProviderRequestObservation.build(
+            request_index=call.request_index,
+            payload_sha256=call.request_sha256,
+            payload_bytes=100 + call.request_index,
+            shape_sha256=_digest(f"SENTINEL_REQUEST_SHAPE_{call.request_index}"),
+            field_count=10 + call.request_index,
+            leaf_count=20 + call.request_index,
+            text_characters=30 + call.request_index,
+            private_reference_sha256=_digest(
+                f"SENTINEL_PRIVATE_REFERENCE_{call.request_index}"
+            ),
+            segments=inferred.frames[0].segments,
+        )
+        for call in model_calls
+    )
+    return RuntimeObservationBatch.build(
+        run_sha256=inferred.run_sha256,
+        frames=inferred.frames,
+        model_calls=model_calls,
+        tools=inferred.tools,
+        provider_requests=provider_requests,
+        missing_evidence=(
+            "model-identity",
+            "model-request-boundary",
+            "model-response",
+            "token-usage",
+        ),
+    )
+
+
 def _two_frame_batch() -> RuntimeObservationBatch:
     tool = _batch().tools[0]
     first_frame = ContextFrameObservation(
@@ -834,6 +886,87 @@ class WorkflowEvidenceRuntimeTests(unittest.IsolatedAsyncioTestCase):
             "SENTINEL_PRIVATE_REFERENCE",
         ):
             self.assertNotIn(sentinel, rendered)
+
+    def test_request_only_gap_does_not_contaminate_completed_calls(self) -> None:
+        events = tuple(
+            RunEvent("native-run", sequence, event_type, payload).to_mapping()
+            for sequence, (event_type, payload) in enumerate(_native_events(), start=1)
+        )
+        batch = _per_call_missing_evidence_batch()
+        self.assertEqual(
+            batch.missing_evidence,
+            (
+                "model-identity",
+                "model-request-boundary",
+                "model-response",
+                "token-usage",
+            ),
+        )
+
+        projected = workflow_evidence.project_completed_runtime_evidence(
+            request=_request(),
+            event_observations=tuple(
+                (event, index * 10 + 2, index * 10 + 3)
+                for index, event in enumerate(events)
+            ),
+            native_observation=batch,
+            runtime_id="pi.reference",
+            trace_id=TRACE_ID,
+            invocation_started_ns=1,
+            invocation_ended_ns=len(events) * 10 + 4,
+        )
+
+        starts = [
+            event
+            for event in _started_events(projected.trace)
+            if event["kind"] == "model-call"
+        ]
+        labels = {
+            event["attributes"]["request_index"]: tuple(
+                event["attributes"].get("missing_evidence_labels", ())
+            )
+            for event in starts
+        }
+        self.assertEqual(labels[1], ("model-request-boundary",))
+        self.assertEqual(labels[2], ("model-request-boundary",))
+        self.assertEqual(
+            labels[3],
+            (
+                "model-identity",
+                "model-request-boundary",
+                "model-response",
+                "token-usage",
+            ),
+        )
+        self.assertEqual(labels[4], ("model-request-boundary",))
+
+        request_only_attributes = next(
+            event["attributes"]
+            for event in starts
+            if event["attributes"]["request_index"] == 3
+        )
+        provider_request = batch.provider_requests[2]
+        self.assertEqual(
+            request_only_attributes["request_sha256"], provider_request.payload_sha256
+        )
+        expected_request_metadata = {
+            "request_shape_sha256": provider_request.shape_sha256,
+            "payload_bytes": provider_request.payload_bytes,
+            "field_count": provider_request.field_count,
+            "leaf_count": provider_request.leaf_count,
+            "text_characters": provider_request.text_characters,
+            "private_reference_sha256": provider_request.private_reference_sha256,
+        }
+        for field, expected in expected_request_metadata.items():
+            self.assertEqual(request_only_attributes[field], expected)
+        for field in (
+            "model_id",
+            "response_sha256",
+            "response_length",
+            "input_tokens",
+            "output_tokens",
+        ):
+            self.assertNotIn(field, request_only_attributes)
 
     def test_completed_projection_degrades_mismatched_native_observation(self) -> None:
         events = tuple(
