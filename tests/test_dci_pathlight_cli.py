@@ -226,6 +226,102 @@ class TestDciPathlightCli(unittest.TestCase):
                 {"coverage"},
             )
 
+    def test_diagnose_loads_completed_coverage_experiment_without_provider(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            recovery_roots = []
+            for index, dataset in enumerate(_DATASETS):
+                recovery_root = root / f"recovery-{index}"
+                _write_recovery_triad(recovery_root, _run(*dataset))
+                recovery_roots.append(recovery_root)
+            coverage_root = root / "coverage"
+            coverage_root.mkdir(mode=0o700)
+            plan = coverage_root / "pathlight-coverage-experiment.json"
+            authorization = root / "coverage-authorization.json"
+            plan.write_text("{}\n", encoding="utf-8")
+            authorization.write_text("{}\n", encoding="utf-8")
+            plan.chmod(0o600)
+            authorization.chmod(0o600)
+            output = root / "diagnosis"
+            output.mkdir(mode=0o700)
+            arguments = ["diagnose"]
+            for recovery_root in recovery_roots:
+                arguments.extend(("--recovery-root", str(recovery_root)))
+            arguments.extend(
+                (
+                    "--coverage-plan-file", str(plan),
+                    "--coverage-authorization-file", str(authorization),
+                    "--coverage-output-root", str(coverage_root),
+                    "--output-root", str(output),
+                )
+            )
+
+            with patch(
+                "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+                "read_completed_coverage_experiment",
+                return_value=_coverage_pack(),
+            ) as loader:
+                code = pathlight_main(
+                    arguments,
+                    stdout=io.StringIO(),
+                    stderr=io.StringIO(),
+                )
+
+            self.assertEqual(code, 0)
+            loader.assert_called_once_with(
+                plan_file=plan,
+                authorization_file=authorization,
+                output_root=coverage_root,
+            )
+            self.assertTrue((output / AUTHORIZATION_GATE_REPORT_FILENAME).is_file())
+
+    def test_diagnose_rejects_partial_coverage_arguments_and_redacts_loader_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            recovery_roots = []
+            for index, dataset in enumerate(_DATASETS):
+                recovery_root = root / f"recovery-{index}"
+                _write_recovery_triad(recovery_root, _run(*dataset))
+                recovery_roots.append(recovery_root)
+            output = root / "diagnosis"
+            output.mkdir(mode=0o700)
+            arguments = ["diagnose"]
+            for recovery_root in recovery_roots:
+                arguments.extend(("--recovery-root", str(recovery_root)))
+            arguments.extend(("--coverage-output-root", str(root), "--output-root", str(output)))
+            stdout, stderr = io.StringIO(), io.StringIO()
+            self.assertEqual(
+                pathlight_main(arguments, stdout=stdout, stderr=stderr),
+                2,
+            )
+            self.assertEqual(stdout.getvalue(), "")
+            self.assertEqual(stderr.getvalue(), "asterion-dci: command failed\n")
+
+            plan = root / "plan.json"
+            authorization = root / "authorization.json"
+            for path in (plan, authorization):
+                path.write_text("{}\n", encoding="utf-8")
+                path.chmod(0o600)
+            arguments[arguments.index("--coverage-output-root"):arguments.index("--output-root")] = [
+                "--coverage-plan-file", str(plan),
+                "--coverage-authorization-file", str(authorization),
+                "--coverage-output-root", str(root),
+            ]
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with patch(
+                "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+                "read_completed_coverage_experiment",
+                side_effect=RuntimeError("SENTINEL_PRIVATE_NATIVE_PATH"),
+            ):
+                self.assertEqual(
+                    pathlight_main(arguments, stdout=stdout, stderr=stderr),
+                    2,
+                )
+            self.assertEqual(stdout.getvalue(), "")
+            self.assertEqual(stderr.getvalue(), "asterion-dci: command failed\n")
+            self.assertNotIn(str(root), stderr.getvalue())
+            self.assertNotIn("SENTINEL", stderr.getvalue())
+
     def test_recover_never_removes_a_racing_final_target_it_does_not_own(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()

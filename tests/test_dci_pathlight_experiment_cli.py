@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import shutil
 import tempfile
 import unittest
 from collections.abc import Callable, Mapping
@@ -18,11 +19,24 @@ from asterion.applications.dci_agent_lite.benchmark_instances import (
     DciBenchmarkInstance,
 )
 from asterion.applications.dci_agent_lite.cli import main
+from asterion.applications.dci_agent_lite import pathlight_experiment_cli as experiment_cli
+from asterion.applications.dci_agent_lite.pathlight_experiment_cli import (
+    _seal_completed_native_task,
+    read_completed_coverage_experiment,
+)
 from asterion.applications.dci_agent_lite.operator_config import DciOperatorConfig
 from asterion.benchmarks.cli import BenchmarkCommandHost
 from asterion.benchmarks.evidence import BenchmarkRunResult, BenchmarkTaskResult
+from asterion.capabilities.dci.implementation.evaluation.artifacts import (
+    pathlight_trace_id,
+)
 from asterion.capabilities.dci.implementation.pathlight.diagnosis import (
+    DciCoverageDatasetObservation,
     diagnose_recommended_pack,
+)
+from asterion.capabilities.dci.implementation.pathlight.recovery import (
+    DciRecoveryError,
+    read_completed_dci_run,
 )
 from asterion.pathlight.diagnosis import write_diagnosis_bundle
 from tests.test_dci_pathlight_diagnosis import _DATASETS, _run
@@ -35,6 +49,27 @@ _TASK_IDS = (
     "bright.robotics",
     "beir.scifact",
 )
+_NATIVE_FIXTURE = Path(__file__).parent / "fixtures" / "dci" / "pathlight-recovery"
+
+
+def _exact_observation(task_id: str) -> DciCoverageDatasetObservation:
+    return DciCoverageDatasetObservation(
+        dataset_id=task_id,
+        coverage_available_queries=10,
+        coverage_total_queries=10,
+        coverage_median_any_microunits=1_000_000,
+        coverage_median_mean_microunits=500_000,
+        coverage_median_all_microunits=0,
+        retained_available_queries=10,
+        retained_median_microunits=500_000,
+        tool_observation_count=20,
+        surfaced_gold_count=10,
+        model_call_count=10,
+        context_frame_count=10,
+        missing_boundary_count=0,
+        integrity_failure_count=0,
+        evidence_sha256=hashlib.sha256(task_id.encode()).hexdigest(),
+    )
 
 
 def _write_inputs(root: Path, *, suffix: str = "") -> None:
@@ -294,6 +329,488 @@ def _host_factory(
 
 
 class TestDciPathlightExperimentCli(unittest.TestCase):
+    def setUp(self) -> None:
+        self._native_seal_patch = patch(
+            "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+            "_seal_completed_native_task",
+            side_effect=lambda **kwargs: _exact_observation(
+                str(kwargs["task"]["task_id"])
+            ),
+        )
+        self._native_seal_patch.start()
+        self.addCleanup(self._native_seal_patch.stop)
+
+    def test_execute_does_not_publish_completed_receipt_without_native_seal(self) -> None:
+        self._native_seal_patch.stop()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            plan, output, _proposal = _prepare(root)
+            authorization = _write_authorization(root, plan)
+
+            code = main(
+                [
+                    "pathlight", "experiment", "execute",
+                    "--plan-file", str(plan),
+                    "--authorization-file", str(authorization),
+                    "--output-root", str(output),
+                ],
+                repo_root=root,
+                environment=_execution_environment(root),
+                experiment_host_factory=_host_factory([], {}),
+                stdout=io.StringIO(),
+                stderr=io.StringIO(),
+            )
+
+            self.assertEqual(code, 1)
+            receipts = tuple(sorted((output / "receipts").glob("receipt-*.json")))
+            self.assertEqual(len(receipts), 5)
+            self.assertTrue(
+                all(
+                    json.loads(path.read_bytes())["benchmark_status"] == "completed"
+                    for path in receipts
+                )
+            )
+            self.assertTrue(
+                all(
+                    json.loads(path.read_bytes())["observation_status"] == "invalid"
+                    for path in receipts
+                )
+            )
+
+    def test_observation_invalid_is_terminal_and_preserves_agent_operations(self) -> None:
+        self._native_seal_patch.stop()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            plan, output, _proposal = _prepare(root)
+            authorization = _write_authorization(root, plan)
+            events: list[str] = []
+            arguments = [
+                "pathlight", "experiment", "execute",
+                "--plan-file", str(plan),
+                "--authorization-file", str(authorization),
+                "--output-root", str(output),
+            ]
+            with patch(
+                "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+                "_seal_completed_native_task",
+                side_effect=ValueError("observation invalid"),
+            ):
+                code = main(
+                    arguments,
+                    repo_root=root,
+                    environment=_execution_environment(root),
+                    experiment_host_factory=_host_factory(events, {}),
+                    stdout=io.StringIO(),
+                    stderr=io.StringIO(),
+                )
+            receipts = tuple(sorted((output / "receipts").glob("receipt-*.json")))
+            self.assertEqual(code, 1)
+            self.assertEqual(len(receipts), 5)
+            for path in receipts:
+                receipt = json.loads(path.read_bytes())
+                self.assertEqual(receipt["benchmark_status"], "completed")
+                self.assertEqual(receipt["observation_status"], "invalid")
+                self.assertEqual(receipt["case_count"], 10)
+            self.assertEqual(len([event for event in events if event.startswith("run:")]), 5)
+            self.assertEqual(
+                sum(json.loads(path.read_bytes())["case_count"] for path in receipts),
+                50,
+            )
+
+            before_runs = len(
+                [event for event in events if event.startswith("run:")]
+            )
+            with patch(
+                "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+                "_seal_completed_native_task",
+                side_effect=AssertionError("must not retry terminal observation"),
+            ):
+                self.assertEqual(
+                    main(
+                        arguments,
+                        repo_root=root,
+                        environment=_execution_environment(root),
+                        experiment_host_factory=_host_factory(events, {}),
+                        stdout=io.StringIO(),
+                        stderr=io.StringIO(),
+                    ),
+                    1,
+                )
+            self.assertEqual(
+                len([event for event in events if event.startswith("run:")]),
+                before_runs,
+            )
+
+    def test_receipt_reader_requires_exact_authorization_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            plan_path, output, _proposal = _prepare(root)
+            plan = experiment_cli._read_plan(plan_path)
+            authorization = _write_authorization(root, plan_path)
+            authority = experiment_cli._read_authorization(authorization, plan=plan)
+            tasks = plan["tasks"]
+            assert isinstance(tasks, list)
+            task = tasks[0]
+            assert isinstance(task, dict)
+            experiment_cli._publish_receipt(
+                output / "receipts",
+                plan=plan,
+                task=task,
+                authorization=authority,
+                generation=0,
+                run_id="run-exact-authority",
+                status="failed",
+                case_count=0,
+                authorized_cost_microusd=1_000_000,
+                consumed_cost_microusd=1_000_000,
+                cost_evidence="upper-bound",
+            )
+            with self.assertRaises(ValueError):
+                experiment_cli._read_receipt_chain(
+                    output / "receipts",
+                    plan=plan,
+                    task=task,
+                    expected_authorization_sha256="f" * 64,
+                )
+
+    def test_workflow_case_binding_rejects_cross_run_replay(self) -> None:
+        run_id = "native-run-1"
+        record = {
+            "run_sha256": hashlib.sha256(b"other-native-run").hexdigest(),
+            "terminal_status": "completed",
+        }
+        trajectory = {
+            "run": {"run_id": run_id, "attempt": 1},
+            "dataset": {"dataset_id": "bright.biology", "query_id": "q-1"},
+        }
+        with self.assertRaises(ValueError):
+            experiment_cli._validate_workflow_case_binding(
+                record=record,
+                trace={"trace_id": pathlight_trace_id(run_id, attempt=1)},
+                trajectory=trajectory,
+                expected_dataset_id="bright.biology",
+                expected_query_id="q-1",
+                expected_generation="native-generation-0001",
+                generation_state={"run_id": run_id, "attempts": [{}]},
+            )
+        valid_record = {
+            "run_sha256": hashlib.sha256(run_id.encode()).hexdigest(),
+            "terminal_status": "completed",
+        }
+        for name, query_id, generation in (
+            ("query", "q-2", "native-generation-0001"),
+            ("generation", "q-1", "native-generation-0002"),
+        ):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                experiment_cli._validate_workflow_case_binding(
+                    record=valid_record,
+                    trace={"trace_id": pathlight_trace_id(run_id, attempt=1)},
+                    trajectory=trajectory,
+                    expected_dataset_id="bright.biology",
+                    expected_query_id=query_id,
+                    expected_generation=generation,
+                    generation_state={"run_id": run_id, "attempts": [{}]},
+                )
+
+    def test_workflow_case_binding_rejects_trace_from_another_native_run(self) -> None:
+        run_id = "native-run-1"
+        record = {
+            "run_sha256": hashlib.sha256(run_id.encode()).hexdigest(),
+            "terminal_status": "completed",
+        }
+        trajectory = {
+            "run": {"run_id": run_id, "attempt": 1},
+            "dataset": {"dataset_id": "bright.biology", "query_id": "q-1"},
+        }
+        replayed_trace = {
+            "trace_id": "00000000-0000-4000-8000-000000000999",
+        }
+        with self.assertRaises(ValueError):
+            experiment_cli._validate_workflow_case_binding(
+                record=record,
+                trace=replayed_trace,
+                trajectory=trajectory,
+                expected_dataset_id="bright.biology",
+                expected_query_id="q-1",
+                expected_generation="native-generation-0001",
+                generation_state={"run_id": run_id, "attempts": [{}]},
+            )
+    def test_status_revalidates_completed_native_observation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            plan, output, _proposal = _prepare(root)
+            authorization = _write_authorization(root, plan)
+            arguments = [
+                "pathlight", "experiment", "execute",
+                "--plan-file", str(plan),
+                "--authorization-file", str(authorization),
+                "--output-root", str(output),
+            ]
+            self.assertEqual(
+                main(
+                    arguments,
+                    repo_root=root,
+                    environment=_execution_environment(root),
+                    experiment_host_factory=_host_factory([], {}),
+                    stdout=io.StringIO(),
+                    stderr=io.StringIO(),
+                ),
+                0,
+            )
+            stdout = io.StringIO()
+            with patch(
+                "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+                "_seal_completed_native_task",
+                side_effect=ValueError("tampered native"),
+            ):
+                self.assertEqual(
+                    main(
+                        [
+                            "pathlight", "experiment", "status",
+                            "--plan-file", str(plan),
+                            "--authorization-file", str(authorization),
+                            "--output-root", str(output),
+                        ],
+                        stdout=stdout,
+                        stderr=io.StringIO(),
+                    ),
+                    0,
+                )
+            self.assertEqual(json.loads(stdout.getvalue())["status"], "observation-invalid")
+
+    def test_native_seal_rejects_fixture_dataset_identity_and_accepts_exact_projection(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = Path(directory).resolve() / "native"
+            shutil.copytree(_NATIVE_FIXTURE, fixture)
+            fixture.chmod(0o700)
+            for path in fixture.iterdir():
+                path.chmod(0o600)
+            config_path = fixture / "config.json"
+            config = json.loads(config_path.read_bytes())
+            for name in ("summary.json", "results.jsonl"):
+                config["artifact_digests"][name] = hashlib.sha256(
+                    (fixture / name).read_bytes()
+                ).hexdigest()
+            config_path.write_bytes(_canonical_bytes(config))
+            config_path.chmod(0o600)
+            self.assertEqual(
+                read_completed_dci_run(fixture, "bright.biology").dataset_id,
+                "bright.biology",
+            )
+            config["dataset"]["dataset_id"] = "dataset.local"
+            config_path.write_bytes(_canonical_bytes(config))
+            config_path.chmod(0o600)
+            with self.assertRaises(DciRecoveryError):
+                read_completed_dci_run(fixture, "bright.biology")
+
+        exact = DciCoverageDatasetObservation(
+            dataset_id="bright.biology",
+            coverage_available_queries=10,
+            coverage_total_queries=10,
+            coverage_median_any_microunits=1_000_000,
+            coverage_median_mean_microunits=500_000,
+            coverage_median_all_microunits=0,
+            retained_available_queries=10,
+            retained_median_microunits=500_000,
+            tool_observation_count=20,
+            surfaced_gold_count=10,
+            model_call_count=10,
+            context_frame_count=10,
+            missing_boundary_count=0,
+            integrity_failure_count=0,
+            evidence_sha256=hashlib.sha256(b"exact-native").hexdigest(),
+        )
+        with patch(
+            "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+            "_read_native_dataset_observation",
+            return_value=exact,
+        ) as reader:
+            sealed = _seal_completed_native_task(
+                output_root=Path("/operator/root"),
+                plan={"plan_sha256": "0" * 64},
+                task={"task_id": "bright.biology"},
+                run_id="run-exact-native",
+            )
+        self.assertEqual(sealed, exact)
+        reader.assert_called_once_with(
+            output_root=Path("/operator/root"),
+            plan={"plan_sha256": "0" * 64},
+            task={"task_id": "bright.biology"},
+            receipt={"run_id": "run-exact-native", "receipt_sha256": "0" * 64},
+        )
+
+    def test_completed_experiment_reader_rebuilds_observation_from_exact_chain(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            plan, output, _proposal = _prepare(root)
+            authorization = _write_authorization(root, plan)
+            self.assertEqual(
+                main(
+                    [
+                        "pathlight", "experiment", "execute",
+                        "--plan-file", str(plan),
+                        "--authorization-file", str(authorization),
+                        "--output-root", str(output),
+                    ],
+                    repo_root=root,
+                    environment=_execution_environment(root),
+                    experiment_host_factory=_host_factory([], {}),
+                    stdout=io.StringIO(),
+                    stderr=io.StringIO(),
+                ),
+                0,
+            )
+
+            def observed(
+                *, task: Mapping[str, object], **_kwargs: object
+            ) -> DciCoverageDatasetObservation:
+                return DciCoverageDatasetObservation(
+                    dataset_id=str(task["task_id"]),
+                    coverage_available_queries=10,
+                    coverage_total_queries=10,
+                    coverage_median_any_microunits=1_000_000,
+                    coverage_median_mean_microunits=500_000,
+                    coverage_median_all_microunits=0,
+                    retained_available_queries=10,
+                    retained_median_microunits=500_000,
+                    tool_observation_count=20,
+                    surfaced_gold_count=10,
+                    model_call_count=10,
+                    context_frame_count=10,
+                    missing_boundary_count=0,
+                    integrity_failure_count=0,
+                    evidence_sha256=hashlib.sha256(
+                        str(task["task_id"]).encode()
+                    ).hexdigest(),
+                )
+
+            with patch(
+                "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+                "_read_native_dataset_observation",
+                side_effect=observed,
+            ):
+                observation = read_completed_coverage_experiment(
+                    plan_file=plan,
+                    authorization_file=authorization,
+                    output_root=output,
+                )
+
+            self.assertTrue(observation.complete)
+            self.assertEqual(observation.agent_operation_count, 50)
+            self.assertEqual(observation.judge_operation_count, 0)
+            self.assertEqual(tuple(item.dataset_id for item in observation.datasets), _TASK_IDS)
+
+    def test_completed_experiment_reader_rejects_incomplete_tampered_or_replaced_chain(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            plan, output, _proposal = _prepare(root)
+            authorization = _write_authorization(root, plan)
+            self.assertEqual(
+                main(
+                    [
+                        "pathlight", "experiment", "execute",
+                        "--plan-file", str(plan),
+                        "--authorization-file", str(authorization),
+                        "--output-root", str(output),
+                    ],
+                    repo_root=root,
+                    environment=_execution_environment(root),
+                    experiment_host_factory=_host_factory([], {}),
+                    stdout=io.StringIO(),
+                    stderr=io.StringIO(),
+                ),
+                0,
+            )
+
+            receipt = output / "receipts" / "receipt-1-0000.json"
+            original_receipt = receipt.read_bytes()
+            receipt.unlink()
+            with self.assertRaisesRegex(ValueError, "coverage experiment evidence is invalid"):
+                read_completed_coverage_experiment(
+                    plan_file=plan,
+                    authorization_file=authorization,
+                    output_root=output,
+                )
+            receipt.write_bytes(original_receipt)
+            receipt.chmod(0o600)
+
+            tampered = json.loads(original_receipt)
+            tampered["consumed_cost_microusd"] = 1
+            receipt.write_bytes(_canonical_bytes(tampered))
+            receipt.chmod(0o600)
+            with self.assertRaisesRegex(ValueError, "coverage experiment evidence is invalid"):
+                read_completed_coverage_experiment(
+                    plan_file=plan,
+                    authorization_file=authorization,
+                    output_root=output,
+                )
+            receipt.write_bytes(original_receipt)
+            receipt.chmod(0o600)
+
+            wrong_authorization = root / "wrong-authorization.json"
+            wrong = json.loads(authorization.read_bytes())
+            wrong["plan_sha256"] = "0" * 64
+            wrong_authorization.write_bytes(_canonical_bytes(wrong))
+            wrong_authorization.chmod(0o600)
+            with self.assertRaisesRegex(ValueError, "coverage experiment evidence is invalid"):
+                read_completed_coverage_experiment(
+                    plan_file=plan,
+                    authorization_file=wrong_authorization,
+                    output_root=output,
+                )
+
+            alias = root / "coverage-alias"
+            alias.symlink_to(output, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "coverage experiment evidence is invalid"):
+                read_completed_coverage_experiment(
+                    plan_file=plan,
+                    authorization_file=authorization,
+                    output_root=alias,
+                )
+
+    def test_completed_experiment_reader_rejects_native_tamper_without_leaking(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            plan, output, _proposal = _prepare(root)
+            authorization = _write_authorization(root, plan)
+            self.assertEqual(
+                main(
+                    [
+                        "pathlight", "experiment", "execute",
+                        "--plan-file", str(plan),
+                        "--authorization-file", str(authorization),
+                        "--output-root", str(output),
+                    ],
+                    repo_root=root,
+                    environment=_execution_environment(root),
+                    experiment_host_factory=_host_factory([], {}),
+                    stdout=io.StringIO(),
+                    stderr=io.StringIO(),
+                ),
+                0,
+            )
+            with patch(
+                "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+                "_read_native_dataset_observation",
+                side_effect=RuntimeError("SENTINEL_PRIVATE_NATIVE_PATH"),
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "^coverage experiment evidence is invalid$"
+                ) as raised:
+                    read_completed_coverage_experiment(
+                        plan_file=plan,
+                        authorization_file=authorization,
+                        output_root=output,
+                    )
+            self.assertNotIn(str(root), str(raised.exception))
+            self.assertNotIn("SENTINEL", str(raised.exception))
+
     def test_prepare_binds_only_effective_execution_config(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory).resolve()
@@ -674,6 +1191,8 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
                         "status",
                         "--plan-file",
                         str(plan),
+                        "--authorization-file",
+                        str(authorization),
                         "--output-root",
                         str(output),
                     ],
@@ -1016,6 +1535,8 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
                         "status",
                         "--plan-file",
                         str(output / "pathlight-coverage-experiment.json"),
+                        "--authorization-file",
+                        str(_write_authorization(root, output / "pathlight-coverage-experiment.json")),
                         "--output-root",
                         str(output),
                     ],

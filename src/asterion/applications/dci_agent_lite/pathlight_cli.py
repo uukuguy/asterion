@@ -190,7 +190,19 @@ def _diagnose(
     *,
     coverage_experiment: DciCoverageExperimentObservation | None = None,
 ) -> dict[str, object]:
-    roots, output_root = _diagnose_arguments(arguments)
+    roots, output_root, coverage_paths = _diagnose_arguments(arguments)
+    if coverage_paths is not None:
+        if coverage_experiment is not None:
+            raise ValueError
+        from asterion.applications.dci_agent_lite.pathlight_experiment_cli import (
+            read_completed_coverage_experiment,
+        )
+
+        coverage_experiment = read_completed_coverage_experiment(
+            plan_file=coverage_paths[0],
+            authorization_file=coverage_paths[1],
+            output_root=coverage_paths[2],
+        )
     targets = {
         "diagnosis": output_root / DIAGNOSIS_BUNDLE_FILENAME,
         "markdown": output_root / _MARKDOWN_FILENAME,
@@ -361,11 +373,14 @@ def _exact_options(arguments: tuple[str, ...], names: set[str]) -> dict[str, str
     return values
 
 
-def _diagnose_arguments(arguments: tuple[str, ...]) -> tuple[tuple[Path, ...], Path]:
-    if len(arguments) != 14:
+def _diagnose_arguments(
+    arguments: tuple[str, ...],
+) -> tuple[tuple[Path, ...], Path, tuple[Path, Path, Path] | None]:
+    if len(arguments) not in {14, 20}:
         raise ValueError
     roots: list[Path] = []
     output: Path | None = None
+    coverage: dict[str, Path] = {}
     for index in range(0, len(arguments), 2):
         name, value = arguments[index], arguments[index + 1]
         if type(name) is not str or type(value) is not str or not value:
@@ -374,11 +389,30 @@ def _diagnose_arguments(arguments: tuple[str, ...]) -> tuple[tuple[Path, ...], P
             roots.append(_operator_root(value))
         elif name == "--output-root" and output is None:
             output = _operator_root(value)
+        elif name in {"--coverage-plan-file", "--coverage-authorization-file"} and name not in coverage:
+            coverage[name] = _absolute_path(value)
+        elif name == "--coverage-output-root" and name not in coverage:
+            coverage[name] = _operator_root(value)
         else:
             raise ValueError
     if output is None or len(roots) != 6 or len({str(root) for root in roots}) != 6:
         raise ValueError
-    return tuple(roots), output
+    if coverage and set(coverage) != {
+        "--coverage-plan-file",
+        "--coverage-authorization-file",
+        "--coverage-output-root",
+    }:
+        raise ValueError
+    coverage_paths = (
+        None
+        if not coverage
+        else (
+            coverage["--coverage-plan-file"],
+            coverage["--coverage-authorization-file"],
+            coverage["--coverage-output-root"],
+        )
+    )
+    return tuple(roots), output, coverage_paths
 
 
 def _absolute_path(value: str) -> Path:

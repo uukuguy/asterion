@@ -91,7 +91,11 @@ _HEX_SHA256 = re.compile(r"[0-9a-f]{64}")
 _PUBLIC_EVIDENCE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]*")
 
 
-def _pathlight_trace_id(run_id: str, *, attempt: int) -> str:
+def pathlight_trace_id(run_id: str, *, attempt: int) -> str:
+    """Return the canonical DCI Pathlight trace identity for one native attempt."""
+
+    if type(run_id) is not str or not run_id or type(attempt) is not int or attempt < 1:
+        raise DciArtifactError("DCI Pathlight trace identity is invalid")
     digest = hashlib.sha256(
         json.dumps(
             {
@@ -682,6 +686,9 @@ class DciRunLock:
 
     @classmethod
     def acquire(cls, output_dir: Path, *, create: bool = True) -> DciRunLock:
+        lock_api = fcntl
+        if lock_api is None:
+            raise DciArtifactError("DCI run locking is unavailable")
         directory = Path(output_dir)
         descriptor = _acquire_directory_fd(directory, create=create)
         try:
@@ -701,7 +708,7 @@ class DciRunLock:
         except BaseException:
             try:
                 try:
-                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+                    lock_api.flock(descriptor, lock_api.LOCK_UN)
                 except OSError:
                     pass
             finally:
@@ -712,6 +719,9 @@ class DciRunLock:
     def acquire_existing(cls, output_dir: Path, *, wait: bool = True) -> DciRunLock:
         """Acquire the recorder's writer authority without creating run evidence."""
 
+        lock_api = fcntl
+        if lock_api is None:
+            raise DciArtifactError("DCI run locking is unavailable")
         directory = Path(output_dir)
         descriptor = _acquire_existing_directory_fd_nofollow(directory, wait=wait)
         try:
@@ -724,7 +734,7 @@ class DciRunLock:
             )
         except BaseException:
             try:
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
+                lock_api.flock(descriptor, lock_api.LOCK_UN)
             finally:
                 os.close(descriptor)
             raise
@@ -1369,6 +1379,7 @@ def _tool_timing_projection(
         if (
             set(entry) != expected_names
             or not _valid_timestamp(recorded_at)
+            or not isinstance(recorded_at, str)
             or entry.get("event") != event_type
             or call_id != raw.get("toolCallId")
             or entry.get("toolName") != raw.get("toolName")
@@ -1610,12 +1621,11 @@ def _validate_latest_context_projection(
             raise DciArtifactError("DCI completed run evidence is invalid")
         return
     last = provider_events[-1]
-    indexes = [
-        event.get("requestIndex")
-        for event in provider_events
-        if isinstance(event.get("requestIndex"), int)
-        and not isinstance(event.get("requestIndex"), bool)
-    ]
+    indexes: list[int] = []
+    for event in provider_events:
+        request_index = event.get("requestIndex")
+        if isinstance(request_index, int) and not isinstance(request_index, bool):
+            indexes.append(request_index)
     expected_count = max([0, *indexes])
     messages = last.get("messages")
     annotated = (
@@ -2841,7 +2851,7 @@ class DciRunRecorder:
             event_observations=tuple(self._pathlight_event_observations),
             native_observation=native_observation,
             runtime_id="pi.dci-native",
-            trace_id=_pathlight_trace_id(
+            trace_id=pathlight_trace_id(
                 self._pathlight_run_id, attempt=self._attempt_index + 1
             ),
             invocation_started_ns=self._pathlight_invocation_started_ns,
