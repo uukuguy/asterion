@@ -2496,6 +2496,8 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
         rendered = json.dumps(config, sort_keys=True)
         self.assertNotIn(str(private_root), rendered)
         coverage = cast(dict[str, object], config["coverage"])
+        dataset = cast(dict[str, object], config["dataset"])
+        self.assertEqual(dataset["dataset_id"], "bright.biology")
         coverage_registry = cast(dict[str, object], coverage["registry"])
         self.assertEqual(
             coverage_registry["relative_path"],

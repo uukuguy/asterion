@@ -1649,11 +1649,17 @@ def _prepare(
             if isinstance(selected_profile.source_identity, Mapping)
             else selected_profile.source_identity
         )
-    dataset_id = (
-        resolve_paper_experiment_scope(selected_scope).dataset_id
-        if selected_scope is not None
-        else "dataset.local"
-    )
+    if coverage_config:
+        coverage_dataset_id = coverage_config.get("dataset_id")
+        if type(coverage_dataset_id) is not str or not coverage_dataset_id:
+            raise DciBenchmarkError("DCI benchmark coverage registry is invalid")
+        dataset_id = coverage_dataset_id
+    else:
+        dataset_id = (
+            resolve_paper_experiment_scope(selected_scope).dataset_id
+            if selected_scope is not None
+            else "dataset.local"
+        )
     config["dataset"] = {
         **config["dataset"],  # type: ignore[arg-type]
         "dataset_id": dataset_id,
