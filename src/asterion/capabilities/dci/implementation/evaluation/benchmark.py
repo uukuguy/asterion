@@ -15,7 +15,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, cast
 
 from asterion.capabilities.dci.implementation.evaluation.artifacts import (
     DciArtifactError,
@@ -405,6 +405,9 @@ async def run_benchmark_async(
     except BaseException:
         _cancel_request_authorization(request)
         raise
+    trajectory_config = config.get("resolution")
+    if trajectory_config is None:
+        trajectory_config = config.get("coverage")
     try:
         authorized_identity = _consume_paper_execution_after_inputs(
             request,
@@ -485,7 +488,7 @@ async def run_benchmark_async(
                 rows=rows,
                 authorities=row_authorities,
                 input_snapshots=snapshots,
-                resolution_config=config.get("resolution"),
+                resolution_config=trajectory_config,
                 implementation_sha256=str(config["implementation_sha256"]),
             )
         counts = _counts(results)
@@ -494,7 +497,7 @@ async def run_benchmark_async(
             authorities=row_authorities,
             include_analysis=True,
             input_snapshots=snapshots,
-            resolution_config=config.get("resolution"),
+            resolution_config=trajectory_config,
             implementation_sha256=str(config["implementation_sha256"]),
         )
         _publish_batch_state(lock, "completed", results)
@@ -520,7 +523,7 @@ async def run_benchmark_async(
             authorities=row_authorities,
             include_analysis=True,
             input_snapshots=snapshots,
-            resolution_config=config.get("resolution"),
+            resolution_config=trajectory_config,
             implementation_sha256=str(config["implementation_sha256"]),
         )
         _publish_batch_state(lock, "cancelled", results)
@@ -554,7 +557,7 @@ async def run_benchmark_async(
             authorities=row_authorities,
             include_analysis=True,
             input_snapshots=snapshots,
-            resolution_config=config.get("resolution"),
+            resolution_config=trajectory_config,
             implementation_sha256=str(config["implementation_sha256"]),
         )
         _publish_batch_state(lock, "failed", results)
@@ -1206,6 +1209,7 @@ def _coverage_manifest_paths(
             {
                 "schema": "dci.retrieval-coverage-binding/v1",
                 "dataset_id": registry.dataset_id,
+                "corpus": _corpus_content_identity(request.corpus),
                 "registry": {
                     "relative_path": registry.relative_path,
                     "sha256": registry.sha256,
@@ -2595,15 +2599,22 @@ def _valid_coverage_configuration(value: object) -> bool:
     if not isinstance(value, dict) or set(value) != {
         "schema",
         "dataset_id",
+        "corpus",
         "registry",
         "manifests",
     }:
         return False
     registry = value.get("registry")
     manifests = value.get("manifests")
+    corpus = value.get("corpus")
     if (
         value.get("schema") != "dci.retrieval-coverage-binding/v1"
         or value.get("dataset_id") not in _COVERAGE_DATASET_IDS
+        or type(corpus) is not dict
+        or set(corpus) != {"sha256", "file_count"}
+        or re.fullmatch(r"[0-9a-f]{64}", str(corpus.get("sha256"))) is None
+        or type(corpus.get("file_count")) is not int
+        or corpus["file_count"] < 1
         or type(registry) is not dict
         or set(registry) != {"relative_path", "sha256"}
         or registry.get("relative_path") != "registry.json"
@@ -3987,6 +3998,11 @@ def _analysis_results(
     )
     if not isinstance(resolution_manifests, Mapping):
         raise DciBenchmarkError("DCI benchmark resolution evidence is invalid")
+    coverage_analysis = (
+        isinstance(resolution_config, Mapping)
+        and resolution_config.get("schema")
+        == "dci.retrieval-coverage-binding/v1"
+    )
     if isinstance(resolution_config, Mapping):
         if (
             request.corpus is None
@@ -4085,14 +4101,17 @@ def _analysis_results(
             if request.mode == "ir" and result.get("status") == "completed"
             else None
         )
+        resolution_ready = (
+            request.resolution_segment_characters is not None
+            and request.resolution_read_minimum_evidence_overlap is not None
+        )
         if (
             query_id in resolution_manifests
             and result.get("status") == "completed"
             and state is not None
             and isinstance(generation, str)
             and request.corpus is not None
-            and request.resolution_segment_characters is not None
-            and request.resolution_read_minimum_evidence_overlap is not None
+            and (coverage_analysis or resolution_ready)
         ):
             attempts = state.get("attempts")
             if not isinstance(attempts, list) or not attempts:
@@ -4114,16 +4133,35 @@ def _analysis_results(
                     raise DciBenchmarkError(
                         "DCI benchmark resolution evidence is invalid"
                     )
+                if coverage_analysis:
+                    trajectory_config = TrajectoryAnalysisConfig(
+                        segment_characters=4096,
+                        read_minimum_evidence_overlap=0.5,
+                    )
+                else:
+                    segment_characters = request.resolution_segment_characters
+                    overlap = request.resolution_read_minimum_evidence_overlap
+                    if (
+                        type(segment_characters) is not int
+                        or type(overlap) not in {int, float}
+                    ):
+                        raise DciBenchmarkError(
+                            "DCI benchmark resolution evidence is invalid"
+                        )
+                    trajectory_config = TrajectoryAnalysisConfig(
+                        segment_characters=segment_characters,
+                        read_minimum_evidence_overlap=float(cast(float, overlap)),
+                    )
+                native = authority.native
+                if native is None:
+                    raise DciBenchmarkError(
+                        "DCI benchmark resolution evidence is invalid"
+                    )
                 evidence = analyze_trajectory_resolution(
                     run_dir=lock.path / query_id / generation,
                     attempt=len(attempts),
                     corpus_dir=request.corpus,
-                    config=TrajectoryAnalysisConfig(
-                        segment_characters=request.resolution_segment_characters,
-                        read_minimum_evidence_overlap=(
-                            request.resolution_read_minimum_evidence_overlap
-                        ),
-                    ),
+                    config=trajectory_config,
                     gold_manifest_bytes=manifest_bytes,
                 )
                 _validate_bound_directory(authority.query, generation, native)

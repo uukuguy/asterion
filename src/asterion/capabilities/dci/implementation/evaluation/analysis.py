@@ -134,7 +134,19 @@ def gather_query_metrics(
         validated_resolution = validate_public_resolution_summary(
             dict(resolution_summary)
         )
-        if validated_resolution["query_id"] != str(row["query_id"]):
+        if (
+            validated_resolution["schema"]
+            == "dci.trajectory-resolution-coverage-summary/v1"
+        ):
+            from asterion.capabilities.dci.implementation.pathlight.coverage import (
+                coverage_query_sha256,
+            )
+
+            if validated_resolution["query_sha256"] != coverage_query_sha256(
+                str(row["query_id"])
+            ):
+                raise ValueError("resolution summary query identity mismatch")
+        elif validated_resolution["query_id"] != str(row["query_id"]):
             raise ValueError("resolution summary query identity mismatch")
     available = state is not None
     state = state or {}

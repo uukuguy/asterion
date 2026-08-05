@@ -2562,6 +2562,31 @@ class AsterionDciBenchmarkTests(unittest.TestCase):
                     run_benchmark(request, paths=resolve_dci_paths(root))
             agent.assert_not_called()
 
+    def test_coverage_run_writes_trajectory_resolution_evidence(self) -> None:
+        """Coverage binding must reach the analysis stage, not only config.json."""
+
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            registry = _write_coverage_registry(
+                root / "coverage",
+                dataset_id="bright.biology",
+                selected_query_id="q-000",
+            )
+            request = replace(
+                _coverage_request(root),
+                coverage_registry=registry,
+                analysis=True,
+            )
+            with patch(
+                "asterion.capabilities.dci.implementation.runtime.run.PiRpcClient",
+                _FixtureClient,
+            ):
+                run_benchmark(request, paths=resolve_dci_paths(root))
+
+            evidence = tuple(request.output_root.rglob("trajectory-resolution.json"))
+
+        self.assertEqual(len(evidence), 1)
+
     def test_coverage_manifest_ancestor_swap_fails_before_agent_execution(
         self,
     ) -> None:
