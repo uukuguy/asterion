@@ -10,6 +10,7 @@ from asterion.applications.dci_agent_lite.benchmark_host import (
     DciBenchmarkHost,
     DciBenchmarkHostError,
     DciLoadedBenchmarkProviders,
+    coverage_execution_config_sha256,
     optimization_execution_config_sha256,
 )
 from asterion.applications.dci_agent_lite.benchmark_instances import (
@@ -70,6 +71,21 @@ def _resolved(host, instance, lock_path: Path):
 
 
 class DciBenchmarkHostTests(unittest.TestCase):
+    def test_coverage_config_digest_binds_dci_implementation_identity(self) -> None:
+        environment = {"DEEPSEEK_API_KEY": "SENTINEL-PRIVATE-KEY"}
+        with patch(
+            "asterion.applications.dci_agent_lite.benchmark_executor."
+            "dci_complete_implementation_identity",
+            side_effect=["a" * 64, "b" * 64],
+            create=True,
+        ):
+            first = coverage_execution_config_sha256(environment)
+            second = coverage_execution_config_sha256(environment)
+
+        self.assertNotEqual(first, second)
+        self.assertNotIn("SENTINEL-PRIVATE-KEY", first)
+        self.assertNotIn("SENTINEL-PRIVATE-KEY", second)
+
     def test_candidate_query_plan_is_rejected_for_non_bright_host(self) -> None:
         instance = select_benchmark_instance("dci.qa.bamboogle@1.0.0")
         with tempfile.TemporaryDirectory() as temporary:

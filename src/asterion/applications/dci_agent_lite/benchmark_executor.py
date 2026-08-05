@@ -52,6 +52,9 @@ from asterion.capabilities.dci.implementation.reproduction.paper_benchmarks impo
     resolve_paper_benchmark,
     resolve_paper_experiment_scope,
 )
+from asterion.capabilities.dci.implementation.reproduction.provenance import (
+    dci_complete_implementation_identity,
+)
 from asterion.capabilities.dci.implementation.research.experiment_profiles import (
     authorize_full_execution,
     authorized_scope_output_root,
@@ -160,6 +163,7 @@ def _coverage_execution_config_sha256(
         _fail()
     value = {
         "schema": "asterion.dci.coverage-execution-config/v1",
+        "implementation_sha256": dci_complete_implementation_identity(),
         "executor_profile": executor_profile,
         "experiment_profile": experiment_profile,
         "runtime": runtime_options.runtime,
