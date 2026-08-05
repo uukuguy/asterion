@@ -203,6 +203,9 @@ def _write_authorization(root: Path, plan_path: Path) -> Path:
         "variant_sha256": plan["variant_sha256"],
         "registry_set_sha256": plan["registry_set_sha256"],
         "execution_config_sha256": plan["execution_config_sha256"],
+        "operator_root_sha256": experiment_cli._operator_root_binding_sha256(
+            plan_path.parent
+        ),
         "max_agent_operations": 50,
         "max_cost_microusd": 5_000_000,
         "max_infrastructure_failures": 2,
@@ -447,7 +450,9 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
             plan_path, output, _proposal = _prepare(root)
             plan = experiment_cli._read_plan(plan_path)
             authorization = _write_authorization(root, plan_path)
-            authority = experiment_cli._read_authorization(authorization, plan=plan)
+            authority = experiment_cli._read_authorization(
+                authorization, plan=plan, output_root=output
+            )
             tasks = plan["tasks"]
             assert isinstance(tasks, list)
             task = tasks[0]
@@ -472,6 +477,41 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
                     task=task,
                     expected_authorization_sha256="f" * 64,
                 )
+
+    def test_authorization_rejects_an_equivalent_plan_in_another_operator_root(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            first_root = root / "first"
+            second_root = root / "second"
+            first_root.mkdir(mode=0o700)
+            second_root.mkdir(mode=0o700)
+            first_plan, first_output, _proposal = _prepare(first_root)
+            second_plan, second_output, _proposal = _prepare(second_root)
+            self.assertEqual(
+                json.loads(first_plan.read_bytes())["plan_sha256"],
+                json.loads(second_plan.read_bytes())["plan_sha256"],
+            )
+            authorization = _write_authorization(first_root, first_plan)
+            events: list[str] = []
+
+            code = main(
+                [
+                    "pathlight", "experiment", "execute",
+                    "--plan-file", str(second_plan),
+                    "--authorization-file", str(authorization),
+                    "--output-root", str(second_output),
+                ],
+                repo_root=second_root,
+                environment=_execution_environment(second_root),
+                experiment_host_factory=_host_factory(events, {}),
+                stdout=io.StringIO(),
+                stderr=io.StringIO(),
+            )
+
+            self.assertEqual(code, 2)
+            self.assertEqual(events, [])
 
     def test_workflow_case_binding_rejects_cross_run_replay(self) -> None:
         run_id = "native-run-1"

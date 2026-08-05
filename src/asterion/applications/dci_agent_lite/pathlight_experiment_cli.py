@@ -278,7 +278,7 @@ def _execute(
     if _absolute_path(options["--plan-file"]).parent != output_root:
         raise ValueError
     authorization = _read_authorization(
-        _absolute_path(options["--authorization-file"]), plan=plan
+        _absolute_path(options["--authorization-file"]), plan=plan, output_root=output_root
     )
     source_lock_path = output_root / str(plan["source_lock_path"])
     if _file_sha256(source_lock_path) != plan["source_lock_sha256"]:
@@ -534,7 +534,7 @@ def _status(arguments: tuple[str, ...]) -> dict[str, object]:
         raise ValueError
     plan = _read_plan(plan_path)
     authorization = _read_authorization(
-        _absolute_path(options["--authorization-file"]), plan=plan
+        _absolute_path(options["--authorization-file"]), plan=plan, output_root=plan_path.parent
     )
     tasks = plan["tasks"]
     if type(tasks) is not list:
@@ -599,7 +599,9 @@ def read_completed_coverage_experiment(
         if plan_path.parent != root:
             raise ValueError
         plan = _read_plan(plan_path)
-        authorization = _read_authorization(authorization_path, plan=plan)
+        authorization = _read_authorization(
+            authorization_path, plan=plan, output_root=root
+        )
         tasks = plan.get("tasks")
         if type(tasks) is not list or len(tasks) != len(_TASK_IDS):
             raise ValueError
@@ -1448,7 +1450,9 @@ def _read_plan(path: Path) -> dict[str, object]:
     return value
 
 
-def _read_authorization(path: Path, *, plan: Mapping[str, object]) -> dict[str, object]:
+def _read_authorization(
+    path: Path, *, plan: Mapping[str, object], output_root: Path
+) -> dict[str, object]:
     value = _json_private(path)
     fields = {
         "schema",
@@ -1458,6 +1462,7 @@ def _read_authorization(path: Path, *, plan: Mapping[str, object]) -> dict[str, 
         "variant_sha256",
         "registry_set_sha256",
         "execution_config_sha256",
+        "operator_root_sha256",
         "max_agent_operations",
         "max_cost_microusd",
         "max_infrastructure_failures",
@@ -1477,6 +1482,8 @@ def _read_authorization(path: Path, *, plan: Mapping[str, object]) -> dict[str, 
         or value.get("registry_set_sha256") != plan["registry_set_sha256"]
         or value.get("execution_config_sha256")
         != plan["execution_config_sha256"]
+        or value.get("operator_root_sha256")
+        != _operator_root_binding_sha256(output_root)
         or value.get("max_agent_operations") != _MAX_AGENT_OPERATIONS
         or value.get("max_cost_microusd") != _MAX_COST_MICROUSD
         or value.get("max_infrastructure_failures") != _MAX_INFRASTRUCTURE_FAILURES
@@ -1550,6 +1557,22 @@ def _operator_root(value: str) -> Path:
     from asterion.applications.dci_agent_lite.pathlight_cli import _operator_root
 
     return _operator_root(value)
+
+
+def _operator_root_binding_sha256(root: Path) -> str:
+    """Return a path-free identity for one validated private operator root."""
+
+    try:
+        validated = _operator_root(str(root))
+        metadata = os.stat(validated, follow_symlinks=False)
+        if metadata.st_dev < 0 or metadata.st_ino <= 0:
+            raise ValueError
+        return _domain_digest(
+            "coverage-operator-root",
+            {"device": metadata.st_dev, "inode": metadata.st_ino},
+        )
+    except (OSError, TypeError, ValueError):
+        raise ValueError from None
 
 
 def _create_staging_root(root: Path) -> Path:
