@@ -532,6 +532,7 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
                 expected_query_id="q-1",
                 expected_generation="native-generation-0001",
                 generation_state={"run_id": run_id, "attempts": [{}]},
+                workflow_run_id=run_id,
             )
         valid_record = {
             "run_sha256": hashlib.sha256(run_id.encode()).hexdigest(),
@@ -550,6 +551,7 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
                     expected_query_id=query_id,
                     expected_generation=generation,
                     generation_state={"run_id": run_id, "attempts": [{}]},
+                    workflow_run_id=run_id,
                 )
 
     def test_workflow_case_binding_rejects_trace_from_another_native_run(self) -> None:
@@ -574,7 +576,28 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
                 expected_query_id="q-1",
                 expected_generation="native-generation-0001",
                 generation_state={"run_id": run_id, "attempts": [{}]},
+                workflow_run_id=run_id,
             )
+
+    def test_workflow_case_binding_accepts_distinct_protocol_and_native_ids(self) -> None:
+        native_run_id = "query-0"
+        protocol_run_id = "query-0-attempt-0001"
+        experiment_cli._validate_workflow_case_binding(
+            record={
+                "run_sha256": hashlib.sha256(protocol_run_id.encode()).hexdigest(),
+                "terminal_status": "completed",
+            },
+            trace={"trace_id": pathlight_trace_id(protocol_run_id, attempt=1)},
+            trajectory={
+                "run": {"run_id": native_run_id, "attempt": 1},
+                "dataset": {"dataset_id": "bright.biology", "query_id": "q-1"},
+            },
+            expected_dataset_id="bright.biology",
+            expected_query_id="q-1",
+            expected_generation="native-generation-0001",
+            generation_state={"run_id": native_run_id, "attempts": [{}]},
+            workflow_run_id=protocol_run_id,
+        )
     def test_status_revalidates_completed_native_observation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
@@ -680,6 +703,54 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
             task={"task_id": "bright.biology"},
             receipt={"run_id": "run-exact-native", "receipt_sha256": "0" * 64},
         )
+
+    def test_query_generation_reader_accepts_only_native_case_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            query_root = Path(directory).resolve() / "query"
+            query_root.mkdir(mode=0o700)
+            generation = query_root / "native-generation-0001"
+            generation.mkdir(mode=0o700)
+            for name in (
+                "input_question.txt",
+                "item.json",
+                "reproduction-evidence.json",
+                "result.json",
+                "timing.json",
+            ):
+                path = query_root / name
+                path.write_text("safe\n", encoding="utf-8")
+                path.chmod(0o600)
+
+            self.assertEqual(
+                experiment_cli._query_generation_root(
+                    query_root, "native-generation-0001"
+                ),
+                generation,
+            )
+
+            unexpected = query_root / "unexpected.json"
+            unexpected.write_text("safe\n", encoding="utf-8")
+            unexpected.chmod(0o600)
+            with self.assertRaises(ValueError):
+                experiment_cli._query_generation_root(
+                    query_root, "native-generation-0001"
+                )
+
+    def test_native_json_reader_accepts_writer_format_but_rejects_duplicate_keys(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            formatted = root / "formatted.json"
+            formatted.write_text('{\n  "value": 1\n}\n', encoding="utf-8")
+            formatted.chmod(0o600)
+            self.assertEqual(experiment_cli._json_native(formatted), {"value": 1})
+
+            duplicate = root / "duplicate.json"
+            duplicate.write_text('{"value": 1, "value": 2}\n', encoding="utf-8")
+            duplicate.chmod(0o600)
+            with self.assertRaises(ValueError):
+                experiment_cli._json_native(duplicate)
 
     def test_completed_experiment_reader_rebuilds_observation_from_exact_chain(
         self,

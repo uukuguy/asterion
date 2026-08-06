@@ -57,6 +57,7 @@ from asterion.capabilities.dci.implementation.research.trajectory_resolution imp
 from asterion.pathlight.flow import project_trace_flow
 from asterion.pathlight._private_file import read_private_file, write_private_file
 from asterion.pathlight.diagnosis import Proposal, read_diagnosis_bundle
+from asterion.runtime.protocol import validate_run_request
 from asterion.workflow_evidence.storage import read_workflow_observation_bundle
 
 
@@ -65,6 +66,7 @@ _PLAN_SCHEMA = "asterion.dci.pathlight.coverage-experiment/v1"
 _AUTHORIZATION_SCHEMA = "asterion.dci.pathlight.coverage-experiment-authorization/v1"
 _ERROR = "asterion-dci: command failed\n"
 _MAX_DOCUMENT_BYTES = 1 << 20
+_MAX_NATIVE_STATE_BYTES = 8 << 20
 _MAX_AGENT_OPERATIONS = 50
 _MAX_COST_MICROUSD = 5_000_000
 _MAX_INFRASTRUCTURE_FAILURES = 2
@@ -799,10 +801,8 @@ def _read_native_dataset_observation(
             raise ValueError
         observed_queries.add(query_sha256)
         query_root = _owned_evidence_directory(native_root / query_id)
-        if tuple(path.name for path in query_root.iterdir()) != (generation,):
-            raise ValueError
-        generation_root = _owned_evidence_directory(query_root / generation)
-        evidence = _json_private(generation_root / "trajectory-resolution.json")
+        generation_root = _query_generation_root(query_root, generation)
+        evidence = _json_native(generation_root / "trajectory-resolution.json")
         if type(evidence) is not dict:
             raise ValueError
         projection = public_resolution_projection(evidence)
@@ -835,8 +835,13 @@ def _read_native_dataset_observation(
         )
         if len(workflow.records) != 1 or len(workflow.pathlight_traces) != 1:
             raise ValueError
-        generation_state = _json_private(generation_root / "state.json")
+        generation_state = _json_native(
+            generation_root / "state.json", max_bytes=_MAX_NATIVE_STATE_BYTES
+        )
         if type(generation_state) is not dict:
+            raise ValueError
+        attempts = generation_state.get("attempts")
+        if type(attempts) is not list:
             raise ValueError
         _validate_workflow_case_binding(
             record=workflow.records[0],
@@ -846,6 +851,9 @@ def _read_native_dataset_observation(
             expected_query_id=query_id,
             expected_generation=generation,
             generation_state=generation_state,
+            workflow_run_id=_workflow_protocol_run_id(
+                generation_root, attempt=len(attempts)
+            ),
         )
         flow = project_trace_flow(workflow.pathlight_traces[0])
         model_calls += sum(node.get("kind") == "model-call" for node in flow)
@@ -913,6 +921,7 @@ def _validate_workflow_case_binding(
     expected_query_id: str,
     expected_generation: str,
     generation_state: Mapping[str, object],
+    workflow_run_id: str,
 ) -> None:
     run = trajectory.get("run")
     dataset = trajectory.get("dataset")
@@ -931,12 +940,31 @@ def _validate_workflow_case_binding(
         or dataset.get("dataset_id") != expected_dataset_id
         or dataset.get("query_id") != expected_query_id
         or record.get("terminal_status") != "completed"
+        or type(workflow_run_id) is not str
+        or not workflow_run_id
         or record.get("run_sha256")
-        != hashlib.sha256(native_run_id.encode("utf-8")).hexdigest()
+        != hashlib.sha256(workflow_run_id.encode("utf-8")).hexdigest()
         or trace.get("trace_id")
-        != pathlight_trace_id(native_run_id, attempt=len(attempts))
+        != pathlight_trace_id(workflow_run_id, attempt=len(attempts))
     ):
         raise ValueError
+
+
+def _workflow_protocol_run_id(generation_root: Path, *, attempt: int) -> str:
+    try:
+        if type(attempt) is not int or attempt < 1:
+            raise ValueError
+        protocol = _owned_evidence_directory(generation_root / "protocol")
+        request = _json_native(protocol / f"attempt-{attempt:04d}.request.json")
+        if type(request) is not dict:
+            raise ValueError
+        validate_run_request(request)
+        run_id = request.get("run_id")
+        if type(run_id) is not str or not run_id:
+            raise ValueError
+        return run_id
+    except (OSError, TypeError, ValueError):
+        raise ValueError from None
 
 
 def _jsonl_private(path: Path) -> tuple[dict[str, object], ...]:
@@ -964,6 +992,40 @@ def _owned_evidence_directory(path: Path) -> Path:
     ):
         raise ValueError
     return path
+
+
+def _query_generation_root(query_root: Path, generation: str) -> Path:
+    """Accept the fixed native case envelope without accepting arbitrary files."""
+
+    expected_files = {
+        "input_question.txt",
+        "item.json",
+        "reproduction-evidence.json",
+        "result.json",
+        "timing.json",
+    }
+    try:
+        root = _owned_evidence_directory(query_root)
+        if type(generation) is not str or not generation.startswith(
+            "native-generation-"
+        ):
+            raise ValueError
+        children = {path.name: path for path in root.iterdir()}
+        if set(children) != expected_files | {generation}:
+            raise ValueError
+        for name in expected_files:
+            path = children[name]
+            metadata = path.stat(follow_symlinks=False)
+            if (
+                path.is_symlink()
+                or not stat.S_ISREG(metadata.st_mode)
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+                or metadata.st_uid != os.getuid()
+            ):
+                raise ValueError
+        return _owned_evidence_directory(children[generation])
+    except (OSError, TypeError, ValueError):
+        raise ValueError from None
 
 
 def _natural(value: object) -> int:
@@ -1623,6 +1685,18 @@ def _json_private(path: Path) -> object:
     if encoded != _canonical_bytes(value):
         raise ValueError
     return value
+
+
+def _json_native(path: Path, *, max_bytes: int = _MAX_DOCUMENT_BYTES) -> object:
+    """Read one trusted native writer artifact without imposing its JSON layout."""
+
+    try:
+        return json.loads(
+            read_private_file(path, max_bytes),
+            object_pairs_hook=_unique_object,
+        )
+    except (OSError, TypeError, UnicodeError, ValueError, json.JSONDecodeError):
+        raise ValueError from None
 
 
 def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
