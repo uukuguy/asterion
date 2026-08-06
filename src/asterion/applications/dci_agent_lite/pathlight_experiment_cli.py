@@ -72,6 +72,12 @@ _MAX_COST_MICROUSD = 5_000_000
 _MAX_INFRASTRUCTURE_FAILURES = 2
 _SOURCE_LOCK_FILENAME = "pathlight-coverage-source-lock.json"
 _RECEIPT_SCHEMA = "asterion.dci.pathlight.coverage-experiment-receipt/v2"
+_RECONCILIATION_SCHEMA = (
+    "asterion.dci.pathlight.coverage-experiment-observation-reconciliation/v1"
+)
+_RECONCILIATION_IMPLEMENTATION_SHA256 = hashlib.sha256(
+    b"asterion.dci.pathlight.coverage-observation-reconciliation/protocol-bound-native-reader/v1"
+).hexdigest()
 _RUN_ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 _TASK_IDS = (
     "bright.biology",
@@ -139,6 +145,8 @@ def main(
             return result.code
         elif values[0] == "status":
             output = _status(values[1:])
+        elif values[0] == "reconcile":
+            output = _reconcile(values[1:])
         else:
             raise ValueError
         stdout.write(json.dumps(output, sort_keys=True, separators=(",", ":")) + "\n")
@@ -175,6 +183,7 @@ def _prepare(
     try:
         (staging_root / "coverage").mkdir(mode=0o700)
         (staging_root / "receipts").mkdir(mode=0o700)
+        (staging_root / "reconciliations").mkdir(mode=0o700)
         (staging_root / "evidence").mkdir(mode=0o700)
         tasks: list[dict[str, object]] = []
         for task_id in _TASK_IDS:
@@ -338,6 +347,7 @@ def _execute(
             plan=plan,
             task=raw_task,
             receipt=receipt_chain[-1],
+            authorization=authorization,
         ):
             completed_before += 1
         infrastructure_failures += sum(
@@ -562,6 +572,7 @@ def _status(arguments: tuple[str, ...]) -> dict[str, object]:
                     plan=plan,
                     task=task,
                     receipt=receipt,
+                    authorization=authorization,
                 )
             infrastructure_failures += sum(
                 item["benchmark_status"] == "failed" for item in chain
@@ -581,6 +592,70 @@ def _status(arguments: tuple[str, ...]) -> dict[str, object]:
     else:
         status = "prepared"
     return _status_summary(plan, completed=completed, status=status)
+
+
+def _reconcile(arguments: tuple[str, ...]) -> dict[str, object]:
+    """Append validation receipts for completed runs sealed by an older reader.
+
+    This command never invokes a provider and never changes the original benchmark
+    receipt.  It only records a fresh, protocol-bound validation of native evidence.
+    """
+
+    options = _exact_options(
+        arguments, {"--plan-file", "--authorization-file", "--output-root"}
+    )
+    plan_path = _absolute_path(options["--plan-file"])
+    output_root = _operator_root(options["--output-root"])
+    if plan_path.parent != output_root:
+        raise ValueError
+    plan = _read_plan(plan_path)
+    authorization = _read_authorization(
+        _absolute_path(options["--authorization-file"]),
+        plan=plan,
+        output_root=output_root,
+    )
+    tasks = plan.get("tasks")
+    if type(tasks) is not list:
+        raise ValueError
+    reconciled = 0
+    for task in tasks:
+        if type(task) is not dict:
+            raise ValueError
+        chain = _read_receipt_chain(
+            output_root / "receipts",
+            plan=plan,
+            task=task,
+            expected_authorization_sha256=str(authorization["authorization_sha256"]),
+        )
+        if not chain or chain[-1].get("benchmark_status") != "completed":
+            continue
+        receipt = chain[-1]
+        if receipt.get("observation_status") == "complete":
+            continue
+        if receipt.get("observation_status") != "invalid":
+            raise ValueError
+        observation = _seal_completed_native_task(
+            output_root=output_root,
+            plan=plan,
+            task=task,
+            run_id=str(receipt["run_id"]),
+        )
+        _publish_reconciliation(
+            output_root / "reconciliations",
+            plan=plan,
+            task=task,
+            authorization=authorization,
+            receipt=receipt,
+            observation=observation,
+        )
+        reconciled += 1
+    summary = _status((
+        "--plan-file", str(plan_path),
+        "--authorization-file", options["--authorization-file"],
+        "--output-root", str(output_root),
+    ))
+    summary["reconciled_task_count"] = reconciled
+    return summary
 
 
 def read_completed_coverage_experiment(
@@ -623,11 +698,7 @@ def read_completed_coverage_experiment(
                     authorization["authorization_sha256"]
                 ),
             )
-            if (
-                not chain
-                or chain[-1].get("benchmark_status") != "completed"
-                or chain[-1].get("observation_status") != "complete"
-            ):
+            if not chain or chain[-1].get("benchmark_status") != "completed":
                 raise ValueError
             receipt_digests.extend(str(receipt["receipt_sha256"]) for receipt in chain)
             consumed_cost += sum(_receipt_consumed_cost(receipt) for receipt in chain)
@@ -639,14 +710,15 @@ def read_completed_coverage_experiment(
             if type(case_count) is not int:
                 raise ValueError
             agent_operations += case_count
-            observation = _read_native_dataset_observation(
+            observation, reconciliation = _revalidated_terminal_observation(
                 output_root=root,
                 plan=plan,
                 task=task,
                 receipt=terminal,
+                authorization=authorization,
             )
-            if observation.evidence_sha256 != terminal["observation_evidence_sha256"]:
-                raise ValueError
+            if reconciliation is not None:
+                receipt_digests.append(str(reconciliation["reconciliation_sha256"]))
             datasets.append(observation)
         if agent_operations != _MAX_AGENT_OPERATIONS:
             raise ValueError
@@ -701,23 +773,54 @@ def _revalidate_terminal_receipt(
     plan: Mapping[str, object],
     task: Mapping[str, object],
     receipt: Mapping[str, object],
+    authorization: Mapping[str, object],
 ) -> bool:
     if receipt.get("benchmark_status") != "completed":
         return False
     try:
-        observation = _seal_completed_native_task(
+        observation, _reconciliation = _revalidated_terminal_observation(
             output_root=output_root,
             plan=plan,
             task=task,
-            run_id=str(receipt["run_id"]),
+            receipt=receipt,
+            authorization=authorization,
         )
     except Exception:
         return False
-    return (
-        receipt.get("observation_status") == "complete"
-        and observation.evidence_sha256
-        == receipt.get("observation_evidence_sha256")
+    return observation.coverage_available_queries == 10
+
+
+def _revalidated_terminal_observation(
+    *,
+    output_root: Path,
+    plan: Mapping[str, object],
+    task: Mapping[str, object],
+    receipt: Mapping[str, object],
+    authorization: Mapping[str, object] | None,
+) -> tuple[DciCoverageDatasetObservation, dict[str, object] | None]:
+    observation = _seal_completed_native_task(
+        output_root=output_root,
+        plan=plan,
+        task=task,
+        run_id=str(receipt["run_id"]),
     )
+    if (
+        receipt.get("observation_status") == "complete"
+        and observation.evidence_sha256 == receipt.get("observation_evidence_sha256")
+    ):
+        return observation, None
+    if receipt.get("observation_status") != "invalid" or authorization is None:
+        raise ValueError
+    reconciliation = _read_reconciliation(
+        output_root / "reconciliations",
+        plan=plan,
+        task=task,
+        receipt=receipt,
+        authorization=authorization,
+    )
+    if reconciliation["observation_evidence_sha256"] != observation.evidence_sha256:
+        raise ValueError
+    return observation, reconciliation
 
 
 def _read_native_dataset_observation(
