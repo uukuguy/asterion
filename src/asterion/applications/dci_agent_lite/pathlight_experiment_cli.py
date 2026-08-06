@@ -617,6 +617,10 @@ def _reconcile(arguments: tuple[str, ...]) -> dict[str, object]:
     tasks = plan.get("tasks")
     if type(tasks) is not list:
         raise ValueError
+    reconciliation_root = output_root / "reconciliations"
+    if not reconciliation_root.exists():
+        reconciliation_root.mkdir(mode=0o700)
+    _operator_root(str(reconciliation_root))
     reconciled = 0
     for task in tasks:
         if type(task) is not dict:
@@ -634,14 +638,21 @@ def _reconcile(arguments: tuple[str, ...]) -> dict[str, object]:
             continue
         if receipt.get("observation_status") != "invalid":
             raise ValueError
-        observation = _seal_completed_native_task(
+        observation = _read_native_dataset_observation(
             output_root=output_root,
             plan=plan,
             task=task,
-            run_id=str(receipt["run_id"]),
+            receipt=receipt,
         )
+        if (
+            observation.dataset_id != task.get("task_id")
+            or observation.coverage_available_queries != 10
+            or observation.coverage_total_queries != 10
+            or observation.integrity_failure_count != 0
+        ):
+            raise ValueError
         _publish_reconciliation(
-            output_root / "reconciliations",
+            reconciliation_root,
             plan=plan,
             task=task,
             authorization=authorization,
@@ -778,11 +789,18 @@ def _revalidate_terminal_receipt(
     if receipt.get("benchmark_status") != "completed":
         return False
     try:
+        if receipt.get("observation_status") == "complete":
+            observation = _seal_completed_native_task(
+                output_root=output_root,
+                plan=plan,
+                task=task,
+                run_id=str(receipt["run_id"]),
+            )
+            return observation.evidence_sha256 == receipt.get(
+                "observation_evidence_sha256"
+            )
         observation, _reconciliation = _revalidated_terminal_observation(
-            output_root=output_root,
-            plan=plan,
-            task=task,
-            receipt=receipt,
+            output_root=output_root, plan=plan, task=task, receipt=receipt,
             authorization=authorization,
         )
     except Exception:
@@ -798,12 +816,19 @@ def _revalidated_terminal_observation(
     receipt: Mapping[str, object],
     authorization: Mapping[str, object] | None,
 ) -> tuple[DciCoverageDatasetObservation, dict[str, object] | None]:
-    observation = _seal_completed_native_task(
+    observation = _read_native_dataset_observation(
         output_root=output_root,
         plan=plan,
         task=task,
-        run_id=str(receipt["run_id"]),
+        receipt=receipt,
     )
+    if (
+        observation.dataset_id != task.get("task_id")
+        or observation.coverage_available_queries != 10
+        or observation.coverage_total_queries != 10
+        or observation.integrity_failure_count != 0
+    ):
+        raise ValueError
     if (
         receipt.get("observation_status") == "complete"
         and observation.evidence_sha256 == receipt.get("observation_evidence_sha256")
@@ -1305,6 +1330,115 @@ def _receipt_filename(task_id: str, generation: int) -> str:
     if type(generation) is not int or not 0 <= generation <= 9999:
         raise ValueError
     return f"receipt-{index + 1}-{generation:04d}.json"
+
+
+def _reconciliation_filename(task_id: str) -> str:
+    try:
+        return f"reconciliation-{_TASK_IDS.index(task_id) + 1}.json"
+    except ValueError:
+        raise ValueError from None
+
+
+def _read_reconciliation(
+    root: Path,
+    *,
+    plan: Mapping[str, object],
+    task: Mapping[str, object],
+    receipt: Mapping[str, object],
+    authorization: Mapping[str, object],
+) -> dict[str, object]:
+    _operator_root(str(root))
+    task_id = task.get("task_id")
+    if type(task_id) is not str:
+        raise ValueError
+    expected_name = _reconciliation_filename(task_id)
+    allowed = re.compile(r"^reconciliation-[1-5]\.json$")
+    children = tuple(root.iterdir())
+    if any(not path.is_file() or allowed.fullmatch(path.name) is None for path in children):
+        raise ValueError
+    path = root / expected_name
+    if not path.exists():
+        raise ValueError
+    value = _json_private(path)
+    fields = {
+        "schema", "task_id", "plan_sha256", "authorization_sha256", "run_id",
+        "receipt_sha256", "observation_evidence_sha256",
+        "implementation_sha256", "reconciliation_sha256",
+    }
+    if type(value) is not dict or set(value) != fields:
+        raise ValueError
+    digest = value.pop("reconciliation_sha256", None)
+    if (
+        value.get("schema") != _RECONCILIATION_SCHEMA
+        or value.get("task_id") != task_id
+        or value.get("plan_sha256") != plan.get("plan_sha256")
+        or value.get("authorization_sha256") != authorization.get("authorization_sha256")
+        or value.get("run_id") != receipt.get("run_id")
+        or value.get("receipt_sha256") != receipt.get("receipt_sha256")
+        or not _is_sha256(value.get("observation_evidence_sha256"))
+        or value.get("implementation_sha256") != _RECONCILIATION_IMPLEMENTATION_SHA256
+        or not _is_sha256(digest)
+        or not hmac.compare_digest(str(digest), _digest(value))
+    ):
+        raise ValueError
+    value["reconciliation_sha256"] = digest
+    return value
+
+
+def _publish_reconciliation(
+    root: Path,
+    *,
+    plan: Mapping[str, object],
+    task: Mapping[str, object],
+    authorization: Mapping[str, object],
+    receipt: Mapping[str, object],
+    observation: DciCoverageDatasetObservation,
+) -> None:
+    task_id = task.get("task_id")
+    if (
+        type(task_id) is not str
+        or receipt.get("benchmark_status") != "completed"
+        or receipt.get("observation_status") != "invalid"
+        or not _is_sha256(receipt.get("receipt_sha256"))
+        or observation.dataset_id != task_id
+        or observation.coverage_available_queries != 10
+        or observation.integrity_failure_count != 0
+        or not _is_sha256(observation.evidence_sha256)
+    ):
+        raise ValueError
+    body: dict[str, object] = {
+        "schema": _RECONCILIATION_SCHEMA,
+        "task_id": task_id,
+        "plan_sha256": plan["plan_sha256"],
+        "authorization_sha256": authorization["authorization_sha256"],
+        "run_id": receipt["run_id"],
+        "receipt_sha256": receipt["receipt_sha256"],
+        "observation_evidence_sha256": observation.evidence_sha256,
+        "implementation_sha256": _RECONCILIATION_IMPLEMENTATION_SHA256,
+    }
+    body["reconciliation_sha256"] = _digest(body)
+    name = _reconciliation_filename(task_id)
+    existing = root / name
+    if existing.exists():
+        if _json_private(existing) != body:
+            raise ValueError
+    else:
+        staging = _create_staging_root(root)
+        failed = False
+        try:
+            write_private_file(staging / name, _canonical_bytes(body))
+            _publish_staged_outputs(root, staging, (name,))
+        except BaseException:
+            failed = True
+        try:
+            _cleanup_staging(root, staging, (name,))
+        except BaseException:
+            failed = True
+        if failed:
+            raise ValueError
+    _read_reconciliation(
+        root, plan=plan, task=task, receipt=receipt, authorization=authorization
+    )
 
 
 def _read_receipt_chain(

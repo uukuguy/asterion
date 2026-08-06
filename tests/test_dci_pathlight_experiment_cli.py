@@ -444,6 +444,113 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
                 before_runs,
             )
 
+    def test_reconcile_appends_native_validation_without_rerunning_or_mutating_receipts(
+        self,
+    ) -> None:
+        self._native_seal_patch.stop()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            plan, output, _proposal = _prepare(root)
+            authorization = _write_authorization(root, plan)
+            execute = [
+                "pathlight", "experiment", "execute",
+                "--plan-file", str(plan),
+                "--authorization-file", str(authorization),
+                "--output-root", str(output),
+            ]
+            with patch(
+                "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+                "_seal_completed_native_task",
+                side_effect=ValueError("old reader rejected native evidence"),
+            ):
+                self.assertEqual(
+                    main(
+                        execute,
+                        repo_root=root,
+                        environment=_execution_environment(root),
+                        experiment_host_factory=_host_factory([], {}),
+                        stdout=io.StringIO(),
+                        stderr=io.StringIO(),
+                    ),
+                    1,
+                )
+            original_receipts = {
+                path.name: path.read_bytes()
+                for path in (output / "receipts").glob("receipt-*.json")
+            }
+            stdout = io.StringIO()
+            with patch(
+                "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+                "_read_native_dataset_observation",
+                side_effect=lambda *, task, **_kwargs: _exact_observation(
+                    str(task["task_id"])
+                ),
+            ):
+                self.assertEqual(
+                    main(
+                        [
+                            "pathlight", "experiment", "reconcile",
+                            "--plan-file", str(plan),
+                            "--authorization-file", str(authorization),
+                            "--output-root", str(output),
+                        ],
+                        repo_root=root,
+                        environment={"PRIVATE_SENTINEL": "must-not-leak"},
+                        stdout=stdout,
+                        stderr=io.StringIO(),
+                    ),
+                    0,
+                )
+            self.assertEqual(json.loads(stdout.getvalue())["status"], "completed")
+            self.assertEqual(json.loads(stdout.getvalue())["reconciled_task_count"], 5)
+            self.assertEqual(
+                {
+                    path.name: path.read_bytes()
+                    for path in (output / "receipts").glob("receipt-*.json")
+                },
+                original_receipts,
+            )
+            reconciliations = tuple(
+                sorted((output / "reconciliations").glob("reconciliation-*.json"))
+            )
+            self.assertEqual(len(reconciliations), 5)
+            self.assertTrue(
+                all(
+                    json.loads(path.read_bytes())["receipt_sha256"]
+                    == json.loads(original_receipts[f"receipt-{index}-0000.json"])[
+                        "receipt_sha256"
+                    ]
+                    for index, path in enumerate(reconciliations, start=1)
+                )
+            )
+            first = reconciliations[0]
+            tampered = json.loads(first.read_bytes())
+            tampered["observation_evidence_sha256"] = "0" * 64
+            first.write_bytes(_canonical_bytes(tampered))
+            first.chmod(0o600)
+            loaded_plan = experiment_cli._read_plan(plan)
+            loaded_authorization = experiment_cli._read_authorization(
+                authorization, plan=loaded_plan, output_root=output
+            )
+            first_task = loaded_plan["tasks"][0]
+            assert isinstance(first_task, dict)
+            first_receipt = experiment_cli._read_receipt_chain(
+                output / "receipts",
+                plan=loaded_plan,
+                task=first_task,
+                expected_authorization_sha256=str(
+                    loaded_authorization["authorization_sha256"]
+                ),
+            )[-1]
+            with self.assertRaises(ValueError):
+                experiment_cli._read_reconciliation(
+                    output / "reconciliations",
+                    plan=loaded_plan,
+                    task=first_task,
+                    receipt=first_receipt,
+                    authorization=loaded_authorization,
+                )
+
     def test_receipt_reader_requires_exact_authorization_identity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
