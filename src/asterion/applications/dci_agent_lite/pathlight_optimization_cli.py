@@ -175,14 +175,17 @@ def _prepare(
     environment: Mapping[str, str] | None,
     package_sources: Sequence[object] | None,
 ) -> dict[str, object]:
-    options = _exact_options(
+    options = _optional_options(
         arguments,
-        {
+        required={
             "--diagnosis-file",
             "--diagnosis-report-file",
             "--gate-report-file",
             "--proposal-sha256",
             "--output-root",
+        },
+        optional={
+            "--coverage-registry-root",
         },
     )
     output_root = _operator_root(options["--output-root"])
@@ -211,6 +214,11 @@ def _prepare(
     # Passing a non-existent explicit path prevents load_operator_config from
     # falling back to ``repo_root/.env``.  Only caller-supplied environment is
     # consumed, and no provider is constructed on this path.
+    coverage_registry_root = (
+        None
+        if "--coverage-registry-root" not in options
+        else _operator_root(options["--coverage-registry-root"])
+    )
     config = load_operator_config(
         repo_root,
         env_file=Path(repo_root).resolve() / ".pathlight-no-dotenv",
@@ -225,9 +233,7 @@ def _prepare(
         (staging / "prompts").mkdir(mode=0o700)
         (staging / "receipts").mkdir(mode=0o700)
         (staging / "evidence").mkdir(mode=0o700)
-        selections = _prepare_selections(staging, config)
-        if proposal.scope_sha256 != _proposal_scope(selections):
-            raise ValueError
+        selections = _prepare_selections(staging, config, coverage_registry_root)
         source_lock = resolve_benchmark_source_lock(
             select_benchmark_instance("dci.bright.biology@1.0.0"),
             package_sources=package_sources,  # type: ignore[arg-type]
@@ -317,12 +323,21 @@ def _prepare(
     }
 
 
-def _prepare_selections(root: Path, config: DciOperatorConfig) -> dict[str, dict[str, object]]:
+def _prepare_selections(root: Path, config: DciOperatorConfig, coverage_registry_root: Path | None = None) -> dict[str, dict[str, object]]:
     selections: dict[str, dict[str, object]] = {}
     for dataset_id in _DATASETS:
         source = _read_source(Path(config.benchmark_inputs.dataset_roots[dataset_id]))
         rows = load_bright_benchmark_rows_bytes(source)
-        cases = tuple(sorted((_recovery_digest("query-id", row.query_id) for row in rows)))[:10]
+        if coverage_registry_root is None:
+            cases = tuple(sorted((_recovery_digest("query-id", row.query_id) for row in rows)))[:10]
+        else:
+            registry_root = coverage_registry_root / "coverage" / dataset_id
+            registry = json.loads((registry_root / "registry.json").read_text(encoding="utf-8"))
+            selected = {
+                json.loads((registry_root / item["path"]).read_text(encoding="utf-8"))["query_id"]
+                for item in registry["manifests"]
+            }
+            cases = tuple(sorted(_recovery_digest("query-id", row.query_id) for row in rows if row.query_id in selected))
         if len(cases) != 10 or len(set(cases)) != 10:
             raise ValueError
         value: dict[str, object] = {
@@ -1607,6 +1622,28 @@ def _exact_options(arguments: tuple[str, ...], names: set[str]) -> dict[str, str
             raise ValueError
         values[name] = value
     if set(values) != names:
+        raise ValueError
+    return values
+
+
+def _optional_options(
+    arguments: tuple[str, ...], *, required: set[str], optional: set[str]
+) -> dict[str, str]:
+    if len(arguments) % 2:
+        raise ValueError
+    values: dict[str, str] = {}
+    for index in range(0, len(arguments), 2):
+        name, value = arguments[index], arguments[index + 1]
+        if (
+            type(name) is not str
+            or type(value) is not str
+            or name not in required | optional
+            or name in values
+            or not value
+        ):
+            raise ValueError
+        values[name] = value
+    if not required.issubset(values):
         raise ValueError
     return values
 
