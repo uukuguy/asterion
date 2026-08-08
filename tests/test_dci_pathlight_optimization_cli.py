@@ -137,7 +137,7 @@ def _proposal(scope: str) -> tuple[SimpleNamespace, SimpleNamespace]:
             "proposal-stop", {"prerequisite_proposal_sha256": coverage.proposal_sha256}
         ),
         budget_sha256=_diagnosis_digest(
-            "proposal-budget", {"agent_operations": 80, "max_cost_microusd": 8_000_000}
+            "proposal-budget", {"agent_operations": 80, "max_cost_microusd": 16_000_000}
         ),
     )
     return coverage, query
@@ -257,7 +257,7 @@ def _authorization(plan: dict[str, object]) -> dict[str, object]:
         "output_root_inode": plan["output_root_inode"],
         "max_agent_operations": 80,
         "max_judge_operations": 0,
-        "max_cost_microusd": 8_000_000,
+        "max_cost_microusd": 16_000_000,
         "max_infrastructure_failures": 2,
         "max_native_attempts": 1,
         "execution_authorized": True,
@@ -286,7 +286,12 @@ class TestPrepare(unittest.TestCase):
         self.assertEqual(output["case_count"], 40)
         self.assertEqual(output["max_agent_operations"], 80)
         self.assertEqual(output["max_judge_operations"], 0)
-        self.assertEqual(output["max_cost_microusd"], 8_000_000)
+        # A ten-case Bright task may contain a single response just above the
+        # old $0.10 parallel reservation slice despite remaining below the
+        # task's aggregate envelope.  The development optimization plan gives
+        # each paired task a $2 envelope, so real bounded execution is not
+        # rejected by that artificial slice.
+        self.assertEqual(output["max_cost_microusd"], 16_000_000)
         plan = read_optimization_plan(fixture.output / PLAN_FILENAME)
         self.assertFalse(plan["execution_authorized"])
         tasks = plan["tasks"]
@@ -602,19 +607,19 @@ class _RecordingOptimizationHost:
                 (BenchmarkTaskResult(self.task_id.rsplit(".", 1)[0], "cancelled", 0),),
             )
         artifact_ids: tuple[str, ...] = (
-            "coverage-authorized-microusd.1000000", "coverage-upper-microusd.1000000"
+            "coverage-authorized-microusd.2000000", "coverage-upper-microusd.2000000"
         )
         if status == "observation-invalid":
             status = "completed"
             artifact_ids = (
-                "coverage-authorized-microusd.1000000", "coverage-upper-microusd.1000000",
+                "coverage-authorized-microusd.2000000", "coverage-upper-microusd.2000000",
                 "pathlight-observation-invalid",
             )
         elif status.startswith("actual:"):
             _prefix, amount = status.split(":", 1)
             status = "completed"
             artifact_ids = (
-                f"coverage-actual-microusd.{amount}", "coverage-authorized-microusd.1000000",
+                f"coverage-actual-microusd.{amount}", "coverage-authorized-microusd.2000000",
             )
         return BenchmarkRunResult(
             status,
@@ -706,12 +711,12 @@ class _NativeEvidenceExecutor(BenchmarkTaskExecutor):
         if self.fail_first and len(self.calls) == 1:
             return BenchmarkTaskResult(task_id, "failed", 0)
         artifacts = (
-            (f"coverage-actual-microusd.{self.candidate_cost if is_candidate and self.candidate_cost is not None else self.actual_cost}", "coverage-authorized-microusd.1000000")
+            (f"coverage-actual-microusd.{self.candidate_cost if is_candidate and self.candidate_cost is not None else self.actual_cost}", "coverage-authorized-microusd.2000000")
             if self.actual_cost is not None
             else
-            ("coverage-actual-microusd.17", "coverage-authorized-microusd.1000000")
+            ("coverage-actual-microusd.17", "coverage-authorized-microusd.2000000")
             if len(self.calls) == 1
-            else ("coverage-authorized-microusd.1000000", "coverage-upper-microusd.1000000")
+            else ("coverage-authorized-microusd.2000000", "coverage-upper-microusd.2000000")
         )
         return BenchmarkTaskResult(task_id, "completed", 10, artifacts)
 
@@ -732,7 +737,7 @@ def _execute_optimization(
 
     def host_factory(*, task: object, operator_config: object, **_kwargs: object) -> object:
         amount = getattr(getattr(operator_config, "benchmark_inputs"), "amount")
-        if amount is None or not 0 < amount <= 1:
+        if amount is None or not 0 < amount <= 2:
             raise AssertionError("real task host did not receive its bounded amount")
         recorded.append(f"budget:{getattr(task, 'get')('task_id')}:{amount}")
         return _RecordingOptimizationHost(getattr(task, "get")("task_id"), recorded, values)
@@ -809,10 +814,10 @@ class TestExecute(unittest.TestCase):
 
     def test_result_cost_requires_exact_authorized_and_exclusive_actual_or_upper_artifacts(self) -> None:
         valid_actual = (
-            "coverage-actual-microusd.17", "coverage-authorized-microusd.1000000"
+            "coverage-actual-microusd.17", "coverage-authorized-microusd.2000000"
         )
         valid_upper = (
-            "coverage-authorized-microusd.1000000", "coverage-upper-microusd.1000000"
+            "coverage-authorized-microusd.2000000", "coverage-upper-microusd.2000000"
         )
         invalid = (
             (),
@@ -828,11 +833,11 @@ class TestExecute(unittest.TestCase):
                 "completed", (BenchmarkTaskResult("bright.biology", "completed", 10, artifacts),)
             )
 
-        self.assertEqual(_result_cost(result(valid_actual), task_id="bright.biology", maximum=1_000_000), (17, "actual"))
-        self.assertEqual(_result_cost(result(valid_upper), task_id="bright.biology", maximum=1_000_000), (1_000_000, "conservative"))
+        self.assertEqual(_result_cost(result(valid_actual), task_id="bright.biology", maximum=2_000_000), (17, "actual"))
+        self.assertEqual(_result_cost(result(valid_upper), task_id="bright.biology", maximum=2_000_000), (2_000_000, "conservative"))
         for artifacts in invalid:
             with self.subTest(artifacts=artifacts), self.assertRaises(ValueError):
-                _result_cost(result(artifacts), task_id="bright.biology", maximum=1_000_000)
+                _result_cost(result(artifacts), task_id="bright.biology", maximum=2_000_000)
 
     def test_real_dci_host_unknown_progress_failure_quarantines_and_resume_is_not_wedged(self) -> None:
         fixture = _OptimizationFixture()
@@ -899,7 +904,7 @@ class TestExecute(unittest.TestCase):
             )
         self.assertEqual(code, 0, stderr.getvalue())
         self.assertEqual(len(calls), 8)
-        self.assertTrue(all(amount == Decimal("1") for _task, amount in calls))
+        self.assertTrue(all(amount == Decimal("2") for _task, amount in calls))
         receipt = json.loads((fixture.output / "receipts" / "receipt-1-0000.json").read_text())
         self.assertEqual(receipt["completed_case_count"], 10)
         self.assertEqual(receipt["cost_microusd"], 17)
@@ -909,7 +914,7 @@ class TestExecute(unittest.TestCase):
             "recovered_run_sha256", "experiment_bundle_sha256", "evaluation_bundle_sha256", "workflow_bundle_set_sha256",
         )))
         upper = json.loads((fixture.output / "receipts" / "receipt-2-0000.json").read_text())
-        self.assertEqual((upper["cost_source"], upper["cost_microusd"]), ("conservative", 1_000_000))
+        self.assertEqual((upper["cost_source"], upper["cost_microusd"]), ("conservative", 2_000_000))
         native = next((fixture.output / "evidence" / "bright.biology" / "baseline" / "outputs").glob("*/*"))
         recovered = read_completed_dci_run(native, "bright.biology")
         self.assertEqual(receipt["recovered_run_sha256"], recovered.recovered_run_sha256)
@@ -1142,7 +1147,7 @@ class TestExecute(unittest.TestCase):
                     self.assertEqual(receipt["cost_microusd"], 17)
                     self.assertEqual(receipt["cost_source"], "actual")
                 else:
-                    self.assertEqual(receipt["cost_microusd"], 1_000_000)
+                    self.assertEqual(receipt["cost_microusd"], 2_000_000)
                 self.assertEqual(output["status"], expected_status)
                 if name == "cancelled":
                     self.assertEqual([event for event in events if event.startswith("run:")], ["run:bright.biology.baseline"])

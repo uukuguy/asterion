@@ -92,7 +92,8 @@ _ERROR = "asterion-dci: command failed\n"
 _MAX_DOCUMENT_BYTES = 1 << 20
 _MAX_AGENT_OPERATIONS = 80
 _MAX_JUDGE_OPERATIONS = 0
-_MAX_COST_MICROUSD = 8_000_000
+_MAX_COST_MICROUSD = 16_000_000
+_TASK_MAX_COST_MICROUSD = 2_000_000
 _MAX_INFRASTRUCTURE_FAILURES = 2
 _MAX_NATIVE_ATTEMPTS = 1
 _DATASETS = (
@@ -388,7 +389,7 @@ def _tasks(
                     "case_limit": 10,
                     "native_attempt_limit": _MAX_NATIVE_ATTEMPTS,
                     "max_judge_operations": _MAX_JUDGE_OPERATIONS,
-                    "max_cost_microusd": 1_000_000,
+                    "max_cost_microusd": _TASK_MAX_COST_MICROUSD,
                     "evidence_path": f"evidence/{dataset_id}/{role}",
                     "receipt_path": f"receipts/{dataset_id}.{role}",
                 }
@@ -775,7 +776,7 @@ def _restore_quarantined_completed_evidence(
 
 def _config_with_amount(config: DciOperatorConfig, cost_microusd: int) -> DciOperatorConfig:
     """Bind the real DCI payload to the remaining exact task/global ceiling."""
-    if type(cost_microusd) is not int or not 1 <= cost_microusd <= 1_000_000:
+    if type(cost_microusd) is not int or not 1 <= cost_microusd <= _TASK_MAX_COST_MICROUSD:
         raise ValueError
     inputs = config.benchmark_inputs
     return DciOperatorConfig(
@@ -877,7 +878,7 @@ def _native_failure_category(evidence_root: Path | None, task_id: str) -> str | 
 
 
 def _result_cost(result: object, *, task_id: str, maximum: int) -> tuple[int, str]:
-    if not isinstance(result, BenchmarkRunResult) or maximum != 1_000_000:
+    if not isinstance(result, BenchmarkRunResult) or maximum != _TASK_MAX_COST_MICROUSD:
         raise ValueError
     matches = [item for item in result.tasks if item.task_id == task_id]
     if len(matches) != 1:
@@ -1532,7 +1533,7 @@ def _validate_tasks(raw: object, plan: Mapping[str, object]) -> None:
             or len(set(item["selected_case_sha256s"])) != 10
             or any(not _is_sha256(value) for value in item["selected_case_sha256s"])
             or item.get("case_limit") != 10 or item.get("native_attempt_limit") != 1
-            or item.get("max_judge_operations") != 0 or item.get("max_cost_microusd") != 1_000_000
+            or item.get("max_judge_operations") != 0 or item.get("max_cost_microusd") != _TASK_MAX_COST_MICROUSD
             or item.get("evidence_path") != f"evidence/{dataset_id}/{role}"
             or item.get("receipt_path") != f"receipts/{dataset_id}.{role}"
         ):
@@ -1590,7 +1591,7 @@ def _query_decomposition_proposal(diagnosis: object, digest: str) -> Proposal:
     expected = (
         _diagnosis_digest("proposal-change", {"change": "retrieval-query-decomposition", "sole_variable_sha256": sole}),
         _diagnosis_digest("proposal-success", {"mean_ndcg_gain_microunits": 50_000, "maximum_cost_or_time_increase_microunits": 250_000}),
-        _diagnosis_digest("proposal-budget", {"agent_operations": 80, "max_cost_microusd": 8_000_000}),
+        _diagnosis_digest("proposal-budget", {"agent_operations": 80, "max_cost_microusd": 16_000_000}),
     )
     coverage = _coverage_proposal(proposals)
     expected_stop = _diagnosis_digest(

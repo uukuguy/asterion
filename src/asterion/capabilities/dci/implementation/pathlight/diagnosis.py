@@ -877,7 +877,7 @@ class DciProposalSummary:
                 _sha256(self.prerequisite_proposal_sha256)
                 dataset_ids = _BRIGHT_DATASETS
                 expected = (
-                    80, 8_000_000, None, self.prerequisite_proposal_sha256,
+                    80, 16_000_000, None, self.prerequisite_proposal_sha256,
                     50_000, 250_000, 40, 40,
                 )
                 purpose = "paired-bright"
@@ -2032,7 +2032,7 @@ def _diagnosis_bundle(
         ),
         DciProposalSummary(
             "retrieval-query-decomposition", decomposition.proposal_sha256,
-            True, False, 80, 8_000_000, None, coverage.proposal_sha256,
+            True, False, 80, 16_000_000, None, coverage.proposal_sha256,
             50_000, 250_000, query_scope.dataset_case_counts,
             query_scope.dataset_case_scope_sha256s,
             query_scope.case_scope_sha256, 40, 40,
@@ -2181,7 +2181,7 @@ def _pathlight_proposals(
             "proposal-stop",
             {"prerequisite_proposal_sha256": coverage.proposal_sha256},
         ),
-        _digest("proposal-budget", {"agent_operations": 80, "max_cost_microusd": 8_000_000}),
+        _digest("proposal-budget", {"agent_operations": 80, "max_cost_microusd": 16_000_000}),
     )
     return coverage, decomposition
 

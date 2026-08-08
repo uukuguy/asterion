@@ -671,7 +671,7 @@ class TestDciPathlightDiagnosis(unittest.TestCase):
         self.assertEqual(
             query_core.budget_sha256,
             _domain_digest("proposal-budget", {
-                "agent_operations": 80, "max_cost_microusd": 8_000_000,
+                "agent_operations": 80, "max_cost_microusd": 16_000_000,
             }),
         )
 
