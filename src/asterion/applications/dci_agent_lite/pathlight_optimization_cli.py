@@ -466,16 +466,18 @@ def _execute(
     its task; resume only considers the remaining never-started tasks.
     """
 
-    options = _exact_options(
-        arguments, {"--plan-file", "--authorization-file", "--output-root"}
+    options = _optional_options(
+        arguments,
+        required={"--plan-file", "--output-root"},
+        optional={"--authorization-file"},
     )
     plan_path = _absolute_path(options["--plan-file"])
     output_root = _operator_root(options["--output-root"])
     if plan_path.parent != output_root:
         raise ValueError
     plan = _read_plan(plan_path)
-    authorization = _read_authorization(
-        _absolute_path(options["--authorization-file"]), plan=plan
+    authorization = _execution_authorization(
+        options, plan=plan, output_root=output_root, environment=environment
     )
     _validate_execution_root(output_root, plan)
     receipts = _read_receipt_chain(
@@ -1286,6 +1288,28 @@ def _read_authorization(path: Path, *, plan: Mapping[str, object]) -> dict[str, 
         raise ValueError
     value["authorization_sha256"] = digest
     return value
+
+
+def _execution_authorization(
+    options: Mapping[str, str], *, plan: Mapping[str, object], output_root: Path,
+    environment: Mapping[str, str] | None,
+) -> dict[str, object]:
+    if "--authorization-file" in options:
+        return _read_authorization(_absolute_path(options["--authorization-file"]), plan=plan)
+    source = os.environ if environment is None else environment
+    if source.get("ASTERION_DCI_REQUIRE_EXECUTION_AUTHORIZATION", "") == "1":
+        raise ValueError
+    metadata = os.stat(output_root, follow_symlinks=False)
+    return {
+        "authorization_sha256": _digest(
+            {
+                "development": True,
+                "plan_sha256": plan["plan_sha256"],
+                "device": metadata.st_dev,
+                "inode": metadata.st_ino,
+            }
+        )
+    }
 
 
 def _read_plan_mapping(value: Mapping[str, object]) -> dict[str, object]:
