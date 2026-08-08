@@ -135,7 +135,7 @@ def main(
                 package_sources=package_sources,
             )
         elif values[0] == "prepare-recovery":
-            output = _prepare_recovery(values[1:])
+            output = _prepare_recovery(values[1:], environment=environment)
         elif values[0] == "execute":
             result = _execute(
                 values[1:],
@@ -154,7 +154,7 @@ def main(
         elif values[0] == "reconcile":
             output = _reconcile(values[1:])
         elif values[0] == "status-recovery":
-            output = _status_recovery(values[1:])
+            output = _status_recovery(values[1:], environment=environment)
         elif values[0] == "execute-recovery":
             result = _execute_recovery(
                 values[1:], repo_root=repo_root, env_file=env_file,
@@ -288,27 +288,30 @@ def _prepare(
     }
 
 
-def _prepare_recovery(arguments: tuple[str, ...]) -> dict[str, object]:
+def _prepare_recovery(
+    arguments: tuple[str, ...], *, environment: Mapping[str, str] | None
+) -> dict[str, object]:
     """Prepare a new, bounded retry only for terminally failed coverage tasks."""
 
-    options = _exact_options(
+    options = _optional_options(
         arguments,
-        {
+        required={
             "--parent-plan-file",
-            "--parent-authorization-file",
             "--parent-output-root",
             "--output-root",
         },
+        optional={"--parent-authorization-file"},
     )
     parent_root = _operator_root(options["--parent-output-root"])
     parent_plan_path = _absolute_path(options["--parent-plan-file"])
     if parent_plan_path.parent != parent_root:
         raise ValueError
     parent_plan = _read_plan(parent_plan_path)
-    parent_authorization = _read_authorization(
-        _absolute_path(options["--parent-authorization-file"]),
-        plan=parent_plan,
-        output_root=parent_root,
+    parent_options = {
+        "--authorization-file": options["--parent-authorization-file"]
+    } if "--parent-authorization-file" in options else {}
+    parent_authorization = _execution_authorization(
+        parent_options, plan=parent_plan, output_root=parent_root, environment=environment
     )
     output_root = _operator_root(options["--output-root"])
     if any(output_root.iterdir()):
@@ -806,17 +809,19 @@ def _reconcile(arguments: tuple[str, ...]) -> dict[str, object]:
     return summary
 
 
-def _status_recovery(arguments: tuple[str, ...]) -> dict[str, object]:
-    options = _exact_options(
-        arguments, {"--plan-file", "--authorization-file", "--output-root"}
+def _status_recovery(
+    arguments: tuple[str, ...], *, environment: Mapping[str, str] | None = None
+) -> dict[str, object]:
+    options = _optional_options(
+        arguments, required={"--plan-file", "--output-root"}, optional={"--authorization-file"}
     )
     root = _operator_root(options["--output-root"])
     plan_path = _absolute_path(options["--plan-file"])
     if plan_path.parent != root:
         raise ValueError
     plan = _read_recovery_plan(plan_path)
-    authorization = _read_recovery_authorization(
-        _absolute_path(options["--authorization-file"]), plan=plan, output_root=root
+    authorization = _recovery_execution_authorization(
+        options, plan=plan, output_root=root, environment=environment
     )
     if _file_sha256(root / _SOURCE_LOCK_FILENAME) != plan["source_lock_sha256"]:
         raise ValueError
@@ -846,9 +851,10 @@ def _execute_recovery(
     package_sources: Sequence[CapabilityPackageSource] | None,
     host_factory: Callable[..., BenchmarkCommandHost] | None,
 ) -> _CommandResult:
-    options = _exact_options(
+    options = _optional_options(
         arguments,
-        {"--plan-file", "--authorization-file", "--output-root", "--parent-plan-file", "--parent-output-root"},
+        required={"--plan-file", "--output-root", "--parent-plan-file", "--parent-output-root"},
+        optional={"--authorization-file"},
     )
     root = _operator_root(options["--output-root"])
     plan_path = _absolute_path(options["--plan-file"])
@@ -862,8 +868,8 @@ def _execute_recovery(
     parent_plan = _read_plan(parent_plan_path)
     if parent_plan["plan_sha256"] != plan["parent_plan_sha256"]:
         raise ValueError
-    authorization = _read_recovery_authorization(
-        _absolute_path(options["--authorization-file"]), plan=plan, output_root=root
+    authorization = _recovery_execution_authorization(
+        options, plan=plan, output_root=root, environment=environment
     )
     if _file_sha256(root / _SOURCE_LOCK_FILENAME) != plan["source_lock_sha256"]:
         raise ValueError
@@ -2368,6 +2374,28 @@ def _execution_authorization(
     return {
         "authorization_sha256": _domain_digest(
             "development-authorization",
+            {
+                "plan_sha256": plan["plan_sha256"],
+                "operator_root_sha256": _operator_root_binding_sha256(output_root),
+            },
+        )
+    }
+
+
+def _recovery_execution_authorization(
+    options: Mapping[str, str], *, plan: Mapping[str, object], output_root: Path,
+    environment: Mapping[str, str] | None,
+) -> dict[str, object]:
+    path = options.get("--authorization-file")
+    if path is not None:
+        return _read_recovery_authorization(
+            _absolute_path(path), plan=plan, output_root=output_root
+        )
+    if _authorization_required(environment):
+        raise ValueError
+    return {
+        "authorization_sha256": _domain_digest(
+            "development-recovery-authorization",
             {
                 "plan_sha256": plan["plan_sha256"],
                 "operator_root_sha256": _operator_root_binding_sha256(output_root),

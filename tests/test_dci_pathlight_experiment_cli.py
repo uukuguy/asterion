@@ -487,6 +487,92 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
             )
             self.assertEqual(len(retry["completed_receipts"]), 3)
 
+    def test_development_prepare_recovery_omits_parent_authorization_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            parent_plan, parent_root, _proposal = _prepare(root)
+            self.assertEqual(
+                main(
+                    ["pathlight", "experiment", "execute", "--plan-file", str(parent_plan), "--output-root", str(parent_root)],
+                    repo_root=root, environment=_execution_environment(root),
+                    experiment_host_factory=_host_factory(
+                        [], {"bright.economics": ["failed"], "beir.scifact": ["failed"]}
+                    ), stdout=io.StringIO(), stderr=io.StringIO(),
+                ),
+                1,
+            )
+            recovery_root = root / "recovery"
+            recovery_root.mkdir(mode=0o700)
+            self.assertEqual(
+                main(
+                    [
+                        "pathlight", "experiment", "prepare-recovery",
+                        "--parent-plan-file", str(parent_plan),
+                        "--parent-output-root", str(parent_root),
+                        "--output-root", str(recovery_root),
+                    ],
+                    repo_root=root, environment=_execution_environment(root),
+                    stdout=io.StringIO(), stderr=io.StringIO(),
+                ),
+                0,
+            )
+
+    def test_development_recovery_status_omits_authorization_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            parent_plan, parent_root, _proposal = _prepare(root)
+            main(
+                ["pathlight", "experiment", "execute", "--plan-file", str(parent_plan), "--output-root", str(parent_root)],
+                repo_root=root, environment=_execution_environment(root),
+                experiment_host_factory=_host_factory(
+                    [], {"bright.economics": ["failed"], "beir.scifact": ["failed"]}
+                ), stdout=io.StringIO(), stderr=io.StringIO(),
+            )
+            recovery_root = root / "recovery"
+            recovery_root.mkdir(mode=0o700)
+            main(
+                ["pathlight", "experiment", "prepare-recovery", "--parent-plan-file", str(parent_plan), "--parent-output-root", str(parent_root), "--output-root", str(recovery_root)],
+                repo_root=root, environment=_execution_environment(root), stdout=io.StringIO(), stderr=io.StringIO(),
+            )
+            stdout = io.StringIO()
+            self.assertEqual(
+                main(
+                    ["pathlight", "experiment", "status-recovery", "--plan-file", str(recovery_root / "pathlight-coverage-recovery.json"), "--output-root", str(recovery_root)],
+                    repo_root=root, environment=_execution_environment(root), stdout=stdout, stderr=io.StringIO(),
+                ),
+                0,
+            )
+            self.assertEqual(json.loads(stdout.getvalue())["status"], "prepared")
+
+    def test_development_execute_recovery_omits_authorization_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            parent_plan, parent_root, _proposal = _prepare(root)
+            main(
+                ["pathlight", "experiment", "execute", "--plan-file", str(parent_plan), "--output-root", str(parent_root)],
+                repo_root=root, environment=_execution_environment(root),
+                experiment_host_factory=_host_factory(
+                    [], {"bright.economics": ["failed"], "beir.scifact": ["failed"]}
+                ), stdout=io.StringIO(), stderr=io.StringIO(),
+            )
+            recovery_root = root / "recovery"
+            recovery_root.mkdir(mode=0o700)
+            main(
+                ["pathlight", "experiment", "prepare-recovery", "--parent-plan-file", str(parent_plan), "--parent-output-root", str(parent_root), "--output-root", str(recovery_root)],
+                repo_root=root, environment=_execution_environment(root), stdout=io.StringIO(), stderr=io.StringIO(),
+            )
+            events: list[str] = []
+            self.assertEqual(
+                main(
+                    ["pathlight", "experiment", "execute-recovery", "--plan-file", str(recovery_root / "pathlight-coverage-recovery.json"), "--output-root", str(recovery_root), "--parent-plan-file", str(parent_plan), "--parent-output-root", str(parent_root)],
+                    repo_root=root, environment=_execution_environment(root),
+                    experiment_host_factory=_host_factory(events, {}, expected_coverage_tasks={"bright.economics", "beir.scifact"}),
+                    stdout=io.StringIO(), stderr=io.StringIO(),
+                ),
+                0,
+            )
+            self.assertEqual([event for event in events if event.startswith("run:")], ["run:bright.economics", "run:beir.scifact"])
+
     def test_recovery_status_requires_exact_bound_authorization(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
