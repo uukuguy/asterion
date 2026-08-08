@@ -195,6 +195,16 @@ class TestDciPathlightDiagnosis(unittest.TestCase):
         self.assertEqual(aggregate.attempted_agent_operation_count, 50)
         self.assertEqual(aggregate.infrastructure_failure_count, 2)
 
+    def test_recovery_aggregate_opens_the_coverage_diagnosis_gate(self) -> None:
+        aggregate = DciCoverageRecoveryAggregate(
+            coverage=_coverage_pack(), parent_plan_sha256=_sha256("parent"),
+            recovery_plan_sha256=_sha256("recovery"), attempted_agent_operation_count=50,
+            actual_cost_microusd=5_106_161, infrastructure_failure_count=2,
+            ledger_sha256=_sha256("ledger"),
+        )
+        report = diagnose_recommended_pack(tuple(_run(*dataset) for dataset in _DATASETS), coverage_experiment=aggregate)
+        self.assertEqual(report.query_decomposition_gate, "ready-for-authorization")
+
     def setUp(self) -> None:
         self.six_runs = tuple(_run(*dataset) for dataset in _DATASETS)
 

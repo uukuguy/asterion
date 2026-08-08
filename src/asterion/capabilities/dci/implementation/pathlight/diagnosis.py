@@ -1635,17 +1635,19 @@ def _copy_pathlight_proposal(value: object) -> Proposal:
 def diagnose_recommended_pack(
     runs: object,
     *,
-    coverage_experiment: DciCoverageExperimentObservation | None = None,
+    coverage_experiment: DciCoverageExperimentObservation | DciCoverageRecoveryAggregate | None = None,
 ) -> DciDiagnosisReport:
     """Diagnose exactly the six fixed recovered DCI cohorts without execution."""
 
     result: DciDiagnosisReport | None = None
     try:
-        coverage = (
-            None
-            if coverage_experiment is None
-            else _copy_coverage_experiment(coverage_experiment)
-        )
+        coverage = None
+        if type(coverage_experiment) is DciCoverageExperimentObservation:
+            coverage = _copy_coverage_experiment(coverage_experiment)
+        elif type(coverage_experiment) is DciCoverageRecoveryAggregate:
+            coverage = _copy_coverage_experiment(coverage_experiment.coverage)
+        elif coverage_experiment is not None:
+            raise ValueError
         normalized = _validate_pack(runs)
         experiments = {dataset_id: recovered_run_to_experiment(run) for dataset_id, run in normalized.items()}
         references = {dataset_id: load_paper_reference(dataset_id) for dataset_id in _DATASET_ORDER}
