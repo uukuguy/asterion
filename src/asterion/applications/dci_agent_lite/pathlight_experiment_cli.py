@@ -152,7 +152,7 @@ def main(
         elif values[0] == "status":
             output = _status(values[1:], environment=environment)
         elif values[0] == "reconcile":
-            output = _reconcile(values[1:])
+            output = _reconcile(values[1:], environment=environment)
         elif values[0] == "status-recovery":
             output = _status_recovery(values[1:], environment=environment)
         elif values[0] == "execute-recovery":
@@ -688,6 +688,7 @@ def _status(
     authorization = _execution_authorization(
         options, plan=plan, output_root=plan_path.parent, environment=environment
     )
+    development = "--authorization-file" not in options and not _authorization_required(environment)
     tasks = plan["tasks"]
     if type(tasks) is not list:
         raise ValueError
@@ -701,10 +702,16 @@ def _status(
             plan_path.parent / "receipts",
             plan=plan,
             task=task,
-            expected_authorization_sha256=str(authorization["authorization_sha256"]),
+            expected_authorization_sha256=(
+                None if development else str(authorization["authorization_sha256"])
+            ),
         )
         if chain:
             receipt = chain[-1]
+            receipt_authorization = (
+                {"authorization_sha256": receipt["authorization_sha256"]}
+                if development else authorization
+            )
             terminal_statuses.append(str(receipt["benchmark_status"]))
             if receipt["benchmark_status"] == "completed":
                 completed += _revalidate_terminal_receipt(
@@ -712,7 +719,7 @@ def _status(
                     plan=plan,
                     task=task,
                     receipt=receipt,
-                    authorization=authorization,
+                    authorization=receipt_authorization,
                 )
             infrastructure_failures += sum(
                 item["benchmark_status"] == "failed" for item in chain
@@ -734,25 +741,25 @@ def _status(
     return _status_summary(plan, completed=completed, status=status)
 
 
-def _reconcile(arguments: tuple[str, ...]) -> dict[str, object]:
+def _reconcile(
+    arguments: tuple[str, ...], *, environment: Mapping[str, str] | None = None
+) -> dict[str, object]:
     """Append validation receipts for completed runs sealed by an older reader.
 
     This command never invokes a provider and never changes the original benchmark
     receipt.  It only records a fresh, protocol-bound validation of native evidence.
     """
 
-    options = _exact_options(
-        arguments, {"--plan-file", "--authorization-file", "--output-root"}
+    options = _optional_options(
+        arguments, required={"--plan-file", "--output-root"}, optional={"--authorization-file"}
     )
     plan_path = _absolute_path(options["--plan-file"])
     output_root = _operator_root(options["--output-root"])
     if plan_path.parent != output_root:
         raise ValueError
     plan = _read_plan(plan_path)
-    authorization = _read_authorization(
-        _absolute_path(options["--authorization-file"]),
-        plan=plan,
-        output_root=output_root,
+    authorization = _execution_authorization(
+        options, plan=plan, output_root=output_root, environment=environment
     )
     tasks = plan.get("tasks")
     if type(tasks) is not list:
@@ -769,7 +776,10 @@ def _reconcile(arguments: tuple[str, ...]) -> dict[str, object]:
             output_root / "receipts",
             plan=plan,
             task=task,
-            expected_authorization_sha256=str(authorization["authorization_sha256"]),
+            expected_authorization_sha256=(
+                None if "--authorization-file" not in options and not _authorization_required(environment)
+                else str(authorization["authorization_sha256"])
+            ),
         )
         if not chain or chain[-1].get("benchmark_status") != "completed":
             continue
@@ -800,11 +810,14 @@ def _reconcile(arguments: tuple[str, ...]) -> dict[str, object]:
             observation=observation,
         )
         reconciled += 1
-    summary = _status((
-        "--plan-file", str(plan_path),
-        "--authorization-file", options["--authorization-file"],
-        "--output-root", str(output_root),
-    ))
+    status_arguments = [
+        "--plan-file", str(plan_path), "--output-root", str(output_root),
+    ]
+    if "--authorization-file" in options:
+        status_arguments.extend(
+            ("--authorization-file", options["--authorization-file"])
+        )
+    summary = _status(tuple(status_arguments), environment=environment)
     summary["reconciled_task_count"] = reconciled
     return summary
 
@@ -1843,7 +1856,7 @@ def _read_receipt_chain(
     *,
     plan: Mapping[str, object],
     task: Mapping[str, object],
-    expected_authorization_sha256: str,
+    expected_authorization_sha256: str | None,
 ) -> tuple[dict[str, object], ...]:
     _operator_root(str(root))
     task_id = str(task["task_id"])
@@ -1911,7 +1924,10 @@ def _read_receipt_chain(
             or value.get("registry_sha256") != task["registry_sha256"]
             or value.get("execution_config_sha256")
             != plan["execution_config_sha256"]
-            or value.get("authorization_sha256") != expected_authorization_sha256
+            or expected_authorization_sha256 is not None
+            and value.get("authorization_sha256") != expected_authorization_sha256
+            or chain
+            and value.get("authorization_sha256") != chain[0]["authorization_sha256"]
             or type(value.get("run_id")) is not str
             or _RUN_ID.fullmatch(str(value.get("run_id"))) is None
             or benchmark_status not in {"completed", "failed", "cancelled"}

@@ -71,6 +71,35 @@ def _write_recovery_triad(root: Path, run: DciRecoveredRun) -> None:
 
 
 class TestDciPathlightCli(unittest.TestCase):
+    def test_experiment_env_file_option_is_forwarded_to_execution_coordinator(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            dotenv = root / ".env"
+            dotenv.write_text("PRIVATE_SENTINEL=must-not-leak\n", encoding="utf-8")
+            dotenv.chmod(0o600)
+            received: dict[str, object] = {}
+
+            def record_experiment(
+                _arguments: object, **kwargs: object
+            ) -> int:
+                received.update(kwargs)
+                return 0
+
+            with patch(
+                "asterion.applications.dci_agent_lite.pathlight_experiment_cli.main",
+                side_effect=record_experiment,
+            ):
+                self.assertEqual(
+                    pathlight_main(
+                        ["experiment", "--env-file", str(dotenv), "status"],
+                        stdout=io.StringIO(),
+                        stderr=io.StringIO(),
+                        repo_root=root,
+                    ),
+                    0,
+                )
+            self.assertEqual(received["env_file"], dotenv)
+
     def test_recover_is_provider_free_and_emits_one_safe_json_line(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()

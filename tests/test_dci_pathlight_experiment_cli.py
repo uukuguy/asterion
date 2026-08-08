@@ -387,6 +387,42 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
             )
             self.assertEqual(json.loads(stdout.getvalue())["status"], "prepared")
 
+    def test_development_status_reads_historical_explicit_authorization_receipts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            plan, output, _proposal = _prepare(root)
+            authorization = _write_authorization(root, plan)
+            self.assertEqual(
+                main(
+                    [
+                        "pathlight", "experiment", "execute",
+                        "--plan-file", str(plan),
+                        "--authorization-file", str(authorization),
+                        "--output-root", str(output),
+                    ],
+                    repo_root=root,
+                    environment=_execution_environment(root),
+                    experiment_host_factory=_host_factory([], {}),
+                    stdout=io.StringIO(), stderr=io.StringIO(),
+                ),
+                0,
+            )
+            stdout = io.StringIO()
+            self.assertEqual(
+                main(
+                    [
+                        "pathlight", "experiment", "status",
+                        "--plan-file", str(plan),
+                        "--output-root", str(output),
+                    ],
+                    repo_root=root,
+                    environment=_execution_environment(root),
+                    stdout=stdout, stderr=io.StringIO(),
+                ),
+                0,
+            )
+            self.assertEqual(json.loads(stdout.getvalue())["status"], "completed")
+
     def test_development_execute_accepts_omitted_authorization_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()

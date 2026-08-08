@@ -95,12 +95,15 @@ def main(
                 main as experiment_main,
             )
 
+            command_arguments, command_env_file = _execution_env_file(
+                values[1:], inherited=env_file
+            )
             return experiment_main(
-                values[1:],
+                command_arguments,
                 stdout=stdout,
                 stderr=stderr,
                 repo_root=(Path.cwd() if repo_root is None else repo_root),
-                env_file=env_file,
+                env_file=command_env_file,
                 environment=environment,
                 package_sources=package_sources,
                 host_factory=experiment_host_factory,
@@ -110,12 +113,15 @@ def main(
                 main as optimization_main,
             )
 
+            command_arguments, command_env_file = _execution_env_file(
+                values[1:], inherited=env_file
+            )
             return optimization_main(
-                values[1:],
+                command_arguments,
                 stdout=stdout,
                 stderr=stderr,
                 repo_root=(Path.cwd() if repo_root is None else repo_root),
-                env_file=env_file,
+                env_file=command_env_file,
                 environment=environment,
                 package_sources=package_sources,
             )
@@ -132,6 +138,36 @@ def main(
     except BaseException:
         stderr.write(_ERROR)
         return 2
+
+
+def _execution_env_file(
+    arguments: tuple[str, ...], *, inherited: Path | None
+) -> tuple[tuple[str, ...], Path | None]:
+    """Extract one private dotenv path for an execution coordinator.
+
+    The option is accepted only at the product command boundary, never recorded
+    in plans, manifests, receipts, or public output.  It lets an operator run
+    from an isolated worktree while explicitly anchoring resource paths and
+    provider configuration to the intended ``.env`` file.
+    """
+
+    values = list(arguments)
+    positions = [index for index, value in enumerate(values) if value == "--env-file"]
+    if not positions:
+        return arguments, inherited
+    if inherited is not None or len(positions) != 1:
+        raise ValueError
+    index = positions[0]
+    if index + 1 >= len(values):
+        raise ValueError
+    value = values[index + 1]
+    if value.startswith("-"):
+        raise ValueError
+    path = Path(value).expanduser().resolve()
+    if not path.is_file():
+        raise ValueError
+    del values[index : index + 2]
+    return tuple(values), path
 
 
 def _recover(arguments: tuple[str, ...]) -> dict[str, object]:
