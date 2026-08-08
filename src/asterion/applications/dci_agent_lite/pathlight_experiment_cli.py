@@ -66,6 +66,8 @@ RECOVERY_PLAN_FILENAME = "pathlight-coverage-recovery.json"
 _PLAN_SCHEMA = "asterion.dci.pathlight.coverage-experiment/v1"
 _RECOVERY_PLAN_SCHEMA = "asterion.dci.pathlight.coverage-recovery/v1"
 _AUTHORIZATION_SCHEMA = "asterion.dci.pathlight.coverage-experiment-authorization/v1"
+_RECOVERY_AUTHORIZATION_SCHEMA = "asterion.dci.pathlight.coverage-recovery-authorization/v1"
+_RECOVERY_RECEIPT_SCHEMA = "asterion.dci.pathlight.coverage-recovery-receipt/v1"
 _ERROR = "asterion-dci: command failed\n"
 _MAX_DOCUMENT_BYTES = 1 << 20
 _MAX_NATIVE_STATE_BYTES = 8 << 20
@@ -151,6 +153,16 @@ def main(
             output = _status(values[1:])
         elif values[0] == "reconcile":
             output = _reconcile(values[1:])
+        elif values[0] == "status-recovery":
+            output = _status_recovery(values[1:])
+        elif values[0] == "execute-recovery":
+            result = _execute_recovery(
+                values[1:], repo_root=repo_root, env_file=env_file,
+                environment=environment, package_sources=package_sources,
+                host_factory=host_factory,
+            )
+            stdout.write(json.dumps(result.output, sort_keys=True, separators=(",", ":")) + "\n")
+            return result.code
         else:
             raise ValueError
         stdout.write(json.dumps(output, sort_keys=True, separators=(",", ":")) + "\n")
@@ -786,6 +798,154 @@ def _reconcile(arguments: tuple[str, ...]) -> dict[str, object]:
     ))
     summary["reconciled_task_count"] = reconciled
     return summary
+
+
+def _status_recovery(arguments: tuple[str, ...]) -> dict[str, object]:
+    options = _exact_options(
+        arguments, {"--plan-file", "--authorization-file", "--output-root"}
+    )
+    root = _operator_root(options["--output-root"])
+    plan_path = _absolute_path(options["--plan-file"])
+    if plan_path.parent != root:
+        raise ValueError
+    plan = _read_recovery_plan(plan_path)
+    authorization = _read_recovery_authorization(
+        _absolute_path(options["--authorization-file"]), plan=plan, output_root=root
+    )
+    if _file_sha256(root / _SOURCE_LOCK_FILENAME) != plan["source_lock_sha256"]:
+        raise ValueError
+    receipts = _operator_root(str(root / "receipts"))
+    chains = _read_recovery_receipts(receipts, plan=plan, authorization=authorization)
+    if not chains:
+        return _recovery_status_summary(plan, completed=0, status="prepared")
+    completed = 0
+    for task, receipt in zip(plan["tasks"], chains, strict=True):
+        if receipt["benchmark_status"] != "completed":
+            return _recovery_status_summary(plan, completed=completed, status="failed")
+        observation = _seal_completed_native_task(
+            output_root=root, plan=plan, task=task, run_id=str(receipt["run_id"])
+        )
+        if (
+            receipt["observation_status"] != "complete"
+            or receipt["observation_evidence_sha256"] != observation.evidence_sha256
+        ):
+            return _recovery_status_summary(plan, completed=completed, status="observation-invalid")
+        completed += 1
+    return _recovery_status_summary(plan, completed=completed, status="completed")
+
+
+def _execute_recovery(
+    arguments: tuple[str, ...], *, repo_root: Path, env_file: Path | None,
+    environment: Mapping[str, str] | None,
+    package_sources: Sequence[CapabilityPackageSource] | None,
+    host_factory: Callable[..., BenchmarkCommandHost] | None,
+) -> _CommandResult:
+    options = _exact_options(
+        arguments,
+        {"--plan-file", "--authorization-file", "--output-root", "--parent-plan-file", "--parent-output-root"},
+    )
+    root = _operator_root(options["--output-root"])
+    plan_path = _absolute_path(options["--plan-file"])
+    if plan_path.parent != root:
+        raise ValueError
+    plan = _read_recovery_plan(plan_path)
+    parent_root = _operator_root(options["--parent-output-root"])
+    parent_plan_path = _absolute_path(options["--parent-plan-file"])
+    if parent_plan_path.parent != parent_root:
+        raise ValueError
+    parent_plan = _read_plan(parent_plan_path)
+    if parent_plan["plan_sha256"] != plan["parent_plan_sha256"]:
+        raise ValueError
+    authorization = _read_recovery_authorization(
+        _absolute_path(options["--authorization-file"]), plan=plan, output_root=root
+    )
+    if _file_sha256(root / _SOURCE_LOCK_FILENAME) != plan["source_lock_sha256"]:
+        raise ValueError
+    receipts_root = _operator_root(str(root / "receipts"))
+    if any(receipts_root.iterdir()):
+        raise ValueError
+    base = load_operator_config(
+        repo_root, env_file=env_file, environment=environment, amount=Decimal("1")
+    )
+    inputs = base.benchmark_inputs
+    config = DciOperatorConfig(
+        repo_root=base.repo_root,
+        benchmark_inputs=DciBenchmarkOperatorInputs(
+            dataset_roots=inputs.dataset_roots,
+            corpus_roots=inputs.corpus_roots,
+            private_environment=inputs.private_environment,
+            coverage_registry_roots={
+                str(task["task_id"]): parent_root / str(task["registry_path"])
+                for task in plan["tasks"]
+            },
+            amount=Decimal("1"),
+        ),
+        host_service_options=base.host_service_options,
+    )
+    completed = 0
+    source_lock_path = root / _SOURCE_LOCK_FILENAME
+    for task in plan["tasks"]:
+        if type(task) is not dict:
+            raise ValueError
+        task_id = str(task["task_id"])
+        registry = validate_coverage_registry_root(
+            parent_root / str(task["registry_path"]),
+            corpus_dir=inputs.corpus_roots[task_id], expected_dataset_id=task_id,
+            expected_count=10,
+        )
+        if registry.sha256 != task["registry_sha256"]:
+            raise ValueError
+        instance = select_benchmark_instance(str(task["instance_selector"]))
+        host = _create_host(host_factory, instance=instance, config=config, package_sources=package_sources)
+        metadata = host.discover_metadata(application_ref=instance.application_ref, suite_ref=instance.suite_ref)
+        source_lock = host.resolve_source_lock(source_lock_path)
+        payloads = host.open_selected_payloads(metadata, source_lock)
+        resolved = host.resolve_application(payloads, application_ref=instance.application_ref, suite_ref=instance.suite_ref)
+        draft = host.create_plan(resolved, application_ref=instance.application_ref, suite_ref=instance.suite_ref, case_limit=10, execute=False, authorization=None, resume_run_id=None)
+        if getattr(draft, "case_limit", None) != 10:
+            raise ValueError
+        inner = host.authorize_execution(
+            application_ref=instance.application_ref, suite_ref=instance.suite_ref,
+            case_limit=10, evidence_root=root / "evidence" / task_id, resume_run_id=None,
+        )
+        execution = host.create_plan(resolved, application_ref=instance.application_ref, suite_ref=instance.suite_ref, case_limit=10, execute=True, authorization=inner, resume_run_id=None)
+        run_id = getattr(execution, "run_id", None)
+        if type(run_id) is not str or not run_id:
+            raise ValueError
+        try:
+            providers = host.load_selected_providers(payloads, inner)
+            result = host.run(execution, providers, evidence_root=root / "evidence" / task_id)
+            if not isinstance(result, BenchmarkRunResult):
+                raise ValueError
+            status = result.status
+            case_count = sum(item.case_count for item in result.tasks)
+            consumed, cost_evidence = _result_cost_evidence(
+                result, task_id=task_id, authorized_cost_microusd=1_000_000
+            )
+            observation = None
+            observation_status = "unavailable"
+            if status == "completed" and case_count == 10:
+                try:
+                    observation = _seal_completed_native_task(output_root=root, plan=plan, task=task, run_id=run_id)
+                    observation_status = "complete"
+                except Exception:
+                    observation_status = "invalid"
+            elif status == "completed":
+                status = "failed"
+        except BaseException:
+            status, case_count, consumed, cost_evidence = "failed", 10, 1_000_000, "upper-bound"
+            observation, observation_status = None, "unavailable"
+        _publish_recovery_receipt(
+            receipts_root, plan=plan, task=task, authorization=authorization,
+            run_id=run_id, status=status, case_count=case_count,
+            consumed_cost_microusd=consumed, cost_evidence=cost_evidence,
+            observation_status=observation_status,
+            observation_evidence_sha256=None if observation is None else observation.evidence_sha256,
+        )
+        if status != "completed" or observation_status != "complete":
+            return _CommandResult(1, _recovery_status_summary(plan, completed=completed, status="failed"))
+        completed += 1
+    return _CommandResult(0, _recovery_status_summary(plan, completed=completed, status="completed"))
 
 
 def read_completed_coverage_experiment(
@@ -1560,6 +1720,112 @@ def _publish_reconciliation(
     )
 
 
+def _publish_recovery_receipt(
+    root: Path, *, plan: Mapping[str, object], task: Mapping[str, object],
+    authorization: Mapping[str, object], run_id: str, status: str, case_count: int,
+    consumed_cost_microusd: int, cost_evidence: str, observation_status: str,
+    observation_evidence_sha256: str | None,
+) -> None:
+    task_id = task.get("task_id")
+    if (
+        type(task_id) is not str or _RUN_ID.fullmatch(run_id) is None
+        or status not in {"completed", "failed", "cancelled"}
+        or type(case_count) is not int or not 0 <= case_count <= 10
+        or (status == "completed") != (case_count == 10)
+        or observation_status not in {"complete", "invalid", "unavailable"}
+        or (observation_status == "complete") != _is_sha256(observation_evidence_sha256)
+        or (status != "completed" and observation_status != "unavailable")
+        or (status == "completed" and observation_status == "unavailable")
+        or type(consumed_cost_microusd) is not int or not 0 <= consumed_cost_microusd <= 1_000_000
+        or cost_evidence not in {"actual", "upper-bound"}
+        or (cost_evidence == "upper-bound" and consumed_cost_microusd != 1_000_000)
+    ):
+        raise ValueError
+    body: dict[str, object] = {
+        "schema": _RECOVERY_RECEIPT_SCHEMA,
+        "task_id": task_id,
+        "plan_sha256": plan["plan_sha256"],
+        "authorization_sha256": authorization["authorization_sha256"],
+        "run_id": run_id,
+        "benchmark_status": status,
+        "observation_status": observation_status,
+        "observation_evidence_sha256": observation_evidence_sha256,
+        "case_count": case_count,
+        "consumed_cost_microusd": consumed_cost_microusd,
+        "cost_evidence": cost_evidence,
+    }
+    body["receipt_sha256"] = _digest(body)
+    try:
+        index = ("bright.economics", "beir.scifact").index(task_id) + 1
+    except ValueError:
+        raise ValueError from None
+    name = f"receipt-{index}.json"
+    staging = _create_staging_root(root)
+    failed = False
+    try:
+        write_private_file(staging / name, _canonical_bytes(body))
+        _publish_staged_outputs(root, staging, (name,))
+    except BaseException:
+        failed = True
+    try:
+        _cleanup_staging(root, staging, (name,))
+    except BaseException:
+        failed = True
+    if failed:
+        raise ValueError
+
+
+def _read_recovery_receipts(
+    root: Path, *, plan: Mapping[str, object], authorization: Mapping[str, object]
+) -> tuple[dict[str, object], ...]:
+    _operator_root(str(root))
+    names = tuple(sorted(path.name for path in root.iterdir()))
+    if not names:
+        return ()
+    if names != ("receipt-1.json", "receipt-2.json"):
+        raise ValueError
+    tasks = plan.get("tasks")
+    if type(tasks) is not list or len(tasks) != 2:
+        raise ValueError
+    receipts: list[dict[str, object]] = []
+    fields = {
+        "schema", "task_id", "plan_sha256", "authorization_sha256", "run_id",
+        "benchmark_status", "observation_status", "observation_evidence_sha256",
+        "case_count", "consumed_cost_microusd", "cost_evidence", "receipt_sha256",
+    }
+    for index, task in enumerate(tasks, start=1):
+        if type(task) is not dict:
+            raise ValueError
+        value = _json_private(root / f"receipt-{index}.json")
+        if type(value) is not dict or set(value) != fields:
+            raise ValueError
+        digest = value.pop("receipt_sha256", None)
+        if (
+            value.get("schema") != _RECOVERY_RECEIPT_SCHEMA
+            or value.get("task_id") != task.get("task_id")
+            or value.get("plan_sha256") != plan.get("plan_sha256")
+            or value.get("authorization_sha256") != authorization.get("authorization_sha256")
+            or type(value.get("run_id")) is not str
+            or _RUN_ID.fullmatch(str(value.get("run_id"))) is None
+            or value.get("benchmark_status") not in {"completed", "failed", "cancelled"}
+            or value.get("observation_status") not in {"complete", "invalid", "unavailable"}
+            or (value.get("observation_status") == "complete") != _is_sha256(value.get("observation_evidence_sha256"))
+            or (value.get("benchmark_status") != "completed" and value.get("observation_status") != "unavailable")
+            or (value.get("benchmark_status") == "completed" and value.get("observation_status") == "unavailable")
+            or value.get("case_count") != 10
+            or type(value.get("consumed_cost_microusd")) is not int
+            or not 0 <= int(value["consumed_cost_microusd"]) <= 1_000_000
+            or value.get("cost_evidence") not in {"actual", "upper-bound"}
+            or (value.get("cost_evidence") == "upper-bound" and value.get("consumed_cost_microusd") != 1_000_000)
+            or not _is_sha256(digest)
+            or not hmac.compare_digest(str(digest), _digest(value))
+        ):
+            raise ValueError
+        value["receipt_sha256"] = digest
+        receipts.append(value)
+    return tuple(receipts)
+
+
 def _read_receipt_chain(
     root: Path,
     *,
@@ -1780,6 +2046,24 @@ def _status_summary(
     }
 
 
+def _recovery_status_summary(
+    plan: Mapping[str, object], *, completed: int, status: str
+) -> dict[str, object]:
+    if type(completed) is not int or not 0 <= completed <= 2 or status not in {
+        "prepared", "partial", "completed", "failed", "cancelled", "observation-invalid"
+    }:
+        raise ValueError
+    return {
+        "case_count": completed * 10,
+        "completed_task_count": completed,
+        "max_agent_operations": plan["max_agent_operations"],
+        "max_cost_microusd": plan["max_cost_microusd"],
+        "parent_plan_sha256": plan["parent_plan_sha256"],
+        "plan_sha256": plan["plan_sha256"],
+        "status": status,
+    }
+
+
 def _read_plan(path: Path) -> dict[str, object]:
     value = _json_private(path)
     required = {
@@ -1909,6 +2193,86 @@ def _read_authorization(
         or not _is_sha256(value.get("operator_approval_sha256"))
         or not _is_sha256(digest)
         or not hmac.compare_digest(digest, _digest(value))
+    ):
+        raise ValueError
+    value["authorization_sha256"] = digest
+    return value
+
+
+def _read_recovery_plan(path: Path) -> dict[str, object]:
+    value = _json_private(path)
+    fields = {
+        "schema", "parent_plan_sha256", "parent_authorization_sha256",
+        "completed_receipts", "source_lock_sha256", "max_agent_operations",
+        "max_cost_microusd", "max_infrastructure_failures", "execution_authorized",
+        "tasks", "plan_sha256",
+    }
+    if type(value) is not dict or set(value) != fields:
+        raise ValueError
+    digest = value.pop("plan_sha256", None)
+    tasks = value.get("tasks")
+    completed = value.get("completed_receipts")
+    if (
+        value.get("schema") != _RECOVERY_PLAN_SCHEMA
+        or not _is_sha256(value.get("parent_plan_sha256"))
+        or not _is_sha256(value.get("parent_authorization_sha256"))
+        or not _is_sha256(value.get("source_lock_sha256"))
+        or value.get("max_agent_operations") != 20
+        or value.get("max_cost_microusd") != 2_000_000
+        or value.get("max_infrastructure_failures") != 2
+        or value.get("execution_authorized") is not False
+        or type(tasks) is not list
+        or [task.get("task_id") if type(task) is dict else None for task in tasks]
+        != ["bright.economics", "beir.scifact"]
+        or any(
+            type(task) is not dict
+            or task.get("case_limit") != 10
+            or task.get("max_cost_microusd") != 1_000_000
+            or task.get("instance_selector") != f"dci.{task.get('task_id')}@1.0.0"
+            or task.get("registry_path") != f"coverage/{task.get('task_id')}/registry.json"
+            or not _is_sha256(task.get("registry_sha256"))
+            or not _is_sha256(task.get("selected_ids_sha256"))
+            for task in tasks
+        )
+        or type(completed) is not list
+        or len(completed) != 3
+        or any(
+            type(item) is not dict
+            or set(item) != {"task_id", "receipt_sha256"}
+            or not _is_sha256(item.get("receipt_sha256"))
+            for item in completed
+        )
+        or not _is_sha256(digest)
+        or not hmac.compare_digest(str(digest), _digest(value))
+    ):
+        raise ValueError
+    value["plan_sha256"] = digest
+    return value
+
+
+def _read_recovery_authorization(
+    path: Path, *, plan: Mapping[str, object], output_root: Path
+) -> dict[str, object]:
+    value = _json_private(path)
+    fields = {
+        "schema", "plan_sha256", "parent_plan_sha256", "operator_root_sha256",
+        "max_agent_operations", "max_cost_microusd", "execution_authorized",
+        "operator_approval_sha256", "authorization_sha256",
+    }
+    if type(value) is not dict or set(value) != fields:
+        raise ValueError
+    digest = value.pop("authorization_sha256", None)
+    if (
+        value.get("schema") != _RECOVERY_AUTHORIZATION_SCHEMA
+        or value.get("plan_sha256") != plan.get("plan_sha256")
+        or value.get("parent_plan_sha256") != plan.get("parent_plan_sha256")
+        or value.get("operator_root_sha256") != _operator_root_binding_sha256(output_root)
+        or value.get("max_agent_operations") != 20
+        or value.get("max_cost_microusd") != 2_000_000
+        or value.get("execution_authorized") is not True
+        or not _is_sha256(value.get("operator_approval_sha256"))
+        or not _is_sha256(digest)
+        or not hmac.compare_digest(str(digest), _digest(value))
     ):
         raise ValueError
     value["authorization_sha256"] = digest

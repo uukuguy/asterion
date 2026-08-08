@@ -219,6 +219,27 @@ def _write_authorization(root: Path, plan_path: Path) -> Path:
     return path
 
 
+def _write_recovery_authorization(root: Path, plan_path: Path) -> Path:
+    plan = json.loads(plan_path.read_bytes())
+    body = {
+        "schema": "asterion.dci.pathlight.coverage-recovery-authorization/v1",
+        "plan_sha256": plan["plan_sha256"],
+        "parent_plan_sha256": plan["parent_plan_sha256"],
+        "operator_root_sha256": experiment_cli._operator_root_binding_sha256(
+            plan_path.parent
+        ),
+        "max_agent_operations": 20,
+        "max_cost_microusd": 2_000_000,
+        "execution_authorized": True,
+        "operator_approval_sha256": hashlib.sha256(b"recovery approval").hexdigest(),
+    }
+    body["authorization_sha256"] = hashlib.sha256(_canonical_bytes(body)).hexdigest()
+    path = root / "recovery-authorization.json"
+    path.write_bytes(_canonical_bytes(body))
+    path.chmod(0o600)
+    return path
+
+
 class _RecordingHost:
     def __init__(
         self,
@@ -306,7 +327,7 @@ class _RecordingHost:
 
 
 def _host_factory(
-    events: list[str], outcomes: dict[str, list[str]]
+    events: list[str], outcomes: dict[str, list[str]], *, expected_coverage_tasks: set[str] | None = None
 ) -> Callable[..., BenchmarkCommandHost]:
     def create(
         *,
@@ -316,7 +337,9 @@ def _host_factory(
     ) -> BenchmarkCommandHost:
         task_id = instance.task_ids[0]
         inputs = operator_config.benchmark_inputs
-        if set(inputs.coverage_registry_roots) != set(_TASK_IDS):
+        if set(inputs.coverage_registry_roots) != (
+            set(_TASK_IDS) if expected_coverage_tasks is None else expected_coverage_tasks
+        ):
             raise AssertionError("coverage registries were not bound")
         amount = inputs.amount
         if amount is None or not Decimal("0") < amount <= Decimal("1"):
@@ -395,6 +418,100 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
                 ["bright.economics", "beir.scifact"],
             )
             self.assertEqual(len(retry["completed_receipts"]), 3)
+
+    def test_recovery_status_requires_exact_bound_authorization(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            parent_plan, parent_root, _proposal = _prepare(root)
+            parent_authorization = _write_authorization(root, parent_plan)
+            main(
+                [
+                    "pathlight", "experiment", "execute",
+                    "--plan-file", str(parent_plan),
+                    "--authorization-file", str(parent_authorization),
+                    "--output-root", str(parent_root),
+                ],
+                repo_root=root,
+                environment=_execution_environment(root),
+                experiment_host_factory=_host_factory(
+                    [], {"bright.economics": ["failed"], "beir.scifact": ["failed"]}
+                ),
+                stdout=io.StringIO(), stderr=io.StringIO(),
+            )
+            recovery_root = root / "recovery"
+            recovery_root.mkdir(mode=0o700)
+            self.assertEqual(
+                main(
+                    [
+                        "pathlight", "experiment", "prepare-recovery",
+                        "--parent-plan-file", str(parent_plan),
+                        "--parent-authorization-file", str(parent_authorization),
+                        "--parent-output-root", str(parent_root),
+                        "--output-root", str(recovery_root),
+                    ],
+                    repo_root=root, environment={}, stdout=io.StringIO(), stderr=io.StringIO(),
+                ),
+                0,
+            )
+            recovery_plan = recovery_root / "pathlight-coverage-recovery.json"
+            authorization = _write_recovery_authorization(root, recovery_plan)
+            stdout = io.StringIO()
+            self.assertEqual(
+                main(
+                    [
+                        "pathlight", "experiment", "status-recovery",
+                        "--plan-file", str(recovery_plan),
+                        "--authorization-file", str(authorization),
+                        "--output-root", str(recovery_root),
+                    ],
+                    repo_root=root, environment={}, stdout=stdout, stderr=io.StringIO(),
+                ),
+                0,
+            )
+            self.assertEqual(json.loads(stdout.getvalue())["status"], "prepared")
+            self.assertEqual(json.loads(stdout.getvalue())["case_count"], 0)
+
+    def test_execute_recovery_runs_only_the_two_failed_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            parent_plan, parent_root, _proposal = _prepare(root)
+            parent_authorization = _write_authorization(root, parent_plan)
+            main(
+                ["pathlight", "experiment", "execute", "--plan-file", str(parent_plan), "--authorization-file", str(parent_authorization), "--output-root", str(parent_root)],
+                repo_root=root, environment=_execution_environment(root),
+                experiment_host_factory=_host_factory([], {"bright.economics": ["failed"], "beir.scifact": ["failed"]}),
+                stdout=io.StringIO(), stderr=io.StringIO(),
+            )
+            recovery_root = root / "recovery"
+            recovery_root.mkdir(mode=0o700)
+            self.assertEqual(main(
+                ["pathlight", "experiment", "prepare-recovery", "--parent-plan-file", str(parent_plan), "--parent-authorization-file", str(parent_authorization), "--parent-output-root", str(parent_root), "--output-root", str(recovery_root)],
+                repo_root=root, environment={}, stdout=io.StringIO(), stderr=io.StringIO(),
+            ), 0)
+            authorization = _write_recovery_authorization(
+                root, recovery_root / "pathlight-coverage-recovery.json"
+            )
+            events: list[str] = []
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            self.assertEqual(main(
+                ["pathlight", "experiment", "execute-recovery", "--plan-file", str(recovery_root / "pathlight-coverage-recovery.json"), "--authorization-file", str(authorization), "--output-root", str(recovery_root), "--parent-plan-file", str(parent_plan), "--parent-output-root", str(parent_root)],
+                repo_root=root, environment=_execution_environment(root),
+                experiment_host_factory=_host_factory(
+                    events, {}, expected_coverage_tasks={"bright.economics", "beir.scifact"}
+                ), stdout=stdout, stderr=stderr,
+            ), 0, stderr.getvalue())
+            self.assertEqual(
+                [event.removeprefix("run:") for event in events if event.startswith("run:")],
+                ["bright.economics", "beir.scifact"],
+            )
+            self.assertEqual(json.loads(stdout.getvalue())["status"], "completed")
+            status_stdout = io.StringIO()
+            self.assertEqual(main(
+                ["pathlight", "experiment", "status-recovery", "--plan-file", str(recovery_root / "pathlight-coverage-recovery.json"), "--authorization-file", str(authorization), "--output-root", str(recovery_root)],
+                repo_root=root, environment={}, stdout=status_stdout, stderr=io.StringIO(),
+            ), 0)
+            self.assertEqual(json.loads(status_stdout.getvalue())["status"], "completed")
 
     def test_execute_does_not_publish_completed_receipt_without_native_seal(self) -> None:
         self._native_seal_patch.stop()
