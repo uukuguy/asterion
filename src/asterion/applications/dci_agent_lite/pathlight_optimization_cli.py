@@ -639,10 +639,15 @@ def _validate_execution_tree(root: Path, plan: Mapping[str, object], config: Dci
         selection = _selection(raw_selection)
         source = _read_source(Path(config.benchmark_inputs.dataset_roots[dataset]))
         rows = load_bright_benchmark_rows_bytes(source)
-        selected = tuple(sorted(_recovery_digest("query-id", row.query_id) for row in rows))[:10]
+        # The prepared selection is sealed into the plan and may deliberately
+        # come from the preceding coverage experiment instead of the lexical
+        # first ten source rows.  Execution must re-check source identity and
+        # membership, but must not silently replace that selected cohort with
+        # a different default cohort.
+        available = frozenset(_recovery_digest("query-id", row.query_id) for row in rows)
         if (
             hashlib.sha256(source).hexdigest() != selection["dataset_source_sha256"]
-            or list(selected) != selection["selected_case_sha256s"]
+            or any(case not in available for case in selection["selected_case_sha256s"])
         ):
             raise ValueError
 
