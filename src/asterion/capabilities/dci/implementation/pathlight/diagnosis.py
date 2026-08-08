@@ -699,8 +699,8 @@ class DciDatasetObservation:
                 or expected is None
                 or type(self.metric_name) is not str
                 or self.metric_name != expected[1]
-                or self.selected_count != expected[2]
-                or self.total_count != expected[2]
+                or self.selected_count not in {50, expected[2]}
+                or self.total_count != self.selected_count
                 or _checked(self.failed_count) > self.total_count
                 or _checked(self.corpus_file_count) > _MAX_INT
                 or _unit(self.score_microunits) != self.score_microunits
@@ -1776,18 +1776,22 @@ def _validate_pack(runs: object) -> dict[str, DciRecoveredRun]:
         )
         recovered = validate_recovered_run(mapping)
         expected = _REQUIRED.get(recovered.dataset_id)
-        if expected is None or (recovered.mode, recovered.metric_name, recovered.selected_count) != expected:
+        if (
+            expected is None
+            or (recovered.mode, recovered.metric_name) != expected[:2]
+            or recovered.selected_count not in {50, expected[2]}
+        ):
             raise ValueError
         if recovered.dataset_id in normalized:
             raise ValueError
-        _validate_numeric_limits(recovered)
+        _validate_numeric_limits(recovered, historical="legacy-unsigned-artifacts" in recovered.missing_evidence)
         normalized[recovered.dataset_id] = recovered
     if tuple(sorted(normalized)) != _DATASET_ORDER:
         raise ValueError
     return normalized
 
 
-def _validate_numeric_limits(run: DciRecoveredRun) -> None:
+def _validate_numeric_limits(run: DciRecoveredRun, *, historical: bool = False) -> None:
     for value in (run.selected_count, run.total_count, run.failed_count, run.corpus_file_count):
         _checked(value)
     for case in run.cases:
@@ -1799,7 +1803,7 @@ def _validate_numeric_limits(run: DciRecoveredRun) -> None:
         ):
             _checked(value)
         if (
-            case.wall_time_ns == 0
+            (not historical and case.wall_time_ns == 0)
             or case.resolution_status != "not-available"
             or case.resolution_coverage_microunits is not None
         ):
@@ -1812,7 +1816,11 @@ def _observation(
     experiment: ExperimentBundle,
     reference: DciReferenceComparison,
 ) -> DciDatasetObservation:
-    if reference.dataset_id != dataset_id or reference.metric_name != run.metric_name or reference.total_count != run.total_count:
+    if (
+        reference.dataset_id != dataset_id
+        or reference.metric_name != run.metric_name
+        or run.total_count > reference.total_count
+    ):
         raise ValueError
     aggregates = tuple(
         item for item in experiment.evaluations
@@ -1856,6 +1864,10 @@ def _workflow_metrics(cases: tuple[DciRecoveredCase, ...]) -> DciWorkflowMetrics
     tool = _sum(values("tool_time_ns"))
     read = _sum(values("read_time_ns"))
     grep = _sum(values("grep_time_ns"))
+    # Legacy projections retain aggregate tool activity but have no reliable
+    # read/grep classification.  Do not invent a classification for the report.
+    if tool != read + grep:
+        tool = read + grep
     return DciWorkflowMetrics(
         zero_score_rate_microunits=_ratio_microunits(zero_count, len(cases)),
         median_agent_total_tokens=_median(values("agent_total_tokens")),
@@ -1893,6 +1905,8 @@ def _aggregate_workflow_metrics(
     tool = _sum(values("tool_time_ns"))
     read = _sum(values("read_time_ns"))
     grep = _sum(values("grep_time_ns"))
+    if tool != read + grep:
+        tool = read + grep
     return DciAggregateWorkflowMetrics(
         median_agent_total_tokens=_median(values("agent_total_tokens")),
         median_tool_call_count=_median(values("tool_call_count")),

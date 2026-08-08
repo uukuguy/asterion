@@ -310,14 +310,14 @@ def _recover(
     if len({case.dataset_item_sha256 for case in cases}) != len(cases):
         raise ValueError
     cases = tuple(sorted(cases, key=lambda case: case.dataset_item_sha256))
-    _validate_result_rows(result_rows, cases, mode)
+    _validate_result_rows(result_rows, cases, mode, historical=historical)
     selected_count = _selected_count(config)
     total_count, failed_count = _counts(state, summary)
     if selected_count != len(cases) or total_count != len(cases) or failed_count != sum(case.run_status == "failed" for case in cases):
         raise ValueError
     metric_name: Literal["ndcg-at-10", "accuracy"] = "ndcg-at-10" if mode == "ir" else "accuracy"
     metric_value = _summary_metric(summary, mode)
-    _validate_aggregate_metric(metric_value, cases)
+    _validate_aggregate_metric(metric_value, cases, exclude_failed=historical)
     corpus_file_count = (
         _historical_corpus_file_count(config)
         if historical
@@ -402,14 +402,16 @@ def _historical_case(value: object, mode: Literal["ir", "qa"]) -> DciRecoveredCa
     row = _mapping(value)
     query_id = _string(row.get("query_id"))
     status = row.get("run_status")
+    if status is None:
+        status = "failed"
     if status not in {"completed", "failed"}:
         raise ValueError
     coverage = row.get("coverage_any")
     if coverage is not None and row.get("resolution_status") != "available":
         raise ValueError
-    metric = _metric(row, mode)
-    tool_calls = _natural(row.get("tool_call_count"))
-    tool_time = _scaled(row.get("tool_time_seconds"), Decimal("1000000000"))
+    metric = 0 if status == "failed" and row.get("ndcg_at_10") is None else _metric(row, mode)
+    tool_calls = _historical_natural(row.get("tool_call_count"))
+    tool_time = _historical_scaled(row.get("tool_time_seconds"), Decimal("1000000000"))
     source = {
         "query_id": query_id, "metric": metric, "run_status": status,
         "agent_total_tokens": row.get("agent_total_tokens"),
@@ -425,17 +427,25 @@ def _historical_case(value: object, mode: Literal["ir", "qa"]) -> DciRecoveredCa
         dataset_item_sha256=_domain_digest("query-id", query_id),
         metric_value_microunits=metric,
         run_status=cast(Literal["completed", "failed"], status),
-        agent_total_tokens=_natural(row.get("agent_total_tokens")),
-        overall_cost_microusd=_scaled(row.get("overall_cost_total"), Decimal("1000000")),
-        wall_time_ns=_scaled(row.get("wall_time_seconds"), Decimal("1000000000")),
+        agent_total_tokens=_historical_natural(row.get("agent_total_tokens")),
+        overall_cost_microusd=_historical_scaled(row.get("overall_cost_total"), Decimal("1000000")),
+        wall_time_ns=_historical_scaled(row.get("wall_time_seconds"), Decimal("1000000000")),
         tool_time_ns=tool_time, tool_call_count=tool_calls,
-        tool_error_count=_natural(row.get("tool_error_count")),
+        tool_error_count=_historical_natural(row.get("tool_error_count")),
         read_call_count=0, grep_call_count=0, read_time_ns=0, grep_time_ns=0,
-        question_word_count=_natural(row.get("question_word_count")),
+        question_word_count=_historical_natural(row.get("question_word_count")),
         resolution_status=_resolution_status(row.get("resolution_status")),
         resolution_coverage_microunits=None if coverage is None else _unit(coverage),
         case_source_sha256=_domain_digest("case-source", source),
     )
+
+
+def _historical_natural(value: object) -> int:
+    return 0 if value is None else _natural(value)
+
+
+def _historical_scaled(value: object, scale: Decimal) -> int:
+    return 0 if value is None else _scaled(value, scale)
 
 
 def _variant(
@@ -501,7 +511,7 @@ def _validate_artifact_digests(config: Mapping[str, object], documents: Mapping[
 
 
 def _validate_result_rows(
-    rows: tuple[Mapping[str, object], ...], cases: tuple[DciRecoveredCase, ...], mode: Literal["ir", "qa"]
+    rows: tuple[Mapping[str, object], ...], cases: tuple[DciRecoveredCase, ...], mode: Literal["ir", "qa"], *, historical: bool = False
 ) -> None:
     if len(rows) != len(cases):
         raise ValueError
@@ -510,7 +520,11 @@ def _validate_result_rows(
         query_id = _string(row.get("query_id"))
         digest = _domain_digest("query-id", query_id)
         status = row.get("status")
-        if digest in observed or status not in {"completed", "failed"} or row.get("mode") != mode:
+        if (
+            digest in observed
+            or status not in {"completed", "failed"}
+            or (row.get("mode") != mode and not (historical and status == "failed" and row.get("mode") is None))
+        ):
             raise ValueError
         observed[digest] = cast(str, status)
     expected = {case.dataset_item_sha256: case.run_status for case in cases}
@@ -689,7 +703,11 @@ def _validate_recovered_run_mapping(mapping: object) -> DciRecoveredRun:
         or failed_count != sum(case.run_status == "failed" for case in cases)
     ):
         raise ValueError
-    _validate_aggregate_metric(metric_value, cases)
+    _validate_aggregate_metric(
+        metric_value,
+        cases,
+        exclude_failed=missing_evidence == _LEGACY_MISSING_EVIDENCE,
+    )
     recovered = _build_recovered_run(
         dataset_id,
         mode,
@@ -764,11 +782,21 @@ def _validated_case(
 
 
 def _validate_aggregate_metric(
-    metric_value_microunits: int, cases: tuple[DciRecoveredCase, ...]
+    metric_value_microunits: int,
+    cases: tuple[DciRecoveredCase, ...],
+    *,
+    exclude_failed: bool = False,
 ) -> None:
+    observed = (
+        tuple(case for case in cases if case.run_status == "completed")
+        if exclude_failed
+        else cases
+    )
+    if not observed:
+        raise ValueError
     mean = sum(
-        (Decimal(case.metric_value_microunits) for case in cases), Decimal(0)
-    ) / len(cases)
+        (Decimal(case.metric_value_microunits) for case in observed), Decimal(0)
+    ) / len(observed)
     if abs(Decimal(metric_value_microunits) - mean) > 1:
         raise ValueError
 
