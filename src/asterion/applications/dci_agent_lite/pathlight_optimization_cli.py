@@ -1137,16 +1137,19 @@ def _receipt_int(receipt: Mapping[str, object], name: str) -> int:
 def _finalize(arguments: tuple[str, ...]) -> dict[str, object]:
     """Re-read native evidence and publish one provider-free finalization."""
 
-    options = _exact_options(
+    options = _optional_options(
         arguments,
-        {"--plan-file", "--authorization-file", "--diagnosis-file", "--output-root"},
+        required={"--plan-file", "--diagnosis-file", "--output-root"},
+        optional={"--authorization-file"},
     )
     plan_path = _absolute_path(options["--plan-file"])
     output_root = _operator_root(options["--output-root"])
     if plan_path.parent != output_root:
         raise ValueError
     plan = _read_plan(plan_path)
-    authorization = _read_authorization(_absolute_path(options["--authorization-file"]), plan=plan)
+    authorization = _execution_authorization(
+        options, plan=plan, output_root=output_root, environment=None
+    )
     _validate_execution_root(output_root, plan)
     receipts = _read_receipt_chain(
         output_root / "receipts", plan=plan,
