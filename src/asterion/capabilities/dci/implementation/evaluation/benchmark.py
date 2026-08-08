@@ -503,12 +503,13 @@ async def run_benchmark_async(
         _publish_batch_state(lock, "completed", results)
         return BenchmarkResult(output_root=output_root, counts=counts)
     except asyncio.CancelledError:
-        _cancel_request_authorization(request)
         if not batch_started:
+            _cancel_request_authorization(request)
             raise
         for task in tasks:
             task.cancel()
         await _drain_tasks(tasks)
+        _cancel_request_authorization(request)
         results.update(_drained_task_results(tasks))
         results = _terminal_results(
             lock,
@@ -529,8 +530,8 @@ async def run_benchmark_async(
         _publish_batch_state(lock, "cancelled", results)
         raise
     except BaseException as error:
-        _cancel_request_authorization(request)
         if not batch_started:
+            _cancel_request_authorization(request)
             raise
         lock.write_json(
             "batch-error.json",
@@ -543,6 +544,7 @@ async def run_benchmark_async(
         for task in tasks:
             task.cancel()
         await _drain_tasks(tasks)
+        _cancel_request_authorization(request)
         results.update(_drained_task_results(tasks))
         results = _terminal_results(
             lock,
