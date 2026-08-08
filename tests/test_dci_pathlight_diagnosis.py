@@ -15,6 +15,7 @@ from asterion.capabilities.dci.implementation.pathlight.diagnosis import (
     DciAggregateWorkflowMetrics,
     DciCoverageDatasetObservation,
     DciCoverageExperimentObservation,
+    DciCoverageRecoveryAggregate,
     DciDatasetObservation,
     DciDiagnosisError,
     DciDiagnosisReport,
@@ -179,6 +180,21 @@ class _HostileFinding(Finding):
 
 
 class TestDciPathlightDiagnosis(unittest.TestCase):
+    def test_recovery_aggregate_keeps_attempt_history_separate_from_valid_coverage(self) -> None:
+        coverage = _coverage_pack()
+        aggregate = DciCoverageRecoveryAggregate(
+            coverage=coverage,
+            parent_plan_sha256=_sha256("parent"),
+            recovery_plan_sha256=_sha256("recovery"),
+            attempted_agent_operation_count=60,
+            actual_cost_microusd=5_106_161,
+            infrastructure_failure_count=2,
+            ledger_sha256=_sha256("ledger"),
+        )
+        self.assertTrue(aggregate.coverage.complete)
+        self.assertEqual(aggregate.attempted_agent_operation_count, 60)
+        self.assertEqual(aggregate.infrastructure_failure_count, 2)
+
     def setUp(self) -> None:
         self.six_runs = tuple(_run(*dataset) for dataset in _DATASETS)
 

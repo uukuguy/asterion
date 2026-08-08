@@ -384,6 +384,65 @@ def _copy_coverage_experiment(
     return copied
 
 
+@dataclass(frozen=True, slots=True)
+class DciCoverageRecoveryAggregate:
+    """Bind valid coverage observations to their complete recovery ledger.
+
+    ``coverage`` deliberately contains only the five validated 10-query
+    observations.  Attempt and cost fields retain every failed or superseded
+    execution, so a recovered 50/50 result can never conceal its history.
+    """
+
+    coverage: DciCoverageExperimentObservation
+    parent_plan_sha256: str
+    recovery_plan_sha256: str
+    attempted_agent_operation_count: int
+    actual_cost_microusd: int
+    infrastructure_failure_count: int
+    ledger_sha256: str
+    aggregate_sha256: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        try:
+            coverage = _copy_coverage_experiment(self.coverage)
+            if (
+                type(self) is not DciCoverageRecoveryAggregate
+                or not coverage.complete
+                or any(
+                    _sha256(value) != value
+                    for value in (
+                        self.parent_plan_sha256,
+                        self.recovery_plan_sha256,
+                        self.ledger_sha256,
+                    )
+                )
+                or _checked(self.attempted_agent_operation_count)
+                < coverage.agent_operation_count
+                or _checked(self.actual_cost_microusd) < coverage.consumed_cost_microusd
+                or _checked(self.infrastructure_failure_count) < 0
+            ):
+                raise ValueError
+            object.__setattr__(self, "coverage", coverage)
+            object.__setattr__(
+                self,
+                "aggregate_sha256",
+                _digest(
+                    "coverage-recovery-aggregate",
+                    {
+                        "coverage": coverage.to_mapping(),
+                        "parent_plan_sha256": self.parent_plan_sha256,
+                        "recovery_plan_sha256": self.recovery_plan_sha256,
+                        "attempted_agent_operation_count": self.attempted_agent_operation_count,
+                        "actual_cost_microusd": self.actual_cost_microusd,
+                        "infrastructure_failure_count": self.infrastructure_failure_count,
+                        "ledger_sha256": self.ledger_sha256,
+                    },
+                ),
+            )
+        except Exception:
+            raise ValueError("invalid DCI coverage recovery aggregate") from None
+
+
 def coverage_evaluation_values(
     coverage: DciCoverageExperimentObservation,
 ) -> tuple[MetricContract, tuple[EvaluationRecord, ...]]:
