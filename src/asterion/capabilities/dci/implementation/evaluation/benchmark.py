@@ -1658,8 +1658,12 @@ def _prepare(
         dataset_id = coverage_dataset_id
     else:
         dataset_id = (
-            resolve_paper_experiment_scope(selected_scope).dataset_id
-            if selected_scope is not None
+            # A bounded, authorized selection is intentionally a strict
+            # subset of the paper scope, so it cannot rediscover that scope
+            # from its selected rows alone.  Its already-validated authority
+            # is the canonical dataset identity for the native result.
+            resolve_paper_experiment_scope(authorized_scope).dataset_id
+            if authorized_scope is not None
             else "dataset.local"
         )
     config["dataset"] = {
