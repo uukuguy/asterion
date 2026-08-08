@@ -547,6 +547,11 @@ def _execute(
     for task, host, payloads, resolved, _draft in prepared:
         instance = select_benchmark_instance(str(task["instance_selector"]))
         evidence_root = output_root / str(task["evidence_path"])
+        # Planning can create a native run manifest before a provider is
+        # loaded.  A later retry must preserve that incomplete evidence and
+        # continue, rather than treating its own recoverable residue as a
+        # permanent execution blocker.
+        _quarantine_unknown_evidence(output_root, evidence_root, str(task["task_id"]))
         _fresh_evidence_root(evidence_root)
         authorization_claim = host.authorize_execution(
             application_ref=instance.application_ref, suite_ref=instance.suite_ref,
