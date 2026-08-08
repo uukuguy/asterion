@@ -366,6 +366,74 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
         self._native_seal_patch.start()
         self.addCleanup(self._native_seal_patch.stop)
 
+    def test_development_status_accepts_omitted_authorization_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            plan, output, _proposal = _prepare(root)
+            stdout = io.StringIO()
+            self.assertEqual(
+                main(
+                    [
+                        "pathlight", "experiment", "status",
+                        "--plan-file", str(plan),
+                        "--output-root", str(output),
+                    ],
+                    repo_root=root,
+                    environment=_execution_environment(root),
+                    stdout=stdout,
+                    stderr=io.StringIO(),
+                ),
+                0,
+            )
+            self.assertEqual(json.loads(stdout.getvalue())["status"], "prepared")
+
+    def test_development_execute_accepts_omitted_authorization_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            plan, output, _proposal = _prepare(root)
+            events: list[str] = []
+            self.assertEqual(
+                main(
+                    [
+                        "pathlight", "experiment", "execute",
+                        "--plan-file", str(plan),
+                        "--output-root", str(output),
+                    ],
+                    repo_root=root,
+                    environment=_execution_environment(root),
+                    experiment_host_factory=_host_factory(events, {}),
+                    stdout=io.StringIO(),
+                    stderr=io.StringIO(),
+                ),
+                0,
+            )
+            self.assertEqual(len([event for event in events if event.startswith("run:")]), 5)
+
+    def test_production_execute_rejects_omitted_authorization_before_host(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            plan, output, _proposal = _prepare(root)
+            events: list[str] = []
+            self.assertEqual(
+                main(
+                    [
+                        "pathlight", "experiment", "execute",
+                        "--plan-file", str(plan),
+                        "--output-root", str(output),
+                    ],
+                    repo_root=root,
+                    environment={
+                        **_execution_environment(root),
+                        "ASTERION_DCI_REQUIRE_EXECUTION_AUTHORIZATION": "1",
+                    },
+                    experiment_host_factory=_host_factory(events, {}),
+                    stdout=io.StringIO(),
+                    stderr=io.StringIO(),
+                ),
+                2,
+            )
+            self.assertEqual(events, [])
+
     def test_prepare_recovery_selects_only_failed_tasks_and_binds_completed_receipts(
         self,
     ) -> None:

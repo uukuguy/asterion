@@ -150,7 +150,7 @@ def main(
             )
             return result.code
         elif values[0] == "status":
-            output = _status(values[1:])
+            output = _status(values[1:], environment=environment)
         elif values[0] == "reconcile":
             output = _reconcile(values[1:])
         elif values[0] == "status-recovery":
@@ -412,15 +412,17 @@ def _execute(
     package_sources: Sequence[CapabilityPackageSource] | None,
     host_factory: Callable[..., BenchmarkCommandHost] | None,
 ) -> _CommandResult:
-    options = _exact_options(
-        arguments, {"--plan-file", "--authorization-file", "--output-root"}
+    options = _optional_options(
+        arguments,
+        required={"--plan-file", "--output-root"},
+        optional={"--authorization-file"},
     )
     plan = _read_plan(_absolute_path(options["--plan-file"]))
     output_root = _operator_root(options["--output-root"])
     if _absolute_path(options["--plan-file"]).parent != output_root:
         raise ValueError
-    authorization = _read_authorization(
-        _absolute_path(options["--authorization-file"]), plan=plan, output_root=output_root
+    authorization = _execution_authorization(
+        options, plan=plan, output_root=output_root, environment=environment
     )
     source_lock_path = output_root / str(plan["source_lock_path"])
     if _file_sha256(source_lock_path) != plan["source_lock_sha256"]:
@@ -668,16 +670,20 @@ def _execute(
     )
 
 
-def _status(arguments: tuple[str, ...]) -> dict[str, object]:
-    options = _exact_options(
-        arguments, {"--plan-file", "--authorization-file", "--output-root"}
+def _status(
+    arguments: tuple[str, ...], *, environment: Mapping[str, str] | None = None
+) -> dict[str, object]:
+    options = _optional_options(
+        arguments,
+        required={"--plan-file", "--output-root"},
+        optional={"--authorization-file"},
     )
     plan_path = _absolute_path(options["--plan-file"])
     if plan_path.parent != _operator_root(options["--output-root"]):
         raise ValueError
     plan = _read_plan(plan_path)
-    authorization = _read_authorization(
-        _absolute_path(options["--authorization-file"]), plan=plan, output_root=plan_path.parent
+    authorization = _execution_authorization(
+        options, plan=plan, output_root=plan_path.parent, environment=environment
     )
     tasks = plan["tasks"]
     if type(tasks) is not list:
@@ -2326,6 +2332,48 @@ def _exact_options(arguments: tuple[str, ...], names: set[str]) -> dict[str, str
     if set(values) != names:
         raise ValueError
     return values
+
+
+def _optional_options(
+    arguments: tuple[str, ...], *, required: set[str], optional: set[str]
+) -> dict[str, str]:
+    if len(arguments) % 2:
+        raise ValueError
+    values: dict[str, str] = {}
+    allowed = required | optional
+    for index in range(0, len(arguments), 2):
+        name, value = arguments[index : index + 2]
+        if name not in allowed or name in values or not value:
+            raise ValueError
+        values[name] = value
+    if not required <= set(values):
+        raise ValueError
+    return values
+
+
+def _authorization_required(environment: Mapping[str, str] | None) -> bool:
+    source = os.environ if environment is None else environment
+    return source.get("ASTERION_DCI_REQUIRE_EXECUTION_AUTHORIZATION", "") == "1"
+
+
+def _execution_authorization(
+    options: Mapping[str, str], *, plan: Mapping[str, object], output_root: Path,
+    environment: Mapping[str, str] | None,
+) -> dict[str, object]:
+    path = options.get("--authorization-file")
+    if path is not None:
+        return _read_authorization(_absolute_path(path), plan=plan, output_root=output_root)
+    if _authorization_required(environment):
+        raise ValueError
+    return {
+        "authorization_sha256": _domain_digest(
+            "development-authorization",
+            {
+                "plan_sha256": plan["plan_sha256"],
+                "operator_root_sha256": _operator_root_binding_sha256(output_root),
+            },
+        )
+    }
 
 
 def _absolute_path(value: str) -> Path:
