@@ -1430,15 +1430,15 @@ def _execution_authorization(
     if source.get("ASTERION_DCI_REQUIRE_EXECUTION_AUTHORIZATION", "") == "1":
         raise ValueError
     metadata = os.stat(output_root, follow_symlinks=False)
+    development = {
+        "development": True,
+        "plan_sha256": plan["plan_sha256"],
+        "device": metadata.st_dev,
+        "inode": metadata.st_ino,
+    }
     return {
-        "authorization_sha256": _digest(
-            {
-                "development": True,
-                "plan_sha256": plan["plan_sha256"],
-                "device": metadata.st_dev,
-                "inode": metadata.st_ino,
-            }
-        )
+        "authorization_sha256": _digest(development),
+        "operator_approval_sha256": _digest({"development-approval": development}),
     }
 
 
