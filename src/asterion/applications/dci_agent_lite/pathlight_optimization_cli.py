@@ -16,6 +16,7 @@ import re
 import stat
 import time
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import contextmanager
 from decimal import Decimal
 from pathlib import Path
 from typing import TextIO, cast
@@ -103,6 +104,7 @@ _DATASETS = (
 _ROLES = ("baseline", "candidate")
 _RECEIPT_NAME = re.compile(r"^receipt-[1-8]-0000\.json$")
 _RUN_ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
+_EXECUTION_LEASE_NAME = ".pathlight-bright-optimization.execution.lock"
 
 
 def main(
@@ -459,6 +461,34 @@ def _execute(
     package_sources: Sequence[object] | None,
     host_factory: Callable[..., object] | None,
 ) -> tuple[int, dict[str, object]]:
+    """Run one execution coordinator while exclusively owning its plan root."""
+
+    options = _optional_options(
+        arguments,
+        required={"--plan-file", "--output-root"},
+        optional={"--authorization-file"},
+    )
+    output_root = _operator_root(options["--output-root"])
+    with _execution_lease(output_root):
+        return _execute_unlocked(
+            arguments,
+            repo_root=repo_root,
+            env_file=env_file,
+            environment=environment,
+            package_sources=package_sources,
+            host_factory=host_factory,
+        )
+
+
+def _execute_unlocked(
+    arguments: tuple[str, ...],
+    *,
+    repo_root: Path,
+    env_file: Path | None,
+    environment: Mapping[str, str] | None,
+    package_sources: Sequence[object] | None,
+    host_factory: Callable[..., object] | None,
+) -> tuple[int, dict[str, object]]:
     """Preflight the complete immutable tree, then execute one foreground pass.
 
     The intentionally two-phase structure means a malformed later task can
@@ -615,6 +645,34 @@ def _execute(
 
 
 _INFRASTRUCTURE_FAILURES = frozenset({"authorization", "network", "rate-limit", "timeout", "host-service"})
+
+
+@contextmanager
+def _execution_lease(root: Path):
+    """Make a plan root single-writer without persisting execution authority."""
+
+    import fcntl
+
+    path = root / _EXECUTION_LEASE_NAME
+    descriptor = os.open(
+        path,
+        os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
+        0o600,
+    )
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077:
+            raise ValueError
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ValueError from None
+        yield
+    finally:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        finally:
+            os.close(descriptor)
 
 
 def _validate_execution_root(root: Path, plan: Mapping[str, object]) -> None:

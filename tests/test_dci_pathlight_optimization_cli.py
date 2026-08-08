@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import fcntl
 import io
 import json
 import os
@@ -790,6 +791,22 @@ def _finalize_real_native(
 
 
 class TestExecute(unittest.TestCase):
+    def test_execute_rejects_a_concurrent_coordinator_before_host_creation(self) -> None:
+        fixture = _OptimizationFixture()
+        self.addCleanup(fixture.close)
+        self.assertEqual(fixture.prepare()[0], 0)
+        lease = fixture.output / ".pathlight-bright-optimization.execution.lock"
+        descriptor = os.open(lease, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            events: list[str] = []
+            code, _output, events = _execute_optimization(fixture, events=events)
+            self.assertEqual(code, 2)
+            self.assertEqual(events, [])
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+            os.close(descriptor)
+
     def test_result_cost_requires_exact_authorized_and_exclusive_actual_or_upper_artifacts(self) -> None:
         valid_actual = (
             "coverage-actual-microusd.17", "coverage-authorized-microusd.1000000"
