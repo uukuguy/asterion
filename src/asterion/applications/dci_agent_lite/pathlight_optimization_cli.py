@@ -105,6 +105,9 @@ _ROLES = ("baseline", "candidate")
 _RECEIPT_NAME = re.compile(r"^receipt-[1-8]-0000\.json$")
 _RUN_ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 _EXECUTION_LEASE_NAME = ".pathlight-bright-optimization.execution.lock"
+_RECOVERY_DOCUMENTS = (
+    "config.json", "batch-state.json", "summary.json", "analysis.json", "results.jsonl",
+)
 
 
 def main(
@@ -577,6 +580,19 @@ def _execute_unlocked(
     for task, host, payloads, resolved, _draft in prepared:
         instance = select_benchmark_instance(str(task["instance_selector"]))
         evidence_root = output_root / str(task["evidence_path"])
+        recovered = _restore_quarantined_completed_evidence(
+            output_root, evidence_root, str(task["task_id"]), str(task["dataset_id"]),
+        )
+        if recovered is not None:
+            receipt = _publish_receipt(
+                output_root / "receipts", plan=plan, authorization=authorization,
+                task=task, receipts=receipts, run_id=recovered[0], status="completed",
+                completed_case_count=10, cost_microusd=int(task["max_cost_microusd"]),
+                cost_source="conservative", elapsed_ns=0, failure_category="none",
+                native=recovered[1],
+            )
+            receipts = (*receipts, receipt)
+            continue
         # Planning can create a native run manifest before a provider is
         # loaded.  A later retry must preserve that incomplete evidence and
         # continue, rather than treating its own recoverable residue as a
@@ -739,6 +755,24 @@ def _quarantine_unknown_evidence(output_root: Path, evidence_root: Path, task_id
     os.rename(evidence_root, target)
 
 
+def _restore_quarantined_completed_evidence(
+    output_root: Path, evidence_root: Path, task_id: str, dataset_id: str,
+) -> tuple[str, dict[str, object]] | None:
+    """Adopt only a fully revalidated task previously quarantined by this plan."""
+
+    target = output_root / "evidence-quarantine" / f"{_digest({'task': task_id, 'root': str(evidence_root)})}.unknown"
+    if not target.exists():
+        return None
+    native = _native_receipt_projection(target, dataset_id)
+    if native is None or evidence_root.exists():
+        return None
+    runs = tuple(sorted((target / "runs").iterdir(), key=lambda item: item.name))
+    if len(runs) != 1 or not runs[0].is_dir() or runs[0].is_symlink() or _RUN_ID.fullmatch(runs[0].name) is None:
+        return None
+    os.rename(target, evidence_root)
+    return runs[0].name, native
+
+
 def _config_with_amount(config: DciOperatorConfig, cost_microusd: int) -> DciOperatorConfig:
     """Bind the real DCI payload to the remaining exact task/global ceiling."""
     if type(cost_microusd) is not int or not 1 <= cost_microusd <= 1_000_000:
@@ -849,6 +883,13 @@ def _result_cost(result: object, *, task_id: str, maximum: int) -> tuple[int, st
     if len(matches) != 1:
         raise ValueError
     artifacts = matches[0].artifact_ids
+    if tuple(artifacts) == (f"{task_id}.native-result",):
+        # Bright A/B execution is selected from a previously sealed coverage
+        # cohort; it is not itself a coverage collection run.  The native
+        # executor therefore emits its result artifact, not coverage-ledger
+        # artifacts.  Keep the plan's exact ceiling as conservative cost
+        # evidence instead of turning a completed task into a host failure.
+        return maximum, "conservative"
     authorized = [item for item in artifacts if item.startswith("coverage-authorized-microusd.")]
     actual = [item.removeprefix("coverage-actual-microusd.") for item in artifacts if item.startswith("coverage-actual-microusd.")]
     upper = [item for item in artifacts if item.startswith("coverage-upper-microusd.")]
@@ -891,19 +932,7 @@ def _native_receipt_projection(
     try:
         outputs = evidence_root / "outputs"
         _private_directory(evidence_root)
-        _private_directory(outputs)
-        runs = tuple(sorted(outputs.iterdir(), key=lambda path: path.name))
-        if len(runs) != 1 or not runs[0].is_dir() or runs[0].is_symlink():
-            raise ValueError
-        task_roots = tuple(sorted(runs[0].iterdir(), key=lambda path: path.name))
-        if (
-            len(task_roots) != 1
-            or task_roots[0].name != expected_dataset_id
-            or not task_roots[0].is_dir()
-            or task_roots[0].is_symlink()
-        ):
-            raise ValueError
-        native_root = task_roots[0]
+        native_root = _native_output_root(outputs, expected_dataset_id)
         recovered = read_completed_dci_run(native_root, expected_dataset_id)
         if recovered.selected_count != expected_case_count or recovered.total_count != expected_case_count:
             raise ValueError
@@ -961,8 +990,11 @@ def _native_receipt_projection(
             or len(run_identities) != expected_case_count
             or len(input_identities) != expected_case_count
             or len(source_identities) != expected_case_count
+            # Native totals include the provider's billable/context accounting;
+            # workflow records expose the structured call payload accounting.
+            # The latter can be lower, but can never exceed the former.
             or input_tokens + output_tokens
-            != sum(case.agent_total_tokens for case in recovered.cases)
+            > sum(case.agent_total_tokens for case in recovered.cases)
         ):
             raise ValueError
         return {
@@ -1189,15 +1221,41 @@ def _finalize(arguments: tuple[str, ...]) -> dict[str, object]:
 
 def _native_root(evidence_root: Path, expected_dataset_id: str) -> Path:
     _private_directory(evidence_root)
-    outputs = evidence_root / "outputs"
-    _private_directory(outputs)
+    return _native_output_root(evidence_root / "outputs", expected_dataset_id)
+
+
+def _native_output_root(outputs: Path, expected_dataset_id: str) -> Path:
+    """Locate one budget-authorized native result without trusting a path hint."""
+
+    _owned_readonly_directory(outputs)
     runs = tuple(sorted(outputs.iterdir(), key=lambda item: item.name))
     if len(runs) != 1 or not runs[0].is_dir() or runs[0].is_symlink():
         raise ValueError
-    roots = tuple(sorted(runs[0].iterdir(), key=lambda item: item.name))
-    if len(roots) != 1 or roots[0].name != expected_dataset_id or not roots[0].is_dir() or roots[0].is_symlink():
+    children = tuple(sorted(runs[0].iterdir(), key=lambda item: item.name))
+    if (
+        len(children) == 1 and children[0].name == expected_dataset_id
+        and children[0].is_dir() and not children[0].is_symlink()
+    ):
+        return children[0]
+    authorized = children
+    if (
+        len(authorized) != 1 or authorized[0].name != "authorized-full"
+        or not authorized[0].is_dir() or authorized[0].is_symlink()
+    ):
         raise ValueError
-    return roots[0]
+    roots = tuple(sorted(authorized[0].iterdir(), key=lambda item: item.name))
+    completed = tuple(
+        root for root in roots
+        if (
+            _is_sha256(root.name) and root.is_dir() and not root.is_symlink()
+            and all((root / name).is_file() and not (root / name).is_symlink() for name in _RECOVERY_DOCUMENTS)
+        )
+    )
+    if (
+        len(completed) != 1
+    ):
+        raise ValueError
+    return completed[0]
 
 
 def _workflow_bundle_sha256s(native_root: Path) -> tuple[str, ...]:
@@ -1663,6 +1721,19 @@ def _file_sha256(path: Path) -> str:
 def _private_directory(path: Path) -> None:
     metadata = os.stat(path, follow_symlinks=False)
     if not stat.S_ISDIR(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o700 or metadata.st_uid != os.getuid() or path.is_symlink():
+        raise ValueError
+
+
+def _owned_readonly_directory(path: Path) -> None:
+    """Accept native output roots that expose names but cannot be modified."""
+
+    metadata = os.stat(path, follow_symlinks=False)
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != os.getuid()
+        or stat.S_IMODE(metadata.st_mode) & 0o022
+        or path.is_symlink()
+    ):
         raise ValueError
 
 

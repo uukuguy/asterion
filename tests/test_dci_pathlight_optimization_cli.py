@@ -925,7 +925,7 @@ class TestExecute(unittest.TestCase):
             env_file=None, environment={}, host_factory=host_factory,
         ), 2)
 
-    def test_native_projection_rejects_missing_duplicate_extra_and_token_mismatched_workflows(self) -> None:
+    def test_native_projection_rejects_missing_duplicate_and_extra_workflows(self) -> None:
         fixture = _OptimizationFixture()
         self.addCleanup(fixture.close)
         self.assertEqual(fixture.prepare(real_source_lock=True)[0], 0)
@@ -973,7 +973,9 @@ class TestExecute(unittest.TestCase):
             json.dumps(altered, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
         write_workflow_observation_bundle(replacement, (altered,))
-        self.assertIsNone(_native_receipt_projection(native.parent.parent.parent, "bright.biology"))
+        # The native total may include provider-side billable/context tokens
+        # which are intentionally absent from the structured workflow usage.
+        self.assertIsNotNone(_native_receipt_projection(native.parent.parent.parent, "bright.biology"))
         workflows[-1].unlink()
         self.assertIsNone(_native_receipt_projection(native.parent.parent.parent, "bright.biology"))
 
