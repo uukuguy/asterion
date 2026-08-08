@@ -49,6 +49,7 @@ from asterion.capabilities.dci.implementation.pathlight.diagnosis import (
     DciCoverageExperimentObservation,
 )
 from asterion.capabilities.dci.implementation.pathlight.recovery import (
+    DciRecoveryError,
     read_completed_dci_run,
 )
 from asterion.capabilities.dci.implementation.research.trajectory_resolution import (
@@ -1164,6 +1165,44 @@ def _revalidated_terminal_observation(
     return observation, reconciliation
 
 
+def _read_coverage_recovered_run(native_root: Path, task_id: str):
+    """Read one sealed coverage run, including its legacy local envelope.
+
+    Older coverage runs bound the native batch to ``dataset.local`` while the
+    surrounding coverage registry and every trajectory record retained the
+    canonical benchmark task ID.  Keep the generic recovery reader strict;
+    this product-specific bridge is only admitted after the downstream
+    registry/trajectory checks in :func:`_read_native_dataset_observation`.
+    """
+
+    try:
+        return read_completed_dci_run(native_root, task_id)
+    except DciRecoveryError:
+        config = _json_native(native_root / "config.json")
+        dataset = config.get("dataset") if isinstance(config, dict) else None
+        if not isinstance(dataset, dict) or dataset.get("dataset_id") != "dataset.local":
+            raise
+        return read_completed_dci_run(native_root, "dataset.local")
+
+
+def _selected_native_run_root(outputs: Path, run_id: str) -> Path:
+    """Select the receipt-bound run while retaining sealed prior attempts."""
+
+    if type(run_id) is not str or _RUN_ID.fullmatch(run_id) is None:
+        raise ValueError
+    entries = tuple(sorted(outputs.iterdir(), key=lambda path: path.name))
+    if not entries:
+        raise ValueError
+    for entry in entries:
+        if _RUN_ID.fullmatch(entry.name) is None:
+            raise ValueError
+        _owned_evidence_directory(entry)
+    selected = outputs / run_id
+    if selected not in entries:
+        raise ValueError
+    return _owned_evidence_directory(selected)
+
+
 def _read_native_dataset_observation(
     *,
     output_root: Path,
@@ -1177,9 +1216,7 @@ def _read_native_dataset_observation(
     run_id = receipt.get("run_id")
     if type(run_id) is not str:
         raise ValueError
-    run_root = _owned_evidence_directory(outputs / run_id)
-    if tuple(path.name for path in outputs.iterdir()) != (run_id,):
-        raise ValueError
+    run_root = _selected_native_run_root(outputs, run_id)
     authorities = tuple(run_root.iterdir())
     if len(authorities) != 1 or authorities[0].name != "authorized-full":
         raise ValueError
@@ -1197,7 +1234,7 @@ def _read_native_dataset_observation(
         raise ValueError
     native_root = _owned_evidence_directory(candidates[0])
     _owned_evidence_directory(next(path for path in native_roots if path != native_root))
-    recovered = read_completed_dci_run(native_root, task_id)
+    recovered = _read_coverage_recovered_run(native_root, task_id)
     if recovered.selected_count != 10 or recovered.total_count != 10:
         raise ValueError
 

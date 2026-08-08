@@ -21,7 +21,9 @@ from asterion.applications.dci_agent_lite.benchmark_instances import (
 from asterion.applications.dci_agent_lite.cli import main
 from asterion.applications.dci_agent_lite import pathlight_experiment_cli as experiment_cli
 from asterion.applications.dci_agent_lite.pathlight_experiment_cli import (
+    _read_coverage_recovered_run,
     _seal_completed_native_task,
+    _selected_native_run_root,
     read_completed_coverage_experiment,
 )
 from asterion.applications.dci_agent_lite.operator_config import DciOperatorConfig
@@ -355,6 +357,18 @@ def _host_factory(
 
 
 class TestDciPathlightExperimentCli(unittest.TestCase):
+    def test_selected_native_run_allows_sealed_prior_attempts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            outputs = Path(directory).resolve() / "outputs"
+            outputs.mkdir(mode=0o700)
+            first = outputs / "run-first"
+            second = outputs / "run-second"
+            first.mkdir(mode=0o700)
+            second.mkdir(mode=0o700)
+            self.assertEqual(
+                _selected_native_run_root(outputs, "run-second"), second
+            )
+
     def setUp(self) -> None:
         self._native_seal_patch = patch(
             "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
@@ -1134,6 +1148,13 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
             config_path.chmod(0o600)
             with self.assertRaises(DciRecoveryError):
                 read_completed_dci_run(fixture, "bright.biology")
+            # Legacy coverage output recorded the native envelope as
+            # ``dataset.local``.  Its task identity is separately sealed by
+            # the coverage registry and per-query trajectory evidence.
+            self.assertEqual(
+                _read_coverage_recovered_run(fixture, "bright.biology").dataset_id,
+                "dataset.local",
+            )
 
         exact = DciCoverageDatasetObservation(
             dataset_id="bright.biology",
