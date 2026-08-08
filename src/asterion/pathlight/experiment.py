@@ -33,6 +33,7 @@ _MISSING_EVIDENCE = frozenset(
         "tool-payload-lineage",
         "sealed-config-digest",
         "sealed-analysis-digest",
+        "legacy-unsigned-artifacts",
         "paper-method-detail",
         "assembly-lineage",
         "package-lineage",

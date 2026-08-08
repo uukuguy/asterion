@@ -23,6 +23,7 @@ DCI_RECOVERY_FILENAME = "pathlight-dci-recovery.json"
 _MAX_RECOVERY_BYTES = 1 << 20
 _HEX_SHA256 = frozenset("0123456789abcdef")
 _MISSING_EVIDENCE = ("sealed-analysis-digest", "sealed-config-digest")
+_LEGACY_MISSING_EVIDENCE = ("legacy-unsigned-artifacts", *_MISSING_EVIDENCE)
 _RUN_FIELDS = frozenset(
     {
         "dataset_id",
@@ -211,6 +212,25 @@ def read_completed_dci_run(root: Path, expected_dataset_id: str) -> DciRecovered
     return recovered
 
 
+def read_historical_dci_run(root: Path, expected_dataset_id: str) -> DciRecoveredRun:
+    """Read a completed legacy batch for analysis, never for certification."""
+    try:
+        documents = dict(read_private_file_snapshot(root, _FILES, _LIMITS))
+        return _recover(
+            _json_mapping(documents["config.json"]),
+            _json_mapping(documents["batch-state.json"]),
+            _json_mapping(documents["summary.json"]),
+            _json_mapping(documents["analysis.json"]),
+            _jsonl_mappings(documents["results.jsonl"]),
+            expected_dataset_id,
+            documents,
+            _LEGACY_MISSING_EVIDENCE,
+            historical=True,
+        )
+    except Exception:
+        raise DciRecoveryError("DCI historical evidence is invalid") from None
+
+
 def validate_recovered_run(mapping: Mapping[str, object]) -> DciRecoveredRun:
     """Reconstruct one exact canonical recovered run and verify its content address."""
 
@@ -271,19 +291,22 @@ def _recover(
     result_rows: tuple[Mapping[str, object], ...],
     expected_dataset_id: str,
     documents: Mapping[str, bytes],
+    missing_evidence: tuple[str, ...] = _MISSING_EVIDENCE,
+    *,
+    historical: bool = False,
 ) -> DciRecoveredRun:
     dataset = _mapping(config.get("dataset"))
-    dataset_id = _string(dataset.get("dataset_id"))
+    dataset_id = expected_dataset_id if historical else _string(dataset.get("dataset_id"))
     if dataset_id != expected_dataset_id:
         raise ValueError
     mode = _mode(config.get("mode"))
     if state.get("status") != "completed":
         raise ValueError
-    variant = _variant(config, mode)
+    variant = _historical_variant(config, mode) if historical else _variant(config, mode)
     rows = analysis.get("per_query_metrics")
     if type(rows) is not list or not rows:
         raise ValueError
-    cases = tuple(_case(row, mode) for row in rows)
+    cases = tuple((_historical_case(row, mode) if historical else _case(row, mode)) for row in rows)
     if len({case.dataset_item_sha256 for case in cases}) != len(cases):
         raise ValueError
     cases = tuple(sorted(cases, key=lambda case: case.dataset_item_sha256))
@@ -295,8 +318,11 @@ def _recover(
     metric_name: Literal["ndcg-at-10", "accuracy"] = "ndcg-at-10" if mode == "ir" else "accuracy"
     metric_value = _summary_metric(summary, mode)
     _validate_aggregate_metric(metric_value, cases)
-    corpus = _mapping(config.get("corpus_content_identity"))
-    corpus_file_count = _natural(corpus.get("file_count"))
+    corpus_file_count = (
+        _historical_corpus_file_count(config)
+        if historical
+        else _natural(_mapping(config.get("corpus_content_identity")).get("file_count"))
+    )
     dataset_snapshot_sha256 = _sha256(dataset.get("sha256"))
     source_document_sha256s = (_snapshot_digest(documents),)
     return _build_recovered_run(
@@ -312,7 +338,7 @@ def _recover(
         variant,
         cases,
         source_document_sha256s,
-        _MISSING_EVIDENCE,
+        missing_evidence,
     )
 
 
@@ -370,6 +396,48 @@ def _case(value: object, mode: Literal["ir", "qa"]) -> DciRecoveredCase:
     )
 
 
+def _historical_case(value: object, mode: Literal["ir", "qa"]) -> DciRecoveredCase:
+    """Preserve aggregate legacy tool use without pretending it used read/grep."""
+
+    row = _mapping(value)
+    query_id = _string(row.get("query_id"))
+    status = row.get("run_status")
+    if status not in {"completed", "failed"}:
+        raise ValueError
+    coverage = row.get("coverage_any")
+    if coverage is not None and row.get("resolution_status") != "available":
+        raise ValueError
+    metric = _metric(row, mode)
+    tool_calls = _natural(row.get("tool_call_count"))
+    tool_time = _scaled(row.get("tool_time_seconds"), Decimal("1000000000"))
+    source = {
+        "query_id": query_id, "metric": metric, "run_status": status,
+        "agent_total_tokens": row.get("agent_total_tokens"),
+        "overall_cost_total": row.get("overall_cost_total"),
+        "wall_time_seconds": row.get("wall_time_seconds"),
+        "tool_time_seconds": row.get("tool_time_seconds"),
+        "tool_call_count": row.get("tool_call_count"),
+        "tool_error_count": row.get("tool_error_count"),
+        "question_word_count": row.get("question_word_count"),
+        "resolution_status": row.get("resolution_status"), "coverage_any": coverage,
+    }
+    return DciRecoveredCase(
+        dataset_item_sha256=_domain_digest("query-id", query_id),
+        metric_value_microunits=metric,
+        run_status=cast(Literal["completed", "failed"], status),
+        agent_total_tokens=_natural(row.get("agent_total_tokens")),
+        overall_cost_microusd=_scaled(row.get("overall_cost_total"), Decimal("1000000")),
+        wall_time_ns=_scaled(row.get("wall_time_seconds"), Decimal("1000000000")),
+        tool_time_ns=tool_time, tool_call_count=tool_calls,
+        tool_error_count=_natural(row.get("tool_error_count")),
+        read_call_count=0, grep_call_count=0, read_time_ns=0, grep_time_ns=0,
+        question_word_count=_natural(row.get("question_word_count")),
+        resolution_status=_resolution_status(row.get("resolution_status")),
+        resolution_coverage_microunits=None if coverage is None else _unit(coverage),
+        case_source_sha256=_domain_digest("case-source", source),
+    )
+
+
 def _variant(
     config: Mapping[str, object], mode: Literal["ir", "qa"]
 ) -> DciRecoveredVariant:
@@ -389,6 +457,38 @@ def _variant(
         profile_sha256=_sha256(config.get("profile_sha256")),
         policy_sha256=_sha256(config.get("product_effective_config_sha256")),
     )
+
+
+def _historical_variant(
+    config: Mapping[str, object], mode: Literal["ir", "qa"]
+) -> DciRecoveredVariant:
+    """Project legacy identity hints into opaque, non-comparable identifiers."""
+
+    runtime = _mapping(config.get("runtime"))
+    return DciRecoveredVariant(
+        runtime_contract_sha256=_domain_digest("legacy-runtime-contract", runtime),
+        model_sha256=_domain_digest("legacy-model", runtime.get("model")),
+        toolset_sha256=_domain_digest("legacy-toolset", runtime.get("tools")),
+        prompt_contract_sha256=_sha256(config.get("benchmark_prompt_contract_sha256")),
+        context_contract_sha256=_domain_digest(
+            "legacy-context-contract", runtime.get("context_policy_identity")
+        ),
+        metric_contract_sha256=_opaque_identity(
+            "ndcg-at-10" if mode == "ir" else "accuracy", "metric-contract"
+        ),
+        implementation_sha256=_domain_digest("legacy-schema", config.get("schema")),
+        profile_sha256=_domain_digest("legacy-profile", config.get("profile")),
+        policy_sha256=_domain_digest("legacy-selection", config.get("selection")),
+    )
+
+
+def _historical_corpus_file_count(config: Mapping[str, object]) -> int:
+    """Legacy outputs did not seal corpus inventories; retain an explicit zero."""
+
+    corpus_hint = config.get("corpus_hint")
+    if corpus_hint is not None:
+        return _natural(_mapping(corpus_hint).get("file_count"))
+    return 0
 
 
 def _validate_artifact_digests(config: Mapping[str, object], documents: Mapping[str, bytes]) -> None:
@@ -567,17 +667,22 @@ def _validate_recovered_run_mapping(mapping: object) -> DciRecoveredRun:
     corpus_file_count = _exact_natural(value["corpus_file_count"])
     dataset_snapshot_sha256 = _sha256(value["dataset_snapshot_sha256"])
     variant = _validated_variant(value["variant"])
+    missing_evidence = _canonical_string_list(value["missing_evidence"])
+    if missing_evidence not in {_MISSING_EVIDENCE, _LEGACY_MISSING_EVIDENCE}:
+        raise ValueError
     raw_cases = _exact_list(value["cases"])
     if not raw_cases:
         raise ValueError
-    cases = tuple(_validated_case(item, mode) for item in raw_cases)
+    cases = tuple(
+        _validated_case(
+            item, mode, allow_unclassified_tool_activity=missing_evidence == _LEGACY_MISSING_EVIDENCE
+        )
+        for item in raw_cases
+    )
     case_ids = tuple(case.dataset_item_sha256 for case in cases)
     if case_ids != tuple(sorted(case_ids)) or len(case_ids) != len(set(case_ids)):
         raise ValueError
     source_document_sha256s = _canonical_sha256_list(value["source_document_sha256s"])
-    missing_evidence = _canonical_string_list(value["missing_evidence"])
-    if missing_evidence != _MISSING_EVIDENCE:
-        raise ValueError
     if (
         selected_count != len(cases)
         or total_count != len(cases)
@@ -611,7 +716,12 @@ def _validated_variant(value: object) -> DciRecoveredVariant:
     return DciRecoveredVariant(**{field: _sha256(mapping[field]) for field in _VARIANT_FIELDS})
 
 
-def _validated_case(value: object, mode: Literal["ir", "qa"]) -> DciRecoveredCase:
+def _validated_case(
+    value: object,
+    mode: Literal["ir", "qa"],
+    *,
+    allow_unclassified_tool_activity: bool = False,
+) -> DciRecoveredCase:
     mapping = _exact_mapping(value, _CASE_FIELDS)
     metric_value = _exact_unit(mapping["metric_value_microunits"])
     if mode == "qa" and metric_value not in {0, 1_000_000}:
@@ -640,9 +750,15 @@ def _validated_case(value: object, mode: Literal["ir", "qa"]) -> DciRecoveredCas
         resolution_coverage_microunits=resolution_coverage,
         case_source_sha256=_sha256(mapping["case_source_sha256"]),
     )
-    if case.tool_call_count != case.read_call_count + case.grep_call_count:
+    if (
+        not allow_unclassified_tool_activity
+        and case.tool_call_count != case.read_call_count + case.grep_call_count
+    ):
         raise ValueError
-    if case.tool_time_ns != case.read_time_ns + case.grep_time_ns:
+    if (
+        not allow_unclassified_tool_activity
+        and case.tool_time_ns != case.read_time_ns + case.grep_time_ns
+    ):
         raise ValueError
     return case
 

@@ -15,6 +15,7 @@ from typing import Iterator
 from asterion.capabilities.dci.implementation.pathlight.recovery import (
     DciRecoveryError,
     read_completed_dci_run,
+    read_historical_dci_run,
     validate_recovered_run,
 )
 
@@ -102,6 +103,38 @@ class _HostileMapping(dict[str, object]):
 
 
 class TestDciPathlightRecovery(unittest.TestCase):
+    def test_historical_reader_accepts_legacy_identity_shape_with_explicit_limits(self) -> None:
+        with private_fixture() as root:
+            config = _load(root, "config.json")
+            config.pop("artifact_digests")
+            config["dataset"] = {"identity": "SENTINEL_PRIVATE_PATH", "sha256": config["dataset"]["sha256"]}
+            config["runtime_contract"] = None
+            config["context_contract"] = None
+            config["ranking_metric_contract"] = None
+            config["implementation_sha256"] = None
+            config["profile_sha256"] = None
+            config["product_effective_config_sha256"] = None
+            config.pop("corpus_content_identity")
+            config["corpus_hint"] = None
+            _write(root, "config.json", config)
+            analysis = _load(root, "analysis.json")
+            rows = analysis["per_query_metrics"]
+            assert type(rows) is list
+            for row in rows:
+                assert type(row) is dict
+                row["tool_counts"] = {"bash": row["tool_call_count"]}
+                row["tool_durations"] = {"bash": row["tool_time_seconds"]}
+            _write(root, "analysis.json", analysis)
+            recovered = read_historical_dci_run(root, "bright.biology")
+
+        self.assertEqual(recovered.corpus_file_count, 0)
+        self.assertEqual(
+            recovered.missing_evidence,
+            ("legacy-unsigned-artifacts", "sealed-analysis-digest", "sealed-config-digest"),
+        )
+        self.assertEqual(recovered.cases[0].read_call_count, 0)
+        self.assertEqual(recovered.cases[0].tool_call_count, 0)
+
     def assert_recovery_error(self, root: Path, expected_dataset_id: str = "bright.biology") -> None:
         with self.assertRaises(DciRecoveryError) as raised:
             read_completed_dci_run(root.absolute(), expected_dataset_id=expected_dataset_id)

@@ -35,6 +35,7 @@ from asterion.capabilities.dci.implementation.pathlight.recovery import (
     DCI_RECOVERY_FILENAME,
     DciRecoveredRun,
     read_completed_dci_run,
+    read_historical_dci_run,
     read_recovered_run,
     validate_recovered_run,
     write_recovered_run,
@@ -127,6 +128,8 @@ def main(
             )
         if values[0] == "recover":
             output = _recover(values[1:])
+        elif values[0] == "recover-historical":
+            output = _recover(values[1:], historical=True)
         elif values[0] == "diagnose":
             output = _diagnose(
                 values[1:], coverage_experiment=coverage_experiment
@@ -170,7 +173,9 @@ def _execution_env_file(
     return tuple(values), path
 
 
-def _recover(arguments: tuple[str, ...]) -> dict[str, object]:
+def _recover(
+    arguments: tuple[str, ...], *, historical: bool = False
+) -> dict[str, object]:
     options = _exact_options(
         arguments, {"--instance", "--evidence-root", "--output-root"}
     )
@@ -182,7 +187,11 @@ def _recover(arguments: tuple[str, ...]) -> dict[str, object]:
     output_root = _operator_root(options["--output-root"])
     targets = _recovery_targets(output_root)
     _require_absent(tuple(targets.values()))
-    recovered = read_completed_dci_run(evidence_root, expected_dataset_id)
+    recovered = (
+        read_historical_dci_run(evidence_root, expected_dataset_id)
+        if historical
+        else read_completed_dci_run(evidence_root, expected_dataset_id)
+    )
     recovered = validate_recovered_run(recovered.to_mapping())
     experiment = recovered_run_to_experiment(recovered)
     evaluations = recovered_run_to_evaluation_bundle(recovered)
@@ -214,11 +223,14 @@ def _recover(arguments: tuple[str, ...]) -> dict[str, object]:
         failed = True
     if failed:
         raise RuntimeError from None
-    return {
+    output = {
         "case_count": recovered.selected_count,
         "dataset_digest": recovered.dataset_snapshot_sha256,
         "output_bundle_digest": experiment.bundle_sha256,
     }
+    if historical:
+        output["evidence_class"] = "historical-external-limited"
+    return output
 
 
 def _diagnose(
