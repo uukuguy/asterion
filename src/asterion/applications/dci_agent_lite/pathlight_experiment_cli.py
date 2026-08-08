@@ -62,7 +62,9 @@ from asterion.workflow_evidence.storage import read_workflow_observation_bundle
 
 
 PLAN_FILENAME = "pathlight-coverage-experiment.json"
+RECOVERY_PLAN_FILENAME = "pathlight-coverage-recovery.json"
 _PLAN_SCHEMA = "asterion.dci.pathlight.coverage-experiment/v1"
+_RECOVERY_PLAN_SCHEMA = "asterion.dci.pathlight.coverage-recovery/v1"
 _AUTHORIZATION_SCHEMA = "asterion.dci.pathlight.coverage-experiment-authorization/v1"
 _ERROR = "asterion-dci: command failed\n"
 _MAX_DOCUMENT_BYTES = 1 << 20
@@ -130,6 +132,8 @@ def main(
                 environment=environment,
                 package_sources=package_sources,
             )
+        elif values[0] == "prepare-recovery":
+            output = _prepare_recovery(values[1:])
         elif values[0] == "execute":
             result = _execute(
                 values[1:],
@@ -268,6 +272,121 @@ def _prepare(
     return {
         "case_count": _MAX_AGENT_OPERATIONS,
         "max_cost_microusd": _MAX_COST_MICROUSD,
+        "output_bundle_digest": body["plan_sha256"],
+    }
+
+
+def _prepare_recovery(arguments: tuple[str, ...]) -> dict[str, object]:
+    """Prepare a new, bounded retry only for terminally failed coverage tasks."""
+
+    options = _exact_options(
+        arguments,
+        {
+            "--parent-plan-file",
+            "--parent-authorization-file",
+            "--parent-output-root",
+            "--output-root",
+        },
+    )
+    parent_root = _operator_root(options["--parent-output-root"])
+    parent_plan_path = _absolute_path(options["--parent-plan-file"])
+    if parent_plan_path.parent != parent_root:
+        raise ValueError
+    parent_plan = _read_plan(parent_plan_path)
+    parent_authorization = _read_authorization(
+        _absolute_path(options["--parent-authorization-file"]),
+        plan=parent_plan,
+        output_root=parent_root,
+    )
+    output_root = _operator_root(options["--output-root"])
+    if any(output_root.iterdir()):
+        raise ValueError
+    completed: list[dict[str, object]] = []
+    failed: list[dict[str, object]] = []
+    for task in parent_plan["tasks"]:
+        if type(task) is not dict:
+            raise ValueError
+        chain = _read_receipt_chain(
+            parent_root / "receipts",
+            plan=parent_plan,
+            task=task,
+            expected_authorization_sha256=str(parent_authorization["authorization_sha256"]),
+        )
+        if not chain:
+            raise ValueError
+        terminal = chain[-1]
+        if terminal["benchmark_status"] == "completed" and _revalidate_terminal_receipt(
+            output_root=parent_root,
+            plan=parent_plan,
+            task=task,
+            receipt=terminal,
+            authorization=parent_authorization,
+        ):
+            completed.append(
+                {
+                    "task_id": task["task_id"],
+                    "receipt_sha256": terminal["receipt_sha256"],
+                }
+            )
+        elif terminal["benchmark_status"] == "failed":
+            failed.append(task)
+        else:
+            raise ValueError
+    if (
+        [item["task_id"] for item in failed]
+        != ["bright.economics", "beir.scifact"]
+        or len(completed) != 3
+    ):
+        raise ValueError
+    staging = _create_staging_root(output_root)
+    body: dict[str, object] | None = None
+    failed_write = False
+    try:
+        (staging / "coverage").mkdir(mode=0o700)
+        (staging / "receipts").mkdir(mode=0o700)
+        (staging / "reconciliations").mkdir(mode=0o700)
+        (staging / "evidence").mkdir(mode=0o700)
+        tasks: list[dict[str, object]] = []
+        for task in failed:
+            task_id = str(task["task_id"])
+            registry_path = str(task["registry_path"])
+            target = staging / registry_path
+            target.parent.mkdir(mode=0o700)
+            write_private_file(
+                target, read_private_file(parent_root / registry_path, _MAX_DOCUMENT_BYTES)
+            )
+            tasks.append(dict(task))
+        source_lock = staging / _SOURCE_LOCK_FILENAME
+        write_private_file(
+            source_lock,
+            read_private_file(parent_root / _SOURCE_LOCK_FILENAME, _MAX_DOCUMENT_BYTES),
+        )
+        body = {
+            "schema": _RECOVERY_PLAN_SCHEMA,
+            "parent_plan_sha256": parent_plan["plan_sha256"],
+            "parent_authorization_sha256": parent_authorization["authorization_sha256"],
+            "completed_receipts": completed,
+            "source_lock_sha256": _file_sha256(source_lock),
+            "max_agent_operations": 20,
+            "max_cost_microusd": 2_000_000,
+            "max_infrastructure_failures": 2,
+            "execution_authorized": False,
+            "tasks": tasks,
+        }
+        body["plan_sha256"] = _digest(body)
+        write_private_file(staging / RECOVERY_PLAN_FILENAME, _canonical_bytes(body))
+        _publish_staged_tree(output_root, staging)
+    except BaseException:
+        failed_write = True
+    try:
+        _cleanup_staging_tree(output_root, staging)
+    except BaseException:
+        failed_write = True
+    if failed_write or body is None:
+        raise ValueError
+    return {
+        "case_count": 20,
+        "max_cost_microusd": 2_000_000,
         "output_bundle_digest": body["plan_sha256"],
     }
 

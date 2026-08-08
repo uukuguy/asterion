@@ -343,6 +343,59 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
         self._native_seal_patch.start()
         self.addCleanup(self._native_seal_patch.stop)
 
+    def test_prepare_recovery_selects_only_failed_tasks_and_binds_completed_receipts(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            parent_plan, parent_root, _proposal = _prepare(root)
+            authorization = _write_authorization(root, parent_plan)
+            self.assertEqual(
+                main(
+                    [
+                        "pathlight", "experiment", "execute",
+                        "--plan-file", str(parent_plan),
+                        "--authorization-file", str(authorization),
+                        "--output-root", str(parent_root),
+                    ],
+                    repo_root=root,
+                    environment=_execution_environment(root),
+                    experiment_host_factory=_host_factory(
+                        [], {"bright.economics": ["failed"], "beir.scifact": ["failed"]}
+                    ),
+                    stdout=io.StringIO(), stderr=io.StringIO(),
+                ),
+                1,
+            )
+            recovery_root = root / "recovery"
+            recovery_root.mkdir(mode=0o700)
+            stdout = io.StringIO()
+            self.assertEqual(
+                main(
+                    [
+                        "pathlight", "experiment", "prepare-recovery",
+                        "--parent-plan-file", str(parent_plan),
+                        "--parent-authorization-file", str(authorization),
+                        "--parent-output-root", str(parent_root),
+                        "--output-root", str(recovery_root),
+                    ],
+                    repo_root=root,
+                    environment={"PRIVATE_SENTINEL": "must-not-leak"},
+                    stdout=stdout, stderr=io.StringIO(),
+                ),
+                0,
+            )
+            result = json.loads(stdout.getvalue())
+            self.assertEqual(result["case_count"], 20)
+            retry = json.loads(
+                (recovery_root / "pathlight-coverage-recovery.json").read_bytes()
+            )
+            self.assertEqual(
+                [task["task_id"] for task in retry["tasks"]],
+                ["bright.economics", "beir.scifact"],
+            )
+            self.assertEqual(len(retry["completed_receipts"]), 3)
+
     def test_execute_does_not_publish_completed_receipt_without_native_seal(self) -> None:
         self._native_seal_patch.stop()
         with tempfile.TemporaryDirectory() as directory:
