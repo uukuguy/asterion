@@ -313,6 +313,10 @@ def _prepare_recovery(
     parent_authorization = _execution_authorization(
         parent_options, plan=parent_plan, output_root=parent_root, environment=environment
     )
+    development = (
+        "--parent-authorization-file" not in options
+        and not _authorization_required(environment)
+    )
     output_root = _operator_root(options["--output-root"])
     if any(output_root.iterdir()):
         raise ValueError
@@ -325,17 +329,25 @@ def _prepare_recovery(
             parent_root / "receipts",
             plan=parent_plan,
             task=task,
-            expected_authorization_sha256=str(parent_authorization["authorization_sha256"]),
+            expected_authorization_sha256=(
+                None
+                if development
+                else str(parent_authorization["authorization_sha256"])
+            ),
         )
         if not chain:
             raise ValueError
         terminal = chain[-1]
+        receipt_authorization = (
+            {"authorization_sha256": terminal["authorization_sha256"]}
+            if development else parent_authorization
+        )
         if terminal["benchmark_status"] == "completed" and _revalidate_terminal_receipt(
             output_root=parent_root,
             plan=parent_plan,
             task=task,
             receipt=terminal,
-            authorization=parent_authorization,
+            authorization=receipt_authorization,
         ):
             completed.append(
                 {
