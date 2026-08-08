@@ -536,7 +536,7 @@ class DciWorkflowMetrics:
             if (
                 self.total_wall_time_ns == 0
                 or self.total_tool_time_ns
-                != self.total_read_time_ns + self.total_grep_time_ns
+                < self.total_read_time_ns + self.total_grep_time_ns
                 or self.total_tool_time_ns > self.total_wall_time_ns
                 or self.tool_time_share_microunits
                 != _ratio_microunits(self.total_tool_time_ns, self.total_wall_time_ns)
@@ -624,7 +624,7 @@ class DciAggregateWorkflowMetrics:
             if (
                 self.total_wall_time_ns == 0
                 or self.total_tool_time_ns
-                != self.total_read_time_ns + self.total_grep_time_ns
+                < self.total_read_time_ns + self.total_grep_time_ns
                 or self.total_tool_time_ns > self.total_wall_time_ns
                 or self.tool_time_share_microunits
                 != _ratio_microunits(self.total_tool_time_ns, self.total_wall_time_ns)
@@ -1864,10 +1864,6 @@ def _workflow_metrics(cases: tuple[DciRecoveredCase, ...]) -> DciWorkflowMetrics
     tool = _sum(values("tool_time_ns"))
     read = _sum(values("read_time_ns"))
     grep = _sum(values("grep_time_ns"))
-    # Legacy projections retain aggregate tool activity but have no reliable
-    # read/grep classification.  Do not invent a classification for the report.
-    if tool != read + grep:
-        tool = read + grep
     return DciWorkflowMetrics(
         zero_score_rate_microunits=_ratio_microunits(zero_count, len(cases)),
         median_agent_total_tokens=_median(values("agent_total_tokens")),
@@ -1905,8 +1901,6 @@ def _aggregate_workflow_metrics(
     tool = _sum(values("tool_time_ns"))
     read = _sum(values("read_time_ns"))
     grep = _sum(values("grep_time_ns"))
-    if tool != read + grep:
-        tool = read + grep
     return DciAggregateWorkflowMetrics(
         median_agent_total_tokens=_median(values("agent_total_tokens")),
         median_tool_call_count=_median(values("tool_call_count")),
@@ -2253,7 +2247,7 @@ def render_chinese_diagnosis(report: object) -> str:
                 f"- 论文参照：{item.reference_score_microunits} 微单位；差值 {item.reference_gap_microunits} 微单位；状态：仅参考、不可作完全可比结论。",
                 f"- 零分率：{metrics.zero_score_rate_microunits} 微单位；覆盖可用 {item.resolution_available_queries}/{item.resolution_total_queries}；解析状态：不可用。",
                 f"- 中位数：tokens {metrics.median_agent_total_tokens}；工具调用 {metrics.median_tool_call_count}；墙钟 {metrics.median_wall_time_ns} ns；工具 {metrics.median_tool_time_ns} ns；read 调用 {metrics.median_read_call_count}；grep 调用 {metrics.median_grep_call_count}；read {metrics.median_read_time_ns} ns；grep {metrics.median_grep_time_ns} ns；问题词 {metrics.median_question_word_count}。",
-                f"- 工具错误：{metrics.total_tool_error_count}；时间占比：工具/墙钟 {metrics.tool_time_share_microunits} 微单位、read/工具 {metrics.read_time_share_microunits} 微单位、grep/工具 {metrics.grep_time_share_microunits} 微单位。",
+                f"- 工具错误：{metrics.total_tool_error_count}；时间占比：工具/墙钟 {metrics.tool_time_share_microunits} 微单位、read/工具 {metrics.read_time_share_microunits} 微单位、grep/工具 {metrics.grep_time_share_microunits} 微单位。read/grep 仅计已分类活动，二者之差为未分类历史工具活动。",
                 "",
             ))
             if item.coverage_total_queries:
