@@ -655,3 +655,4 @@
 
 - 00:00 提交 Pathlight Bright 真实 A/B 文档闭环，消除 worktree 残留状态 [1c63d47]
 - 00:00 设计中文 Pathlight 操作者手册，统一当前可用入口与安全边界 [fdc2c5c]
+- 00:00 发布中文 Pathlight 操作者手册，消除分散且过期的使用说明 [pending]

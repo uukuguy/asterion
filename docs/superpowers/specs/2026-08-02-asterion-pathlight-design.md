@@ -269,10 +269,9 @@ Dashboard API 已实现为一次性验证并固定的 `DashboardSnapshot`。它�
 
 ### CLI
 
-提供 `trace list/show/tail/flow`、`metrics query`、`evaluate compare`、`diagnose`、
-`proposal create/review/execute`、`export opik/inspect` 和 `import opik-observation`。所有
-human-readable 输出与 JSON 输出都遵守安全层；执行 proposal 复用显式 authorization、成本上限
-和 cancellation，绝不以已有 trace 或外部建议授权。
+提供 `trace list/show/tail/flow`、`metrics query`、`evaluate compare`、`diagnosis show`、
+`proposal list`、`export opik/inspect` 和 `import opik-observation`。所有 human-readable 输出与 JSON
+输出都遵守安全层；proposal 仅为未授权建议，绝不以已有 trace 或外部建议授权。
 
 已实现的本机界面命令为：
 
@@ -293,13 +292,10 @@ uv run asterion pathlight dashboard \
 
 DCI 产品层已经实现查询分解 A/B 协调器；通用 Pathlight 只提供领域中立的 Experiment、
 Evaluation、TrialHistory、Decision、查询、Dashboard 和 Opik 安全映射。DCI 协调器不会反向
-进入 framework 模块。它固定比较四个 Bright 数据集各 10 例的基线/候选，最多 80 次 Agent、
-0 次 Judge、8,000,000 微美元，每个原生案例最多一次尝试；收据链累计两次基础设施失败即停止。
-
-当前真实 A/B 未运行，实现为 provider-free verified，运行状态为
-`blocked-by-coverage-reverification` / `Not rerun`。以下 provider-free 准备、查询和执行后收口
-入口只能在 fresh 5×10 coverage 通过真实 seal、并重新生成 diagnosis/gate 后使用；变量只指向
-操作员私有文件，公共产物不得展开其值：
+进入 framework 模块。它固定比较四个 Bright 数据集各 10 例的基线/候选；已完成的真实实验为
+80 次 Agent、0 次 Judge、$16、0 次基础设施失败，最终为
+`rejected (quality-threshold-missed)`。它是优化诊断，不替代四个 Bright 的 423 条全量 benchmark
+基线。以下命令是下一次独立实验的可复用形状，变量只指向操作员私有文件：
 
 ```bash
 uv run asterion-dci pathlight optimization prepare \
@@ -315,19 +311,14 @@ uv run asterion-dci pathlight optimization status \
 
 uv run asterion-dci pathlight optimization finalize \
   --plan-file "$FRESH_OPTIMIZATION_ROOT/pathlight-bright-optimization.json" \
-  --authorization-file "$FRESH_AUTHORIZATION_FILE" \
   --diagnosis-file "$PATHLIGHT_DIAGNOSIS_ROOT/pathlight-diagnosis.json" \
   --output-root "$FRESH_OPTIMIZATION_ROOT"
 ```
 
-`prepare` 生成的不可变计划保持 `execution_authorized=false`。单独的 0600 授权文档使用
-`asterion.dci.pathlight.bright-optimization-authorization/v1`，必须逐项绑定计划、诊断、授权门、
-finding/proposal/scope、source lock、所选案例范围、基线/候选查询规划、variant、执行配置、输出
-根设备/inode，以及 80/0/$8/两次基础设施失败/一次原生尝试边界；另含操作员审批摘要、
-`execution_authorized=true` 和对规范授权体的摘要。执行命令只在这一精确授权下以前台方式运行，
-`resume` 只能处理同一计划中从未开始的剩余任务；`finalize` 重新读取原生证据，证据不足时只能
-产生 `inconclusive`。详尽中文运行手册见
-[DCI 差分诊断](../../status/PATHLIGHT-DCI-DIAGNOSIS.md#bright-查询分解-ab-状态尚未执行)。
+开发模式默认不要求外层授权文件；设置 `ASTERION_DCI_REQUIRE_EXECUTION_AUTHORIZATION=1` 才启用
+严格生产授权。`resume` 只能处理同一计划中从未开始的剩余任务；`finalize` 重新读取原生证据，
+证据不足时只能产生 `inconclusive`。详尽中文运行手册见
+[Pathlight 操作者手册](../../guides/pathlight-operator-guide.md)。
 
 ### Opik 离线操作模式
 

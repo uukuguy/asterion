@@ -29,21 +29,21 @@
 - Consumes: `asterion pathlight` 的只读 CLI，`asterion-dci pathlight` 的 DCI 协调 CLI，已封存的 `workflow-evidence.json`、`pathlight-evaluations.json`、`pathlight-experiment.json`、`pathlight-diagnosis.json`、`pathlight-optimization.json`。
 - Produces: 单一中文操作入口，并在状态索引注册；设计稿中的旧 A/B 命令状态改为指向该手册。
 
-- [ ] **Step 1: 写入手册内容**
+- [x] **Step 1: 写入手册内容**
 
 创建六段结构：开始前的证据文件清单；`trace`/`metrics`/`evaluate`/`diagnosis` 只读查询；Dashboard；DCI Bright 受控优化；Opik 离线交换；故障与安全边界。每段放入可复制命令，所有路径采用 `/absolute/path/...` 占位形式。
 
-- [ ] **Step 2: 同步入口与状态**
+- [x] **Step 2: 同步入口与状态**
 
 在 `docs/status/INDEX.md` 的 Active 表添加 `pathlight-operator-guide.md` 行；在 Pathlight 设计稿的 Bright A/B 段落替换旧的“尚未执行、$8、必须授权文件”叙述，改为已完成的 80/0/$16/拒绝结论和手册链接。
 
-- [ ] **Step 3: 验证文档**
+- [x] **Step 3: 验证文档**
 
 运行：`make docs-check && git diff --check`
 
 预期：文档检查列出全部本地链接且退出码为 0；无空白错误。
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```bash
 git add docs/guides/pathlight-operator-guide.md docs/status/INDEX.md \
