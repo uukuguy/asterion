@@ -6,6 +6,7 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 
 from asterion.control.host import ControlEvent
 from asterion.control.protocol import (
@@ -228,6 +229,23 @@ class AuthorityLedger:
     def reserved_action_ids(self) -> tuple[str, ...]:
         return tuple(sorted(self._reservations))
 
+    @property
+    def reservations(self) -> Mapping[str, AdmissionDecision]:
+        return MappingProxyType(dict(self._reservations))
+
+    @property
+    def receipts(self) -> Mapping[str, ActionReceipt]:
+        return MappingProxyType(dict(self._receipts))
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, AuthorityLedger)
+            and self._envelope == other._envelope
+            and self._usage == other._usage
+            and self._reservations == other._reservations
+            and self._receipts == other._receipts
+        )
+
     def evaluate(
         self,
         proposal: ControlEvent,
@@ -320,6 +338,33 @@ class AuthorityLedger:
         )
         if not _fits(effective, self._envelope.budget_limit):
             raise AuthorityError("admission budget is no longer available")
+        self._reservations[decision.action_id] = decision
+
+    def restore_reservation(self, decision: AdmissionDecision) -> None:
+        """Restore one validated historical reservation during pure replay."""
+
+        if not isinstance(decision, AdmissionDecision) or decision.status != "admitted":
+            raise AuthorityError("recovered admission reservation is invalid")
+        existing = self._reservations.get(decision.action_id)
+        if existing is not None:
+            if existing != decision:
+                raise AuthorityError("recovered admission reservation conflicts")
+            return
+        if decision.action_id in self._receipts:
+            raise AuthorityError("recovered admission is already settled")
+        if (
+            decision.authority_id != self._envelope.authority_id
+            or decision.authority_revision > self._envelope.revision
+            or decision.reservation is None
+        ):
+            raise AuthorityError("recovered admission authority is invalid")
+        effective = _add_usage(
+            self._usage,
+            self._reserved_usage(),
+            decision.reservation.as_usage(),
+        )
+        if not _fits(effective, self._envelope.budget_limit):
+            raise AuthorityError("recovered admission budget is unavailable")
         self._reservations[decision.action_id] = decision
 
     def settle(self, action_id: str, receipt: ActionReceipt) -> None:

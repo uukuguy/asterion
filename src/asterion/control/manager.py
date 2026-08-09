@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from asterion.control.authority import AuthorityLedger
+from asterion.control.authority import AuthorityLedger, BudgetUsage
 from asterion.control.evidence import ControlEvidenceProjector
 from asterion.control.host import (
     ControlCommand,
@@ -17,8 +17,10 @@ from asterion.control.host import (
 from asterion.control.journal import (
     CanonicalJournal,
     JournalConflictError,
+    JournalCursor,
     JournalRecord,
 )
+from asterion.control.recovery import recover_control_host_state
 from asterion.control.state import (
     ControlState,
     ControlStateError,
@@ -74,7 +76,9 @@ class ControlHost:
             or not callable(clock_ms)
             or not callable(getattr(action_executor, "execute", None))
             or client.manifest != plan.control_binding.manifest
-            or journal.position != 0
+            or authority.usage != BudgetUsage.zero()
+            or authority.reserved_action_ids
+            or authority.receipts
         ):
             raise ControlHostError("control host construction is invalid")
         plan_grants = set(plan.portfolio_by_identity)
@@ -96,27 +100,59 @@ class ControlHost:
         self._action_executor = action_executor
         self._clock_ms = clock_ms
         self._evidence = ControlEvidenceProjector(pathlight)
-        self._state = ControlState.empty(session_id, generation=generation)
-        system = self._journal.append(
-            0,
-            JournalRecord.system_bound(
-                system_id=plan.system_id,
-                system_version=plan.version,
-            ),
-        )
-        authority_entry = self._journal.append(
-            system.position,
-            JournalRecord.authority_bound(
-                authority_id=authority.envelope.authority_id,
-                authority_revision=authority.envelope.revision,
-            ),
-        )
+        try:
+            position = self._journal.position
+            if position == 0:
+                self._state = ControlState.empty(session_id, generation=generation)
+                system = self._journal.append(
+                    0,
+                    JournalRecord.system_bound(
+                        system_id=plan.system_id,
+                        system_version=plan.version,
+                    ),
+                )
+                authority_entry = self._journal.append(
+                    system.position,
+                    JournalRecord.authority_bound(
+                        authority_id=authority.envelope.authority_id,
+                        authority_revision=authority.envelope.revision,
+                    ),
+                )
+            else:
+                entries = self._journal.replay(JournalCursor(0))
+                if len(entries) != position:
+                    raise JournalConflictError("control journal changed")
+                recovered = recover_control_host_state(entries, authority.envelope)
+                system_payload = entries[0].record.payload
+                authority_payload = entries[1].record.payload
+                if (
+                    system_payload.get("system_id") != plan.system_id
+                    or system_payload.get("system_version") != plan.version
+                    or authority_payload.get("authority_id")
+                    != authority.envelope.authority_id
+                    or recovered.state.session_id != session_id
+                    or recovered.state.generation != generation
+                    or recovered.state.authority_id
+                    != authority.envelope.authority_id
+                    or recovered.state.authority_revision
+                    != authority.envelope.revision
+                    or recovered.journal_position != position
+                ):
+                    raise JournalConflictError("control journal identity conflicts")
+                self._state = recovered.state
+                self._authority = recovered.authority
+                authority_entry = entries[-1]
+                if self._journal.position != position:
+                    raise JournalConflictError("control journal changed")
+        except (JournalConflictError, TypeError, ValueError):
+            raise ControlHostError("control host recovery failed") from None
+        self._journal_position = authority_entry.position
         self._evidence.start_system(
             plan,
             session_id=session_id,
             generation=generation,
             authority=authority.envelope,
-            journal_position=authority_entry.position,
+            journal_position=self._journal_position,
             timestamp_ns=self._clock_ms() * 1_000_000,
         )
 
@@ -128,9 +164,10 @@ class ControlHost:
         ):
             raise ControlHostError("control command authority or identity mismatches")
         try:
-            self._journal.accept_command(
-                command, expected_position=self._journal.position
+            entry = self._journal.accept_command(
+                command, expected_position=self._journal_position
             )
+            self._journal_position = max(self._journal_position, entry.position)
         except (JournalConflictError, TypeError, ValueError):
             raise ControlHostError("control command journal admission failed") from None
         try:
@@ -161,7 +198,7 @@ class ControlHost:
     def snapshot(self) -> ControlHostSnapshot:
         return ControlHostSnapshot(
             state=self._state,
-            journal_position=self._journal.position,
+            journal_position=self._journal_position,
             evidence_gaps=self._evidence.gaps,
         )
 
@@ -178,8 +215,9 @@ class ControlHost:
             raise ControlHostError("control provider event is invalid")
         try:
             entry = self._journal.accept_event(
-                event, expected_position=self._journal.position
+                event, expected_position=self._journal_position
             )
+            self._journal_position = max(self._journal_position, entry.position)
         except (JournalConflictError, TypeError, ValueError):
             raise ControlHostError("control provider event journal failed") from None
         if (
@@ -212,7 +250,7 @@ class ControlHost:
             if decision.status == "admitted":
                 self._authority.reserve(decision)
             entry = self._journal.append(
-                self._journal.position,
+                self._journal_position,
                 JournalRecord.action_decided(
                     action_id=decision.action_id,
                     authority_revision=decision.authority_revision,
@@ -221,6 +259,7 @@ class ControlHost:
                     proposal_digest=decision.proposal_digest,
                 ),
             )
+            self._journal_position = max(self._journal_position, entry.position)
             self._state = apply_action_admission(self._state, decision)
             self._evidence.project_admission(
                 decision,

@@ -31,11 +31,16 @@ from asterion.control.host import (
 )
 from asterion.control.journal import (
     CanonicalJournal,
+    FileCanonicalJournal,
     JournalConflictError,
     JournalCursor,
     JournalEntry,
     JournalRecord,
     MemoryCanonicalJournal,
+)
+from asterion.control.recovery import (
+    RecoveredControlState,
+    recover_control_host_state,
 )
 from asterion.control.manager import (
     ActionExecutor,
@@ -120,6 +125,7 @@ __all__ = [
     "ControlStateError",
     "EventCursor",
     "FakeControlPlaneClient",
+    "FileCanonicalJournal",
     "JournalConflictError",
     "JournalCursor",
     "JournalEntry",
@@ -127,6 +133,7 @@ __all__ = [
     "MemoryCanonicalJournal",
     "PortfolioGrant",
     "REQUIRED_PHASE0_SCENARIOS",
+    "RecoveredControlState",
     "ConformanceReport",
     "action_proposal_digest",
     "apply_action_admission",
@@ -134,6 +141,7 @@ __all__ = [
     "apply_authority_revision",
     "mark_action_running",
     "reconcile_uncertain_action",
+    "recover_control_host_state",
     "reduce_control_event",
     "run_control_provider_conformance",
     "resolve_agent_system",

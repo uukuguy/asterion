@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import stat
+from pathlib import Path
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Protocol
+
+import fcntl
 
 from asterion.control.host import ControlCommand, ControlEvent
 from asterion.control.protocol import (
@@ -32,6 +37,14 @@ JOURNAL_RECORD_KINDS = frozenset(
         "fault.projected",
     }
 )
+JOURNAL_FILE_VERSION = "asterion.control-journal/v1"
+_FILE_ROW_FIELDS = frozenset(
+    {"version", "position", "previous_digest", "record_digest", "record"}
+)
+_RECORD_FIELDS = frozenset({"record_id", "kind", "payload"})
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
+_CLOEXEC = getattr(os, "O_CLOEXEC", 0)
 
 
 class JournalConflictError(ValueError):
@@ -51,7 +64,7 @@ class JournalCursor:
             raise JournalConflictError("journal cursor is invalid")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class JournalRecord:
     record_id: str
     kind: str
@@ -77,6 +90,13 @@ class JournalRecord:
         ).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
 
+    def __repr__(self) -> str:
+        return (
+            "JournalRecord("
+            f"record_id={self.record_id!r}, kind={self.kind!r}, "
+            f"digest={self.digest!r})"
+        )
+
     @classmethod
     def system_bound(
         cls, *, system_id: str, system_version: str
@@ -94,6 +114,19 @@ class JournalRecord:
         return cls(
             record_id="authority-bound",
             kind="authority.bound",
+            payload={
+                "authority_id": authority_id,
+                "authority_revision": authority_revision,
+            },
+        )
+
+    @classmethod
+    def authority_revised(
+        cls, *, authority_id: str, authority_revision: int
+    ) -> JournalRecord:
+        return cls(
+            record_id=f"authority-revision:{authority_revision}",
+            kind="authority.revised",
             payload={
                 "authority_id": authority_id,
                 "authority_revision": authority_revision,
@@ -142,6 +175,35 @@ class JournalRecord:
             },
         )
 
+    @classmethod
+    def action_receipted(
+        cls,
+        *,
+        action_id: str,
+        receipt_ref: str,
+        usage: object,
+    ) -> JournalRecord:
+        return cls(
+            record_id=f"receipt:{action_id}",
+            kind="action.receipted",
+            payload={
+                "action_id": action_id,
+                "receipt_ref": receipt_ref,
+                "usage": _public_usage(usage),
+            },
+        )
+
+    @classmethod
+    def checkpoint_sealed(cls, *, checkpoint_event: ControlEvent) -> JournalRecord:
+        if not isinstance(checkpoint_event, ControlEvent):
+            raise JournalConflictError("journal checkpoint event is invalid")
+        checkpoint_id = checkpoint_event.payload.get("checkpoint_id")
+        return cls(
+            record_id=f"checkpoint:{checkpoint_id}",
+            kind="checkpoint.sealed",
+            payload={"checkpoint_event": checkpoint_event.to_mapping()},
+        )
+
 
 @dataclass(frozen=True)
 class JournalEntry:
@@ -163,12 +225,27 @@ class CanonicalJournal(Protocol):
     @property
     def position(self) -> int:
         """Return the current append position."""
+        ...
 
     def append(self, expected_position: int, record: JournalRecord) -> JournalEntry:
         """Compare-and-append one safe record, or replay an equal record."""
+        ...
 
     def replay(self, cursor: JournalCursor) -> tuple[JournalEntry, ...]:
         """Return the immutable suffix strictly after the cursor."""
+        ...
+
+    def accept_command(
+        self, command: ControlCommand, *, expected_position: int | None = None
+    ) -> JournalEntry:
+        """Append one validated command record."""
+        ...
+
+    def accept_event(
+        self, event: ControlEvent, *, expected_position: int | None = None
+    ) -> JournalEntry:
+        """Append one validated event record."""
+        ...
 
 
 class MemoryCanonicalJournal:
@@ -263,6 +340,378 @@ class MemoryCanonicalJournal:
             raise JournalConflictError("journal record session identity mismatches")
 
 
+class FileCanonicalJournal:
+    """Descriptor-relative, hash-chained canonical JSONL journal."""
+
+    def __init__(self, root: Path, session_id: str, filename: str) -> None:
+        self._root = root
+        self._session_id = session_id
+        self._filename = filename
+        self._entries: tuple[JournalEntry, ...] = ()
+        self._by_record_id: dict[str, JournalEntry] = {}
+
+    @classmethod
+    def open(cls, root: os.PathLike[str] | str, session_id: str) -> FileCanonicalJournal:
+        try:
+            if (
+                not isinstance(session_id, str)
+                or OPAQUE_ID.fullmatch(session_id) is None
+                or not isinstance(root, (str, os.PathLike))
+            ):
+                raise JournalConflictError("file journal construction is invalid")
+            native_root = Path(root)
+            if ".." in native_root.parts:
+                raise JournalConflictError("file journal construction is invalid")
+            native_root = Path(os.path.abspath(native_root))
+            filename = f"journal-{hashlib.sha256(session_id.encode('utf-8')).hexdigest()}.jsonl"
+            journal = cls(native_root, session_id, filename)
+            journal._refresh(exclusive=False, create=True)
+            return journal
+        except JournalConflictError:
+            raise
+        except (OSError, TypeError, ValueError, UnicodeError):
+            raise JournalConflictError("file journal cannot be opened safely") from None
+
+    @property
+    def position(self) -> int:
+        self._refresh(exclusive=False, create=False)
+        return len(self._entries)
+
+    def append(self, expected_position: int, record: JournalRecord) -> JournalEntry:
+        if not isinstance(record, JournalRecord):
+            raise JournalConflictError("journal record is invalid")
+        try:
+            root_fd, file_fd, created = self._open_descriptors(create=False)
+            try:
+                fcntl.flock(file_fd, fcntl.LOCK_EX)
+                entries = _read_file_entries(file_fd, self._session_id)
+                self._install(entries)
+                existing = self._by_record_id.get(record.record_id)
+                if existing is not None:
+                    if existing.digest != record.digest:
+                        raise JournalConflictError("journal record replay conflicts")
+                    return existing
+                if (
+                    isinstance(expected_position, bool)
+                    or not isinstance(expected_position, int)
+                    or expected_position != len(entries)
+                ):
+                    raise JournalConflictError("journal append position conflicts")
+                _validate_prefix(len(entries), record)
+                _validate_session(self._session_id, record)
+                entry = JournalEntry(
+                    position=len(entries) + 1,
+                    digest=record.digest,
+                    record=record,
+                )
+                previous = entries[-1].digest if entries else None
+                encoded = _encode_file_row(entry, previous)
+                with os.fdopen(os.dup(file_fd), "ab", buffering=0) as stream:
+                    offset = 0
+                    while offset < len(encoded):
+                        written = stream.write(encoded[offset:])
+                        if written is None or written < 1:
+                            raise OSError("journal write made no progress")
+                        offset += written
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                _verify_root_binding(self._root, root_fd)
+                _verify_file_binding(root_fd, self._filename, file_fd)
+                if created:
+                    os.fsync(root_fd)
+                self._install((*entries, entry))
+                return self._by_record_id[record.record_id]
+            finally:
+                os.close(file_fd)
+                os.close(root_fd)
+        except JournalConflictError:
+            raise
+        except (OSError, TypeError, ValueError, UnicodeError):
+            raise JournalConflictError("file journal append failed safely") from None
+
+    def replay(self, cursor: JournalCursor) -> tuple[JournalEntry, ...]:
+        if not isinstance(cursor, JournalCursor):
+            raise JournalConflictError("journal replay cursor conflicts")
+        self._refresh(exclusive=False, create=False)
+        if cursor.position > len(self._entries):
+            raise JournalConflictError("journal replay cursor conflicts")
+        return self._entries[cursor.position :]
+
+    def accept_command(
+        self, command: ControlCommand, *, expected_position: int | None = None
+    ) -> JournalEntry:
+        if not isinstance(command, ControlCommand):
+            raise JournalConflictError("journal command is invalid")
+        position = self.position if expected_position is None else expected_position
+        return self.append(
+            position,
+            JournalRecord(
+                record_id=f"command:{command.command_id}",
+                kind="command.accepted",
+                payload={"command": command.to_mapping()},
+            ),
+        )
+
+    def accept_event(
+        self, event: ControlEvent, *, expected_position: int | None = None
+    ) -> JournalEntry:
+        if not isinstance(event, ControlEvent):
+            raise JournalConflictError("journal event is invalid")
+        position = self.position if expected_position is None else expected_position
+        return self.append(
+            position,
+            JournalRecord(
+                record_id=f"event:{event.event_id}",
+                kind="event.accepted",
+                payload={"event": event.to_mapping()},
+            ),
+        )
+
+    def _refresh(self, *, exclusive: bool, create: bool) -> None:
+        try:
+            root_fd, file_fd, created = self._open_descriptors(create=create)
+            try:
+                fcntl.flock(file_fd, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
+                self._install(_read_file_entries(file_fd, self._session_id))
+                _verify_root_binding(self._root, root_fd)
+                _verify_file_binding(root_fd, self._filename, file_fd)
+                if created:
+                    os.fsync(file_fd)
+                    os.fsync(root_fd)
+            finally:
+                os.close(file_fd)
+                os.close(root_fd)
+        except JournalConflictError:
+            raise
+        except (OSError, TypeError, ValueError, UnicodeError):
+            raise JournalConflictError("file journal cannot be read safely") from None
+
+    def _open_descriptors(self, *, create: bool) -> tuple[int, int, bool]:
+        root_fd, root_created = _open_private_root(self._root, create=create)
+        try:
+            file_fd, file_created = _open_private_file(
+                root_fd, self._filename, create=create
+            )
+        except BaseException:
+            os.close(root_fd)
+            raise
+        return root_fd, file_fd, root_created or file_created
+
+    def _install(self, entries: tuple[JournalEntry, ...]) -> None:
+        if entries == self._entries:
+            return
+        self._entries = entries
+        self._by_record_id = {entry.record.record_id: entry for entry in entries}
+
+
+def _open_private_root(root: Path, *, create: bool) -> tuple[int, bool]:
+    created = False
+    if create:
+        try:
+            os.mkdir(root, 0o700)
+            created = True
+        except FileExistsError:
+            pass
+    before = os.lstat(root)
+    descriptor = os.open(root, os.O_RDONLY | _DIRECTORY | _NOFOLLOW | _CLOEXEC)
+    try:
+        details = os.fstat(descriptor)
+        if created:
+            os.fchmod(descriptor, 0o700)
+            details = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(before.st_mode)
+            or not stat.S_ISDIR(details.st_mode)
+            or (before.st_dev, before.st_ino) != (details.st_dev, details.st_ino)
+            or stat.S_IMODE(details.st_mode) != 0o700
+            or details.st_uid != os.getuid()
+        ):
+            raise JournalConflictError("file journal root is unsafe")
+        _verify_root_binding(root, descriptor)
+        return descriptor, created
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _open_private_file(root_fd: int, filename: str, *, create: bool) -> tuple[int, bool]:
+    flags = os.O_RDWR | os.O_APPEND | _NOFOLLOW | _CLOEXEC
+    created = False
+    try:
+        descriptor = os.open(filename, flags, dir_fd=root_fd)
+    except FileNotFoundError:
+        if not create:
+            raise
+        try:
+            descriptor = os.open(
+                filename,
+                flags | os.O_CREAT | os.O_EXCL,
+                0o600,
+                dir_fd=root_fd,
+            )
+            created = True
+        except FileExistsError:
+            descriptor = os.open(filename, flags, dir_fd=root_fd)
+    try:
+        if created:
+            os.fchmod(descriptor, 0o600)
+        details = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(details.st_mode)
+            or stat.S_IMODE(details.st_mode) != 0o600
+            or details.st_uid != os.getuid()
+            or details.st_nlink != 1
+        ):
+            raise JournalConflictError("file journal artifact is unsafe")
+        _verify_file_binding(root_fd, filename, descriptor)
+        return descriptor, created
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _read_file_entries(file_fd: int, session_id: str) -> tuple[JournalEntry, ...]:
+    details_before = os.fstat(file_fd)
+    if (
+        not stat.S_ISREG(details_before.st_mode)
+        or stat.S_IMODE(details_before.st_mode) != 0o600
+        or details_before.st_uid != os.getuid()
+        or details_before.st_nlink != 1
+    ):
+        raise JournalConflictError("file journal artifact is unsafe")
+    with os.fdopen(os.dup(file_fd), "rb", buffering=0) as stream:
+        stream.seek(0)
+        raw = stream.read()
+    details_after = os.fstat(file_fd)
+    if (
+        (details_before.st_dev, details_before.st_ino, details_before.st_size)
+        != (details_after.st_dev, details_after.st_ino, details_after.st_size)
+    ):
+        raise JournalConflictError("file journal changed while reading")
+    if raw and not raw.endswith(b"\n"):
+        raise JournalConflictError("file journal is truncated")
+    entries: list[JournalEntry] = []
+    record_ids: set[str] = set()
+    previous_digest: str | None = None
+    raw_lines = raw[:-1].split(b"\n") if raw else ()
+    for expected_position, raw_line in enumerate(raw_lines, start=1):
+        try:
+            text = raw_line.decode("utf-8", errors="strict")
+            value = json.loads(text)
+            if (
+                not isinstance(value, dict)
+                or set(value) != _FILE_ROW_FIELDS
+                or json.dumps(
+                    value,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                ).encode("utf-8")
+                != raw_line
+                or value["version"] != JOURNAL_FILE_VERSION
+                or value["position"] != expected_position
+                or value["previous_digest"] != previous_digest
+                or not isinstance(value["record"], dict)
+                or set(value["record"]) != _RECORD_FIELDS
+            ):
+                raise JournalConflictError("file journal row is invalid")
+            record_value = value["record"]
+            record = JournalRecord(
+                record_id=record_value["record_id"],
+                kind=record_value["kind"],
+                payload=record_value["payload"],
+            )
+            if value["record_digest"] != record.digest:
+                raise JournalConflictError("file journal digest is invalid")
+            if record.record_id in record_ids:
+                raise JournalConflictError("file journal record identity is duplicated")
+            _validate_prefix(len(entries), record)
+            _validate_session(session_id, record)
+            entry = JournalEntry(
+                position=expected_position,
+                digest=record.digest,
+                record=record,
+            )
+        except JournalConflictError:
+            raise
+        except (KeyError, TypeError, ValueError, UnicodeError, json.JSONDecodeError):
+            raise JournalConflictError("file journal row is invalid") from None
+        entries.append(entry)
+        record_ids.add(record.record_id)
+        previous_digest = entry.digest
+    return tuple(entries)
+
+
+def _verify_root_binding(root: Path, root_fd: int) -> None:
+    path_details = os.lstat(root)
+    descriptor_details = os.fstat(root_fd)
+    if (
+        not stat.S_ISDIR(path_details.st_mode)
+        or (path_details.st_dev, path_details.st_ino)
+        != (descriptor_details.st_dev, descriptor_details.st_ino)
+        or stat.S_IMODE(path_details.st_mode) != 0o700
+    ):
+        raise JournalConflictError("file journal root binding changed")
+
+
+def _verify_file_binding(root_fd: int, filename: str, file_fd: int) -> None:
+    path_details = os.stat(filename, dir_fd=root_fd, follow_symlinks=False)
+    descriptor_details = os.fstat(file_fd)
+    if (
+        not stat.S_ISREG(path_details.st_mode)
+        or (path_details.st_dev, path_details.st_ino)
+        != (descriptor_details.st_dev, descriptor_details.st_ino)
+        or stat.S_IMODE(path_details.st_mode) != 0o600
+        or path_details.st_nlink != 1
+    ):
+        raise JournalConflictError("file journal artifact binding changed")
+
+
+def _encode_file_row(entry: JournalEntry, previous_digest: str | None) -> bytes:
+    value = {
+        "version": JOURNAL_FILE_VERSION,
+        "position": entry.position,
+        "previous_digest": previous_digest,
+        "record_digest": entry.digest,
+        "record": {
+            "record_id": entry.record.record_id,
+            "kind": entry.record.kind,
+            "payload": _json_value(entry.record.payload),
+        },
+    }
+    return (
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        + b"\n"
+    )
+
+
+def _validate_prefix(position: int, record: JournalRecord) -> None:
+    if position == 0 and record.kind != "system.bound":
+        raise JournalConflictError("journal system binding is missing")
+    if position == 1 and record.kind != "authority.bound":
+        raise JournalConflictError("journal authority binding is missing")
+    if position >= 2 and record.kind in {"system.bound", "authority.bound"}:
+        raise JournalConflictError("journal binding record is duplicated")
+
+
+def _validate_session(session_id: str, record: JournalRecord) -> None:
+    field = {
+        "command.accepted": "command",
+        "event.accepted": "event",
+        "checkpoint.sealed": "checkpoint_event",
+    }.get(record.kind)
+    if field is None:
+        return
+    value = record.payload[field]
+    if not isinstance(value, Mapping) or value.get("session_id") != session_id:
+        raise JournalConflictError("journal record session identity mismatches")
+
+
 def _validate_record_payload(kind: str, value: object) -> None:
     if not isinstance(value, Mapping) or not all(isinstance(key, str) for key in value):
         raise JournalConflictError("journal record payload is invalid")
@@ -347,6 +796,27 @@ def _validate_usage(value: object) -> None:
         item = value[field]
         if isinstance(item, bool) or not isinstance(item, int) or item < 0:
             raise JournalConflictError("journal receipt usage is invalid")
+
+
+def _public_usage(value: object) -> Mapping[str, object]:
+    fields = (
+        "controller_tokens",
+        "application_tokens",
+        "child_tokens",
+        "aggregate_tokens",
+        "cost_micros",
+    )
+    if isinstance(value, Mapping):
+        if set(value) != set(fields):
+            raise JournalConflictError("journal receipt usage is invalid")
+        result = {field: value[field] for field in fields}
+    else:
+        try:
+            result = {field: getattr(value, field) for field in fields}
+        except AttributeError:
+            raise JournalConflictError("journal receipt usage is invalid") from None
+    _validate_usage(result)
+    return result
 
 
 def _require_fields(value: Mapping[str, object], fields: set[str]) -> None:
