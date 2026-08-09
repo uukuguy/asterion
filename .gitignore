@@ -49,4 +49,7 @@ tmp/
 # Isolated feature worktrees
 .worktrees/
 
+# Local design companion state
+.superpowers/
+
 3th-party/
