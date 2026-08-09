@@ -48,3 +48,5 @@ tmp/
 
 # Isolated feature worktrees
 .worktrees/
+
+3th-party/
