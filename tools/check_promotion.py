@@ -101,6 +101,16 @@ from importlib import resources
 from pathlib import Path
 
 root = Path(str(resources.files('asterion')))
+schema_paths = (
+    'asterion/schemas/agent-system/v1/agent-system.schema.json',
+    'asterion/schemas/control-plane/v1/control-plane-manifest.schema.json',
+    'asterion/schemas/agent-control/v1/command.schema.json',
+    'asterion/schemas/agent-control/v1/event.schema.json',
+)
+for name in schema_paths:
+    path = root.parent / name
+    payload = json.loads(path.read_text(encoding='utf-8'))
+    assert payload.get('$id', '').endswith(name.removeprefix('asterion/')), name
 expected = {
     'applications/controlled_code/assemblies/controlled-code-validation.json':
         'asterion.application-assembly/v1',
@@ -213,6 +223,7 @@ assert json.loads(template_descriptor.read_text()).get('protocol') == (
 
 ROOT_EXCLUDED_NAMES = frozenset(
     {
+        "3th-party",
         "build",
         "corpora",
         "corpus",

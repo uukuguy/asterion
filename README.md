@@ -178,6 +178,10 @@ make check
 
 The [documentation hub](docs/README.md) links the framework architecture,
 capability usage, complete DCI reference, and functional verification guide.
+Long-running agent development starts with the
+[Agent Control Protocol](docs/architecture/AGENT-CONTROL-PROTOCOL.md); the
+[Prime parity ledger](docs/status/PRIME-PARITY-LEDGER.md) keeps foundation,
+Prime-managed and native-kernel claims distinct.
 
 ## Promotion
 

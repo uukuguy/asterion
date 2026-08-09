@@ -84,6 +84,7 @@ class PromotionCheckTests(unittest.TestCase):
             ".ruff_cache",
             "node_modules",
             "target",
+            "3th-party",
             "worktrees",
             "dist",
             "outputs",
@@ -275,6 +276,13 @@ class PromotionCheckTests(unittest.TestCase):
         self.assertIn("capability_sdk/templates/minimal", smoke_source)
         self.assertIn("asterion.capability_sdk", smoke_source)
         self.assertIn("asterion.capability_packages.payload", smoke_source)
+        for schema_path in (
+            "asterion/schemas/agent-system/v1/agent-system.schema.json",
+            "asterion/schemas/control-plane/v1/control-plane-manifest.schema.json",
+            "asterion/schemas/agent-control/v1/command.schema.json",
+            "asterion/schemas/agent-control/v1/event.schema.json",
+        ):
+            self.assertIn(schema_path, smoke_source)
         for expected in (
             "applications/controlled_code/assemblies/controlled-code-validation.json",
             "applications/dci_agent_lite/assemblies/dci-complete-application-claude.json",

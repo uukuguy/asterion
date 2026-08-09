@@ -21,6 +21,11 @@ read architecture documents when extending the framework.
   counterexamples, experiment provenance, and the prioritized delivery route.
 - [Agent application framework](architecture/agent-framework.md) — the layer
   model, public boundaries, delivery strategy, and non-goals.
+- [Agent Control Protocol](architecture/AGENT-CONTROL-PROTOCOL.md) — optional
+  long-running systems, provider interchangeability, authority, journal,
+  recovery and safe evidence boundaries.
+- [Prime parity ledger](status/PRIME-PARITY-LEDGER.md) — pinned baseline,
+  evidence levels, stable domains and explicit Prime/native gaps.
 - [Framework and capability integration](architecture/asterion-framework-capability-integration.md)
   — runtime, adapter, package, capability, assembly, application, provider,
   host service, and CLI integration.

@@ -10,12 +10,23 @@ from zipfile import ZipFile
 PROJECT = Path(__file__).resolve().parents[1]
 BENCHMARK_SOURCE = PROJECT / "src/asterion/benchmarks"
 DCI_SOURCE = PROJECT / "src/asterion/capabilities/dci"
-BENCHMARK_SCHEMA = (
-    PROJECT / "schemas/benchmark-suite/v1/benchmark-suite.schema.json"
-)
-PACKAGED_BENCHMARK_SCHEMA = (
-    "asterion/schemas/benchmark-suite/v1/benchmark-suite.schema.json"
-)
+PACKAGED_SCHEMAS = {
+    "schemas/agent-control/v1/command.schema.json": (
+        "asterion/schemas/agent-control/v1/command.schema.json"
+    ),
+    "schemas/agent-control/v1/event.schema.json": (
+        "asterion/schemas/agent-control/v1/event.schema.json"
+    ),
+    "schemas/agent-system/v1/agent-system.schema.json": (
+        "asterion/schemas/agent-system/v1/agent-system.schema.json"
+    ),
+    "schemas/benchmark-suite/v1/benchmark-suite.schema.json": (
+        "asterion/schemas/benchmark-suite/v1/benchmark-suite.schema.json"
+    ),
+    "schemas/control-plane/v1/control-plane-manifest.schema.json": (
+        "asterion/schemas/control-plane/v1/control-plane-manifest.schema.json"
+    ),
+}
 
 
 class DistributionTests(unittest.TestCase):
@@ -59,11 +70,13 @@ class DistributionTests(unittest.TestCase):
                             wheel.read(relative),
                             (PROJECT / "src" / relative).read_bytes(),
                         )
-                self.assertIn(PACKAGED_BENCHMARK_SCHEMA, members)
-                self.assertEqual(
-                    wheel.read(PACKAGED_BENCHMARK_SCHEMA),
-                    BENCHMARK_SCHEMA.read_bytes(),
-                )
+                for source, packaged in PACKAGED_SCHEMAS.items():
+                    with self.subTest(schema=source):
+                        self.assertIn(packaged, members)
+                        self.assertEqual(
+                            wheel.read(packaged),
+                            (PROJECT / source).read_bytes(),
+                        )
 
 
 if __name__ == "__main__":
