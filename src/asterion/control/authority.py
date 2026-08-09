@@ -253,7 +253,7 @@ class AuthorityLedger:
             raise AuthorityError("proposal host services are invalid")
         payload = proposal.payload
         action_id = str(payload["action_id"])
-        digest = _proposal_digest(proposal)
+        digest = action_proposal_digest(proposal)
         revision = payload["authority_revision"]
         if self._envelope.cancelled:
             return self._rejected(action_id, digest, "authority-cancelled")
@@ -386,7 +386,11 @@ class AuthorityLedger:
         )
 
 
-def _proposal_digest(proposal: ControlEvent) -> str:
+def action_proposal_digest(proposal: ControlEvent) -> str:
+    """Return the canonical public digest used to bind an admission decision."""
+
+    if not isinstance(proposal, ControlEvent) or proposal.type != "action.proposed":
+        raise AuthorityError("authority proposal is invalid")
     encoded = json.dumps(
         proposal.to_mapping(),
         sort_keys=True,

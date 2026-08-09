@@ -16,6 +16,7 @@ from asterion.control.authority import (
     BudgetRequest,
     BudgetUsage,
     PortfolioGrant,
+    action_proposal_digest,
 )
 from asterion.control.host import (
     ControlCommand,
@@ -49,11 +50,23 @@ from asterion.control.system import (
     ApplicationPortfolioEntry,
     resolve_agent_system,
 )
+from asterion.control.state import (
+    ActionState,
+    ControlState,
+    ControlStateError,
+    apply_action_admission,
+    apply_action_resolution,
+    apply_authority_revision,
+    mark_action_running,
+    reconcile_uncertain_action,
+    reduce_control_event,
+)
 
 __all__ = [
     "AGENT_CONTROL_PROTOCOL",
     "AGENT_SYSTEM_PROTOCOL",
     "ActionReceipt",
+    "ActionState",
     "AdmissionDecision",
     "AgentSystemError",
     "AgentSystemPlan",
@@ -75,6 +88,8 @@ __all__ = [
     "ControlPlaneFactoryRegistry",
     "ControlPlaneManifest",
     "ControlProtocolError",
+    "ControlState",
+    "ControlStateError",
     "EventCursor",
     "JournalConflictError",
     "JournalCursor",
@@ -82,6 +97,13 @@ __all__ = [
     "JournalRecord",
     "MemoryCanonicalJournal",
     "PortfolioGrant",
+    "action_proposal_digest",
+    "apply_action_admission",
+    "apply_action_resolution",
+    "apply_authority_revision",
+    "mark_action_running",
+    "reconcile_uncertain_action",
+    "reduce_control_event",
     "resolve_agent_system",
     "validate_agent_system_manifest",
     "validate_control_command",
