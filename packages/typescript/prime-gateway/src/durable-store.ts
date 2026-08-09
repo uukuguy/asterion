@@ -54,6 +54,7 @@ export interface GatewayDurableStoreOptions {
 
 export interface PrimeIdentityBinding {
   readonly activeSessionId: string;
+  readonly transcriptSessionId: string;
   readonly supervisorGeneration: string;
 }
 
@@ -338,14 +339,20 @@ function recordName(position: number): string {
 function validateIdentityPayload(value: unknown): PrimeIdentityBinding {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ["activeSessionId", "supervisorGeneration"]) ||
+    !hasExactKeys(value, [
+      "activeSessionId",
+      "transcriptSessionId",
+      "supervisorGeneration",
+    ]) ||
     !nonEmptyIdentifier(value.activeSessionId) ||
+    !nonEmptyIdentifier(value.transcriptSessionId) ||
     !nonEmptyIdentifier(value.supervisorGeneration)
   ) {
     throw new GatewayStoreConflictError();
   }
   return Object.freeze({
     activeSessionId: value.activeSessionId,
+    transcriptSessionId: value.transcriptSessionId,
     supervisorGeneration: value.supervisorGeneration,
   });
 }

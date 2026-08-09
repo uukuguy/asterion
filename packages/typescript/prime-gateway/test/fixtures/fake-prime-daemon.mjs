@@ -48,9 +48,11 @@ export async function startFakePrimeDaemon(options = {}) {
   const acknowledgements = [];
   const deliveries = new Map();
   const mutations = new Map();
+  const commandCounts = new Map();
   const cachedResponses = new Map();
   const sockets = new Set();
   let connectionCount = 0;
+  let attachedActiveSessionId;
 
   const server = createServer((socket) => {
     const connectionIndex = connectionCount++;
@@ -72,7 +74,10 @@ export async function startFakePrimeDaemon(options = {}) {
         greetingOverride.schemaRevision ?? options.schemaRevision ?? 14,
       appVersion: greetingOverride.appVersion ?? options.appVersion ?? "0.7.1",
       runtime: {
-        buildId: greetingOverride.buildId ?? `fake-build-${connectionIndex + 1}`,
+        buildId:
+          greetingOverride.buildId ??
+          options.buildId ??
+          `fake-build-${connectionIndex + 1}`,
         executablePath: "/private/sentinel/node",
         entrypointPath: "/private/sentinel/prime.ts",
       },
@@ -117,15 +122,22 @@ export async function startFakePrimeDaemon(options = {}) {
             acknowledgements.push(command.commandId);
           } else {
             const commandId = envelope.id;
+            commandCounts.set(command.type, (commandCounts.get(command.type) ?? 0) + 1);
+            if (command.type === "attach") {
+              attachedActiveSessionId = command.activeSessionId;
+            }
             deliveries.set(commandId, (deliveries.get(commandId) ?? 0) + 1);
             if (!mutations.has(commandId)) {
               mutations.set(commandId, 1);
+              const configuredData = typeof options.responseData === "function"
+                ? options.responseData(command, envelope, connectionIndex)
+                : options.responseData?.[command.type];
               cachedResponses.set(commandId, {
                 id: commandId,
                 type: "response",
                 command: command.type,
                 success: true,
-                data: { accepted: true },
+                data: configuredData ?? { accepted: true },
               });
               if (options.disconnectFirstMutation) {
                 socket.destroy();
@@ -173,6 +185,15 @@ export async function startFakePrimeDaemon(options = {}) {
     acknowledgements,
     get connectionCount() {
       return connectionCount;
+    },
+    get prepareCount() {
+      return commandCounts.get("prepare_update_restart") ?? 0;
+    },
+    get attachedActiveSessionId() {
+      return attachedActiveSessionId;
+    },
+    commandCount(type) {
+      return commandCounts.get(type) ?? 0;
     },
     deliveryCount(commandId) {
       return deliveries.get(commandId) ?? 0;

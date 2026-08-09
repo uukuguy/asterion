@@ -106,6 +106,8 @@ export type {
   PrimePromptCancellation,
   PrimeSessionCreateOptions,
   PrimeSessionIdentity,
+  PrimeSessionRecovery,
+  PrimeSessionRestoreOptions,
 } from "./prime-session.js";
 export {
   PrimeGateway,
@@ -117,3 +119,14 @@ export type {
   PrimeGatewayOptions,
   PrimeGatewaySession,
 } from "./gateway.js";
+export {
+  PrimeCheckpointError,
+  PrimeCheckpointManager,
+} from "./checkpoint.js";
+export type {
+  PrimeCapsuleV1,
+  PrimeCheckpointCreated,
+  PrimeCheckpointManagerOptions,
+  PrimeCheckpointRecovery,
+  PrimeCheckpointRuntime,
+} from "./checkpoint.js";

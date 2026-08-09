@@ -71,7 +71,7 @@ interface PendingRequest {
 
 export interface PrimeDaemonDeferredResponse {
   readonly response: PrimeDaemonResponse;
-  readonly acknowledge: () => void;
+  readonly acknowledge: () => boolean;
 }
 
 interface TransportState {
@@ -197,7 +197,9 @@ export class PrimeDaemonClient {
       acknowledge: () => {
         if (!acknowledged && this.acknowledgeDeferred(stableCommandId)) {
           acknowledged = true;
+          return true;
         }
+        return acknowledged;
       },
     });
   }
@@ -380,7 +382,7 @@ export class PrimeDaemonClient {
         this.clearRequestTimeout(pending);
         const uncertain = this.isUncertainResult(outbound, outbound.id);
         if (uncertain || !pending.deferAcknowledgement) {
-          this.acknowledgeResult(state, outbound.id);
+          this.writeAcknowledgement(state, outbound.id);
         } else {
           this.deferredAcknowledgements.add(outbound.id);
         }
@@ -488,7 +490,7 @@ export class PrimeDaemonClient {
     this.pending.clear();
   }
 
-  private acknowledgeResult(state: TransportState, commandId: string): void {
+  private writeAcknowledgement(state: TransportState, commandId: string): void {
     if (!state.active || state.socket.destroyed) {
       return;
     }
@@ -501,12 +503,11 @@ export class PrimeDaemonClient {
     state.socket.write(wireData);
   }
 
-  private acknowledgeDeferred(commandId: string): boolean {
-    if (!this.deferredAcknowledgements.has(commandId)) {
-      return false;
-    }
+  acknowledgeResult(commandId: string): boolean {
     const state = this.transport;
     if (
+      typeof commandId !== "string" ||
+      commandId.length === 0 ||
       state === undefined ||
       !state.active ||
       !state.helloReceived ||
@@ -514,9 +515,20 @@ export class PrimeDaemonClient {
     ) {
       return false;
     }
-    this.acknowledgeResult(state, commandId);
-    this.deferredAcknowledgements.delete(commandId);
-    return true;
+    try {
+      this.writeAcknowledgement(state, commandId);
+      this.deferredAcknowledgements.delete(commandId);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private acknowledgeDeferred(commandId: string): boolean {
+    if (!this.deferredAcknowledgements.has(commandId)) {
+      return false;
+    }
+    return this.acknowledgeResult(commandId);
   }
 
   private isUncertainResult(

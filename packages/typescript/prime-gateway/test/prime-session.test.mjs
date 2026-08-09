@@ -39,7 +39,10 @@ class FakeTransport {
         type: "response",
         command: "create",
         success: true,
-        data: { activeSessionId: "prime-root-1", id: "transcript-1" },
+        data: {
+          activeSessionId: "prime-root-1",
+          sessionId: "transcript-1",
+        },
       });
     }
     if (command.type === "attach") {
@@ -76,6 +79,11 @@ class FakeTransport {
 
   subscribe() {
     return () => undefined;
+  }
+
+  acknowledgeResult(commandId) {
+    this.acknowledgements.push(commandId);
+    return true;
   }
 
   async requestDeferred(command, commandId) {
@@ -121,9 +129,11 @@ test("lifecycle create binds exact resident config and disables native RLM", asy
   });
 
   assert.equal(session.activeSessionId, "prime-root-1");
+  assert.equal(session.transcriptSessionId, "transcript-1");
   assert.equal(session.supervisorGeneration, "supervisor-generation-1");
   assert.deepEqual(identities, [{
     activeSessionId: "prime-root-1",
+    transcriptSessionId: "transcript-1",
     supervisorGeneration: "supervisor-generation-1",
   }]);
   assert.deepEqual(transport.acknowledgements, ["session-1-create"]);
@@ -174,6 +184,50 @@ test("lifecycle create binds exact resident config and disables native RLM", asy
   });
 });
 
+test("lifecycle adopts one restored resident identity without creating a new root", async () => {
+  const transport = new FakeTransport();
+  transport.hello = {
+    supervisorGeneration: "supervisor-generation-2",
+  };
+
+  const session = PrimeSession.restore({
+    transport,
+    sessionId: "session-1",
+    activeSessionId: "prime-root-1",
+    transcriptSessionId: "transcript-1",
+  });
+
+  assert.equal(session.activeSessionId, "prime-root-1");
+  assert.equal(session.transcriptSessionId, "transcript-1");
+  assert.equal(session.supervisorGeneration, "supervisor-generation-2");
+  assert.deepEqual(transport.commands, []);
+});
+
+test("lifecycle adopts a distinct recovery transport before new input", async () => {
+  const original = new FakeTransport();
+  const recovered = new FakeTransport();
+  recovered.hello = { supervisorGeneration: "supervisor-generation-2" };
+  const session = PrimeSession.restore({
+    transport: original,
+    sessionId: "session-1",
+    activeSessionId: "prime-root-1",
+    transcriptSessionId: "transcript-1",
+  });
+
+  session.adoptRecovery({
+    transport: recovered,
+    primeCursor: { generation: "prime-events-2", sequence: 8 },
+    transcriptSessionId: "transcript-1",
+    supervisorGeneration: "supervisor-generation-2",
+    sessionStatus: "running",
+  });
+  await session.submitInput("input-recovered", "direct", "private recovered input");
+
+  assert.equal(session.supervisorGeneration, "supervisor-generation-2");
+  assert.deepEqual(original.commands, []);
+  assert.deepEqual(recovered.commands.map(({ command }) => command.type), ["prompt"]);
+});
+
 test("lifecycle maps input modes pause resume detach and cancellation cascade", async () => {
   const transport = new FakeTransport();
   const session = await PrimeSession.create({
@@ -209,6 +263,21 @@ test("lifecycle maps input modes pause resume detach and cancellation cascade", 
   assert.equal(transport.commands[5].command.message, "Continue the active goal.");
   assert.equal(transport.commands[5].command.expandPromptTemplates, false);
   assert.equal(transport.commands[6].command.activeSessionId, "prime-root-1");
+});
+
+test("lifecycle retries one deterministic checkpoint acknowledgement", async () => {
+  const transport = new FakeTransport();
+  const session = PrimeSession.restore({
+    transport,
+    sessionId: "session-1",
+    activeSessionId: "prime-root-1",
+    transcriptSessionId: "transcript-1",
+  });
+
+  assert.equal(session.acknowledgeCheckpoint("checkpoint-1"), true);
+  assert.deepEqual(transport.acknowledgements, [
+    "session-1-checkpoint-checkpoint-1-prepare",
+  ]);
 });
 
 test("lifecycle classifies prompt admission cancellation without guessing", async () => {

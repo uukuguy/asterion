@@ -6,10 +6,12 @@ import type {
   ActionResolution,
   ControlCommand,
   ControlEvent,
+  GoalStatus,
 } from "@dci/agent-runtime";
 
 import type {
   GatewayDurableStore,
+  PrimeIdentityBinding,
 } from "./durable-store.js";
 import {
   canonicalJsonBytes,
@@ -26,6 +28,10 @@ import type {
   PrivateValueRef,
   PrivateValueStore,
 } from "./private-store.js";
+import type {
+  PrimeCheckpointCreated,
+  PrimeCheckpointRecovery,
+} from "./checkpoint.js";
 import type {
   PrimeDaemonListener,
 } from "./daemon-client.js";
@@ -47,7 +53,10 @@ type CheckpointPayload = Extract<
 
 export interface PrimeGatewaySession {
   readonly activeSessionId: string;
+  readonly transcriptSessionId: string;
   readonly supervisorGeneration: string;
+  adoptRecovery(recovery: PrimeCheckpointRecovery): void;
+  acknowledgeCheckpoint(checkpointId: string): boolean;
   subscribe(listener: PrimeDaemonListener): () => void;
   submitInput(
     inputId: string,
@@ -71,13 +80,19 @@ export interface PrimeGatewayOptions {
     goal: string,
     bindIdentity: (identity: {
       readonly activeSessionId: string;
+      readonly transcriptSessionId: string;
       readonly supervisorGeneration: string;
     }) => Promise<void>,
+  ) => Promise<PrimeGatewaySession>;
+  readonly restoreSession?: (
+    identity: PrimeIdentityBinding,
+    onRecovered: (recovery: PrimeCheckpointRecovery) => Promise<void>,
   ) => Promise<PrimeGatewaySession>;
   readonly createCheckpoint: (
     checkpointId: string,
     coveredSequence: number,
-  ) => Promise<CheckpointPayload>;
+    onRecovered: (recovery: PrimeCheckpointRecovery) => Promise<void>,
+  ) => Promise<PrimeCheckpointCreated>;
   readonly now?: () => string;
 }
 
@@ -146,6 +161,8 @@ function requirePrivateRef(value: string): PrivateValueRef {
 
 export class PrimeGateway {
   private readonly actions = new Map<string, ActionRecord>();
+  private readonly checkpoints = new Set<string>();
+  private readonly pendingCheckpointAcknowledgements = new Set<string>();
   private readonly commandExecutions = new Map<string, CommandExecution>();
   private readonly reservedEvents = new Map<number, ReservedEventIdentity>();
   private readonly now: () => string;
@@ -157,7 +174,9 @@ export class PrimeGateway {
   private eventQueue: Promise<void> = Promise.resolve();
   private durableQueue: Promise<void> = Promise.resolve();
   private goalId: string | undefined;
+  private goalStatus: GoalStatus | undefined;
   private sessionStatus: GatewaySessionStatus | undefined;
+  private recoveryBaseStatus: GatewaySessionStatus | undefined;
   private terminal = false;
   private closed = false;
 
@@ -172,8 +191,13 @@ export class PrimeGateway {
     for (const event of events) {
       if (event.type === "session.created") {
         this.goalId = event.payload.goal_id;
+        this.goalStatus ??= "active";
+      } else if (event.type === "goal.updated") {
+        this.goalStatus = event.payload.status;
       } else if (event.type === "action.proposed") {
         this.actions.set(event.payload.action_id, { status: "proposed" });
+      } else if (event.type === "checkpoint.created") {
+        this.checkpoints.add(event.payload.checkpoint_id);
       }
       this.updateSessionStatus(event);
     }
@@ -186,11 +210,15 @@ export class PrimeGateway {
       !OPAQUE_ID.test(options.authorityId) ||
       typeof options.createSession !== "function" ||
       typeof options.createCheckpoint !== "function" ||
+      (options.restoreSession !== undefined &&
+        typeof options.restoreSession !== "function") ||
       options.store.snapshot().sessionId !== options.sessionId
     ) {
       throw new PrimeGatewayError();
     }
-    return new PrimeGateway(options);
+    const gateway = new PrimeGateway(options);
+    await gateway.restoreExistingSession();
+    return gateway;
   }
 
   nextEventIdentity(): PrimeMappedEventIdentity {
@@ -236,6 +264,7 @@ export class PrimeGateway {
     if (command.session_id !== this.options.sessionId) {
       throw new PrimeGatewayError();
     }
+    this.retryCheckpointAcknowledgements();
     const digest = sha256Hex(canonicalJsonBytes(command));
     const existing = this.commandExecutions.get(command.command_id);
     if (existing !== undefined) {
@@ -400,7 +429,13 @@ export class PrimeGateway {
         await this.cancel(command);
         return;
       case "checkpoint.request":
-        this.requireSessionStatus("running");
+        if (
+          !this.checkpoints.has(command.payload.checkpoint_id) &&
+          this.sessionStatus !== "running" &&
+          this.sessionStatus !== "recovery_required"
+        ) {
+          throw new PrimeGatewayError();
+        }
         await this.checkpoint(command.payload.checkpoint_id);
         return;
       case "action.resolve":
@@ -425,12 +460,14 @@ export class PrimeGateway {
     );
     let boundIdentity: {
       readonly activeSessionId: string;
+      readonly transcriptSessionId: string;
       readonly supervisorGeneration: string;
     } | undefined;
     const session = await this.options.createSession(goal, async (identity) => {
       if (
         boundIdentity !== undefined ||
         !OPAQUE_ID.test(identity.activeSessionId) ||
+        !OPAQUE_ID.test(identity.transcriptSessionId) ||
         !OPAQUE_ID.test(identity.supervisorGeneration)
       ) {
         throw new PrimeGatewayError();
@@ -441,14 +478,17 @@ export class PrimeGateway {
     if (
       boundIdentity === undefined ||
       !OPAQUE_ID.test(session.activeSessionId) ||
+      !OPAQUE_ID.test(session.transcriptSessionId) ||
       !OPAQUE_ID.test(session.supervisorGeneration) ||
       session.activeSessionId !== boundIdentity.activeSessionId ||
+      session.transcriptSessionId !== boundIdentity.transcriptSessionId ||
       session.supervisorGeneration !== boundIdentity.supervisorGeneration
     ) {
       throw new PrimeGatewayError();
     }
     this.session = session;
     this.goalId = command.payload.goal_id;
+    this.goalStatus = "active";
     this.mapper = new PrimeEventMapper({
       sessionId: this.options.sessionId,
       generation: this.options.generation,
@@ -484,18 +524,279 @@ export class PrimeGateway {
   }
 
   private async checkpoint(checkpointId: string): Promise<void> {
-    const coveredSequence = this.nextSequence - 1;
-    const payload = await this.options.createCheckpoint(
-      checkpointId,
-      coveredSequence,
+    if (this.checkpoints.has(checkpointId)) {
+      this.retryCheckpointAcknowledgements();
+      return;
+    }
+    this.unsubscribe?.();
+    this.unsubscribe = undefined;
+    try {
+      await this.eventQueue;
+      if (this.sessionStatus === "running") {
+        await this.append(this.reasonEvent(
+          "session.recovery-required",
+          "prime-checkpoint-restart",
+        ));
+        this.mapper?.noteExternalRecoveryRequired();
+      } else if (this.sessionStatus !== "recovery_required") {
+        throw new PrimeGatewayError();
+      }
+    } catch {
+      this.unsubscribe = this.requireSession().subscribe(
+        (outbound) => this.enqueue(outbound),
+      );
+      throw new PrimeGatewayError();
+    }
+
+    const runningEvent = this.reasonEvent(
+      "session.running",
+      "prime-checkpoint-restored",
     );
+    const coveredSequence = runningEvent.sequence;
+    let recovered: PrimeCheckpointRecovery | undefined;
+    let adopted = false;
+    let created: PrimeCheckpointCreated;
+    try {
+      created = await this.options.createCheckpoint(
+        checkpointId,
+        coveredSequence,
+        async (recovery) => {
+          if (
+            recovered !== undefined ||
+            this.sessionStatus !== "recovery_required" ||
+            !this.validRecovery(recovery) ||
+            recovery.sessionStatus !== "running"
+          ) {
+            throw new PrimeGatewayError();
+          }
+          const session = this.requireSession();
+          const identity = this.options.store.snapshot().primeIdentity;
+          if (
+            identity === undefined ||
+            session.activeSessionId !== identity.activeSessionId ||
+            session.transcriptSessionId !== identity.transcriptSessionId ||
+            session.supervisorGeneration !== identity.supervisorGeneration ||
+            recovery.transcriptSessionId !== identity.transcriptSessionId
+          ) {
+            throw new PrimeGatewayError();
+          }
+          session.adoptRecovery(recovery);
+          if (session.supervisorGeneration !== recovery.supervisorGeneration) {
+            throw new PrimeGatewayError();
+          }
+          adopted = true;
+          await this.enqueueDurable(() => this.options.store.bindPrimeIdentity({
+            activeSessionId: session.activeSessionId,
+            transcriptSessionId: recovery.transcriptSessionId,
+            supervisorGeneration: recovery.supervisorGeneration,
+          }));
+          await this.enqueueDurable(
+            () => this.options.store.recordPrimeCursor(recovery.primeCursor),
+          );
+          this.mapper = this.recoveredMapper(recovery.primeCursor);
+          await this.append(runningEvent);
+          this.mapper.noteExternalSessionStatus("running");
+          recovered = recovery;
+        },
+      );
+      if (
+        recovered === undefined ||
+        created.checkpointId !== checkpointId ||
+        created.coveredSequence !== coveredSequence ||
+        created.controlPlaneId !== "prime.gateway" ||
+        created.controlPlaneVersion !== "0.1.0" ||
+        created.checkpointVersion !== "1.0.0" ||
+        typeof created.acknowledge !== "function" ||
+        created.supervisorGeneration !== recovered.supervisorGeneration ||
+        created.primeCursor.generation !== recovered.primeCursor.generation ||
+        created.primeCursor.sequence !== recovered.primeCursor.sequence
+      ) {
+        throw new PrimeGatewayError();
+      }
+    } catch {
+      if (recovered === undefined) {
+        this.releaseReservedEvent(runningEvent);
+      }
+      if (recovered !== undefined || adopted) {
+        this.unsubscribe = this.requireSession().subscribe(
+          (outbound) => this.enqueue(outbound),
+        );
+      }
+      throw new PrimeGatewayError();
+    }
+
+    const payload: CheckpointPayload = {
+      checkpoint_id: created.checkpointId,
+      capsule_id: created.capsuleId,
+      capsule_digest: created.capsuleDigest,
+      control_plane_id: created.controlPlaneId,
+      control_plane_version: created.controlPlaneVersion,
+      checkpoint_version: created.checkpointVersion,
+      covered_sequence: created.coveredSequence,
+      storage_ref: created.storageRef,
+    };
+    try {
+      await this.append(this.event("checkpoint.created", payload));
+      try {
+        if (created.acknowledge()) {
+          this.pendingCheckpointAcknowledgements.delete(checkpointId);
+        }
+      } catch {
+        // The durable checkpoint remains authoritative; retry is idempotent.
+      }
+    } finally {
+      this.unsubscribe = this.requireSession().subscribe(
+        (outbound) => this.enqueue(outbound),
+      );
+    }
+  }
+
+  private recoveredMapper(primeCursor?: PrimeDaemonCursor): PrimeEventMapper {
+    const mapper = new PrimeEventMapper({
+      sessionId: this.options.sessionId,
+      generation: this.options.generation,
+      goalId: this.requireGoalId(),
+      activeSessionId: this.requireSession().activeSessionId,
+      nextEventIdentity: () => this.nextEventIdentity(),
+      ...(primeCursor === undefined ? {} : { primeCursor }),
+    });
+    if (this.goalStatus !== undefined) {
+      mapper.noteExternalGoalStatus(this.goalStatus);
+    }
+    return mapper;
+  }
+
+  private async restoreExistingSession(): Promise<void> {
+    if (this.sessionStatus === undefined || this.sessionStatus === "terminal") {
+      return;
+    }
+    const identity = this.options.store.snapshot().primeIdentity;
     if (
-      payload.checkpoint_id !== checkpointId ||
-      payload.covered_sequence !== coveredSequence
+      identity === undefined ||
+      this.goalId === undefined ||
+      this.options.restoreSession === undefined
     ) {
       throw new PrimeGatewayError();
     }
-    await this.append(this.event("checkpoint.created", payload));
+    const previousStatus = this.sessionStatus === "recovery_required"
+      ? this.recoveryBaseStatus ?? this.sessionStatus
+      : this.sessionStatus;
+    if (this.sessionStatus !== "recovery_required") {
+      await this.append(this.reasonEvent(
+        "session.recovery-required",
+        "prime-gateway-restart",
+      ));
+    }
+    let recovered: PrimeCheckpointRecovery | undefined;
+    let restoredEvent: ControlEvent | undefined;
+    try {
+      const session = await this.options.restoreSession(identity, async (recovery) => {
+        if (
+          recovered !== undefined ||
+          this.sessionStatus !== "recovery_required" ||
+          !this.validRecovery(recovery) ||
+          recovery.transcriptSessionId !== identity.transcriptSessionId
+        ) {
+          throw new PrimeGatewayError();
+        }
+        recovered = recovery;
+      });
+      if (
+        recovered === undefined ||
+        session.activeSessionId !== identity.activeSessionId ||
+        session.transcriptSessionId !== identity.transcriptSessionId ||
+        typeof session.adoptRecovery !== "function" ||
+        typeof session.subscribe !== "function"
+      ) {
+        throw new PrimeGatewayError();
+      }
+      session.adoptRecovery(recovered);
+      if (session.supervisorGeneration !== recovered.supervisorGeneration) {
+        throw new PrimeGatewayError();
+      }
+      await this.enqueueDurable(() => this.options.store.bindPrimeIdentity({
+        activeSessionId: identity.activeSessionId,
+        transcriptSessionId: identity.transcriptSessionId,
+        supervisorGeneration: recovered!.supervisorGeneration,
+      }));
+      await this.enqueueDurable(
+        () => this.options.store.recordPrimeCursor(recovered!.primeCursor),
+      );
+      this.session = session;
+      this.mapper = this.recoveredMapper(recovered.primeCursor);
+      const restoredStatus = previousStatus === "paused"
+        ? "paused"
+        : recovered.sessionStatus;
+      restoredEvent = this.reasonEvent(
+        restoredStatus === "running" ? "session.running" : "session.paused",
+        "prime-gateway-restored",
+      );
+      await this.append(restoredEvent);
+      this.mapper.noteExternalSessionStatus(restoredStatus);
+      this.unsubscribe = session.subscribe((outbound) => this.enqueue(outbound));
+      this.retryCheckpointAcknowledgements();
+    } catch (error) {
+      if (restoredEvent !== undefined) {
+        this.releaseReservedEvent(restoredEvent);
+      }
+      if (error instanceof PrimeGatewayError) {
+        throw error;
+      }
+      throw new PrimeGatewayError();
+    }
+  }
+
+  private validPrimeCursor(value: unknown): value is PrimeDaemonCursor {
+    return (
+      typeof value === "object" &&
+      value !== null &&
+      "generation" in value &&
+      "sequence" in value &&
+      typeof value.generation === "string" &&
+      typeof value.sequence === "number" &&
+      OPAQUE_ID.test(value.generation) &&
+      Number.isSafeInteger(value.sequence) &&
+      value.sequence >= 0
+    );
+  }
+
+  private validRecovery(recovery: PrimeCheckpointRecovery): boolean {
+    return (
+      OPAQUE_ID.test(recovery.transcriptSessionId) &&
+      OPAQUE_ID.test(recovery.supervisorGeneration) &&
+      this.validPrimeCursor(recovery.primeCursor) &&
+      (recovery.sessionStatus === "running" || recovery.sessionStatus === "paused") &&
+      recovery.transport?.hello?.supervisorGeneration ===
+        recovery.supervisorGeneration &&
+      typeof recovery.transport.request === "function" &&
+      typeof recovery.transport.requestDeferred === "function" &&
+      typeof recovery.transport.acknowledgeResult === "function" &&
+      typeof recovery.transport.subscribe === "function"
+    );
+  }
+
+  private releaseReservedEvent(event: ControlEvent): void {
+    if (!this.reservedEvents.delete(event.sequence)) {
+      return;
+    }
+    if (this.nextSequence === event.sequence + 1) {
+      this.nextSequence = event.sequence;
+    }
+  }
+
+  private retryCheckpointAcknowledgements(): void {
+    if (this.session === undefined) {
+      return;
+    }
+    for (const checkpointId of [...this.pendingCheckpointAcknowledgements].sort()) {
+      try {
+        if (this.session.acknowledgeCheckpoint(checkpointId)) {
+          this.pendingCheckpointAcknowledgements.delete(checkpointId);
+        }
+      } catch {
+        // A later command or restored session retries the stable acknowledgement.
+      }
+    }
   }
 
   private resolveAction(
@@ -657,12 +958,23 @@ export class PrimeGateway {
   private updateSessionStatus(event: ControlEvent): void {
     if (event.type === "session.created") {
       this.sessionStatus = "created";
+      this.goalStatus ??= "active";
+    } else if (event.type === "goal.updated") {
+      this.goalStatus = event.payload.status;
     } else if (event.type === "session.running") {
       this.sessionStatus = "running";
+      this.recoveryBaseStatus = undefined;
     } else if (event.type === "session.paused") {
       this.sessionStatus = "paused";
+      this.recoveryBaseStatus = undefined;
     } else if (event.type === "session.recovery-required") {
+      if (this.sessionStatus !== "recovery_required") {
+        this.recoveryBaseStatus = this.sessionStatus;
+      }
       this.sessionStatus = "recovery_required";
+    } else if (event.type === "checkpoint.created") {
+      this.checkpoints.add(event.payload.checkpoint_id);
+      this.pendingCheckpointAcknowledgements.add(event.payload.checkpoint_id);
     } else if ([
       "session.budget-limited",
       "session.cancelled",
@@ -670,6 +982,7 @@ export class PrimeGateway {
       "session.failed",
     ].includes(event.type)) {
       this.sessionStatus = "terminal";
+      this.recoveryBaseStatus = undefined;
       this.terminal = true;
     }
   }

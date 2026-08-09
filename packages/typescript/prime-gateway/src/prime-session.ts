@@ -13,6 +13,7 @@ import type {
 
 export interface PrimeDaemonTransport {
   readonly hello: PrimeDaemonHello | undefined;
+  acknowledgeResult(stableCommandId: string): boolean;
   request(
     command: PrimeDaemonCommand,
     stableCommandId: string,
@@ -28,7 +29,16 @@ export interface PrimeDaemonTransport {
 
 export interface PrimeSessionIdentity {
   readonly activeSessionId: string;
+  readonly transcriptSessionId: string;
   readonly supervisorGeneration: string;
+}
+
+export interface PrimeSessionRecovery {
+  readonly transport: PrimeDaemonTransport;
+  readonly primeCursor: PrimeDaemonCursor;
+  readonly transcriptSessionId: string;
+  readonly supervisorGeneration: string;
+  readonly sessionStatus: "running" | "paused";
 }
 
 export interface PrimePrivateSessionConfig {
@@ -50,6 +60,13 @@ export interface PrimeSessionCreateOptions {
   readonly sessionId: string;
   readonly privateConfig: PrimePrivateSessionConfig;
   readonly bindIdentity: (identity: PrimeSessionIdentity) => Promise<void>;
+}
+
+export interface PrimeSessionRestoreOptions {
+  readonly transport: PrimeDaemonTransport;
+  readonly sessionId: string;
+  readonly activeSessionId: string;
+  readonly transcriptSessionId: string;
 }
 
 export type PrimeInputDelivery = "direct" | "steer" | "follow_up";
@@ -108,29 +125,47 @@ function validatePrivateConfig(
   return Object.freeze({ ...value });
 }
 
-function activeSessionIdFromCreate(response: PrimeDaemonResponse): string {
+function identityFromCreate(response: PrimeDaemonResponse): Readonly<{
+  activeSessionId: string;
+  transcriptSessionId: string;
+}> {
   if (
     !response.success ||
     response.command !== "create" ||
     !isRecord(response.data) ||
     typeof response.data.activeSessionId !== "string" ||
-    !OPAQUE_ID.test(response.data.activeSessionId)
+    !OPAQUE_ID.test(response.data.activeSessionId) ||
+    typeof response.data.sessionId !== "string" ||
+    !OPAQUE_ID.test(response.data.sessionId)
   ) {
     throw new PrimeSessionError();
   }
-  return response.data.activeSessionId;
+  return Object.freeze({
+    activeSessionId: response.data.activeSessionId,
+    transcriptSessionId: response.data.sessionId,
+  });
 }
 
 export class PrimeSession {
   private commandSequence = 0;
   private readonly pendingAdmissions = new Set<string>();
+  private transport: PrimeDaemonTransport;
+  private currentSupervisorGeneration: string;
 
   private constructor(
-    private readonly transport: PrimeDaemonTransport,
+    transport: PrimeDaemonTransport,
     private readonly sessionId: string,
     readonly activeSessionId: string,
-    readonly supervisorGeneration: string,
-  ) {}
+    readonly transcriptSessionId: string,
+    supervisorGeneration: string,
+  ) {
+    this.transport = transport;
+    this.currentSupervisorGeneration = supervisorGeneration;
+  }
+
+  get supervisorGeneration(): string {
+    return this.currentSupervisorGeneration;
+  }
 
   static async create(options: PrimeSessionCreateOptions): Promise<PrimeSession> {
     try {
@@ -181,16 +216,22 @@ export class PrimeSession {
         `${options.sessionId}-create`,
         privateConfig.timeoutMs,
       );
-      const activeSessionId = activeSessionIdFromCreate(deferredCreate.response);
+      const { activeSessionId, transcriptSessionId } = identityFromCreate(
+        deferredCreate.response,
+      );
       await options.bindIdentity(Object.freeze({
         activeSessionId,
+        transcriptSessionId,
         supervisorGeneration: generation,
       }));
-      deferredCreate.acknowledge();
+      if (!deferredCreate.acknowledge()) {
+        throw new PrimeSessionError();
+      }
       const session = new PrimeSession(
         options.transport,
         options.sessionId,
         activeSessionId,
+        transcriptSessionId,
         generation,
       );
       await session.request(
@@ -212,12 +253,58 @@ export class PrimeSession {
     }
   }
 
+  static restore(options: PrimeSessionRestoreOptions): PrimeSession {
+    try {
+      const generation = options.transport.hello?.supervisorGeneration;
+      if (
+        !OPAQUE_ID.test(options.sessionId) ||
+        !OPAQUE_ID.test(options.activeSessionId) ||
+        !OPAQUE_ID.test(options.transcriptSessionId) ||
+        typeof generation !== "string" ||
+        !OPAQUE_ID.test(generation)
+      ) {
+        throw new PrimeSessionError();
+      }
+      return new PrimeSession(
+        options.transport,
+        options.sessionId,
+        options.activeSessionId,
+        options.transcriptSessionId,
+        generation,
+      );
+    } catch (error) {
+      if (error instanceof PrimeSessionError) {
+        throw error;
+      }
+      throw new PrimeSessionError();
+    }
+  }
+
   subscribe(listener: PrimeDaemonListener): () => void {
     try {
       return this.transport.subscribe(listener);
     } catch {
       throw new PrimeSessionError();
     }
+  }
+
+  adoptRecovery(recovery: PrimeSessionRecovery): void {
+    const generation = recovery.transport?.hello?.supervisorGeneration;
+    if (
+      this.pendingAdmissions.size !== 0 ||
+      recovery.transcriptSessionId !== this.transcriptSessionId ||
+      typeof generation !== "string" ||
+      generation !== recovery.supervisorGeneration ||
+      !OPAQUE_ID.test(generation) ||
+      !OPAQUE_ID.test(recovery.primeCursor.generation) ||
+      !Number.isSafeInteger(recovery.primeCursor.sequence) ||
+      recovery.primeCursor.sequence < 0 ||
+      (recovery.sessionStatus !== "running" && recovery.sessionStatus !== "paused")
+    ) {
+      throw new PrimeSessionError();
+    }
+    this.transport = recovery.transport;
+    this.currentSupervisorGeneration = generation;
   }
 
   toString(): string {
@@ -361,6 +448,19 @@ export class PrimeSession {
       type: "kill",
       activeSessionId: this.activeSessionId,
     }, `${commandId}-kill`);
+  }
+
+  acknowledgeCheckpoint(checkpointId: string): boolean {
+    if (!OPAQUE_ID.test(checkpointId)) {
+      throw new PrimeSessionError();
+    }
+    try {
+      return this.transport.acknowledgeResult(
+        `${this.sessionId}-checkpoint-${checkpointId}-prepare`,
+      );
+    } catch {
+      return false;
+    }
   }
 
   private async interruptPendingAdmissions(): Promise<boolean> {

@@ -71,6 +71,7 @@ test("durable store reopens identity cursor and safe event suffix", async () => 
     await store.acceptCommand(command);
     await store.bindPrimeIdentity({
       activeSessionId: "prime-root",
+      transcriptSessionId: "transcript-1",
       supervisorGeneration: "supervisor-generation-1",
     });
     await store.recordPrimeCursor({ generation: "worker-generation-1", sequence: 4 });
@@ -86,6 +87,7 @@ test("durable store reopens identity cursor and safe event suffix", async () => 
       eventCount: 1,
       primeIdentity: {
         activeSessionId: "prime-root",
+        transcriptSessionId: "transcript-1",
         supervisorGeneration: "supervisor-generation-1",
       },
       primeCursor: { generation: "worker-generation-1", sequence: 4 },
