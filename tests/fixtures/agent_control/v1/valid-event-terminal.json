@@ -1,0 +1,12 @@
+{
+  "protocol": "asterion.agent-control/v1",
+  "event_id": "event-3",
+  "session_id": "session-1",
+  "generation": 1,
+  "sequence": 3,
+  "emitted_at": "2026-08-09T15:00:02Z",
+  "type": "session.completed",
+  "payload": {
+    "reason_code": "goal-accepted"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "protocol": "asterion.agent-control/v1",
+  "event_id": "event-1",
+  "session_id": "session-1",
+  "generation": 1,
+  "sequence": 1,
+  "emitted_at": "2026-08-09T15:00:00Z",
+  "type": "fault.raised",
+  "payload": {
+    "code": "provider-disconnected",
+    "recoverable": true,
+    "evidence_ref": "evidence-1",
+    "provider_payload": {
+      "token": "SENTINEL_SECRET"
+    }
+  }
+}

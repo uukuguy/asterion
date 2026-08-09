@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asterion.local/schemas/agent-control/v1/command.schema.json",
+  "title": "Asterion Agent Control Command v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "command_id",
+    "session_id",
+    "authority_revision",
+    "type",
+    "payload"
+  ],
+  "properties": {
+    "protocol": {"const": "asterion.agent-control/v1"},
+    "command_id": {"$ref": "#/$defs/opaque_id"},
+    "session_id": {"$ref": "#/$defs/opaque_id"},
+    "authority_revision": {"type": "integer", "minimum": 1},
+    "type": {
+      "enum": [
+        "action.resolve",
+        "checkpoint.request",
+        "input.submit",
+        "session.attach",
+        "session.cancel",
+        "session.create",
+        "session.pause",
+        "session.resume"
+      ]
+    },
+    "payload": {}
+  },
+  "allOf": [
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "type": {"const": "session.create"},
+            "payload": {"$ref": "#/$defs/session_create"}
+          }
+        },
+        {
+          "properties": {
+            "type": {"const": "session.attach"},
+            "payload": {"$ref": "#/$defs/session_attach"}
+          }
+        },
+        {
+          "properties": {
+            "type": {"const": "input.submit"},
+            "payload": {"$ref": "#/$defs/input_submit"}
+          }
+        },
+        {
+          "properties": {
+            "type": {"const": "session.pause"},
+            "payload": {"$ref": "#/$defs/reason"}
+          }
+        },
+        {
+          "properties": {
+            "type": {"const": "session.resume"},
+            "payload": {"$ref": "#/$defs/reason"}
+          }
+        },
+        {
+          "properties": {
+            "type": {"const": "session.cancel"},
+            "payload": {"$ref": "#/$defs/reason"}
+          }
+        },
+        {
+          "properties": {
+            "type": {"const": "checkpoint.request"},
+            "payload": {"$ref": "#/$defs/checkpoint_request"}
+          }
+        },
+        {
+          "properties": {
+            "type": {"const": "action.resolve"},
+            "payload": {"$ref": "#/$defs/action_resolve"}
+          }
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)$"
+    },
+    "opaque_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "session_create": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["system_id", "system_version", "goal_id", "goal_ref"],
+      "properties": {
+        "system_id": {"$ref": "#/$defs/identifier"},
+        "system_version": {"$ref": "#/$defs/version"},
+        "goal_id": {"$ref": "#/$defs/opaque_id"},
+        "goal_ref": {"$ref": "#/$defs/opaque_id"}
+      }
+    },
+    "session_attach": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cursor"],
+      "properties": {
+        "cursor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["generation", "sequence"],
+          "properties": {
+            "generation": {"type": "integer", "minimum": 1},
+            "sequence": {"type": "integer", "minimum": 0}
+          }
+        }
+      }
+    },
+    "input_submit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["input_id", "delivery", "content_ref"],
+      "properties": {
+        "input_id": {"$ref": "#/$defs/opaque_id"},
+        "delivery": {"enum": ["direct", "steer", "follow_up"]},
+        "content_ref": {"$ref": "#/$defs/opaque_id"}
+      }
+    },
+    "reason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason_code"],
+      "properties": {
+        "reason_code": {"$ref": "#/$defs/identifier"}
+      }
+    },
+    "checkpoint_request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["checkpoint_id"],
+      "properties": {
+        "checkpoint_id": {"$ref": "#/$defs/opaque_id"}
+      }
+    },
+    "action_resolve": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["action_id", "resolution", "reason_code", "receipt_ref"],
+      "properties": {
+        "action_id": {"$ref": "#/$defs/opaque_id"},
+        "resolution": {
+          "enum": [
+            "admitted",
+            "rejected",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "uncertain"
+          ]
+        },
+        "reason_code": {"$ref": "#/$defs/identifier"},
+        "receipt_ref": {
+          "oneOf": [
+            {"$ref": "#/$defs/opaque_id"},
+            {"type": "null"}
+          ]
+        }
+      }
+    }
+  }
+}

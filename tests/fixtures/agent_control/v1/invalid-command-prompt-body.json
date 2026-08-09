@@ -1,0 +1,14 @@
+{
+  "protocol": "asterion.agent-control/v1",
+  "command_id": "command-1",
+  "session_id": "session-1",
+  "authority_revision": 1,
+  "type": "session.create",
+  "payload": {
+    "system_id": "research.system",
+    "system_version": "1.0.0",
+    "goal_id": "goal-1",
+    "goal_ref": "goal-ref-1",
+    "prompt": "SENTINEL_SECRET"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "protocol": "asterion.agent-control/v1",
+  "command_id": "command-2",
+  "session_id": "session-1",
+  "authority_revision": 1,
+  "type": "action.resolve",
+  "payload": {
+    "action_id": "action-1",
+    "resolution": "succeeded",
+    "reason_code": "receipt-verified",
+    "receipt_ref": "receipt-1"
+  }
+}

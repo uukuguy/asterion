@@ -1,0 +1,38 @@
+{
+  "protocol": "asterion.agent-control/v1",
+  "event_id": "event-2",
+  "session_id": "session-1",
+  "generation": 1,
+  "sequence": 2,
+  "emitted_at": "2026-08-09T15:00:00Z",
+  "type": "action.proposed",
+  "payload": {
+    "action_id": "action-1",
+    "idempotency_key": "idempotency-1",
+    "kind": "application.invoke",
+    "target": {
+      "kind": "application",
+      "provider_id": "example.provider",
+      "application_id": "alpha",
+      "version": "1.0.0",
+      "runtime_id": "fake.runtime"
+    },
+    "input_ref": "input-ref-1",
+    "expected_artifacts": [
+      "report.alpha",
+      "report.zeta"
+    ],
+    "budget": {
+      "controller_tokens": 0,
+      "application_tokens": 100,
+      "child_tokens": 0,
+      "aggregate_tokens": 100,
+      "cost_micros": 5000,
+      "deadline_ms": 10000
+    },
+    "causal_parent_ids": [
+      "goal-1",
+      "task-1"
+    ]
+  }
+}
