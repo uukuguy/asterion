@@ -241,3 +241,4 @@
 - 21:22 Checkpointed Task 8 so recovery resumes at whole-Plan-4 review [e9daf26]
 - 21:29 Retired stale decision guidance and guarded active status docs against migration drift [7ee708b]
 - 21:33 Verified Plan 4 complete: final review approved and all local closure gates passed
+- 21:35 Finalized verified Plan 4 handoff so integration remains an explicit operator choice [c704dfa]
