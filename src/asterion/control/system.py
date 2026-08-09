@@ -94,6 +94,19 @@ class AgentSystemPlan:
             }
         )
 
+    def portfolio_entry(
+        self,
+        provider_id: str,
+        application_id: str,
+        version: str,
+        runtime_id: str,
+    ) -> ApplicationPortfolioEntry | None:
+        """Return an exact pre-resolved portfolio entry, if authorized."""
+
+        return self.portfolio_by_identity.get(
+            (provider_id, application_id, version, runtime_id)
+        )
+
     def __repr__(self) -> str:
         return (
             "AgentSystemPlan("
@@ -197,7 +210,7 @@ def _validate_host_capabilities(values: Sequence[str]) -> frozenset[str]:
             not isinstance(value, str) or IDENTIFIER.fullmatch(value) is None
             for value in values
         )
-        or not is_sorted_unique_scalar_strings(values)
+        or not is_sorted_unique_scalar_strings(list(values))
     ):
         raise AgentSystemError("agent system available host capabilities are invalid")
     return frozenset(values)

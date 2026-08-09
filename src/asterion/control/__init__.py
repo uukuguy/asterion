@@ -15,6 +15,7 @@ from asterion.control.execution import (
     ActionExecutionFailure,
     ActionExecutionReceipt,
 )
+from asterion.control.application_executor import ApplicationActionExecutor
 from asterion.control.authority import (
     ActionReceipt,
     AdmissionDecision,
@@ -26,6 +27,14 @@ from asterion.control.authority import (
     BudgetUsage,
     PortfolioGrant,
     action_proposal_digest,
+)
+from asterion.control.private_store import (
+    MAX_PRIVATE_TEXT_BYTES,
+    PrivateContentResolver,
+    PrivateResultPublication,
+    PrivateResultStore,
+    PrivateStoreError,
+    validate_private_result_publication,
 )
 from asterion.control.host import (
     ControlCommand,
@@ -103,6 +112,7 @@ __all__ = [
     "AdmissionDecision",
     "AgentSystemError",
     "AgentSystemPlan",
+    "ApplicationActionExecutor",
     "ApplicationPortfolioEntry",
     "AuthorityEnvelope",
     "AuthorityError",
@@ -138,8 +148,13 @@ __all__ = [
     "JournalCursor",
     "JournalEntry",
     "JournalRecord",
+    "MAX_PRIVATE_TEXT_BYTES",
     "MemoryCanonicalJournal",
     "PortfolioGrant",
+    "PrivateContentResolver",
+    "PrivateResultPublication",
+    "PrivateResultStore",
+    "PrivateStoreError",
     "REQUIRED_PHASE0_SCENARIOS",
     "RecoveredControlState",
     "ConformanceReport",
@@ -158,4 +173,5 @@ __all__ = [
     "validate_control_event",
     "validate_control_event_stream",
     "validate_control_plane_manifest",
+    "validate_private_result_publication",
 ]
