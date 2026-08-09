@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -10,6 +10,8 @@ import {
   PRIME_GATEWAY_IPC_PROTOCOL,
 } from "../dist/src/main.js";
 import {
+  GatewayDurableStore,
+  PrimeGateway,
   PrivateValueStore,
 } from "../dist/src/index.js";
 
@@ -122,6 +124,43 @@ class FakeGateway {
   }
 }
 
+class FakePrimeSession {
+  constructor() {
+    this.activeSessionId = "prime-root-1";
+    this.transcriptSessionId = "transcript-1";
+    this.supervisorGeneration = "supervisor-generation-1";
+    this.calls = [];
+    this.listener = undefined;
+  }
+
+  subscribe(listener) {
+    this.listener = listener;
+    return () => {
+      this.listener = undefined;
+    };
+  }
+
+  async submitInput(inputId, delivery, body) {
+    this.calls.push(["input", inputId, delivery, body]);
+  }
+
+  async pause() {}
+
+  async resume() {}
+
+  async attach() {}
+
+  async detach() {}
+
+  async cancel() {}
+
+  adoptRecovery() {}
+
+  acknowledgeCheckpoint() {
+    return true;
+  }
+}
+
 function createSidecar(options = {}) {
   const gateway = options.gateway ?? new FakeGateway(options.gatewayOptions);
   const privateValues = options.privateValues ?? new FakePrivateValues();
@@ -134,6 +173,71 @@ function createSidecar(options = {}) {
       privateValues,
     }),
   };
+}
+
+async function createRealSidecarFixture() {
+  const fixtureRoot = await temporaryStoreRoot();
+  const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+  store.registerEventGeneration(1);
+  const privateValues = await PrivateValueStore.open(fixtureRoot.root);
+  const session = new FakePrimeSession();
+  const createdGoals = [];
+  let tick = 0;
+  const gateway = await PrimeGateway.open({
+    sessionId: "session-1",
+    generation: 1,
+    authorityId: "authority-1",
+    store,
+    privateValues: new PrimeBoundPrivateInputs(privateValues),
+    async createSession(goal, bindIdentity) {
+      createdGoals.push(goal);
+      await bindIdentity({
+        activeSessionId: session.activeSessionId,
+        transcriptSessionId: session.transcriptSessionId,
+        supervisorGeneration: session.supervisorGeneration,
+      });
+      return session;
+    },
+    async createCheckpoint() {
+      throw new Error("not used by sidecar integration test");
+    },
+    now() {
+      tick += 1;
+      return `2026-08-10T03:00:${String(tick).padStart(2, "0")}Z`;
+    },
+  });
+  const sidecar = new PrimeGatewaySidecar({
+    currentGeneration: 1,
+    privateValues,
+    gateway: {
+      accept: (value) => gateway.accept(value),
+      eventsAfterCursor: (cursor) =>
+        store.eventsAfterCursor(cursor).map((receipt) => receipt.event),
+      close: () => gateway.close(),
+    },
+  });
+  return {
+    ...fixtureRoot,
+    store,
+    privateValues,
+    gateway,
+    session,
+    createdGoals,
+    sidecar,
+  };
+}
+
+async function durableCommandRecords(root) {
+  const recordsRoot = join(root, "public", "records");
+  const names = await readdir(recordsRoot);
+  const records = await Promise.all(
+    names.filter((name) => name.endsWith(".json")).map(async (name) =>
+      JSON.parse(await readFile(join(recordsRoot, name), "utf8")),
+    ),
+  );
+  return records
+    .filter((record) => record.kind === "command.accepted")
+    .map((record) => record.payload.command);
 }
 
 test("bound private inputs resolve private-looking public refs through bindings", async () => {
@@ -217,6 +321,88 @@ test("sidecar rejects unknown generation cursors instead of returning empty batc
   });
 
   assert.equal(response.type, "error");
+});
+
+test("real sidecar gateway resolves public refs and persists body-free commands", async () => {
+  const fixture = await createRealSidecarFixture();
+  try {
+    const create = command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: "goal-ref-1",
+    });
+    const createResponse = await fixture.sidecar.handleEnvelope({
+      protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+      id: "request-create",
+      type: "command.accept",
+      command: create,
+      private: { goal: "SENTINEL_RESOLVER_GOAL" },
+    });
+
+    assert.equal(createResponse.type, "command.accepted");
+    assert.deepEqual(fixture.createdGoals, ["SENTINEL_RESOLVER_GOAL"]);
+
+    const input = command("input.submit", {
+      input_id: "input-1",
+      delivery: "direct",
+      content_ref: "content-ref-1",
+    }, "command-2");
+    const inputResponse = await fixture.sidecar.handleEnvelope({
+      protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+      id: "request-input",
+      type: "command.accept",
+      command: input,
+      private: { content: "SENTINEL_RESOLVER_INPUT" },
+    });
+
+    assert.equal(inputResponse.type, "command.accepted");
+    assert.deepEqual(fixture.session.calls, [
+      ["input", "input-1", "direct", "SENTINEL_RESOLVER_INPUT"],
+    ]);
+
+    const durableCommands = await durableCommandRecords(fixture.root);
+    assert.deepEqual(durableCommands, [create, input]);
+    assert.equal(JSON.stringify(durableCommands).includes("SENTINEL_RESOLVER"), false);
+    assert.equal(fixture.store.snapshot().commandCount, 2);
+
+    const conflictingReplay = await fixture.sidecar.handleEnvelope({
+      protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+      id: "request-conflict",
+      type: "command.accept",
+      command: input,
+      private: { content: "SENTINEL_DIFFERENT_INPUT" },
+    });
+    assert.equal(conflictingReplay.type, "error");
+    assert.equal(fixture.store.snapshot().commandCount, 2);
+    assert.equal(JSON.stringify(conflictingReplay).includes("SENTINEL"), false);
+  } finally {
+    await fixture.sidecar.close().catch(() => undefined);
+    await fixture.cleanup();
+  }
+});
+
+test("real gateway fails closed when a public ref has no private binding", async () => {
+  const fixture = await createRealSidecarFixture();
+  try {
+    const create = command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: "goal-ref-1",
+    });
+
+    await assert.rejects(
+      fixture.gateway.accept(create),
+    );
+    const durableCommands = await durableCommandRecords(fixture.root);
+    assert.deepEqual(durableCommands, [create]);
+    assert.equal(JSON.stringify(durableCommands).includes("SENTINEL"), false);
+    assert.equal(fixture.store.snapshot().commandCount, 1);
+  } finally {
+    await fixture.sidecar.close().catch(() => undefined);
+    await fixture.cleanup();
+  }
 });
 
 test("sidecar accepts a closed command envelope after private goal indirection", async () => {

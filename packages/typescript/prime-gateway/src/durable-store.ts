@@ -238,6 +238,14 @@ async function syncDirectory(path: string): Promise<void> {
   }
 }
 
+export async function syncPrivateDirectory(
+  path: string,
+  faultInjector?: StorageFaultInjector,
+): Promise<void> {
+  await faultInjector?.("before_directory_fsync");
+  await syncDirectory(path);
+}
+
 export async function atomicWriteFile(
   directory: string,
   targetName: string,
@@ -291,8 +299,7 @@ export async function atomicWriteFile(
       throw error;
     }
     await unlink(temporary);
-    await faultInjector?.("before_directory_fsync");
-    await syncDirectory(directory);
+    await syncPrivateDirectory(directory, faultInjector);
   } finally {
     if (!closed) {
       await descriptor.close().catch(() => undefined);

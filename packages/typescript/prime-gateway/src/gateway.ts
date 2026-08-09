@@ -155,13 +155,6 @@ function isPrivateRef(value: string): value is PrivateValueRef {
   return /^private:[A-Za-z0-9._:-]+$/u.test(value);
 }
 
-function requirePrivateRef(value: string): PrivateValueRef {
-  if (!isPrivateRef(value)) {
-    throw new PrimeGatewayError();
-  }
-  return value;
-}
-
 export class PrimeGateway {
   private readonly actions = new Map<string, ActionRecord>();
   private readonly checkpoints = new Set<string>();
@@ -379,9 +372,7 @@ export class PrimeGateway {
         await this.requireSession().submitInput(
           command.payload.input_id,
           command.payload.delivery,
-          await this.options.privateValues.readInput(
-            requirePrivateRef(command.payload.content_ref),
-          ),
+          await this.options.privateValues.readInput(command.payload.content_ref),
         );
         return;
       case "session.pause":
@@ -458,9 +449,7 @@ export class PrimeGateway {
     if (this.session !== undefined || this.goalId !== undefined) {
       throw new PrimeGatewayError();
     }
-    const goal = await this.options.privateValues.readInput(
-      requirePrivateRef(command.payload.goal_ref),
-    );
+    const goal = await this.options.privateValues.readInput(command.payload.goal_ref);
     let boundIdentity: {
       readonly activeSessionId: string;
       readonly transcriptSessionId: string;

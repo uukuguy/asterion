@@ -10,6 +10,7 @@ import {
   canonicalJsonBytes,
   ensurePrivateDirectory,
   readPrivateRegularFile,
+  syncPrivateDirectory,
 } from "./durable-store.js";
 import type {
   StorageFaultInjector,
@@ -322,6 +323,7 @@ export class PrivateValueStore {
         sourceRef,
         valueDigest,
       });
+      await this.syncBindingsRootForAcknowledgement();
       await this.bindCommandReference(
         commandKey,
         sourceRef,
@@ -437,6 +439,7 @@ export class PrivateValueStore {
       if (binding.privateRef !== privateRef) {
         throw new PrivateValueInvalidError();
       }
+      await this.syncBindingsRootForAcknowledgement();
       return;
     }
     await this.writeBinding(targetName, {
@@ -510,6 +513,7 @@ export class PrivateValueStore {
       if (existing.privateRef !== binding.privateRef) {
         throw new PrivateValueInvalidError();
       }
+      await this.syncBindingsRootForAcknowledgement();
     }
   }
 
@@ -584,6 +588,19 @@ export class PrivateValueStore {
         throw new PrivateValueInvalidError();
       }
       throw error;
+    }
+  }
+
+  private async syncBindingsRootForAcknowledgement(): Promise<void> {
+    try {
+      await this.ensureBindingsRoot();
+      await syncPrivateDirectory(this.bindingsRoot, this.faultInjector);
+      await this.ensureBindingsRoot();
+    } catch (error) {
+      if (error instanceof PrivateValueInvalidError) {
+        throw error;
+      }
+      throw new PrivateValueWriteError();
     }
   }
 }

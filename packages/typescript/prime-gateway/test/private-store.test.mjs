@@ -300,6 +300,112 @@ test("private values reject command binding faults before acknowledging", async 
   }
 });
 
+test("private values resync a recovered public binding before retry acknowledgement", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    await PrivateValueStore.open(fixtureRoot.root);
+    let firstAttemptDirectorySyncs = 0;
+    const faulted = await PrivateValueStore.open(fixtureRoot.root, {
+      faultInjector(stage) {
+        if (stage === "before_directory_fsync") {
+          firstAttemptDirectorySyncs += 1;
+          if (firstAttemptDirectorySyncs === 2) {
+            throw new Error("SENTINEL_PUBLIC_BINDING_FSYNC");
+          }
+        }
+      },
+    });
+    await assert.rejects(
+      faulted.bindInputReference(
+        "command-1",
+        "goal-ref-retry",
+        "SENTINEL_PRIVATE_GOAL",
+      ),
+      PrivateValueWriteError,
+    );
+
+    let retryDirectorySyncs = 0;
+    const retry = await PrivateValueStore.open(fixtureRoot.root, {
+      faultInjector(stage) {
+        if (stage === "before_directory_fsync") {
+          retryDirectorySyncs += 1;
+        }
+      },
+    });
+
+    await retry.bindInputReference(
+      "command-1",
+      "goal-ref-retry",
+      "SENTINEL_PRIVATE_GOAL",
+    );
+
+    assert.equal(retryDirectorySyncs, 2);
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
+test("private values resync a recovered command binding before retry acknowledgement", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const values = await PrivateValueStore.open(fixtureRoot.root);
+    await values.bindInputReference(
+      "command-1",
+      "goal-ref-retry",
+      "SENTINEL_PRIVATE_GOAL",
+    );
+    const faulted = await PrivateValueStore.open(fixtureRoot.root, {
+      faultInjector(stage) {
+        if (stage === "before_directory_fsync") {
+          throw new Error("SENTINEL_COMMAND_BINDING_FSYNC");
+        }
+      },
+    });
+    await assert.rejects(
+      faulted.bindInputReference(
+        "command-2",
+        "goal-ref-retry",
+        "SENTINEL_PRIVATE_GOAL",
+      ),
+      PrivateValueWriteError,
+    );
+
+    const retryFails = await PrivateValueStore.open(fixtureRoot.root, {
+      faultInjector(stage) {
+        if (stage === "before_directory_fsync") {
+          throw new Error("SENTINEL_RETRY_FSYNC");
+        }
+      },
+    });
+    await assert.rejects(
+      retryFails.bindInputReference(
+        "command-2",
+        "goal-ref-retry",
+        "SENTINEL_PRIVATE_GOAL",
+      ),
+      PrivateValueWriteError,
+    );
+
+    let retryDirectorySyncs = 0;
+    const retry = await PrivateValueStore.open(fixtureRoot.root, {
+      faultInjector(stage) {
+        if (stage === "before_directory_fsync") {
+          retryDirectorySyncs += 1;
+        }
+      },
+    });
+    await retry.bindInputReference(
+      "command-2",
+      "goal-ref-retry",
+      "SENTINEL_PRIVATE_GOAL",
+    );
+
+    assert.equal(retryDirectorySyncs, 2);
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
 test("private values reject symlink replacement and redact bodies", async () => {
   const fixtureRoot = await temporaryStoreRoot();
   const sentinel = "SENTINEL_SECRET_INPUT";
