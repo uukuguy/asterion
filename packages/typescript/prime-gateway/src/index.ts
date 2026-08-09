@@ -120,6 +120,13 @@ export type {
   PrimeGatewaySession,
 } from "./gateway.js";
 export {
+  PrimeGatewaySidecar,
+  PRIME_GATEWAY_IPC_PROTOCOL,
+} from "./main.js";
+export type {
+  PrimeGatewaySidecarOptions,
+} from "./main.js";
+export {
   PrimeCheckpointError,
   PrimeCheckpointManager,
 } from "./checkpoint.js";

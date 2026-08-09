@@ -40,6 +40,9 @@ packages = ["src/asterion"]
 artifacts = [
     "src/asterion/capabilities/dci/resources/pi/*.ts",
     "src/asterion/capabilities/dci/resources/pi/*.mjs",
+    "src/asterion/control/providers/prime/resources/control-plane.json",
+    "src/asterion/control/providers/prime/resources/skills/asterion-control/pyproject.toml",
+    "src/asterion/control/providers/prime/resources/skills/asterion-control/src/asterion_control/*.py",
 ]
 
 [tool.hatch.build.targets.wheel.force-include]
