@@ -1,0 +1,16 @@
+{
+  "format": "asterion.prime-artifact-lock/v1",
+  "source_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
+  "package_name": "@earendil-works/pi-coding-agent",
+  "package_version": "0.7.1",
+  "daemon_protocol": 7,
+  "daemon_schema_revision": 14,
+  "daemon_schema_id": "protocol-7-schema-14-816309b1cd50",
+  "files": {
+    "package-lock.json": "39ee303bca10c0933cf917275613c8f44099f50de1650a5c356e7cda02b701e8",
+    "packages/coding-agent/package.json": "4e49f896d35be953c7939c2daaf5fcf884092f3b10370778e1643a54185c4033",
+    "packages/coding-agent/src/modes/daemon/daemon-client.ts": "5b2dcbd5b65697ccae5a80a6e491592afd8d60cde0f93d6ce0091b02eba03d1d",
+    "packages/coding-agent/src/modes/daemon/daemon-protocol.ts": "55200bf1fb1b979ef1864391f1ba3b74737bfbaf89de6d0c64721a8faddbe989",
+    "prime-agent.sh": "0ceef94210da44aa2cb232fb18fd215c5a25caf7b652531856c5a90af01df09d"
+  }
+}
