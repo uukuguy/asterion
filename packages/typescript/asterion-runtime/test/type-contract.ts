@@ -1,4 +1,5 @@
 import type {
+  AgentSystemManifest,
   AgentRuntimeClient,
   AssemblyManifest,
   BenchmarkSuiteManifest,
@@ -6,10 +7,68 @@ import type {
   CapabilityManifest,
   CapabilitySourceDeclaration,
   CapabilitySourceLock,
+  ControlCommand,
+  ControlEvent,
+  ControlPlaneManifest,
   RunEvent,
   RunRequest,
   RuntimeManifest,
 } from "../src/index.js";
+
+export const fixtureAgentSystem: AgentSystemManifest = {
+  protocol: "asterion.agent-system/v1",
+  system_id: "research.system",
+  version: "1.0.0",
+  control_plane: { control_plane_id: "fake.control", version: "1.0.0" },
+  applications: [
+    {
+      provider_id: "example.provider",
+      application_id: "alpha",
+      version: "1.0.0",
+      runtime_id: "fake.runtime",
+    },
+  ],
+  policies: [],
+  host_capabilities: [],
+  control_capabilities: ["session-lifecycle"],
+};
+
+export const fixtureControlPlane: ControlPlaneManifest = {
+  protocol: "asterion.control-plane/v1",
+  control_plane_id: "fake.control",
+  version: "1.0.0",
+  commands: ["session.create"],
+  events: ["session.created"],
+  capabilities: ["session-lifecycle"],
+  continuation_media_type: "application/vnd.asterion.control-capsule",
+  checkpoint_version: "1.0.0",
+  compatibility_ids: ["asterion.agent-control/v1"],
+};
+
+export const fixtureControlCommand: ControlCommand = {
+  protocol: "asterion.agent-control/v1",
+  command_id: "command-1",
+  session_id: "session-1",
+  authority_revision: 1,
+  type: "session.create",
+  payload: {
+    system_id: "research.system",
+    system_version: "1.0.0",
+    goal_id: "goal-1",
+    goal_ref: "goal-ref-1",
+  },
+};
+
+export const fixtureControlEvent: ControlEvent = {
+  protocol: "asterion.agent-control/v1",
+  event_id: "event-1",
+  session_id: "session-1",
+  generation: 1,
+  sequence: 1,
+  emitted_at: "2026-08-09T15:00:00Z",
+  type: "session.running",
+  payload: { reason_code: "started" },
+};
 
 export const fixtureAssembly: AssemblyManifest = {
   protocol: "asterion.application-assembly/v1",

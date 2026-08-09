@@ -7,12 +7,17 @@ import {
 } from "ajv/dist/2020.js";
 
 import type {
+  ActionKind,
+  AgentSystemManifest,
   AssemblyManifest,
   BenchmarkSuiteManifest,
   CapabilityPackageManifest,
   CapabilityManifest,
   CapabilitySourceDeclaration,
   CapabilitySourceLock,
+  ControlCommand,
+  ControlEvent,
+  ControlPlaneManifest,
   RunEvent,
   RunRequest,
   RuntimeManifest,
@@ -24,7 +29,7 @@ function readSchema(name: string): object {
   ) as object;
 }
 
-const ajv = new Ajv2020({ allErrors: true });
+const ajv = new Ajv2020({ allErrors: true, strictTypes: false });
 const manifestValidator = ajv.compile(readSchema("runtime-manifest.schema.json"));
 const capabilityManifestValidator = ajv.compile(
   readSchema("capability-manifest.schema.json"),
@@ -46,6 +51,16 @@ const capabilitySourceLockValidator = ajv.compile(
 );
 const requestValidator = ajv.compile(readSchema("run-request.schema.json"));
 const eventValidator = ajv.compile(readSchema("event.schema.json"));
+const agentSystemValidator = ajv.compile(readSchema("agent-system.schema.json"));
+const controlPlaneValidator = ajv.compile(
+  readSchema("control-plane-manifest.schema.json"),
+);
+const controlCommandValidator = ajv.compile(
+  readSchema("control-command.schema.json"),
+);
+const controlEventValidator = ajv.compile(
+  readSchema("control-event.schema.json"),
+);
 
 export class ProtocolValidationError extends Error {
   constructor(label: string, errors: readonly ErrorObject[] | null | undefined) {
@@ -128,6 +143,36 @@ function compareUnicodeScalarStrings(left: string, right: string): number {
   }
 }
 
+function requireSortedUniqueTuples(
+  label: string,
+  values: readonly (readonly string[])[],
+): void {
+  if (
+    values.some((value) => value.some(hasSurrogateCodePoint)) ||
+    values.some((value, index) => {
+      if (index === 0) {
+        return false;
+      }
+      const previous = values[index - 1]!;
+      const width = Math.max(previous.length, value.length);
+      for (let itemIndex = 0; itemIndex < width; itemIndex += 1) {
+        const left = previous[itemIndex];
+        const right = value[itemIndex];
+        if (left === undefined || right === undefined) {
+          return left !== undefined;
+        }
+        const order = compareUnicodeScalarStrings(left, right);
+        if (order !== 0) {
+          return order > 0;
+        }
+      }
+      return true;
+    })
+  ) {
+    throw new ProtocolValidationError(label, null);
+  }
+}
+
 export function validateRuntimeManifest(value: unknown): RuntimeManifest {
   const manifest = requireValid<RuntimeManifest>(
     "runtime manifest",
@@ -136,6 +181,147 @@ export function validateRuntimeManifest(value: unknown): RuntimeManifest {
   );
   requireSortedUnique("runtime manifest capabilities", manifest.capabilities);
   return manifest;
+}
+
+export function validateAgentSystemManifest(
+  value: unknown,
+): AgentSystemManifest {
+  const manifest = requireValid<AgentSystemManifest>(
+    "agent system manifest",
+    agentSystemValidator,
+    value,
+  );
+  requireSortedUniqueTuples(
+    "agent system application portfolio",
+    manifest.applications.map((application) => [
+      application.provider_id,
+      application.application_id,
+      application.version,
+      application.runtime_id,
+    ]),
+  );
+  requireSortedUnique("agent system policies", manifest.policies);
+  requireSortedUnique(
+    "agent system host capabilities",
+    manifest.host_capabilities,
+  );
+  requireSortedUnique(
+    "agent system control capabilities",
+    manifest.control_capabilities,
+  );
+  return manifest;
+}
+
+export function validateControlPlaneManifest(
+  value: unknown,
+): ControlPlaneManifest {
+  const manifest = requireValid<ControlPlaneManifest>(
+    "control plane manifest",
+    controlPlaneValidator,
+    value,
+  );
+  requireSortedUnique("control plane commands", manifest.commands);
+  requireSortedUnique("control plane events", manifest.events);
+  requireSortedUnique("control plane capabilities", manifest.capabilities);
+  requireSortedUnique(
+    "control plane compatibility identities",
+    manifest.compatibility_ids,
+  );
+  return manifest;
+}
+
+export function validateControlCommand(value: unknown): ControlCommand {
+  const command = requireValid<ControlCommand>(
+    "control command",
+    controlCommandValidator,
+    value,
+  );
+  if (command.type === "action.resolve") {
+    const { resolution, receipt_ref: receiptRef } = command.payload;
+    if (
+      (resolution === "succeeded" && receiptRef === null) ||
+      ((resolution === "admitted" || resolution === "rejected") &&
+        receiptRef !== null)
+    ) {
+      throw new ProtocolValidationError("action resolution receipt", null);
+    }
+  }
+  return command;
+}
+
+const actionTargetKinds: Readonly<Record<ActionKind, string>> = {
+  "application.invoke": "application",
+  "checkpoint.create": "checkpoint",
+  "child.cancel": "child",
+  "child.message": "child",
+  "child.spawn": "child",
+  "goal.complete": "goal",
+  "goal.fail": "goal",
+  "input.request": "input",
+  "session.pause": "session",
+};
+
+export function validateControlEvent(value: unknown): ControlEvent {
+  const event = requireValid<ControlEvent>(
+    "control event",
+    controlEventValidator,
+    value,
+  );
+  if (event.type === "action.proposed") {
+    requireSortedUnique(
+      "action proposal expected artifacts",
+      event.payload.expected_artifacts,
+    );
+    requireSortedUnique(
+      "action proposal causal parents",
+      event.payload.causal_parent_ids,
+    );
+    if (event.payload.target.kind !== actionTargetKinds[event.payload.kind]) {
+      throw new ProtocolValidationError("action proposal target", null);
+    }
+  }
+  return event;
+}
+
+const terminalControlEvents = new Set<ControlEvent["type"]>([
+  "session.budget-limited",
+  "session.cancelled",
+  "session.completed",
+  "session.failed",
+]);
+
+export function validateControlEventStream(
+  value: unknown,
+): readonly ControlEvent[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new ProtocolValidationError("control event stream", null);
+  }
+  const events = value.map((event) => validateControlEvent(event));
+  const sessionId = events[0]!.session_id;
+  const generation = events[0]!.generation;
+  const eventIds = new Set<string>();
+  const terminalIndexes: number[] = [];
+  for (const [index, event] of events.entries()) {
+    if (
+      event.session_id !== sessionId ||
+      event.generation !== generation ||
+      event.sequence !== index + 1 ||
+      eventIds.has(event.event_id)
+    ) {
+      throw new ProtocolValidationError("control event stream sequence", null);
+    }
+    eventIds.add(event.event_id);
+    if (terminalControlEvents.has(event.type)) {
+      terminalIndexes.push(index);
+    }
+  }
+  if (
+    terminalIndexes.length !== 1 ||
+    terminalIndexes[0] !== events.length - 1
+  ) {
+    throw new ProtocolValidationError("control event stream terminal", null);
+  }
+  return immutableSnapshot(events);
 }
 
 const capabilityEdgeFields = [

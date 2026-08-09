@@ -41,6 +41,30 @@ const capabilitySourceLockSource = fileURLToPath(
     import.meta.url,
   ),
 );
+const agentSystemSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/agent-system/v1/agent-system.schema.json",
+    import.meta.url,
+  ),
+);
+const controlPlaneSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/control-plane/v1/control-plane-manifest.schema.json",
+    import.meta.url,
+  ),
+);
+const controlCommandSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/agent-control/v1/command.schema.json",
+    import.meta.url,
+  ),
+);
+const controlEventSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/agent-control/v1/event.schema.json",
+    import.meta.url,
+  ),
+);
 const destination = `${packageRoot}/dist/schemas`;
 
 rmSync(destination, { force: true, recursive: true });
@@ -67,3 +91,10 @@ cpSync(
   capabilitySourceLockSource,
   `${destination}/capability-lock.schema.json`,
 );
+cpSync(agentSystemSource, `${destination}/agent-system.schema.json`);
+cpSync(
+  controlPlaneSource,
+  `${destination}/control-plane-manifest.schema.json`,
+);
+cpSync(controlCommandSource, `${destination}/control-command.schema.json`);
+cpSync(controlEventSource, `${destination}/control-event.schema.json`);

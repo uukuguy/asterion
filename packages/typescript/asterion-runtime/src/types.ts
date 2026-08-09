@@ -11,6 +11,9 @@ export const CAPABILITY_SOURCE_PROTOCOL_VERSION =
   "asterion.capability-source/v1" as const;
 export const CAPABILITY_LOCK_PROTOCOL_VERSION =
   "asterion.capability-lock/v1" as const;
+export const AGENT_SYSTEM_PROTOCOL = "asterion.agent-system/v1" as const;
+export const CONTROL_PLANE_PROTOCOL = "asterion.control-plane/v1" as const;
+export const AGENT_CONTROL_PROTOCOL = "asterion.agent-control/v1" as const;
 
 export type ProtocolVersion = typeof RUNTIME_PROTOCOL_VERSION;
 export type CapabilityProtocolVersion = typeof CAPABILITY_PROTOCOL_VERSION;
@@ -24,6 +27,245 @@ export type CapabilitySourceProtocolVersion =
   typeof CAPABILITY_SOURCE_PROTOCOL_VERSION;
 export type CapabilityLockProtocolVersion =
   typeof CAPABILITY_LOCK_PROTOCOL_VERSION;
+export type AgentSystemProtocolVersion = typeof AGENT_SYSTEM_PROTOCOL;
+export type ControlPlaneProtocolVersion = typeof CONTROL_PLANE_PROTOCOL;
+export type AgentControlProtocolVersion = typeof AGENT_CONTROL_PROTOCOL;
+
+export interface AgentSystemApplicationRef {
+  readonly provider_id: string;
+  readonly application_id: string;
+  readonly version: string;
+  readonly runtime_id: string;
+}
+
+export interface AgentSystemManifest {
+  readonly protocol: AgentSystemProtocolVersion;
+  readonly system_id: string;
+  readonly version: string;
+  readonly control_plane: {
+    readonly control_plane_id: string;
+    readonly version: string;
+  };
+  readonly applications: readonly AgentSystemApplicationRef[];
+  readonly policies: readonly string[];
+  readonly host_capabilities: readonly string[];
+  readonly control_capabilities: readonly string[];
+}
+
+export type ControlCommandType =
+  | "action.resolve"
+  | "checkpoint.request"
+  | "input.submit"
+  | "session.attach"
+  | "session.cancel"
+  | "session.create"
+  | "session.pause"
+  | "session.resume";
+
+export type ControlEventType =
+  | "action.proposed"
+  | "budget.reported"
+  | "checkpoint.created"
+  | "fault.raised"
+  | "goal.updated"
+  | "session.budget-limited"
+  | "session.cancelled"
+  | "session.completed"
+  | "session.created"
+  | "session.failed"
+  | "session.paused"
+  | "session.recovery-required"
+  | "session.running";
+
+export interface ControlPlaneManifest {
+  readonly protocol: ControlPlaneProtocolVersion;
+  readonly control_plane_id: string;
+  readonly version: string;
+  readonly commands: readonly ControlCommandType[];
+  readonly events: readonly ControlEventType[];
+  readonly capabilities: readonly string[];
+  readonly continuation_media_type: string;
+  readonly checkpoint_version: string;
+  readonly compatibility_ids: readonly string[];
+}
+
+interface ControlCommandBase<T extends ControlCommandType, P> {
+  readonly protocol: AgentControlProtocolVersion;
+  readonly command_id: string;
+  readonly session_id: string;
+  readonly authority_revision: number;
+  readonly type: T;
+  readonly payload: P;
+}
+
+interface ReasonPayload {
+  readonly reason_code: string;
+}
+
+export type ActionResolution =
+  | "admitted"
+  | "rejected"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "uncertain";
+
+export type ControlCommand =
+  | ControlCommandBase<
+      "session.create",
+      {
+        readonly system_id: string;
+        readonly system_version: string;
+        readonly goal_id: string;
+        readonly goal_ref: string;
+      }
+    >
+  | ControlCommandBase<
+      "session.attach",
+      { readonly cursor: { readonly generation: number; readonly sequence: number } }
+    >
+  | ControlCommandBase<
+      "input.submit",
+      {
+        readonly input_id: string;
+        readonly delivery: "direct" | "steer" | "follow_up";
+        readonly content_ref: string;
+      }
+    >
+  | ControlCommandBase<"session.pause", ReasonPayload>
+  | ControlCommandBase<"session.resume", ReasonPayload>
+  | ControlCommandBase<"session.cancel", ReasonPayload>
+  | ControlCommandBase<
+      "checkpoint.request",
+      { readonly checkpoint_id: string }
+    >
+  | ControlCommandBase<
+      "action.resolve",
+      {
+        readonly action_id: string;
+        readonly resolution: ActionResolution;
+        readonly reason_code: string;
+        readonly receipt_ref: string | null;
+      }
+    >;
+
+export interface ActionBudget {
+  readonly controller_tokens: number;
+  readonly application_tokens: number;
+  readonly child_tokens: number;
+  readonly aggregate_tokens: number;
+  readonly cost_micros: number;
+  readonly deadline_ms: number;
+}
+
+export interface ControlUsage {
+  readonly controller_tokens: number;
+  readonly application_tokens: number;
+  readonly child_tokens: number;
+  readonly aggregate_tokens: number;
+  readonly cost_micros: number;
+}
+
+export type ActionKind =
+  | "application.invoke"
+  | "checkpoint.create"
+  | "child.cancel"
+  | "child.message"
+  | "child.spawn"
+  | "goal.complete"
+  | "goal.fail"
+  | "input.request"
+  | "session.pause";
+
+export type ActionTarget =
+  | {
+      readonly kind: "application";
+      readonly provider_id: string;
+      readonly application_id: string;
+      readonly version: string;
+      readonly runtime_id: string;
+    }
+  | { readonly kind: "child"; readonly child_id: string }
+  | { readonly kind: "checkpoint"; readonly checkpoint_id: string }
+  | { readonly kind: "goal"; readonly goal_id: string }
+  | { readonly kind: "input"; readonly request_id: string }
+  | { readonly kind: "session"; readonly session_id: string };
+
+interface ControlEventBase<T extends ControlEventType, P> {
+  readonly protocol: AgentControlProtocolVersion;
+  readonly event_id: string;
+  readonly session_id: string;
+  readonly generation: number;
+  readonly sequence: number;
+  readonly emitted_at: string;
+  readonly type: T;
+  readonly payload: P;
+}
+
+export type GoalStatus =
+  | "active"
+  | "paused"
+  | "needs_input"
+  | "budget_limited"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type ControlEvent =
+  | ControlEventBase<
+      "session.created",
+      {
+        readonly goal_id: string;
+        readonly authority_id: string;
+        readonly authority_revision: number;
+      }
+    >
+  | ControlEventBase<"session.running", ReasonPayload>
+  | ControlEventBase<"session.paused", ReasonPayload>
+  | ControlEventBase<"session.recovery-required", ReasonPayload>
+  | ControlEventBase<"session.completed", ReasonPayload>
+  | ControlEventBase<"session.failed", ReasonPayload>
+  | ControlEventBase<"session.cancelled", ReasonPayload>
+  | ControlEventBase<"session.budget-limited", ReasonPayload>
+  | ControlEventBase<
+      "goal.updated",
+      { readonly goal_id: string; readonly status: GoalStatus }
+    >
+  | ControlEventBase<
+      "action.proposed",
+      {
+        readonly action_id: string;
+        readonly idempotency_key: string;
+        readonly kind: ActionKind;
+        readonly target: ActionTarget;
+        readonly input_ref: string;
+        readonly expected_artifacts: readonly string[];
+        readonly budget: ActionBudget;
+        readonly causal_parent_ids: readonly string[];
+      }
+    >
+  | ControlEventBase<
+      "checkpoint.created",
+      {
+        readonly checkpoint_id: string;
+        readonly capsule_id: string;
+        readonly capsule_digest: string;
+        readonly control_plane_id: string;
+        readonly control_plane_version: string;
+        readonly checkpoint_version: string;
+        readonly covered_sequence: number;
+        readonly storage_ref: string;
+      }
+    >
+  | ControlEventBase<"budget.reported", ControlUsage>
+  | ControlEventBase<
+      "fault.raised",
+      {
+        readonly code: string;
+        readonly recoverable: boolean;
+        readonly evidence_ref: string | null;
+      }
+    >;
 
 export interface CapabilityPackageRef {
   readonly package_id: string;

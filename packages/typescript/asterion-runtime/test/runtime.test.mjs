@@ -5,20 +5,28 @@ import test from "node:test";
 import Ajv2020 from "ajv/dist/2020.js";
 
 import {
+  AGENT_CONTROL_PROTOCOL,
+  AGENT_SYSTEM_PROTOCOL,
   APPLICATION_ASSEMBLY_PROTOCOL_VERSION,
   BENCHMARK_SUITE_PROTOCOL_VERSION,
   CAPABILITY_LOCK_PROTOCOL_VERSION,
   CAPABILITY_PACKAGE_PROTOCOL_VERSION,
   CAPABILITY_PROTOCOL_VERSION,
   CAPABILITY_SOURCE_PROTOCOL_VERSION,
+  CONTROL_PLANE_PROTOCOL,
   ProtocolValidationError,
   RUNTIME_PROTOCOL_VERSION,
   validateAssemblyManifest,
+  validateAgentSystemManifest,
   validateBenchmarkSuiteManifest,
   validateCapabilityPackageManifest,
   validateCapabilityManifest,
   validateCapabilitySourceDeclaration,
   validateCapabilitySourceLock,
+  validateControlCommand,
+  validateControlEvent,
+  validateControlEventStream,
+  validateControlPlaneManifest,
   validateEventStream,
   validateRunRequest,
   validateRuntimeManifest,
@@ -49,6 +57,18 @@ const benchmarkSuiteFixtures = new URL(
 );
 const capabilitySourceFixtures = new URL(
   "../../../../tests/fixtures/capability_source/v1/",
+  import.meta.url,
+);
+const agentSystemFixtures = new URL(
+  "../../../../tests/fixtures/agent_system/v1/",
+  import.meta.url,
+);
+const controlPlaneFixtures = new URL(
+  "../../../../tests/fixtures/control_plane/v1/",
+  import.meta.url,
+);
+const agentControlFixtures = new URL(
+  "../../../../tests/fixtures/agent_control/v1/",
   import.meta.url,
 );
 const referenceAssemblyRoots = [
@@ -87,6 +107,122 @@ async function readJsonl(name) {
 
 test("uses the Asterion-owned runtime protocol identity", () => {
   assert.equal(RUNTIME_PROTOCOL_VERSION, "asterion.agent-runtime/v1");
+});
+
+test("validates the shared long-running control contracts", async () => {
+  assert.equal(AGENT_SYSTEM_PROTOCOL, "asterion.agent-system/v1");
+  assert.equal(CONTROL_PLANE_PROTOCOL, "asterion.control-plane/v1");
+  assert.equal(AGENT_CONTROL_PROTOCOL, "asterion.agent-control/v1");
+
+  const system = await readFixture(agentSystemFixtures, "valid-system.json");
+  const controlPlane = await readFixture(
+    controlPlaneFixtures,
+    "valid-manifest.json",
+  );
+  const createCommand = await readFixture(
+    agentControlFixtures,
+    "valid-command-session-create.json",
+  );
+  const proposal = await readFixture(
+    agentControlFixtures,
+    "valid-event-action-proposed.json",
+  );
+  const terminal = await readFixture(
+    agentControlFixtures,
+    "valid-event-terminal.json",
+  );
+
+  const validatedSystem = validateAgentSystemManifest(system);
+  const validatedControlPlane = validateControlPlaneManifest(controlPlane);
+  const validatedCommand = validateControlCommand(createCommand);
+  const validatedProposal = validateControlEvent(proposal);
+  const validatedTerminal = validateControlEvent(terminal);
+  assert.deepEqual(validatedSystem, system);
+  assert.deepEqual(validatedControlPlane, controlPlane);
+  assert.deepEqual(validatedCommand, createCommand);
+  assert.deepEqual(validatedProposal, proposal);
+  assert.deepEqual(validatedTerminal, terminal);
+  assert.ok(Object.isFrozen(validatedSystem.applications[0]));
+  assert.ok(Object.isFrozen(validatedProposal.payload.target));
+  assert.throws(
+    () => {
+      validatedCommand.payload.goal_ref = "changed";
+    },
+    TypeError,
+  );
+
+  for (const [root, name, validate] of [
+    [agentSystemFixtures, "invalid-unknown-field.json", validateAgentSystemManifest],
+    [agentSystemFixtures, "invalid-unsorted-portfolio.json", validateAgentSystemManifest],
+    [controlPlaneFixtures, "invalid-command-family.json", validateControlPlaneManifest],
+    [controlPlaneFixtures, "invalid-secret-field.json", validateControlPlaneManifest],
+    [agentControlFixtures, "invalid-command-prompt-body.json", validateControlCommand],
+    [agentControlFixtures, "invalid-event-sequence.json", validateControlEvent],
+    [agentControlFixtures, "invalid-event-provider-payload.json", validateControlEvent],
+  ]) {
+    const invalid = await readFixture(root, name);
+    assert.throws(() => validate(invalid), ProtocolValidationError);
+  }
+});
+
+test("validates complete control event streams and semantic ordering", async () => {
+  const terminal = await readFixture(
+    agentControlFixtures,
+    "valid-event-terminal.json",
+  );
+  const events = [
+    {
+      ...terminal,
+      event_id: "event-1",
+      sequence: 1,
+      type: "session.created",
+      payload: {
+        goal_id: "goal-1",
+        authority_id: "authority-1",
+        authority_revision: 1,
+      },
+    },
+    {
+      ...terminal,
+      event_id: "event-2",
+      sequence: 2,
+      type: "session.running",
+      payload: { reason_code: "started" },
+    },
+    terminal,
+  ];
+  assert.deepEqual(validateControlEventStream(events), events);
+  assert.throws(
+    () => validateControlEventStream([events[0], { ...events[2], sequence: 4 }]),
+    ProtocolValidationError,
+  );
+
+  const proposal = await readFixture(
+    agentControlFixtures,
+    "valid-event-action-proposed.json",
+  );
+  assert.throws(
+    () =>
+      validateControlEvent({
+        ...proposal,
+        payload: {
+          ...proposal.payload,
+          causal_parent_ids: ["task-1", "goal-1"],
+        },
+      }),
+    ProtocolValidationError,
+  );
+  assert.throws(
+    () =>
+      validateControlEvent({
+        ...proposal,
+        payload: {
+          ...proposal.payload,
+          target: { kind: "child", child_id: "child-1" },
+        },
+      }),
+    ProtocolValidationError,
+  );
 });
 
 test("uses the Asterion-owned individual capability protocol identity", () => {
@@ -183,6 +319,10 @@ test("validates the shared runtime manifest fixtures", async () => {
     "../../../../schemas/benchmark-suite/v1/benchmark-suite.schema.json",
     "../../../../schemas/capability-source/v1/source.schema.json",
     "../../../../schemas/capability-source/v1/lock.schema.json",
+    "../../../../schemas/agent-system/v1/agent-system.schema.json",
+    "../../../../schemas/control-plane/v1/control-plane-manifest.schema.json",
+    "../../../../schemas/agent-control/v1/command.schema.json",
+    "../../../../schemas/agent-control/v1/event.schema.json",
   ]) {
     assert.ok(copyScript.includes(source), source);
   }
