@@ -44,6 +44,7 @@ export const PRIME_GATEWAY_IPC_PROTOCOL = "asterion.prime-gateway-ipc/v1";
 type SidecarEnvelopeType = "command.accept" | "events.stream";
 
 export interface PrimeGatewaySidecarOptions {
+  readonly currentGeneration: number;
   readonly gateway: {
     accept(command: ControlCommand): Promise<void>;
     eventsAfterCursor(cursor: { readonly generation: number; readonly sequence: number }): readonly ControlEvent[];
@@ -299,11 +300,15 @@ export class PrimeGatewaySidecar {
 
   private events(envelope: SidecarEnvelope): readonly ControlEvent[] {
     const cursor = validateCursor(envelope.cursor);
+    const replayCursor = cursor ?? {
+      generation: this.options.currentGeneration,
+      sequence: 0,
+    };
     const events = this.options.gateway.eventsAfterCursor(
-      cursor ?? { generation: 1, sequence: 0 },
+      replayCursor,
     ).map((event) => {
       const validated = validateControlEvent(event);
-      if (cursor !== null && validated.generation !== cursor.generation) {
+      if (validated.generation !== replayCursor.generation) {
         throw new PrimeGatewayError();
       }
       return validated;
@@ -312,13 +317,10 @@ export class PrimeGatewaySidecar {
   }
 }
 
-class PrimeBoundPrivateInputs implements PrimeGatewayPrivateInputs {
+export class PrimeBoundPrivateInputs implements PrimeGatewayPrivateInputs {
   constructor(private readonly privateValues: PrivateValueStore) {}
 
   async readInput(reference: string): Promise<string> {
-    if (reference.startsWith("private:")) {
-      return this.privateValues.readInput(reference as `private:${string}`);
-    }
     return this.privateValues.readBoundInputReference(reference);
   }
 }
@@ -352,6 +354,7 @@ async function createSidecarFromDescriptor(
     descriptor.gatewayRoot,
     descriptor.sessionId,
   );
+  store.registerEventGeneration(descriptor.generation);
   const privateValues = await PrivateValueStore.open(descriptor.gatewayRoot);
   const boundPrivateInputs = new PrimeBoundPrivateInputs(privateValues);
   const lock = await loadPrimeArtifactLock(pathToFileURL(descriptor.artifactLockPath));
@@ -441,6 +444,7 @@ async function createSidecarFromDescriptor(
   });
 
   return new PrimeGatewaySidecar({
+    currentGeneration: descriptor.generation,
     privateValues,
     gateway: {
       accept: (command) => gateway.accept(command),

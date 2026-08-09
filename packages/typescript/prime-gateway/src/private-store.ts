@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { TextDecoder } from "node:util";
 
 import {
+  AtomicTargetExistsError,
   GatewayStoreCorruptionError,
   atomicWriteFile,
   canonicalJsonBytes,
@@ -465,11 +466,12 @@ export class PrivateValueStore {
   }
 
   private async readBinding(targetName: string): Promise<PrivateInputBinding | undefined> {
-    const path = join(this.bindingsRoot, targetName);
-    if (!(await regularPathExists(path))) {
-      return undefined;
-    }
     try {
+      await this.ensureBindingsRoot();
+      const path = join(this.bindingsRoot, targetName);
+      if (!(await regularPathExists(path))) {
+        return undefined;
+      }
       const bytes = await readPrivateRegularFile(
         path,
         BINDING_LIMIT_BYTES,
@@ -485,15 +487,20 @@ export class PrivateValueStore {
     binding: PrivateInputBinding,
   ): Promise<void> {
     try {
+      await this.ensureBindingsRoot();
       await atomicWriteFile(
         this.bindingsRoot,
         targetName,
         Buffer.concat([canonicalJsonBytes(binding), Buffer.from("\n")]),
         this.faultInjector,
       );
+      await this.ensureBindingsRoot();
     } catch (error) {
       if (error instanceof PrivateValueInvalidError) {
         throw error;
+      }
+      if (!(error instanceof AtomicTargetExistsError)) {
+        throw new PrivateValueWriteError();
       }
       const existing = await this.readBinding(targetName);
       if (existing === undefined) {
@@ -559,6 +566,19 @@ export class PrivateValueStore {
       await ensurePrivateDirectory(this.root);
       await ensurePrivateDirectory(this.privateRoot);
       await ensurePrivateDirectory(this.valuesRoot);
+      await ensurePrivateDirectory(this.bindingsRoot);
+    } catch (error) {
+      if (error instanceof GatewayStoreCorruptionError) {
+        throw new PrivateValueInvalidError();
+      }
+      throw error;
+    }
+  }
+
+  private async ensureBindingsRoot(): Promise<void> {
+    try {
+      await this.ensureRoots();
+      await ensurePrivateDirectory(this.bindingsRoot);
     } catch (error) {
       if (error instanceof GatewayStoreCorruptionError) {
         throw new PrivateValueInvalidError();

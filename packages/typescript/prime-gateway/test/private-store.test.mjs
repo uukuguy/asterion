@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
   chmod,
+  mkdir,
   mkdtemp,
   readFile,
   readdir,
@@ -38,6 +39,10 @@ function valuePath(root, reference) {
     "values",
     `${reference.slice("private:".length)}.value`,
   );
+}
+
+function bindingsPath(root) {
+  return join(root, "private", "input-bindings");
 }
 
 test("private values use opaque references and exact kind projections", async () => {
@@ -118,6 +123,180 @@ test("private values bind public input references durably and reject conflicts",
     );
   } finally {
     await fixtureRoot.cleanup();
+  }
+});
+
+test("private values fail closed when the binding root is replaced by a symlink", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const values = await PrivateValueStore.open(fixtureRoot.root);
+    await values.bindInputReference(
+      "command-1",
+      "goal-ref-1",
+      "SENTINEL_PRIVATE_GOAL",
+    );
+    const external = join(fixtureRoot.parent, "external-bindings");
+    await mkdir(external, { mode: 0o700 });
+    await rm(bindingsPath(fixtureRoot.root), { force: true, recursive: true });
+    await symlink(external, bindingsPath(fixtureRoot.root));
+
+    await assert.rejects(
+      values.readBoundInputReference("goal-ref-1"),
+      PrivateValueInvalidError,
+    );
+    await assert.rejects(
+      values.bindInputReference(
+        "command-2",
+        "goal-ref-2",
+        "SENTINEL_PRIVATE_GOAL_2",
+      ),
+      PrivateValueInvalidError,
+    );
+    assert.deepEqual(await readdir(external), []);
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
+test("private values fail closed when binding root permissions drift", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const values = await PrivateValueStore.open(fixtureRoot.root);
+    await values.bindInputReference(
+      "command-1",
+      "goal-ref-1",
+      "SENTINEL_PRIVATE_GOAL",
+    );
+    await chmod(bindingsPath(fixtureRoot.root), 0o755);
+
+    await assert.rejects(
+      values.readBoundInputReference("goal-ref-1"),
+      PrivateValueInvalidError,
+    );
+    await assert.rejects(
+      values.bindInputReference(
+        "command-2",
+        "goal-ref-2",
+        "SENTINEL_PRIVATE_GOAL_2",
+      ),
+      PrivateValueInvalidError,
+    );
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
+test("private values fail closed when binding root is replaced during a write", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    await PrivateValueStore.open(fixtureRoot.root);
+    const external = join(fixtureRoot.parent, "external-race-bindings");
+    let beforeRenameCount = 0;
+    const faulted = await PrivateValueStore.open(fixtureRoot.root, {
+      async faultInjector(stage) {
+        if (stage === "before_rename") {
+          beforeRenameCount += 1;
+          if (beforeRenameCount === 2) {
+            await mkdir(external, { mode: 0o700 });
+            await rm(bindingsPath(fixtureRoot.root), { force: true, recursive: true });
+            await symlink(external, bindingsPath(fixtureRoot.root));
+          }
+        }
+      },
+    });
+
+    await assert.rejects(
+      faulted.bindInputReference(
+        "command-1",
+        "goal-ref-1",
+        "SENTINEL_PRIVATE_GOAL",
+      ),
+      PrivateValueWriteError,
+    );
+    assert.deepEqual(await readdir(external), []);
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
+test("private values reject public binding faults before acknowledging", async () => {
+  for (const faultStage of [
+    "before_write",
+    "after_write",
+    "before_rename",
+    "before_directory_fsync",
+  ]) {
+    const fixtureRoot = await temporaryStoreRoot();
+    try {
+      await PrivateValueStore.open(fixtureRoot.root);
+      let matchingStageCount = 0;
+      const faulted = await PrivateValueStore.open(fixtureRoot.root, {
+        faultInjector(stage) {
+          if (stage === faultStage) {
+            matchingStageCount += 1;
+            if (matchingStageCount === 2) {
+              throw new Error(`SENTINEL_${faultStage}`);
+            }
+          }
+        },
+      });
+
+      await assert.rejects(
+        faulted.bindInputReference(
+          "command-1",
+          `goal-ref-${faultStage}`,
+          "SENTINEL_PRIVATE_GOAL",
+        ),
+        (error) => {
+          assert.ok(error instanceof PrivateValueWriteError);
+          assert.equal(error.message.includes("SENTINEL"), false);
+          return true;
+        },
+      );
+    } finally {
+      await fixtureRoot.cleanup();
+    }
+  }
+});
+
+test("private values reject command binding faults before acknowledging", async () => {
+  for (const faultStage of [
+    "before_write",
+    "after_write",
+    "before_rename",
+    "before_directory_fsync",
+  ]) {
+    const fixtureRoot = await temporaryStoreRoot();
+    try {
+      const values = await PrivateValueStore.open(fixtureRoot.root);
+      await values.bindInputReference(
+        "command-1",
+        `goal-ref-${faultStage}`,
+        "SENTINEL_PRIVATE_GOAL",
+      );
+      const faulted = await PrivateValueStore.open(fixtureRoot.root, {
+        faultInjector(stage) {
+          if (stage === faultStage) {
+            throw new Error(`SENTINEL_${faultStage}`);
+          }
+        },
+      });
+
+      await assert.rejects(
+        faulted.bindInputReference(
+          "command-2",
+          `goal-ref-${faultStage}`,
+          "SENTINEL_PRIVATE_GOAL",
+        ),
+        (error) => {
+          assert.ok(error instanceof PrivateValueWriteError);
+          assert.equal(error.message.includes("SENTINEL"), false);
+          return true;
+        },
+      );
+    } finally {
+      await fixtureRoot.cleanup();
+    }
   }
 });
 

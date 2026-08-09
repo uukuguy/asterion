@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
+  PrimeBoundPrivateInputs,
   PrimeGatewaySidecar,
   PRIME_GATEWAY_IPC_PROTOCOL,
 } from "../dist/src/main.js";
+import {
+  PrivateValueStore,
+} from "../dist/src/index.js";
 
 function command(type, payload, commandId = "command-1") {
   return {
@@ -17,12 +24,23 @@ function command(type, payload, commandId = "command-1") {
   };
 }
 
-function event(sequence) {
+async function temporaryStoreRoot() {
+  const parent = await mkdtemp(join(tmpdir(), "asterion-prime-sidecar-"));
+  return {
+    parent,
+    root: join(parent, "gateway"),
+    async cleanup() {
+      await rm(parent, { force: true, recursive: true });
+    },
+  };
+}
+
+function event(sequence, generation = 1) {
   return {
     protocol: "asterion.agent-control/v1",
-    event_id: `event-${sequence}`,
+    event_id: `event-${generation}-${sequence}`,
     session_id: "session-1",
-    generation: 1,
+    generation,
     sequence,
     emitted_at: `2026-08-10T03:00:0${sequence}Z`,
     type: sequence === 1 ? "session.created" : "session.running",
@@ -60,12 +78,23 @@ class FakePrivateValues {
     this.bindings.set(key, { privateRef, value });
     return privateRef;
   }
+
+  async readBoundInputReference(sourceRef) {
+    for (const binding of this.bindings.values()) {
+      if (binding.sourceRef === sourceRef) {
+        return binding.value;
+      }
+    }
+    throw new Error("missing binding");
+  }
 }
 
 class FakeGateway {
-  constructor() {
+  constructor({ currentGeneration = 1, knownGenerations = [currentGeneration] } = {}) {
     this.accepted = [];
-    this.eventsBySequence = [event(1), event(2)];
+    this.currentGeneration = currentGeneration;
+    this.knownGenerations = new Set(knownGenerations);
+    this.eventsBySequence = [event(1, currentGeneration), event(2, currentGeneration)];
     this.cursorRequests = [];
     this.closed = 0;
   }
@@ -80,6 +109,9 @@ class FakeGateway {
 
   eventsAfterCursor(cursor) {
     this.cursorRequests.push(cursor);
+    if (!this.knownGenerations.has(cursor.generation)) {
+      throw new Error("unknown generation");
+    }
     return this.eventsBySequence
       .filter((item) => item.generation === cursor.generation)
       .filter((item) => item.sequence > cursor.sequence);
@@ -89,6 +121,103 @@ class FakeGateway {
     this.closed += 1;
   }
 }
+
+function createSidecar(options = {}) {
+  const gateway = options.gateway ?? new FakeGateway(options.gatewayOptions);
+  const privateValues = options.privateValues ?? new FakePrivateValues();
+  return {
+    gateway,
+    privateValues,
+    sidecar: new PrimeGatewaySidecar({
+      currentGeneration: options.currentGeneration ?? gateway.currentGeneration ?? 1,
+      gateway,
+      privateValues,
+    }),
+  };
+}
+
+test("bound private inputs resolve private-looking public refs through bindings", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const privateValues = await PrivateValueStore.open(fixtureRoot.root);
+    const publicRef = await privateValues.putInput("SENTINEL_OLD_LOCAL_VALUE");
+    await privateValues.bindInputReference(
+      "command-1",
+      publicRef,
+      "SENTINEL_RESOLVER_BODY",
+    );
+    const boundPrivateInputs = new PrimeBoundPrivateInputs(privateValues);
+
+    assert.equal(
+      await boundPrivateInputs.readInput(publicRef),
+      "SENTINEL_RESOLVER_BODY",
+    );
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
+test("sidecar null event cursor replays the injected current generation", async () => {
+  const gateway = new FakeGateway({
+    currentGeneration: 2,
+    knownGenerations: [1, 2],
+  });
+  gateway.eventsBySequence = [event(1, 1), event(1, 2), event(2, 2)];
+  const { sidecar } = createSidecar({ gateway, currentGeneration: 2 });
+
+  const response = await sidecar.handleEnvelope({
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "request-current-generation",
+    type: "events.stream",
+    cursor: null,
+  });
+
+  assert.equal(response.type, "events.batch");
+  assert.deepEqual(
+    response.events.map((item) => [item.generation, item.sequence]),
+    [[2, 1], [2, 2]],
+  );
+  assert.deepEqual(gateway.cursorRequests, [{ generation: 2, sequence: 0 }]);
+});
+
+test("sidecar null event cursor succeeds for an explicitly empty current generation", async () => {
+  const gateway = new FakeGateway({
+    currentGeneration: 3,
+    knownGenerations: [3],
+  });
+  gateway.eventsBySequence = [];
+  const { sidecar } = createSidecar({ gateway, currentGeneration: 3 });
+
+  const response = await sidecar.handleEnvelope({
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "request-empty-generation",
+    type: "events.stream",
+    cursor: null,
+  });
+
+  assert.equal(response.type, "events.batch");
+  assert.deepEqual(response.events, []);
+  assert.deepEqual(gateway.cursorRequests, [{ generation: 3, sequence: 0 }]);
+});
+
+test("sidecar rejects unknown generation cursors instead of returning empty batches", async () => {
+  const { sidecar } = createSidecar({
+    gateway: new FakeGateway({
+      currentGeneration: 1,
+      knownGenerations: [1],
+    }),
+    currentGeneration: 1,
+  });
+
+  const response = await sidecar.handleEnvelope({
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "request-future-generation",
+    type: "events.stream",
+    cursor: { generation: 2, sequence: 0 },
+  });
+
+  assert.equal(response.type, "error");
+});
 
 test("sidecar accepts a closed command envelope after private goal indirection", async () => {
   const gateway = new FakeGateway();

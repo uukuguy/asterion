@@ -157,6 +157,33 @@ test("durable store replays events by generation and sequence across mixed recor
   }
 });
 
+test("durable store rejects unknown future generation cursors", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    await store.appendEvent(event(1, 1));
+
+    assert.throws(
+      () => store.eventsAfterCursor({ generation: 2, sequence: 0 }),
+      GatewayStoreConflictError,
+    );
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
+test("durable store allows explicitly registered empty current generations", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    store.registerEventGeneration(3);
+
+    assert.deepEqual(store.eventsAfterCursor({ generation: 3, sequence: 0 }), []);
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
 test("durable store generation cursor fails closed on gaps and wrong order", async () => {
   for (const events of [
     [event(1), event(3)],

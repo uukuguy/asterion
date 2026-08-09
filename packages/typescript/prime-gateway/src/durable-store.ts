@@ -122,6 +122,13 @@ export class GatewayStoreWriteError extends Error {
   }
 }
 
+export class AtomicTargetExistsError extends Error {
+  constructor() {
+    super("Prime gateway durable target already exists");
+    this.name = "AtomicTargetExistsError";
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -242,7 +249,7 @@ export async function atomicWriteFile(
   }
   const target = join(directory, targetName);
   if (await pathExists(target)) {
-    throw new GatewayStoreWriteError();
+    throw new AtomicTargetExistsError();
   }
   const temporary = join(directory, `.asterion-${randomUUID()}.tmp`);
   const descriptor = await open(
@@ -275,7 +282,14 @@ export async function atomicWriteFile(
     await descriptor.close();
     closed = true;
     await faultInjector?.("before_rename");
-    await link(temporary, target);
+    try {
+      await link(temporary, target);
+    } catch (error) {
+      if (isRecord(error) && "code" in error && error.code === "EEXIST") {
+        throw new AtomicTargetExistsError();
+      }
+      throw error;
+    }
     await unlink(temporary);
     await faultInjector?.("before_directory_fsync");
     await syncDirectory(directory);
@@ -382,6 +396,7 @@ export class GatewayDurableStore {
   private readonly records: LoadedRecord[] = [];
   private readonly recordsById = new Map<string, LoadedRecord>();
   private readonly eventCounts = new Map<number, number>();
+  private readonly knownEventGenerations = new Set<number>();
   private readonly faultInjector: StorageFaultInjector | undefined;
   private failed = false;
   private commandCount = 0;
@@ -490,6 +505,13 @@ export class GatewayDurableStore {
     return Object.freeze({ ...receipt, event: validated });
   }
 
+  registerEventGeneration(generation: number): void {
+    if (!positiveInteger(generation)) {
+      throw new GatewayStoreConflictError();
+    }
+    this.knownEventGenerations.add(generation);
+  }
+
   async bindPrimeIdentity(identity: PrimeIdentityBinding): Promise<GatewayRecordReceipt> {
     const validated = validateIdentityPayload(identity);
     return this.appendRecord(
@@ -548,6 +570,9 @@ export class GatewayDurableStore {
         return { record, event };
       })
       .filter(({ event }) => event.generation === cursor.generation);
+    if (!this.knownEventGenerations.has(cursor.generation)) {
+      throw new GatewayStoreConflictError();
+    }
     for (const [index, { event }] of generationEvents.entries()) {
       const expectedSequence = index + 1;
       if (
@@ -747,6 +772,7 @@ export class GatewayDurableStore {
     } else if (record.stored.kind === "event.accepted") {
       this.eventCount += 1;
       const event = record.payload.event as ControlEvent;
+      this.knownEventGenerations.add(event.generation);
       const count = (this.eventCounts.get(event.generation) ?? 0) + 1;
       if (count > MAX_PUBLIC_EVENTS_PER_GENERATION) {
         throw new GatewayStoreCorruptionError();

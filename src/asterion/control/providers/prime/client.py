@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from collections.abc import AsyncIterator, Mapping
@@ -64,6 +65,8 @@ class PrimeControlPlaneClient:
         self._private_content = private_content
         self._manifest = manifest or _load_manifest()
         self._closed = False
+        self._close_lock = asyncio.Lock()
+        self._close_task: asyncio.Task[None] | None = None
 
     @property
     def manifest(self) -> ControlPlaneManifest:
@@ -119,13 +122,23 @@ class PrimeControlPlaneClient:
             raise PrimeControlError() from None
 
     async def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
+        async with self._close_lock:
+            if self._closed:
+                return
+            if self._close_task is None or self._close_task.done():
+                self._close_task = asyncio.create_task(self._process.close())
+            close_task = self._close_task
         try:
-            await self._process.close()
+            await close_task
         except RuntimeError:
+            async with self._close_lock:
+                if self._close_task is close_task:
+                    self._close_task = None
             raise PrimeControlError() from None
+        async with self._close_lock:
+            if self._close_task is close_task:
+                self._closed = True
+                self._close_task = None
 
     def _private_for_command(self, command: ControlCommand) -> Mapping[str, str]:
         if command.type == "session.create":

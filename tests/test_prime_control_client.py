@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import unittest
 from collections.abc import AsyncIterator, Mapping
 
@@ -26,6 +27,7 @@ class FakeProcess:
         self.event_requests: list[Mapping[str, object]] = []
         self.closed = 0
         self.failure: Exception | None = None
+        self.close_failures = 0
         self.response: Mapping[str, object] | None = None
         self.event_values: list[Mapping[str, object]] = []
 
@@ -56,6 +58,9 @@ class FakeProcess:
 
     async def close(self) -> None:
         self.closed += 1
+        if self.close_failures > 0:
+            self.close_failures -= 1
+            raise RuntimeError("SENTINEL_CLOSE_FAILURE")
 
 
 def create_command() -> ControlCommand:
@@ -204,6 +209,33 @@ class TestPrimeControlClient(unittest.IsolatedAsyncioTestCase):
 
         await client.close()
         await client.close()
+
+        self.assertEqual(fake_process.closed, 1)
+
+    async def test_close_is_retryable_after_transport_failure(self) -> None:
+        fake_process = FakeProcess()
+        fake_process.close_failures = 1
+        client = PrimeControlPlaneClient(
+            process=fake_process,
+            private_content=FakeResolver(),
+        )
+
+        with self.assertRaises(PrimeControlError) as raised:
+            await client.close()
+        self.assertNotIn("SENTINEL_CLOSE_FAILURE", str(raised.exception))
+
+        await client.close()
+
+        self.assertEqual(fake_process.closed, 2)
+
+    async def test_concurrent_close_shares_one_transport_close(self) -> None:
+        fake_process = FakeProcess()
+        client = PrimeControlPlaneClient(
+            process=fake_process,
+            private_content=FakeResolver(),
+        )
+
+        await asyncio.gather(client.close(), client.close())
 
         self.assertEqual(fake_process.closed, 1)
 
