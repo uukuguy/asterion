@@ -33,6 +33,13 @@ from asterion.control.journal import (
     JournalRecord,
     MemoryCanonicalJournal,
 )
+from asterion.control.manager import (
+    ActionExecutor,
+    ControlHost,
+    ControlHostError,
+    ControlHostSnapshot,
+    ControlHostTransportError,
+)
 from asterion.control.protocol import (
     AGENT_CONTROL_PROTOCOL,
     AGENT_SYSTEM_PROTOCOL,
@@ -66,6 +73,7 @@ __all__ = [
     "AGENT_CONTROL_PROTOCOL",
     "AGENT_SYSTEM_PROTOCOL",
     "ActionReceipt",
+    "ActionExecutor",
     "ActionState",
     "AdmissionDecision",
     "AgentSystemError",
@@ -81,6 +89,10 @@ __all__ = [
     "CONTROL_PLANE_PROTOCOL",
     "ControlCommand",
     "ControlEvent",
+    "ControlHost",
+    "ControlHostError",
+    "ControlHostSnapshot",
+    "ControlHostTransportError",
     "ControlPlaneClient",
     "ControlPlaneFactoryBinding",
     "ControlPlaneFactoryContext",

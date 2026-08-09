@@ -1,0 +1,297 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from collections.abc import AsyncIterator
+from pathlib import Path
+
+from asterion.control.authority import AuthorityLedger
+from asterion.control.host import (
+    ControlCommand,
+    ControlEvent,
+    ControlPlaneManifest,
+    EventCursor,
+)
+from asterion.control.journal import MemoryCanonicalJournal
+from asterion.control.manager import (
+    ControlHost,
+    ControlHostError,
+    ControlHostTransportError,
+)
+from asterion.control.system import resolve_agent_system
+from tests.test_control_authority import _envelope, _proposal
+from tests.test_control_system import (
+    _control_factories,
+    _manifest,
+    _provider,
+)
+
+
+class ScriptedClient:
+    def __init__(
+        self,
+        manifest: ControlPlaneManifest,
+        events: tuple[ControlEvent, ...] = (),
+        *,
+        audit: list[str] | None = None,
+        fail_send: bool = False,
+    ) -> None:
+        self._manifest = manifest
+        self._events = events
+        self.audit = audit if audit is not None else []
+        self.fail_send = fail_send
+        self.sent: list[ControlCommand] = []
+
+    @property
+    def manifest(self) -> ControlPlaneManifest:
+        return self._manifest
+
+    async def send(self, command: ControlCommand) -> None:
+        self.audit.append("provider.send")
+        if self.fail_send:
+            raise RuntimeError("SENTINEL_SECRET transport body")
+        self.sent.append(command)
+
+    async def _iterate(self) -> AsyncIterator[ControlEvent]:
+        for event in self._events:
+            yield event
+
+    def events(self, cursor: EventCursor | None = None) -> AsyncIterator[ControlEvent]:
+        del cursor
+        return self._iterate()
+
+    async def close(self) -> None:
+        self.audit.append("provider.close")
+
+
+class AuditedJournal(MemoryCanonicalJournal):
+    def __init__(self, session_id: str, audit: list[str]) -> None:
+        super().__init__(session_id)
+        self.audit = audit
+
+    def accept_command(self, command: ControlCommand, *, expected_position: int | None = None):
+        self.audit.append("journal.command")
+        return super().accept_command(command, expected_position=expected_position)
+
+    def accept_event(self, event: ControlEvent, *, expected_position: int | None = None):
+        self.audit.append("journal.event")
+        return super().accept_event(event, expected_position=expected_position)
+
+
+class SpyExecutor:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def execute(self, proposal: ControlEvent) -> object:
+        self.calls.append(str(proposal.payload["action_id"]))
+        raise AssertionError("Phase 0 host must not execute applications")
+
+
+def _session_events(proposal: ControlEvent) -> tuple[ControlEvent, ...]:
+    created = ControlEvent.from_mapping(
+        {
+            "protocol": "asterion.agent-control/v1",
+            "event_id": "event-1",
+            "session_id": "session-1",
+            "generation": 1,
+            "sequence": 1,
+            "emitted_at": "2026-08-09T15:00:00Z",
+            "type": "session.created",
+            "payload": {
+                "goal_id": "goal-1",
+                "authority_id": "authority-1",
+                "authority_revision": 1,
+            },
+        }
+    )
+    running = ControlEvent.from_mapping(
+        {
+            "protocol": "asterion.agent-control/v1",
+            "event_id": "event-running",
+            "session_id": "session-1",
+            "generation": 1,
+            "sequence": 2,
+            "emitted_at": "2026-08-09T15:00:01Z",
+            "type": "session.running",
+            "payload": {"reason_code": "started"},
+        }
+    )
+    return created, running, proposal
+
+
+def _create_command() -> ControlCommand:
+    return ControlCommand(
+        command_id="command-1",
+        session_id="session-1",
+        authority_revision=1,
+        type="session.create",
+        payload={
+            "system_id": "research.system",
+            "system_version": "1.0.0",
+            "goal_id": "goal-1",
+            "goal_ref": "goal-ref-1",
+        },
+    )
+
+
+class TestControlHost(unittest.IsolatedAsyncioTestCase):
+    async def test_command_is_journaled_before_provider_send(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            calls: list[str] = []
+            plan = resolve_agent_system(
+                _manifest(),
+                application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
+            )
+            client = ScriptedClient(plan.control_binding.manifest, audit=calls)
+            journal = AuditedJournal("session-1", calls)
+            host = ControlHost(
+                session_id="session-1",
+                generation=1,
+                plan=plan,
+                authority=AuthorityLedger(_envelope()),
+                journal=journal,
+                client=client,
+                action_executor=SpyExecutor(),
+                clock_ms=lambda: 1_000,
+            )
+            calls.clear()
+
+            await host.dispatch(_create_command())
+
+            self.assertEqual(calls, ["journal.command", "provider.send"])
+
+    async def test_send_failure_preserves_accepted_command_and_redacts_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            plan = resolve_agent_system(
+                _manifest(),
+                application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
+            )
+            client = ScriptedClient(plan.control_binding.manifest, fail_send=True)
+            journal = MemoryCanonicalJournal("session-1")
+            host = ControlHost(
+                session_id="session-1",
+                generation=1,
+                plan=plan,
+                authority=AuthorityLedger(_envelope()),
+                journal=journal,
+                client=client,
+                action_executor=SpyExecutor(),
+                clock_ms=lambda: 1_000,
+            )
+
+            with self.assertRaises(ControlHostTransportError) as raised:
+                await host.dispatch(_create_command())
+
+            self.assertEqual(journal.position, 3)
+            self.assertNotIn("SENTINEL_SECRET", str(raised.exception))
+
+    async def test_unauthorized_proposal_is_rejected_without_executor_contact(self) -> None:
+        target = {
+            "kind": "application",
+            "provider_id": "example.provider",
+            "application_id": "zeta",
+            "version": "2.0.0",
+            "runtime_id": "fake.runtime",
+        }
+        proposal = _proposal(target=target)
+        proposal = ControlEvent.from_mapping(
+            {**proposal.to_mapping(), "sequence": 3, "event_id": "event-3"}
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            plan = resolve_agent_system(
+                _manifest(),
+                application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
+            )
+            client = ScriptedClient(
+                plan.control_binding.manifest,
+                _session_events(proposal),
+            )
+            executor = SpyExecutor()
+            host = ControlHost(
+                session_id="session-1",
+                generation=1,
+                plan=plan,
+                authority=AuthorityLedger(_envelope()),
+                journal=MemoryCanonicalJournal("session-1"),
+                client=client,
+                action_executor=executor,
+                clock_ms=lambda: 1_000,
+            )
+
+            await host.pump()
+
+            self.assertEqual(host.snapshot().state.actions["action-1"].status, "rejected")
+            self.assertEqual(executor.calls, [])
+            resolution = client.sent[-1]
+            self.assertEqual(resolution.type, "action.resolve")
+            self.assertEqual(resolution.payload["resolution"], "rejected")
+
+    async def test_authorized_proposal_reserves_budget_without_executing(self) -> None:
+        proposal = ControlEvent.from_mapping(
+            {**_proposal().to_mapping(), "sequence": 3, "event_id": "event-3"}
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            plan = resolve_agent_system(
+                _manifest(),
+                application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
+            )
+            client = ScriptedClient(plan.control_binding.manifest, _session_events(proposal))
+            executor = SpyExecutor()
+            authority = AuthorityLedger(_envelope())
+            host = ControlHost(
+                session_id="session-1",
+                generation=1,
+                plan=plan,
+                authority=authority,
+                journal=MemoryCanonicalJournal("session-1"),
+                client=client,
+                action_executor=executor,
+                clock_ms=lambda: 1_000,
+            )
+
+            await host.pump()
+
+            self.assertEqual(host.snapshot().state.actions["action-1"].status, "admitted")
+            self.assertEqual(authority.reserved_action_ids, ("action-1",))
+            self.assertEqual(executor.calls, [])
+
+    async def test_gap_is_persisted_then_fails_without_synthesizing_state(self) -> None:
+        gap = ControlEvent.from_mapping(
+            {**_proposal().to_mapping(), "sequence": 4, "event_id": "event-4"}
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            plan = resolve_agent_system(
+                _manifest(),
+                application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
+            )
+            journal = MemoryCanonicalJournal("session-1")
+            host = ControlHost(
+                session_id="session-1",
+                generation=1,
+                plan=plan,
+                authority=AuthorityLedger(_envelope()),
+                journal=journal,
+                client=ScriptedClient(plan.control_binding.manifest, _session_events(gap)),
+                action_executor=SpyExecutor(),
+                clock_ms=lambda: 1_000,
+            )
+
+            with self.assertRaises(ControlHostError):
+                await host.pump()
+
+            self.assertEqual(journal.position, 5)
+            self.assertEqual(host.snapshot().state.next_sequence, 3)
+
+
+if __name__ == "__main__":
+    unittest.main()

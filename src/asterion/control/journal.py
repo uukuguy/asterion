@@ -120,6 +120,28 @@ class JournalRecord:
             },
         )
 
+    @classmethod
+    def action_decided(
+        cls,
+        *,
+        action_id: str,
+        authority_revision: int,
+        status: str,
+        reason: str,
+        proposal_digest: str,
+    ) -> JournalRecord:
+        return cls(
+            record_id=f"decision:{action_id}",
+            kind="action.decided",
+            payload={
+                "action_id": action_id,
+                "authority_revision": authority_revision,
+                "status": status,
+                "reason": reason,
+                "proposal_digest": proposal_digest,
+            },
+        )
+
 
 @dataclass(frozen=True)
 class JournalEntry:
