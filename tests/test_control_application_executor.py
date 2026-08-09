@@ -24,9 +24,12 @@ from asterion.capabilities.execution import (
     CapabilityInvocation,
 )
 from asterion.capability_packages import CapabilityPackageRef, InstalledCapabilityPackage
-from asterion.control.application_executor import ApplicationActionExecutor
+from asterion.control.application_executor import (
+    ApplicationActionExecutor,
+    ChildActionService,
+)
 from asterion.control.authority import BudgetUsage
-from asterion.control.execution import ActionExecutionFailure
+from asterion.control.execution import ActionExecutionFailure, ActionExecutionReceipt
 from asterion.control.host import ControlEvent
 from asterion.control.private_store import (
     MAX_PRIVATE_TEXT_BYTES,
@@ -256,6 +259,23 @@ def _proposal(**payload_changes: object) -> ControlEvent:
     )
 
 
+def _child_proposal(kind: str) -> ControlEvent:
+    return _proposal(
+        kind=kind,
+        target={"kind": "child", "child_id": "child-1"},
+    )
+
+
+def _child_receipt(proposal: ControlEvent) -> ActionExecutionReceipt:
+    return ActionExecutionReceipt(
+        action_id=str(proposal.payload["action_id"]),
+        receipt_ref="child-receipt-1",
+        usage=BudgetUsage.zero(),
+        artifact_ids=(),
+        media_types=(),
+    )
+
+
 def _assembly(
     root: Path,
     implementation: UsageImplementation,
@@ -398,6 +418,7 @@ def _executor(
     provider_override: InstalledApplicationProvider | None = None,
     runtime_id: str = "fake.runtime",
     runtime_manifest: Mapping[str, object] | None = None,
+    child_service: object | None = None,
 ):
     audit = [] if audit is None else audit
     implementation = implementation or UsageImplementation(audit)
@@ -460,11 +481,64 @@ def _executor(
         if host_services is not None
         else {"secret.service": {"value": SENTINEL}},
         pathlight=None,
+        child_service=cast(ChildActionService | None, child_service),
     )
     return executor, resolver, results, implementation
 
 
 class TestApplicationActionExecutor(unittest.IsolatedAsyncioTestCase):
+    async def test_child_service_transport_fault_is_uncertain_and_redacted(self) -> None:
+        class FaultingChildren:
+            async def spawn(self, proposal: ControlEvent, signal: MutableSignal):
+                del proposal, signal
+                raise RuntimeError(SENTINEL)
+
+            async def message(self, proposal: ControlEvent, signal: MutableSignal):
+                return await self.spawn(proposal, signal)
+
+            async def cancel(self, proposal: ControlEvent, signal: MutableSignal):
+                return await self.spawn(proposal, signal)
+
+        with tempfile.TemporaryDirectory() as directory:
+            executor, _, _, _ = _executor(
+                Path(directory), child_service=FaultingChildren()
+            )
+            with self.assertRaises(ActionExecutionFailure) as raised:
+                await executor.execute(_child_proposal("child.spawn"), MutableSignal())
+            self.assertEqual(raised.exception.status, "uncertain")
+            self.assertEqual(raised.exception.reason_code, "child-progress-unknown")
+            self.assertNotIn(SENTINEL, str(raised.exception))
+
+    async def test_child_actions_are_forwarded_to_the_injected_service(self) -> None:
+        class ChildActions:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, ControlEvent]] = []
+
+            async def spawn(self, proposal: ControlEvent, signal: MutableSignal):
+                del signal
+                self.calls.append(("spawn", proposal))
+                return _child_receipt(proposal)
+
+            async def message(self, proposal: ControlEvent, signal: MutableSignal):
+                del signal
+                self.calls.append(("message", proposal))
+                return _child_receipt(proposal)
+
+            async def cancel(self, proposal: ControlEvent, signal: MutableSignal):
+                del signal
+                self.calls.append(("cancel", proposal))
+                return _child_receipt(proposal)
+
+        with tempfile.TemporaryDirectory() as directory:
+            service = ChildActions()
+            executor, _, _, _ = _executor(Path(directory), child_service=service)
+            proposal = _child_proposal("child.spawn")
+
+            receipt = await executor.execute(proposal, MutableSignal())
+
+            self.assertEqual(receipt.action_id, proposal.payload["action_id"])
+            self.assertEqual(service.calls, [("spawn", proposal)])
+
     async def test_exact_portfolio_action_runs_once_and_returns_safe_receipt(
         self,
     ) -> None:

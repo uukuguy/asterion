@@ -62,6 +62,23 @@ class ActionExecutor(Protocol):
         ...
 
 
+class ChildLifecycleService(Protocol):
+    """Lifecycle boundary injected by the host without child implementation imports."""
+
+    @property
+    def active_ids(self) -> tuple[str, ...]:
+        """Return the active child identities."""
+        ...
+
+    async def cancel_all(self) -> None:
+        """Request cancellation of all active child sessions."""
+        ...
+
+    async def close(self) -> None:
+        """Close child provider resources."""
+        ...
+
+
 class _NeverCancelled:
     @property
     def cancelled(self) -> bool:
@@ -72,6 +89,7 @@ class _NeverCancelled:
 class ControlHostSnapshot:
     state: ControlState
     journal_position: int
+    authority_usage: BudgetUsage
     evidence_gaps: tuple[str, ...] = ()
 
 
@@ -91,6 +109,7 @@ class ControlHost:
         clock_ms: Callable[[], int],
         cancellation_signal: CancellationSignal | None = None,
         pathlight: PathlightRecorder = NOOP_PATHLIGHT_RECORDER,
+        child_service: ChildLifecycleService | None = None,
     ) -> None:
         if (
             not isinstance(plan, AgentSystemPlan)
@@ -107,6 +126,7 @@ class ControlHost:
             or authority.usage != BudgetUsage.zero()
             or authority.reserved_action_ids
             or authority.receipts
+            or not _valid_child_service(child_service)
         ):
             raise ControlHostError("control host construction is invalid")
         plan_grants = set(plan.portfolio_by_identity)
@@ -126,6 +146,8 @@ class ControlHost:
         self._journal = journal
         self._client = client
         self._action_executor = action_executor
+        self._child_service = child_service
+        self._children_closed = False
         self._cancellation_signal = cancellation_signal or _NeverCancelled()
         self._clock_ms = clock_ms
         self._evidence = ControlEvidenceProjector(pathlight)
@@ -236,6 +258,8 @@ class ControlHost:
             )
         ):
             raise ControlHostError("control command authority or identity mismatches")
+        if command.type == "session.cancel":
+            await self._close_children()
         try:
             entry = self._journal.accept_command(
                 command, expected_position=self._journal_position
@@ -273,10 +297,12 @@ class ControlHost:
         return ControlHostSnapshot(
             state=self._state,
             journal_position=self._journal_position,
+            authority_usage=self._authority.usage,
             evidence_gaps=self._evidence.gaps,
         )
 
     async def close(self) -> None:
+        await self._close_children()
         try:
             await self._client.close()
         except Exception:
@@ -317,6 +343,7 @@ class ControlHost:
             decision = self._authority.evaluate(
                 proposal,
                 now_ms=self._clock_ms(),
+                active_children=self._active_child_count(),
             )
             if decision.status == "admitted":
                 self._authority.reserve(decision)
@@ -615,3 +642,40 @@ class ControlHost:
             raise ControlHostTransportError(
                 "persisted control command delivery is uncertain"
             ) from None
+
+    async def _close_children(self) -> None:
+        if self._child_service is None or self._children_closed:
+            return
+        try:
+            await self._child_service.cancel_all()
+            await self._child_service.close()
+        except Exception:
+            raise ControlHostError("control child cascade is unavailable") from None
+        self._children_closed = True
+
+    def _active_child_count(self) -> int:
+        if self._child_service is None:
+            return 0
+        try:
+            active_ids = self._child_service.active_ids
+            if (
+                not isinstance(active_ids, tuple)
+                or any(not isinstance(child_id, str) for child_id in active_ids)
+            ):
+                raise TypeError
+            return len(active_ids)
+        except Exception:
+            raise ControlHostError("control child lifecycle is unavailable") from None
+
+
+def _valid_child_service(value: object) -> bool:
+    if value is None:
+        return True
+    try:
+        active_ids = getattr(type(value), "active_ids", None)
+        return all(
+            callable(getattr(value, method, None))
+            for method in ("cancel_all", "close")
+        ) and (isinstance(active_ids, property) or isinstance(active_ids, tuple))
+    except Exception:
+        return False

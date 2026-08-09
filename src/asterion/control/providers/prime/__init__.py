@@ -10,7 +10,9 @@ from asterion.control.providers.prime.client import (
 from asterion.control.providers.prime.factory import (
     PRIME_CONTROL_PLANE_ID,
     PRIME_CONTROL_PLANE_VERSION,
+    PRIME_NATIVE_RLM_MAX_DEPTH,
     build_prime_control_plane_client,
+    derive_prime_child_control_options,
     prime_control_plane_binding,
 )
 from asterion.control.providers.prime.process import (
@@ -24,6 +26,7 @@ from asterion.control.providers.prime.process import (
 __all__ = (
     "PRIME_CONTROL_PLANE_ID",
     "PRIME_CONTROL_PLANE_VERSION",
+    "PRIME_NATIVE_RLM_MAX_DEPTH",
     "PrimeControlError",
     "PrimeControlPlaneClient",
     "PrimeSidecarLaunchOptions",
@@ -32,6 +35,7 @@ __all__ = (
     "PrimeSidecarSpawnPlan",
     "PrivateContentResolver",
     "build_prime_control_plane_client",
+    "derive_prime_child_control_options",
     "build_prime_sidecar_spawn_plan",
     "prime_control_plane_binding",
 )

@@ -17,7 +17,16 @@ from asterion.control.execution import (
 )
 from asterion.control.application_executor import (
     ApplicationActionExecutor,
+    ChildActionService,
     ApplicationIdentity,
+)
+from asterion.control.children import (
+    ChildSessionBinding,
+    ChildSessionError,
+    ChildSessionService,
+    ChildSessionStatus,
+    ChildTerminalReceipt,
+    derive_child_authority,
 )
 from asterion.control.authority import (
     ActionReceipt,
@@ -61,6 +70,7 @@ from asterion.control.recovery import (
 )
 from asterion.control.manager import (
     ActionExecutor,
+    ChildLifecycleService,
     ControlHost,
     ControlHostError,
     ControlHostSnapshot,
@@ -116,6 +126,7 @@ __all__ = [
     "AgentSystemError",
     "AgentSystemPlan",
     "ApplicationActionExecutor",
+    "ChildActionService",
     "ApplicationIdentity",
     "ApplicationPortfolioEntry",
     "AuthorityEnvelope",
@@ -132,6 +143,12 @@ __all__ = [
     "ControlEvent",
     "ControlEvidenceProjector",
     "ControlHost",
+    "ChildLifecycleService",
+    "ChildSessionBinding",
+    "ChildSessionError",
+    "ChildSessionService",
+    "ChildSessionStatus",
+    "ChildTerminalReceipt",
     "ControlHostError",
     "ControlHostSnapshot",
     "ControlHostTransportError",
@@ -163,6 +180,7 @@ __all__ = [
     "RecoveredControlState",
     "ConformanceReport",
     "action_proposal_digest",
+    "derive_child_authority",
     "apply_action_admission",
     "apply_action_resolution",
     "apply_authority_revision",

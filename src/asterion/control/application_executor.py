@@ -7,6 +7,7 @@ import hashlib
 import json
 from collections.abc import Iterable, Mapping
 from types import MappingProxyType
+from typing import Protocol
 
 from asterion.applications.provider import (
     APPLICATION_PROVIDER_PROTOCOL,
@@ -48,6 +49,22 @@ from asterion.runtime.host import CancellationSignal
 ApplicationIdentity = tuple[str, str, str, str]
 
 
+class ChildActionService(Protocol):
+    """Execute exact child lifecycle actions without discovery."""
+
+    async def spawn(
+        self, proposal: ControlEvent, signal: CancellationSignal
+    ) -> ActionExecutionReceipt: ...
+
+    async def message(
+        self, proposal: ControlEvent, signal: CancellationSignal
+    ) -> ActionExecutionReceipt: ...
+
+    async def cancel(
+        self, proposal: ControlEvent, signal: CancellationSignal
+    ) -> ActionExecutionReceipt: ...
+
+
 class ApplicationActionExecutor:
     """ActionExecutor for one preflight-resolved application portfolio.
 
@@ -67,6 +84,7 @@ class ApplicationActionExecutor:
         results: PrivateResultStore,
         host_services: Mapping[str, object],
         pathlight: PathlightRecorder | None = None,
+        child_service: ChildActionService | None = None,
     ) -> None:
         if (
             not isinstance(plan, AgentSystemPlan)
@@ -74,6 +92,7 @@ class ApplicationActionExecutor:
             or not callable(getattr(content, "resolve_text", None))
             or not callable(getattr(results, "publish_application_result", None))
             or not isinstance(host_services, Mapping)
+            or not _valid_child_action_service(child_service)
         ):
             raise ValueError("application action executor is invalid")
         self._plan = plan
@@ -86,10 +105,27 @@ class ApplicationActionExecutor:
         self._results = results
         self._host_services = MappingProxyType(dict(host_services))
         self._pathlight = pathlight
+        self._child_service = child_service
 
     async def execute(
         self, proposal: ControlEvent, signal: CancellationSignal
     ) -> ActionExecutionReceipt:
+        child_action = self._child_action(proposal)
+        if child_action is not None:
+            if self._child_service is None:
+                raise _failed(proposal, "child-service-unavailable")
+            try:
+                method = getattr(self._child_service, child_action)
+                receipt = await method(proposal, signal)
+            except ActionExecutionFailure:
+                raise
+            except Exception:
+                raise ActionExecutionFailure(
+                    "uncertain", "child-progress-unknown", None
+                ) from None
+            if type(receipt) is not ActionExecutionReceipt:
+                raise ActionExecutionFailure("uncertain", "child-progress-unknown", None)
+            return receipt
         _raise_if_cancelled(proposal, signal)
         target, identity, entry = self._resolve_entry(proposal)
         if entry is None:
@@ -204,6 +240,31 @@ class ApplicationActionExecutor:
             raise _failed(proposal, "invalid-proposal") from None
         return target, identity, self._plan.portfolio_entry(*identity)
 
+    @staticmethod
+    def _child_action(proposal: object) -> str | None:
+        if not isinstance(proposal, ControlEvent) or proposal.type != "action.proposed":
+            return None
+        kind = proposal.payload.get("kind")
+        if not isinstance(kind, str) or not kind.startswith("child."):
+            return None
+        target = proposal.payload.get("target")
+        if (
+            not isinstance(target, Mapping)
+            or set(target) != {"kind", "child_id"}
+            or target.get("kind") != "child"
+            or not isinstance(target.get("child_id"), str)
+        ):
+            raise _failed(proposal, "child-target-mismatch")
+        methods = {
+            "child.spawn": "spawn",
+            "child.message": "message",
+            "child.cancel": "cancel",
+        }
+        try:
+            return methods[kind]
+        except KeyError:
+            raise _failed(proposal, "child-target-mismatch") from None
+
 
 def _index_providers(
     providers: Iterable[InstalledApplicationProvider],
@@ -222,6 +283,18 @@ def _index_providers(
             raise ValueError("application action providers are invalid")
         indexed[provider.provider_id] = provider
     return MappingProxyType(indexed)
+
+
+def _valid_child_action_service(value: object) -> bool:
+    if value is None:
+        return True
+    try:
+        return all(
+            callable(getattr(value, method, None))
+            for method in ("spawn", "message", "cancel")
+        )
+    except Exception:
+        return False
 
 
 def _provider_contains_entry(

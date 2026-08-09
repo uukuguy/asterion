@@ -5,14 +5,21 @@ from __future__ import annotations
 import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from types import MappingProxyType
+from typing import TypeGuard
 
+from asterion.control.authority import AuthorityEnvelope
 from asterion.control.factory import (
     ControlPlaneFactoryBinding,
     ControlPlaneFactoryContext,
     ControlPlaneFactoryError,
 )
 from asterion.control.host import ControlPlaneClient, ControlPlaneManifest
-from asterion.control.providers.prime.client import PrimeControlPlaneClient
+from asterion.control.protocol import OPAQUE_ID
+from asterion.control.providers.prime.client import (
+    PrimeControlPlaneClient,
+    PrivateContentResolver,
+)
 from asterion.control.providers.prime.process import (
     PrimeSidecarLaunchOptions,
     PrimeSidecarProcess,
@@ -23,6 +30,8 @@ from asterion.control.providers.prime.process import (
 PRIME_CONTROL_PLANE_ID = "prime.gateway"
 PRIME_CONTROL_PLANE_VERSION = "0.1.0"
 PRIME_CHECKPOINT_VERSION = "1.0.0"
+# Prime native RLM remains disabled; child admission is host-owned.
+PRIME_NATIVE_RLM_MAX_DEPTH = 0
 PRIME_COMPATIBILITY_IDS = (
     "asterion.agent-control/v1",
     "prime-agent.daemon/v7",
@@ -89,6 +98,55 @@ _REQUIRED_OPTIONS = frozenset(
 ProcessFactory = Callable[[PrimeSidecarLaunchOptions], object]
 
 
+def derive_prime_child_control_options(
+    parent_options: Mapping[str, str],
+    *,
+    child_root: Path,
+    child_session_id: str,
+    child_authority: AuthorityEnvelope,
+    generation: int,
+) -> Mapping[str, str]:
+    """Return the Prime options for one host-admitted child session."""
+
+    if (
+        not isinstance(child_root, Path)
+        or not isinstance(child_session_id, str)
+        or OPAQUE_ID.fullmatch(child_session_id) is None
+        or not isinstance(child_authority, AuthorityEnvelope)
+    ):
+        raise ValueError("Prime child control options are invalid")
+    if isinstance(generation, bool) or not isinstance(generation, int) or generation < 1:
+        raise ValueError("Prime child control options are invalid")
+    try:
+        parent_controller_tokens = _positive_integer_option(
+            parent_options, "max_controller_tokens"
+        )
+        parent_timeout_ms = _positive_integer_option(parent_options, "timeout_ms")
+        controller_tokens = min(
+            parent_controller_tokens, child_authority.budget_limit.controller_tokens
+        )
+        timeout_ms = min(parent_timeout_ms, child_authority.max_action_deadline_ms)
+        if controller_tokens < 1 or timeout_ms < 1:
+            raise ValueError
+        options = dict(parent_options)
+    except Exception:
+        raise ValueError("Prime child control options are invalid")
+    options.update(
+        {
+            "agent_dir": str(child_root / "agent"),
+            "authority_id": child_authority.authority_id,
+            "gateway_root": str(child_root / "gateway"),
+            "generation": str(generation),
+            "max_controller_tokens": str(controller_tokens),
+            "prime_socket_path": str(child_root / "prime.sock"),
+            "session_dir": str(child_root / "session"),
+            "session_id": child_session_id,
+            "timeout_ms": str(timeout_ms),
+        }
+    )
+    return MappingProxyType(options)
+
+
 def prime_control_plane_binding() -> ControlPlaneFactoryBinding:
     return ControlPlaneFactoryBinding(
         control_plane_id=PRIME_CONTROL_PLANE_ID,
@@ -147,7 +205,7 @@ def _validate_context_identity(context: ControlPlaneFactoryContext) -> None:
         raise ControlPlaneFactoryError("Prime control plane identity is invalid")
 
 
-def _is_private_content_resolver(value: object) -> bool:
+def _is_private_content_resolver(value: object) -> TypeGuard[PrivateContentResolver]:
     return callable(getattr(value, "resolve_text", None))
 
 
