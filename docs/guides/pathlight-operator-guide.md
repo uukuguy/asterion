@@ -4,7 +4,42 @@ Pathlight 用于观察、追踪、评估和优化 Asterion 智能体工作流。
 查看 trace、指标或 Dashboard 而调用模型、执行工具或访问外部网络。DCI Bright 的实验协调器是
 Pathlight 的参考产品适配器，不是通用框架接口。
 
-## 1. 开始前：准备哪些文件
+## 1. 先理解它的作用：不替你完成任务，而是让任务可解释、可改进
+
+Pathlight 默认**不改变任务的答案、工具选择、重试策略或成功/失败判定**。它不是“运行一条
+Pathlight 指令就自动提高任务质量”的系统。
+
+它在一次任务中的作用链是：
+
+```text
+正常执行任务 → 记录安全的工作流证据 → 查看过程与结果 → 比较两次运行 → 诊断差异 →
+人工确认改动 → 用受控实验验证改动是否真的更好
+```
+
+因此，Pathlight 的直接价值是回答：任务在哪个节点成功或失败、模型/工具上下文怎样流动、差异发生在
+哪里、某个改动是否真正提升指标。它会让下一次任务的改进有证据依据，但不会在没有批准的情况下自行
+修改或重跑任务。
+
+### 最小起步：先让一次正常任务产生证据
+
+平时怎样运行任务，就仍然怎样运行；只额外指定一个**尚不存在**的 evidence 文件。父目录必须是你
+拥有的私有目录：
+
+```bash
+install -d -m 700 "$PATHLIGHT_EVIDENCE_ROOT"
+
+uv run asterion run \
+  --provider "<provider-id>" \
+  --application "<application-id>@<version>" \
+  --input "<your task input>" \
+  --workflow-evidence-file "$PATHLIGHT_EVIDENCE_ROOT/workflow-evidence.json"
+```
+
+这条命令仍以原有应用、runtime 和 host service 完成任务；Pathlight 同时记录安全摘要和 trace。
+任务完成后，终端会给出原本的公开结果，而 `workflow-evidence.json` 成为下面所有观察命令的起点。
+不带 `--workflow-evidence-file` 的正常任务也可以完成，但不会有可供 Pathlight 回放的完整过程数据。
+
+## 2. 开始前：准备哪些文件
 
 Pathlight 的输入是运行后生成的不可变文件。常用文件如下：
 
@@ -19,7 +54,7 @@ Pathlight 的输入是运行后生成的不可变文件。常用文件如下：
 所有路径必须是绝对路径。公共输出只包含经验证的结构和摘要；不要把 prompt、问题、答案、case ID、
 provider payload、凭据或私有运行目录复制到终端记录、文档或工单中。
 
-## 2. 观察与追踪：Trace 和 Flow
+## 3. 观察与追踪：Trace 和 Flow
 
 先列出可用 trace，再选择一个 `trace_id` 查看数据流。以下命令均为只读、无模型调用：
 
@@ -40,7 +75,7 @@ uv run asterion pathlight trace flow \
 结构摘要与证据缺口。需要增量查看时使用 `trace tail --after-sequence <n>`；不要把 trace 缺口解释为
 模型或工具一定失败。
 
-## 3. 评估、实验和诊断
+## 4. 评估、实验和诊断
 
 ```bash
 # 查询指标；可额外加 --metric-name、--status 或 --scope-sha256 筛选
@@ -63,7 +98,7 @@ uv run asterion pathlight proposal list \
 比较只接受范围和指标契约兼容的评估；不兼容时拒绝输出，而不是伪造结论。proposal 是待审建议，
 不包含执行权，不能用已有 trace、缓存或外部建议直接启动模型调用。
 
-## 4. 本地 Dashboard
+## 5. 本地 Dashboard
 
 Dashboard 在回环地址提供只读页面和 API。它读取你显式传入的文件，默认不打开浏览器；添加 `--open`
 才会打开本机浏览器。运行时保持在前台，`Ctrl-C` 安全停止。
@@ -83,7 +118,7 @@ uv run asterion pathlight dashboard \
 Dashboard 会在开端口前拒绝。页面显示工作流主线、评估、实验、诊断和证据缺口；不提供写入、执行、
 授权、上传或外部网络接口。
 
-## 5. DCI Bright 受控优化
+## 6. DCI Bright 受控优化
 
 以下是 DCI 产品层命令。它从已闭合的 DCI 诊断准备固定 cohort 的查询分解实验，再从原生证据生成
 Decision；通用 `asterion pathlight` 不运行这些命令。
@@ -121,7 +156,7 @@ uv run asterion-dci pathlight optimization finalize \
 失败。候选在 Biology 和 Economics 提升、在 Earth Science 和 Robotics 回退，因此 Decision 为
 `rejected (quality-threshold-missed)`。这是诊断结果，不是 423 条 Bright 全量 benchmark 的替代分数。
 
-## 6. Opik 离线交换
+## 7. Opik 离线交换
 
 Pathlight 不直接调用 Opik SDK 或网络。导出生成安全 envelope 批次，检查也只读；网络发送、认证和
 重试由 Pathlight 之外的 operator-owned adapter 负责。
@@ -142,7 +177,7 @@ uv run asterion pathlight export inspect \
 外部观察只能用 `import opik-observation` 导入为未授权 `ProposalCandidate`；导入不会执行建议或加载
 provider。
 
-## 7. 故障排查与安全检查
+## 8. 故障排查与安全检查
 
 - `asterion pathlight: request is invalid`：检查命令层级、必填 `--*-file` 参数和绝对路径；通用 CLI
   没有 `diagnose`，正确命令是 `diagnosis show`。
