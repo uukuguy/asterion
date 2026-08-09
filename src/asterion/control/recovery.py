@@ -223,10 +223,7 @@ def recover_control_host_state(
                     usage=usage,
                 )
                 existing = receipts.get(action_id)
-                if existing is not None or (
-                    action_id in admission_commands
-                    and action_id not in running_action_ids
-                ):
+                if existing is not None:
                     raise JournalConflictError("control journal recovery failed")
                 receipts[action_id] = receipt
                 authority_operations.append(receipt)
@@ -280,11 +277,6 @@ def recover_control_host_state(
         ):
             raise JournalConflictError("control journal recovery failed")
         ledger = AuthorityLedger._from_recovery(envelope, authority_operations)
-        stable_terminal_commands = {
-            action_id: command
-            for action_id, command in terminal_commands.items()
-            if _terminal_matches_state(state, command)
-        }
         return RecoveredControlState(
             state=state,
             authority=ledger,
@@ -295,7 +287,7 @@ def recover_control_host_state(
             journal_position=len(values),
             proposals=proposals,
             admission_commands=admission_commands,
-            terminal_commands=stable_terminal_commands,
+            terminal_commands=terminal_commands,
             running_action_ids=tuple(sorted(running_action_ids)),
         )
     except JournalConflictError:
@@ -370,6 +362,7 @@ def _apply_resolution_command(
             or resolution != decision.status
             or command.payload["reason_code"] != decision.reason
             or command.payload["receipt_ref"] is not None
+            or command.command_id != f"admission:{action_id}"
         ):
             raise JournalConflictError("control journal recovery failed")
         existing_admission = admission_commands.get(action_id)
@@ -378,6 +371,15 @@ def _apply_resolution_command(
         admission_commands[action_id] = command
         return state
     action_id = str(command.payload["action_id"])
+    if command.command_id != f"terminal:{action_id}":
+        raise JournalConflictError("control journal recovery failed")
+    decision = decisions.get(action_id)
+    if (
+        decision is None
+        or decision.status != "admitted"
+        or action_id not in admission_commands
+    ):
+        raise JournalConflictError("control journal recovery failed")
     existing = terminal_commands.get(action_id)
     if existing is not None:
         if existing != command:
@@ -391,19 +393,22 @@ def _apply_resolution_command(
         action.status == "admitted"
         and resolution == "cancelled"
         and command.payload["receipt_ref"] is None
+        and command.payload["reason_code"] == "cancelled-before-start"
     ):
         return apply_action_resolution(state, action_id, "cancelled")
-    if action.status == "admitted":
-        state = mark_action_running(state, action_id)
-        action = state.actions[action_id]
     if action.status != "running":
         raise JournalConflictError("control journal recovery failed")
     receipt = receipts.get(action_id)
     receipt_ref = command.payload["receipt_ref"]
-    if receipt is not None and (
-        resolution != "succeeded" or receipt_ref != receipt.receipt_ref
-    ):
-        raise JournalConflictError("control journal recovery failed")
+    if resolution == "succeeded":
+        if receipt is None or receipt_ref != receipt.receipt_ref:
+            raise JournalConflictError("control journal recovery failed")
+        return apply_action_resolution(
+            state,
+            action_id,
+            "succeeded",
+            receipt_ref=receipt.receipt_ref,
+        )
     if resolution == "uncertain":
         if receipt is not None or receipt_ref is not None:
             raise JournalConflictError("control journal recovery failed")
@@ -413,8 +418,8 @@ def _apply_resolution_command(
             "uncertain",
             receipt_ref=(str(receipt_ref) if receipt_ref is not None else None),
         )
-    if resolution in {"failed", "cancelled"} and receipt is None:
-        if resolution == "failed" and receipt_ref is None:
+    if resolution in {"failed", "cancelled"}:
+        if receipt is not None or (resolution == "failed" and receipt_ref is None):
             raise JournalConflictError("control journal recovery failed")
         return apply_action_resolution(
             state,
@@ -422,28 +427,7 @@ def _apply_resolution_command(
             resolution,
             receipt_ref=(str(receipt_ref) if receipt_ref is not None else None),
         )
-    if receipt is None or receipt_ref != receipt.receipt_ref:
-        return apply_action_resolution(
-            state,
-            action_id,
-            "uncertain",
-            receipt_ref=(str(receipt_ref) if receipt_ref is not None else None),
-        )
-    return apply_action_resolution(
-        state,
-        action_id,
-        resolution,
-        receipt_ref=receipt.receipt_ref,
-    )
-
-
-def _terminal_matches_state(state: ControlState, command: ControlCommand) -> bool:
-    action = state.actions.get(str(command.payload["action_id"]))
-    return (
-        action is not None
-        and action.status == command.payload["resolution"]
-        and action.receipt_ref == command.payload["receipt_ref"]
-    )
+    raise JournalConflictError("control journal recovery failed")
 
 
 def _mapping(value: object) -> Mapping[str, object]:

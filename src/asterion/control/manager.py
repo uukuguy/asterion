@@ -147,10 +147,9 @@ class ControlHost:
                         authority_revision=authority.envelope.revision,
                     ),
                 )
-                self._recovered_proposals: dict[str, ControlEvent] = {}
-                self._recovered_admissions: dict[str, ControlCommand] = {}
-                self._recovered_terminals: dict[str, ControlCommand] = {}
-                self._recovered_running: set[str] = set()
+                self._pending_proposals: dict[str, ControlEvent] = {}
+                self._pending_admissions: dict[str, ControlCommand] = {}
+                self._pending_terminals: dict[str, ControlCommand] = {}
             else:
                 entries = self._journal.replay(JournalCursor(0))
                 if len(entries) != position:
@@ -200,10 +199,9 @@ class ControlHost:
                     raise JournalConflictError("control journal identity conflicts")
                 self._state = recovered.state
                 self._authority = recovered.authority._mutable_copy()
-                self._recovered_proposals = dict(recovered.proposals)
-                self._recovered_admissions = dict(recovered.admission_commands)
-                self._recovered_terminals = dict(recovered.terminal_commands)
-                self._recovered_running = set(recovered.running_action_ids)
+                self._pending_proposals = dict(recovered.proposals)
+                self._pending_admissions = dict(recovered.admission_commands)
+                self._pending_terminals = dict(recovered.terminal_commands)
                 authority_entry = entries[-1]
                 if self._journal.position != position:
                     raise JournalConflictError("control journal changed")
@@ -248,7 +246,7 @@ class ControlHost:
             ) from None
 
     async def pump(self, *, until_terminal: bool = False) -> None:
-        await self._resume_recovered_actions()
+        await self._resume_pending_actions()
         cursor = EventCursor(
             generation=self._state.generation,
             sequence=self._state.next_sequence - 1,
@@ -348,40 +346,33 @@ class ControlHost:
                 "receipt_ref": None,
             },
         )
-        await self.dispatch(command)
-        if decision.status == "admitted":
-            await self._execute_admitted_action(proposal)
+        self._pending_proposals[decision.action_id] = proposal
+        self._persist_command(command)
+        self._pending_admissions[decision.action_id] = command
+        await self._deliver_pending_admission(decision.action_id)
 
-    async def _resume_recovered_actions(self) -> None:
-        for action_id in tuple(sorted(self._recovered_proposals)):
+    async def _resume_pending_actions(self) -> None:
+        for action_id in tuple(sorted(self._pending_proposals)):
             action = self._state.actions.get(action_id)
             if action is None:
                 raise ControlHostError("control action recovery failed")
-            terminal = self._recovered_terminals.get(action_id)
+            terminal = self._pending_terminals.get(action_id)
             if terminal is not None:
-                await self._send_persisted_command(terminal)
-                self._clear_recovered_action(action_id)
+                await self._deliver_pending_terminal(action_id)
                 continue
             if action.status == "rejected":
-                command = self._recovered_admissions.get(action_id)
-                if command is None:
-                    command = self._admission_command(action_id)
-                    self._persist_command(command)
-                await self._send_persisted_command(command)
-                self._clear_recovered_action(action_id)
+                self._ensure_pending_admission(action_id)
+                await self._deliver_pending_admission(action_id)
                 continue
             if action.status == "admitted":
-                command = self._recovered_admissions.get(action_id)
-                if command is None:
-                    command = self._admission_command(action_id)
-                    self._persist_command(command)
-                await self._send_persisted_command(command)
-                await self._execute_admitted_action(
-                    self._recovered_proposals[action_id]
-                )
-                self._clear_recovered_action(action_id)
+                self._ensure_pending_admission(action_id)
+                await self._deliver_pending_admission(action_id)
                 continue
             if action.status == "running":
+                self._ensure_pending_admission(action_id)
+                command = self._pending_admissions[action_id]
+                await self._send_persisted_command(command)
+                self._pending_admissions.pop(action_id, None)
                 receipt = self._authority.receipts.get(action_id)
                 if receipt is not None:
                     await self._complete_action(
@@ -398,15 +389,36 @@ class ControlHost:
                         reason_code="progress-unknown",
                         receipt_ref=None,
                     )
-                self._clear_recovered_action(action_id)
                 continue
-            self._clear_recovered_action(action_id)
+            self._clear_pending_action(action_id)
 
-    def _clear_recovered_action(self, action_id: str) -> None:
-        self._recovered_proposals.pop(action_id, None)
-        self._recovered_admissions.pop(action_id, None)
-        self._recovered_terminals.pop(action_id, None)
-        self._recovered_running.discard(action_id)
+    def _ensure_pending_admission(self, action_id: str) -> None:
+        if action_id not in self._pending_admissions:
+            command = self._admission_command(action_id)
+            self._persist_command(command)
+            self._pending_admissions[action_id] = command
+
+    async def _deliver_pending_admission(self, action_id: str) -> None:
+        command = self._pending_admissions[action_id]
+        await self._send_persisted_command(command)
+        self._pending_admissions.pop(action_id, None)
+        action = self._state.actions[action_id]
+        if action.status == "rejected":
+            self._clear_pending_action(action_id)
+            return
+        if action.status != "admitted":
+            raise ControlHostError("control admission delivery state is invalid")
+        await self._execute_admitted_action(self._pending_proposals[action_id])
+
+    async def _deliver_pending_terminal(self, action_id: str) -> None:
+        command = self._pending_terminals[action_id]
+        await self._send_persisted_command(command)
+        self._clear_pending_action(action_id)
+
+    def _clear_pending_action(self, action_id: str) -> None:
+        self._pending_proposals.pop(action_id, None)
+        self._pending_admissions.pop(action_id, None)
+        self._pending_terminals.pop(action_id, None)
 
     async def _execute_admitted_action(self, proposal: ControlEvent) -> None:
         action_id = str(proposal.payload["action_id"])
@@ -550,12 +562,14 @@ class ControlHost:
             },
         )
         self._persist_command(command)
-        await self._send_persisted_command(command)
+        self._pending_terminals[action_id] = command
+        await self._deliver_pending_terminal(action_id)
 
     def _admission_command(self, action_id: str) -> ControlCommand:
         action = self._state.actions[action_id]
-        if action.status not in {"admitted", "rejected"} or action.reason is None:
+        if action.reason is None or action.status == "proposed":
             raise ControlHostError("control admission recovery failed")
+        resolution = "rejected" if action.status == "rejected" else "admitted"
         return ControlCommand(
             command_id=f"admission:{action_id}",
             session_id=self._state.session_id,
@@ -563,7 +577,7 @@ class ControlHost:
             type="action.resolve",
             payload={
                 "action_id": action_id,
-                "resolution": action.status,
+                "resolution": resolution,
                 "reason_code": action.reason,
                 "receipt_ref": None,
             },

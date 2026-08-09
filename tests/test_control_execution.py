@@ -20,6 +20,7 @@ from asterion.control.host import (
 )
 from asterion.control.journal import (
     FileCanonicalJournal,
+    JournalConflictError,
     JournalCursor,
     JournalRecord,
     MemoryCanonicalJournal,
@@ -104,12 +105,14 @@ class ExecutionClient:
         self.fail_admission_once = fail_admission_once
         self.cancel_on_admission = cancel_on_admission
         self.sent: list[ControlCommand] = []
+        self.attempted: list[ControlCommand] = []
 
     @property
     def manifest(self) -> ControlPlaneManifest:
         return self._manifest
 
     async def send(self, command: ControlCommand) -> None:
+        self.attempted.append(command)
         resolution = command.payload.get("resolution")
         self.audit.append(f"provider.{resolution or command.type}")
         if resolution == "admitted" and self.cancel_on_admission is not None:
@@ -151,6 +154,21 @@ class AuditJournal(MemoryCanonicalJournal):
         if record.kind in labels:
             self.audit.append(labels[record.kind])
         return super().append(expected_position, record)
+
+
+class FailAdmissionPersistenceOnceJournal(MemoryCanonicalJournal):
+    def __init__(self, session_id: str) -> None:
+        super().__init__(session_id)
+        self.fail_admission_once = True
+
+    def accept_command(self, command: ControlCommand, *, expected_position=None):
+        if (
+            command.payload.get("resolution") == "admitted"
+            and self.fail_admission_once
+        ):
+            self.fail_admission_once = False
+            raise JournalConflictError("SENTINEL_SECRET persistence failure")
+        return super().accept_command(command, expected_position=expected_position)
 
 
 class AuditedLedger(AuthorityLedger):
@@ -521,6 +539,34 @@ class TestControlExecution(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(journal.position, resumed.snapshot().journal_position)
 
+    async def test_same_host_retries_stable_terminal_without_reexecution(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = _plan(root)
+            journal = MemoryCanonicalJournal("session-1")
+            client = ExecutionClient(
+                plan.control_binding.manifest,
+                _proposal_events(),
+                fail_terminal_once=True,
+            )
+            executor = RecordingExecutor()
+            host = _build_host(root, client=client, executor=executor, journal=journal)
+
+            with self.assertRaises(ControlHostTransportError):
+                await host.pump()
+            first_terminal = client.attempted[-1]
+
+            await host.pump()
+
+            terminal_attempts = tuple(
+                command
+                for command in client.attempted
+                if command.payload.get("resolution") == "succeeded"
+            )
+            self.assertEqual(terminal_attempts, (first_terminal, first_terminal))
+            self.assertEqual(len(executor.calls), 1)
+            self.assertEqual(journal.position, host.snapshot().journal_position)
+
     async def test_persisted_admission_recovers_and_executes_exactly_once(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -558,6 +604,60 @@ class TestControlExecution(unittest.IsolatedAsyncioTestCase):
                 tuple(command.payload["resolution"] for command in resumed_client.sent),
                 ("admitted", "succeeded"),
             )
+
+    async def test_same_host_retries_stable_admission_before_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = _plan(root)
+            journal = MemoryCanonicalJournal("session-1")
+            client = ExecutionClient(
+                plan.control_binding.manifest,
+                _proposal_events(),
+                fail_admission_once=True,
+            )
+            executor = RecordingExecutor()
+            host = _build_host(root, client=client, executor=executor, journal=journal)
+
+            with self.assertRaises(ControlHostTransportError):
+                await host.pump()
+            first_admission = client.attempted[-1]
+            self.assertEqual(executor.calls, [])
+
+            await host.pump()
+
+            admission_attempts = tuple(
+                command
+                for command in client.attempted
+                if command.payload.get("resolution") == "admitted"
+            )
+            self.assertEqual(admission_attempts, (first_admission, first_admission))
+            self.assertEqual(len(executor.calls), 1)
+            self.assertEqual(
+                host.snapshot().state.actions["action-1"].status, "succeeded"
+            )
+
+    async def test_unpersisted_admission_is_never_sent_and_is_rebuilt(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = _plan(root)
+            journal = FailAdmissionPersistenceOnceJournal("session-1")
+            client = ExecutionClient(plan.control_binding.manifest, _proposal_events())
+            executor = RecordingExecutor()
+            host = _build_host(root, client=client, executor=executor, journal=journal)
+
+            with self.assertRaises(ControlHostError) as raised:
+                await host.pump()
+            self.assertNotIn("SENTINEL_SECRET", str(raised.exception))
+            self.assertEqual(client.attempted, [])
+            self.assertEqual(executor.calls, [])
+
+            await host.pump()
+
+            self.assertEqual(
+                tuple(command.payload.get("resolution") for command in client.sent),
+                ("admitted", "succeeded"),
+            )
+            self.assertEqual(len(executor.calls), 1)
 
     async def test_durable_running_fence_without_receipt_recovers_uncertain(
         self,

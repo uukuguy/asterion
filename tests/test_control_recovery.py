@@ -110,7 +110,7 @@ def _decision(
 
 def _terminal_command(status: str, receipt_ref: str | None) -> ControlCommand:
     return ControlCommand(
-        command_id=f"terminal:{status}",
+        command_id="terminal:action-1",
         session_id="session-1",
         authority_revision=1,
         type="action.resolve",
@@ -121,6 +121,21 @@ def _terminal_command(status: str, receipt_ref: str | None) -> ControlCommand:
             if status == "succeeded"
             else "transport-uncertain",
             "receipt_ref": receipt_ref,
+        },
+    )
+
+
+def _admission_command() -> ControlCommand:
+    return ControlCommand(
+        command_id="admission:action-1",
+        session_id="session-1",
+        authority_revision=1,
+        type="action.resolve",
+        payload={
+            "action_id": "action-1",
+            "resolution": "admitted",
+            "reason_code": "authorized",
+            "receipt_ref": None,
         },
     )
 
@@ -166,6 +181,7 @@ def _action_prefix() -> tuple[MemoryCanonicalJournal, ControlEvent]:
 class TestControlRecovery(unittest.TestCase):
     def test_reopen_reduces_receipt_usage_and_exact_cursor(self) -> None:
         journal, _ = _action_prefix()
+        journal.accept_command(_admission_command(), expected_position=journal.position)
         journal.append(
             journal.position,
             JournalRecord.action_receipted(
@@ -200,10 +216,38 @@ class TestControlRecovery(unittest.TestCase):
         self.assertEqual(recovered.reservations, ("action-1",))
         self.assertEqual(recovered.authority.usage, BudgetUsage.zero())
 
-    def test_terminal_without_durable_receipt_remains_uncertain(self) -> None:
+    def test_terminal_without_admission_or_durable_receipt_is_rejected(self) -> None:
         journal, _ = _action_prefix()
         journal.accept_command(
             _terminal_command("succeeded", "receipt-missing"),
+            expected_position=journal.position,
+        )
+
+        with self.assertRaises(JournalConflictError):
+            recover_control_host_state(journal.replay(JournalCursor(0)), _envelope())
+
+    def test_terminal_without_admission_or_running_is_rejected(self) -> None:
+        journal, _ = _action_prefix()
+        journal.accept_command(
+            _terminal_command("uncertain", None), expected_position=journal.position
+        )
+
+        with self.assertRaises(JournalConflictError):
+            recover_control_host_state(journal.replay(JournalCursor(0)), _envelope())
+
+    def test_canonical_cancelled_before_start_terminal_recovers(self) -> None:
+        journal, _ = _action_prefix()
+        journal.accept_command(_admission_command(), expected_position=journal.position)
+        journal.accept_command(
+            replace(
+                _terminal_command("cancelled", None),
+                payload={
+                    "action_id": "action-1",
+                    "resolution": "cancelled",
+                    "reason_code": "cancelled-before-start",
+                    "receipt_ref": None,
+                },
+            ),
             expected_position=journal.position,
         )
 
@@ -211,22 +255,73 @@ class TestControlRecovery(unittest.TestCase):
             journal.replay(JournalCursor(0)), _envelope()
         )
 
-        self.assertEqual(recovered.state.actions["action-1"].status, "uncertain")
-        self.assertEqual(recovered.reservations, ("action-1",))
-        self.assertEqual(recovered.authority.usage, BudgetUsage.zero())
-
-    def test_explicit_uncertain_terminal_never_becomes_success(self) -> None:
-        journal, _ = _action_prefix()
-        journal.accept_command(
-            _terminal_command("uncertain", None), expected_position=journal.position
+        self.assertEqual(recovered.state.actions["action-1"].status, "cancelled")
+        self.assertEqual(
+            recovered.terminal_commands["action-1"].command_id,
+            "terminal:action-1",
         )
 
-        recovered = recover_control_host_state(
-            journal.replay(JournalCursor(0)), _envelope()
-        )
+    def test_recovery_rejects_noncanonical_action_resolution_prefixes(self) -> None:
+        cases: list[tuple[str, MemoryCanonicalJournal]] = []
 
-        self.assertEqual(recovered.state.actions["action-1"].status, "uncertain")
-        self.assertEqual(recovered.reservations, ("action-1",))
+        noncanonical_admission, _ = _action_prefix()
+        admission = _admission_command()
+        noncanonical_admission.accept_command(
+            replace(admission, command_id="resolve-admission"),
+            expected_position=noncanonical_admission.position,
+        )
+        cases.append(("noncanonical-admission-id", noncanonical_admission))
+
+        terminal_before_running, _ = _action_prefix()
+        terminal_before_running.accept_command(
+            admission, expected_position=terminal_before_running.position
+        )
+        terminal_before_running.accept_command(
+            _terminal_command("uncertain", None),
+            expected_position=terminal_before_running.position,
+        )
+        cases.append(("terminal-before-running", terminal_before_running))
+
+        succeeded_without_receipt, proposal = _action_prefix()
+        succeeded_without_receipt.accept_command(
+            admission, expected_position=succeeded_without_receipt.position
+        )
+        succeeded_without_receipt.append(
+            succeeded_without_receipt.position,
+            JournalRecord.action_running(
+                action_id="action-1",
+                proposal_digest=action_proposal_digest(proposal),
+            ),
+        )
+        succeeded_without_receipt.accept_command(
+            _terminal_command("succeeded", "receipt-missing"),
+            expected_position=succeeded_without_receipt.position,
+        )
+        cases.append(("succeeded-without-receipt", succeeded_without_receipt))
+
+        noncanonical_terminal, proposal = _action_prefix()
+        noncanonical_terminal.accept_command(
+            admission, expected_position=noncanonical_terminal.position
+        )
+        noncanonical_terminal.append(
+            noncanonical_terminal.position,
+            JournalRecord.action_running(
+                action_id="action-1",
+                proposal_digest=action_proposal_digest(proposal),
+            ),
+        )
+        terminal = _terminal_command("uncertain", None)
+        noncanonical_terminal.accept_command(
+            replace(terminal, command_id="resolve-terminal"),
+            expected_position=noncanonical_terminal.position,
+        )
+        cases.append(("noncanonical-terminal-id", noncanonical_terminal))
+
+        for label, journal in cases:
+            with self.subTest(label=label), self.assertRaises(JournalConflictError):
+                recover_control_host_state(
+                    journal.replay(JournalCursor(0)), _envelope()
+                )
 
     def test_checkpoint_prefix_advances_state_once_and_is_recoverable(self) -> None:
         journal = _journal()
