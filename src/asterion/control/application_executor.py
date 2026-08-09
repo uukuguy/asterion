@@ -38,15 +38,23 @@ from asterion.protocol_ordering import is_sorted_unique_scalar_strings
 from asterion.runner.application import ApplicationRunResult
 from asterion.runner.composed import run_composed_application
 from asterion.runtime.factory import (
+    RuntimeFactoryBinding,
     RuntimeFactoryContext,
     RuntimeFactoryError,
     RuntimeFactoryRegistry,
 )
 from asterion.runtime.host import CancellationSignal
 
+ApplicationIdentity = tuple[str, str, str, str]
+
 
 class ApplicationActionExecutor:
-    """ActionExecutor for one preflight-resolved application portfolio."""
+    """ActionExecutor for one preflight-resolved application portfolio.
+
+    Runtime bindings are snapshotted at construction. This preserves the
+    already-selected factory boundary: execution can invoke an exact factory,
+    but it cannot reselect or discover a different runtime binding.
+    """
 
     def __init__(
         self,
@@ -54,6 +62,7 @@ class ApplicationActionExecutor:
         plan: AgentSystemPlan,
         providers: Iterable[InstalledApplicationProvider],
         runtime_factories: RuntimeFactoryRegistry,
+        runtime_options: Mapping[ApplicationIdentity, Mapping[str, str]],
         content: PrivateContentResolver,
         results: PrivateResultStore,
         host_services: Mapping[str, object],
@@ -69,7 +78,10 @@ class ApplicationActionExecutor:
             raise ValueError("application action executor is invalid")
         self._plan = plan
         self._providers = _index_providers(providers)
-        self._runtime_factories = runtime_factories
+        self._runtime_bindings = _snapshot_runtime_bindings(
+            plan, runtime_factories
+        )
+        self._runtime_options = _freeze_runtime_options(plan, runtime_options)
         self._content = content
         self._results = results
         self._host_services = MappingProxyType(dict(host_services))
@@ -79,7 +91,7 @@ class ApplicationActionExecutor:
         self, proposal: ControlEvent, signal: CancellationSignal
     ) -> ActionExecutionReceipt:
         _raise_if_cancelled(proposal, signal)
-        target, entry = self._resolve_entry(proposal)
+        target, identity, entry = self._resolve_entry(proposal)
         if entry is None:
             raise _failed(proposal, "target-mismatch")
         if not _provider_contains_entry(self._providers, entry):
@@ -89,16 +101,7 @@ class ApplicationActionExecutor:
         if missing_service:
             raise _failed(proposal, "host-service-unavailable")
 
-        try:
-            runtime_binding = self._runtime_factories.select(entry.runtime_id)
-        except RuntimeFactoryError:
-            raise _failed(proposal, "runtime-unavailable") from None
-
-        if any(
-            capability not in runtime_binding.capabilities
-            for capability in entry.assembly.plan.runtime_capabilities
-        ):
-            raise _failed(proposal, "runtime-unavailable")
+        runtime_binding = self._runtime_bindings[identity]
         _raise_if_cancelled(proposal, signal)
 
         input_text = _resolve_input(self._content, proposal)
@@ -113,16 +116,23 @@ class ApplicationActionExecutor:
                     application_version=entry.version,
                     runtime_id=entry.runtime_id,
                     assembly_path=entry.assembly.path,
-                    options={},
+                    options=self._runtime_options[identity],
                     host_services=self._host_services,
                     pathlight=self._pathlight or NOOP_PATHLIGHT_RECORDER,
                 )
             )
         except Exception:
-            raise _failed(proposal, "runtime-unavailable") from None
+            raise ActionExecutionFailure(
+                "uncertain", "runtime-progress-unknown", None
+            ) from None
 
-        if runtime.manifest.runtime_id != entry.runtime_id:
-            raise _failed(proposal, "runtime-unavailable")
+        try:
+            if runtime.manifest.runtime_id != entry.runtime_id:
+                raise ValueError
+        except Exception:
+            raise ActionExecutionFailure(
+                "uncertain", "runtime-progress-unknown", None
+            ) from None
 
         try:
             result = await run_composed_application(
@@ -172,7 +182,7 @@ class ApplicationActionExecutor:
 
     def _resolve_entry(
         self, proposal: ControlEvent
-    ) -> tuple[Mapping[str, object], ApplicationPortfolioEntry | None]:
+    ) -> tuple[Mapping[str, object], ApplicationIdentity, ApplicationPortfolioEntry | None]:
         try:
             if not isinstance(proposal, ControlEvent):
                 raise TypeError
@@ -192,7 +202,7 @@ class ApplicationActionExecutor:
             )
         except (KeyError, TypeError, ValueError):
             raise _failed(proposal, "invalid-proposal") from None
-        return target, self._plan.portfolio_entry(*identity)
+        return target, identity, self._plan.portfolio_entry(*identity)
 
 
 def _index_providers(
@@ -228,6 +238,69 @@ def _provider_contains_entry(
                 for assembly in application.assemblies
             )
     return False
+
+
+def _snapshot_runtime_bindings(
+    plan: AgentSystemPlan,
+    runtime_factories: RuntimeFactoryRegistry,
+) -> Mapping[ApplicationIdentity, RuntimeFactoryBinding]:
+    values: dict[ApplicationIdentity, RuntimeFactoryBinding] = {}
+    for identity, entry in plan.portfolio_by_identity.items():
+        try:
+            binding = runtime_factories.select(entry.runtime_id)
+        except RuntimeFactoryError:
+            raise ValueError("application runtime factories are invalid") from None
+        if (
+            binding.runtime_id != entry.runtime_id
+            or any(
+                capability not in binding.capabilities
+                for capability in entry.assembly.plan.runtime_capabilities
+            )
+        ):
+            raise ValueError("application runtime factories are invalid")
+        values[identity] = binding
+    return MappingProxyType(values)
+
+
+def _freeze_runtime_options(
+    plan: AgentSystemPlan,
+    runtime_options: Mapping[ApplicationIdentity, Mapping[str, str]],
+) -> Mapping[ApplicationIdentity, Mapping[str, str]]:
+    if not isinstance(runtime_options, Mapping):
+        raise ValueError("application runtime options are invalid")
+    expected = set(plan.portfolio_by_identity)
+    try:
+        actual = set(runtime_options)
+    except Exception:
+        raise ValueError("application runtime options are invalid") from None
+    if actual != expected:
+        raise ValueError("application runtime options are invalid")
+
+    values: dict[ApplicationIdentity, Mapping[str, str]] = {}
+    for identity in expected:
+        if not _is_application_identity(identity):
+            raise ValueError("application runtime options are invalid")
+        try:
+            raw_options = runtime_options[identity]
+        except Exception:
+            raise ValueError("application runtime options are invalid") from None
+        if not isinstance(raw_options, Mapping):
+            raise ValueError("application runtime options are invalid")
+        frozen_options: dict[str, str] = {}
+        for key, value in raw_options.items():
+            if type(key) is not str or type(value) is not str:
+                raise ValueError("application runtime options are invalid")
+            frozen_options[key] = value
+        values[identity] = MappingProxyType(frozen_options)
+    return MappingProxyType(values)
+
+
+def _is_application_identity(value: object) -> bool:
+    return (
+        type(value) is tuple
+        and len(value) == 4
+        and all(type(item) is str for item in value)
+    )
 
 
 def _budget(proposal: ControlEvent) -> BudgetRequest:

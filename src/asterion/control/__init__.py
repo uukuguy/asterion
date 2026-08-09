@@ -15,7 +15,10 @@ from asterion.control.execution import (
     ActionExecutionFailure,
     ActionExecutionReceipt,
 )
-from asterion.control.application_executor import ApplicationActionExecutor
+from asterion.control.application_executor import (
+    ApplicationActionExecutor,
+    ApplicationIdentity,
+)
 from asterion.control.authority import (
     ActionReceipt,
     AdmissionDecision,
@@ -113,6 +116,7 @@ __all__ = [
     "AgentSystemError",
     "AgentSystemPlan",
     "ApplicationActionExecutor",
+    "ApplicationIdentity",
     "ApplicationPortfolioEntry",
     "AuthorityEnvelope",
     "AuthorityError",

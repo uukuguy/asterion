@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import sys
 import tempfile
 import unittest
 from collections.abc import AsyncIterator, Mapping
@@ -32,6 +34,7 @@ from asterion.control.private_store import (
 )
 from asterion.control.system import ApplicationPortfolioEntry, AgentSystemPlan
 from asterion.control.factory import ControlPlaneFactory, ControlPlaneFactoryBinding
+from asterion.runtime.defaults import default_runtime_factory_registry
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 
@@ -241,7 +244,18 @@ def _proposal(**payload_changes: object) -> ControlEvent:
     )
 
 
-def _assembly(root: Path, implementation: UsageImplementation):
+def _assembly(
+    root: Path,
+    implementation: UsageImplementation,
+    *,
+    runtime_id: str = "fake.runtime",
+    runtime_manifest: Mapping[str, object] | None = None,
+):
+    runtime_manifest = runtime_manifest or {
+        "protocol": "asterion.agent-runtime/v1",
+        "runtime_id": runtime_id,
+        "capabilities": [],
+    }
     manifest = {
         "protocol": "asterion.capability/v1",
         "capability_id": TRACE_CAPABILITY.capability_id,
@@ -269,7 +283,7 @@ def _assembly(root: Path, implementation: UsageImplementation):
             "protocol": "asterion.application-assembly/v1",
             "application_id": "alpha",
             "version": "1.0.0",
-            "runtime_id": "fake.runtime",
+            "runtime_id": runtime_id,
             "capability_packages": [{"package_id": "trace", "version": "1.0.0"}],
             "capabilities": [
                 {
@@ -283,7 +297,7 @@ def _assembly(root: Path, implementation: UsageImplementation):
             "host_artifacts": [],
         },
         catalog=catalog,
-        runtime_manifest=RecordingRuntime.manifest.to_mapping(),
+        runtime_manifest=runtime_manifest,
     )
     assembly_path = root / "alpha.json"
     assembly_path.write_text("{}")
@@ -300,7 +314,7 @@ def _assembly(root: Path, implementation: UsageImplementation):
         benchmark_bindings=(),
     )
     installed_assembly = InstalledAssembly(
-        runtime_id="fake.runtime",
+        runtime_id=runtime_id,
         path=assembly_path,
         plan=plan,
     )
@@ -309,7 +323,7 @@ def _assembly(root: Path, implementation: UsageImplementation):
         version="1.0.0",
         assembly_paths=(assembly_path,),
         capability_packages=(package.package_ref,),
-        runtime_ids=("fake.runtime",),
+        runtime_ids=(runtime_id,),
         installed_packages=(package,),
         assemblies=(installed_assembly,),
     )
@@ -368,11 +382,19 @@ def _executor(
     result_store: RecordingResultStore | None = None,
     host_services: Mapping[str, object] | None = None,
     runtime_factories: RuntimeFactoryRegistry | None = None,
+    runtime_options: Mapping[tuple[str, str, str, str], Mapping[str, str]] | None = None,
     provider_override: InstalledApplicationProvider | None = None,
+    runtime_id: str = "fake.runtime",
+    runtime_manifest: Mapping[str, object] | None = None,
 ):
     audit = [] if audit is None else audit
     implementation = implementation or UsageImplementation(audit)
-    provider, application, assembly = _assembly(root, implementation)
+    provider, application, assembly = _assembly(
+        root,
+        implementation,
+        runtime_id=runtime_id,
+        runtime_manifest=runtime_manifest,
+    )
     plan = AgentSystemPlan(
         system_id="research.system",
         version="1.0.0",
@@ -410,6 +432,16 @@ def _executor(
         plan=plan,
         providers=(provider_override or provider,),
         runtime_factories=factories,
+        runtime_options=runtime_options
+        if runtime_options is not None
+        else {
+            (
+                provider.provider_id,
+                application.application_id,
+                application.version,
+                assembly.runtime_id,
+            ): {}
+        },
         content=resolver,
         results=results,
         host_services=host_services
@@ -455,6 +487,157 @@ class TestApplicationActionExecutor(unittest.IsolatedAsyncioTestCase):
             publication = results.publication
             assert publication is not None
             self.assertIn("control-action-", str(publication["run_id"]))
+
+    async def test_private_runtime_options_are_forwarded_by_exact_identity(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            audit: list[str] = []
+            contexts: list[object] = []
+
+            def runtime_factory(context: object) -> RecordingRuntime:
+                audit.append("runtime.factory")
+                contexts.append(context)
+                self.assertNotIn(SENTINEL, repr(context))
+                return RecordingRuntime(audit)
+
+            factories = RuntimeFactoryRegistry(
+                (
+                    RuntimeFactoryBinding(
+                        runtime_id="fake.runtime",
+                        capabilities=(),
+                        factory=runtime_factory,
+                    ),
+                )
+            )
+            executor, _, _, _ = _executor(
+                Path(directory),
+                audit=audit,
+                runtime_factories=factories,
+                runtime_options={
+                    (
+                        "example.provider",
+                        "alpha",
+                        "1.0.0",
+                        "fake.runtime",
+                    ): {
+                        "private-token": SENTINEL,
+                        "mode": "operator-owned",
+                    }
+                },
+            )
+
+            receipt = await executor.execute(_proposal(), MutableSignal())
+
+            self.assertEqual(receipt.receipt_ref, "receipt-action-1")
+            self.assertEqual(len(contexts), 1)
+            context = contexts[0]
+            options = cast(Mapping[str, str], getattr(context, "options"))
+            self.assertEqual(
+                options["private-token"],
+                SENTINEL,
+            )
+            self.assertEqual(options["mode"], "operator-owned")
+            self.assertNotIn(SENTINEL, repr(receipt))
+
+    def test_runtime_options_are_required_exact_private_plan_configuration(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            unknown_identity = ("example.provider", "alpha", "1.0.0", "other.runtime")
+            cases: tuple[object, ...] = (
+                {},
+                {
+                    ("example.provider", "alpha", "1.0.0", "fake.runtime"): {},
+                    unknown_identity: {},
+                },
+                {
+                    ("example.provider", "alpha", "1.0.0", "fake.runtime"): {
+                        "token": cast(str, object())
+                    },
+                },
+                {
+                    ("example.provider", "alpha", "1.0.0", "fake.runtime"): {
+                        cast(str, object()): "value"
+                    },
+                },
+                {
+                    ("example.provider", "alpha", "1.0.0"): {},
+                },
+            )
+            for runtime_options in cases:
+                with self.subTest(runtime_options=repr(runtime_options)):
+                    with self.assertRaises(ValueError) as raised:
+                        _executor(
+                            root,
+                            audit=[],
+                            runtime_options=cast(
+                                Mapping[tuple[str, str, str, str], Mapping[str, str]],
+                                runtime_options,
+                            ),
+                        )
+                    self.assertNotIn(SENTINEL, str(raised.exception))
+
+    async def test_default_pi_factory_receives_private_options_without_provider_contact(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            cwd = root / "cwd"
+            cwd.mkdir()
+            audit: list[str] = []
+            pi_manifest = default_runtime_factory_registry().select(
+                "pi.reference"
+            ).manifest.to_mapping()
+            executor, _, _, _ = _executor(
+                root,
+                audit=audit,
+                runtime_factories=default_runtime_factory_registry(),
+                runtime_options={
+                    (
+                        "example.provider",
+                        "alpha",
+                        "1.0.0",
+                        "pi.reference",
+                    ): {
+                        "command": json.dumps(
+                            [str(Path(sys.executable).resolve()), "-u", "-c", "pass"],
+                            separators=(",", ":"),
+                        ),
+                        "cwd": str(cwd),
+                        "environment": json.dumps(
+                            {"SENTINEL_ENV": SENTINEL},
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
+                        "evidence_root": str(root / "pi-evidence"),
+                        "max_turns": "1",
+                        "tools": "read,grep",
+                    }
+                },
+                runtime_id="pi.reference",
+                runtime_manifest=pi_manifest,
+            )
+
+            receipt = await executor.execute(
+                _proposal(
+                    target={
+                        "kind": "application",
+                        "provider_id": "example.provider",
+                        "application_id": "alpha",
+                        "version": "1.0.0",
+                        "runtime_id": "pi.reference",
+                    }
+                ),
+                MutableSignal(),
+            )
+
+            self.assertEqual(receipt.receipt_ref, "receipt-action-1")
+            self.assertEqual(
+                audit, ["content.resolve", "implementation.execute", "result.publish"]
+            )
+            self.assertNotIn(SENTINEL, repr(receipt))
 
     async def test_expected_artifacts_are_validated_only_by_control_protocol_shape(
         self,
@@ -534,33 +717,59 @@ class TestApplicationActionExecutor(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(audit, ["content.resolve"])
                     self.assertNotIn(SENTINEL, str(raised.exception))
 
-    async def test_rejects_missing_runtime_and_host_service_before_runtime_contact(
+    async def test_rejects_missing_runtime_binding_at_construction(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            missing_runtime = RuntimeFactoryRegistry(())
             cases = (
-                {"runtime_factories": missing_runtime, "reason": "runtime-unavailable"},
-                {"host_services": {}, "reason": "host-service-unavailable"},
+                (
+                    "missing-binding",
+                    RuntimeFactoryRegistry(()),
+                    None,
+                ),
+                (
+                    "missing-capability",
+                    RuntimeFactoryRegistry(
+                        (
+                            RuntimeFactoryBinding(
+                                runtime_id="fake.runtime",
+                                capabilities=(),
+                                factory=lambda context: RecordingRuntime([]),
+                            ),
+                        )
+                    ),
+                    {
+                        "protocol": "asterion.agent-runtime/v1",
+                        "runtime_id": "fake.runtime",
+                        "capabilities": ["filesystem.read"],
+                    },
+                ),
             )
-            for case in cases:
-                with self.subTest(reason=case["reason"]):
-                    audit: list[str] = []
-                    executor, _, _, _ = _executor(
-                        Path(directory),
-                        audit=audit,
-                        runtime_factories=cast(
-                            RuntimeFactoryRegistry | None, case.get("runtime_factories")
-                        ),
-                        host_services=cast(
-                            Mapping[str, object] | None, case.get("host_services")
-                        ),
-                    )
-                    with self.assertRaises(ActionExecutionFailure) as raised:
-                        await executor.execute(_proposal(), MutableSignal())
-                    self.assertEqual(raised.exception.status, "failed")
-                    self.assertEqual(raised.exception.reason_code, case["reason"])
-                    self.assertEqual(audit, [])
+            for name, factories, runtime_manifest in cases:
+                with self.subTest(name=name):
+                    with self.assertRaises(ValueError):
+                        _executor(
+                            Path(directory),
+                            audit=[],
+                            runtime_factories=factories,
+                            runtime_manifest=runtime_manifest,
+                        )
+
+    async def test_rejects_missing_host_service_before_runtime_contact(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            audit: list[str] = []
+            executor, _, _, _ = _executor(
+                Path(directory),
+                audit=audit,
+                host_services={},
+            )
+            with self.assertRaises(ActionExecutionFailure) as raised:
+                await executor.execute(_proposal(), MutableSignal())
+            self.assertEqual(raised.exception.status, "failed")
+            self.assertEqual(raised.exception.reason_code, "host-service-unavailable")
+            self.assertEqual(audit, [])
 
     async def test_cancellation_before_and_during_execution_have_closed_semantics(
         self,
@@ -597,7 +806,7 @@ class TestApplicationActionExecutor(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(task_cancelled.exception.status, "uncertain")
             self.assertIsNone(task_cancelled.exception.receipt_ref)
 
-    async def test_runtime_factory_failure_before_effect_is_failed(self) -> None:
+    async def test_runtime_factory_call_failure_has_unknown_progress(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             audit: list[str] = []
 
@@ -620,8 +829,9 @@ class TestApplicationActionExecutor(unittest.IsolatedAsyncioTestCase):
             )
             with self.assertRaises(ActionExecutionFailure) as raised:
                 await executor.execute(_proposal(), MutableSignal())
-            self.assertEqual(raised.exception.status, "failed")
-            self.assertEqual(raised.exception.reason_code, "runtime-unavailable")
+            self.assertEqual(raised.exception.status, "uncertain")
+            self.assertEqual(raised.exception.reason_code, "runtime-progress-unknown")
+            self.assertIsNone(raised.exception.receipt_ref)
             self.assertEqual(audit, ["content.resolve", "runtime.factory"])
             self.assertNotIn(SENTINEL, repr(raised.exception))
 
