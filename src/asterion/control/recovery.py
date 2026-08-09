@@ -48,41 +48,60 @@ class RecoveredControlState:
 
 
 def recover_control_host_state(
-    entries: Sequence[JournalEntry], envelope: AuthorityEnvelope
+    entries: Sequence[JournalEntry],
+    envelope: AuthorityEnvelope,
+    *,
+    expected_session_id: str | None = None,
+    expected_generation: int | None = None,
 ) -> RecoveredControlState:
     """Validate and replay one complete journal prefix without mutating inputs."""
 
     try:
         values = tuple(entries)
-        if not isinstance(envelope, AuthorityEnvelope) or len(values) < 2:
+        if not isinstance(envelope, AuthorityEnvelope) or not values:
+            raise JournalConflictError("control journal recovery failed")
+        if (expected_session_id is None) != (expected_generation is None):
             raise JournalConflictError("control journal recovery failed")
         _validate_entries(values)
         system = values[0].record
-        authority_binding = values[1].record
-        if system.kind != "system.bound" or authority_binding.kind != "authority.bound":
+        if system.kind != "system.bound":
             raise JournalConflictError("control journal recovery failed")
-        authority_id = authority_binding.payload["authority_id"]
-        journal_revision = authority_binding.payload["authority_revision"]
-        if (
-            authority_id != envelope.authority_id
-            or isinstance(journal_revision, bool)
-            or not isinstance(journal_revision, int)
-            or journal_revision > envelope.revision
-        ):
-            raise JournalConflictError("control journal recovery failed")
+        system_id = str(system.payload["system_id"])
+        system_version = str(system.payload["system_version"])
+        authority_id = envelope.authority_id
+        journal_revision = envelope.revision
+        start = 1
+        if len(values) >= 2:
+            authority_binding = values[1].record
+            if authority_binding.kind != "authority.bound":
+                raise JournalConflictError("control journal recovery failed")
+            authority_id = str(authority_binding.payload["authority_id"])
+            journal_revision = _integer(authority_binding.payload["authority_revision"])
+            if (
+                authority_id != envelope.authority_id
+                or journal_revision > envelope.revision
+            ):
+                raise JournalConflictError("control journal recovery failed")
+            start = 2
 
-        ledger = AuthorityLedger(envelope)
         state: ControlState | None = None
-        session_id: str | None = None
+        session_id = expected_session_id
         proposals: dict[str, ControlEvent] = {}
         accepted_events: dict[str, ControlEvent] = {}
         receipts: dict[str, ActionReceipt] = {}
+        authority_operations: list[AdmissionDecision | ActionReceipt] = []
+        decisions: dict[str, AdmissionDecision] = {}
         terminal_commands: dict[str, ControlCommand] = {}
 
-        for entry in values[2:]:
+        for entry in values[start:]:
             record = entry.record
             if record.kind == "event.accepted":
                 event = ControlEvent.from_mapping(_mapping(record.payload["event"]))
+                if event.type == "session.created" and (
+                    event.payload["authority_id"] != authority_id
+                    or event.payload["authority_revision"] != journal_revision
+                ):
+                    raise JournalConflictError("control journal recovery failed")
                 state, session_id = _reduce_event(
                     state, session_id, event, accepted_events
                 )
@@ -109,11 +128,19 @@ def recover_control_host_state(
                     _mapping(record.payload["command"])
                 )
                 session_id = _bind_session(session_id, command.session_id)
+                if command.authority_revision != journal_revision:
+                    raise JournalConflictError("control journal recovery failed")
+                if command.type == "session.create" and (
+                    command.payload["system_id"] != system_id
+                    or command.payload["system_version"] != system_version
+                ):
+                    raise JournalConflictError("control journal recovery failed")
                 if command.type == "action.resolve":
                     state = _apply_resolution_command(
                         state,
                         command,
                         receipts=receipts,
+                        decisions=decisions,
                         terminal_commands=terminal_commands,
                     )
                 continue
@@ -133,9 +160,7 @@ def recover_control_host_state(
                 decision = AdmissionDecision(
                     action_id=action_id,
                     authority_id=str(authority_id),
-                    authority_revision=_integer(
-                        record.payload["authority_revision"]
-                    ),
+                    authority_revision=_integer(record.payload["authority_revision"]),
                     proposal_digest=str(record.payload["proposal_digest"]),
                     status=status,
                     reason=str(record.payload["reason"]),
@@ -143,8 +168,11 @@ def recover_control_host_state(
                 )
                 if decision.authority_revision != journal_revision:
                     raise JournalConflictError("control journal recovery failed")
+                if action_id in decisions:
+                    raise JournalConflictError("control journal recovery failed")
+                decisions[action_id] = decision
                 if decision.status == "admitted":
-                    ledger.restore_reservation(decision)
+                    authority_operations.append(decision)
                 state = apply_action_admission(state, decision)
                 continue
             if record.kind == "action.receipted":
@@ -160,8 +188,8 @@ def recover_control_host_state(
                 existing = receipts.get(action_id)
                 if existing is not None:
                     raise JournalConflictError("control journal recovery failed")
-                ledger.settle(action_id, receipt)
                 receipts[action_id] = receipt
+                authority_operations.append(receipt)
                 action = state.actions.get(action_id)
                 if action is None:
                     raise JournalConflictError("control journal recovery failed")
@@ -181,7 +209,12 @@ def recover_control_host_state(
                         "succeeded",
                         receipt_ref=receipt.receipt_ref,
                     )
-                elif action.status not in {"running", "succeeded", "failed", "cancelled"}:
+                elif action.status not in {
+                    "running",
+                    "succeeded",
+                    "failed",
+                    "cancelled",
+                }:
                     raise JournalConflictError("control journal recovery failed")
                 continue
             if record.kind == "authority.revised":
@@ -197,8 +230,20 @@ def recover_control_host_state(
                 continue
             raise JournalConflictError("control journal recovery failed")
 
-        if state is None or journal_revision != envelope.revision:
+        if journal_revision != envelope.revision:
             raise JournalConflictError("control journal recovery failed")
+        if state is None:
+            if expected_session_id is None or expected_generation is None:
+                raise JournalConflictError("control journal recovery failed")
+            state = ControlState.empty(
+                expected_session_id, generation=expected_generation
+            )
+        if expected_session_id is not None and (
+            state.session_id != expected_session_id
+            or state.generation != expected_generation
+        ):
+            raise JournalConflictError("control journal recovery failed")
+        ledger = AuthorityLedger._from_recovery(envelope, authority_operations)
         return RecoveredControlState(
             state=state,
             authority=ledger,
@@ -206,7 +251,7 @@ def recover_control_host_state(
                 generation=state.generation,
                 sequence=state.next_sequence - 1,
             ),
-            journal_position=values[-1].position,
+            journal_position=len(values),
         )
     except JournalConflictError:
         raise
@@ -265,12 +310,22 @@ def _apply_resolution_command(
     command: ControlCommand,
     *,
     receipts: Mapping[str, ActionReceipt],
+    decisions: Mapping[str, AdmissionDecision],
     terminal_commands: dict[str, ControlCommand],
 ) -> ControlState:
     if state is None:
         raise JournalConflictError("control journal recovery failed")
     resolution = str(command.payload["resolution"])
     if resolution in {"admitted", "rejected"}:
+        action_id = str(command.payload["action_id"])
+        decision = decisions.get(action_id)
+        if (
+            decision is None
+            or resolution != decision.status
+            or command.payload["reason_code"] != decision.reason
+            or command.payload["receipt_ref"] is not None
+        ):
+            raise JournalConflictError("control journal recovery failed")
         return state
     action_id = str(command.payload["action_id"])
     existing = terminal_commands.get(action_id)

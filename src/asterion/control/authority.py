@@ -134,19 +134,15 @@ class AuthorityEnvelope:
         ):
             raise AuthorityError("authority portfolio is invalid")
         operations = tuple(self.allowed_operations)
-        if (
-            any(operation not in ACTION_KINDS for operation in operations)
-            or not is_sorted_unique_scalar_strings(operations)
-        ):
+        if any(
+            operation not in ACTION_KINDS for operation in operations
+        ) or not is_sorted_unique_scalar_strings(list(operations)):
             raise AuthorityError("authority operations are invalid")
         grants = tuple(self.host_service_grants)
-        if (
-            any(
-                not isinstance(grant, str) or IDENTIFIER.fullmatch(grant) is None
-                for grant in grants
-            )
-            or not is_sorted_unique_scalar_strings(grants)
-        ):
+        if any(
+            not isinstance(grant, str) or IDENTIFIER.fullmatch(grant) is None
+            for grant in grants
+        ) or not is_sorted_unique_scalar_strings(list(grants)):
             raise AuthorityError("authority host-service grants are invalid")
         _require_positive_integer(self.expires_at_ms, "authority expiry")
         _require_positive_integer(
@@ -184,8 +180,12 @@ class AdmissionDecision:
             or self.status not in {"admitted", "rejected"}
             or IDENTIFIER.fullmatch(self.reason) is None
             or len(self.proposal_digest) != 64
-            or any(character not in "0123456789abcdef" for character in self.proposal_digest)
-            or (self.status == "admitted") != isinstance(self.reservation, BudgetRequest)
+            or any(
+                character not in "0123456789abcdef"
+                for character in self.proposal_digest
+            )
+            or (self.status == "admitted")
+            != isinstance(self.reservation, BudgetRequest)
         ):
             raise AuthorityError("admission decision is invalid")
         _require_positive_integer(self.authority_revision, "admission revision")
@@ -216,6 +216,7 @@ class AuthorityLedger:
         self._usage = BudgetUsage.zero()
         self._reservations: dict[str, AdmissionDecision] = {}
         self._receipts: dict[str, ActionReceipt] = {}
+        self._frozen = False
 
     @property
     def envelope(self) -> AuthorityEnvelope:
@@ -246,6 +247,50 @@ class AuthorityLedger:
             and self._receipts == other._receipts
         )
 
+    @classmethod
+    def _from_recovery(
+        cls,
+        envelope: AuthorityEnvelope,
+        operations: Sequence[AdmissionDecision | ActionReceipt],
+    ) -> AuthorityLedger:
+        """Build a frozen ledger from an already validated ordered journal."""
+
+        ledger = cls(envelope)
+        for operation in operations:
+            if isinstance(operation, ActionReceipt):
+                ledger.settle(operation.action_id, operation)
+                continue
+            decision = operation
+            if (
+                not isinstance(decision, AdmissionDecision)
+                or decision.status != "admitted"
+                or decision.authority_id != envelope.authority_id
+                or decision.authority_revision > envelope.revision
+                or decision.reservation is None
+                or decision.action_id in ledger._reservations
+                or decision.action_id in ledger._receipts
+            ):
+                raise AuthorityError("recovered admission reservation is invalid")
+            effective = _add_usage(
+                ledger._usage,
+                ledger._reserved_usage(),
+                decision.reservation.as_usage(),
+            )
+            if not _fits(effective, envelope.budget_limit):
+                raise AuthorityError("recovered admission budget is unavailable")
+            ledger._reservations[decision.action_id] = decision
+        ledger._frozen = True
+        return ledger
+
+    def _mutable_copy(self) -> AuthorityLedger:
+        """Return an owned mutable copy of this ledger's validated state."""
+
+        ledger = AuthorityLedger(self._envelope)
+        ledger._usage = self._usage
+        ledger._reservations = dict(self._reservations)
+        ledger._receipts = dict(self._receipts)
+        return ledger
+
     def evaluate(
         self,
         proposal: ControlEvent,
@@ -261,13 +306,10 @@ class AuthorityLedger:
         _require_nonnegative_integer(recursion_depth, "proposal recursion depth")
         _require_nonnegative_integer(active_children, "proposal active children")
         services = tuple(requested_host_services)
-        if (
-            any(
-                not isinstance(service, str) or IDENTIFIER.fullmatch(service) is None
-                for service in services
-            )
-            or not is_sorted_unique_scalar_strings(services)
-        ):
+        if any(
+            not isinstance(service, str) or IDENTIFIER.fullmatch(service) is None
+            for service in services
+        ) or not is_sorted_unique_scalar_strings(list(services)):
             raise AuthorityError("proposal host services are invalid")
         payload = proposal.payload
         action_id = str(payload["action_id"])
@@ -316,6 +358,7 @@ class AuthorityLedger:
         )
 
     def reserve(self, decision: AdmissionDecision) -> None:
+        self._ensure_mutable()
         if not isinstance(decision, AdmissionDecision) or decision.status != "admitted":
             raise AuthorityError("admission reservation is invalid")
         existing = self._reservations.get(decision.action_id)
@@ -340,34 +383,8 @@ class AuthorityLedger:
             raise AuthorityError("admission budget is no longer available")
         self._reservations[decision.action_id] = decision
 
-    def restore_reservation(self, decision: AdmissionDecision) -> None:
-        """Restore one validated historical reservation during pure replay."""
-
-        if not isinstance(decision, AdmissionDecision) or decision.status != "admitted":
-            raise AuthorityError("recovered admission reservation is invalid")
-        existing = self._reservations.get(decision.action_id)
-        if existing is not None:
-            if existing != decision:
-                raise AuthorityError("recovered admission reservation conflicts")
-            return
-        if decision.action_id in self._receipts:
-            raise AuthorityError("recovered admission is already settled")
-        if (
-            decision.authority_id != self._envelope.authority_id
-            or decision.authority_revision > self._envelope.revision
-            or decision.reservation is None
-        ):
-            raise AuthorityError("recovered admission authority is invalid")
-        effective = _add_usage(
-            self._usage,
-            self._reserved_usage(),
-            decision.reservation.as_usage(),
-        )
-        if not _fits(effective, self._envelope.budget_limit):
-            raise AuthorityError("recovered admission budget is unavailable")
-        self._reservations[decision.action_id] = decision
-
     def settle(self, action_id: str, receipt: ActionReceipt) -> None:
+        self._ensure_mutable()
         if not isinstance(receipt, ActionReceipt) or receipt.action_id != action_id:
             raise AuthorityError("action settlement receipt is invalid")
         existing = self._receipts.get(action_id)
@@ -385,6 +402,7 @@ class AuthorityLedger:
         self._receipts[action_id] = receipt
 
     def replace_authority(self, envelope: AuthorityEnvelope) -> None:
+        self._ensure_mutable()
         if (
             not isinstance(envelope, AuthorityEnvelope)
             or envelope.authority_id != self._envelope.authority_id
@@ -395,6 +413,10 @@ class AuthorityLedger:
         if not _fits(committed, envelope.budget_limit):
             raise AuthorityError("authority replacement budget is insufficient")
         self._envelope = envelope
+
+    def _ensure_mutable(self) -> None:
+        if self._frozen:
+            raise AuthorityError("recovered authority ledger is immutable")
 
     def _target_is_authorized(self, target: object) -> bool:
         if not isinstance(target, Mapping) or target.get("kind") != "application":

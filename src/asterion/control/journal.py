@@ -71,7 +71,10 @@ class JournalRecord:
     payload: Mapping[str, object]
 
     def __post_init__(self) -> None:
-        if OPAQUE_ID.fullmatch(self.record_id) is None or self.kind not in JOURNAL_RECORD_KINDS:
+        if (
+            OPAQUE_ID.fullmatch(self.record_id) is None
+            or self.kind not in JOURNAL_RECORD_KINDS
+        ):
             raise JournalConflictError("journal record identity is invalid")
         _validate_record_payload(self.kind, self.payload)
         object.__setattr__(self, "payload", _freeze_mapping(self.payload))
@@ -98,9 +101,7 @@ class JournalRecord:
         )
 
     @classmethod
-    def system_bound(
-        cls, *, system_id: str, system_version: str
-    ) -> JournalRecord:
+    def system_bound(cls, *, system_id: str, system_version: str) -> JournalRecord:
         return cls(
             record_id="system-bound",
             kind="system.bound",
@@ -336,7 +337,10 @@ class MemoryCanonicalJournal:
         if field is None:
             return
         value = record.payload[field]
-        if not isinstance(value, Mapping) or value.get("session_id") != self._session_id:
+        if (
+            not isinstance(value, Mapping)
+            or value.get("session_id") != self._session_id
+        ):
             raise JournalConflictError("journal record session identity mismatches")
 
 
@@ -345,13 +349,21 @@ class FileCanonicalJournal:
 
     def __init__(self, root: Path, session_id: str, filename: str) -> None:
         self._root = root
+        self._parent = root.parent
         self._session_id = session_id
         self._filename = filename
         self._entries: tuple[JournalEntry, ...] = ()
         self._by_record_id: dict[str, JournalEntry] = {}
+        self._parent_identity: tuple[int, int] | None = None
+        self._root_identity: tuple[int, int] | None = None
+        self._file_identity: tuple[int, int] | None = None
+        self._file_stamp: tuple[int, int, int] | None = None
+        self._initialized = False
 
     @classmethod
-    def open(cls, root: os.PathLike[str] | str, session_id: str) -> FileCanonicalJournal:
+    def open(
+        cls, root: os.PathLike[str] | str, session_id: str
+    ) -> FileCanonicalJournal:
         try:
             if (
                 not isinstance(session_id, str)
@@ -381,15 +393,19 @@ class FileCanonicalJournal:
         if not isinstance(record, JournalRecord):
             raise JournalConflictError("journal record is invalid")
         try:
-            root_fd, file_fd, created = self._open_descriptors(create=False)
+            parent_fd, root_fd, file_fd = self._open_descriptors(create=False)
             try:
                 fcntl.flock(file_fd, fcntl.LOCK_EX)
+                self._confirm_instance_bindings(parent_fd, root_fd, file_fd)
                 entries = _read_file_entries(file_fd, self._session_id)
-                self._install(entries)
+                self._install(entries, os.fstat(file_fd))
                 existing = self._by_record_id.get(record.record_id)
                 if existing is not None:
                     if existing.digest != record.digest:
                         raise JournalConflictError("journal record replay conflicts")
+                    os.fsync(file_fd)
+                    self._confirm_instance_bindings(parent_fd, root_fd, file_fd)
+                    self._file_stamp = _file_stamp(os.fstat(file_fd))
                     return existing
                 if (
                     isinstance(expected_position, bool)
@@ -415,15 +431,14 @@ class FileCanonicalJournal:
                         offset += written
                     stream.flush()
                     os.fsync(stream.fileno())
-                _verify_root_binding(self._root, root_fd)
+                self._confirm_instance_bindings(parent_fd, root_fd, file_fd)
                 _verify_file_binding(root_fd, self._filename, file_fd)
-                if created:
-                    os.fsync(root_fd)
-                self._install((*entries, entry))
+                self._install((*entries, entry), os.fstat(file_fd))
                 return self._by_record_id[record.record_id]
             finally:
                 os.close(file_fd)
                 os.close(root_fd)
+                os.close(parent_fd)
         except JournalConflictError:
             raise
         except (OSError, TypeError, ValueError, UnicodeError):
@@ -469,72 +484,153 @@ class FileCanonicalJournal:
 
     def _refresh(self, *, exclusive: bool, create: bool) -> None:
         try:
-            root_fd, file_fd, created = self._open_descriptors(create=create)
+            parent_fd, root_fd, file_fd = self._open_descriptors(create=create)
             try:
                 fcntl.flock(file_fd, fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH)
-                self._install(_read_file_entries(file_fd, self._session_id))
-                _verify_root_binding(self._root, root_fd)
-                _verify_file_binding(root_fd, self._filename, file_fd)
-                if created:
+                self._confirm_instance_bindings(parent_fd, root_fd, file_fd)
+                self._install(
+                    _read_file_entries(file_fd, self._session_id),
+                    os.fstat(file_fd),
+                )
+                if create:
                     os.fsync(file_fd)
                     os.fsync(root_fd)
+                    os.fsync(parent_fd)
+                    self._confirm_instance_bindings(parent_fd, root_fd, file_fd)
+                    self._file_stamp = _file_stamp(os.fstat(file_fd))
             finally:
                 os.close(file_fd)
                 os.close(root_fd)
+                os.close(parent_fd)
         except JournalConflictError:
             raise
         except (OSError, TypeError, ValueError, UnicodeError):
             raise JournalConflictError("file journal cannot be read safely") from None
 
-    def _open_descriptors(self, *, create: bool) -> tuple[int, int, bool]:
-        root_fd, root_created = _open_private_root(self._root, create=create)
+    def _open_descriptors(self, *, create: bool) -> tuple[int, int, int]:
+        parent_fd = _open_private_parent(self._parent)
         try:
-            file_fd, file_created = _open_private_file(
-                root_fd, self._filename, create=create
+            root_fd = _open_private_root(
+                parent_fd,
+                self._root.name,
+                self._root,
+                create=create,
             )
         except BaseException:
-            os.close(root_fd)
+            os.close(parent_fd)
             raise
-        return root_fd, file_fd, root_created or file_created
+        try:
+            file_fd, _ = _open_private_file(root_fd, self._filename, create=create)
+        except BaseException:
+            os.close(root_fd)
+            os.close(parent_fd)
+            raise
+        return parent_fd, root_fd, file_fd
 
-    def _install(self, entries: tuple[JournalEntry, ...]) -> None:
-        if entries == self._entries:
-            return
+    def _confirm_instance_bindings(
+        self, parent_fd: int, root_fd: int, file_fd: int
+    ) -> None:
+        _verify_parent_binding(self._parent, parent_fd)
+        _verify_root_binding_at(parent_fd, self._root.name, root_fd)
+        _verify_root_binding(self._root, root_fd)
+        _verify_file_binding(root_fd, self._filename, file_fd)
+        identities = (
+            _identity(os.fstat(parent_fd)),
+            _identity(os.fstat(root_fd)),
+            _identity(os.fstat(file_fd)),
+        )
+        pinned = (
+            self._parent_identity,
+            self._root_identity,
+            self._file_identity,
+        )
+        if not self._initialized:
+            (
+                self._parent_identity,
+                self._root_identity,
+                self._file_identity,
+            ) = identities
+        elif identities != pinned:
+            raise JournalConflictError("file journal instance binding changed")
+
+    def _install(
+        self, entries: tuple[JournalEntry, ...], details: os.stat_result
+    ) -> None:
+        stamp = _file_stamp(details)
+        if self._initialized:
+            if (
+                len(entries) < len(self._entries)
+                or entries[: len(self._entries)] != self._entries
+                or (entries == self._entries and stamp != self._file_stamp)
+            ):
+                raise JournalConflictError("file journal instance prefix changed")
+            if entries == self._entries:
+                return
+            entries = self._entries + entries[len(self._entries) :]
         self._entries = entries
         self._by_record_id = {entry.record.record_id: entry for entry in entries}
+        self._file_stamp = stamp
+        self._initialized = True
 
 
-def _open_private_root(root: Path, *, create: bool) -> tuple[int, bool]:
-    created = False
-    if create:
-        try:
-            os.mkdir(root, 0o700)
-            created = True
-        except FileExistsError:
-            pass
-    before = os.lstat(root)
-    descriptor = os.open(root, os.O_RDONLY | _DIRECTORY | _NOFOLLOW | _CLOEXEC)
+def _open_private_parent(parent: Path) -> int:
+    before = os.lstat(parent)
+    descriptor = os.open(parent, os.O_RDONLY | _DIRECTORY | _NOFOLLOW | _CLOEXEC)
     try:
         details = os.fstat(descriptor)
-        if created:
-            os.fchmod(descriptor, 0o700)
-            details = os.fstat(descriptor)
         if (
             not stat.S_ISDIR(before.st_mode)
             or not stat.S_ISDIR(details.st_mode)
-            or (before.st_dev, before.st_ino) != (details.st_dev, details.st_ino)
-            or stat.S_IMODE(details.st_mode) != 0o700
+            or _identity(before) != _identity(details)
             or details.st_uid != os.getuid()
         ):
-            raise JournalConflictError("file journal root is unsafe")
-        _verify_root_binding(root, descriptor)
-        return descriptor, created
+            raise JournalConflictError("file journal parent is unsafe")
+        _verify_parent_binding(parent, descriptor)
+        return descriptor
     except BaseException:
         os.close(descriptor)
         raise
 
 
-def _open_private_file(root_fd: int, filename: str, *, create: bool) -> tuple[int, bool]:
+def _open_private_root(
+    parent_fd: int,
+    root_name: str,
+    root: Path,
+    *,
+    create: bool,
+) -> int:
+    if create:
+        try:
+            os.mkdir(root_name, 0o700, dir_fd=parent_fd)
+        except FileExistsError:
+            pass
+    before = os.stat(root_name, dir_fd=parent_fd, follow_symlinks=False)
+    descriptor = os.open(
+        root_name,
+        os.O_RDONLY | _DIRECTORY | _NOFOLLOW | _CLOEXEC,
+        dir_fd=parent_fd,
+    )
+    try:
+        details = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(before.st_mode)
+            or not stat.S_ISDIR(details.st_mode)
+            or _identity(before) != _identity(details)
+            or stat.S_IMODE(details.st_mode) != 0o700
+            or details.st_uid != os.getuid()
+        ):
+            raise JournalConflictError("file journal root is unsafe")
+        _verify_root_binding_at(parent_fd, root_name, descriptor)
+        _verify_root_binding(root, descriptor)
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _open_private_file(
+    root_fd: int, filename: str, *, create: bool
+) -> tuple[int, bool]:
     flags = os.O_RDWR | os.O_APPEND | _NOFOLLOW | _CLOEXEC
     created = False
     try:
@@ -583,10 +679,9 @@ def _read_file_entries(file_fd: int, session_id: str) -> tuple[JournalEntry, ...
         stream.seek(0)
         raw = stream.read()
     details_after = os.fstat(file_fd)
-    if (
-        (details_before.st_dev, details_before.st_ino, details_before.st_size)
-        != (details_after.st_dev, details_after.st_ino, details_after.st_size)
-    ):
+    if _identity(details_before) != _identity(details_after) or _file_stamp(
+        details_before
+    ) != _file_stamp(details_after):
         raise JournalConflictError("file journal changed while reading")
     if raw and not raw.endswith(b"\n"):
         raise JournalConflictError("file journal is truncated")
@@ -642,13 +737,42 @@ def _read_file_entries(file_fd: int, session_id: str) -> tuple[JournalEntry, ...
     return tuple(entries)
 
 
+def _identity(details: os.stat_result) -> tuple[int, int]:
+    return details.st_dev, details.st_ino
+
+
+def _file_stamp(details: os.stat_result) -> tuple[int, int, int]:
+    return details.st_size, details.st_mtime_ns, details.st_ctime_ns
+
+
+def _verify_parent_binding(parent: Path, parent_fd: int) -> None:
+    path_details = os.lstat(parent)
+    descriptor_details = os.fstat(parent_fd)
+    if (
+        not stat.S_ISDIR(path_details.st_mode)
+        or _identity(path_details) != _identity(descriptor_details)
+        or descriptor_details.st_uid != os.getuid()
+    ):
+        raise JournalConflictError("file journal parent binding changed")
+
+
+def _verify_root_binding_at(parent_fd: int, root_name: str, root_fd: int) -> None:
+    path_details = os.stat(root_name, dir_fd=parent_fd, follow_symlinks=False)
+    descriptor_details = os.fstat(root_fd)
+    if (
+        not stat.S_ISDIR(path_details.st_mode)
+        or _identity(path_details) != _identity(descriptor_details)
+        or stat.S_IMODE(path_details.st_mode) != 0o700
+    ):
+        raise JournalConflictError("file journal root binding changed")
+
+
 def _verify_root_binding(root: Path, root_fd: int) -> None:
     path_details = os.lstat(root)
     descriptor_details = os.fstat(root_fd)
     if (
         not stat.S_ISDIR(path_details.st_mode)
-        or (path_details.st_dev, path_details.st_ino)
-        != (descriptor_details.st_dev, descriptor_details.st_ino)
+        or _identity(path_details) != _identity(descriptor_details)
         or stat.S_IMODE(path_details.st_mode) != 0o700
     ):
         raise JournalConflictError("file journal root binding changed")
@@ -659,8 +783,7 @@ def _verify_file_binding(root_fd: int, filename: str, file_fd: int) -> None:
     descriptor_details = os.fstat(file_fd)
     if (
         not stat.S_ISREG(path_details.st_mode)
-        or (path_details.st_dev, path_details.st_ino)
-        != (descriptor_details.st_dev, descriptor_details.st_ino)
+        or _identity(path_details) != _identity(descriptor_details)
         or stat.S_IMODE(path_details.st_mode) != 0o600
         or path_details.st_nlink != 1
     ):
@@ -768,9 +891,7 @@ def _validate_record_payload(kind: str, value: object) -> None:
             raise JournalConflictError("journal checkpoint event is invalid")
         return
     if kind == "fault.projected":
-        _require_fields(
-            value, {"fault_id", "code", "recoverable", "evidence_ref"}
-        )
+        _require_fields(value, {"fault_id", "code", "recoverable", "evidence_ref"})
         _require_opaque_id(value["fault_id"], "journal fault identity")
         _require_identifier(value["code"], "journal fault code")
         if not isinstance(value["recoverable"], bool):

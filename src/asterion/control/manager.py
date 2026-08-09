@@ -122,25 +122,51 @@ class ControlHost:
                 entries = self._journal.replay(JournalCursor(0))
                 if len(entries) != position:
                     raise JournalConflictError("control journal changed")
-                recovered = recover_control_host_state(entries, authority.envelope)
                 system_payload = entries[0].record.payload
-                authority_payload = entries[1].record.payload
                 if (
                     system_payload.get("system_id") != plan.system_id
                     or system_payload.get("system_version") != plan.version
-                    or authority_payload.get("authority_id")
+                ):
+                    raise JournalConflictError("control journal identity conflicts")
+                if len(entries) == 1:
+                    self._journal.append(
+                        1,
+                        JournalRecord.authority_bound(
+                            authority_id=authority.envelope.authority_id,
+                            authority_revision=authority.envelope.revision,
+                        ),
+                    )
+                    position = self._journal.position
+                    entries = self._journal.replay(JournalCursor(0))
+                    if len(entries) != position:
+                        raise JournalConflictError("control journal changed")
+                authority_payload = entries[1].record.payload
+                recovered = recover_control_host_state(
+                    entries,
+                    authority.envelope,
+                    expected_session_id=session_id,
+                    expected_generation=generation,
+                )
+                if (
+                    authority_payload.get("authority_id")
                     != authority.envelope.authority_id
                     or recovered.state.session_id != session_id
                     or recovered.state.generation != generation
-                    or recovered.state.authority_id
-                    != authority.envelope.authority_id
-                    or recovered.state.authority_revision
-                    != authority.envelope.revision
+                    or (
+                        recovered.state.authority_id is not None
+                        and recovered.state.authority_id
+                        != authority.envelope.authority_id
+                    )
+                    or (
+                        recovered.state.authority_revision is not None
+                        and recovered.state.authority_revision
+                        != authority.envelope.revision
+                    )
                     or recovered.journal_position != position
                 ):
                     raise JournalConflictError("control journal identity conflicts")
                 self._state = recovered.state
-                self._authority = recovered.authority
+                self._authority = recovered.authority._mutable_copy()
                 authority_entry = entries[-1]
                 if self._journal.position != position:
                     raise JournalConflictError("control journal changed")
@@ -161,6 +187,13 @@ class ControlHost:
             not isinstance(command, ControlCommand)
             or command.session_id != self._state.session_id
             or command.authority_revision != self._authority.envelope.revision
+            or (
+                command.type == "session.create"
+                and (
+                    command.payload["system_id"] != self._plan.system_id
+                    or command.payload["system_version"] != self._plan.version
+                )
+            )
         ):
             raise ControlHostError("control command authority or identity mismatches")
         try:
@@ -220,12 +253,9 @@ class ControlHost:
             self._journal_position = max(self._journal_position, entry.position)
         except (JournalConflictError, TypeError, ValueError):
             raise ControlHostError("control provider event journal failed") from None
-        if (
-            event.generation < self._state.generation
-            or (
-                event.generation == self._state.generation
-                and event.sequence < self._state.next_sequence
-            )
+        if event.generation < self._state.generation or (
+            event.generation == self._state.generation
+            and event.sequence < self._state.next_sequence
         ):
             return
         try:

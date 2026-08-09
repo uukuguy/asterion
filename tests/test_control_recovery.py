@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import tempfile
 import unittest
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 
 from asterion.control.authority import (
+    ActionReceipt,
+    AuthorityError,
     AuthorityLedger,
     BudgetUsage,
     action_proposal_digest,
@@ -14,6 +17,7 @@ from asterion.control.host import ControlCommand, ControlEvent, EventCursor
 from asterion.control.journal import (
     JournalConflictError,
     JournalCursor,
+    JournalEntry,
     JournalRecord,
     MemoryCanonicalJournal,
 )
@@ -25,7 +29,14 @@ from tests.test_control_host import ScriptedClient, SpyExecutor
 from tests.test_control_system import _control_factories, _manifest, _provider
 
 
-def _event(event_type: str, sequence: int, payload: dict[str, object], *, generation: int = 1, session_id: str = "session-1") -> ControlEvent:
+def _event(
+    event_type: str,
+    sequence: int,
+    payload: dict[str, object],
+    *,
+    generation: int = 1,
+    session_id: str = "session-1",
+) -> ControlEvent:
     return ControlEvent(
         event_id=f"event-{generation}-{sequence}",
         session_id=session_id,
@@ -51,7 +62,9 @@ def _created(sequence: int = 1, *, session_id: str = "session-1") -> ControlEven
 
 
 def _running(sequence: int = 2, *, generation: int = 1) -> ControlEvent:
-    return _event("session.running", sequence, {"reason_code": "started"}, generation=generation)
+    return _event(
+        "session.running", sequence, {"reason_code": "started"}, generation=generation
+    )
 
 
 def _journal() -> MemoryCanonicalJournal:
@@ -78,7 +91,9 @@ def _proposal_event() -> ControlEvent:
     )
 
 
-def _decision(journal: MemoryCanonicalJournal, proposal: ControlEvent, *, status: str = "admitted") -> None:
+def _decision(
+    journal: MemoryCanonicalJournal, proposal: ControlEvent, *, status: str = "admitted"
+) -> None:
     journal.append(
         journal.position,
         JournalRecord.action_decided(
@@ -100,9 +115,41 @@ def _terminal_command(status: str, receipt_ref: str | None) -> ControlCommand:
         payload={
             "action_id": "action-1",
             "resolution": status,
-            "reason_code": "executed" if status == "succeeded" else "transport-uncertain",
+            "reason_code": "executed"
+            if status == "succeeded"
+            else "transport-uncertain",
             "receipt_ref": receipt_ref,
         },
+    )
+
+
+def _create_command(
+    *,
+    session_id: str = "session-1",
+    authority_revision: int = 1,
+    system_id: str = "research.system",
+    system_version: str = "1.0.0",
+) -> ControlCommand:
+    return ControlCommand(
+        command_id="create-1",
+        session_id=session_id,
+        authority_revision=authority_revision,
+        type="session.create",
+        payload={
+            "system_id": system_id,
+            "system_version": system_version,
+            "goal_id": "goal-1",
+            "goal_ref": "goal-ref-1",
+        },
+    )
+
+
+def _plan(directory: str, *, version: str = "1.0.0"):
+    return resolve_agent_system(
+        {**_manifest(), "version": version},
+        application_providers=(_provider(Path(directory)),),
+        control_factories=_control_factories([]),
+        host_capabilities=("clock.monotonic", "storage.private"),
     )
 
 
@@ -125,9 +172,14 @@ class TestControlRecovery(unittest.TestCase):
                 usage=BudgetUsage(0, 80, 0, 80, 4_000),
             ),
         )
-        journal.accept_command(_terminal_command("succeeded", "receipt-1"), expected_position=journal.position)
+        journal.accept_command(
+            _terminal_command("succeeded", "receipt-1"),
+            expected_position=journal.position,
+        )
 
-        recovered = recover_control_host_state(journal.replay(JournalCursor(0)), _envelope())
+        recovered = recover_control_host_state(
+            journal.replay(JournalCursor(0)), _envelope()
+        )
 
         self.assertEqual(recovered.state.actions["action-1"].status, "succeeded")
         self.assertEqual(recovered.authority_usage, BudgetUsage(0, 80, 0, 80, 4_000))
@@ -138,7 +190,9 @@ class TestControlRecovery(unittest.TestCase):
     def test_admitted_without_receipt_preserves_the_exact_reservation(self) -> None:
         journal, _ = _action_prefix()
 
-        recovered = recover_control_host_state(journal.replay(JournalCursor(0)), _envelope())
+        recovered = recover_control_host_state(
+            journal.replay(JournalCursor(0)), _envelope()
+        )
 
         self.assertEqual(recovered.state.actions["action-1"].status, "admitted")
         self.assertEqual(recovered.reservations, ("action-1",))
@@ -146,9 +200,14 @@ class TestControlRecovery(unittest.TestCase):
 
     def test_terminal_without_durable_receipt_remains_uncertain(self) -> None:
         journal, _ = _action_prefix()
-        journal.accept_command(_terminal_command("succeeded", "receipt-missing"), expected_position=journal.position)
+        journal.accept_command(
+            _terminal_command("succeeded", "receipt-missing"),
+            expected_position=journal.position,
+        )
 
-        recovered = recover_control_host_state(journal.replay(JournalCursor(0)), _envelope())
+        recovered = recover_control_host_state(
+            journal.replay(JournalCursor(0)), _envelope()
+        )
 
         self.assertEqual(recovered.state.actions["action-1"].status, "uncertain")
         self.assertEqual(recovered.reservations, ("action-1",))
@@ -156,9 +215,13 @@ class TestControlRecovery(unittest.TestCase):
 
     def test_explicit_uncertain_terminal_never_becomes_success(self) -> None:
         journal, _ = _action_prefix()
-        journal.accept_command(_terminal_command("uncertain", None), expected_position=journal.position)
+        journal.accept_command(
+            _terminal_command("uncertain", None), expected_position=journal.position
+        )
 
-        recovered = recover_control_host_state(journal.replay(JournalCursor(0)), _envelope())
+        recovered = recover_control_host_state(
+            journal.replay(JournalCursor(0)), _envelope()
+        )
 
         self.assertEqual(recovered.state.actions["action-1"].status, "uncertain")
         self.assertEqual(recovered.reservations, ("action-1",))
@@ -180,9 +243,14 @@ class TestControlRecovery(unittest.TestCase):
                 "storage_ref": "storage-1",
             },
         )
-        journal.append(journal.position, JournalRecord.checkpoint_sealed(checkpoint_event=checkpoint))
+        journal.append(
+            journal.position,
+            JournalRecord.checkpoint_sealed(checkpoint_event=checkpoint),
+        )
 
-        recovered = recover_control_host_state(journal.replay(JournalCursor(0)), _envelope())
+        recovered = recover_control_host_state(
+            journal.replay(JournalCursor(0)), _envelope()
+        )
 
         self.assertEqual(recovered.cursor, EventCursor(1, 3))
         self.assertEqual(recovered.state.next_sequence, 4)
@@ -203,7 +271,9 @@ class TestControlRecovery(unittest.TestCase):
         with self.assertRaises(FrozenInstanceError):
             first.cursor = EventCursor(1, 0)  # type: ignore[misc]
 
-    def test_recovery_rejects_reordered_duplicate_and_conflicting_receipts_redacted(self) -> None:
+    def test_recovery_rejects_reordered_duplicate_and_conflicting_receipts_redacted(
+        self,
+    ) -> None:
         journal, _ = _action_prefix()
         entries = journal.replay(JournalCursor(0))
         malformed = (
@@ -242,7 +312,9 @@ class TestControlRecovery(unittest.TestCase):
             recover_control_host_state(journal.replay(JournalCursor(0)), _envelope())
         self.assertNotIn("receipt-2", str(raised.exception))
 
-    def test_authority_revision_replays_only_to_the_exact_current_envelope(self) -> None:
+    def test_authority_revision_replays_only_to_the_exact_current_envelope(
+        self,
+    ) -> None:
         journal = _journal()
         _accept(
             journal,
@@ -295,7 +367,11 @@ class TestControlRecovery(unittest.TestCase):
             cases = (
                 {"session_id": "session-2"},
                 {"generation": 2},
-                {"authority": AuthorityLedger(replace(_envelope(), authority_id="authority-2"))},
+                {
+                    "authority": AuthorityLedger(
+                        replace(_envelope(), authority_id="authority-2")
+                    )
+                },
             )
             for changes in cases:
                 arguments = {
@@ -312,7 +388,9 @@ class TestControlRecovery(unittest.TestCase):
                 with self.subTest(changes=changes), self.assertRaises(ControlHostError):
                     ControlHost(**arguments)  # type: ignore[arg-type]
 
-    def test_control_host_rejects_system_version_mismatch_without_rebinding(self) -> None:
+    def test_control_host_rejects_system_version_mismatch_without_rebinding(
+        self,
+    ) -> None:
         journal = _journal()
         _accept(journal, _created(), _running())
         entries_before = journal.replay(JournalCursor(0))
@@ -337,6 +415,251 @@ class TestControlRecovery(unittest.TestCase):
                 )
         self.assertEqual(journal.replay(JournalCursor(0)), entries_before)
         self.assertNotIn("SENTINEL_SECRET", str(raised.exception))
+
+    def test_shortest_crash_prefixes_recover_without_duplicate_bindings(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            plan = _plan(directory)
+            journals: list[tuple[str, MemoryCanonicalJournal, int]] = []
+
+            system_only = MemoryCanonicalJournal("session-1")
+            system_only.append(
+                0,
+                JournalRecord.system_bound(
+                    system_id="research.system", system_version="1.0.0"
+                ),
+            )
+            journals.append(("system-only", system_only, 2))
+
+            bound = _journal()
+            journals.append(("bound", bound, 2))
+
+            command_only = _journal()
+            command_only.accept_command(
+                _create_command(), expected_position=command_only.position
+            )
+            journals.append(("create-command", command_only, 3))
+
+            for name, journal, position in journals:
+                with self.subTest(name=name):
+                    host = ControlHost(
+                        session_id="session-1",
+                        generation=1,
+                        plan=plan,
+                        authority=AuthorityLedger(_envelope()),
+                        journal=journal,
+                        client=ScriptedClient(plan.control_binding.manifest),
+                        action_executor=SpyExecutor(),
+                        clock_ms=lambda: 1_000,
+                    )
+                    snapshot = host.snapshot()
+                    self.assertEqual(snapshot.journal_position, position)
+                    self.assertEqual(snapshot.state.session_id, "session-1")
+                    self.assertIsNone(snapshot.state.session_status)
+                    kinds = tuple(
+                        entry.record.kind for entry in journal.replay(JournalCursor(0))
+                    )
+                    self.assertEqual(kinds[:2], ("system.bound", "authority.bound"))
+                    self.assertEqual(kinds.count("authority.bound"), 1)
+
+            wrong = MemoryCanonicalJournal("session-1")
+            wrong.append(
+                0,
+                JournalRecord.system_bound(
+                    system_id="other.system", system_version="1.0.0"
+                ),
+            )
+            with self.assertRaises(ControlHostError):
+                ControlHost(
+                    session_id="session-1",
+                    generation=1,
+                    plan=plan,
+                    authority=AuthorityLedger(_envelope()),
+                    journal=wrong,
+                    client=ScriptedClient(plan.control_binding.manifest),
+                    action_executor=SpyExecutor(),
+                    clock_ms=lambda: 1_000,
+                )
+            self.assertEqual(wrong.position, 1)
+
+    def test_internal_expected_identity_recovers_empty_bound_prefix(self) -> None:
+        system_only = MemoryCanonicalJournal("session-1")
+        system_only.append(
+            0,
+            JournalRecord.system_bound(
+                system_id="research.system", system_version="1.0.0"
+            ),
+        )
+        bound = _journal()
+        command_only = _journal()
+        command_only.accept_command(
+            _create_command(), expected_position=command_only.position
+        )
+
+        for journal in (system_only, bound, command_only):
+            with self.subTest(position=journal.position):
+                recovered = recover_control_host_state(
+                    journal.replay(JournalCursor(0)),
+                    _envelope(),
+                    expected_session_id="session-1",
+                    expected_generation=1,
+                )
+
+                self.assertEqual(recovered.state.session_id, "session-1")
+                self.assertEqual(recovered.state.generation, 1)
+                self.assertIsNone(recovered.state.session_status)
+                self.assertEqual(recovered.cursor, EventCursor(1, 0))
+                self.assertEqual(recovered.journal_position, journal.position)
+
+    def test_recovery_rejects_identity_and_admission_resolution_conflicts(self) -> None:
+        created_conflicts = (
+            _event(
+                "session.created",
+                1,
+                {
+                    "goal_id": "goal-1",
+                    "authority_id": "authority-2",
+                    "authority_revision": 1,
+                },
+            ),
+            _event(
+                "session.created",
+                1,
+                {
+                    "goal_id": "goal-1",
+                    "authority_id": "authority-1",
+                    "authority_revision": 2,
+                },
+            ),
+        )
+        for event in created_conflicts:
+            with self.subTest(event=event):
+                journal = _journal()
+                _accept(journal, event)
+                with self.assertRaises(JournalConflictError):
+                    recover_control_host_state(
+                        journal.replay(JournalCursor(0)), _envelope()
+                    )
+
+        command_conflicts = (
+            _create_command(system_id="other.system"),
+            _create_command(system_version="2.0.0"),
+            _create_command(authority_revision=2),
+        )
+        for command in command_conflicts:
+            with self.subTest(command=command):
+                journal = _journal()
+                journal.accept_command(command, expected_position=journal.position)
+                with self.assertRaises(JournalConflictError):
+                    recover_control_host_state(
+                        journal.replay(JournalCursor(0)),
+                        _envelope(),
+                        expected_session_id="session-1",
+                        expected_generation=1,
+                    )
+
+        journal = _journal()
+        foreign = _create_command(session_id="session-2")
+        record = JournalRecord(
+            record_id="command:create-foreign",
+            kind="command.accepted",
+            payload={"command": foreign.to_mapping()},
+        )
+        entries = journal.replay(JournalCursor(0)) + (
+            JournalEntry(position=3, digest=record.digest, record=record),
+        )
+        with self.assertRaises(JournalConflictError):
+            recover_control_host_state(
+                entries,
+                _envelope(),
+                expected_session_id="session-1",
+                expected_generation=1,
+            )
+
+        for resolution, reason in (
+            ("admitted", "target-not-authorized"),
+            ("rejected", "authorized"),
+        ):
+            with self.subTest(resolution=resolution, reason=reason):
+                journal, _ = _action_prefix()
+                command = ControlCommand(
+                    command_id=f"resolve-{resolution}",
+                    session_id="session-1",
+                    authority_revision=1,
+                    type="action.resolve",
+                    payload={
+                        "action_id": "action-1",
+                        "resolution": resolution,
+                        "reason_code": reason,
+                        "receipt_ref": None,
+                    },
+                )
+                journal.accept_command(command, expected_position=journal.position)
+                with self.assertRaises(JournalConflictError):
+                    recover_control_host_state(
+                        journal.replay(JournalCursor(0)), _envelope()
+                    )
+
+    def test_live_session_create_must_match_the_resolved_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            plan = _plan(directory)
+            journal = MemoryCanonicalJournal("session-1")
+            host = ControlHost(
+                session_id="session-1",
+                generation=1,
+                plan=plan,
+                authority=AuthorityLedger(_envelope()),
+                journal=journal,
+                client=ScriptedClient(plan.control_binding.manifest),
+                action_executor=SpyExecutor(),
+                clock_ms=lambda: 1_000,
+            )
+
+            with self.assertRaises(ControlHostError):
+                asyncio.run(host.dispatch(_create_command(system_version="2.0.0")))
+            self.assertEqual(journal.position, 2)
+
+    def test_recovered_authority_is_frozen_but_host_receives_a_mutable_copy(
+        self,
+    ) -> None:
+        journal, _ = _action_prefix()
+        recovered = recover_control_host_state(
+            journal.replay(JournalCursor(0)), _envelope()
+        )
+        reservation = recovered.authority.reservations["action-1"]
+        receipt = ActionReceipt(
+            action_id="action-1",
+            receipt_ref="receipt-1",
+            usage=BudgetUsage(0, 80, 0, 80, 4_000),
+        )
+
+        self.assertFalse(hasattr(AuthorityLedger(_envelope()), "restore_reservation"))
+        with self.assertRaises(AuthorityError):
+            AuthorityLedger(replace(_envelope(), revision=2)).reserve(reservation)
+        with self.assertRaises(AuthorityError):
+            recovered.authority.reserve(reservation)
+        with self.assertRaises(AuthorityError):
+            recovered.authority.settle("action-1", receipt)
+        with self.assertRaises(AuthorityError):
+            recovered.authority.replace_authority(replace(_envelope(), revision=2))
+
+        live_journal = _journal()
+        _accept(live_journal, _created(), _running())
+        proposal = _proposal_event()
+        with tempfile.TemporaryDirectory() as directory:
+            plan = _plan(directory)
+            client = ScriptedClient(plan.control_binding.manifest, (proposal,))
+            host = ControlHost(
+                session_id="session-1",
+                generation=1,
+                plan=plan,
+                authority=AuthorityLedger(_envelope()),
+                journal=live_journal,
+                client=client,
+                action_executor=SpyExecutor(),
+                clock_ms=lambda: 1_000,
+            )
+            asyncio.run(host.pump())
+        self.assertEqual(host.snapshot().state.actions["action-1"].status, "admitted")
 
 
 if __name__ == "__main__":
