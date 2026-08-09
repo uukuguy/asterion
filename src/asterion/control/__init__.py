@@ -24,10 +24,19 @@ from asterion.control.protocol import (
     validate_control_event_stream,
     validate_control_plane_manifest,
 )
+from asterion.control.system import (
+    AgentSystemError,
+    AgentSystemPlan,
+    ApplicationPortfolioEntry,
+    resolve_agent_system,
+)
 
 __all__ = [
     "AGENT_CONTROL_PROTOCOL",
     "AGENT_SYSTEM_PROTOCOL",
+    "AgentSystemError",
+    "AgentSystemPlan",
+    "ApplicationPortfolioEntry",
     "CONTROL_PLANE_PROTOCOL",
     "ControlProtocolError",
     "ControlCommand",
@@ -44,4 +53,5 @@ __all__ = [
     "validate_control_event",
     "validate_control_event_stream",
     "validate_control_plane_manifest",
+    "resolve_agent_system",
 ]
