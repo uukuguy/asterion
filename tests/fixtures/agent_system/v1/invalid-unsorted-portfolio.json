@@ -1,0 +1,28 @@
+{
+  "protocol": "asterion.agent-system/v1",
+  "system_id": "research.system",
+  "version": "1.0.0",
+  "control_plane": {
+    "control_plane_id": "fake.control",
+    "version": "1.0.0"
+  },
+  "applications": [
+    {
+      "provider_id": "example.provider",
+      "application_id": "zeta",
+      "version": "2.0.0",
+      "runtime_id": "fake.runtime"
+    },
+    {
+      "provider_id": "example.provider",
+      "application_id": "alpha",
+      "version": "1.0.0",
+      "runtime_id": "fake.runtime"
+    }
+  ],
+  "policies": [],
+  "host_capabilities": [],
+  "control_capabilities": [
+    "session-lifecycle"
+  ]
+}
