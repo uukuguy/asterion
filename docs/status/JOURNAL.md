@@ -650,3 +650,7 @@
 - 00:00 旧 coverage 证据按 registry 与轨迹身份重验，避免无谓重跑 50 条 [16cf313]
 - 00:00 Bright 4×10 真实 A/B 完成并拒绝候选：质量门槛未达，执行链路完整 [pending]
 - 00:00 开发期 finalization 绑定内部审批摘要，普通 CLI 现在可完成真实 A/B 收口 [5998255]
+
+## 2026-08-09
+
+- 00:00 提交 Pathlight Bright 真实 A/B 文档闭环，消除 worktree 残留状态 [1c63d47]
