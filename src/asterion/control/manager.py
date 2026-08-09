@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from asterion.control.authority import AuthorityLedger
+from asterion.control.evidence import ControlEvidenceProjector
 from asterion.control.host import (
     ControlCommand,
     ControlEvent,
@@ -25,6 +26,10 @@ from asterion.control.state import (
     reduce_control_event,
 )
 from asterion.control.system import AgentSystemPlan
+from asterion.pathlight.recorder import (
+    NOOP_PATHLIGHT_RECORDER,
+    PathlightRecorder,
+)
 
 
 class ControlHostError(RuntimeError):
@@ -44,6 +49,7 @@ class ActionExecutor(Protocol):
 class ControlHostSnapshot:
     state: ControlState
     journal_position: int
+    evidence_gaps: tuple[str, ...] = ()
 
 
 class ControlHost:
@@ -60,6 +66,7 @@ class ControlHost:
         client: ControlPlaneClient,
         action_executor: ActionExecutor,
         clock_ms: Callable[[], int],
+        pathlight: PathlightRecorder = NOOP_PATHLIGHT_RECORDER,
     ) -> None:
         if (
             not isinstance(plan, AgentSystemPlan)
@@ -88,6 +95,7 @@ class ControlHost:
         self._client = client
         self._action_executor = action_executor
         self._clock_ms = clock_ms
+        self._evidence = ControlEvidenceProjector(pathlight)
         self._state = ControlState.empty(session_id, generation=generation)
         system = self._journal.append(
             0,
@@ -96,12 +104,20 @@ class ControlHost:
                 system_version=plan.version,
             ),
         )
-        self._journal.append(
+        authority_entry = self._journal.append(
             system.position,
             JournalRecord.authority_bound(
                 authority_id=authority.envelope.authority_id,
                 authority_revision=authority.envelope.revision,
             ),
+        )
+        self._evidence.start_system(
+            plan,
+            session_id=session_id,
+            generation=generation,
+            authority=authority.envelope,
+            journal_position=authority_entry.position,
+            timestamp_ns=self._clock_ms() * 1_000_000,
         )
 
     async def dispatch(self, command: ControlCommand) -> None:
@@ -146,6 +162,7 @@ class ControlHost:
         return ControlHostSnapshot(
             state=self._state,
             journal_position=self._journal.position,
+            evidence_gaps=self._evidence.gaps,
         )
 
     async def close(self) -> None:
@@ -160,7 +177,7 @@ class ControlHost:
         if not isinstance(event, ControlEvent):
             raise ControlHostError("control provider event is invalid")
         try:
-            self._journal.accept_event(
+            entry = self._journal.accept_event(
                 event, expected_position=self._journal.position
             )
         except (JournalConflictError, TypeError, ValueError):
@@ -178,6 +195,11 @@ class ControlHost:
         except ControlStateError:
             raise ControlHostError("control provider event transition failed") from None
         self._state = reduced
+        self._evidence.project_event(
+            event,
+            journal_position=entry.position,
+            timestamp_ns=self._clock_ms() * 1_000_000,
+        )
         if event.type == "action.proposed":
             await self._admit_action(event)
 
@@ -189,7 +211,7 @@ class ControlHost:
             )
             if decision.status == "admitted":
                 self._authority.reserve(decision)
-            self._journal.append(
+            entry = self._journal.append(
                 self._journal.position,
                 JournalRecord.action_decided(
                     action_id=decision.action_id,
@@ -200,6 +222,11 @@ class ControlHost:
                 ),
             )
             self._state = apply_action_admission(self._state, decision)
+            self._evidence.project_admission(
+                decision,
+                journal_position=entry.position,
+                timestamp_ns=self._clock_ms() * 1_000_000,
+            )
         except (JournalConflictError, ControlStateError, TypeError, ValueError):
             raise ControlHostError("control action admission failed") from None
         command = ControlCommand(

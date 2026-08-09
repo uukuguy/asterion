@@ -26,6 +26,28 @@ MISSING_SPAN_ID = opaque_id(5)
 
 
 class PathlightProtocolTests(unittest.TestCase):
+    def test_accepts_closed_long_running_control_kinds_and_attributes(self) -> None:
+        event = TraceEvent.start(
+            TRACE_ID,
+            ROOT_SPAN_ID,
+            None,
+            1,
+            "system",
+            attributes={
+                "session_id": "a" * 64,
+                "control_event_sha256": "b" * 64,
+                "control_event_type": "session.running",
+                "control_status": "running",
+                "generation": 1,
+                "event_sequence": 2,
+                "authority_revision": 1,
+                "journal_position": 4,
+            },
+        )
+
+        self.assertEqual(event.kind, "system")
+        self.assertEqual(event.attributes["control_status"], "running")
+
     def test_rejects_terminal_duration_that_disagrees_with_monotonic_timestamps(
         self,
     ) -> None:
@@ -49,13 +71,22 @@ class PathlightProtocolTests(unittest.TestCase):
             )
 
     STRING_ATTRIBUTE_VALUES = {
+        "action_id": "a" * 64,
         "artifact_id": "a" * 64,
+        "authority_id": "a" * 64,
         "call_id": "a" * 64,
+        "checkpoint_id": "a" * 64,
         "component_id": "a" * 64,
+        "control_event_sha256": "a" * 64,
+        "control_event_type": "session.running",
+        "control_reason_sha256": "a" * 64,
+        "control_status": "running",
         "content_sha256": "a" * 64,
         "coverage_sha256": "a" * 64,
         "evidence_ref": "a" * 64,
+        "event_id": "a" * 64,
         "failure_class": "unknown",
+        "goal_id": "a" * 64,
         "metric_contract_id": "a" * 64,
         "metric_name": "input-tokens",
         "model_id": "a" * 64,
@@ -64,11 +95,13 @@ class PathlightProtocolTests(unittest.TestCase):
         "request_sha256": "a" * 64,
         "response_sha256": "a" * 64,
         "runtime_id": "a" * 64,
+        "session_id": "a" * 64,
         "scope_sha256": "a" * 64,
         "segment_role": "assistant",
         "source_call_sha256": "a" * 64,
         "structure_kind": "context-frame",
         "tool_id": "a" * 64,
+        "system_id": "a" * 64,
         "unit": "count",
     }
 

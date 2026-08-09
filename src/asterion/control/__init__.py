@@ -6,6 +6,10 @@ from asterion.control.factory import (
     ControlPlaneFactoryError,
     ControlPlaneFactoryRegistry,
 )
+from asterion.control.evidence import (
+    CONTROL_PATHLIGHT_GAP,
+    ControlEvidenceProjector,
+)
 from asterion.control.authority import (
     ActionReceipt,
     AdmissionDecision,
@@ -95,9 +99,11 @@ __all__ = [
     "BudgetUsage",
     "CanonicalJournal",
     "CONTROL_PLANE_PROTOCOL",
+    "CONTROL_PATHLIGHT_GAP",
     "ControlCommand",
     "ControlConformanceDriver",
     "ControlEvent",
+    "ControlEvidenceProjector",
     "ControlHost",
     "ControlHostError",
     "ControlHostSnapshot",

@@ -25,6 +25,14 @@ SAFE_KINDS = frozenset(
         "host-service",
         "evaluation",
         "artifact",
+        "system",
+        "session",
+        "goal",
+        "action",
+        "admission",
+        "checkpoint",
+        "continuation",
+        "fault",
     }
 )
 SAFE_STATUSES = frozenset({"started", "completed", "failed", "cancelled", "skipped"})
@@ -98,6 +106,8 @@ _DIGEST_ATTRIBUTES = frozenset(
         "source_call_sha256",
         "task_sha256",
         "private_reference_sha256",
+        "control_event_sha256",
+        "control_reason_sha256",
     }
 )
 _OPAQUE_ID_ATTRIBUTES = frozenset(
@@ -109,6 +119,13 @@ _OPAQUE_ID_ATTRIBUTES = frozenset(
         "model_id",
         "runtime_id",
         "tool_id",
+        "session_id",
+        "system_id",
+        "goal_id",
+        "action_id",
+        "checkpoint_id",
+        "authority_id",
+        "event_id",
     }
 )
 _TRUSTED_STRING_ATTRIBUTE_VALUES = {
@@ -166,6 +183,44 @@ _TRUSTED_STRING_ATTRIBUTE_VALUES = {
     "unit": frozenset(
         {"boolean", "bytes", "count", "microunits", "nanoseconds", "ratio", "tokens"}
     ),
+    "control_event_type": frozenset(
+        {
+            "action.admitted",
+            "action.proposed",
+            "action.rejected",
+            "budget.reported",
+            "checkpoint.created",
+            "fault.raised",
+            "goal.updated",
+            "session.budget-limited",
+            "session.cancelled",
+            "session.completed",
+            "session.created",
+            "session.failed",
+            "session.paused",
+            "session.recovery-required",
+            "session.running",
+        }
+    ),
+    "control_status": frozenset(
+        {
+            "active",
+            "admitted",
+            "budget_limited",
+            "cancelled",
+            "completed",
+            "created",
+            "failed",
+            "needs_input",
+            "paused",
+            "proposed",
+            "recovery_required",
+            "rejected",
+            "running",
+            "succeeded",
+            "uncertain",
+        }
+    ),
 }
 _NONNEGATIVE_INT_ATTRIBUTES = frozenset(
     {
@@ -184,6 +239,10 @@ _NONNEGATIVE_INT_ATTRIBUTES = frozenset(
         "segment_count",
         "segment_index",
         "text_characters",
+        "generation",
+        "event_sequence",
+        "authority_revision",
+        "journal_position",
     }
 )
 _INTEGER_ATTRIBUTES = frozenset({"metric_value"})
