@@ -86,7 +86,17 @@ class PrimeControlPlaneClient:
         if (
             response.get("protocol") != PRIME_GATEWAY_IPC_PROTOCOL
             or response.get("id") != envelope["id"]
-            or response.get("type") != "command.accepted"
+        ):
+            raise PrimeControlError()
+        if response.get("type") == "error":
+            if (
+                response.get("code") == "prime-gateway-sidecar-failed"
+                and set(response) == {"protocol", "id", "type", "code"}
+            ):
+                raise PrimeControlError()
+            raise PrimeControlError()
+        if (
+            response.get("type") != "command.accepted"
             or set(response) != {"protocol", "id", "type"}
         ):
             raise PrimeControlError()

@@ -77,6 +77,11 @@ export interface GatewayDurableSnapshot {
   readonly primeCursor?: PrimeDaemonCursor;
 }
 
+export interface GatewayEventCursor {
+  readonly generation: number;
+  readonly sequence: number;
+}
+
 interface StoredRecordBody {
   readonly format: typeof RECORD_FORMAT;
   readonly position: number;
@@ -140,6 +145,10 @@ function nonEmptyRecordId(value: unknown): value is string {
 
 function nonNegativeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+function positiveInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) > 0;
 }
 
 function deepFreeze<T>(value: T): T {
@@ -521,6 +530,49 @@ export class GatewayDurableStore {
             event,
           });
         }),
+    );
+  }
+
+  eventsAfterCursor(cursor: GatewayEventCursor): readonly GatewayEventReceipt[] {
+    if (
+      !isRecord(cursor) ||
+      !positiveInteger(cursor.generation) ||
+      !nonNegativeInteger(cursor.sequence)
+    ) {
+      throw new GatewayStoreConflictError();
+    }
+    const generationEvents = this.records
+      .filter((record) => record.stored.kind === "event.accepted")
+      .map((record) => {
+        const event = record.payload.event as ControlEvent;
+        return { record, event };
+      })
+      .filter(({ event }) => event.generation === cursor.generation);
+    for (const [index, { event }] of generationEvents.entries()) {
+      const expectedSequence = index + 1;
+      if (
+        event.session_id !== this.sessionId ||
+        event.sequence !== expectedSequence
+      ) {
+        throw new GatewayStoreCorruptionError();
+      }
+    }
+    if (
+      cursor.sequence > generationEvents.length ||
+      (generationEvents.length === 0 && cursor.sequence !== 0)
+    ) {
+      throw new GatewayStoreConflictError();
+    }
+    return Object.freeze(
+      generationEvents
+        .filter(({ event }) => event.sequence > cursor.sequence)
+        .map(({ record, event }) =>
+          Object.freeze({
+            position: record.stored.position,
+            digest: record.stored.digest,
+            event,
+          }),
+        ),
     );
   }
 

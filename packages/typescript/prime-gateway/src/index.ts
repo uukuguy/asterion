@@ -54,6 +54,7 @@ export {
 export type {
   GatewayDurableSnapshot,
   GatewayDurableStoreOptions,
+  GatewayEventCursor,
   GatewayEventReceipt,
   GatewayRecordReceipt,
   PrimeIdentityBinding,
@@ -117,6 +118,7 @@ export type {
   GatewayAdmissionResult,
   GatewayTerminalResult,
   PrimeGatewayOptions,
+  PrimeGatewayPrivateInputs,
   PrimeGatewaySession,
 } from "./gateway.js";
 export {

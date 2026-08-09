@@ -76,6 +76,51 @@ test("private values use opaque references and exact kind projections", async ()
   }
 });
 
+test("private values bind public input references durably and reject conflicts", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const values = await PrivateValueStore.open(fixtureRoot.root);
+    const first = await values.bindInputReference(
+      "command-1",
+      "goal-ref-1",
+      "SENTINEL_PRIVATE_GOAL",
+    );
+    const replay = await values.bindInputReference(
+      "command-1",
+      "goal-ref-1",
+      "SENTINEL_PRIVATE_GOAL",
+    );
+    assert.equal(replay, first);
+    assert.equal(await values.readBoundInputReference("goal-ref-1"), "SENTINEL_PRIVATE_GOAL");
+
+    const reopened = await PrivateValueStore.open(fixtureRoot.root);
+    assert.equal(
+      await reopened.bindInputReference(
+        "command-1",
+        "goal-ref-1",
+        "SENTINEL_PRIVATE_GOAL",
+      ),
+      first,
+    );
+    assert.equal(await reopened.readBoundInputReference("goal-ref-1"), "SENTINEL_PRIVATE_GOAL");
+
+    await assert.rejects(
+      reopened.bindInputReference(
+        "command-1",
+        "goal-ref-1",
+        "SENTINEL_DIFFERENT_GOAL",
+      ),
+      (error) => {
+        assert.ok(error instanceof PrivateValueInvalidError);
+        assert.equal(error.message.includes("SENTINEL"), false);
+        return true;
+      },
+    );
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
 test("private values reject symlink replacement and redact bodies", async () => {
   const fixtureRoot = await temporaryStoreRoot();
   const sentinel = "SENTINEL_SECRET_INPUT";

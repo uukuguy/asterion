@@ -26,6 +26,7 @@ class FakeProcess:
         self.event_requests: list[Mapping[str, object]] = []
         self.closed = 0
         self.failure: Exception | None = None
+        self.response: Mapping[str, object] | None = None
         self.event_values: list[Mapping[str, object]] = []
 
     def fail_with(self, message: str) -> None:
@@ -35,6 +36,10 @@ class FakeProcess:
         self.requests.append(envelope)
         if self.failure is not None:
             raise self.failure
+        if self.response is not None:
+            if self.response.get("id") == "<request>":
+                return {**self.response, "id": envelope["id"]}
+            return self.response
         return {
             "protocol": "asterion.prime-gateway-ipc/v1",
             "id": envelope["id"],
@@ -116,6 +121,26 @@ class TestPrimeControlClient(unittest.IsolatedAsyncioTestCase):
         resolver = FakeResolver()
         resolver.values["goal-ref-1"] = "SENTINEL_SECRET"
         fake_process.fail_with("SENTINEL_SECRET provider body")
+        client = PrimeControlPlaneClient(
+            process=fake_process,
+            private_content=resolver,
+        )
+
+        with self.assertRaises(PrimeControlError) as raised:
+            await client.send(create_command())
+
+        self.assertNotIn("SENTINEL_SECRET", str(raised.exception))
+
+    async def test_sidecar_error_response_is_recognized_and_redacted(self) -> None:
+        fake_process = FakeProcess()
+        resolver = FakeResolver()
+        resolver.values["goal-ref-1"] = "SENTINEL_SECRET"
+        fake_process.response = {
+            "protocol": "asterion.prime-gateway-ipc/v1",
+            "id": "<request>",
+            "type": "error",
+            "code": "prime-gateway-sidecar-failed",
+        }
         client = PrimeControlPlaneClient(
             process=fake_process,
             private_content=resolver,

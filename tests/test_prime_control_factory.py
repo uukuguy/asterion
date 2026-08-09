@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import sys
 import tempfile
 import unittest
+from collections.abc import Mapping
 from pathlib import Path
 
 from asterion.control.factory import ControlPlaneFactoryContext, ControlPlaneFactoryError
+from asterion.control.host import ControlPlaneManifest
 from asterion.control.providers.prime.client import PrimeControlPlaneClient
 from asterion.control.providers.prime.factory import (
     PRIME_CONTROL_PLANE_ID,
@@ -96,6 +100,32 @@ class TestPrimeControlFactory(unittest.TestCase):
                 "prime-agent.schema/v14",
             ),
         )
+
+    def test_packaged_manifest_matches_exact_factory_binding(self) -> None:
+        manifest_path = (
+            Path(__file__).resolve().parents[1]
+            / "src/asterion/control/providers/prime/resources/control-plane.json"
+        )
+        packaged = json.loads(manifest_path.read_text())
+        binding_mapping = dict(prime_control_plane_binding().manifest.to_mapping())
+
+        self.assertEqual(packaged, binding_mapping)
+        for mutation in ("extra", "missing", "version"):
+            candidate = dict(packaged)
+            if mutation == "extra":
+                candidate["provider_payload"] = "SENTINEL_SECRET"
+            elif mutation == "missing":
+                candidate.pop("checkpoint_version")
+            else:
+                candidate["version"] = "0.2.0"
+            if mutation == "version":
+                self.assertNotEqual(
+                    ControlPlaneManifest.from_mapping(candidate),
+                    prime_control_plane_binding().manifest,
+                )
+                continue
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                ControlPlaneManifest.from_mapping(candidate)
 
     def test_factory_requires_trusted_local_authorization_and_exact_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -262,6 +292,156 @@ class TestPrimeSidecarProcess(unittest.IsolatedAsyncioTestCase):
             finally:
                 await process.close()
 
+    async def test_sidecar_error_response_fails_closed_with_fixed_code(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = root / "error.py"
+            script.write_text(
+                "import json, sys\n"
+                "request = json.loads(sys.stdin.readline())\n"
+                "sys.stdout.write(json.dumps({\n"
+                "    'protocol': 'asterion.prime-gateway-ipc/v1',\n"
+                "    'id': request['id'],\n"
+                "    'type': 'error',\n"
+                "    'code': 'prime-gateway-sidecar-failed',\n"
+                "}) + '\\n')\n"
+                "sys.stdout.flush()\n",
+            )
+            process = await PrimeSidecarProcess.start(
+                PrimeSidecarLaunchOptions(
+                    node_executable=Path(sys.executable),
+                    sidecar_entry=script,
+                    private_descriptor={},
+                    environ={"PATH": os.environ.get("PATH", "")},
+                    close_timeout=0.2,
+                    request_timeout=0.2,
+                )
+            )
+            try:
+                with self.assertRaises(PrimeSidecarProcessError) as raised:
+                    await process.request(
+                        {
+                            "protocol": "asterion.prime-gateway-ipc/v1",
+                            "id": "request-1",
+                            "type": "events.stream",
+                            "cursor": None,
+                        }
+                    )
+            finally:
+                await process.close()
+
+            self.assertEqual(str(raised.exception), "Prime sidecar process failed")
+
+    async def test_sidecar_malformed_error_response_fails_closed(self) -> None:
+        process = PrimeSidecarProcess(
+            PrimeSidecarLaunchOptions(
+                node_executable=Path(sys.executable),
+                sidecar_entry=Path(__file__),
+                private_descriptor={},
+            )
+        )
+        fake = FakeSubprocess(
+            stdout=[
+                {
+                    "protocol": "asterion.prime-gateway-ipc/v1",
+                    "id": "request-1",
+                    "type": "error",
+                    "code": "wrong",
+                    "detail": "SENTINEL_SECRET",
+                }
+            ]
+        )
+        process._process = fake  # type: ignore[attr-defined]
+
+        with self.assertRaises(PrimeSidecarProcessError) as raised:
+            await process.request(
+                {
+                    "protocol": "asterion.prime-gateway-ipc/v1",
+                    "id": "request-1",
+                    "type": "events.stream",
+                    "cursor": None,
+                }
+            )
+
+        self.assertNotIn("SENTINEL_SECRET", str(raised.exception))
+
+    async def test_close_bounds_blocking_stdin_shutdown(self) -> None:
+        process = PrimeSidecarProcess(
+            PrimeSidecarLaunchOptions(
+                node_executable=Path(sys.executable),
+                sidecar_entry=Path(__file__),
+                private_descriptor={},
+                close_timeout=0.01,
+            )
+        )
+        fake = FakeSubprocess(stdin=FakeStdin(block_wait_closed=True))
+        process._process = fake  # type: ignore[attr-defined]
+
+        await process.close()
+
+        self.assertTrue(process.closed)
+        self.assertTrue(fake.terminated)
+
+    async def test_close_kills_when_terminate_is_ignored(self) -> None:
+        process = PrimeSidecarProcess(
+            PrimeSidecarLaunchOptions(
+                node_executable=Path(sys.executable),
+                sidecar_entry=Path(__file__),
+                private_descriptor={},
+                close_timeout=0.01,
+            )
+        )
+        fake = FakeSubprocess(ignore_terminate=True)
+        process._process = fake  # type: ignore[attr-defined]
+
+        await process.close()
+
+        self.assertTrue(fake.terminated)
+        self.assertTrue(fake.killed)
+        self.assertEqual(fake.returncode, -9)
+
+    async def test_close_failure_after_kill_remains_retryable(self) -> None:
+        process = PrimeSidecarProcess(
+            PrimeSidecarLaunchOptions(
+                node_executable=Path(sys.executable),
+                sidecar_entry=Path(__file__),
+                private_descriptor={},
+                close_timeout=0.01,
+            )
+        )
+        fake = FakeSubprocess(ignore_terminate=True, ignore_kill=True)
+        process._process = fake  # type: ignore[attr-defined]
+
+        with self.assertRaises(PrimeSidecarProcessError):
+            await process.close()
+        self.assertFalse(process.closed)
+
+        fake.ignore_kill = False
+        await process.close()
+        self.assertTrue(process.closed)
+
+    async def test_close_during_request_is_bounded_and_retryable(self) -> None:
+        process = PrimeSidecarProcess(
+            PrimeSidecarLaunchOptions(
+                node_executable=Path(sys.executable),
+                sidecar_entry=Path(__file__),
+                private_descriptor={},
+                close_timeout=0.01,
+            )
+        )
+        fake = FakeSubprocess()
+        process._process = fake  # type: ignore[attr-defined]
+        await process._lock.acquire()  # type: ignore[attr-defined]
+        try:
+            with self.assertRaises(PrimeSidecarProcessError):
+                await process.close()
+            self.assertFalse(process.closed)
+        finally:
+            process._lock.release()  # type: ignore[attr-defined]
+
+        await process.close()
+        self.assertTrue(process.closed)
+
     async def test_sidecar_receives_private_descriptor_only_on_inherited_fd(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -320,6 +500,71 @@ def create_context_command() -> dict[str, object]:
             "goal_ref": "goal-ref-1",
         },
     }
+
+
+class FakeStdin:
+    def __init__(self, *, block_wait_closed: bool = False) -> None:
+        self.block_wait_closed = block_wait_closed
+        self._closing = False
+
+    def is_closing(self) -> bool:
+        return self._closing
+
+    def close(self) -> None:
+        self._closing = True
+
+    async def wait_closed(self) -> None:
+        if self.block_wait_closed:
+            await asyncio.sleep(60)
+
+    def write(self, value: bytes) -> None:
+        del value
+
+    async def drain(self) -> None:
+        return None
+
+
+class FakeStdout:
+    def __init__(self, values: list[Mapping[str, object]]) -> None:
+        self.values = list(values)
+
+    async def readline(self) -> bytes:
+        if not self.values:
+            return b""
+        return json.dumps(self.values.pop(0)).encode("utf-8") + b"\n"
+
+
+class FakeSubprocess:
+    def __init__(
+        self,
+        *,
+        stdin: FakeStdin | None = None,
+        stdout: list[Mapping[str, object]] | None = None,
+        ignore_terminate: bool = False,
+        ignore_kill: bool = False,
+    ) -> None:
+        self.stdin = stdin or FakeStdin()
+        self.stdout = FakeStdout(stdout or [])
+        self.returncode: int | None = None
+        self.terminated = False
+        self.killed = False
+        self.ignore_terminate = ignore_terminate
+        self.ignore_kill = ignore_kill
+
+    def terminate(self) -> None:
+        self.terminated = True
+        if not self.ignore_terminate:
+            self.returncode = -15
+
+    def kill(self) -> None:
+        self.killed = True
+        if not self.ignore_kill:
+            self.returncode = -9
+
+    async def wait(self) -> int:
+        while self.returncode is None:
+            await asyncio.sleep(60)
+        return self.returncode
 
 
 if __name__ == "__main__":

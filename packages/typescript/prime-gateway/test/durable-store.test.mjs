@@ -20,6 +20,25 @@ async function fixture(name) {
   return JSON.parse(await readFile(new URL(name, fixtures), "utf8"));
 }
 
+function event(sequence, generation = 1) {
+  return {
+    protocol: "asterion.agent-control/v1",
+    event_id: `event-${generation}-${sequence}`,
+    session_id: "session-1",
+    generation,
+    sequence,
+    emitted_at: `2026-08-10T03:00:${String(sequence).padStart(2, "0")}Z`,
+    type: sequence === 1 ? "session.created" : "session.running",
+    payload: sequence === 1
+      ? {
+        goal_id: "goal-1",
+        authority_id: "authority-1",
+        authority_revision: 1,
+      }
+      : { reason_code: "started" },
+  };
+}
+
 async function temporaryStoreRoot() {
   const parent = await mkdtemp(join(tmpdir(), "asterion-gateway-store-"));
   return {
@@ -100,6 +119,63 @@ test("durable store reopens identity cursor and safe event suffix", async () => 
     assert.equal(JSON.stringify(snapshot).includes(fixtureRoot.root), false);
   } finally {
     await fixtureRoot.cleanup();
+  }
+});
+
+test("durable store replays events by generation and sequence across mixed records", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    await store.acceptCommand(await fixture("valid-command-session-create.json"));
+    await store.appendEvent(event(1, 1));
+    await store.bindPrimeIdentity({
+      activeSessionId: "prime-root",
+      transcriptSessionId: "transcript-1",
+      supervisorGeneration: "supervisor-generation-1",
+    });
+    await store.recordPrimeCursor({ generation: "worker-generation-1", sequence: 1 });
+    await store.appendEvent(event(1, 2));
+    await store.appendEvent(event(2, 1));
+
+    assert.deepEqual(
+      store.eventsAfterCursor({ generation: 1, sequence: 1 }).map((receipt) => [
+        receipt.position,
+        receipt.event.generation,
+        receipt.event.sequence,
+      ]),
+      [[6, 1, 2]],
+    );
+    assert.deepEqual(
+      store.eventsAfterCursor({ generation: 2, sequence: 0 }).map((receipt) => [
+        receipt.event.generation,
+        receipt.event.sequence,
+      ]),
+      [[2, 1]],
+    );
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
+test("durable store generation cursor fails closed on gaps and wrong order", async () => {
+  for (const events of [
+    [event(1), event(3)],
+    [event(2), event(1)],
+  ]) {
+    const fixtureRoot = await temporaryStoreRoot();
+    try {
+      const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+      for (const item of events) {
+        await store.appendEvent(item);
+      }
+
+      assert.throws(
+        () => store.eventsAfterCursor({ generation: 1, sequence: 0 }),
+        GatewayStoreCorruptionError,
+      );
+    } finally {
+      await fixtureRoot.cleanup();
+    }
   }
 });
 

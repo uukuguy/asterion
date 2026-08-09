@@ -154,6 +154,10 @@ class PrimeSidecarProcess:
     def returncode(self) -> int | None:
         return self._process.returncode if self._process is not None else None
 
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
     async def request(self, envelope: Mapping[str, object]) -> Mapping[str, object]:
         async with self._lock:
             if self._closed:
@@ -185,27 +189,42 @@ class PrimeSidecarProcess:
     async def close(self) -> None:
         if self._closed:
             return
-        self._closed = True
-        process = self._process
-        if process is None:
-            return
+        deadline = asyncio.get_running_loop().time() + self._options.close_timeout
+        acquired = False
         try:
-            if process.stdin is not None and not process.stdin.is_closing():
-                process.stdin.close()
-                await process.stdin.wait_closed()
-        except (BrokenPipeError, ConnectionResetError, OSError):
-            pass
-        if process.returncode is not None:
-            return
-        process.terminate()
-        try:
-            await asyncio.wait_for(process.wait(), timeout=self._options.close_timeout)
-        except TimeoutError:
-            process.kill()
+            await asyncio.wait_for(self._lock.acquire(), timeout=_remaining(deadline))
+            acquired = True
+            process = self._process
+            if process is None:
+                self._closed = True
+                return
             try:
-                await asyncio.wait_for(process.wait(), timeout=self._options.close_timeout)
-            except TimeoutError:
-                raise PrimeSidecarProcessError() from None
+                if process.stdin is not None and not process.stdin.is_closing():
+                    process.stdin.close()
+                    timeout = _phase_timeout(deadline, self._options.close_timeout)
+                    await asyncio.wait_for(
+                        process.stdin.wait_closed(), timeout=timeout
+                    )
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
+            if process.returncode is None:
+                process.terminate()
+                try:
+                    timeout = _phase_timeout(deadline, self._options.close_timeout)
+                    await asyncio.wait_for(process.wait(), timeout=timeout)
+                except TimeoutError:
+                    if process.returncode is None:
+                        process.kill()
+                    timeout = _remaining(deadline)
+                    await asyncio.wait_for(process.wait(), timeout=timeout)
+            self._closed = process.returncode is not None
+            if not self._closed:
+                raise PrimeSidecarProcessError()
+        except (TimeoutError, OSError):
+            raise PrimeSidecarProcessError() from None
+        finally:
+            if acquired:
+                self._lock.release()
 
     async def _ensure_started(self) -> asyncio.subprocess.Process:
         if self._process is not None:
@@ -266,6 +285,17 @@ def _positive_finite(value: object) -> bool:
     )
 
 
+def _remaining(deadline: float) -> float:
+    remaining = deadline - asyncio.get_running_loop().time()
+    if remaining <= 0:
+        raise TimeoutError
+    return remaining
+
+
+def _phase_timeout(deadline: float, total: float) -> float:
+    return min(_remaining(deadline), max(total / 3, 0.001))
+
+
 def _regular_existing_path(path: Path, *, executable: bool) -> Path:
     try:
         resolved = path.resolve(strict=True)
@@ -306,6 +336,15 @@ def _decode_frame(line: bytes) -> Mapping[str, object]:
 def _validate_response(
     response: Mapping[str, object], request: Mapping[str, object]
 ) -> Mapping[str, object]:
+    if response.get("type") == "error":
+        if (
+            response.get("protocol") == PRIME_GATEWAY_IPC_PROTOCOL
+            and response.get("id") == request.get("id")
+            and response.get("code") == "prime-gateway-sidecar-failed"
+            and set(response) == {"protocol", "id", "type", "code"}
+        ):
+            raise PrimeSidecarProcessError()
+        raise PrimeSidecarProcessError()
     if (
         response.get("protocol") != PRIME_GATEWAY_IPC_PROTOCOL
         or response.get("id") != request.get("id")

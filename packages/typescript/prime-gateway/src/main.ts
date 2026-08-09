@@ -29,6 +29,9 @@ import {
   PrimeGateway,
   PrimeGatewayError,
 } from "./gateway.js";
+import type {
+  PrimeGatewayPrivateInputs,
+} from "./gateway.js";
 import {
   PrimeSession,
 } from "./prime-session.js";
@@ -43,10 +46,13 @@ type SidecarEnvelopeType = "command.accept" | "events.stream";
 export interface PrimeGatewaySidecarOptions {
   readonly gateway: {
     accept(command: ControlCommand): Promise<void>;
-    eventsAfter(sequence: number): readonly ControlEvent[];
+    eventsAfterCursor(cursor: { readonly generation: number; readonly sequence: number }): readonly ControlEvent[];
     close(): Promise<void>;
   };
-  readonly privateValues: Pick<PrivateValueStore, "putInput">;
+  readonly privateValues: Pick<
+    PrivateValueStore,
+    "bindInputReference" | "readBoundInputReference"
+  >;
 }
 
 interface PrimeSidecarDescriptor {
@@ -223,16 +229,6 @@ function validateCursor(value: unknown): Readonly<{ generation: number; sequence
   });
 }
 
-function withPayload(
-  command: ControlCommand,
-  payload: Readonly<Record<string, unknown>>,
-): ControlCommand {
-  return validateControlCommand({
-    ...command,
-    payload,
-  });
-}
-
 export class PrimeGatewaySidecar {
   constructor(private readonly options: PrimeGatewaySidecarOptions) {}
 
@@ -281,20 +277,20 @@ export class PrimeGatewaySidecar {
       if (!hasExactKeys(privateValues, ["goal"]) || !validPrivateText(privateValues.goal)) {
         throw new PrimeGatewayError();
       }
-      const goalRef = await this.options.privateValues.putInput(privateValues.goal);
-      command = withPayload(command, {
-        ...command.payload,
-        goal_ref: goalRef,
-      });
+      await this.options.privateValues.bindInputReference(
+        command.command_id,
+        command.payload.goal_ref,
+        privateValues.goal,
+      );
     } else if (command.type === "input.submit") {
       if (!hasExactKeys(privateValues, ["content"]) || !validPrivateText(privateValues.content)) {
         throw new PrimeGatewayError();
       }
-      const contentRef = await this.options.privateValues.putInput(privateValues.content);
-      command = withPayload(command, {
-        ...command.payload,
-        content_ref: contentRef,
-      });
+      await this.options.privateValues.bindInputReference(
+        command.command_id,
+        command.payload.content_ref,
+        privateValues.content,
+      );
     } else if (!hasExactKeys(privateValues, [])) {
       throw new PrimeGatewayError();
     }
@@ -303,8 +299,9 @@ export class PrimeGatewaySidecar {
 
   private events(envelope: SidecarEnvelope): readonly ControlEvent[] {
     const cursor = validateCursor(envelope.cursor);
-    const sequence = cursor?.sequence ?? 0;
-    const events = this.options.gateway.eventsAfter(sequence).map((event) => {
+    const events = this.options.gateway.eventsAfterCursor(
+      cursor ?? { generation: 1, sequence: 0 },
+    ).map((event) => {
       const validated = validateControlEvent(event);
       if (cursor !== null && validated.generation !== cursor.generation) {
         throw new PrimeGatewayError();
@@ -312,6 +309,17 @@ export class PrimeGatewaySidecar {
       return validated;
     });
     return Object.freeze(events);
+  }
+}
+
+class PrimeBoundPrivateInputs implements PrimeGatewayPrivateInputs {
+  constructor(private readonly privateValues: PrivateValueStore) {}
+
+  async readInput(reference: string): Promise<string> {
+    if (reference.startsWith("private:")) {
+      return this.privateValues.readInput(reference as `private:${string}`);
+    }
+    return this.privateValues.readBoundInputReference(reference);
   }
 }
 
@@ -345,6 +353,7 @@ async function createSidecarFromDescriptor(
     descriptor.sessionId,
   );
   const privateValues = await PrivateValueStore.open(descriptor.gatewayRoot);
+  const boundPrivateInputs = new PrimeBoundPrivateInputs(privateValues);
   const lock = await loadPrimeArtifactLock(pathToFileURL(descriptor.artifactLockPath));
   const artifactEvidence = await verifyPrimeArtifact(descriptor.primeSourceRoot, lock);
   let checkpointManager: PrimeCheckpointManager | undefined;
@@ -354,7 +363,7 @@ async function createSidecarFromDescriptor(
     generation: descriptor.generation,
     authorityId: descriptor.authorityId,
     store,
-    privateValues,
+    privateValues: boundPrivateInputs,
     async createSession(goal, bindIdentity) {
       return PrimeSession.create({
         transport,
@@ -435,8 +444,8 @@ async function createSidecarFromDescriptor(
     privateValues,
     gateway: {
       accept: (command) => gateway.accept(command),
-      eventsAfter: (sequence) =>
-        store.eventsAfter(sequence).map((receipt) => receipt.event),
+      eventsAfterCursor: (cursor) =>
+        store.eventsAfterCursor(cursor).map((receipt) => receipt.event),
       close: async () => {
         await gateway.close();
         transport.close();

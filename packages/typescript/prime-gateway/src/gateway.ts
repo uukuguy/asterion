@@ -26,7 +26,6 @@ import type {
 } from "./event-mapper.js";
 import type {
   PrivateValueRef,
-  PrivateValueStore,
 } from "./private-store.js";
 import type {
   PrimeCheckpointCreated,
@@ -70,12 +69,16 @@ export interface PrimeGatewaySession {
   cancel(commandId: string): Promise<void>;
 }
 
+export interface PrimeGatewayPrivateInputs {
+  readInput(reference: string): Promise<string>;
+}
+
 export interface PrimeGatewayOptions {
   readonly sessionId: string;
   readonly generation: number;
   readonly authorityId: string;
   readonly store: GatewayDurableStore;
-  readonly privateValues: PrivateValueStore;
+  readonly privateValues: PrimeGatewayPrivateInputs;
   readonly createSession: (
     goal: string,
     bindIdentity: (identity: {
