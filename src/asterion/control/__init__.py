@@ -24,6 +24,14 @@ from asterion.control.host import (
     ControlPlaneManifest,
     EventCursor,
 )
+from asterion.control.journal import (
+    CanonicalJournal,
+    JournalConflictError,
+    JournalCursor,
+    JournalEntry,
+    JournalRecord,
+    MemoryCanonicalJournal,
+)
 from asterion.control.protocol import (
     AGENT_CONTROL_PROTOCOL,
     AGENT_SYSTEM_PROTOCOL,
@@ -56,6 +64,7 @@ __all__ = [
     "BudgetLimit",
     "BudgetRequest",
     "BudgetUsage",
+    "CanonicalJournal",
     "CONTROL_PLANE_PROTOCOL",
     "ControlCommand",
     "ControlEvent",
@@ -67,6 +76,11 @@ __all__ = [
     "ControlPlaneManifest",
     "ControlProtocolError",
     "EventCursor",
+    "JournalConflictError",
+    "JournalCursor",
+    "JournalEntry",
+    "JournalRecord",
+    "MemoryCanonicalJournal",
     "PortfolioGrant",
     "resolve_agent_system",
     "validate_agent_system_manifest",
