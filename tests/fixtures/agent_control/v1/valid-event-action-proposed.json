@@ -8,6 +8,7 @@
   "type": "action.proposed",
   "payload": {
     "action_id": "action-1",
+    "authority_revision": 1,
     "idempotency_key": "idempotency-1",
     "kind": "application.invoke",
     "target": {

@@ -47,6 +47,7 @@ class TestAgentControlProtocol(unittest.TestCase):
         terminal = control_protocol.validate_control_event(terminal_source)
 
         self.assertEqual(proposed["type"], "action.proposed")
+        self.assertEqual(proposed["payload"]["authority_revision"], 1)
         self.assertEqual(
             proposed["payload"]["target"]["application_id"],
             "alpha",
@@ -55,6 +56,17 @@ class TestAgentControlProtocol(unittest.TestCase):
         self.assertIsInstance(proposed["payload"]["causal_parent_ids"], tuple)
         with self.assertRaises(TypeError):
             proposed["payload"]["target"]["application_id"] = "changed"  # type: ignore[index]
+
+    def test_action_proposal_requires_the_expected_authority_revision(self) -> None:
+        proposed = _fixture("valid-event-action-proposed.json")
+        payload = proposed["payload"]
+        assert isinstance(payload, dict)
+        without_revision = {key: value for key, value in payload.items() if key != "authority_revision"}
+
+        with self.assertRaises(control_protocol.ControlProtocolError):
+            control_protocol.validate_control_event(
+                {**proposed, "payload": without_revision}
+            )
 
     def test_complete_stream_requires_one_identity_generation_and_terminal(self) -> None:
         events = (

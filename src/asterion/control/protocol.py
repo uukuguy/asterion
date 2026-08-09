@@ -469,6 +469,7 @@ def _validate_action_proposal(value: object) -> None:
         value,
         {
             "action_id",
+            "authority_revision",
             "idempotency_key",
             "kind",
             "target",
@@ -480,6 +481,9 @@ def _validate_action_proposal(value: object) -> None:
         "action proposal payload",
     )
     _require_opaque_id(payload.get("action_id"), "action proposal identity")
+    _require_positive_integer(
+        payload.get("authority_revision"), "action proposal authority revision"
+    )
     _require_opaque_id(
         payload.get("idempotency_key"), "action proposal idempotency key"
     )

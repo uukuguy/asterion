@@ -235,6 +235,7 @@ export type ControlEvent =
       "action.proposed",
       {
         readonly action_id: string;
+        readonly authority_revision: number;
         readonly idempotency_key: string;
         readonly kind: ActionKind;
         readonly target: ActionTarget;

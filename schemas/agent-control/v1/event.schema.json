@@ -182,6 +182,7 @@
       "additionalProperties": false,
       "required": [
         "action_id",
+        "authority_revision",
         "idempotency_key",
         "kind",
         "target",
@@ -192,6 +193,7 @@
       ],
       "properties": {
         "action_id": {"$ref": "#/$defs/opaque_id"},
+        "authority_revision": {"type": "integer", "minimum": 1},
         "idempotency_key": {"$ref": "#/$defs/opaque_id"},
         "kind": {
           "enum": [
