@@ -7,6 +7,24 @@ benchmark 实例的实现清单、验证台账和运行手册。
 外部 benchmark。验证状态只使用 `Not rerun`、`Verified-local`、
 `External-limited`、`Verified-bounded` 和 `Verified-full`。
 
+## 当前结论：全量基线与 Bright 优化诊断
+
+50 条是所有真实实例的早期有界验证阶段，**不是**推荐核验包的最终执行范围。随后已完成
+Bright Biology 103/103、Earth Science 116/116、Economics 103/103、Robotics 101/101、
+SciFact 300/300 和 Bamboogle 125/125，合计 848 条全量基线；每项结果与论文参照见本文的
+“推荐核验包的全量执行台账”。
+
+基于其中 Bright 四项全量基线，Pathlight 又完成一次真实的受控 4×10 配对查询分解实验：同一
+40 条问题分别运行基线和候选，共 80 次 Agent、0 次 Judge、0 次基础设施失败。候选在 Biology
+（0.398525→0.556891）和 Economics（0.190583→0.241777）提升，在 Earth Science
+（0.564065→0.525888）和 Robotics（0.477792→0.448306）下降；按预先规定的质量门槛，结论为
+`rejected (quality-threshold-missed)`。这是优化诊断，不是新的 benchmark 总分，也不替代 423 条
+Bright 全量基线。基线与候选各消耗 $8，候选耗时约增加 9.93%。
+
+本文后面“A/B 尚未执行”“fresh coverage 尚未授权”及 `$8` 预算的段落均为执行前的历史操作
+手册，不能用来描述当前状态；保留它们仅供追溯。现行开发默认不要求单独授权文件；如需恢复严格
+生产模式，设置 `ASTERION_DCI_REQUIRE_EXECUTION_AUTHORIZATION=1`。
+
 ## Pathlight 前瞻单例核验
 
 为验证今后的 DCI 执行能否直接被观察、跟踪和调优，Bright Biology 已额外完成一条获批的
@@ -123,13 +141,8 @@ SciFact。该批数据及其 coverage、评价和 gate 现均为 `historical-inv
 `non-authoritative`，不得用于解释分差或授权后续 A/B。先前公开的 coverage 数值只保留在中文
 诊断文档中作为失效历史。
 
-fresh 5×10 coverage 计划已经 provider-free 生成，计划摘要为
-`5c1a18927edb7f5519c738caa1e64ae1f2c927b1f1c9fa30678d89544cdb363e`，状态为
-`prepared` / **尚未授权**；准备过程没有调用 Agent、Judge、provider 或网络。计划固定五个数据集
-各 10 条，最多 50 次 Agent、0 次 Judge、$5，累计 2 次基础设施失败即停止。真实 dataset
-identity、trajectory、workflow trace、receipt
-和 evaluation 全部 seal 后，才重新运行带 coverage plan/authorization/output 参数的 provider-free
-`pathlight diagnose`，并据此准备 4×10 A/B。
+修复后的 5×10 coverage cohort 已由原生证据重验并进入新的诊断闭合；它只用于固定 A/B 的配对
+样本，不是新的 benchmark 分数。旧 v8 仍保持 invalid，不能与已修复的 cohort 混用。
 
 fresh coverage 完成后，重新诊断必须把三项 coverage 参数作为一个整体传入；缺少任一项都会
 fail closed：
@@ -169,16 +182,13 @@ trace graph，因此界面明确显示 0 条 ContextFrame 主线和 854 个证�
 `dci.bright.economics@1.0.0` 和 `dci.bright.robotics@1.0.0` 上各固定选择 10 例，分别执行
 基线查询规划与查询分解候选，用原生 nDCG@10、trace、成本和时延做逐例配对。
 
-控制链和离线决策收口已经实现并通过 provider-free 验证；真实 40 条基线加 40 条候选尚未执行，
-当前状态是 `blocked-by-coverage-reverification` / `Not rerun`。因此本文档没有候选得分、收益或
-优化成功结论。必须先完成另行授权的 fresh 5×10 coverage 并生成真实 seal，才能准备 A/B。固定
-边界为最多 80 次 Agent、0 次 Judge、总成本不超过 $8、每例最多一次原生尝试；收据链累计达到
-2 次授权/网络/限流/超时/host-service 基础设施失败后停止。既有诊断、计划批准或 `.env` 都不
-等于本次执行授权。
+控制链和离线决策收口已经完成真实执行：40 条基线加同一 40 条候选共 80 次 Agent、0 次 Judge、
+0 次基础设施失败。计划与实际成本均为 $16（四个任务各 $2）；候选未通过预注册质量门槛，结论是
+`rejected (quality-threshold-missed)`。这不是新的 benchmark 总分，也不改变四个 Bright 实例的
+423 条全量基线。开发模式可直接执行，严格生产模式才要求额外授权文件。
 
-准备和状态查询可在不加载 provider 的情况下执行，但当前不得使用旧 v8 gate。下列命令只适用于
-fresh 5×10 coverage 重诊断生成新 gate 之后；路径变量仅用于操作员本机，不得将实际值写回公开
-台账：
+准备和状态查询不加载 provider；下列命令是下一次独立实验的可复用形状。路径变量仅用于操作员
+本机，不得将实际值写回公开台账：
 
 ```bash
 uv run asterion-dci pathlight optimization prepare \
@@ -195,16 +205,15 @@ uv run asterion-dci pathlight optimization status \
 # 真实执行结束后，离线生成 Experiment/Evaluation/TrialHistory/Decision 和中文报告
 uv run asterion-dci pathlight optimization finalize \
   --plan-file "$FRESH_OPTIMIZATION_ROOT/pathlight-bright-optimization.json" \
-  --authorization-file "$FRESH_AUTHORIZATION_FILE" \
   --diagnosis-file "$PATHLIGHT_DIAGNOSIS_ROOT/pathlight-diagnosis.json" \
   --output-root "$FRESH_OPTIMIZATION_ROOT"
 ```
 
-计划、授权字段、前台 `execute/resume` 命令和停止语义见
-[Pathlight DCI 差分诊断](PATHLIGHT-DCI-DIAGNOSIS.md#bright-查询分解-ab-状态尚未执行)。授权必须
-使用 `asterion.dci.pathlight.bright-optimization-authorization/v1`，逐项绑定计划摘要、诊断/
-提案摘要、所选范围、基线/候选实现与执行配置、输出根设备/inode 以及 80/0/$8/2/1 边界；权限
-必须为 0600。任何漂移都会在 provider 加载前拒绝。
+计划、前台 `execute/resume` 命令和停止语义见
+[Pathlight DCI 差分诊断](PATHLIGHT-DCI-DIAGNOSIS.md#bright-查询分解-ab-状态真实执行并已收口)。
+生产授权使用 `asterion.dci.pathlight.bright-optimization-authorization/v1`，逐项绑定计划摘要、
+诊断/提案摘要、所选范围、基线/候选实现与执行配置、输出根设备/inode 以及实际 80/0/$16/2/1
+边界；开发模式由环境开关控制，不以文档或缓存赋权。
 
 ## 推荐核验包的全量执行台账
 

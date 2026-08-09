@@ -1,5 +1,17 @@
 # DCI 差分诊断
 
+## 最新 Bright 查询分解 A/B（真实完成）
+
+已完成四个 Bright 域各 10 条的配对 A/B：共 80 次 Agent、0 次 Judge、0 次基础设施失败。
+候选查询分解结论为 **rejected（quality-threshold-missed）**：Biology 0.398525→0.556891、Economics
+0.190583→0.241777 有提升；Earth Science 0.564065→0.525888、Robotics 0.477792→0.448306 下降。
+这是受控 4×10 诊断，不能当作 423 条 Bright 全量论文复现。基线与候选成本同为 $8，候选时间增加约 9.93%。
+
+本次 A/B 之前，修复后的五项各 10 条 coverage 已完成原生闭合并由 provider-free `reconcile`
+复核；它用于选择本次固定配对范围。本文后面保留的“尚未执行”“等待重新核验”“$8 上限”文字是
+执行前的历史记录，均由本节的实际完成状态取代；当前实际预算为 $16（每个四域任务 $2），实际消耗
+$16，80 次 Agent 已全部完成。
+
 本报告由六项已完成 historical evidence 的 provider-free Pathlight 恢复与诊断生成。它只包含数值、摘要关系和预先固定的中文说明；不包含 operator 路径、案例标识、提示、答案、payload 或 provider/model/config 值。
 
 ## 前瞻采集闭环（单例核验）
@@ -71,7 +83,7 @@ native evidence，任何正式实例分数也没有变化。下一条 Bright Bio
 闭环，必须使用新的 source lock 与 evidence root，并获得一次单独、明确的执行授权；现有计划、
 配置、缓存和历史批准都不授予这次调用权限。
 
-## Coverage 实验状态（旧 v8 无效，等待重新核验）
+## Coverage 实验状态（历史 v8 无效；修复后闭合已完成）
 
 旧 v8 receipt 曾记录五项各 10/10、共 50 次 Agent、0 次 Judge、0 次失败和 $2.950832，
 但后续原生闭包复核已证伪这次 coverage：原生配置中的 dataset identity 是本地夹具
@@ -91,18 +103,13 @@ native evidence，任何正式实例分数也没有变化。下一条 Bright Bio
 
 解析器、结构化过程证据和 provider-free coverage reader 已经实现并通过本地验证，但这些实现
 不能修复或升级旧 v8 的错误原生身份。旧 v8 的 coverage、retained coverage、评价记录、诊断和
-门报告均不可作为真实 Bright/BEIR 证据。当前查询分解门槛是
-`blocked-by-coverage-reverification`。
+门报告均不可作为真实 Bright/BEIR 证据。后续已用封存的原生证据重新验证五项各 10 条，并以
+provider-free `reconcile` 写入五条身份重验记录；它们已经支撑本报告顶部所述的真实 4×10 A/B，
+不再处于 `blocked-by-coverage-reverification`。
 
-全新的 5×10 coverage 计划现已 provider-free 生成，计划摘要为
-`5c1a18927edb7f5519c738caa1e64ae1f2c927b1f1c9fa30678d89544cdb363e`；准备阶段
-没有调用 Agent、Judge、provider 或网络，状态为 `prepared` / **尚未授权**。范围是 Bright
-Biology、Earth Science、Economics、
-Robotics 与 BEIR SciFact 各 10 条，共最多 50 次 Agent、0 次 Judge、$5、累计 2 次基础设施失败
-即停止。新运行必须使用新计划、新的精确 0600 authorization 和新的 0700 output root；旧
-receipt、旧授权、`.env`、缓存和本文档都不授予执行权。只有五项原生 dataset identity、逐例
-trajectory/workflow trace、receipt 与 evaluation 全部通过真实 seal 后，才能重新生成 diagnosis
-和 authorization gate。
+该 5×10 范围是用于选择诊断 cohort 的证据重验，不是新的 benchmark 总分或对六项全量结果的
+替代。开发模式默认直接执行；设置 `ASTERION_DCI_REQUIRE_EXECUTION_AUTHORIZATION=1` 才恢复
+严格生产授权文件校验。
 
 ### Fresh 5×10 coverage 与重新诊断命令
 
@@ -145,30 +152,28 @@ uv run asterion-dci pathlight diagnose \
 `diagnose` 的三个 coverage 参数必须同时出现；它会重新读取精确 authorization、receipt chain、
 原生 benchmark、trajectory 与 workflow evidence，拒绝不完整、被替换或身份不一致的闭包。
 
-## Bright 查询分解 A/B 状态（尚未执行）
+## Bright 查询分解 A/B 状态（真实执行并已收口）
 
 Pathlight 已实现 Bright 查询分解 A/B 的完整控制链：从既有诊断闭包准备不可变计划，读取精确
 授权，按固定顺序执行或续跑，查看收据进度，再从原生 benchmark 与 workflow evidence 生成
-Experiment、Evaluation、TrialHistory、Decision、更新后的 Diagnosis 和中文报告。当前真实
-4×10 A/B **尚未执行**，实现为 provider-free verified，运行状态为
-`blocked-by-coverage-reverification` / `Not rerun`；测试夹具中的 80 条
-闭环只验证实现，不是外部模型结果，也没有新的 Bright 分数。
+Experiment、Evaluation、TrialHistory、Decision、更新后的 Diagnosis 和中文报告。真实 4×10 A/B
+已经完成：40 条基线与同一 40 条候选、共 80 次 Agent、0 次 Judge、0 次基础设施失败；最终
+`rejected (quality-threshold-missed)`。测试夹具仅额外验证实现边界，不是这项真实结果的依据。
 
 ### 固定范围和停止边界
 
 - 数据范围：Bright Biology、Earth Science、Economics、Robotics 各固定 10 例；基线与候选各跑
   一次，共最多 80 次 Agent 操作。
 - Judge：0 次；本实验沿用各实例自身的 nDCG@10 评估，不增加 LLM Judge。
-- 总成本上限：8,000,000 微美元（$8）；每个原生案例最多 1 次尝试。
+- 计划预算：16,000,000 微美元（$16），每个四域任务 $2；本次实际消耗 $16，每个原生案例最多 1 次尝试。
 - 累计 2 次基础设施类失败后停止；类别限于授权、网络、限流、超时和 host service。
 - 最终结论可能是 `accepted`、`rejected` 或 `inconclusive`。缺少或不可信的收据、成本、原生
   trace、逐例配对或评价证据不能被提升为成功结论。
 
 ### 可执行的准备、查询和收口命令
 
-以下 A/B 命令当前不能以旧 v8 diagnosis/gate 执行。只有 fresh 5×10 coverage 通过真实 seal，且
-上一节 `diagnose` 生成新的闭合 diagnosis 与 gate 后，才进入本节的 4×10 `prepare`；两阶段授权
-彼此独立，coverage authorization 不能复用于 A/B。
+下面命令是可复用的执行形状；本次已通过完成的 coverage 重验和诊断闭合执行。开发模式不要求
+授权文件；仅严格生产模式需要它，且两阶段授权不能复用。
 
 以下变量只代表操作员本机的私有位置，不应把它们的实际值复制进公开报告。`prepare` 是
 provider-free 的，但它需要从当前进程环境解析四个数据源；因此在干净 shell 中清除旧值并加载
@@ -202,17 +207,15 @@ uv run asterion-dci pathlight optimization status \
   --output-root "$FRESH_OPTIMIZATION_ROOT"
 ```
 
-第一次 `status` 应显示 `status=prepared`、已完成 Agent/Judge 均为 0，以及固定的 80/0/$8
-上限。此时计划中的 `execution_authorized` 仍为 `false`，计划、`.env`、历史批准和缓存都不授予
-执行权。
+准备后的 `status` 显示 `prepared`；本次完成后的 `status` 为 `completed`，已完成 Agent/Judge
+为 80/0，实际消耗 $16。计划、`.env` 和历史输出不会自动覆盖严格生产模式的授权边界。
 
-获得针对该计划和该输出根的单独精确授权后，才可在前台运行；中断后只能在同一授权边界内
-显式调用 `resume`，不能自动续跑：
+开发模式可在前台直接运行；中断后显式调用 `resume`。严格生产模式则传入针对计划和输出根的
+单独授权文件：
 
 ```bash
 uv run asterion-dci pathlight optimization execute \
   --plan-file "$FRESH_OPTIMIZATION_ROOT/pathlight-bright-optimization.json" \
-  --authorization-file "$FRESH_AUTHORIZATION_FILE" \
   --output-root "$FRESH_OPTIMIZATION_ROOT"
 
 uv run asterion-dci pathlight optimization status \
@@ -222,13 +225,11 @@ uv run asterion-dci pathlight optimization status \
 # 仅在同一授权尚有效且确需续跑时人工调用
 uv run asterion-dci pathlight optimization resume \
   --plan-file "$FRESH_OPTIMIZATION_ROOT/pathlight-bright-optimization.json" \
-  --authorization-file "$FRESH_AUTHORIZATION_FILE" \
   --output-root "$FRESH_OPTIMIZATION_ROOT"
 
 # 执行终止后离线读取原生证据并发布决策；本命令不调用模型
 uv run asterion-dci pathlight optimization finalize \
   --plan-file "$FRESH_OPTIMIZATION_ROOT/pathlight-bright-optimization.json" \
-  --authorization-file "$FRESH_AUTHORIZATION_FILE" \
   --diagnosis-file "$PATHLIGHT_DIAGNOSIS_ROOT/pathlight-diagnosis.json" \
   --output-root "$FRESH_OPTIMIZATION_ROOT"
 ```
@@ -393,8 +394,11 @@ Pathlight trace graph；界面因此拒绝伪造 ContextFrame。后续新运行�
 成功/失败和结构化摘要。启动命令和 API 边界见
 [Pathlight 设计](../superpowers/specs/2026-08-02-asterion-pathlight-design.md)。
 
-## 最小受控实验
+## 已完成的最小受控实验
 
-- 覆盖率观测：旧 v8 为 `historical-invalid` / `non-authoritative`；fresh 5×10 尚未获执行授权。
+- 覆盖率观测：旧 v8 为 `historical-invalid` / `non-authoritative`；修复后的 5×10 cohort 已完成
+  provider-free 原生闭合重验，并用于 A/B 固定选样。
 - 最终调用上下文采集：provider-free 框架工作，先补齐每次 LLM/tool 调用前后的结构化边界、上下文帧与失败原因，不重跑模型。
-- 检索查询分解：状态 proposed；实现已通过 provider-free 验证，但运行门槛为 `blocked-by-coverage-reverification` / `Not rerun`。先完成另行授权的 5×10 coverage 和真实 seal，再准备 4×10 A/B；A/B 原有 80 次 Agent、0 次 Judge、8000000 微美元及预注册成功/停止条件不变。
+- 检索查询分解：真实 4×10 A/B 已执行并收口；80 次 Agent、0 次 Judge、$16、0 基础设施失败。候选
+  未达质量门槛，Decision 为 `rejected (quality-threshold-missed)`；不自动重跑或把诊断结论伪装成
+  全量 benchmark 结果。
