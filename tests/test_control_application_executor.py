@@ -5,7 +5,7 @@ import json
 import sys
 import tempfile
 import unittest
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Iterator, Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
@@ -41,6 +41,18 @@ from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 
 TRACE_CAPABILITY = CapabilityRef("trace.capability", "1.0.0")
 SENTINEL = "SENTINEL_SECRET"
+
+
+class HostileInnerRuntimeOptions(Mapping[str, str]):
+    def __getitem__(self, key: str) -> str:
+        del key
+        raise RuntimeError(f"{SENTINEL} leaked")
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(("token",))
+
+    def __len__(self) -> int:
+        return 1
 
 
 class MutableSignal:
@@ -564,6 +576,14 @@ class TestApplicationActionExecutor(unittest.IsolatedAsyncioTestCase):
                 },
                 {
                     ("example.provider", "alpha", "1.0.0"): {},
+                },
+                {
+                    (
+                        "example.provider",
+                        "alpha",
+                        "1.0.0",
+                        "fake.runtime",
+                    ): HostileInnerRuntimeOptions(),
                 },
             )
             for runtime_options in cases:

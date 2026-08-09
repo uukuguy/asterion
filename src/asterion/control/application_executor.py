@@ -282,15 +282,15 @@ def _freeze_runtime_options(
             raise ValueError("application runtime options are invalid")
         try:
             raw_options = runtime_options[identity]
+            if not isinstance(raw_options, Mapping):
+                raise ValueError
+            frozen_options: dict[str, str] = {}
+            for key, value in raw_options.items():
+                if type(key) is not str or type(value) is not str:
+                    raise ValueError
+                frozen_options[key] = value
         except Exception:
             raise ValueError("application runtime options are invalid") from None
-        if not isinstance(raw_options, Mapping):
-            raise ValueError("application runtime options are invalid")
-        frozen_options: dict[str, str] = {}
-        for key, value in raw_options.items():
-            if type(key) is not str or type(value) is not str:
-                raise ValueError("application runtime options are invalid")
-            frozen_options[key] = value
         values[identity] = MappingProxyType(frozen_options)
     return MappingProxyType(values)
 
