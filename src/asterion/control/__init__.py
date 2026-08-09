@@ -10,6 +10,11 @@ from asterion.control.evidence import (
     CONTROL_PATHLIGHT_GAP,
     ControlEvidenceProjector,
 )
+from asterion.control.execution import (
+    ActionExecutionError,
+    ActionExecutionFailure,
+    ActionExecutionReceipt,
+)
 from asterion.control.authority import (
     ActionReceipt,
     AdmissionDecision,
@@ -90,6 +95,9 @@ __all__ = [
     "AGENT_CONTROL_PROTOCOL",
     "AGENT_SYSTEM_PROTOCOL",
     "ActionReceipt",
+    "ActionExecutionError",
+    "ActionExecutionFailure",
+    "ActionExecutionReceipt",
     "ActionExecutor",
     "ActionState",
     "AdmissionDecision",

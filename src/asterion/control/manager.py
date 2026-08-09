@@ -6,7 +6,16 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from asterion.control.authority import AuthorityLedger, BudgetUsage
+from asterion.control.authority import (
+    ActionReceipt,
+    AuthorityError,
+    AuthorityLedger,
+    BudgetUsage,
+)
+from asterion.control.execution import (
+    ActionExecutionFailure,
+    ActionExecutionReceipt,
+)
 from asterion.control.evidence import ControlEvidenceProjector
 from asterion.control.host import (
     ControlCommand,
@@ -25,8 +34,11 @@ from asterion.control.state import (
     ControlState,
     ControlStateError,
     apply_action_admission,
+    apply_action_resolution,
+    mark_action_running,
     reduce_control_event,
 )
+from asterion.runtime.host import CancellationSignal
 from asterion.control.system import AgentSystemPlan
 from asterion.pathlight.recorder import (
     NOOP_PATHLIGHT_RECORDER,
@@ -43,8 +55,17 @@ class ControlHostTransportError(ControlHostError):
 
 
 class ActionExecutor(Protocol):
-    async def execute(self, proposal: ControlEvent) -> object:
-        """Execute one already-admitted action in a later integration phase."""
+    async def execute(
+        self, proposal: ControlEvent, signal: CancellationSignal
+    ) -> ActionExecutionReceipt:
+        """Return an exact receipt or raise ``ActionExecutionFailure``."""
+        ...
+
+
+class _NeverCancelled:
+    @property
+    def cancelled(self) -> bool:
+        return False
 
 
 @dataclass(frozen=True)
@@ -68,6 +89,7 @@ class ControlHost:
         client: ControlPlaneClient,
         action_executor: ActionExecutor,
         clock_ms: Callable[[], int],
+        cancellation_signal: CancellationSignal | None = None,
         pathlight: PathlightRecorder = NOOP_PATHLIGHT_RECORDER,
     ) -> None:
         if (
@@ -75,6 +97,12 @@ class ControlHost:
             or not isinstance(authority, AuthorityLedger)
             or not callable(clock_ms)
             or not callable(getattr(action_executor, "execute", None))
+            or (
+                cancellation_signal is not None
+                and not isinstance(
+                    getattr(cancellation_signal, "cancelled", None), bool
+                )
+            )
             or client.manifest != plan.control_binding.manifest
             or authority.usage != BudgetUsage.zero()
             or authority.reserved_action_ids
@@ -98,6 +126,7 @@ class ControlHost:
         self._journal = journal
         self._client = client
         self._action_executor = action_executor
+        self._cancellation_signal = cancellation_signal or _NeverCancelled()
         self._clock_ms = clock_ms
         self._evidence = ControlEvidenceProjector(pathlight)
         try:
@@ -118,6 +147,10 @@ class ControlHost:
                         authority_revision=authority.envelope.revision,
                     ),
                 )
+                self._recovered_proposals: dict[str, ControlEvent] = {}
+                self._recovered_admissions: dict[str, ControlCommand] = {}
+                self._recovered_terminals: dict[str, ControlCommand] = {}
+                self._recovered_running: set[str] = set()
             else:
                 entries = self._journal.replay(JournalCursor(0))
                 if len(entries) != position:
@@ -167,6 +200,10 @@ class ControlHost:
                     raise JournalConflictError("control journal identity conflicts")
                 self._state = recovered.state
                 self._authority = recovered.authority._mutable_copy()
+                self._recovered_proposals = dict(recovered.proposals)
+                self._recovered_admissions = dict(recovered.admission_commands)
+                self._recovered_terminals = dict(recovered.terminal_commands)
+                self._recovered_running = set(recovered.running_action_ids)
                 authority_entry = entries[-1]
                 if self._journal.position != position:
                     raise JournalConflictError("control journal changed")
@@ -211,6 +248,7 @@ class ControlHost:
             ) from None
 
     async def pump(self, *, until_terminal: bool = False) -> None:
+        await self._resume_recovered_actions()
         cursor = EventCursor(
             generation=self._state.generation,
             sequence=self._state.next_sequence - 1,
@@ -311,3 +349,239 @@ class ControlHost:
             },
         )
         await self.dispatch(command)
+        if decision.status == "admitted":
+            await self._execute_admitted_action(proposal)
+
+    async def _resume_recovered_actions(self) -> None:
+        for action_id in tuple(sorted(self._recovered_proposals)):
+            action = self._state.actions.get(action_id)
+            if action is None:
+                raise ControlHostError("control action recovery failed")
+            terminal = self._recovered_terminals.get(action_id)
+            if terminal is not None:
+                await self._send_persisted_command(terminal)
+                self._clear_recovered_action(action_id)
+                continue
+            if action.status == "rejected":
+                command = self._recovered_admissions.get(action_id)
+                if command is None:
+                    command = self._admission_command(action_id)
+                    self._persist_command(command)
+                await self._send_persisted_command(command)
+                self._clear_recovered_action(action_id)
+                continue
+            if action.status == "admitted":
+                command = self._recovered_admissions.get(action_id)
+                if command is None:
+                    command = self._admission_command(action_id)
+                    self._persist_command(command)
+                await self._send_persisted_command(command)
+                await self._execute_admitted_action(
+                    self._recovered_proposals[action_id]
+                )
+                self._clear_recovered_action(action_id)
+                continue
+            if action.status == "running":
+                receipt = self._authority.receipts.get(action_id)
+                if receipt is not None:
+                    await self._complete_action(
+                        action_id,
+                        status="succeeded",
+                        reason_code="executed",
+                        receipt_ref=receipt.receipt_ref,
+                        usage=receipt.usage,
+                    )
+                else:
+                    await self._complete_action(
+                        action_id,
+                        status="uncertain",
+                        reason_code="progress-unknown",
+                        receipt_ref=None,
+                    )
+                self._clear_recovered_action(action_id)
+                continue
+            self._clear_recovered_action(action_id)
+
+    def _clear_recovered_action(self, action_id: str) -> None:
+        self._recovered_proposals.pop(action_id, None)
+        self._recovered_admissions.pop(action_id, None)
+        self._recovered_terminals.pop(action_id, None)
+        self._recovered_running.discard(action_id)
+
+    async def _execute_admitted_action(self, proposal: ControlEvent) -> None:
+        action_id = str(proposal.payload["action_id"])
+        if self._cancellation_signal.cancelled:
+            await self._complete_action(
+                action_id,
+                status="cancelled",
+                reason_code="cancelled-before-start",
+                receipt_ref=None,
+            )
+            return
+        try:
+            entry = self._journal.append(
+                self._journal_position,
+                JournalRecord.action_running(
+                    action_id=action_id,
+                    proposal_digest=self._state.actions[action_id].proposal_digest,
+                ),
+            )
+            self._journal_position = max(self._journal_position, entry.position)
+            self._state = mark_action_running(self._state, action_id)
+        except (
+            JournalConflictError,
+            ControlStateError,
+            KeyError,
+            TypeError,
+            ValueError,
+        ):
+            raise ControlHostError("control action running fence failed") from None
+
+        try:
+            result = await self._action_executor.execute(
+                proposal, self._cancellation_signal
+            )
+        except ActionExecutionFailure as failure:
+            if type(failure) is not ActionExecutionFailure:
+                await self._resolve_unknown_progress(action_id)
+                return
+            await self._complete_action(
+                action_id,
+                status=failure.status,
+                reason_code=failure.reason_code,
+                receipt_ref=failure.receipt_ref,
+            )
+            return
+        except Exception:
+            await self._resolve_unknown_progress(action_id)
+            return
+
+        if type(result) is not ActionExecutionReceipt:
+            await self._resolve_unknown_progress(action_id)
+            return
+        receipt = result
+        authority_receipt = ActionReceipt(
+            action_id=receipt.action_id,
+            receipt_ref=receipt.receipt_ref,
+            usage=receipt.usage,
+        )
+        try:
+            if receipt.action_id != action_id:
+                raise AuthorityError("action receipt identity mismatches")
+            self._authority.preview_settlement(action_id, authority_receipt)
+        except (AuthorityError, TypeError, ValueError):
+            await self._resolve_unknown_progress(action_id)
+            return
+
+        entry = self._journal.append(
+            self._journal_position,
+            JournalRecord.action_receipted(
+                action_id=receipt.action_id,
+                receipt_ref=receipt.receipt_ref,
+                usage=receipt.usage,
+            ),
+        )
+        self._journal_position = max(self._journal_position, entry.position)
+        try:
+            self._authority.settle(action_id, authority_receipt)
+        except AuthorityError:
+            raise ControlHostError("durable action receipt settlement failed") from None
+        await self._complete_action(
+            action_id,
+            status="succeeded",
+            reason_code="executed",
+            receipt_ref=receipt.receipt_ref,
+            execution_receipt=receipt,
+        )
+
+    async def _resolve_unknown_progress(self, action_id: str) -> None:
+        await self._complete_action(
+            action_id,
+            status="uncertain",
+            reason_code="progress-unknown",
+            receipt_ref=None,
+        )
+
+    async def _complete_action(
+        self,
+        action_id: str,
+        *,
+        status: str,
+        reason_code: str,
+        receipt_ref: str | None,
+        execution_receipt: ActionExecutionReceipt | None = None,
+        usage: BudgetUsage | None = None,
+    ) -> None:
+        try:
+            self._state = apply_action_resolution(
+                self._state,
+                action_id,
+                status,
+                receipt_ref=receipt_ref,
+            )
+        except ControlStateError:
+            raise ControlHostError(
+                "control action terminal transition failed"
+            ) from None
+        self._evidence.project_execution(
+            action_id=action_id,
+            status=status,
+            reason_code=reason_code,
+            receipt_ref=receipt_ref,
+            receipt=execution_receipt,
+            usage=(
+                execution_receipt.usage
+                if execution_receipt is not None
+                else usage or BudgetUsage.zero()
+            ),
+            journal_position=self._journal_position,
+            timestamp_ns=self._clock_ms() * 1_000_000,
+        )
+        command = ControlCommand(
+            command_id=f"terminal:{action_id}",
+            session_id=self._state.session_id,
+            authority_revision=self._state.actions[action_id].authority_revision,
+            type="action.resolve",
+            payload={
+                "action_id": action_id,
+                "resolution": status,
+                "reason_code": reason_code,
+                "receipt_ref": receipt_ref,
+            },
+        )
+        self._persist_command(command)
+        await self._send_persisted_command(command)
+
+    def _admission_command(self, action_id: str) -> ControlCommand:
+        action = self._state.actions[action_id]
+        if action.status not in {"admitted", "rejected"} or action.reason is None:
+            raise ControlHostError("control admission recovery failed")
+        return ControlCommand(
+            command_id=f"admission:{action_id}",
+            session_id=self._state.session_id,
+            authority_revision=action.authority_revision,
+            type="action.resolve",
+            payload={
+                "action_id": action_id,
+                "resolution": action.status,
+                "reason_code": action.reason,
+                "receipt_ref": None,
+            },
+        )
+
+    def _persist_command(self, command: ControlCommand) -> None:
+        try:
+            entry = self._journal.accept_command(
+                command, expected_position=self._journal_position
+            )
+            self._journal_position = max(self._journal_position, entry.position)
+        except (JournalConflictError, TypeError, ValueError):
+            raise ControlHostError("control command journal admission failed") from None
+
+    async def _send_persisted_command(self, command: ControlCommand) -> None:
+        try:
+            await self._client.send(command)
+        except Exception:
+            raise ControlHostTransportError(
+                "persisted control command delivery is uncertain"
+            ) from None

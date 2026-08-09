@@ -32,6 +32,7 @@ JOURNAL_RECORD_KINDS = frozenset(
         "command.accepted",
         "event.accepted",
         "action.decided",
+        "action.running",
         "action.receipted",
         "checkpoint.sealed",
         "fault.projected",
@@ -191,6 +192,17 @@ class JournalRecord:
                 "action_id": action_id,
                 "receipt_ref": receipt_ref,
                 "usage": _public_usage(usage),
+            },
+        )
+
+    @classmethod
+    def action_running(cls, *, action_id: str, proposal_digest: str) -> JournalRecord:
+        return cls(
+            record_id=f"running:{action_id}",
+            kind="action.running",
+            payload={
+                "action_id": action_id,
+                "proposal_digest": proposal_digest,
             },
         )
 
@@ -883,6 +895,11 @@ def _validate_record_payload(kind: str, value: object) -> None:
         _require_opaque_id(value["action_id"], "journal receipt action")
         _require_opaque_id(value["receipt_ref"], "journal receipt reference")
         _validate_usage(value["usage"])
+        return
+    if kind == "action.running":
+        _require_fields(value, {"action_id", "proposal_digest"})
+        _require_opaque_id(value["action_id"], "journal running action")
+        _require_digest(value["proposal_digest"], "journal running proposal digest")
         return
     if kind == "checkpoint.sealed":
         _require_fields(value, {"checkpoint_event"})

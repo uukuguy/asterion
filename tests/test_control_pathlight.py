@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from collections.abc import Sequence
 from pathlib import Path
+from typing import cast
 
-from asterion.control.authority import AuthorityLedger, PortfolioGrant
+from asterion.control.authority import AuthorityLedger, BudgetUsage, PortfolioGrant
+from asterion.control.execution import ActionExecutionReceipt
+from asterion.control.host import ControlEvent
 from asterion.control.journal import MemoryCanonicalJournal
 from asterion.control.manager import ControlHost
 from asterion.control.system import resolve_agent_system
 from asterion.control.testing import FakeControlPlaneClient
 from asterion.pathlight import MemoryPathlightRecorder, PathlightError
+from asterion.runtime.host import CancellationSignal
 from tests.test_control_authority import _envelope
 from tests.test_control_host import SpyExecutor, _create_command
 from tests.test_control_system import _control_factories, _manifest, _provider
@@ -29,7 +34,7 @@ class FailingRecorder:
         del event
         raise PathlightError("SENTINEL_SECRET recorder body")
 
-    def record_many(self, events: object) -> None:
+    def record_many(self, events: Sequence[object]) -> None:
         del events
         raise PathlightError("SENTINEL_SECRET recorder body")
 
@@ -48,6 +53,19 @@ class FailingSequenceRecorder(FailingRecorder):
 
 
 class TestControlPathlight(unittest.IsolatedAsyncioTestCase):
+    class SuccessfulExecutor:
+        async def execute(
+            self, proposal: object, signal: CancellationSignal
+        ) -> ActionExecutionReceipt:
+            del proposal, signal
+            return ActionExecutionReceipt(
+                action_id="action-1",
+                receipt_ref="receipt-1",
+                usage=BudgetUsage(0, 80, 0, 80, 4_000),
+                artifact_ids=("artifact-SENTINEL_SECRET",),
+                media_types=("application/json",),
+            )
+
     async def test_control_host_projects_complete_safe_causal_chain(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -92,7 +110,8 @@ class TestControlPathlight(unittest.IsolatedAsyncioTestCase):
             snapshot = host.snapshot()
             graph = recorder.snapshot()
             assert graph is not None
-            kinds = tuple(event["kind"] for event in graph["events"])
+            events = cast(list[dict[str, object]], graph["events"])
+            kinds = tuple(event["kind"] for event in events)
             self.assertEqual(kinds[0:2], ("system", "session"))
             self.assertIn("action", kinds)
             self.assertIn("admission", kinds)
@@ -106,7 +125,9 @@ class TestControlPathlight(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("goal-ref-1", rendered)
             self.assertNotIn("SENTINEL_SECRET", rendered)
 
-    async def test_recorder_failure_does_not_change_control_result_and_records_gap(self) -> None:
+    async def test_recorder_failure_does_not_change_control_result_and_records_gap(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             plan = resolve_agent_system(
                 _manifest(),
@@ -167,6 +188,103 @@ class TestControlPathlight(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(snapshot.state.session_status, "completed")
             self.assertEqual(snapshot.evidence_gaps, ("control-pathlight-recording",))
             self.assertNotIn("SENTINEL_SECRET", repr(snapshot))
+
+    async def test_execution_projection_contains_only_digests_counts_and_usage(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = resolve_agent_system(
+                _manifest(),
+                application_providers=(_provider(root),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
+            )
+            from tests.test_control_execution import ExecutionClient, _proposal_events
+
+            prefix = _proposal_events()
+            completed_goal = ControlEvent.from_mapping(
+                {
+                    "protocol": "asterion.agent-control/v1",
+                    "event_id": "event-4",
+                    "session_id": "session-1",
+                    "generation": 1,
+                    "sequence": 4,
+                    "emitted_at": "2026-08-10T00:00:04Z",
+                    "type": "goal.updated",
+                    "payload": {"goal_id": "goal-1", "status": "completed"},
+                }
+            )
+            completed_session = ControlEvent.from_mapping(
+                {
+                    "protocol": "asterion.agent-control/v1",
+                    "event_id": "event-5",
+                    "session_id": "session-1",
+                    "generation": 1,
+                    "sequence": 5,
+                    "emitted_at": "2026-08-10T00:00:05Z",
+                    "type": "session.completed",
+                    "payload": {"reason_code": "goal-accepted"},
+                }
+            )
+            client = ExecutionClient(
+                plan.control_binding.manifest,
+                (*prefix, completed_goal, completed_session),
+            )
+            recorder = MemoryPathlightRecorder(_opaque_id(102))
+            host = ControlHost(
+                session_id="session-1",
+                generation=1,
+                plan=plan,
+                authority=AuthorityLedger(_envelope()),
+                journal=MemoryCanonicalJournal("session-1"),
+                client=client,
+                action_executor=self.SuccessfulExecutor(),
+                clock_ms=lambda: 1_000,
+                pathlight=recorder,
+            )
+
+            await host.pump()
+
+            graph = recorder.snapshot()
+            assert graph is not None
+            rendered = repr(graph)
+            self.assertIn("content_length", rendered)
+            self.assertIn("output_tokens", rendered)
+            self.assertNotIn("artifact-SENTINEL_SECRET", rendered)
+            self.assertNotIn("receipt-1", rendered)
+            self.assertNotIn(str(root), rendered)
+
+    async def test_execution_recorder_failure_does_not_change_success(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = resolve_agent_system(
+                _manifest(),
+                application_providers=(_provider(root),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
+            )
+            from tests.test_control_execution import ExecutionClient, _proposal_events
+
+            host = ControlHost(
+                session_id="session-1",
+                generation=1,
+                plan=plan,
+                authority=AuthorityLedger(_envelope()),
+                journal=MemoryCanonicalJournal("session-1"),
+                client=ExecutionClient(
+                    plan.control_binding.manifest, _proposal_events()
+                ),
+                action_executor=self.SuccessfulExecutor(),
+                clock_ms=lambda: 1_000,
+                pathlight=FailingRecorder(),
+            )
+
+            await host.pump()
+
+            snapshot = host.snapshot()
+            self.assertEqual(snapshot.state.actions["action-1"].status, "succeeded")
+            self.assertEqual(snapshot.evidence_gaps, ("control-pathlight-recording",))
 
 
 if __name__ == "__main__":

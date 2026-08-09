@@ -401,6 +401,12 @@ class AuthorityLedger:
         del self._reservations[action_id]
         self._receipts[action_id] = receipt
 
+    def preview_settlement(self, action_id: str, receipt: ActionReceipt) -> None:
+        """Validate an exact settlement without mutating the live ledger."""
+
+        preview = self._mutable_copy()
+        preview.settle(action_id, receipt)
+
     def replace_authority(self, envelope: AuthorityEnvelope) -> None:
         self._ensure_mutable()
         if (

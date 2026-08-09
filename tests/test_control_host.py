@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 from asterion.control.authority import AuthorityLedger
+from asterion.control.execution import ActionExecutionReceipt
 from asterion.control.host import (
     ControlCommand,
     ControlEvent,
@@ -19,6 +20,7 @@ from asterion.control.manager import (
     ControlHostTransportError,
 )
 from asterion.control.system import resolve_agent_system
+from asterion.runtime.host import CancellationSignal
 from tests.test_control_authority import _envelope, _proposal
 from tests.test_control_system import (
     _control_factories,
@@ -69,11 +71,15 @@ class AuditedJournal(MemoryCanonicalJournal):
         super().__init__(session_id)
         self.audit = audit
 
-    def accept_command(self, command: ControlCommand, *, expected_position: int | None = None):
+    def accept_command(
+        self, command: ControlCommand, *, expected_position: int | None = None
+    ):
         self.audit.append("journal.command")
         return super().accept_command(command, expected_position=expected_position)
 
-    def accept_event(self, event: ControlEvent, *, expected_position: int | None = None):
+    def accept_event(
+        self, event: ControlEvent, *, expected_position: int | None = None
+    ):
         self.audit.append("journal.event")
         return super().accept_event(event, expected_position=expected_position)
 
@@ -82,7 +88,10 @@ class SpyExecutor:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    async def execute(self, proposal: ControlEvent) -> object:
+    async def execute(
+        self, proposal: ControlEvent, signal: CancellationSignal
+    ) -> ActionExecutionReceipt:
+        del signal
         self.calls.append(str(proposal.payload["action_id"]))
         raise AssertionError("Phase 0 host must not execute applications")
 
@@ -162,7 +171,9 @@ class TestControlHost(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(calls, ["journal.command", "provider.send"])
 
-    async def test_send_failure_preserves_accepted_command_and_redacts_error(self) -> None:
+    async def test_send_failure_preserves_accepted_command_and_redacts_error(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             plan = resolve_agent_system(
                 _manifest(),
@@ -189,7 +200,9 @@ class TestControlHost(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(journal.position, 3)
             self.assertNotIn("SENTINEL_SECRET", str(raised.exception))
 
-    async def test_unauthorized_proposal_is_rejected_without_executor_contact(self) -> None:
+    async def test_unauthorized_proposal_is_rejected_without_executor_contact(
+        self,
+    ) -> None:
         target = {
             "kind": "application",
             "provider_id": "example.provider",
@@ -226,13 +239,29 @@ class TestControlHost(unittest.IsolatedAsyncioTestCase):
 
             await host.pump()
 
-            self.assertEqual(host.snapshot().state.actions["action-1"].status, "rejected")
+            self.assertEqual(
+                host.snapshot().state.actions["action-1"].status, "rejected"
+            )
             self.assertEqual(executor.calls, [])
             resolution = client.sent[-1]
             self.assertEqual(resolution.type, "action.resolve")
             self.assertEqual(resolution.payload["resolution"], "rejected")
 
-    async def test_authorized_proposal_reserves_budget_without_executing(self) -> None:
+    async def test_authorized_proposal_executes_only_after_admission(self) -> None:
+        from asterion.control.authority import BudgetUsage
+
+        class SuccessfulExecutor(SpyExecutor):
+            async def execute(
+                self, proposal: ControlEvent, signal: CancellationSignal
+            ) -> ActionExecutionReceipt:
+                del signal
+                self.calls.append(str(proposal.payload["action_id"]))
+                return ActionExecutionReceipt(
+                    action_id="action-1",
+                    receipt_ref="receipt-1",
+                    usage=BudgetUsage(0, 80, 0, 80, 4_000),
+                )
+
         proposal = ControlEvent.from_mapping(
             {**_proposal().to_mapping(), "sequence": 3, "event_id": "event-3"}
         )
@@ -243,8 +272,10 @@ class TestControlHost(unittest.IsolatedAsyncioTestCase):
                 control_factories=_control_factories([]),
                 host_capabilities=("clock.monotonic", "storage.private"),
             )
-            client = ScriptedClient(plan.control_binding.manifest, _session_events(proposal))
-            executor = SpyExecutor()
+            client = ScriptedClient(
+                plan.control_binding.manifest, _session_events(proposal)
+            )
+            executor = SuccessfulExecutor()
             authority = AuthorityLedger(_envelope())
             host = ControlHost(
                 session_id="session-1",
@@ -259,9 +290,11 @@ class TestControlHost(unittest.IsolatedAsyncioTestCase):
 
             await host.pump()
 
-            self.assertEqual(host.snapshot().state.actions["action-1"].status, "admitted")
-            self.assertEqual(authority.reserved_action_ids, ("action-1",))
-            self.assertEqual(executor.calls, [])
+            self.assertEqual(
+                host.snapshot().state.actions["action-1"].status, "succeeded"
+            )
+            self.assertEqual(authority.reserved_action_ids, ())
+            self.assertEqual(executor.calls, ["action-1"])
 
     async def test_gap_is_persisted_then_fails_without_synthesizing_state(self) -> None:
         gap = ControlEvent.from_mapping(
@@ -281,7 +314,9 @@ class TestControlHost(unittest.IsolatedAsyncioTestCase):
                 plan=plan,
                 authority=AuthorityLedger(_envelope()),
                 journal=journal,
-                client=ScriptedClient(plan.control_binding.manifest, _session_events(gap)),
+                client=ScriptedClient(
+                    plan.control_binding.manifest, _session_events(gap)
+                ),
                 action_executor=SpyExecutor(),
                 clock_ms=lambda: 1_000,
             )

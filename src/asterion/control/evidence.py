@@ -6,7 +6,12 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 
-from asterion.control.authority import AdmissionDecision, AuthorityEnvelope
+from asterion.control.authority import (
+    AdmissionDecision,
+    AuthorityEnvelope,
+    BudgetUsage,
+)
+from asterion.control.execution import ActionExecutionReceipt
 from asterion.control.host import ControlEvent
 from asterion.control.protocol import TERMINAL_CONTROL_EVENT_TYPES
 from asterion.control.system import AgentSystemPlan
@@ -270,6 +275,95 @@ class ControlEvidenceProjector:
                     span_id,
                     start + 1,
                     kind="admission",
+                    timestamp_ns=timestamp_ns,
+                ),
+            )
+        )
+
+    def project_execution(
+        self,
+        *,
+        action_id: str,
+        status: str,
+        reason_code: str,
+        receipt_ref: str | None,
+        receipt: ActionExecutionReceipt | None,
+        usage: BudgetUsage,
+        journal_position: int,
+        timestamp_ns: int,
+    ) -> None:
+        try:
+            self._project_execution(
+                action_id=action_id,
+                status=status,
+                reason_code=reason_code,
+                receipt_ref=receipt_ref,
+                receipt=receipt,
+                usage=usage,
+                journal_position=journal_position,
+                timestamp_ns=timestamp_ns,
+            )
+        except Exception:
+            self._record_gap()
+
+    def _project_execution(
+        self,
+        *,
+        action_id: str,
+        status: str,
+        reason_code: str,
+        receipt_ref: str | None,
+        receipt: ActionExecutionReceipt | None,
+        usage: BudgetUsage,
+        journal_position: int,
+        timestamp_ns: int,
+    ) -> None:
+        if self._disabled or self._session_span_id is None:
+            return
+        assert self._trace_id is not None
+        artifact_ids = receipt.artifact_ids if receipt is not None else ()
+        media_types = receipt.media_types if receipt is not None else ()
+        attributes: dict[str, SafeAttributeValue] = {
+            "action_id": _digest(action_id),
+            "control_reason_sha256": _digest(reason_code),
+            "control_status": status,
+            "content_length": len(artifact_ids),
+            "artifact_sha256": _digest("\n".join(artifact_ids)),
+            "field_count": len(media_types),
+            "scope_sha256": _digest("\n".join(media_types)),
+            "input_tokens": usage.controller_tokens,
+            "output_tokens": usage.application_tokens,
+            "leaf_count": usage.child_tokens,
+            "metric_value": usage.aggregate_tokens,
+            "cost_microunits": usage.cost_micros,
+            "journal_position": journal_position,
+        }
+        if receipt_ref is not None:
+            attributes["evidence_ref"] = _digest(receipt_ref)
+        span_id = _span_id(f"execution:{action_id}:{status}")
+        start = self._recorder.next_sequence
+        terminal = {
+            "cancelled": "cancelled",
+            "failed": "failed",
+            "uncertain": "failed",
+        }.get(status, "completed")
+        self._record_many(
+            (
+                TraceEvent.start(
+                    self._trace_id,
+                    span_id,
+                    self._session_span_id,
+                    start,
+                    "action",
+                    attributes=attributes,
+                    timestamp_ns=timestamp_ns,
+                ),
+                TraceEvent.terminal(
+                    self._trace_id,
+                    span_id,
+                    start + 1,
+                    terminal,
+                    kind="action",
                     timestamp_ns=timestamp_ns,
                 ),
             )

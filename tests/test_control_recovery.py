@@ -14,6 +14,7 @@ from asterion.control.authority import (
     action_proposal_digest,
 )
 from asterion.control.host import ControlCommand, ControlEvent, EventCursor
+from asterion.control.execution import ActionExecutionReceipt
 from asterion.control.journal import (
     JournalConflictError,
     JournalCursor,
@@ -24,6 +25,7 @@ from asterion.control.journal import (
 from asterion.control.manager import ControlHost, ControlHostError
 from asterion.control.recovery import recover_control_host_state
 from asterion.control.system import resolve_agent_system
+from asterion.runtime.host import CancellationSignal
 from tests.test_control_authority import _envelope, _proposal
 from tests.test_control_host import ScriptedClient, SpyExecutor
 from tests.test_control_system import _control_factories, _manifest, _provider
@@ -646,6 +648,18 @@ class TestControlRecovery(unittest.TestCase):
         _accept(live_journal, _created(), _running())
         proposal = _proposal_event()
         with tempfile.TemporaryDirectory() as directory:
+
+            class SuccessfulExecutor:
+                async def execute(
+                    self, proposal: ControlEvent, signal: CancellationSignal
+                ) -> ActionExecutionReceipt:
+                    del proposal, signal
+                    return ActionExecutionReceipt(
+                        action_id="action-1",
+                        receipt_ref="receipt-1",
+                        usage=BudgetUsage(0, 80, 0, 80, 4_000),
+                    )
+
             plan = _plan(directory)
             client = ScriptedClient(plan.control_binding.manifest, (proposal,))
             host = ControlHost(
@@ -655,11 +669,11 @@ class TestControlRecovery(unittest.TestCase):
                 authority=AuthorityLedger(_envelope()),
                 journal=live_journal,
                 client=client,
-                action_executor=SpyExecutor(),
+                action_executor=SuccessfulExecutor(),
                 clock_ms=lambda: 1_000,
             )
             asyncio.run(host.pump())
-        self.assertEqual(host.snapshot().state.actions["action-1"].status, "admitted")
+        self.assertEqual(host.snapshot().state.actions["action-1"].status, "succeeded")
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from types import MappingProxyType
+from typing import cast
 
 from asterion.control.authority import (
     AdmissionDecision,
@@ -146,9 +147,7 @@ def reduce_control_event(state: ControlState, event: ControlEvent) -> ControlSta
     if event.type == "session.created":
         result = _create_session(state, event)
     elif event.type in SESSION_EVENT_STATUSES:
-        result = _transition_session(
-            state, event, SESSION_EVENT_STATUSES[event.type]
-        )
+        result = _transition_session(state, event, SESSION_EVENT_STATUSES[event.type])
     elif event.type == "goal.updated":
         result = _transition_goal(state, event)
     elif event.type == "action.proposed":
@@ -198,14 +197,20 @@ def apply_action_resolution(
     receipt_ref: str | None = None,
 ) -> ControlState:
     action = _action(state, action_id)
-    if action.status != "running" or status not in {
+    if status not in {
         "succeeded",
         "failed",
         "cancelled",
         "uncertain",
     }:
         raise ControlStateError("action resolution transition is invalid")
-    if status == "succeeded" and not _valid_optional_receipt(receipt_ref, required=True):
+    if action.status != "running" and not (
+        action.status == "admitted" and status == "cancelled" and receipt_ref is None
+    ):
+        raise ControlStateError("action resolution transition is invalid")
+    if status == "succeeded" and not _valid_optional_receipt(
+        receipt_ref, required=True
+    ):
         raise ControlStateError("succeeded action receipt is invalid")
     if status != "succeeded" and not _valid_optional_receipt(receipt_ref):
         raise ControlStateError("action receipt is invalid")
@@ -265,7 +270,7 @@ def _create_session(state: ControlState, event: ControlEvent) -> ControlState:
         goal_id=str(payload["goal_id"]),
         goal_status="active",
         authority_id=str(payload["authority_id"]),
-        authority_revision=int(payload["authority_revision"]),
+        authority_revision=cast(int, payload["authority_revision"]),
     )
 
 
@@ -335,7 +340,7 @@ def _propose_action(state: ControlState, event: ControlEvent) -> ControlState:
         action_id=action_id,
         idempotency_key=idempotency_key,
         kind=str(payload["kind"]),
-        authority_revision=int(payload["authority_revision"]),
+        authority_revision=cast(int, payload["authority_revision"]),
         proposal_event_id=event.event_id,
         proposal_digest=action_proposal_digest(event),
     )
