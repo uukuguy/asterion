@@ -69,3 +69,19 @@ export type {
   PrivateValueRef,
   PrivateValueStoreOptions,
 } from "./private-store.js";
+export {
+  AsterionSkillBridge,
+  MAX_SKILL_FRAME_BYTES,
+  SKILL_CONTROL_PROTOCOL,
+  SkillBridgeConfigurationError,
+  SkillBridgeConflictError,
+  generateSkillBridgeToken,
+} from "./skill-bridge.js";
+export type {
+  AsterionSkillBridgeOptions,
+  SkillAdmission,
+  SkillApplicationTarget,
+  SkillBudget,
+  SkillEventIdentity,
+  SkillTerminal,
+} from "./skill-bridge.js";
