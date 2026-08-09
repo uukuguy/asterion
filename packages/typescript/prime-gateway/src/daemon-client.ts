@@ -64,8 +64,14 @@ interface PendingRequest {
   readonly resolve: (response: PrimeDaemonResponse) => void;
   readonly reject: (error: Error) => void;
   readonly timeoutMs: number;
+  readonly deferAcknowledgement: boolean;
   timeout: ReturnType<typeof setTimeout> | undefined;
   awaitingReconnect: boolean;
+}
+
+export interface PrimeDaemonDeferredResponse {
+  readonly response: PrimeDaemonResponse;
+  readonly acknowledge: () => void;
 }
 
 interface TransportState {
@@ -96,6 +102,7 @@ export class PrimeDaemonClient {
   private readonly requestTimeoutMs: number;
   private readonly listeners = new Set<PrimeDaemonListener>();
   private readonly pending = new Map<string, PendingRequest>();
+  private readonly deferredAcknowledgements = new Set<string>();
   private transport: TransportState | undefined;
   private socketPath: string | undefined;
   private currentHello: PrimeDaemonHello | undefined;
@@ -170,6 +177,37 @@ export class PrimeDaemonClient {
     stableCommandId: string,
     timeoutMs = this.requestTimeoutMs,
   ): Promise<PrimeDaemonResponse> {
+    return this.startRequest(command, stableCommandId, timeoutMs, false);
+  }
+
+  async requestDeferred(
+    command: PrimeDaemonCommand,
+    stableCommandId: string,
+    timeoutMs = this.requestTimeoutMs,
+  ): Promise<PrimeDaemonDeferredResponse> {
+    const response = await this.startRequest(
+      command,
+      stableCommandId,
+      timeoutMs,
+      true,
+    );
+    let acknowledged = false;
+    return Object.freeze({
+      response,
+      acknowledge: () => {
+        if (!acknowledged && this.acknowledgeDeferred(stableCommandId)) {
+          acknowledged = true;
+        }
+      },
+    });
+  }
+
+  private startRequest(
+    command: PrimeDaemonCommand,
+    stableCommandId: string,
+    timeoutMs: number,
+    deferAcknowledgement: boolean,
+  ): Promise<PrimeDaemonResponse> {
     this.assertOpen();
     const transport = this.transport;
     if (
@@ -187,7 +225,10 @@ export class PrimeDaemonClient {
     );
     const existing = this.pending.get(stableCommandId);
     if (existing !== undefined) {
-      if (existing.wireData !== wireData) {
+      if (
+        existing.wireData !== wireData ||
+        existing.deferAcknowledgement !== deferAcknowledgement
+      ) {
         throw new PrimeDaemonProtocolError();
       }
       return existing.promise;
@@ -206,6 +247,7 @@ export class PrimeDaemonClient {
       resolve: resolveRequest,
       reject: rejectRequest,
       timeoutMs: actualTimeoutMs,
+      deferAcknowledgement,
       timeout: undefined,
       awaitingReconnect: false,
     };
@@ -336,8 +378,13 @@ export class PrimeDaemonClient {
       if (pending !== undefined) {
         this.pending.delete(outbound.id);
         this.clearRequestTimeout(pending);
-        this.acknowledgeResult(state, outbound.id);
-        if (this.isUncertainResult(outbound, outbound.id)) {
+        const uncertain = this.isUncertainResult(outbound, outbound.id);
+        if (uncertain || !pending.deferAcknowledgement) {
+          this.acknowledgeResult(state, outbound.id);
+        } else {
+          this.deferredAcknowledgements.add(outbound.id);
+        }
+        if (uncertain) {
           pending.reject(new PrimeDaemonUncertainError(outbound.id));
         } else {
           pending.resolve(outbound);
@@ -452,6 +499,24 @@ export class PrimeDaemonClient {
       this.clientId,
     );
     state.socket.write(wireData);
+  }
+
+  private acknowledgeDeferred(commandId: string): boolean {
+    if (!this.deferredAcknowledgements.has(commandId)) {
+      return false;
+    }
+    const state = this.transport;
+    if (
+      state === undefined ||
+      !state.active ||
+      !state.helloReceived ||
+      state.socket.destroyed
+    ) {
+      return false;
+    }
+    this.acknowledgeResult(state, commandId);
+    this.deferredAcknowledgements.delete(commandId);
+    return true;
   }
 
   private isUncertainResult(

@@ -93,6 +93,7 @@ const COMMAND_FIELDS = Object.freeze({
   ],
   cancel_prompt_admission: ["type", "activeSessionId", "admissionId"],
   abort: ["type", "activeSessionId"],
+  abort_and_clear_queue: ["type", "activeSessionId"],
   wait_for_idle: ["type", "activeSessionId"],
   wait_for_headless_completion: ["type", "activeSessionId"],
   get_session_header: ["type", "activeSessionId"],

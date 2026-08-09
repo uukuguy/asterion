@@ -264,6 +264,8 @@ test("skill bridge rejects wrong token and cross-session authentication", async 
     assert.equal(state.proposals.length, 0);
     assert.equal((await stat(fixtureRoot.root)).mode & 0o777, 0o700);
     assert.equal((await stat(state.bridge.socketPath)).mode & 0o777, 0o600);
+    assert.equal(JSON.stringify(state.bridge).includes(TOKEN), false);
+    assert.equal(JSON.stringify(state.bridge).includes(fixtureRoot.root), false);
   } finally {
     await state.bridge.close();
     await fixtureRoot.cleanup();

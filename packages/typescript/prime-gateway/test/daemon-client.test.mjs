@@ -159,6 +159,29 @@ test("daemon client acknowledges and classifies a structured uncertain result", 
   }
 });
 
+test("daemon client defers acknowledgement until durable identity binding", async () => {
+  const daemon = await startFakePrimeDaemon();
+  const subject = client();
+  try {
+    await subject.connect(daemon.socketPath);
+    const deferred = await subject.requestDeferred(
+      { type: "abort", activeSessionId: "prime-root" },
+      "asterion-command-deferred",
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(
+      daemon.acknowledgements.includes("asterion-command-deferred"),
+      false,
+    );
+    deferred.acknowledge();
+    await daemon.waitForAcknowledgement("asterion-command-deferred");
+    assert.equal(deferred.response.success, true);
+  } finally {
+    subject.close();
+    await daemon.close();
+  }
+});
+
 test("daemon client times out without rendering a private command", async () => {
   const daemon = await startFakePrimeDaemon({
     silentCommandIds: ["asterion-command-timeout"],

@@ -491,6 +491,10 @@ export class AsterionSkillBridge {
     return "[Asterion private skill bridge]";
   }
 
+  toJSON(): Readonly<Record<string, string>> {
+    return Object.freeze({ kind: "asterion-private-skill-bridge" });
+  }
+
   async close(): Promise<void> {
     if (this.closed) {
       return;

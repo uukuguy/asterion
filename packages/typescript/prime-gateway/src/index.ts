@@ -39,6 +39,7 @@ export {
   PrimeDaemonUncertainError,
 } from "./daemon-client.js";
 export type {
+  PrimeDaemonDeferredResponse,
   PrimeDaemonClientOptions,
   PrimeDaemonListener,
 } from "./daemon-client.js";
@@ -85,3 +86,34 @@ export type {
   SkillEventIdentity,
   SkillTerminal,
 } from "./skill-bridge.js";
+export {
+  PrimeEventMapper,
+  PrimeEventMappingError,
+} from "./event-mapper.js";
+export type {
+  PrimeEventMapperOptions,
+  PrimeMappedEventIdentity,
+} from "./event-mapper.js";
+export {
+  PrimePromptAdmissionUncertainError,
+  PrimeSession,
+  PrimeSessionError,
+} from "./prime-session.js";
+export type {
+  PrimeDaemonTransport,
+  PrimeInputDelivery,
+  PrimePrivateSessionConfig,
+  PrimePromptCancellation,
+  PrimeSessionCreateOptions,
+  PrimeSessionIdentity,
+} from "./prime-session.js";
+export {
+  PrimeGateway,
+  PrimeGatewayError,
+} from "./gateway.js";
+export type {
+  GatewayAdmissionResult,
+  GatewayTerminalResult,
+  PrimeGatewayOptions,
+  PrimeGatewaySession,
+} from "./gateway.js";
