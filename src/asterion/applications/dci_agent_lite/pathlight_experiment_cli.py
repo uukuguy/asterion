@@ -376,7 +376,6 @@ def _prepare_recovery(
         (staging / "evidence").mkdir(mode=0o700)
         tasks: list[dict[str, object]] = []
         for task in failed:
-            task_id = str(task["task_id"])
             registry_path = str(task["registry_path"])
             target = staging / registry_path
             target.parent.mkdir(mode=0o700)
