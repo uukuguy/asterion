@@ -171,6 +171,21 @@ class FailAdmissionPersistenceOnceJournal(MemoryCanonicalJournal):
         return super().accept_command(command, expected_position=expected_position)
 
 
+class FailTerminalPersistenceOnceJournal(MemoryCanonicalJournal):
+    def __init__(self, session_id: str) -> None:
+        super().__init__(session_id)
+        self.fail_terminal_once = True
+        self.terminal_attempts: list[ControlCommand] = []
+
+    def accept_command(self, command: ControlCommand, *, expected_position=None):
+        if command.payload.get("resolution") == "succeeded":
+            self.terminal_attempts.append(command)
+            if self.fail_terminal_once:
+                self.fail_terminal_once = False
+                raise JournalConflictError("SENTINEL_SECRET persistence failure")
+        return super().accept_command(command, expected_position=expected_position)
+
+
 class AuditedLedger(AuthorityLedger):
     def __init__(self, audit: list[str]) -> None:
         super().__init__(_envelope())
@@ -566,6 +581,45 @@ class TestControlExecution(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(terminal_attempts, (first_terminal, first_terminal))
             self.assertEqual(len(executor.calls), 1)
             self.assertEqual(journal.position, host.snapshot().journal_position)
+
+    async def test_same_host_persists_terminal_before_sending_after_failures(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = _plan(root)
+            journal = FailTerminalPersistenceOnceJournal("session-1")
+            client = ExecutionClient(plan.control_binding.manifest, _proposal_events())
+            executor = RecordingExecutor()
+            host = _build_host(root, client=client, executor=executor, journal=journal)
+
+            with self.assertRaises(ControlHostError) as first:
+                await host.pump()
+            self.assertNotIn("SENTINEL_SECRET", str(first.exception))
+            self.assertEqual(
+                tuple(command.payload.get("resolution") for command in client.sent),
+                ("admitted",),
+            )
+            self.assertEqual(len(executor.calls), 1)
+
+            journal.fail_terminal_once = True
+            with self.assertRaises(ControlHostError):
+                await host.pump()
+            self.assertEqual(
+                tuple(command.payload.get("resolution") for command in client.sent),
+                ("admitted",),
+            )
+            self.assertEqual(len(executor.calls), 1)
+
+            await host.pump()
+
+            self.assertEqual(len(journal.terminal_attempts), 3)
+            self.assertEqual(
+                tuple(journal.terminal_attempts),
+                (journal.terminal_attempts[0],) * 3,
+            )
+            self.assertEqual(client.sent[-1], journal.terminal_attempts[0])
+            self.assertEqual(len(executor.calls), 1)
 
     async def test_persisted_admission_recovers_and_executes_exactly_once(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -150,6 +150,7 @@ class ControlHost:
                 self._pending_proposals: dict[str, ControlEvent] = {}
                 self._pending_admissions: dict[str, ControlCommand] = {}
                 self._pending_terminals: dict[str, ControlCommand] = {}
+                self._durable_terminal_ids: set[str] = set()
             else:
                 entries = self._journal.replay(JournalCursor(0))
                 if len(entries) != position:
@@ -202,6 +203,10 @@ class ControlHost:
                 self._pending_proposals = dict(recovered.proposals)
                 self._pending_admissions = dict(recovered.admission_commands)
                 self._pending_terminals = dict(recovered.terminal_commands)
+                self._durable_terminal_ids = {
+                    command.command_id
+                    for command in recovered.terminal_commands.values()
+                }
                 authority_entry = entries[-1]
                 if self._journal.position != position:
                     raise JournalConflictError("control journal changed")
@@ -358,6 +363,7 @@ class ControlHost:
                 raise ControlHostError("control action recovery failed")
             terminal = self._pending_terminals.get(action_id)
             if terminal is not None:
+                self._ensure_pending_terminal_persisted(action_id)
                 await self._deliver_pending_terminal(action_id)
                 continue
             if action.status == "rejected":
@@ -412,13 +418,23 @@ class ControlHost:
 
     async def _deliver_pending_terminal(self, action_id: str) -> None:
         command = self._pending_terminals[action_id]
+        if command.command_id not in self._durable_terminal_ids:
+            raise ControlHostError("control terminal command is not durable")
         await self._send_persisted_command(command)
         self._clear_pending_action(action_id)
+
+    def _ensure_pending_terminal_persisted(self, action_id: str) -> None:
+        command = self._pending_terminals[action_id]
+        if command.command_id not in self._durable_terminal_ids:
+            self._persist_command(command)
+            self._durable_terminal_ids.add(command.command_id)
 
     def _clear_pending_action(self, action_id: str) -> None:
         self._pending_proposals.pop(action_id, None)
         self._pending_admissions.pop(action_id, None)
-        self._pending_terminals.pop(action_id, None)
+        terminal = self._pending_terminals.pop(action_id, None)
+        if terminal is not None:
+            self._durable_terminal_ids.discard(terminal.command_id)
 
     async def _execute_admitted_action(self, proposal: ControlEvent) -> None:
         action_id = str(proposal.payload["action_id"])
@@ -561,8 +577,8 @@ class ControlHost:
                 "receipt_ref": receipt_ref,
             },
         )
-        self._persist_command(command)
         self._pending_terminals[action_id] = command
+        self._ensure_pending_terminal_persisted(action_id)
         await self._deliver_pending_terminal(action_id)
 
     def _admission_command(self, action_id: str) -> ControlCommand:
