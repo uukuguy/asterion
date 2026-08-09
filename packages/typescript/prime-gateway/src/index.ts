@@ -42,3 +42,30 @@ export type {
   PrimeDaemonClientOptions,
   PrimeDaemonListener,
 } from "./daemon-client.js";
+export {
+  GatewayDurableStore,
+  GatewayStoreConflictError,
+  GatewayStoreCorruptionError,
+  GatewayStoreWriteError,
+  MAX_PUBLIC_EVENTS_PER_GENERATION,
+  MAX_PUBLIC_RECORD_BYTES,
+} from "./durable-store.js";
+export type {
+  GatewayDurableSnapshot,
+  GatewayDurableStoreOptions,
+  GatewayEventReceipt,
+  GatewayRecordReceipt,
+  PrimeIdentityBinding,
+  StorageFaultInjector,
+  StorageFaultStage,
+} from "./durable-store.js";
+export {
+  PrivateValueInvalidError,
+  PrivateValueStore,
+  PrivateValueWriteError,
+} from "./private-store.js";
+export type {
+  PrivateResultProjection,
+  PrivateValueRef,
+  PrivateValueStoreOptions,
+} from "./private-store.js";

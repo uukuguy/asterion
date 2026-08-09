@@ -13,6 +13,9 @@
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --test"
   },
+  "dependencies": {
+    "@dci/agent-runtime": "file:../asterion-runtime"
+  },
   "devDependencies": {
     "@types/node": "26.1.1",
     "typescript": "6.0.3"
