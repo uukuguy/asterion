@@ -22,3 +22,22 @@ test("returns an admitted RLM spawn before its terminal lifecycle event", async 
   assert.deepEqual(result, { resolution: "admitted", childId: "child-1" });
   assert.equal(proposed, 1);
 });
+
+test("replays one RLM request identity and rejects a conflicting child", async () => {
+  let proposed = 0;
+  const bridge = new RlmHostBridge({
+    sessionId: "session-1",
+    admitSpawn: async (proposal) => {
+      proposed += 1;
+      return { resolution: "admitted", childId: proposal.childId };
+    },
+    waitForTerminal: async () => undefined,
+  });
+  const proposal = { childId: "child-1", requestId: "request-1" };
+  assert.deepEqual(await bridge.proposeSpawn(proposal), await bridge.proposeSpawn(proposal));
+  assert.equal(proposed, 1);
+  await assert.rejects(
+    () => bridge.proposeSpawn({ childId: "child-2", requestId: "request-1" }),
+    /conflicts/,
+  );
+});
