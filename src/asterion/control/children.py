@@ -595,6 +595,11 @@ class ChildSessionService:
                     await _close_runtime(runtime)
                 except Exception:
                     pass
+                if runtime.host is None and nested_children is not None:
+                    try:
+                        await nested_children.close()
+                    except Exception:
+                        pass
             elif nested_children is not None:
                 try:
                     await nested_children.close()
@@ -631,6 +636,11 @@ class ChildSessionService:
                     await _close_runtime(runtime)
                 except Exception:
                     pass
+                if runtime.host is None and nested_children is not None:
+                    try:
+                        await nested_children.close()
+                    except Exception:
+                        pass
             elif nested_children is not None:
                 try:
                     await nested_children.close()

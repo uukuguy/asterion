@@ -794,6 +794,48 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(SENTINEL, str(raised.exception))
             self.assertEqual(service.active_ids, ())
 
+    async def test_attach_failure_closes_unowned_nested_lifecycle(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audit: list[str] = []
+            clients: list[WaitingChildClient] = []
+            closed_nested_roots: list[Path] = []
+            service = ChildSessionService(
+                plan=_plan(root),
+                authority=_child_envelope(),
+                control_factories=_registry(audit, clients),
+                private_root=root,
+                content=RecordingResolver(),
+                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
+                clock_ms=lambda: 1_000,
+            )
+            original_close = ChildSessionService.close
+            original_attach = service._attach_runtime
+
+            async def recording_close(self: ChildSessionService) -> None:
+                if self is not service:
+                    closed_nested_roots.append(self._private_root)
+                await original_close(self)
+
+            async def fail_attach(child_id: str, runtime: object) -> None:
+                del child_id, runtime
+                raise RuntimeError(SENTINEL)
+
+            ChildSessionService.close = recording_close  # type: ignore[method-assign]
+            service._attach_runtime = fail_attach  # type: ignore[method-assign]
+            try:
+                with self.assertRaises(ActionExecutionFailure) as raised:
+                    await service.spawn(_child_proposal(), MutableSignal())
+            finally:
+                ChildSessionService.close = original_close  # type: ignore[method-assign]
+                service._attach_runtime = original_attach  # type: ignore[method-assign]
+
+            self.assertEqual(raised.exception.status, "uncertain")
+            self.assertEqual(audit.count("child.provider.create"), 1)
+            self.assertEqual(audit.count("child.close"), 1)
+            self.assertTrue(clients[0].closed)
+            self.assertEqual(closed_nested_roots, [root / "children" / "child-1"])
+
     async def test_missing_private_goal_is_a_known_pre_fence_failure(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
