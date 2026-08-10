@@ -380,6 +380,26 @@ class TestChildAuthority(unittest.TestCase):
 
 
 class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
+    async def test_concurrent_close_waiters_share_shielded_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            service = ChildSessionService(
+                plan=_plan(root), authority=_child_envelope(),
+                control_factories=_registry([], []), private_root=root,
+                content=RecordingResolver(),
+                child_action_executor_factory=lambda authority: ChildWorkExecutor([]),
+                clock_ms=lambda: 1_000,
+            )
+            first = asyncio.create_task(service.close())
+            second = asyncio.create_task(service.close())
+            first.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await first
+            await second
+            self.assertEqual(service.active_ids, ())
+            with self.assertRaises(ChildSessionError):
+                await service.spawn(_child_proposal(), MutableSignal())
+
     async def test_child_executor_factory_receives_nested_lifecycle_service(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

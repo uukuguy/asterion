@@ -335,6 +335,7 @@ class ChildSessionService:
         self._lock = asyncio.Lock()
         self._closing = False
         self._closed = False
+        self._close_task: asyncio.Task[None] | None = None
 
     @property
     def active_ids(self) -> tuple[str, ...]:
@@ -614,7 +615,7 @@ class ChildSessionService:
 
         async with self._lock:
             entry = self._entries.get(child_id)
-            if entry is None:
+            if entry is None or self._closing or self._closed:
                 raise RuntimeError("child registry is unavailable")
             entry.runtime = runtime
 
@@ -710,26 +711,26 @@ class ChildSessionService:
             )
 
     async def close(self) -> None:
-        """Cancel first, then close retained provider resources exactly once."""
+        """Await the one service-owned shutdown task without cancelling it."""
         async with self._lock:
             if self._closed:
                 return
-            if self._closing:
-                raise ChildSessionError("child service close is in progress")
-            self._closing = True
-        try:
-            await self.cancel_all()
-            async with self._lock:
-                tasks = tuple(entry.task for entry in self._entries.values())
-            for task in tasks:
-                if not task.done():
-                    task.cancel()
-            if tasks:
-                await asyncio.gather(*tasks, return_exceptions=True)
-        finally:
-            async with self._lock:
-                self._closing = False
+            if self._close_task is None:
+                self._closing = True
+                self._close_task = asyncio.create_task(self._close_impl())
+            task = self._close_task
+        await asyncio.shield(task)
 
+    async def _close_impl(self) -> None:
+        """Cancel, drain, close, and release while the service remains closing."""
+        await self.cancel_all()
+        async with self._lock:
+            tasks = tuple(entry.task for entry in self._entries.values())
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         async with self._lock:
             active = tuple(
                 (entry.binding, entry.runtime)
@@ -753,9 +754,15 @@ class ChildSessionService:
                         self._entries.pop(binding.child_id, None)
         if failures:
             self._closed = False
+            async with self._lock:
+                self._close_task = None
             raise ChildSessionError("child provider close is unavailable")
         self._closed = True
         self._close_root_descriptors()
+        async with self._lock:
+            if not self._closed:
+                self._close_task = None
+            self._closing = False
 
     async def _active_runtime(
         self, proposal: ControlEvent, kind: str
