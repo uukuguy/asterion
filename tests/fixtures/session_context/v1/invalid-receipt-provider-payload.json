@@ -1,0 +1,28 @@
+{
+  "protocol": "asterion.session-context/v1",
+  "receipt_id": "context-receipt-1",
+  "command_id": "context-command-1",
+  "session_id": "session-1",
+  "generation": 1,
+  "operation": "session.describe",
+  "status": "succeeded",
+  "reason_code": "session-context-succeeded",
+  "payload": {
+    "evidence_ref": "evidence-1",
+    "result": {
+      "continuation_id": "continuation-1",
+      "status": "running",
+      "context_tokens": 10,
+      "turns": 1,
+      "usage": {
+        "controller_tokens": 10,
+        "application_tokens": 0,
+        "child_tokens": 0,
+        "aggregate_tokens": 10,
+        "cost_micros": 0
+      },
+      "name_sha256": null,
+      "provider_payload": "SENTINEL_SECRET"
+    }
+  }
+}

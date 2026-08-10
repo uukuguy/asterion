@@ -39,6 +39,14 @@ export type {
   RunEvent,
   RunRequest,
   RuntimeManifest,
+  SessionContextBudget,
+  SessionContextCommand,
+  SessionContextOperation,
+  SessionContextProtocolVersion,
+  SessionContextReceipt,
+  SessionContextStatus,
+  SessionContextTreeNode,
+  SessionContextUsage,
 } from "./types.js";
 export {
   AGENT_CONTROL_PROTOCOL,
@@ -52,6 +60,7 @@ export {
   CONTROL_PLANE_PROTOCOL,
   PROTOCOL_VERSION,
   RUNTIME_PROTOCOL_VERSION,
+  SESSION_CONTEXT_PROTOCOL,
 } from "./types.js";
 export {
   ProtocolValidationError,
@@ -69,4 +78,6 @@ export {
   validateControlPlaneManifest,
   validateRunRequest,
   validateRuntimeManifest,
+  validateSessionContextCommand,
+  validateSessionContextReceipt,
 } from "./validation.js";

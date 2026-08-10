@@ -21,6 +21,8 @@ import type {
   RunEvent,
   RunRequest,
   RuntimeManifest,
+  SessionContextCommand,
+  SessionContextReceipt,
 } from "./types.js";
 
 function readSchema(name: string): object {
@@ -60,6 +62,12 @@ const controlCommandValidator = ajv.compile(
 );
 const controlEventValidator = ajv.compile(
   readSchema("control-event.schema.json"),
+);
+const sessionContextCommandValidator = ajv.compile(
+  readSchema("session-context-command.schema.json"),
+);
+const sessionContextReceiptValidator = ajv.compile(
+  readSchema("session-context-receipt.schema.json"),
 );
 
 export class ProtocolValidationError extends Error {
@@ -247,6 +255,60 @@ export function validateControlCommand(value: unknown): ControlCommand {
     }
   }
   return command;
+}
+
+export function validateSessionContextCommand(
+  value: unknown,
+): SessionContextCommand {
+  return requireValid<SessionContextCommand>(
+    "session context command",
+    sessionContextCommandValidator,
+    value,
+  );
+}
+
+export function validateSessionContextReceipt(
+  value: unknown,
+): SessionContextReceipt {
+  const receipt = requireValid<SessionContextReceipt>(
+    "session context receipt",
+    sessionContextReceiptValidator,
+    value,
+  );
+  if (receipt.status === "succeeded" && receipt.operation === "session.tree.read") {
+    const entryIds: string[] = [];
+    const parents = new Map<string, string | null>();
+    for (const node of receipt.payload.result.nodes) {
+      entryIds.push(node.entry_id);
+      parents.set(node.entry_id, node.parent_id);
+    }
+    requireSortedUnique("session context tree entries", entryIds);
+    if (
+      entryIds.length > 0 &&
+      [...parents.values()].filter((parent) => parent === null).length !== 1
+    ) {
+      throw new ProtocolValidationError("session context tree roots", null);
+    }
+    for (const entryId of entryIds) {
+      const visited = new Set<string>();
+      let current: string | null = entryId;
+      while (current !== null) {
+        if (visited.has(current) || !parents.has(current)) {
+          throw new ProtocolValidationError("session context tree parent", null);
+        }
+        visited.add(current);
+        current = parents.get(current)!;
+      }
+    }
+    if (
+      (receipt.payload.result.leaf_id === null && entryIds.length !== 0) ||
+      (receipt.payload.result.leaf_id !== null &&
+        !parents.has(receipt.payload.result.leaf_id))
+    ) {
+      throw new ProtocolValidationError("session context tree leaf", null);
+    }
+  }
+  return receipt;
 }
 
 const actionTargetKinds: Readonly<Record<ActionKind, string>> = {

@@ -1,0 +1,12 @@
+{
+  "protocol": "asterion.session-context/v1",
+  "command_id": "context-command-1",
+  "session_id": "session-1",
+  "generation": 1,
+  "authority_revision": 1,
+  "idempotency_key": "context-operation-1",
+  "operation": "session.tree.read",
+  "payload": {
+    "continuation_id": "continuation-1"
+  }
+}

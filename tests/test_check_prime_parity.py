@@ -25,6 +25,10 @@ def _ledger(name: str = "prime-agent-0.7.1.json"):
 
 
 class TestCheckPrimeParity(unittest.TestCase):
+    @unittest.skipUnless(
+        PINNED_SOURCE.is_dir(),
+        "external pinned Prime source checkout is unavailable",
+    )
     def test_explicit_source_check_proves_every_declared_file_and_anchor(self) -> None:
         report = parity_checker.verify_prime_source_evidence(
             _ledger(), source_root=PINNED_SOURCE

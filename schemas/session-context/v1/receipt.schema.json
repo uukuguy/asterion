@@ -1,0 +1,404 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asterion.local/schemas/session-context/v1/receipt.schema.json",
+  "title": "Asterion Session Context Receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "receipt_id",
+    "command_id",
+    "session_id",
+    "generation",
+    "operation",
+    "status",
+    "reason_code",
+    "payload"
+  ],
+  "properties": {
+    "protocol": {"const": "asterion.session-context/v1"},
+    "receipt_id": {"$ref": "#/$defs/opaque_id"},
+    "command_id": {"$ref": "#/$defs/opaque_id"},
+    "session_id": {"$ref": "#/$defs/opaque_id"},
+    "generation": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+    "operation": {
+      "enum": [
+        "session.attachment.bind",
+        "session.branch.summarize",
+        "session.clone",
+        "session.compact",
+        "session.continuation.delete",
+        "session.continuation.resume",
+        "session.describe",
+        "session.fork",
+        "session.label.set",
+        "session.name.set",
+        "session.tree.navigate",
+        "session.tree.read"
+      ]
+    },
+    "status": {"enum": ["cancelled", "failed", "rejected", "succeeded", "uncertain"]},
+    "reason_code": {"$ref": "#/$defs/identifier"},
+    "payload": {}
+  },
+  "allOf": [
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "status": {"enum": ["cancelled", "failed", "rejected", "uncertain"]},
+            "payload": {"$ref": "#/$defs/failure_payload"}
+          }
+        },
+        {
+          "properties": {
+            "operation": {"const": "session.attachment.bind"},
+            "status": {"const": "succeeded"},
+            "payload": {"$ref": "#/$defs/success_attachment_bind"}
+          }
+        },
+        {
+          "properties": {
+            "operation": {"const": "session.branch.summarize"},
+            "status": {"const": "succeeded"},
+            "payload": {"$ref": "#/$defs/success_branch_summarize"}
+          }
+        },
+        {
+          "properties": {
+            "operation": {"const": "session.clone"},
+            "status": {"const": "succeeded"},
+            "payload": {"$ref": "#/$defs/success_fork_clone"}
+          }
+        },
+        {
+          "properties": {
+            "operation": {"const": "session.compact"},
+            "status": {"const": "succeeded"},
+            "payload": {"$ref": "#/$defs/success_compact"}
+          }
+        },
+        {
+          "properties": {
+            "operation": {"const": "session.continuation.delete"},
+            "status": {"const": "succeeded"},
+            "payload": {"$ref": "#/$defs/success_continuation_delete"}
+          }
+        },
+        {
+          "properties": {
+            "operation": {"const": "session.continuation.resume"},
+            "status": {"const": "succeeded"},
+            "payload": {"$ref": "#/$defs/success_continuation_resume"}
+          }
+        },
+        {
+          "properties": {
+            "operation": {"const": "session.describe"},
+            "status": {"const": "succeeded"},
+            "payload": {"$ref": "#/$defs/success_describe"}
+          }
+        },
+        {
+          "properties": {
+            "operation": {"const": "session.fork"},
+            "status": {"const": "succeeded"},
+            "payload": {"$ref": "#/$defs/success_fork_clone"}
+          }
+        },
+        {
+          "properties": {
+            "operation": {"const": "session.label.set"},
+            "status": {"const": "succeeded"},
+            "payload": {"$ref": "#/$defs/success_label_set"}
+          }
+        },
+        {
+          "properties": {
+            "operation": {"const": "session.name.set"},
+            "status": {"const": "succeeded"},
+            "payload": {"$ref": "#/$defs/success_name_set"}
+          }
+        },
+        {
+          "properties": {
+            "operation": {"const": "session.tree.navigate"},
+            "status": {"const": "succeeded"},
+            "payload": {"$ref": "#/$defs/success_tree_navigate"}
+          }
+        },
+        {
+          "properties": {
+            "operation": {"const": "session.tree.read"},
+            "status": {"const": "succeeded"},
+            "payload": {"$ref": "#/$defs/success_tree_read"}
+          }
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+    },
+    "opaque_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "media_type": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$"
+    },
+    "nullable_opaque_id": {
+      "oneOf": [{"$ref": "#/$defs/opaque_id"}, {"type": "null"}]
+    },
+    "nullable_sha256": {
+      "oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "controller_tokens", "application_tokens", "child_tokens",
+        "aggregate_tokens", "cost_micros"
+      ],
+      "properties": {
+        "controller_tokens": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "application_tokens": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "child_tokens": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "aggregate_tokens": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "cost_micros": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+      }
+    },
+    "failure_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_ref", "result"],
+      "properties": {
+        "evidence_ref": {"$ref": "#/$defs/nullable_opaque_id"},
+        "result": {"type": "null"}
+      }
+    },
+    "success_attachment_bind": {"$ref": "#/$defs/payload_attachment_bind"},
+    "success_branch_summarize": {"$ref": "#/$defs/payload_branch_summarize"},
+    "success_fork_clone": {"$ref": "#/$defs/payload_fork_clone"},
+    "success_compact": {"$ref": "#/$defs/payload_compact"},
+    "success_continuation_delete": {"$ref": "#/$defs/payload_continuation_delete"},
+    "success_continuation_resume": {"$ref": "#/$defs/payload_continuation_resume"},
+    "success_describe": {"$ref": "#/$defs/payload_describe"},
+    "success_label_set": {"$ref": "#/$defs/payload_label_set"},
+    "success_name_set": {"$ref": "#/$defs/payload_name_set"},
+    "success_tree_navigate": {"$ref": "#/$defs/payload_tree_navigate"},
+    "success_tree_read": {"$ref": "#/$defs/payload_tree_read"},
+    "payload_attachment_bind": {
+      "type": "object", "additionalProperties": false,
+      "required": ["evidence_ref", "result"],
+      "properties": {
+        "evidence_ref": {"$ref": "#/$defs/nullable_opaque_id"},
+        "result": {"$ref": "#/$defs/result_attachment_bind"}
+      }
+    },
+    "payload_branch_summarize": {
+      "type": "object", "additionalProperties": false,
+      "required": ["evidence_ref", "result"],
+      "properties": {
+        "evidence_ref": {"$ref": "#/$defs/nullable_opaque_id"},
+        "result": {"$ref": "#/$defs/result_branch_summarize"}
+      }
+    },
+    "payload_fork_clone": {
+      "type": "object", "additionalProperties": false,
+      "required": ["evidence_ref", "result"],
+      "properties": {
+        "evidence_ref": {"$ref": "#/$defs/nullable_opaque_id"},
+        "result": {"$ref": "#/$defs/result_fork_clone"}
+      }
+    },
+    "payload_compact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["evidence_ref", "result"],
+      "properties": {
+        "evidence_ref": {"$ref": "#/$defs/nullable_opaque_id"},
+        "result": {"$ref": "#/$defs/result_compact"}
+      }
+    },
+    "payload_continuation_delete": {
+      "type": "object", "additionalProperties": false,
+      "required": ["evidence_ref", "result"],
+      "properties": {
+        "evidence_ref": {"$ref": "#/$defs/nullable_opaque_id"},
+        "result": {"$ref": "#/$defs/result_continuation_delete"}
+      }
+    },
+    "payload_continuation_resume": {
+      "type": "object", "additionalProperties": false,
+      "required": ["evidence_ref", "result"],
+      "properties": {
+        "evidence_ref": {"$ref": "#/$defs/nullable_opaque_id"},
+        "result": {"$ref": "#/$defs/result_continuation_resume"}
+      }
+    },
+    "payload_describe": {
+      "type": "object", "additionalProperties": false,
+      "required": ["evidence_ref", "result"],
+      "properties": {
+        "evidence_ref": {"$ref": "#/$defs/nullable_opaque_id"},
+        "result": {"$ref": "#/$defs/result_describe"}
+      }
+    },
+    "payload_label_set": {
+      "type": "object", "additionalProperties": false,
+      "required": ["evidence_ref", "result"],
+      "properties": {
+        "evidence_ref": {"$ref": "#/$defs/nullable_opaque_id"},
+        "result": {"$ref": "#/$defs/result_label_set"}
+      }
+    },
+    "payload_name_set": {
+      "type": "object", "additionalProperties": false,
+      "required": ["evidence_ref", "result"],
+      "properties": {
+        "evidence_ref": {"$ref": "#/$defs/nullable_opaque_id"},
+        "result": {"$ref": "#/$defs/result_name_set"}
+      }
+    },
+    "payload_tree_navigate": {
+      "type": "object", "additionalProperties": false,
+      "required": ["evidence_ref", "result"],
+      "properties": {
+        "evidence_ref": {"$ref": "#/$defs/nullable_opaque_id"},
+        "result": {"$ref": "#/$defs/result_tree_navigate"}
+      }
+    },
+    "payload_tree_read": {
+      "type": "object", "additionalProperties": false,
+      "required": ["evidence_ref", "result"],
+      "properties": {
+        "evidence_ref": {"$ref": "#/$defs/nullable_opaque_id"},
+        "result": {"$ref": "#/$defs/result_tree_read"}
+      }
+    },
+    "result_attachment_bind": {
+      "type": "object", "additionalProperties": false,
+      "required": ["input_id", "attachment_id", "media_type", "sha256", "size"],
+      "properties": {
+        "input_id": {"$ref": "#/$defs/opaque_id"},
+        "attachment_id": {"$ref": "#/$defs/opaque_id"},
+        "media_type": {"$ref": "#/$defs/media_type"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+      }
+    },
+    "result_branch_summarize": {
+      "type": "object", "additionalProperties": false,
+      "required": ["continuation_id", "previous_leaf_id", "current_leaf_id", "summary_sha256", "usage"],
+      "properties": {
+        "continuation_id": {"$ref": "#/$defs/opaque_id"},
+        "previous_leaf_id": {"$ref": "#/$defs/nullable_opaque_id"},
+        "current_leaf_id": {"$ref": "#/$defs/opaque_id"},
+        "summary_sha256": {"$ref": "#/$defs/sha256"},
+        "usage": {"$ref": "#/$defs/usage"}
+      }
+    },
+    "result_fork_clone": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_continuation_id", "new_continuation_id", "active_leaf_id", "transition_sha256"],
+      "properties": {
+        "source_continuation_id": {"$ref": "#/$defs/opaque_id"},
+        "new_continuation_id": {"$ref": "#/$defs/opaque_id"},
+        "active_leaf_id": {"$ref": "#/$defs/nullable_opaque_id"},
+        "transition_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "result_compact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["continuation_id", "covered_leaf_id", "before_context_tokens", "after_context_tokens", "summary_sha256", "usage"],
+      "properties": {
+        "continuation_id": {"$ref": "#/$defs/opaque_id"},
+        "covered_leaf_id": {"$ref": "#/$defs/opaque_id"},
+        "before_context_tokens": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "after_context_tokens": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "summary_sha256": {"$ref": "#/$defs/sha256"},
+        "usage": {"$ref": "#/$defs/usage"}
+      }
+    },
+    "result_continuation_delete": {
+      "type": "object", "additionalProperties": false,
+      "required": ["continuation_id", "deletion_sha256"],
+      "properties": {
+        "continuation_id": {"$ref": "#/$defs/opaque_id"},
+        "deletion_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "result_continuation_resume": {
+      "type": "object", "additionalProperties": false,
+      "required": ["previous_continuation_id", "current_continuation_id", "transition_sha256"],
+      "properties": {
+        "previous_continuation_id": {"$ref": "#/$defs/opaque_id"},
+        "current_continuation_id": {"$ref": "#/$defs/opaque_id"},
+        "transition_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "result_describe": {
+      "type": "object", "additionalProperties": false,
+      "required": ["continuation_id", "status", "context_tokens", "turns", "usage", "name_sha256"],
+      "properties": {
+        "continuation_id": {"$ref": "#/$defs/opaque_id"},
+        "status": {"enum": ["cancelled", "completed", "creating", "failed", "idle", "paused", "recovery-required", "running"]},
+        "context_tokens": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "turns": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "usage": {"$ref": "#/$defs/usage"},
+        "name_sha256": {"$ref": "#/$defs/nullable_sha256"}
+      }
+    },
+    "result_label_set": {
+      "type": "object", "additionalProperties": false,
+      "required": ["continuation_id", "entry_id", "label_sha256"],
+      "properties": {
+        "continuation_id": {"$ref": "#/$defs/opaque_id"},
+        "entry_id": {"$ref": "#/$defs/opaque_id"},
+        "label_sha256": {"$ref": "#/$defs/nullable_sha256"}
+      }
+    },
+    "result_name_set": {
+      "type": "object", "additionalProperties": false,
+      "required": ["continuation_id", "name_sha256"],
+      "properties": {
+        "continuation_id": {"$ref": "#/$defs/opaque_id"},
+        "name_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "result_tree_navigate": {
+      "type": "object", "additionalProperties": false,
+      "required": ["continuation_id", "previous_leaf_id", "current_leaf_id", "transition_sha256"],
+      "properties": {
+        "continuation_id": {"$ref": "#/$defs/opaque_id"},
+        "previous_leaf_id": {"$ref": "#/$defs/nullable_opaque_id"},
+        "current_leaf_id": {"$ref": "#/$defs/opaque_id"},
+        "transition_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "tree_node": {
+      "type": "object", "additionalProperties": false,
+      "required": ["entry_id", "parent_id", "kind", "label_sha256", "token_count"],
+      "properties": {
+        "entry_id": {"$ref": "#/$defs/opaque_id"},
+        "parent_id": {"$ref": "#/$defs/nullable_opaque_id"},
+        "kind": {"enum": ["compaction", "custom", "input", "output", "summary", "system", "tool"]},
+        "label_sha256": {"$ref": "#/$defs/nullable_sha256"},
+        "token_count": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}
+      }
+    },
+    "result_tree_read": {
+      "type": "object", "additionalProperties": false,
+      "required": ["continuation_id", "nodes", "leaf_id"],
+      "properties": {
+        "continuation_id": {"$ref": "#/$defs/opaque_id"},
+        "nodes": {"type": "array", "items": {"$ref": "#/$defs/tree_node"}},
+        "leaf_id": {"$ref": "#/$defs/nullable_opaque_id"}
+      }
+    }
+  }
+}

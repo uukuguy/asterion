@@ -106,6 +106,16 @@ from asterion.control.parity_testing import (
     ParityScenarioResult,
     ParityScenarioRunner,
 )
+from asterion.control.session_context import (
+    SESSION_CONTEXT_OPERATIONS,
+    SESSION_CONTEXT_PROTOCOL,
+    SessionContextClient,
+    SessionContextCommand,
+    SessionContextProtocolError,
+    SessionContextReceipt,
+    validate_session_context_command,
+    validate_session_context_receipt,
+)
 from asterion.control.system import (
     AgentSystemError,
     AgentSystemPlan,
@@ -210,6 +220,12 @@ __all__ = [
     "PrivateStoreError",
     "REQUIRED_PHASE0_SCENARIOS",
     "RecoveredControlState",
+    "SESSION_CONTEXT_OPERATIONS",
+    "SESSION_CONTEXT_PROTOCOL",
+    "SessionContextClient",
+    "SessionContextCommand",
+    "SessionContextProtocolError",
+    "SessionContextReceipt",
     "ConformanceReport",
     "action_proposal_digest",
     "derive_child_authority",
@@ -230,4 +246,6 @@ __all__ = [
     "validate_control_plane_manifest",
     "validate_private_result_publication",
     "validate_parity_ledger",
+    "validate_session_context_command",
+    "validate_session_context_receipt",
 ]

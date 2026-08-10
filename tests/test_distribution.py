@@ -26,6 +26,12 @@ PACKAGED_SCHEMAS = {
     "schemas/control-plane/v1/control-plane-manifest.schema.json": (
         "asterion/schemas/control-plane/v1/control-plane-manifest.schema.json"
     ),
+    "schemas/session-context/v1/command.schema.json": (
+        "asterion/schemas/session-context/v1/command.schema.json"
+    ),
+    "schemas/session-context/v1/receipt.schema.json": (
+        "asterion/schemas/session-context/v1/receipt.schema.json"
+    ),
 }
 PRIME_DISTRIBUTION_MEMBERS = {
     "src/asterion/control/providers/prime/resources/control-plane.json": (

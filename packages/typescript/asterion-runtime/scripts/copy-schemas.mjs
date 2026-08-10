@@ -65,6 +65,18 @@ const controlEventSource = fileURLToPath(
     import.meta.url,
   ),
 );
+const sessionContextCommandSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/session-context/v1/command.schema.json",
+    import.meta.url,
+  ),
+);
+const sessionContextReceiptSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/session-context/v1/receipt.schema.json",
+    import.meta.url,
+  ),
+);
 const destination = `${packageRoot}/dist/schemas`;
 
 rmSync(destination, { force: true, recursive: true });
@@ -98,3 +110,11 @@ cpSync(
 );
 cpSync(controlCommandSource, `${destination}/control-command.schema.json`);
 cpSync(controlEventSource, `${destination}/control-event.schema.json`);
+cpSync(
+  sessionContextCommandSource,
+  `${destination}/session-context-command.schema.json`,
+);
+cpSync(
+  sessionContextReceiptSource,
+  `${destination}/session-context-receipt.schema.json`,
+);

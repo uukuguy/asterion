@@ -14,6 +14,7 @@ import {
   CAPABILITY_PROTOCOL_VERSION,
   CAPABILITY_SOURCE_PROTOCOL_VERSION,
   CONTROL_PLANE_PROTOCOL,
+  SESSION_CONTEXT_PROTOCOL,
   ProtocolValidationError,
   RUNTIME_PROTOCOL_VERSION,
   validateAssemblyManifest,
@@ -27,6 +28,8 @@ import {
   validateControlEvent,
   validateControlEventStream,
   validateControlPlaneManifest,
+  validateSessionContextCommand,
+  validateSessionContextReceipt,
   validateEventStream,
   validateRunRequest,
   validateRuntimeManifest,
@@ -69,6 +72,10 @@ const controlPlaneFixtures = new URL(
 );
 const agentControlFixtures = new URL(
   "../../../../tests/fixtures/agent_control/v1/",
+  import.meta.url,
+);
+const sessionContextFixtures = new URL(
+  "../../../../tests/fixtures/session_context/v1/",
   import.meta.url,
 );
 const referenceAssemblyRoots = [
@@ -223,6 +230,63 @@ test("validates complete control event streams and semantic ordering", async () 
       }),
     ProtocolValidationError,
   );
+});
+
+test("validates the closed session context extension", async () => {
+  assert.equal(SESSION_CONTEXT_PROTOCOL, "asterion.session-context/v1");
+  const command = await readFixture(
+    sessionContextFixtures,
+    "valid-command-tree-read.json",
+  );
+  const receipt = await readFixture(
+    sessionContextFixtures,
+    "valid-receipt-tree-read.json",
+  );
+  const validatedCommand = validateSessionContextCommand(command);
+  const validatedReceipt = validateSessionContextReceipt(receipt);
+  assert.deepEqual(validatedCommand, command);
+  assert.deepEqual(validatedReceipt, receipt);
+  assert.ok(Object.isFrozen(validatedReceipt.payload.result.nodes[0]));
+  assert.throws(
+    () => {
+      validatedCommand.payload.continuation_id = "changed";
+    },
+    TypeError,
+  );
+  assert.throws(
+    () => validateSessionContextCommand({
+      ...command,
+      generation: Number.MAX_SAFE_INTEGER + 1,
+    }),
+    ProtocolValidationError,
+  );
+  assert.throws(
+    () => validateSessionContextReceipt({
+      ...receipt,
+      payload: {
+        ...receipt.payload,
+        result: {
+          ...receipt.payload.result,
+          nodes: [{
+            entry_id: "entry-1",
+            parent_id: null,
+            kind: "input",
+            label_sha256: null,
+            token_count: Number.MAX_SAFE_INTEGER + 1,
+          }],
+          leaf_id: "entry-1",
+        },
+      },
+    }),
+    ProtocolValidationError,
+  );
+  for (const [name, validate] of [
+    ["invalid-command-private-path.json", validateSessionContextCommand],
+    ["invalid-receipt-provider-payload.json", validateSessionContextReceipt],
+  ]) {
+    const invalid = await readFixture(sessionContextFixtures, name);
+    assert.throws(() => validate(invalid), ProtocolValidationError);
+  }
 });
 
 test("uses the Asterion-owned individual capability protocol identity", () => {

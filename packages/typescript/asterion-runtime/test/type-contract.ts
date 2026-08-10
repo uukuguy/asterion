@@ -13,7 +13,39 @@ import type {
   RunEvent,
   RunRequest,
   RuntimeManifest,
+  SessionContextCommand,
+  SessionContextReceipt,
 } from "../src/index.js";
+
+export const fixtureSessionContextCommand: SessionContextCommand = {
+  protocol: "asterion.session-context/v1",
+  command_id: "context-command-1",
+  session_id: "session-1",
+  generation: 1,
+  authority_revision: 1,
+  idempotency_key: "context-operation-1",
+  operation: "session.tree.read",
+  payload: { continuation_id: "continuation-1" },
+};
+
+export const fixtureSessionContextReceipt: SessionContextReceipt = {
+  protocol: "asterion.session-context/v1",
+  receipt_id: "context-receipt-1",
+  command_id: "context-command-1",
+  session_id: "session-1",
+  generation: 1,
+  operation: "session.tree.read",
+  status: "succeeded",
+  reason_code: "session-context-succeeded",
+  payload: {
+    evidence_ref: "evidence-1",
+    result: {
+      continuation_id: "continuation-1",
+      nodes: [],
+      leaf_id: null,
+    },
+  },
+};
 
 export const fixtureAgentSystem: AgentSystemManifest = {
   protocol: "asterion.agent-system/v1",

@@ -14,6 +14,7 @@ export const CAPABILITY_LOCK_PROTOCOL_VERSION =
 export const AGENT_SYSTEM_PROTOCOL = "asterion.agent-system/v1" as const;
 export const CONTROL_PLANE_PROTOCOL = "asterion.control-plane/v1" as const;
 export const AGENT_CONTROL_PROTOCOL = "asterion.agent-control/v1" as const;
+export const SESSION_CONTEXT_PROTOCOL = "asterion.session-context/v1" as const;
 
 export type ProtocolVersion = typeof RUNTIME_PROTOCOL_VERSION;
 export type CapabilityProtocolVersion = typeof CAPABILITY_PROTOCOL_VERSION;
@@ -30,6 +31,256 @@ export type CapabilityLockProtocolVersion =
 export type AgentSystemProtocolVersion = typeof AGENT_SYSTEM_PROTOCOL;
 export type ControlPlaneProtocolVersion = typeof CONTROL_PLANE_PROTOCOL;
 export type AgentControlProtocolVersion = typeof AGENT_CONTROL_PROTOCOL;
+export type SessionContextProtocolVersion = typeof SESSION_CONTEXT_PROTOCOL;
+
+export type SessionContextOperation =
+  | "session.attachment.bind"
+  | "session.branch.summarize"
+  | "session.clone"
+  | "session.compact"
+  | "session.continuation.delete"
+  | "session.continuation.resume"
+  | "session.describe"
+  | "session.fork"
+  | "session.label.set"
+  | "session.name.set"
+  | "session.tree.navigate"
+  | "session.tree.read";
+
+export interface SessionContextBudget {
+  readonly controller_tokens: number;
+  readonly application_tokens: number;
+  readonly child_tokens: number;
+  readonly aggregate_tokens: number;
+  readonly cost_micros: number;
+  readonly deadline_ms: number;
+}
+
+export interface SessionContextUsage {
+  readonly controller_tokens: number;
+  readonly application_tokens: number;
+  readonly child_tokens: number;
+  readonly aggregate_tokens: number;
+  readonly cost_micros: number;
+}
+
+interface SessionContextCommandBase<T extends SessionContextOperation, P> {
+  readonly protocol: SessionContextProtocolVersion;
+  readonly command_id: string;
+  readonly session_id: string;
+  readonly generation: number;
+  readonly authority_revision: number;
+  readonly idempotency_key: string;
+  readonly operation: T;
+  readonly payload: P;
+}
+
+type ContinuationPayload = { readonly continuation_id: string };
+type ContinuationEntryPayload = ContinuationPayload & {
+  readonly entry_id: string;
+};
+
+export type SessionContextCommand =
+  | SessionContextCommandBase<
+      "session.attachment.bind",
+      {
+        readonly input_id: string;
+        readonly attachment_id: string;
+        readonly body_ref: string;
+        readonly media_type: string;
+        readonly sha256: string;
+        readonly size: number;
+      }
+    >
+  | SessionContextCommandBase<
+      "session.branch.summarize",
+      ContinuationEntryPayload & {
+        readonly instructions_ref: string | null;
+        readonly budget: SessionContextBudget;
+      }
+    >
+  | SessionContextCommandBase<"session.clone", ContinuationPayload>
+  | SessionContextCommandBase<
+      "session.compact",
+      ContinuationPayload & {
+        readonly instructions_ref: string | null;
+        readonly budget: SessionContextBudget;
+      }
+    >
+  | SessionContextCommandBase<"session.continuation.delete", ContinuationPayload>
+  | SessionContextCommandBase<"session.continuation.resume", ContinuationPayload>
+  | SessionContextCommandBase<"session.describe", Record<string, never>>
+  | SessionContextCommandBase<
+      "session.fork",
+      ContinuationEntryPayload & { readonly position: "at" | "before" }
+    >
+  | SessionContextCommandBase<
+      "session.label.set",
+      ContinuationEntryPayload & { readonly label_ref: string | null }
+    >
+  | SessionContextCommandBase<"session.name.set", { readonly name_ref: string }>
+  | SessionContextCommandBase<"session.tree.navigate", ContinuationEntryPayload>
+  | SessionContextCommandBase<"session.tree.read", ContinuationPayload>;
+
+export type SessionContextStatus =
+  | "succeeded"
+  | "rejected"
+  | "failed"
+  | "cancelled"
+  | "uncertain";
+
+export interface SessionContextTreeNode {
+  readonly entry_id: string;
+  readonly parent_id: string | null;
+  readonly kind:
+    | "compaction"
+    | "custom"
+    | "input"
+    | "output"
+    | "summary"
+    | "system"
+    | "tool";
+  readonly label_sha256: string | null;
+  readonly token_count: number;
+}
+
+interface SessionContextReceiptBase<
+  T extends SessionContextOperation,
+  S extends SessionContextStatus,
+  R,
+> {
+  readonly protocol: SessionContextProtocolVersion;
+  readonly receipt_id: string;
+  readonly command_id: string;
+  readonly session_id: string;
+  readonly generation: number;
+  readonly operation: T;
+  readonly status: S;
+  readonly reason_code: string;
+  readonly payload: {
+    readonly evidence_ref: string | null;
+    readonly result: R;
+  };
+}
+
+type ForkCloneResult = {
+  readonly source_continuation_id: string;
+  readonly new_continuation_id: string;
+  readonly active_leaf_id: string | null;
+  readonly transition_sha256: string;
+};
+
+type SessionContextFailureReceipt = SessionContextReceiptBase<
+  SessionContextOperation,
+  Exclude<SessionContextStatus, "succeeded">,
+  null
+>;
+
+export type SessionContextReceipt =
+  | SessionContextFailureReceipt
+  | SessionContextReceiptBase<
+      "session.attachment.bind",
+      "succeeded",
+      {
+        readonly input_id: string;
+        readonly attachment_id: string;
+        readonly media_type: string;
+        readonly sha256: string;
+        readonly size: number;
+      }
+    >
+  | SessionContextReceiptBase<
+      "session.branch.summarize",
+      "succeeded",
+      {
+        readonly continuation_id: string;
+        readonly previous_leaf_id: string | null;
+        readonly current_leaf_id: string;
+        readonly summary_sha256: string;
+        readonly usage: SessionContextUsage;
+      }
+    >
+  | SessionContextReceiptBase<"session.clone", "succeeded", ForkCloneResult>
+  | SessionContextReceiptBase<
+      "session.compact",
+      "succeeded",
+      {
+        readonly continuation_id: string;
+        readonly covered_leaf_id: string;
+        readonly before_context_tokens: number;
+        readonly after_context_tokens: number;
+        readonly summary_sha256: string;
+        readonly usage: SessionContextUsage;
+      }
+    >
+  | SessionContextReceiptBase<
+      "session.continuation.delete",
+      "succeeded",
+      { readonly continuation_id: string; readonly deletion_sha256: string }
+    >
+  | SessionContextReceiptBase<
+      "session.continuation.resume",
+      "succeeded",
+      {
+        readonly previous_continuation_id: string;
+        readonly current_continuation_id: string;
+        readonly transition_sha256: string;
+      }
+    >
+  | SessionContextReceiptBase<
+      "session.describe",
+      "succeeded",
+      {
+        readonly continuation_id: string;
+        readonly status:
+          | "cancelled"
+          | "completed"
+          | "creating"
+          | "failed"
+          | "idle"
+          | "paused"
+          | "recovery-required"
+          | "running";
+        readonly context_tokens: number;
+        readonly turns: number;
+        readonly usage: SessionContextUsage;
+        readonly name_sha256: string | null;
+      }
+    >
+  | SessionContextReceiptBase<"session.fork", "succeeded", ForkCloneResult>
+  | SessionContextReceiptBase<
+      "session.label.set",
+      "succeeded",
+      {
+        readonly continuation_id: string;
+        readonly entry_id: string;
+        readonly label_sha256: string | null;
+      }
+    >
+  | SessionContextReceiptBase<
+      "session.name.set",
+      "succeeded",
+      { readonly continuation_id: string; readonly name_sha256: string }
+    >
+  | SessionContextReceiptBase<
+      "session.tree.navigate",
+      "succeeded",
+      {
+        readonly continuation_id: string;
+        readonly previous_leaf_id: string | null;
+        readonly current_leaf_id: string;
+        readonly transition_sha256: string;
+      }
+    >
+  | SessionContextReceiptBase<
+      "session.tree.read",
+      "succeeded",
+      {
+        readonly continuation_id: string;
+        readonly nodes: readonly SessionContextTreeNode[];
+        readonly leaf_id: string | null;
+      }
+    >;
 
 export interface AgentSystemApplicationRef {
   readonly provider_id: string;

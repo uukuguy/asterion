@@ -1,6 +1,6 @@
 # Asterion Prime Session/Context Parity Implementation Plan
 
-> Status: approved design; implementation not started.
+> Status: Task 4.1 verified; Task 4.2 selected-provider binding is next.
 >
 > Program parent: `2026-08-10-asterion-prime-system-parity.md`, Task 4.
 >
@@ -165,7 +165,9 @@ Every command has exactly:
   "authority_revision": 1,
   "idempotency_key": "context-operation-1",
   "operation": "session.tree.read",
-  "payload": {}
+  "payload": {
+    "continuation_id": "continuation-1"
+  }
 }
 ```
 
@@ -178,10 +180,16 @@ Every receipt has exactly:
   "command_id": "context-command-1",
   "session_id": "session-1",
   "generation": 1,
+  "operation": "session.tree.read",
   "status": "succeeded",
   "reason_code": "session-context-succeeded",
   "payload": {
-    "evidence_ref": "evidence-1"
+    "evidence_ref": "evidence-1",
+    "result": {
+      "continuation_id": "continuation-1",
+      "nodes": [],
+      "leaf_id": null
+    }
   }
 }
 ```
@@ -196,7 +204,7 @@ Operation payloads are closed unions:
 | Operation | Public request payload | Public success projection |
 | --- | --- | --- |
 | `session.describe` | `{}` | current `continuation_id`, status code, safe token/turn counts, optional name digest |
-| `session.name.set` | `name_ref` | `name_digest` and current `continuation_id` |
+| `session.name.set` | `name_ref` | `name_sha256` and current `continuation_id` |
 | `session.continuation.resume` | `continuation_id` | previous/current continuation IDs and transition digest |
 | `session.continuation.delete` | `continuation_id` | deleted continuation ID and deletion receipt digest |
 | `session.tree.read` | `continuation_id` | sorted closed nodes containing IDs, parent ID, kind, token count and optional label digest; active leaf ID |
@@ -321,6 +329,9 @@ mutation task while an earlier protocol/durability task is failing.
 
 ### Task 4.1: Add the closed session-context contract
 
+**Status:** Complete. Python/JSON Schema/TypeScript agreement, safe-integer
+bounds, wheel resources, full promotion and independent review pass.
+
 **Create:**
 
 - `schemas/session-context/v1/command.schema.json`
@@ -329,6 +340,10 @@ mutation task while an earlier protocol/durability task is failing.
 - `tests/fixtures/session_context/v1/valid-*.json`
 - `tests/fixtures/session_context/v1/invalid-*.json`
 - `tests/test_session_context_protocol.py`
+- `pyproject.toml`
+- `tools/check_promotion.py`
+- `tests/test_distribution.py`
+- `tests/test_check_promotion.py`
 
 **Modify:**
 
@@ -351,6 +366,8 @@ mutation task while an earlier protocol/durability task is failing.
 uv run python -m unittest -v tests.test_session_context_protocol
 npm --prefix packages/typescript/asterion-runtime test
 uv run pyright src/asterion/control/session_context.py tests/test_session_context_protocol.py
+uv run python -m unittest -v tests.test_distribution tests.test_check_promotion
+make promotion-check
 ```
 
 Expected: PASS, zero Pyright errors/warnings.

@@ -1,0 +1,33 @@
+{
+  "protocol": "asterion.session-context/v1",
+  "receipt_id": "context-receipt-1",
+  "command_id": "context-command-1",
+  "session_id": "session-1",
+  "generation": 1,
+  "operation": "session.tree.read",
+  "status": "succeeded",
+  "reason_code": "session-context-succeeded",
+  "payload": {
+    "evidence_ref": "evidence-1",
+    "result": {
+      "continuation_id": "continuation-1",
+      "nodes": [
+        {
+          "entry_id": "entry-1",
+          "parent_id": null,
+          "kind": "input",
+          "label_sha256": null,
+          "token_count": 7
+        },
+        {
+          "entry_id": "entry-2",
+          "parent_id": "entry-1",
+          "kind": "output",
+          "label_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "token_count": 11
+        }
+      ],
+      "leaf_id": "entry-2"
+    }
+  }
+}

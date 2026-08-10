@@ -106,6 +106,8 @@ schema_paths = (
     'asterion/schemas/control-plane/v1/control-plane-manifest.schema.json',
     'asterion/schemas/agent-control/v1/command.schema.json',
     'asterion/schemas/agent-control/v1/event.schema.json',
+    'asterion/schemas/session-context/v1/command.schema.json',
+    'asterion/schemas/session-context/v1/receipt.schema.json',
 )
 for name in schema_paths:
     path = root.parent / name
