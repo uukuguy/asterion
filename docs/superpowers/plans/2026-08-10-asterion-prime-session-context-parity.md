@@ -1,6 +1,6 @@
 # Asterion Prime Session/Context Parity Implementation Plan
 
-> Status: Tasks 4.1-4.5 verified; Task 4.6 identity and safe status projection is next.
+> Status: Tasks 4.1-4.6 verified; Task 4.7 exact resume and bounded deletion is next.
 >
 > Program parent: `2026-08-10-asterion-prime-system-parity.md`, Task 4.
 >
@@ -549,8 +549,12 @@ Commit: `feat: admit pinned prime session commands`.
 
 - `packages/typescript/prime-gateway/src/prime-session.ts`
 - `packages/typescript/prime-gateway/src/gateway.ts`
+- `packages/typescript/prime-gateway/src/durable-store.ts`
+- `packages/typescript/prime-gateway/src/main.ts`
+- `src/asterion/control/providers/prime/process.py`
 - `packages/typescript/prime-gateway/test/prime-session.test.mjs`
 - `packages/typescript/prime-gateway/test/gateway.test.mjs`
+- `tests/test_prime_control_factory.py`
 
 1. Persist initial continuation and separate Prime active/transcript IDs after
    `create`; acquire the exact private session path through the pinned header.
@@ -559,6 +563,16 @@ Commit: `feat: admit pinned prime session commands`.
    continuation ID and optional name digest.
 4. Reject overflow, negative, floating, unknown and raw nested stats.
 5. Exercise restart-after-result and repeated command replay.
+
+**Status:** Complete. Creation now pins the Prime header, stores the private
+continuation locator before acknowledging the daemon result, and rebinds it
+across supervisor generations. Native naming and describe commands expose
+only digests, closed status and monotonic safe counts; valid post-compaction
+unknown context usage projects to zero while malformed statistics fail
+closed. The sidecar launches with umask `0077`, so the pinned Prime transcript
+satisfies the locator's owner-only file invariant. Thirty-eight focused
+Gateway tests, all 152 Prime Gateway tests, the Python process-boundary suite,
+`make check`, and independent review pass.
 
 Run the two focused Gateway test files. Commit:
 `feat: project prime session identity and status`.

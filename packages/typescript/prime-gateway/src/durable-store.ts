@@ -38,6 +38,8 @@ const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
 const PRIVATE_REF_PATTERN = /^private:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const RECORD_KINDS = new Set([
   "command.accepted",
+  "context.binding.initialized",
+  "context.binding.rebound",
   "context.command.accepted",
   "context.operation.committed",
   "event.accepted",
@@ -521,6 +523,7 @@ export class GatewayDurableStore {
     string,
     GatewayContextBinding
   >();
+  private initialContextBindingValue?: GatewayContextBinding;
   private readonly faultInjector: StorageFaultInjector | undefined;
   private failed = false;
   private commandCount = 0;
@@ -635,6 +638,31 @@ export class GatewayDurableStore {
     );
   }
 
+  async initializeContextBinding(
+    binding: GatewayContextBinding,
+  ): Promise<GatewayRecordReceipt> {
+    const validated = validateContextBinding(binding);
+    return this.appendRecord(
+      "context.binding.initialized",
+      "context-binding:initial",
+      validated as unknown as Record<string, unknown>,
+    );
+  }
+
+  async rebindContextBinding(
+    binding: GatewayContextBinding,
+  ): Promise<GatewayRecordReceipt> {
+    const validated = validateContextBinding(binding);
+    if (!this.currentContextBindings.has(validated.continuationId)) {
+      throw new GatewayStoreConflictError();
+    }
+    return this.appendRecord(
+      "context.binding.rebound",
+      `context-binding:${validated.continuationId}:${validated.bindingDigest}`,
+      validated as unknown as Record<string, unknown>,
+    );
+  }
+
   async commitContextOperation(
     receipt: unknown,
     nextBinding: GatewayContextBinding | null,
@@ -704,6 +732,10 @@ export class GatewayDurableStore {
       throw new GatewayStoreConflictError();
     }
     return this.currentContextBindings.get(continuationId);
+  }
+
+  initialContextBinding(): GatewayContextBinding | undefined {
+    return this.initialContextBindingValue;
   }
 
   async appendEvent(event: unknown): Promise<GatewayEventReceipt> {
@@ -998,6 +1030,24 @@ export class GatewayDurableStore {
         }
         return Object.freeze({ command });
       }
+      if (kind === "context.binding.initialized") {
+        const binding = validateContextBinding(payload);
+        if (recordId !== "context-binding:initial") {
+          throw new GatewayStoreCorruptionError();
+        }
+        return binding as unknown as Record<string, unknown>;
+      }
+      if (kind === "context.binding.rebound") {
+        const binding = validateContextBinding(payload);
+        if (
+          recordId !==
+            `context-binding:${binding.continuationId}:${binding.bindingDigest}` ||
+          !this.currentContextBindings.has(binding.continuationId)
+        ) {
+          throw new GatewayStoreCorruptionError();
+        }
+        return binding as unknown as Record<string, unknown>;
+      }
       if (kind === "context.operation.committed") {
         const commandId = recordId.startsWith("context-commit:")
           ? recordId.slice("context-commit:".length)
@@ -1037,6 +1087,26 @@ export class GatewayDurableStore {
     this.recordsById.set(record.stored.record_id, record);
     if (record.stored.kind === "command.accepted") {
       this.commandCount += 1;
+    } else if (record.stored.kind === "context.binding.initialized") {
+      const binding = record.payload as unknown as GatewayContextBinding;
+      if (
+        this.currentContextBindings.size !== 0 ||
+        this.initialContextBindingValue !== undefined
+      ) {
+        throw new GatewayStoreCorruptionError();
+      }
+      this.initialContextBindingValue = binding;
+      this.currentContextBindings.set(binding.continuationId, binding);
+    } else if (record.stored.kind === "context.binding.rebound") {
+      const binding = record.payload as unknown as GatewayContextBinding;
+      const existing = this.currentContextBindings.get(binding.continuationId);
+      if (existing === undefined) {
+        throw new GatewayStoreCorruptionError();
+      }
+      this.currentContextBindings.set(binding.continuationId, binding);
+      if (this.initialContextBindingValue?.continuationId === binding.continuationId) {
+        this.initialContextBindingValue = binding;
+      }
     } else if (record.stored.kind === "context.command.accepted") {
       const command = record.payload.command as SessionContextCommand;
       const existingId = this.contextIdempotency.get(command.idempotency_key);

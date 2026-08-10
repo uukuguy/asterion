@@ -30,6 +30,7 @@ import type {
   PrimeMappedEventIdentity,
 } from "./event-mapper.js";
 import type {
+  PrivateContinuationLocator,
   PrivateValueRef,
 } from "./private-store.js";
 import type {
@@ -48,7 +49,11 @@ import type {
   PrimeDaemonResponse,
 } from "./daemon-wire.js";
 import type {
+  PrimeContextDescription,
+  PrimeContextNameResult,
+  PrimeContextStatus,
   PrimeInputDelivery,
+  PrimeSessionInitialBinding,
 } from "./prime-session.js";
 import {
   PrimePromptAdmissionUncertainError,
@@ -62,6 +67,7 @@ type CheckpointPayload = Extract<
 export interface PrimeGatewaySession {
   readonly activeSessionId: string;
   readonly transcriptSessionId: string;
+  readonly continuationId: string;
   readonly supervisorGeneration: string;
   readonly lastAttachResponse: PrimeDaemonResponse | undefined;
   adoptRecovery(recovery: PrimeCheckpointRecovery): void;
@@ -77,10 +83,25 @@ export interface PrimeGatewaySession {
   attach(commandId: string, cursor?: PrimeDaemonCursor): Promise<PrimeDaemonResponse>;
   detach(commandId: string): Promise<void>;
   cancel(commandId: string): Promise<void>;
+  describeContext(
+    commandId: string,
+    status: PrimeContextStatus,
+  ): Promise<PrimeContextDescription>;
+  setContextName(
+    commandId: string,
+    name: string,
+  ): Promise<PrimeContextNameResult>;
+  acknowledgeContext(commandId: string): boolean;
 }
 
 export interface PrimeGatewayPrivateInputs {
   readInput(reference: string): Promise<string>;
+  putContinuationLocator(
+    locator: PrivateContinuationLocator,
+  ): Promise<GatewayContextBinding>;
+  readContinuationLocator(
+    binding: GatewayContextBinding,
+  ): Promise<PrivateContinuationLocator>;
 }
 
 export interface PrimeGatewayPrivateResults {
@@ -106,15 +127,14 @@ export interface PrimeGatewayOptions {
   readonly privateResults?: PrimeGatewayPrivateResults;
   readonly createSession: (
     goal: string,
-    bindIdentity: (identity: {
-      readonly activeSessionId: string;
-      readonly transcriptSessionId: string;
-      readonly supervisorGeneration: string;
-    }) => Promise<void>,
+    bindIdentity: (identity: PrimeSessionInitialBinding) => Promise<void>,
     context: PrimeGatewayCreateContext,
   ) => Promise<PrimeGatewaySession>;
   readonly restoreSession?: (
-    identity: PrimeIdentityBinding,
+    identity: PrimeIdentityBinding & Readonly<{
+      continuationId: string;
+      sessionPath: string;
+    }>,
     onRecovered: (recovery: PrimeCheckpointRecovery) => Promise<void>,
   ) => Promise<PrimeGatewaySession>;
   readonly createCheckpoint: (
@@ -130,6 +150,7 @@ export interface PrimeGatewayOptions {
 export interface PrimeGatewaySessionContextResult {
   readonly receipt: SessionContextReceipt;
   readonly nextBinding: GatewayContextBinding | null;
+  readonly acknowledge?: () => boolean;
 }
 
 export interface PrimeGatewaySessionContextExecutor {
@@ -351,9 +372,7 @@ export class PrimeGateway {
     preparePrivate: () => Promise<void>,
   ): Promise<SessionContextReceipt> {
     this.assertOpen();
-    const executor = this.options.sessionContext;
     if (
-      executor === undefined ||
       typeof preparePrivate !== "function" ||
       this.options.store.snapshot().primeIdentity === undefined
     ) {
@@ -382,8 +401,11 @@ export class PrimeGateway {
       } catch {
         throw new PrimeGatewayError();
       }
-      return existing.promise;
+      const receipt = await existing.promise;
+      this.retryContextAcknowledgement(command);
+      return receipt;
     }
+    const executor = this.options.sessionContext ?? this.nativeContextExecutor();
     let execution: ContextExecution;
     const promise = this.persistAndExecuteSessionContext(
       command,
@@ -591,6 +613,10 @@ export class PrimeGateway {
             "session.recovery-required",
             "prime-supervisor-restart",
           ));
+          await this.refreshContextBinding(
+            attachedSession,
+            attachedSession.supervisorGeneration,
+          );
           await this.enqueueDurable(() => this.options.store.bindPrimeIdentity({
             activeSessionId: attachedSession.activeSessionId,
             transcriptSessionId: attachedSession.transcriptSessionId,
@@ -651,11 +677,20 @@ export class PrimeGateway {
       const result = await executor.execute(command);
       if (
         typeof result !== "object" ||
-        result === null ||
-        Object.keys(result).sort().join("\u0000") !==
-          ["nextBinding", "receipt"].sort().join("\u0000") ||
+        result === null
+      ) {
+        throw new PrimeGatewayError();
+      }
+      const resultKeys = Object.keys(result).sort().join("\u0000");
+      if (
+        (resultKeys !== ["nextBinding", "receipt"].sort().join("\u0000") &&
+          resultKeys !== ["acknowledge", "nextBinding", "receipt"]
+            .sort()
+            .join("\u0000")) ||
         !Object.hasOwn(result, "receipt") ||
-        !Object.hasOwn(result, "nextBinding")
+        !Object.hasOwn(result, "nextBinding") ||
+        (result.acknowledge !== undefined &&
+          typeof result.acknowledge !== "function")
       ) {
         throw new PrimeGatewayError();
       }
@@ -668,16 +703,195 @@ export class PrimeGateway {
       ) {
         throw new PrimeGatewayError();
       }
+      this.assertMonotonicContextReceipt(receipt);
       const committed = await this.enqueueDurable(
         () => this.options.store.commitContextOperation(
           receipt,
           result.nextBinding,
         ),
       );
+      try {
+        result.acknowledge?.();
+      } catch {
+        // Durable receipt wins; a stable command replay retries acknowledgement.
+      }
       return committed.receipt;
     } catch {
       throw new PrimeGatewayError();
     }
+  }
+
+  private nativeContextExecutor(): PrimeGatewaySessionContextExecutor {
+    const session = this.requireSession();
+    return Object.freeze({
+      execute: async (
+        command: SessionContextCommand,
+      ): Promise<PrimeGatewaySessionContextResult> => {
+        if (command.operation === "session.describe") {
+          const result = await session.describeContext(
+            command.command_id,
+            this.contextStatus(),
+          );
+          return Object.freeze({
+            receipt: this.contextSuccessReceipt(command, {
+              continuation_id: result.continuationId,
+              status: result.status,
+              context_tokens: result.contextTokens,
+              turns: result.turns,
+              usage: result.usage,
+              name_sha256: result.nameSha256,
+            }),
+            nextBinding: null,
+          });
+        }
+        if (command.operation === "session.name.set") {
+          const named = await session.setContextName(
+            command.command_id,
+            await this.options.privateValues.readInput(command.payload.name_ref),
+          );
+          return Object.freeze({
+            receipt: this.contextSuccessReceipt(command, {
+              continuation_id: named.result.continuationId,
+              name_sha256: named.result.nameSha256,
+            }),
+            nextBinding: null,
+            acknowledge: named.acknowledge,
+          });
+        }
+        throw new PrimeGatewayError();
+      },
+      cancel: async () => {
+        throw new PrimeGatewayError();
+      },
+    });
+  }
+
+  private contextSuccessReceipt(
+    command: SessionContextCommand,
+    result: object,
+  ): SessionContextReceipt {
+    return validateSessionContextReceipt({
+      protocol: "asterion.session-context/v1",
+      receipt_id: `context-${sha256Hex(
+        canonicalJsonBytes({ command_id: command.command_id }),
+      ).slice(0, 32)}`,
+      command_id: command.command_id,
+      session_id: command.session_id,
+      generation: command.generation,
+      operation: command.operation,
+      status: "succeeded",
+      reason_code: "session-context-succeeded",
+      payload: {
+        evidence_ref: null,
+        result,
+      },
+    });
+  }
+
+  private contextStatus(): PrimeContextStatus {
+    if (this.sessionStatus === "created") {
+      return "creating";
+    }
+    if (this.sessionStatus === "running") {
+      return "running";
+    }
+    if (this.sessionStatus === "paused") {
+      return "paused";
+    }
+    if (this.sessionStatus === "recovery_required") {
+      return "recovery-required";
+    }
+    if (this.goalStatus === "completed") {
+      return "completed";
+    }
+    if (this.goalStatus === "failed") {
+      return "failed";
+    }
+    const terminal = this.options.store.eventsAfter(0).at(-1)?.event.type;
+    return terminal === "session.cancelled" ? "cancelled" : "failed";
+  }
+
+  private assertMonotonicContextReceipt(receipt: SessionContextReceipt): void {
+    if (receipt.status !== "succeeded" || receipt.operation !== "session.describe") {
+      return;
+    }
+    const current = receipt.payload.result;
+    const usageTotal =
+      current.usage.controller_tokens +
+      current.usage.application_tokens +
+      current.usage.child_tokens;
+    if (
+      !Number.isSafeInteger(usageTotal) ||
+      usageTotal !== current.usage.aggregate_tokens
+    ) {
+      throw new PrimeGatewayError();
+    }
+    const previous = [...this.options.store.contextOperations()]
+      .reverse()
+      .map(({ receipt: candidate }) => candidate)
+      .find(
+        (candidate): candidate is Extract<
+          SessionContextReceipt,
+          { readonly operation: "session.describe"; readonly status: "succeeded" }
+        > =>
+          candidate.status === "succeeded" &&
+          candidate.operation === "session.describe",
+      );
+    if (previous === undefined) {
+      return;
+    }
+    const prior = previous.payload.result;
+    if (
+      current.turns < prior.turns ||
+      current.usage.controller_tokens < prior.usage.controller_tokens ||
+      current.usage.application_tokens < prior.usage.application_tokens ||
+      current.usage.child_tokens < prior.usage.child_tokens ||
+      current.usage.aggregate_tokens < prior.usage.aggregate_tokens ||
+      current.usage.cost_micros < prior.usage.cost_micros
+    ) {
+      throw new PrimeGatewayError();
+    }
+  }
+
+  private retryContextAcknowledgement(command: SessionContextCommand): void {
+    if (command.operation !== "session.name.set" || this.session === undefined) {
+      return;
+    }
+    try {
+      this.session.acknowledgeContext(command.command_id);
+    } catch {
+      // A later replay retries the stable acknowledgement.
+    }
+  }
+
+  private async refreshContextBinding(
+    session: PrimeGatewaySession,
+    supervisorGeneration: string,
+  ): Promise<void> {
+    const current = this.options.store.currentContextBinding(
+      session.continuationId,
+    );
+    if (current === undefined || !OPAQUE_ID.test(supervisorGeneration)) {
+      throw new PrimeGatewayError();
+    }
+    const locator = await this.options.privateValues.readContinuationLocator(current);
+    if (
+      locator.continuationId !== session.continuationId ||
+      locator.activeSessionId !== session.activeSessionId ||
+      locator.transcriptSessionId !== session.transcriptSessionId
+    ) {
+      throw new PrimeGatewayError();
+    }
+    if (locator.supervisorGeneration === supervisorGeneration) {
+      return;
+    }
+    const replacement = await this.options.privateValues.putContinuationLocator({
+      ...locator,
+      supervisorGeneration,
+    });
+    await this.enqueueDurable(
+      () => this.options.store.rebindContextBinding(replacement),
+    );
   }
 
   private async create(
@@ -687,11 +901,7 @@ export class PrimeGateway {
       throw new PrimeGatewayError();
     }
     const goal = await this.options.privateValues.readInput(command.payload.goal_ref);
-    let boundIdentity: {
-      readonly activeSessionId: string;
-      readonly transcriptSessionId: string;
-      readonly supervisorGeneration: string;
-    } | undefined;
+    let boundIdentity: PrimeSessionInitialBinding | undefined;
     const createContext = Object.freeze({
       goalId: command.payload.goal_id,
       authorityRevision: command.authority_revision,
@@ -704,11 +914,48 @@ export class PrimeGateway {
           boundIdentity !== undefined ||
           !OPAQUE_ID.test(identity.activeSessionId) ||
           !OPAQUE_ID.test(identity.transcriptSessionId) ||
-          !OPAQUE_ID.test(identity.supervisorGeneration)
+          !OPAQUE_ID.test(identity.supervisorGeneration) ||
+          !OPAQUE_ID.test(identity.continuationId) ||
+          typeof identity.sessionPath !== "string"
         ) {
           throw new PrimeGatewayError();
         }
-        await this.enqueueDurable(() => this.options.store.bindPrimeIdentity(identity));
+        const locator = Object.freeze({
+          continuationId: identity.continuationId,
+          activeSessionId: identity.activeSessionId,
+          transcriptSessionId: identity.transcriptSessionId,
+          supervisorGeneration: identity.supervisorGeneration,
+          sessionPath: identity.sessionPath,
+        });
+        let contextBinding = this.options.store.currentContextBinding(
+          identity.continuationId,
+        );
+        if (contextBinding === undefined) {
+          contextBinding = await this.options.privateValues.putContinuationLocator(
+            locator,
+          );
+          await this.enqueueDurable(
+            () => this.options.store.initializeContextBinding(contextBinding!),
+          );
+        } else {
+          const restored = await this.options.privateValues.readContinuationLocator(
+            contextBinding,
+          );
+          if (
+            restored.continuationId !== locator.continuationId ||
+            restored.activeSessionId !== locator.activeSessionId ||
+            restored.transcriptSessionId !== locator.transcriptSessionId ||
+            restored.supervisorGeneration !== locator.supervisorGeneration ||
+            restored.sessionPath !== locator.sessionPath
+          ) {
+            throw new PrimeGatewayError();
+          }
+        }
+        await this.enqueueDurable(() => this.options.store.bindPrimeIdentity({
+          activeSessionId: identity.activeSessionId,
+          transcriptSessionId: identity.transcriptSessionId,
+          supervisorGeneration: identity.supervisorGeneration,
+        }));
         boundIdentity = Object.freeze({ ...identity });
       },
       createContext,
@@ -717,9 +964,11 @@ export class PrimeGateway {
       boundIdentity === undefined ||
       !OPAQUE_ID.test(session.activeSessionId) ||
       !OPAQUE_ID.test(session.transcriptSessionId) ||
+      !OPAQUE_ID.test(session.continuationId) ||
       !OPAQUE_ID.test(session.supervisorGeneration) ||
       session.activeSessionId !== boundIdentity.activeSessionId ||
       session.transcriptSessionId !== boundIdentity.transcriptSessionId ||
+      session.continuationId !== boundIdentity.continuationId ||
       session.supervisorGeneration !== boundIdentity.supervisorGeneration
     ) {
       throw new PrimeGatewayError();
@@ -835,6 +1084,10 @@ export class PrimeGateway {
             throw new PrimeGatewayError();
           }
           adopted = true;
+          await this.refreshContextBinding(
+            session,
+            recovery.supervisorGeneration,
+          );
           await this.enqueueDurable(() => this.options.store.bindPrimeIdentity({
             activeSessionId: session.activeSessionId,
             transcriptSessionId: recovery.transcriptSessionId,
@@ -921,8 +1174,10 @@ export class PrimeGateway {
       return;
     }
     const identity = this.options.store.snapshot().primeIdentity;
+    const contextBinding = this.options.store.initialContextBinding();
     if (
       identity === undefined ||
+      contextBinding === undefined ||
       this.goalId === undefined ||
       this.options.restoreSession === undefined
     ) {
@@ -940,7 +1195,21 @@ export class PrimeGateway {
     let recovered: PrimeCheckpointRecovery | undefined;
     let restoredEvent: ControlEvent | undefined;
     try {
-      const session = await this.options.restoreSession(identity, async (recovery) => {
+      const locator = await this.options.privateValues.readContinuationLocator(
+        contextBinding,
+      );
+      if (
+        locator.continuationId !== contextBinding.continuationId ||
+        locator.activeSessionId !== identity.activeSessionId ||
+        locator.transcriptSessionId !== identity.transcriptSessionId
+      ) {
+        throw new PrimeGatewayError();
+      }
+      const session = await this.options.restoreSession(Object.freeze({
+        ...identity,
+        continuationId: locator.continuationId,
+        sessionPath: locator.sessionPath,
+      }), async (recovery) => {
         if (
           recovered !== undefined ||
           this.sessionStatus !== "recovery_required" ||
@@ -955,6 +1224,7 @@ export class PrimeGateway {
         recovered === undefined ||
         session.activeSessionId !== identity.activeSessionId ||
         session.transcriptSessionId !== identity.transcriptSessionId ||
+        session.continuationId !== locator.continuationId ||
         typeof session.adoptRecovery !== "function" ||
         typeof session.subscribe !== "function"
       ) {
@@ -964,6 +1234,10 @@ export class PrimeGateway {
       if (session.supervisorGeneration !== recovered.supervisorGeneration) {
         throw new PrimeGatewayError();
       }
+      await this.refreshContextBinding(
+        session,
+        recovered.supervisorGeneration,
+      );
       await this.enqueueDurable(() => this.options.store.bindPrimeIdentity({
         activeSessionId: identity.activeSessionId,
         transcriptSessionId: identity.transcriptSessionId,

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -218,9 +218,11 @@ class FakeGateway {
 }
 
 class FakePrimeSession {
-  constructor() {
+  constructor(sessionPath = "/private/sessions/transcript-1.jsonl") {
     this.activeSessionId = "prime-root-1";
     this.transcriptSessionId = "transcript-1";
+    this.continuationId = "continuation-1";
+    this.sessionPath = sessionPath;
     this.supervisorGeneration = "supervisor-generation-1";
     this.calls = [];
     this.listener = undefined;
@@ -270,10 +272,16 @@ function createSidecar(options = {}) {
 
 async function createRealSidecarFixture() {
   const fixtureRoot = await temporaryStoreRoot();
+  const sessionRoot = join(fixtureRoot.parent, "sessions");
+  const sessionPath = join(sessionRoot, "transcript-1.jsonl");
+  await mkdir(sessionRoot, { mode: 0o700 });
+  await writeFile(sessionPath, "private transcript\n", { mode: 0o600 });
   const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
   store.registerEventGeneration(1);
-  const privateValues = await PrivateValueStore.open(fixtureRoot.root);
-  const session = new FakePrimeSession();
+  const privateValues = await PrivateValueStore.open(fixtureRoot.root, {
+    continuationRoot: sessionRoot,
+  });
+  const session = new FakePrimeSession(sessionPath);
   const createdGoals = [];
   const contextCalls = [];
   const contextCancellations = [];
@@ -307,6 +315,8 @@ async function createRealSidecarFixture() {
         activeSessionId: session.activeSessionId,
         transcriptSessionId: session.transcriptSessionId,
         supervisorGeneration: session.supervisorGeneration,
+        continuationId: session.continuationId,
+        sessionPath: session.sessionPath,
       });
       return session;
     },

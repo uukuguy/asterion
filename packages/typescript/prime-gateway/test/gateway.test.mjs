@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -34,9 +35,14 @@ function recoveryTransport(supervisorGeneration, name) {
 }
 
 class FakePrimeSession {
-  constructor() {
+  constructor(
+    sessionPath = "/private/sessions/transcript-1.jsonl",
+    contextBackend = undefined,
+  ) {
     this.activeSessionId = "prime-root-1";
     this.transcriptSessionId = "transcript-1";
+    this.continuationId = "continuation-1";
+    this.sessionPath = sessionPath;
     this.supervisorGeneration = "supervisor-generation-1";
     this.calls = [];
     this.recoveries = [];
@@ -44,6 +50,29 @@ class FakePrimeSession {
     this.checkpointAcknowledger = () => true;
     this.listener = undefined;
     this.pauseError = undefined;
+    this.contextCalls = [];
+    this.contextBackend = contextBackend ?? {
+      acknowledgements: [],
+      nameResults: new Map(),
+      sideEffects: [],
+    };
+    this.contextAcknowledgements = this.contextBackend.acknowledgements;
+    this.contextSideEffects = this.contextBackend.sideEffects;
+    this.contextDescription = {
+      continuationId: this.continuationId,
+      status: "idle",
+      contextTokens: 90,
+      turns: 2,
+      usage: {
+        controller_tokens: 135,
+        application_tokens: 0,
+        child_tokens: 0,
+        aggregate_tokens: 135,
+        cost_micros: 1234,
+      },
+      nameSha256: createHash("sha256").update("session-1").digest("hex"),
+    };
+    this.afterContextResult = undefined;
   }
 
   subscribe(listener) {
@@ -80,6 +109,40 @@ class FakePrimeSession {
     this.calls.push(["cancel", commandId]);
   }
 
+  async describeContext(commandId, status) {
+    this.contextCalls.push(["describe", commandId, status]);
+    return structuredClone(this.contextDescription);
+  }
+
+  async setContextName(commandId, name) {
+    this.contextCalls.push(["name", commandId, name]);
+    const stableCommandId = `session-1-context-${commandId}-set-name`;
+    let result = this.contextBackend.nameResults.get(stableCommandId);
+    if (result === undefined) {
+      result = {
+        continuationId: this.continuationId,
+        nameSha256: createHash("sha256").update(name.trim()).digest("hex"),
+      };
+      this.contextBackend.nameResults.set(stableCommandId, result);
+      this.contextBackend.sideEffects.push([stableCommandId, name]);
+    }
+    this.afterContextResult?.();
+    return {
+      result,
+      acknowledge: () => {
+        this.contextAcknowledgements.push(stableCommandId);
+        return true;
+      },
+    };
+  }
+
+  acknowledgeContext(commandId) {
+    this.contextAcknowledgements.push(
+      `session-1-context-${commandId}-set-name`,
+    );
+    return true;
+  }
+
   adoptRecovery(recovery) {
     this.recoveries.push(recovery);
     this.supervisorGeneration = recovery.supervisorGeneration;
@@ -101,6 +164,10 @@ async function fixture({
 } = {}) {
   const parent = await mkdtemp(join(tmpdir(), "asterion-prime-gateway-"));
   const root = join(parent, "gateway");
+  const sessionRoot = join(parent, "sessions");
+  const sessionPath = join(sessionRoot, "transcript-1.jsonl");
+  await mkdir(sessionRoot, { mode: 0o700 });
+  await writeFile(sessionPath, "private transcript\n", { mode: 0o600 });
   let failNextWrite = false;
   const store = await GatewayDurableStore.open(root, "session-1", {
     faultInjector(stage) {
@@ -110,7 +177,9 @@ async function fixture({
       }
     },
   });
-  const privateValues = await PrivateValueStore.open(root);
+  const privateValues = await PrivateValueStore.open(root, {
+    continuationRoot: sessionRoot,
+  });
   const resultLookups = [];
   let failAfterResultLookup = false;
   const privateResults = {
@@ -128,7 +197,7 @@ async function fixture({
       return result;
     },
   };
-  const session = new FakePrimeSession();
+  const session = new FakePrimeSession(sessionPath);
   const createdGoals = [];
   const checkpointAcknowledgements = [];
   const checkpointAcknowledgementAttempts = [];
@@ -155,6 +224,8 @@ async function fixture({
         activeSessionId: session.activeSessionId,
         transcriptSessionId: session.transcriptSessionId,
         supervisorGeneration: session.supervisorGeneration,
+        continuationId: session.continuationId,
+        sessionPath: session.sessionPath,
       });
       return session;
     },
@@ -194,6 +265,7 @@ async function fixture({
   return {
     parent,
     root,
+    sessionRoot,
     store,
     privateValues,
     resultLookups,
@@ -204,6 +276,15 @@ async function fixture({
     checkpointAcknowledgementAttempts,
     failNextGoalEventWrite() {
       failAfterResultLookup = true;
+    },
+    failNextDurableWrite() {
+      failNextWrite = true;
+    },
+    failContextCommitAfterResult() {
+      session.afterContextResult = () => {
+        session.afterContextResult = undefined;
+        failNextWrite = true;
+      };
     },
     async cleanup({ allowCloseFailure = false } = {}) {
       if (allowCloseFailure) {
@@ -223,6 +304,19 @@ function command(type, payload, commandId) {
     session_id: "session-1",
     authority_revision: 1,
     type,
+    payload,
+  };
+}
+
+function contextCommand(operation, payload, commandId) {
+  return {
+    protocol: "asterion.session-context/v1",
+    command_id: commandId,
+    session_id: "session-1",
+    generation: 1,
+    authority_revision: 1,
+    idempotency_key: `${commandId}-once`,
+    operation,
     payload,
   };
 }
@@ -307,6 +401,20 @@ test("gateway persists create before one safe running prefix", async () => {
       transcriptSessionId: "transcript-1",
       supervisorGeneration: "supervisor-generation-1",
     });
+    const initialBinding = state.store.currentContextBinding(
+      state.session.continuationId,
+    );
+    assert.ok(initialBinding);
+    assert.deepEqual(
+      await state.privateValues.readContinuationLocator(initialBinding),
+      {
+        continuationId: "continuation-1",
+        activeSessionId: "prime-root-1",
+        transcriptSessionId: "transcript-1",
+        supervisorGeneration: "supervisor-generation-1",
+        sessionPath: state.session.sessionPath,
+      },
+    );
     assert.equal(JSON.stringify(state.store.snapshot()).includes("SENTINEL"), false);
     const publicGateway = JSON.stringify(state.gateway);
     assert.equal(publicGateway.includes("SENTINEL"), false);
@@ -319,6 +427,206 @@ test("gateway persists create before one safe running prefix", async () => {
     });
   } finally {
     await state.cleanup();
+  }
+});
+
+test("gateway executes native describe and name operations with closed durable replay", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+
+    const describe = contextCommand("session.describe", {}, "context-describe-1");
+    const described = await state.gateway.executeSessionContext(
+      describe,
+      async () => undefined,
+    );
+    assert.deepEqual(described.payload.result, {
+      continuation_id: "continuation-1",
+      status: "idle",
+      context_tokens: 90,
+      turns: 2,
+      usage: {
+        controller_tokens: 135,
+        application_tokens: 0,
+        child_tokens: 0,
+        aggregate_tokens: 135,
+        cost_micros: 1234,
+      },
+      name_sha256: createHash("sha256").update("session-1").digest("hex"),
+    });
+    assert.equal(described.status, "succeeded");
+
+    state.session.contextDescription.turns = 99;
+    assert.deepEqual(
+      await state.gateway.executeSessionContext(
+        structuredClone(describe),
+        async () => undefined,
+      ),
+      described,
+    );
+    assert.deepEqual(state.session.contextCalls, [
+      ["describe", "context-describe-1", "running"],
+    ]);
+
+    const nameRef = await state.privateValues.putInput(
+      "SENTINEL_PRIVATE_SESSION_NAME",
+    );
+    const name = contextCommand(
+      "session.name.set",
+      { name_ref: nameRef },
+      "context-name-1",
+    );
+    const named = await state.gateway.executeSessionContext(
+      name,
+      async () => undefined,
+    );
+    assert.deepEqual(named.payload.result, {
+      continuation_id: "continuation-1",
+      name_sha256: createHash("sha256")
+        .update("SENTINEL_PRIVATE_SESSION_NAME")
+        .digest("hex"),
+    });
+    assert.deepEqual(state.session.contextAcknowledgements, [
+      "session-1-context-context-name-1-set-name",
+    ]);
+    assert.equal(
+      JSON.stringify(state.store.contextOperations()).includes("SENTINEL"),
+      false,
+    );
+    assert.equal(
+      JSON.stringify(state.store.contextOperations()).includes(state.session.sessionPath),
+      false,
+    );
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("gateway rejects persisted session usage rollback before committing a second receipt", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    await state.gateway.executeSessionContext(
+      contextCommand("session.describe", {}, "context-describe-first"),
+      async () => undefined,
+    );
+    state.session.contextDescription = {
+      ...state.session.contextDescription,
+      turns: 1,
+      usage: {
+        ...state.session.contextDescription.usage,
+        controller_tokens: 134,
+        aggregate_tokens: 134,
+      },
+    };
+    await assert.rejects(
+      state.gateway.executeSessionContext(
+        contextCommand("session.describe", {}, "context-describe-rollback"),
+        async () => undefined,
+      ),
+    );
+    assert.equal(state.store.contextOperations().length, 1);
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("gateway replays one stable name mutation after restart between Prime result and durable receipt", async () => {
+  const state = await fixture();
+  let reopened;
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const nameRef = await state.privateValues.putInput("SENTINEL_RESTART_NAME");
+    const name = contextCommand(
+      "session.name.set",
+      { name_ref: nameRef },
+      "context-name-restart",
+    );
+    state.failContextCommitAfterResult();
+    await assert.rejects(
+      state.gateway.executeSessionContext(name, async () => undefined),
+    );
+    assert.equal(state.session.contextSideEffects.length, 1);
+    assert.deepEqual(state.session.contextAcknowledgements, []);
+    assert.equal(state.store.snapshot().contextCommandCount, 1);
+    assert.equal(state.store.snapshot().contextCommitCount, undefined);
+    await state.gateway.close().catch(() => undefined);
+
+    const store = await GatewayDurableStore.open(state.root, "session-1");
+    const restoredSession = new FakePrimeSession(
+      state.session.sessionPath,
+      state.session.contextBackend,
+    );
+    reopened = await PrimeGateway.open({
+      sessionId: "session-1",
+      generation: 1,
+      authorityId: "authority-1",
+      store,
+      privateValues: state.privateValues,
+      async createSession() {
+        throw new Error("must restore existing Prime session");
+      },
+      async restoreSession(_identity, onRecovered) {
+        await onRecovered({
+          transport: recoveryTransport(
+            "supervisor-generation-1",
+            "context-result-recovery",
+          ),
+          primeCursor: { generation: "prime-events-1", sequence: 0 },
+          transcriptSessionId: "transcript-1",
+          supervisorGeneration: "supervisor-generation-1",
+          sessionStatus: "running",
+        });
+        return restoredSession;
+      },
+      async createCheckpoint() {
+        throw new Error("not used");
+      },
+    });
+
+    const receipt = await reopened.executeSessionContext(
+      structuredClone(name),
+      async () => undefined,
+    );
+    assert.equal(receipt.status, "succeeded");
+    assert.equal(state.session.contextSideEffects.length, 1);
+    assert.deepEqual(restoredSession.contextCalls, [[
+      "name",
+      "context-name-restart",
+      "SENTINEL_RESTART_NAME",
+    ]]);
+    assert.deepEqual(state.session.contextAcknowledgements, [
+      "session-1-context-context-name-restart-set-name",
+    ]);
+    assert.deepEqual(
+      await reopened.executeSessionContext(
+        structuredClone(name),
+        async () => undefined,
+      ),
+      receipt,
+    );
+    assert.equal(restoredSession.contextCalls.length, 1);
+  } finally {
+    await reopened?.close().catch(() => undefined);
+    await state.cleanup({ allowCloseFailure: true });
   }
 });
 
@@ -699,6 +1007,8 @@ test("gateway reopens a checkpointed resident without creating a second Prime ro
       activeSessionId: "prime-root-1",
       transcriptSessionId: "transcript-1",
       supervisorGeneration: "supervisor-generation-2",
+      continuationId: "continuation-1",
+      sessionPath: state.session.sessionPath,
     }]);
     assert.deepEqual(restoredSession.calls, [[
       "input",
@@ -1169,8 +1479,10 @@ test("durable goal resolution completes its terminal events after gateway restar
     await state.gateway.close().catch(() => undefined);
 
     const store = await GatewayDurableStore.open(state.root, "session-1");
-    const privateValues = await PrivateValueStore.open(state.root);
-    const session = new FakePrimeSession();
+    const privateValues = await PrivateValueStore.open(state.root, {
+      continuationRoot: state.sessionRoot,
+    });
+    const session = new FakePrimeSession(state.session.sessionPath);
     let tick = 30;
     reopened = await PrimeGateway.open({
       sessionId: "session-1",

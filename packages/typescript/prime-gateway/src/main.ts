@@ -56,6 +56,7 @@ import {
 } from "./private-store.js";
 import type {
   PrivateResultProjection,
+  PrivateContinuationBinding,
 } from "./private-store.js";
 import {
   AsterionSkillBridge,
@@ -791,6 +792,20 @@ export class PrimeBoundPrivateInputs implements PrimeGatewayPrivateInputs {
   async readInput(reference: string): Promise<string> {
     return this.privateValues.readBoundInputReference(reference);
   }
+
+  putContinuationLocator(
+    locator: Parameters<PrivateValueStore["putContinuationLocator"]>[0],
+  ): ReturnType<PrivateValueStore["putContinuationLocator"]> {
+    return this.privateValues.putContinuationLocator(locator);
+  }
+
+  readContinuationLocator(
+    binding: import("./durable-store.js").GatewayContextBinding,
+  ): ReturnType<PrivateValueStore["readContinuationLocator"]> {
+    return this.privateValues.readContinuationLocator(
+      binding as PrivateContinuationBinding,
+    );
+  }
 }
 
 function encodeResponse(value: SidecarResponse): string {
@@ -1073,6 +1088,8 @@ async function createSidecarFromDescriptor(
         sessionId: descriptor.sessionId,
         activeSessionId: identity.activeSessionId,
         transcriptSessionId: identity.transcriptSessionId,
+        continuationId: identity.continuationId,
+        sessionPath: identity.sessionPath,
       });
       return (async () => {
         const cursor = store.snapshot().primeCursor;

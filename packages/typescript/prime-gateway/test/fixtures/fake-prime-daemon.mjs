@@ -7,6 +7,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -68,6 +69,7 @@ export async function startFakePrimeDaemon(options = {}) {
   const sockets = new Set();
   const activeSessionSockets = new Map();
   const transcriptByActiveSession = new Map();
+  const sessionPathByActiveSession = new Map();
   let connectionCount = 0;
   let createCount = 0;
   let outboundSequence = 0;
@@ -118,10 +120,14 @@ export async function startFakePrimeDaemon(options = {}) {
     const transcriptSessionId = command.fakeTranscriptSessionId
       ?? transcriptByActiveSession.get(activeSessionId)
       ?? "prime-transcript-1";
+    const sessionPath = sessionPathByActiveSession.get(activeSessionId)
+      ?? "/private/sessions/root.jsonl";
+    const sessionCwd = createConfig?.cwd ?? "/private/workspace";
     if (command.type === "create") {
       return {
         activeSessionId,
         sessionId: transcriptSessionId,
+        sessionFile: sessionPath,
       };
     }
     if (command.type === "attach") {
@@ -149,6 +155,16 @@ export async function startFakePrimeDaemon(options = {}) {
     if (command.type === "cancel_prompt_admission") {
       return { status: "cancelled" };
     }
+    if (command.type === "get_session_header") {
+      return {
+        header: {
+          type: "session",
+          id: transcriptSessionId,
+          timestamp: "2026-08-10T04:00:00.000Z",
+          cwd: sessionCwd,
+        },
+      };
+    }
     if (command.type === "get_state") {
       return {
         id: activeSessionId,
@@ -159,9 +175,9 @@ export async function startFakePrimeDaemon(options = {}) {
         rlmDepth: 0,
         activeSessionId,
         sessionId: transcriptSessionId,
-        sessionFile: "/private/sessions/root.jsonl",
+        sessionFile: sessionPath,
         sessionName: "private fake session",
-        cwd: "/private/workspace",
+        cwd: sessionCwd,
         thinkingLevel: "medium",
         isStreaming: false,
         isCompacting: false,
@@ -177,7 +193,7 @@ export async function startFakePrimeDaemon(options = {}) {
     }
     if (command.type === "get_session_stats") {
       return {
-        sessionFile: "/private/sessions/root.jsonl",
+        sessionFile: sessionPath,
         sessionId: transcriptSessionId,
         userMessages: 0,
         assistantMessages: 0,
@@ -192,6 +208,7 @@ export async function startFakePrimeDaemon(options = {}) {
           total: 0,
         },
         cost: 0,
+        contextUsage: { tokens: 0, contextWindow: 200_000, percent: 0 },
       };
     }
     if (command.type === "get_session_tree") {
@@ -526,6 +543,11 @@ export async function startFakePrimeDaemon(options = {}) {
                 command.fakeTranscriptSessionId,
               );
               createConfig = command.config;
+              const sessionPath = join(command.config.sessionDir, "root.jsonl");
+              writeFileSync(sessionPath, "private fake transcript\n", {
+                mode: 0o600,
+              });
+              sessionPathByActiveSession.set(command.fakeActiveSessionId, sessionPath);
             }
             void persistObservations();
             deliveries.set(commandId, (deliveries.get(commandId) ?? 0) + 1);

@@ -20,6 +20,7 @@ from asterion.immutable import RedactedImmutableMapping
 PRIME_GATEWAY_IPC_PROTOCOL = "asterion.prime-gateway-ipc/v1"
 _MAX_FRAME_BYTES = 1024 * 1024
 _MAX_PRIVATE_ATTACHMENT_FRAME_BYTES = 12 * 1024 * 1024
+_PRIVATE_PROCESS_UMASK = 0o077
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _PUBLIC_ENV_ALLOWLIST = frozenset(
     {
@@ -370,6 +371,7 @@ class PrimeSidecarProcess:
                 else asyncio.subprocess.DEVNULL,
                 env=dict(plan.env),
                 pass_fds=plan.pass_fds,
+                umask=_PRIVATE_PROCESS_UMASK,
                 limit=_MAX_FRAME_BYTES + 1,
             )
             return self._process

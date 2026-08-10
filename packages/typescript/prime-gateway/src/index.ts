@@ -109,12 +109,17 @@ export {
   PrimeSessionError,
 } from "./prime-session.js";
 export type {
+  PrimeContextDescription,
+  PrimeContextNameResult,
+  PrimeContextStatus,
+  PrimeContextUsage,
   PrimeDaemonTransport,
   PrimeInputDelivery,
   PrimePrivateSessionConfig,
   PrimePromptCancellation,
   PrimeSessionCreateOptions,
   PrimeSessionIdentity,
+  PrimeSessionInitialBinding,
   PrimeSessionRecovery,
   PrimeSessionRestoreOptions,
 } from "./prime-session.js";

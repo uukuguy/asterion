@@ -242,6 +242,43 @@ class TestPrimeControlFactory(unittest.TestCase):
 
 
 class TestPrimeSidecarProcess(unittest.IsolatedAsyncioTestCase):
+    async def test_sidecar_creates_private_files_with_owner_only_permissions(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / "session.jsonl"
+            script = root / "write_private.py"
+            script.write_text(
+                "import json, os, pathlib, sys\n"
+                "d=json.loads(os.read(int(os.environ['ASTERION_PRIME_PRIVATE_FD']),65536))\n"
+                "pathlib.Path(d['output']).write_text('private')\n"
+                "r=json.loads(sys.stdin.readline())\n"
+                "print(json.dumps({'protocol':'asterion.prime-gateway-ipc/v1','id':r['id'],'type':'command.accepted'}),flush=True)\n"
+            )
+            process = await PrimeSidecarProcess.start(
+                PrimeSidecarLaunchOptions(
+                    node_executable=Path(sys.executable),
+                    sidecar_entry=script,
+                    private_descriptor={"output": str(output)},
+                    environ={"PATH": os.environ.get("PATH", "")},
+                )
+            )
+            try:
+                await process.request(
+                    {
+                        "protocol": "asterion.prime-gateway-ipc/v1",
+                        "id": "write-private",
+                        "type": "command.accept",
+                        "command": {},
+                        "private": {},
+                    }
+                )
+            finally:
+                await process.close()
+
+            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+
     async def test_attachment_execute_has_a_bounded_private_frame_exception(
         self,
     ) -> None:

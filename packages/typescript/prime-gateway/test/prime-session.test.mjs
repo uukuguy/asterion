@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import {
@@ -14,6 +15,47 @@ class FakeTransport {
     this.holdPrompts = false;
     this.promptResolvers = [];
     this.acknowledgements = [];
+    this.sessionFile = "/private/sessions/transcript-1.jsonl";
+    this.sessionHeader = {
+      type: "session",
+      id: "transcript-1",
+      timestamp: "2026-08-10T03:00:00Z",
+      cwd: "/private/workspace",
+    };
+    this.sessionState = {
+      id: "prime-root-1",
+      lifecycle: "live",
+      activity: "idle",
+      isSessionActive: false,
+      activeSessionId: "prime-root-1",
+      sessionId: "transcript-1",
+      sessionFile: this.sessionFile,
+      sessionName: "session-1",
+      cwd: "/private/workspace",
+      isStreaming: false,
+      isCompacting: false,
+      attachedClients: 1,
+      messageCount: 3,
+      sessionActions: { queuedCount: 0, steering: [], followUps: [] },
+    };
+    this.sessionStats = {
+      sessionFile: this.sessionFile,
+      sessionId: "transcript-1",
+      userMessages: 2,
+      assistantMessages: 1,
+      toolCalls: 0,
+      toolResults: 0,
+      totalMessages: 3,
+      tokens: {
+        input: 100,
+        output: 20,
+        cacheRead: 10,
+        cacheWrite: 5,
+        total: 135,
+      },
+      cost: 0.001234,
+      contextUsage: { tokens: 90, contextWindow: 200_000, percent: 0.045 },
+    };
     this.hello = {
       supervisorGeneration: "supervisor-generation-1",
     };
@@ -42,7 +84,35 @@ class FakeTransport {
         data: {
           activeSessionId: "prime-root-1",
           sessionId: "transcript-1",
+          sessionFile: this.sessionFile,
         },
+      });
+    }
+    if (command.type === "get_session_header") {
+      return Promise.resolve({
+        id: commandId,
+        type: "response",
+        command: command.type,
+        success: true,
+        data: { header: structuredClone(this.sessionHeader) },
+      });
+    }
+    if (command.type === "get_state") {
+      return Promise.resolve({
+        id: commandId,
+        type: "response",
+        command: command.type,
+        success: true,
+        data: structuredClone(this.sessionState),
+      });
+    }
+    if (command.type === "get_session_stats") {
+      return Promise.resolve({
+        id: commandId,
+        type: "response",
+        command: command.type,
+        success: true,
+        data: structuredClone(this.sessionStats),
       });
     }
     if (command.type === "attach") {
@@ -90,7 +160,10 @@ class FakeTransport {
     const response = await this.request(command, commandId);
     return {
       response,
-      acknowledge: () => this.acknowledgements.push(commandId),
+      acknowledge: () => {
+        this.acknowledgements.push(commandId);
+        return true;
+      },
     };
   }
 
@@ -130,15 +203,22 @@ test("lifecycle create binds exact resident config and disables native RLM", asy
 
   assert.equal(session.activeSessionId, "prime-root-1");
   assert.equal(session.transcriptSessionId, "transcript-1");
+  assert.equal(
+    session.continuationId,
+    `continuation-${createHash("sha256").update("session-1").digest("hex").slice(0, 32)}`,
+  );
   assert.equal(session.supervisorGeneration, "supervisor-generation-1");
   assert.deepEqual(identities, [{
     activeSessionId: "prime-root-1",
     transcriptSessionId: "transcript-1",
     supervisorGeneration: "supervisor-generation-1",
+    continuationId: session.continuationId,
+    sessionPath: "/private/sessions/transcript-1.jsonl",
   }]);
   assert.deepEqual(transport.acknowledgements, ["session-1-create"]);
   assert.deepEqual(transport.commands.map(({ command }) => command.type), [
     "create",
+    "get_session_header",
     "set_rlm_max_depth",
     "attach",
   ]);
@@ -167,8 +247,9 @@ test("lifecycle create binds exact resident config and disables native RLM", asy
       tokenBudget: 2_000,
     },
   });
-  assert.equal(transport.commands[1].command.maxDepth, 0);
-  assert.deepEqual(transport.commands[2].command.capabilities, [
+  assert.equal(transport.commands[1].command.activeSessionId, "prime-root-1");
+  assert.equal(transport.commands[2].command.maxDepth, 0);
+  assert.deepEqual(transport.commands[3].command.capabilities, [
     "attach_snapshot",
     "chunked_snapshot",
     "event_sequence",
@@ -182,6 +263,146 @@ test("lifecycle create binds exact resident config and disables native RLM", asy
     active_session_id: "prime-root-1",
     supervisor_generation: "supervisor-generation-1",
   });
+});
+
+test("lifecycle rejects a missing path or mismatched pinned header before durability acknowledgement", async () => {
+  for (const mutate of [
+    (transport) => {
+      transport.sessionFile = undefined;
+    },
+    (transport) => {
+      transport.sessionHeader.id = "other-transcript";
+    },
+    (transport) => {
+      transport.sessionHeader.extra = { raw: "SENTINEL_RAW_HEADER" };
+    },
+  ]) {
+    const transport = new FakeTransport();
+    mutate(transport);
+    const identities = [];
+    await assert.rejects(
+      PrimeSession.create({
+        transport,
+        sessionId: "session-1",
+        privateConfig: PRIVATE_CONFIG,
+        async bindIdentity(identity) {
+          identities.push(identity);
+        },
+      }),
+    );
+    assert.deepEqual(identities, []);
+    assert.deepEqual(transport.acknowledgements, []);
+  }
+});
+
+test("context naming and describe project only digests closed status and safe monotonic counts", async () => {
+  const transport = new FakeTransport();
+  const session = await PrimeSession.create({
+    transport,
+    sessionId: "session-1",
+    privateConfig: PRIVATE_CONFIG,
+    bindIdentity: async () => undefined,
+  });
+  transport.commands.length = 0;
+  transport.acknowledgements.length = 0;
+
+  const named = await session.setContextName(
+    "context-name-1",
+    "  SENTINEL_PRIVATE_NAME  ",
+  );
+  assert.deepEqual(named.result, {
+    continuationId: session.continuationId,
+    nameSha256: createHash("sha256").update("SENTINEL_PRIVATE_NAME").digest("hex"),
+  });
+  assert.deepEqual(transport.acknowledgements, []);
+  assert.equal(named.acknowledge(), true);
+  assert.deepEqual(transport.acknowledgements, [
+    "session-1-context-context-name-1-set-name",
+  ]);
+  transport.sessionState.sessionName = "SENTINEL_PRIVATE_NAME";
+
+  const described = await session.describeContext("context-describe-1", "running");
+  assert.deepEqual(described, {
+    continuationId: session.continuationId,
+    status: "idle",
+    contextTokens: 90,
+    turns: 2,
+    usage: {
+      controller_tokens: 135,
+      application_tokens: 0,
+      child_tokens: 0,
+      aggregate_tokens: 135,
+      cost_micros: 1234,
+    },
+    nameSha256: createHash("sha256").update("SENTINEL_PRIVATE_NAME").digest("hex"),
+  });
+  assert.deepEqual(transport.commands.map(({ command }) => command.type), [
+    "set_session_name",
+    "get_state",
+    "get_session_stats",
+  ]);
+  assert.equal(JSON.stringify(described).includes("SENTINEL"), false);
+  assert.equal(JSON.stringify(described).includes("/private/"), false);
+});
+
+test("context describe rejects malformed or regressing Prime statistics", async () => {
+  const invalidStats = [
+    (stats) => {
+      stats.userMessages = -1;
+    },
+    (stats) => {
+      stats.assistantMessages = 1.5;
+    },
+    (stats) => {
+      stats.tokens.total = Number.MAX_SAFE_INTEGER + 1;
+    },
+    (stats) => {
+      stats.tokens.raw = { prompt: "SENTINEL_RAW_STATS" };
+    },
+    (stats) => {
+      stats.contextUsage.tokens = null;
+      stats.contextUsage.percent = 0;
+    },
+  ];
+  for (const mutate of invalidStats) {
+    const transport = new FakeTransport();
+    const session = await PrimeSession.create({
+      transport,
+      sessionId: "session-1",
+      privateConfig: PRIVATE_CONFIG,
+      bindIdentity: async () => undefined,
+    });
+    mutate(transport.sessionStats);
+    await assert.rejects(session.describeContext("context-invalid", "running"));
+  }
+
+  const transport = new FakeTransport();
+  const session = await PrimeSession.create({
+    transport,
+    sessionId: "session-1",
+    privateConfig: PRIVATE_CONFIG,
+    bindIdentity: async () => undefined,
+  });
+  await session.describeContext("context-first", "running");
+  transport.sessionStats.tokens.input -= 1;
+  transport.sessionStats.tokens.total -= 1;
+  await assert.rejects(session.describeContext("context-regressed", "running"));
+});
+
+test("context describe projects post-compaction unknown usage without rejecting valid Prime stats", async () => {
+  const transport = new FakeTransport();
+  const session = await PrimeSession.create({
+    transport,
+    sessionId: "session-1",
+    privateConfig: PRIVATE_CONFIG,
+    bindIdentity: async () => undefined,
+  });
+  transport.sessionStats.contextUsage.tokens = null;
+  transport.sessionStats.contextUsage.percent = null;
+
+  const described = await session.describeContext("context-compacted", "running");
+
+  assert.equal(described.contextTokens, 0);
 });
 
 test("lifecycle adopts one restored resident identity without creating a new root", async () => {
