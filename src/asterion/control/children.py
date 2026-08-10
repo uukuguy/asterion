@@ -263,6 +263,7 @@ class _ChildRuntime:
     host: ControlHost | None = None
     closed: bool = False
     cancel_requested: bool = False
+    cancellation_uncertain: bool = False
 
 
 class ChildSessionService:
@@ -764,7 +765,16 @@ class ChildSessionService:
         except Exception:
             cancellation_failed = True
         async with self._lock:
-            tasks = tuple(entry.task for entry in self._entries.values())
+            entries = tuple(self._entries.values())
+            tasks = tuple(
+                entry.task
+                for entry in entries
+                if entry.runtime is None or not entry.runtime.cancellation_uncertain
+            )
+            uncertain_cancellations = any(
+                entry.runtime is not None and entry.runtime.cancellation_uncertain
+                for entry in entries
+            )
         for task in tasks:
             if not task.done():
                 task.cancel()
@@ -776,9 +786,12 @@ class ChildSessionService:
                 for _, entry in sorted(self._entries.items())
                 if entry.runtime is not None
             )
-        failures = cancellation_failed
+        failures = cancellation_failed or uncertain_cancellations
         for binding, runtime in active:
             assert runtime is not None
+            if runtime.cancellation_uncertain:
+                failures = True
+                continue
             try:
                 await _close_runtime(runtime)
             except Exception:
@@ -838,6 +851,7 @@ class ChildSessionService:
                 )
             )
         except Exception:
+            runtime.cancellation_uncertain = True
             await self._mark_uncertain(binding.child_id, binding.action_id)
             raise _uncertain() from None
 

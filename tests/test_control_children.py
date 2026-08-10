@@ -1492,6 +1492,57 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             self.assertLess(audit.index("child.command.session.cancel"), audit.index("child.close"))
             self.assertEqual(audit.count("child.command.session.cancel"), 1)
 
+    async def test_cancel_send_failure_keeps_child_uncertain_across_close_retries(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audit: list[str] = []
+            clients: list[WaitingChildClient] = []
+
+            class BlockingExecutor(ChildWorkExecutor):
+                async def execute(
+                    self, proposal: ControlEvent, signal: CancellationSignal
+                ) -> ActionExecutionReceipt:
+                    while not signal.cancelled:
+                        await asyncio.sleep(0)
+                    return await super().execute(proposal, signal)
+
+            service = ChildSessionService(
+                plan=_plan(root),
+                authority=_child_envelope(),
+                control_factories=_registry(audit, clients),
+                private_root=root,
+                content=RecordingResolver(),
+                child_action_executor_factory=lambda authority, children: BlockingExecutor(audit),
+                clock_ms=lambda: 1_000,
+            )
+            spawn = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
+            while not clients:
+                await asyncio.sleep(0)
+            original_send = clients[0].send
+
+            async def fail_cancel_send(command: ControlCommand) -> None:
+                if command.type == "session.cancel":
+                    audit.append("child.command.session.cancel.failed")
+                    raise RuntimeError(SENTINEL)
+                await original_send(command)
+
+            clients[0].send = fail_cancel_send  # type: ignore[method-assign]
+            for _ in range(2):
+                with self.assertRaises(ChildSessionError):
+                    await service.close()
+                self.assertEqual(service.active_ids, ("child-1",))
+                self.assertEqual(service.status("child-1").status, "uncertain")
+                self.assertTrue((root / "children" / "child-1" / "binding.json").is_file())
+                self.assertFalse(spawn.done())
+            self.assertEqual(audit.count("child.command.session.cancel.failed"), 1)
+            self.assertFalse(clients[0].closed)
+
+            child_task = service._entries["child-1"].task
+            child_task.cancel()
+            await asyncio.gather(child_task, return_exceptions=True)
+            spawn.cancel()
+            await asyncio.gather(spawn, return_exceptions=True)
+
     def test_root_safety_rejects_symlink_wrong_mode_and_conflicting_binding(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1748,6 +1799,81 @@ class TestManagerChildIntegration(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(client.sent, [])
             self.assertNotIn(SENTINEL, str(raised.exception))
+
+    async def test_child_cancel_send_failure_prevents_parent_cancel_delivery(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = _plan(root)
+            audit: list[str] = []
+            child_clients: list[WaitingChildClient] = []
+
+            class BlockingExecutor(ChildWorkExecutor):
+                async def execute(
+                    self, proposal: ControlEvent, signal: CancellationSignal
+                ) -> ActionExecutionReceipt:
+                    while not signal.cancelled:
+                        await asyncio.sleep(0)
+                    return await super().execute(proposal, signal)
+
+            children = ChildSessionService(
+                plan=plan,
+                authority=_child_envelope(),
+                control_factories=_registry(audit, child_clients),
+                private_root=root,
+                content=RecordingResolver(),
+                child_action_executor_factory=lambda authority, children: BlockingExecutor(audit),
+                clock_ms=lambda: 1_000,
+            )
+            spawn = asyncio.create_task(children.spawn(_child_proposal(), MutableSignal()))
+            while not child_clients:
+                await asyncio.sleep(0)
+            original_send = child_clients[0].send
+
+            async def fail_cancel_send(command: ControlCommand) -> None:
+                if command.type == "session.cancel":
+                    audit.append("child.command.session.cancel.failed")
+                    raise RuntimeError(SENTINEL)
+                await original_send(command)
+
+            child_clients[0].send = fail_cancel_send  # type: ignore[method-assign]
+            parent = ScriptedClient(plan.control_binding.manifest, audit=audit)
+            host = ControlHost(
+                session_id="session-1",
+                generation=1,
+                plan=plan,
+                authority=AuthorityLedger(_child_envelope()),
+                journal=FileCanonicalJournal.open(root / "parent", "session-1"),
+                client=parent,
+                action_executor=ChildWorkExecutor(audit),
+                clock_ms=lambda: 1_000,
+                child_service=children,
+            )
+
+            with self.assertRaisesRegex(
+                ControlHostError, "control child cascade is unavailable"
+            ) as raised:
+                await host.dispatch(
+                    ControlCommand(
+                        command_id="parent-cancel-1",
+                        session_id="session-1",
+                        authority_revision=1,
+                        type="session.cancel",
+                        payload={"reason_code": "operator-cancelled"},
+                    )
+                )
+
+            self.assertEqual(parent.sent, [])
+            self.assertNotIn("provider.send", audit)
+            self.assertEqual(children.active_ids, ("child-1",))
+            self.assertEqual(children.status("child-1").status, "uncertain")
+            self.assertEqual(audit.count("child.command.session.cancel.failed"), 1)
+            self.assertNotIn(SENTINEL, str(raised.exception))
+
+            child_task = children._entries["child-1"].task
+            child_task.cancel()
+            await asyncio.gather(child_task, return_exceptions=True)
+            spawn.cancel()
+            await asyncio.gather(spawn, return_exceptions=True)
 
     async def test_active_children_rejects_a_child_spawn_at_the_concurrency_limit(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
