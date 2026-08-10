@@ -21,6 +21,16 @@ LOCK_PATH = (
     PROJECT / "packages/typescript/prime-gateway/resources/prime-artifact-lock.json"
 )
 PINNED_SOURCE = PROJECT / "3th-party/prime-agent"
+OFFLINE_BUILD_COMMANDS = (
+    ("npm", "--prefix", "packages/tui", "run", "build"),
+    (
+        "node_modules/.bin/tsgo",
+        "-p",
+        "packages/ai/tsconfig.build.json",
+    ),
+    ("npm", "--prefix", "packages/agent", "run", "build"),
+    ("npm", "--prefix", "packages/coding-agent", "run", "build"),
+)
 
 
 def _fixture_source(root: Path) -> tuple[Path, Path]:
@@ -101,7 +111,7 @@ class RecordingRunner:
             return _completed(command, stdout="")
         if command == ("npm", "ci"):
             return _completed(command, returncode=self.npm_returncode)
-        if command == ("npm", "run", "build"):
+        if command == ("npm", "run", "build") or command in OFFLINE_BUILD_COMMANDS:
             return _completed(command, returncode=self.build_returncode)
         raise AssertionError(command)
 
@@ -154,12 +164,30 @@ class TestSetupPrimeAgent(unittest.TestCase):
         self.assertNotIn("NPM_TOKEN", npm_call[2])
         self.assertNotIn("ASTERION_PRIVATE", npm_call[2])
         self.assertNotIn("SENTINEL_SECRET", repr(npm_call))
-        self.assertIn(("npm", "run", "build"), (call[0] for call in runner.calls))
+        self.assertIn(OFFLINE_BUILD_COMMANDS[-1], (call[0] for call in runner.calls))
+
+    def test_setup_builds_locked_workspaces_without_live_catalog_generation(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source, lock_path = _fixture_source(Path(directory))
+            runner = RecordingRunner()
+
+            setup_prime_source(source, lock_path=lock_path, runner=runner)
+
+        commands = tuple(call[0] for call in runner.calls)
+        self.assertNotIn(("npm", "run", "build"), commands)
+        self.assertNotIn("generate-models", repr(commands))
+        build_offset = commands.index(OFFLINE_BUILD_COMMANDS[0])
+        self.assertEqual(
+            commands[build_offset : build_offset + len(OFFLINE_BUILD_COMMANDS)],
+            OFFLINE_BUILD_COMMANDS,
+        )
 
     def test_setup_revalidates_after_install_and_build(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)
-            for mutation_command in (("npm", "ci"), ("npm", "run", "build")):
+            for mutation_command in (("npm", "ci"), OFFLINE_BUILD_COMMANDS[-1]):
                 source, lock_path = _fixture_source(parent / "-".join(mutation_command))
                 runner = RecordingRunner()
 
@@ -180,7 +208,7 @@ class TestSetupPrimeAgent(unittest.TestCase):
                 self.assertNotIn("SENTINEL_SECRET", str(raised.exception))
                 if mutation_command == ("npm", "ci"):
                     self.assertNotIn(
-                        ("npm", "run", "build"),
+                        OFFLINE_BUILD_COMMANDS[0],
                         (call[0] for call in runner.calls),
                     )
 

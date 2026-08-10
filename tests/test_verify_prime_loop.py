@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import tempfile
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
+import tools.verify_prime_loop as prime_loop
 from tools.verify_prime_loop import (
     PrimeVerificationError,
     load_bounded_authority,
+    verify_preflight,
     verify_provider_free,
 )
 
@@ -164,6 +170,119 @@ class TestVerifyPrimeLoop(unittest.TestCase):
                 load_bounded_authority(path, max_cost_micros=1, now_ms=1)
             self.assertNotIn("SENTINEL_SECRET", str(raised.exception))
             self.assertNotIn(str(path), str(raised.exception))
+
+    def test_preflight_owns_one_foreground_daemon_without_removed_cli_commands(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory) / "project"
+            source = Path(directory) / "prime-source"
+            package_root = project / "packages/typescript/prime-gateway"
+            gateway_entry = package_root / "dist/src/index.js"
+            gateway_entry.parent.mkdir(parents=True)
+            gateway_entry.write_text("export {};\n")
+            bundle = source / "packages/coding-agent/dist/bundle/cli.js"
+            bundle.parent.mkdir(parents=True, exist_ok=True)
+            bundle.write_text("fixture\n")
+            source_report = SimpleNamespace(
+                source_commit="a18809e00ea30638584d87b3afea7285a9d7296c",
+                package_version="0.7.1",
+                daemon_protocol=7,
+                daemon_schema_revision=14,
+            )
+            commands: list[tuple[str, ...]] = []
+            popen_calls: list[tuple[tuple[str, ...], dict[str, object]]] = []
+
+            def command_runner(command, cwd, environment):
+                commands.append(command)
+                if "--input-type=module" in command:
+                    handshake_script = command[3]
+                    self.assertNotIn("hello.protocol.", handshake_script)
+                    self.assertIn("hello.protocolVersion", handshake_script)
+                    self.assertIn("hello.runtimeBuildId", handshake_script)
+                    payload = {
+                        "protocol_name": "prime-agent.daemon",
+                        "protocol_version": 7,
+                        "schema_id": "protocol-7-schema-14-fixture",
+                        "schema_revision": 14,
+                        "app_version": "0.7.1",
+                        "runtime_build_id": "fixture-build",
+                    }
+                    return subprocess.CompletedProcess(
+                        command, 0, stdout=json.dumps(payload), stderr=""
+                    )
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+            class FakeProcess:
+                def __init__(self) -> None:
+                    self.returncode: int | None = None
+
+                def poll(self) -> int | None:
+                    return self.returncode
+
+                def terminate(self) -> None:
+                    self.returncode = -15
+
+                def wait(self, timeout: float | None = None) -> int:
+                    del timeout
+                    self.returncode = -15
+                    return self.returncode
+
+                def kill(self) -> None:
+                    self.returncode = -9
+
+            def popen_runner(command, **kwargs):
+                popen_calls.append((command, kwargs))
+                Path(command[-1]).touch()
+                return FakeProcess()
+
+            with (
+                mock.patch.object(
+                    prime_loop,
+                    "__file__",
+                    str(project / "tools/verify_prime_loop.py"),
+                ),
+                mock.patch.object(
+                    prime_loop, "verify_prime_source", return_value=source_report
+                ),
+                mock.patch.object(prime_loop, "_command", side_effect=command_runner),
+                mock.patch.object(
+                    prime_loop.subprocess, "Popen", side_effect=popen_runner
+                ),
+                mock.patch.dict(
+                    os.environ,
+                    {"PATH": os.environ.get("PATH", ""), "OPENAI_API_KEY": "SENTINEL_SECRET"},
+                    clear=True,
+                ),
+            ):
+                try:
+                    report = verify_preflight(source)
+                except prime_loop.PrimeExternalLimit:
+                    self.fail("bundle-only Prime preflight was rejected")
+
+        self.assertEqual(report["status"], "PASS")
+        self.assertEqual(len(popen_calls), 1)
+        daemon_command, daemon_options = popen_calls[0]
+        self.assertEqual(
+            daemon_command,
+            (
+                "node",
+                str(bundle.resolve()),
+                "--mode",
+                "daemon",
+                "--daemon-socket",
+                daemon_command[-1],
+            ),
+        )
+        daemon_environment = daemon_options["env"]
+        self.assertIsInstance(daemon_environment, dict)
+        assert isinstance(daemon_environment, dict)
+        self.assertNotIn("OPENAI_API_KEY", daemon_environment)
+        self.assertNotIn("SENTINEL_SECRET", repr(popen_calls))
+        self.assertFalse(
+            any(command[1:3] == ("daemon", "start") for command in commands)
+        )
+        self.assertFalse(any("shutdown" in command for command in commands))
 
 
 def _write(path: Path, value: object) -> Path:

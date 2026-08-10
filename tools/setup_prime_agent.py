@@ -22,6 +22,16 @@ MINIMUM_NODE_VERSION = (22, 8, 0)
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _VERSION = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
+_OFFLINE_BUILD_COMMANDS = (
+    ("npm", "--prefix", "packages/tui", "run", "build"),
+    (
+        "node_modules/.bin/tsgo",
+        "-p",
+        "packages/ai/tsconfig.build.json",
+    ),
+    ("npm", "--prefix", "packages/agent", "run", "build"),
+    ("npm", "--prefix", "packages/coding-agent", "run", "build"),
+)
 
 Runner = Callable[
     [tuple[str, ...], Path, dict[str, str]], subprocess.CompletedProcess[str]
@@ -210,14 +220,11 @@ def setup_prime_source(
         runner=runner,
     )
     with tempfile.TemporaryDirectory(prefix="asterion-prime-build-") as temporary:
-        built = _run(
-            runner,
-            ("npm", "run", "build"),
-            root,
-            _closed_environment(Path(temporary)),
-        )
-    if built.returncode != 0:
-        raise PrimeSetupError("Prime source build failed")
+        environment = _closed_environment(Path(temporary))
+        for command in _OFFLINE_BUILD_COMMANDS:
+            built = _run(runner, command, root, environment)
+            if built.returncode != 0:
+                raise PrimeSetupError("Prime source build failed")
     verify_prime_source(
         root,
         lock_path=lock_path,

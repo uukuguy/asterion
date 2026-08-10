@@ -24,7 +24,7 @@ fake Prime daemon; it still does not establish a real Prime/model run.
 |---|---|---|---|
 | `control-plane-foundation` | PASS | Phase 0 gate below | Provider-free fake only; no Prime/model/runtime/application operation. |
 | Prime Gateway implemented | Implemented; provider-free gate PASS | `make prime-verify-provider-free` and Phase 1 gate below | Ten real-process fake-Prime scenarios; zero model-provider operations, two fake application executions. |
-| `Verified-loop` | External-limited | Bounded gate not run | Provider-free half passes. Real Prime preflight requires compatible Node 22.x; bounded execution also requires separately injected private run configuration and finite authorization. |
+| `Verified-loop` | External-limited | Provider-free and real-daemon preflight PASS; bounded gate not run | Node 22 setup and the pinned Prime handshake pass with zero provider operations. Bounded execution still requires separately injected private run configuration and finite authorization. |
 | `Verified-system-parity` | Missing | Not run | Requires zero missing mandatory pinned Prime entries. |
 | Native `Verified-loop` | Missing | Not run | Requires native provider common and differential evidence. |
 | `Verified-native-parity` | Missing | Not run | Final goal; requires every mandatory native parity scenario. |
@@ -67,8 +67,8 @@ make promotion-check
 make check
 ```
 
-Observed results were 175 focused Python tests, 123 Prime Gateway TypeScript
-tests, 21 shared-contract TypeScript tests, 1,651 repository Python tests, 32
+Observed results were 177 focused Python tests, 123 Prime Gateway TypeScript
+tests, 21 shared-contract TypeScript tests, 1,653 repository Python tests, 32
 DCI context-extension TypeScript tests, and 19 Rust tests. Documentation checked
 86 Markdown files and 57 local links. Promotion passed 26 commands from an
 isolated standalone copy. The stable ten-scenario ledger observed zero model-
@@ -76,16 +76,24 @@ provider operations, two fake application executions, canonical journal/
 Pathlight evidence, and no sentinel leakage from public events, journal,
 Pathlight, stdout/stderr, or expected exception strings.
 
-External preflight was also attempted with:
+The real external source boundary subsequently passed on Node 22.23.2 with:
 
 ```bash
-uv run python tools/verify_prime_loop.py --level preflight --source-root 3th-party/prime-agent
+npm exec --yes --package=node@22 -- \
+  uv run python tools/setup_prime_agent.py --source-root 3th-party/prime-agent
+npm exec --yes --package=node@22 -- \
+  uv run python tools/verify_prime_loop.py \
+    --level preflight \
+    --source-root 3th-party/prime-agent
 ```
 
-It reported `External-limited`, not PASS: the current machine has Node 23.11.0,
-while the pinned Prime compatibility boundary is Node 22.8.0 through 22.x. A
-bounded real-Prime/model run was not authorized and was not run. No model
-credential was read and the provider-operation count remained zero.
+Setup reported the pinned commit, Prime 0.7.1, protocol 7, schema 14, installed
+dependencies, and zero provider operations. Preflight reported PASS against the
+real bundle daemon with runtime build `beta`, zero application operations, and
+zero provider operations. Setup uses exact offline workspace builds and does not
+invoke Prime's live model-catalog generator. Preflight owns and terminates only
+its exact foreground daemon process. A bounded real-Prime/model run was not
+authorized and was not run; no model credential was read.
 
 ## Stable parity domains
 
@@ -108,9 +116,10 @@ machine-readable feature/scenario entries.
 
 ## Next evidence boundary
 
-The next evidence boundary is a compatible Node 22.x external preflight followed
-by one separately authorized finite bounded run through the pinned real Prime
-daemon/model. That run must exercise one root goal, an admitted exact
+The next evidence boundary is one separately authorized finite bounded run
+through the pinned real Prime daemon/model. The current bounded entry point
+deliberately remains `External-limited` until an approved private run
+configuration is injected. That run must exercise one root goal, an admitted exact
 application, one child, detach/attach, checkpoint/restart, cancellation, budget
 reporting, a terminal goal, complete causal evidence, and sentinel redaction.
 Provider-free success cannot satisfy `Verified-loop`; system/native parity

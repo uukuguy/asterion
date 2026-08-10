@@ -61,6 +61,13 @@ major is rejected before dependency installation. Setup revalidates the exact
 Git root, commit, clean tracked/untracked state, and locked bytes after install
 and again after build before reporting success.
 
+Setup does not call Prime's root `npm run build`, because that upstream command
+regenerates the model catalog from live external APIs. It runs a fixed offline
+sequence for the TUI, AI, agent-core, and coding-agent workspaces; the AI step
+compiles the pinned generated catalog without refreshing it. Do not inject a
+persistent npm cache into setup: native `prebuild-install` cache entries are
+URL-keyed and are not an Asterion execution authorization or integrity proof.
+
 ## Provider-free and preflight gates
 
 Run the promotion-safe integration gate:
@@ -79,6 +86,12 @@ uv run python tools/verify_prime_loop.py \
 
 Missing source, dependencies, or daemon readiness is `External-limited`; it is
 never promoted to PASS.
+
+Preflight starts the built Prime bundle directly in foreground daemon mode,
+waits for its private Unix socket, checks the normalized Gateway hello, and
+terminates that exact child process. It does not use Prime's removed
+`daemon start` command or the global `shutdown` command, so it cannot stop an
+operator's unrelated Prime services.
 
 ## Bounded authority boundary
 

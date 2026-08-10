@@ -213,7 +213,7 @@ _HANDSHAKE_SCRIPT = r"""
 import { pathToFileURL } from 'node:url';
 const socketPath = process.argv[1];
 const entry = process.argv[2];
-const { PrimeDaemonClient } = await import(pathToFileURL(entry));
+const { PrimeDaemonClient, PRIME_DAEMON_PROTOCOL_NAME } = await import(pathToFileURL(entry));
 const client = new PrimeDaemonClient({
   clientId: 'asterion-preflight',
   connectTimeoutMs: 3000,
@@ -222,13 +222,14 @@ const client = new PrimeDaemonClient({
 try {
   await client.connect(socketPath);
   const hello = client.hello;
+  if (hello === undefined) throw new Error('Prime daemon hello is unavailable');
   console.log(JSON.stringify({
-    protocol_name: hello.protocol.name,
-    protocol_version: hello.protocol.version,
+    protocol_name: PRIME_DAEMON_PROTOCOL_NAME,
+    protocol_version: hello.protocolVersion,
     schema_id: hello.schemaId,
     schema_revision: hello.schemaRevision,
     app_version: hello.appVersion,
-    runtime_build_id: hello.runtime.buildId,
+    runtime_build_id: hello.runtimeBuildId,
   }));
 } finally {
   client.close();
@@ -242,13 +243,12 @@ def verify_preflight(source_root: Path) -> Mapping[str, object]:
     except PrimeSetupError as error:
         raise PrimeExternalLimit(str(error)) from None
     source = source_root.resolve()
-    launcher = source / "prime-agent.sh"
-    tsx = source / "node_modules/.bin/tsx"
+    daemon_entry = source / "packages/coding-agent/dist/bundle/cli.js"
     package_root = (
         Path(__file__).resolve().parents[1] / "packages/typescript/prime-gateway"
     )
     gateway_entry = package_root / "dist/src/index.js"
-    if not launcher.is_file() or not os.access(launcher, os.X_OK) or not tsx.is_file():
+    if not daemon_entry.is_file():
         raise PrimeExternalLimit("Prime dependencies are not installed")
     build = _command(("npm", "run", "build"), package_root, _safe_environment())
     if build.returncode != 0 or not gateway_entry.is_file():
@@ -259,21 +259,20 @@ def verify_preflight(source_root: Path) -> Mapping[str, object]:
         private_root = Path(temporary)
         socket_path = private_root / "prime.sock"
         environment = _safe_environment(private_home=private_root / "home")
-        start = _command(
+        daemon = _start_prime_daemon(
             (
-                str(launcher),
-                "--no-env",
+                "node",
+                str(daemon_entry),
+                "--mode",
                 "daemon",
-                "start",
-                "--socket",
+                "--daemon-socket",
                 str(socket_path),
             ),
             source,
             environment,
         )
         try:
-            if start.returncode != 0:
-                raise PrimeExternalLimit("Prime daemon preflight could not start")
+            _wait_for_prime_daemon(socket_path, daemon)
             handshake = _command(
                 (
                     "node",
@@ -311,19 +310,7 @@ def verify_preflight(source_root: Path) -> Mapping[str, object]:
         except (json.JSONDecodeError, TypeError, ValueError):
             raise PrimeExternalLimit("Prime daemon handshake did not pass") from None
         finally:
-            _command(
-                (
-                    str(launcher),
-                    "--no-env",
-                    "daemon",
-                    "shutdown",
-                    "--force",
-                    "--socket",
-                    str(socket_path),
-                ),
-                source,
-                environment,
-            )
+            _stop_prime_daemon(daemon)
     return {
         "status": "PASS",
         "level": "preflight",
@@ -348,6 +335,56 @@ def _safe_environment(private_home: Path | None = None) -> dict[str, str]:
         private_home.mkdir(mode=0o700, parents=True, exist_ok=True)
         environment["HOME"] = str(private_home)
     return environment
+
+
+def _start_prime_daemon(
+    command: tuple[str, ...], cwd: Path, environment: dict[str, str]
+) -> subprocess.Popen[bytes]:
+    try:
+        return subprocess.Popen(
+            command,
+            cwd=cwd,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise PrimeExternalLimit("Prime daemon preflight could not start") from None
+
+
+def _wait_for_prime_daemon(
+    socket_path: Path,
+    daemon: subprocess.Popen[bytes],
+    *,
+    timeout_seconds: float = 10.0,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if socket_path.exists():
+            return
+        if daemon.poll() is not None:
+            raise PrimeExternalLimit("Prime daemon preflight could not start")
+        time.sleep(0.025)
+    raise PrimeExternalLimit("Prime daemon preflight could not start")
+
+
+def _stop_prime_daemon(daemon: subprocess.Popen[bytes]) -> None:
+    if daemon.poll() is not None:
+        return
+    try:
+        daemon.terminate()
+        daemon.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        daemon.kill()
+        try:
+            daemon.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            raise PrimeExternalLimit(
+                "Prime daemon preflight could not stop"
+            ) from None
+    except (OSError, subprocess.SubprocessError):
+        raise PrimeExternalLimit("Prime daemon preflight could not stop") from None
 
 
 def _command(
