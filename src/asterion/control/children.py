@@ -288,6 +288,8 @@ class ChildSessionService:
         self._entries: dict[str, _ActiveChild] = {}
         self._statuses: dict[str, ChildSessionStatus] = {}
         self._lock = asyncio.Lock()
+        self._closing = False
+        self._closed = False
 
     @property
     def active_ids(self) -> tuple[str, ...]:
@@ -326,6 +328,8 @@ class ChildSessionService:
             )
             raise ActionExecutionFailure("cancelled", "child-start-cancelled", None)
         async with self._lock:
+            if self._closing or self._closed:
+                raise ChildSessionError("child service is closed")
             entry = self._entries.get(child_id)
             if entry is not None:
                 if entry.digest != digest:
@@ -369,7 +373,7 @@ class ChildSessionService:
                 entry = _ActiveChild(expected, digest, task)
                 self._entries[child_id] = entry
                 self._statuses[child_id] = ChildSessionStatus(child_id, "starting", expected.action_id)
-        return await task
+        return await asyncio.shield(task)
 
     async def _run_spawn(
         self,
@@ -471,6 +475,19 @@ class ChildSessionService:
             )
             await self._finish_known(binding, "completed", receipt.receipt_ref)
             return receipt
+        except asyncio.CancelledError:
+            if runtime is not None:
+                try:
+                    await _close_runtime(runtime)
+                except Exception:
+                    pass
+            async with self._lock:
+                self._statuses[binding.child_id] = ChildSessionStatus(
+                    binding.child_id, "cancelled", binding.action_id
+                )
+            raise ActionExecutionFailure(
+                "cancelled", "child-close-cancelled", None
+            ) from None
         except ActionExecutionFailure:
             raise
         except Exception:
@@ -575,8 +592,25 @@ class ChildSessionService:
 
     async def close(self) -> None:
         """Cancel first, then close retained provider resources exactly once."""
+        async with self._lock:
+            if self._closed:
+                return
+            if self._closing:
+                raise ChildSessionError("child service close is in progress")
+            self._closing = True
+        try:
+            await self.cancel_all()
+            async with self._lock:
+                tasks = tuple(entry.task for entry in self._entries.values())
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+        finally:
+            async with self._lock:
+                self._closing = False
 
-        await self.cancel_all()
         async with self._lock:
             active = tuple(
                 (entry.binding, entry.runtime)
@@ -599,7 +633,9 @@ class ChildSessionService:
                     if status is not None and status.status in {"completed", "failed", "cancelled"}:
                         self._entries.pop(binding.child_id, None)
         if failures:
+            self._closed = False
             raise ChildSessionError("child provider close is unavailable")
+        self._closed = True
 
     async def _active_runtime(
         self, proposal: ControlEvent, kind: str
