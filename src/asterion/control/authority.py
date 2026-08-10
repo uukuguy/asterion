@@ -331,7 +331,10 @@ class AuthorityLedger:
         if not set(services).issubset(self._envelope.host_service_grants):
             return self._rejected(action_id, digest, "host-service-not-authorized")
         if operation == "child.spawn":
-            if recursion_depth > self._envelope.max_recursion_depth:
+            if (
+                self._envelope.max_recursion_depth == 0
+                or recursion_depth > self._envelope.max_recursion_depth
+            ):
                 return self._rejected(action_id, digest, "recursion-depth-exceeded")
             if active_children >= self._envelope.max_concurrent_children:
                 return self._rejected(action_id, digest, "child-concurrency-exceeded")
