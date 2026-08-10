@@ -1,0 +1,65 @@
+{
+  "format": "asterion.parity-ledger/v1",
+  "ledger_id": "prime-agent-0.7.1",
+  "baseline": {
+    "artifact_lock": "asterion.prime-artifact-lock/v1",
+    "source_commit": "a18809e00ea30638584d87b3afea7285a9d7296c"
+  },
+  "providers": [
+    "asterion.native",
+    "asterion.prime-gateway"
+  ],
+  "features": [
+    {
+      "feature_id": "session.persistence-naming",
+      "domain_id": "session.context",
+      "disposition": "mandatory",
+      "description": "Persistent named sessions are addressable by stable public identities.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/session-manager.ts",
+          "anchors": [
+            "export class SessionManager"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.session.persistence-naming",
+      "primary_scenario_id": "prime-parity.session.persistence-naming",
+      "compatibility_impacts": [
+        "gateway-private",
+        "host-api"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    }
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "prime-parity.session.persistence-naming",
+      "feature_ids": [
+        "session.persistence-naming"
+      ],
+      "boundary": "provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-create"
+      ],
+      "assertion_ids": [
+        "identity-stable",
+        "name-redacted",
+        "resume-exact"
+      ]
+    }
+  ],
+  "evidence": []
+}

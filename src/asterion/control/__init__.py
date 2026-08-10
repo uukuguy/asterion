@@ -89,6 +89,13 @@ from asterion.control.protocol import (
     validate_control_event_stream,
     validate_control_plane_manifest,
 )
+from asterion.control.parity import (
+    PARITY_LEDGER_FORMAT,
+    ParityClaimReport,
+    ParityLedgerError,
+    evaluate_parity_claim,
+    validate_parity_ledger,
+)
 from asterion.control.system import (
     AgentSystemError,
     AgentSystemPlan,
@@ -176,6 +183,9 @@ __all__ = [
     "MAX_PRIVATE_TEXT_BYTES",
     "MemoryCanonicalJournal",
     "PortfolioGrant",
+    "PARITY_LEDGER_FORMAT",
+    "ParityClaimReport",
+    "ParityLedgerError",
     "PrivateContentResolver",
     "PrivateResultPublication",
     "PrivateResultStore",
@@ -192,6 +202,7 @@ __all__ = [
     "reconcile_uncertain_action",
     "recover_control_host_state",
     "reduce_control_event",
+    "evaluate_parity_claim",
     "run_control_provider_conformance",
     "resolve_agent_system",
     "validate_agent_system_manifest",
@@ -200,4 +211,5 @@ __all__ = [
     "validate_control_event_stream",
     "validate_control_plane_manifest",
     "validate_private_result_publication",
+    "validate_parity_ledger",
 ]

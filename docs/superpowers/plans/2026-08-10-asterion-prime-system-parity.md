@@ -77,6 +77,8 @@ The ordering is dependency-driven. Session identities and snapshots precede recu
 
 ### Task 1: Add the provider-neutral parity ledger model
 
+**Status:** Complete. Fifteen focused tests, Pyright, Ruff, full repository Python tests and independent review pass.
+
 **Files:**
 - Create: `src/asterion/control/parity.py`
 - Modify: `src/asterion/control/__init__.py`
@@ -208,6 +210,8 @@ git commit -m "feat: add closed parity ledger model"
 ```
 
 ### Task 2: Pin the exhaustive Prime feature and scenario ledger
+
+**Status:** In progress.
 
 **Files:**
 - Create: `tests/fixtures/prime-parity/v1/prime-agent-0.7.1.json`

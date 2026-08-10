@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-08-10 14:23. Phase 2 system-parity planning is durable; ledger-model TDD is active.
+> Updated: 2026-08-10 14:38. Phase 2 Task 1 is verified; exhaustive ledger TDD is active.
 
 ## Active objective
 
@@ -23,6 +23,9 @@ kernel. The canonical worklist is
 - `docs/superpowers/plans/2026-08-10-asterion-prime-system-parity.md`
   fixes 61 mandatory feature IDs, two exclusions, claim rules, domain delivery
   order, and the Phase 2 exit gate.
+- Phase 2 Task 1 adds a provider-neutral closed/immutable parity ledger model,
+  mechanical evidence-bound claim evaluation, hostile-container rejection and
+  exact primary-scenario/exclusion rules.
 
 ## Newly verified external boundary
 
@@ -60,8 +63,8 @@ kernel. The canonical worklist is
 
 ## Immediate next boundary
 
-1. Execute Task 1 of the Phase 2 plan test-first: add the provider-neutral,
-   closed and immutable parity-ledger model without changing a runtime protocol.
+1. Execute Task 2 of the Phase 2 plan test-first: pin all 63 Prime feature
+   records and add the provider-free inventory/source-evidence checker.
 
 ## Invariants
 

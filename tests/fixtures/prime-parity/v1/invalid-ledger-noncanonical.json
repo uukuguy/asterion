@@ -1,0 +1,15 @@
+{
+  "format": "asterion.parity-ledger/v1",
+  "ledger_id": "prime-agent-0.7.1",
+  "baseline": {
+    "artifact_lock": "asterion.prime-artifact-lock/v1",
+    "source_commit": "a18809e00ea30638584d87b3afea7285a9d7296c"
+  },
+  "providers": [
+    "asterion.prime-gateway",
+    "asterion.native"
+  ],
+  "features": [],
+  "scenarios": [],
+  "evidence": []
+}
