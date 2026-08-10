@@ -6,6 +6,7 @@
 |---|---|---|
 | D-2026-07-26-01 | 🟢 active | Anchor explicit operator configuration to the environment-file directory |
 | D-2026-07-31-02 | 🟢 active | Complete every DCI instance's 50-case result before considering full datasets |
+| D-2026-08-10-03 | 🟢 active | Stage Prime-managed and native kernels as peer control providers |
 
 ## D-2026-07-26-01 — Operator configuration root
 
@@ -32,3 +33,19 @@
   across the whole instance list before spending full-dataset budget.
 - Consequence: Results are recorded as `50/total`; a full benchmark stays
   deferred until all listed 50-case versions have passed.
+
+## D-2026-08-10-03 — Peer long-running control providers
+
+- Status: 🟢 active
+- Decision: First deliver Prime Agent through a managed TypeScript Gateway, then
+  implement an Asterion-native kernel as a peer provider over the same closed
+  Python-owned control contracts.
+- Rationale: Prime delegation supplies a high-value long-running behavior oracle
+  sooner and at lower initial risk. A shared provider-neutral authority,
+  execution, recovery, and evidence plane prevents Prime-specific semantics from
+  becoming the framework kernel and preserves a later native implementation.
+- Consequence: Phase 1 must reach the bounded Prime `Verified-loop` gate before
+  it is used as a differential oracle. System parity and native parity remain
+  separate named phases and cannot be inferred from provider-free evidence.
+- Evidence: `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`;
+  commits `75bd6fe`, `ea7a53f`, `7c202ed`.

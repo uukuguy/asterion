@@ -4,94 +4,67 @@
 
 - Project: Asterion
 - Active branch: `main`
-- Theme: source-neutral capability packages and generic benchmark execution
-- Runnable DCI closure Tasks 1–9: implemented; Bamboogle and both BC+ variants have verified 50-case results
-- Next action: implement the next exact instance from the DCI benchmark backlog
+- Theme-level focus: Prime functional parity through a managed provider, then
+  an interchangeable Asterion-native kernel
+- Project route: managed
+- Canonical worklist:
+  `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`
+- Active work package: Phase 1 — Prime verifiable long-running closure
 
 ## Current Architecture
 
-- Asterion owns the public runtime, capability, capability-package, application
-  assembly, source, source-lock, and benchmark-suite contracts.
-- Python owns orchestration, deterministic composition, source resolution,
-  application assembly, benchmark planning/execution, and runtime adapters.
-- TypeScript validates shared contracts and Node integration. Rust owns
-  controlled process execution.
-- Built-in, installed-distribution, and explicit local-directory capability
-  packages are equivalent source forms. Resolution has no hidden precedence and
-  exact ambiguity requires a source lock.
-- DCI is `dci@1.0.0`, one capability-package implementation of the generic
-  Asterion benchmark subsystem. Generic framework modules do not import it.
-- `src/asterion/capabilities/dci/` owns the DCI portable payload, suites,
-  implementation, resources, and provider. The old top-level and transitional
-  owners are absent.
-- `src/asterion/applications/dci_agent_lite/` owns the product application,
-  assemblies, provider exposure, and thin `asterion-dci` adapter.
-- The DCI package passed external-first clean-wheel conformance before built-in
-  registration. Built-in, distribution, and local forms have equivalent public
-  behavior.
-- Global DCI benchmark launchers and per-task shell scripts are absent. DCI
-  suite bindings translate private operator inputs into generic task
-  invocations inside the package.
+- Asterion is a composable multi-runtime framework. DCI is a reference product;
+  generic framework layers remain domain-neutral.
+- Python owns orchestration, exact system/application resolution, authority,
+  admission, budgets, canonical journal/state, application execution, and
+  public-safe evidence.
+- TypeScript validates shared contracts and owns the Prime Node/Gateway boundary.
+  Rust remains limited to controlled execution.
+- Prime Gateway and the future native kernel are peer control providers over the
+  closed Asterion agent-control contracts; neither may authorize itself or bypass
+  the application runner and injected host-service boundaries.
+- Prime source, credentials, provider configuration, private content, and
+  generated evidence remain external and operator-owned.
+- Capability packages, application assemblies, runtimes, and catalogs preserve
+  exact identities, deterministic composition, and fail-closed ambiguity.
 
-## Execution Boundary
+## Open Problems
 
-- `asterion-dci benchmark instances`, source locking, and planning are
-  implemented and provider-free.
-- The installed product host supports explicitly authorized run/resume for the
-  provider-free local fixture and bounded Bamboogle, BC+ Level 3, and BC+ Main
-  instances.
-  It injects exact implementations, cancellation, and private evidence only
-  after authority.
-- Credentials, provider settings, datasets, corpora, paths, private environment,
-  and optional amount remain operator-owned and outside portable/public values.
-- A monetary amount is not a generic authorization requirement.
-- Real Bamboogle binds the `asterion-safe/pi` Agent/prompt/Judge contracts,
-  defaults to one case, and permits a finite 50-case run. The complete
-  GitHub-sample50 run is verified; paper-full125 reproduction remains unimplemented
-  and requires separate finite-budget governance.
-- Archive and registry source forms remain deferred pending a separate security
-  and lifecycle design.
-
-## Verification State
-
-- The installed-wheel subprocess test executes and resumes all 15 local fixture
-  tasks using only installed resources: `Verified-local`.
-- The Bamboogle path has fake Agent/Judge E2E verification, exact 50-case
-  provider-free planning, and a real full50 `Verified-full` run.
-- Main-workspace run `run-e8ea4a0db373482b9a849d8f8ace7790` completed all
-  50 cases with 50 judged, 41 correct, 82% accuracy, and zero failed runs.
-  Exact resume completed in zero seconds without adding evidence or generation.
-- BC+ Level 3 run `run-480faaa833b84c84a766284b8e7865ff` completed 50/830
-  cases with 17 correct, 34% accuracy, and zero failed runs. Exact resume
-  reused all 50 native generations without additional Agent or Judge calls.
-- BC+ Main run `run-9bc4c4ec92f44ee8bab0fda79c01ceb4` completed 50/830 cases
-  with 14 correct, 28% accuracy, and zero failed runs. Exact resume reused all
-  50 native generations without additional Agent or Judge calls.
-- `make check` and `make promotion-check` pass on integrated `main`. The
-  completed capability-protocol worktree and branch have been removed.
-- A passing command is required before any final state is labelled Verified.
-  Provider-free checks never establish paper-score reproduction.
+- Separately authorized bounded `Verified-loop` evidence and private run binding
+- Complete mandatory Prime system-parity ledger and conformance coverage
+- Asterion-native long-running kernel and differential parity
+- Long-tail Prime ecosystem and operational parity
 
 ## Key Files
 
-- `AGENTS.md` — repository invariants
-- `docs/status/RESUME-NEXT-SESSION.md` — current handoff
-- `docs/status/JOURNAL.md` — append-only event history
-- `docs/status/DECISIONS.md` — active architecture decisions
-- `docs/status/DCI-BENCHMARK-INSTANCES.md` — exact instance backlog
-- `docs/superpowers/plans/2026-07-27-dci-capability-package-migration.md`
-- `docs/architecture/benchmark-subsystem.md`
-- `docs/architecture/composable-packages.md`
-- `docs/security.md`
-- `src/asterion/benchmarks/` — generic benchmark subsystem
-- `src/asterion/capabilities/dci/` — DCI capability package
-- `src/asterion/applications/dci_agent_lite/` — DCI application adapter
+### Loaded every session
+
+- `AGENTS.md`
+- `docs/status/INDEX.md`
+- `docs/status/RESUME-NEXT-SESSION.md`
+- `docs/status/JOURNAL.md`
+- `docs/status/DECISIONS.md`
+
+### Canonical program and evidence
+
+- `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`
+- `docs/superpowers/plans/2026-08-10-asterion-prime-verified-loop.md`
+- `docs/status/PRIME-PARITY-LEDGER.md`
+- `docs/guides/prime-control-operator-guide.md`
+
+### Implementation entry points
+
+- `src/asterion/control/` — provider-neutral authority, execution, recovery,
+  children, journals, and provider bindings
+- `src/asterion/control/providers/prime/` — Python Prime control client/factory
+- `packages/typescript/prime-gateway/` — Prime daemon boundary and durable bridge
+- `tools/setup_prime_agent.py` — exact external Prime checkout setup
+- `tools/verify_prime_loop.py` — provider-free, preflight, and bounded gates
 
 ## Resume Instructions
 
-1. Read this file and `RESUME-NEXT-SESSION.md`.
-2. Run `git status --short` and `git log --oneline -10`.
-3. Keep private resources and credentials outside repository state.
-4. Select and implement the next exact instance from
-   `DCI-BENCHMARK-INSTANCES.md`, preserving finite execution limits.
-5. Never promote bounded or provider-free evidence to full-paper reproduction.
+1. Read this structural snapshot and `RESUME-NEXT-SESSION.md`.
+2. Inspect `git status --short` and recent commits.
+3. Use the canonical worklist and parity ledger for package selection and claims.
+4. Keep credentials, private run configuration, and execution authority external.
+5. Never promote provider-free or External-limited evidence to a broader PASS.
