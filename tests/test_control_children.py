@@ -380,6 +380,27 @@ class TestChildAuthority(unittest.TestCase):
 
 
 class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
+    async def test_child_executor_factory_receives_nested_lifecycle_service(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audit: list[str] = []
+            received: list[ChildSessionService] = []
+
+            def factory(authority: AuthorityEnvelope, children: ChildSessionService) -> ChildWorkExecutor:
+                del authority
+                received.append(children)
+                return ChildWorkExecutor(audit)
+
+            service = ChildSessionService(
+                plan=_plan(root), authority=_child_envelope(),
+                control_factories=_registry(audit, []), private_root=root,
+                content=RecordingResolver(), child_action_executor_factory=factory,
+                clock_ms=lambda: 1_000,
+            )
+            await service.spawn(_child_proposal(), MutableSignal())
+            self.assertEqual(len(received), 1)
+            self.assertEqual(received[0].active_ids, ())
+
     async def test_message_transport_fault_is_uncertain_and_retained(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

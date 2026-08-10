@@ -7,6 +7,7 @@ import json
 import os
 import stat
 import asyncio
+import inspect
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -251,7 +252,7 @@ class ChildSessionService:
         control_factories: ControlPlaneFactoryRegistry,
         private_root: Path,
         content: PrivateContentResolver,
-        child_action_executor_factory: Callable[[AuthorityEnvelope], ActionExecutor],
+        child_action_executor_factory: Callable[..., ActionExecutor],
         clock_ms: Callable[[], int],
         control_options: Mapping[str, str] = {},
         derive_control_options: DeriveControlOptions | None = None,
@@ -413,7 +414,19 @@ class ChildSessionService:
             client = factory(context)
             runtime = _ChildRuntime(client=client)
             await self._attach_runtime(binding.child_id, runtime)
-            executor = self._executor_factory(authority)
+            nested_children = ChildSessionService(
+                plan=self._plan,
+                authority=authority,
+                control_factories=self._factories,
+                private_root=root,
+                content=self._content,
+                child_action_executor_factory=self._executor_factory,
+                clock_ms=self._clock_ms,
+                control_options=self._control_options,
+                derive_control_options=self._derive_options,
+                host_services=self._host_services,
+            )
+            executor = self._build_executor(authority, nested_children)
             host = ControlHost(
                 session_id=binding.session_id,
                 generation=binding.generation,
@@ -424,6 +437,7 @@ class ChildSessionService:
                 action_executor=executor,
                 clock_ms=self._clock_ms,
                 cancellation_signal=signal,
+                child_service=nested_children,
             )
             runtime.host = host
             await self._mark_running(binding)
@@ -512,6 +526,19 @@ class ChildSessionService:
             if entry is None:
                 raise RuntimeError("child registry is unavailable")
             entry.runtime = runtime
+
+    def _build_executor(
+        self, authority: AuthorityEnvelope, children: ChildSessionService
+    ) -> ActionExecutor:
+        """Inject the exact nested lifecycle service without requiring a new API."""
+
+        try:
+            parameters = inspect.signature(self._executor_factory).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        if len(parameters) >= 2:
+            return self._executor_factory(authority, children)
+        return self._executor_factory(authority)
 
     async def _mark_running(self, binding: ChildSessionBinding) -> None:
         async with self._lock:
