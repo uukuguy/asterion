@@ -318,6 +318,33 @@ class ControlHost:
     async def _accept_event(self, event: ControlEvent) -> None:
         if not isinstance(event, ControlEvent):
             raise ControlHostError("control provider event is invalid")
+        if event.generation < self._state.generation or (
+            event.generation == self._state.generation
+            and event.sequence < self._state.next_sequence
+        ):
+            expected = JournalRecord(
+                record_id=f"event:{event.event_id}",
+                kind="event.accepted",
+                payload={"event": event.to_mapping()},
+            )
+            try:
+                existing = next(
+                    (
+                        entry
+                        for entry in self._journal.replay(JournalCursor(0))
+                        if entry.record.record_id == expected.record_id
+                    ),
+                    None,
+                )
+                if existing is None or existing.digest != expected.digest:
+                    raise JournalConflictError("prior event replay conflicts")
+                entry = self._journal.accept_event(
+                    event, expected_position=self._journal_position
+                )
+                self._journal_position = max(self._journal_position, entry.position)
+            except (JournalConflictError, TypeError, ValueError):
+                raise ControlHostError("control provider event journal failed") from None
+            return
         report: ProviderUsageReport | None = None
         if event.type == "budget.reported":
             try:
@@ -350,11 +377,6 @@ class ControlHost:
             self._journal_position = max(self._journal_position, entry.position)
         except (JournalConflictError, TypeError, ValueError):
             raise ControlHostError("control provider event journal failed") from None
-        if event.generation < self._state.generation or (
-            event.generation == self._state.generation
-            and event.sequence < self._state.next_sequence
-        ):
-            return
         try:
             reduced = reduce_control_event(self._state, event)
         except ControlStateError:

@@ -144,6 +144,68 @@ def _create_command() -> ControlCommand:
 
 
 class TestControlHost(unittest.IsolatedAsyncioTestCase):
+    async def test_exact_stale_budget_report_replay_preserves_current_usage(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            plan = resolve_agent_system(
+                _manifest(),
+                application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
+            )
+            journal = MemoryCanonicalJournal("session-1")
+            host = ControlHost(
+                session_id="session-1",
+                generation=1,
+                plan=plan,
+                authority=AuthorityLedger(_envelope()),
+                journal=journal,
+                client=ScriptedClient(plan.control_binding.manifest),
+                action_executor=SpyExecutor(),
+                clock_ms=lambda: 1_000,
+            )
+            created, running, _ = _session_events(_proposal())
+            lower = ControlEvent.from_mapping(
+                {
+                    "protocol": "asterion.agent-control/v1",
+                    "event_id": "budget-lower",
+                    "session_id": "session-1",
+                    "generation": 1,
+                    "sequence": 3,
+                    "emitted_at": "2026-08-10T00:00:02Z",
+                    "type": "budget.reported",
+                    "payload": {
+                        "controller_tokens": 10,
+                        "application_tokens": 0,
+                        "child_tokens": 0,
+                        "aggregate_tokens": 10,
+                        "cost_micros": 0,
+                    },
+                }
+            )
+            higher = ControlEvent.from_mapping(
+                {
+                    **lower.to_mapping(),
+                    "event_id": "budget-higher",
+                    "sequence": 4,
+                    "payload": {
+                        "controller_tokens": 20,
+                        "application_tokens": 0,
+                        "child_tokens": 0,
+                        "aggregate_tokens": 20,
+                        "cost_micros": 0,
+                    },
+                }
+            )
+            for event in (created, running, lower, higher):
+                await host._accept_event(event)
+            position = journal.position
+
+            await host._accept_event(lower)
+
+            self.assertEqual(journal.position, position)
+            self.assertEqual(host.snapshot().authority_usage.controller_tokens, 20)
+            self.assertEqual(host.snapshot().state.next_sequence, 5)
+
     async def test_overflow_budget_report_is_rejected_before_journal_append(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             plan = resolve_agent_system(
