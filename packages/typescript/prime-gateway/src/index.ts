@@ -90,7 +90,7 @@ export {
   SkillBridgeConflictError,
   generateSkillBridgeToken,
 } from "./skill-bridge.js";
-export { authenticateRlmHostFrame, RlmHostBridge, RLM_HOST_PROTOCOL } from "./rlm-host-bridge.js";
+export { authenticateRlmHostFrame, listenRlmHostBridge, RlmHostBridge, RLM_HOST_PROTOCOL } from "./rlm-host-bridge.js";
 export type {
   RlmHostBridgeOptions,
   RlmSpawnProposal,

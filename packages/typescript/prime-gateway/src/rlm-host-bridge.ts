@@ -1,4 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
+import { chmod, unlink } from "node:fs/promises";
+import { createServer, type Server } from "node:net";
 
 export const RLM_HOST_PROTOCOL = "asterion.prime-rlm-host/v1";
 
@@ -62,4 +64,41 @@ export class RlmHostBridge {
     if (resolution.childId !== proposal.childId) throw new TypeError("RLM admission is invalid");
     return Object.freeze({ ...resolution });
   }
+}
+
+export async function listenRlmHostBridge(
+  path: string,
+  sessionId: string,
+  token: string,
+  bridge: RlmHostBridge,
+): Promise<{ readonly close: () => Promise<void> }> {
+  await unlink(path).catch(() => undefined);
+  const server: Server = createServer((socket) => {
+    let authenticated = false;
+    let buffer = Buffer.alloc(0);
+    socket.on("data", (chunk: Buffer) => {
+      buffer = Buffer.concat([buffer, chunk]);
+      while (true) {
+        const newline = buffer.indexOf(0x0a);
+        if (newline < 0) { if (buffer.byteLength > 64 * 1024) socket.destroy(); return; }
+        if (newline > 64 * 1024) return socket.destroy();
+        const line = buffer.subarray(0, newline);
+        buffer = buffer.subarray(newline + 1);
+        if (!authenticated) {
+          authenticated = authenticateRlmHostFrame(line, sessionId, token);
+          if (!authenticated) return socket.destroy();
+          continue;
+        }
+        try {
+        const value = JSON.parse(line.toString("utf8")) as { request_id?: unknown; child_id?: unknown; type?: unknown };
+        if (value.type !== "rlm.spawn.propose" || typeof value.request_id !== "string" || typeof value.child_id !== "string") throw new TypeError();
+        void bridge.proposeSpawn({ requestId: value.request_id, childId: value.child_id }).then((result) => socket.end(`${JSON.stringify(result)}\n`), () => socket.destroy());
+        } catch { socket.destroy(); }
+        return;
+      }
+    });
+  });
+  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(path, resolve); });
+  await chmod(path, 0o600);
+  return Object.freeze({ close: async () => { await new Promise<void>((resolve) => server.close(() => resolve())); await unlink(path).catch(() => undefined); } });
 }
