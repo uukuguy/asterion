@@ -1,7 +1,8 @@
-import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 export const defaultServerCapabilities = Object.freeze([
   "attach_snapshot",
@@ -39,9 +40,10 @@ function selected(value, index) {
 }
 
 export async function startFakePrimeDaemon(options = {}) {
-  const root = await mkdtemp(join(tmpdir(), "asterion-fake-prime-"));
+  const ownsRoot = options.root === undefined;
+  const root = options.root ?? await mkdtemp(join(tmpdir(), "asterion-fake-prime-"));
   await mkdir(root, { mode: 0o700, recursive: true });
-  const socketPath = join(root, "daemon.sock");
+  const socketPath = options.socketPath ?? join(root, "daemon.sock");
   const commands = [];
   const rawCommands = [];
   const clientIds = [];
@@ -53,6 +55,47 @@ export async function startFakePrimeDaemon(options = {}) {
   const sockets = new Set();
   let connectionCount = 0;
   let attachedActiveSessionId;
+
+  function observations() {
+    return {
+      scenarioId: options.scenarioId ?? "embedded",
+      processId: process.pid,
+      socketPath,
+      connectionCount,
+      modelProviderOperations: 0,
+      applicationOperations: 0,
+      commandCounts: Object.fromEntries(
+        [...commandCounts.entries()].sort(([left], [right]) => left.localeCompare(right)),
+      ),
+      clientIds: [...clientIds],
+      acknowledgements: [...acknowledgements],
+    };
+  }
+
+  async function persistObservations() {
+    if (typeof options.observationsPath !== "string") {
+      return;
+    }
+    await writeFile(options.observationsPath, `${JSON.stringify(observations(), null, 2)}\n`)
+      .catch(() => undefined);
+  }
+
+  function defaultResponseData(command) {
+    const activeSessionId = command.activeSessionId ?? "prime-root-1";
+    if (command.type === "create") {
+      return {
+        activeSessionId,
+        sessionId: "prime-transcript-1",
+      };
+    }
+    if (command.type === "attach") {
+      return { activeSessionId };
+    }
+    if (command.type === "cancel_prompt_admission") {
+      return { status: "cancelled" };
+    }
+    return { accepted: true };
+  }
 
   const server = createServer((socket) => {
     const connectionIndex = connectionCount++;
@@ -126,6 +169,7 @@ export async function startFakePrimeDaemon(options = {}) {
             if (command.type === "attach") {
               attachedActiveSessionId = command.activeSessionId;
             }
+            void persistObservations();
             deliveries.set(commandId, (deliveries.get(commandId) ?? 0) + 1);
             if (!mutations.has(commandId)) {
               mutations.set(commandId, 1);
@@ -137,7 +181,7 @@ export async function startFakePrimeDaemon(options = {}) {
                 type: "response",
                 command: command.type,
                 success: true,
-                data: configuredData ?? { accepted: true },
+                data: configuredData ?? defaultResponseData(command),
               });
               if (options.disconnectFirstMutation) {
                 socket.destroy();
@@ -164,6 +208,7 @@ export async function startFakePrimeDaemon(options = {}) {
                 }
               : cachedResponses.get(commandId);
             socket.write(`${JSON.stringify(response)}\n`);
+            void persistObservations();
           }
         }
         newline = buffer.indexOf("\n");
@@ -175,6 +220,7 @@ export async function startFakePrimeDaemon(options = {}) {
     server.once("error", reject);
     server.listen(socketPath, resolve);
   });
+  await persistObservations();
 
   return {
     root,
@@ -232,7 +278,41 @@ export async function startFakePrimeDaemon(options = {}) {
         socket.destroy();
       }
       await new Promise((resolve) => server.close(resolve));
-      await rm(root, { force: true, recursive: true });
+      await persistObservations();
+      if (ownsRoot) {
+        await rm(root, { force: true, recursive: true });
+      }
     },
   };
+}
+
+function cliValue(flag) {
+  const index = process.argv.indexOf(flag);
+  return index === -1 ? undefined : process.argv[index + 1];
+}
+
+if (
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href &&
+  cliValue("--socket-path") !== undefined
+) {
+  const daemon = await startFakePrimeDaemon({
+    root: cliValue("--root"),
+    socketPath: cliValue("--socket-path"),
+    observationsPath: cliValue("--observations"),
+    scenarioId: cliValue("--scenario-id"),
+  });
+  process.stdout.write(`${JSON.stringify({
+    protocol: "asterion.fake-prime-daemon/v1",
+    socketPath: daemon.socketPath,
+    root: daemon.root,
+    pid: process.pid,
+  })}\n`);
+  const shutdown = async () => {
+    await daemon.close().catch(() => undefined);
+    process.exit(0);
+  };
+  process.once("SIGTERM", shutdown);
+  process.once("SIGINT", shutdown);
+  process.stdin.resume();
 }

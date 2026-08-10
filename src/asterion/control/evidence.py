@@ -306,6 +306,95 @@ class ControlEvidenceProjector:
         except Exception:
             self._record_gap()
 
+    def project_action_running(
+        self,
+        *,
+        action_id: str,
+        status: str,
+        journal_position: int,
+        timestamp_ns: int,
+    ) -> None:
+        try:
+            self._project_fixed_action(
+                action_id=action_id,
+                status=status,
+                reason_code="action-running",
+                receipt_ref=None,
+                usage=BudgetUsage.zero(),
+                journal_position=journal_position,
+                timestamp_ns=timestamp_ns,
+            )
+        except Exception:
+            self._record_gap()
+
+    def project_action_receipt(
+        self,
+        *,
+        action_id: str,
+        status: str,
+        receipt: ActionExecutionReceipt,
+        journal_position: int,
+        timestamp_ns: int,
+    ) -> None:
+        try:
+            self._project_fixed_action(
+                action_id=action_id,
+                status=status,
+                reason_code="action-receipt",
+                receipt_ref=receipt.receipt_ref,
+                usage=receipt.usage,
+                journal_position=journal_position,
+                timestamp_ns=timestamp_ns,
+            )
+        except Exception:
+            self._record_gap()
+
+    def project_provider_recovery(
+        self,
+        *,
+        scenario_id: str,
+        status: str,
+        process_counts: Mapping[str, int],
+        journal_position: int,
+        timestamp_ns: int,
+    ) -> None:
+        try:
+            self._project_provider_recovery(
+                scenario_id=scenario_id,
+                status=status,
+                process_counts=process_counts,
+                journal_position=journal_position,
+                timestamp_ns=timestamp_ns,
+            )
+        except Exception:
+            self._record_gap()
+
+    def project_child_session(
+        self,
+        *,
+        child_id: str,
+        status: str,
+        active_count: int,
+        journal_position: int,
+        timestamp_ns: int,
+    ) -> None:
+        try:
+            self._project_child_session(
+                child_id=child_id,
+                status=status,
+                active_count=active_count,
+                journal_position=journal_position,
+                timestamp_ns=timestamp_ns,
+            )
+        except Exception:
+            self._record_gap()
+
+    def complete_provider_free_projection(self, *, timestamp_ns: int) -> None:
+        try:
+            self._complete_provider_free_projection(timestamp_ns=timestamp_ns)
+        except Exception:
+            self._record_gap()
+
     def _project_execution(
         self,
         *,
@@ -368,6 +457,196 @@ class ControlEvidenceProjector:
                 ),
             )
         )
+
+    def _project_fixed_action(
+        self,
+        *,
+        action_id: str,
+        status: str,
+        reason_code: str,
+        receipt_ref: str | None,
+        usage: BudgetUsage,
+        journal_position: int,
+        timestamp_ns: int,
+    ) -> None:
+        if self._disabled:
+            return
+        assert self._trace_id is not None
+        self._ensure_projection_root(timestamp_ns=timestamp_ns)
+        attributes: dict[str, SafeAttributeValue] = {
+            "action_id": _digest(action_id),
+            "control_event_type": "action.admitted",
+            "control_reason_sha256": _digest(reason_code),
+            "control_status": _safe_control_status(status),
+            "input_tokens": usage.controller_tokens,
+            "output_tokens": usage.application_tokens,
+            "leaf_count": usage.child_tokens,
+            "metric_value": usage.aggregate_tokens,
+            "cost_microunits": usage.cost_micros,
+            "journal_position": journal_position,
+        }
+        if receipt_ref is not None:
+            attributes["evidence_ref"] = _digest(receipt_ref)
+        span_id = _span_id(f"fixed-action:{action_id}:{reason_code}:{status}")
+        start = self._recorder.next_sequence
+        terminal = {
+            "cancelled": "cancelled",
+            "failed": "failed",
+            "uncertain": "failed",
+        }.get(status, "completed")
+        self._record_many(
+            (
+                TraceEvent.start(
+                    self._trace_id,
+                    span_id,
+                    self._session_span_id,
+                    start,
+                    "action",
+                    attributes=attributes,
+                    timestamp_ns=timestamp_ns,
+                ),
+                TraceEvent.terminal(
+                    self._trace_id,
+                    span_id,
+                    start + 1,
+                    terminal,
+                    kind="action",
+                    timestamp_ns=timestamp_ns,
+                ),
+            )
+        )
+
+    def _project_provider_recovery(
+        self,
+        *,
+        scenario_id: str,
+        status: str,
+        process_counts: Mapping[str, int],
+        journal_position: int,
+        timestamp_ns: int,
+    ) -> None:
+        if self._disabled:
+            return
+        assert self._trace_id is not None
+        self._ensure_projection_root(timestamp_ns=timestamp_ns)
+        counts = _safe_counts(process_counts)
+        total = sum(counts.values())
+        span_id = _span_id(f"provider-recovery:{scenario_id}:{status}:{total}")
+        start = self._recorder.next_sequence
+        self._record_many(
+            (
+                TraceEvent.start(
+                    self._trace_id,
+                    span_id,
+                    self._session_span_id,
+                    start,
+                    "session",
+                    attributes={
+                        "session_id": _digest(scenario_id),
+                        "control_event_type": "session.recovery-required",
+                        "control_status": "recovery_required",
+                        "control_reason_sha256": _digest(status),
+                        "content_length": total,
+                        "field_count": len(counts),
+                        "journal_position": journal_position,
+                    },
+                    timestamp_ns=timestamp_ns,
+                ),
+                TraceEvent.complete(
+                    self._trace_id,
+                    span_id,
+                    start + 1,
+                    kind="session",
+                    timestamp_ns=timestamp_ns,
+                ),
+            )
+        )
+
+    def _project_child_session(
+        self,
+        *,
+        child_id: str,
+        status: str,
+        active_count: int,
+        journal_position: int,
+        timestamp_ns: int,
+    ) -> None:
+        if self._disabled:
+            return
+        if isinstance(active_count, bool) or not isinstance(active_count, int) or active_count < 0:
+            raise ValueError("child session count is invalid")
+        assert self._trace_id is not None
+        self._ensure_projection_root(timestamp_ns=timestamp_ns)
+        span_id = _span_id(f"child-session:{child_id}:{status}:{active_count}")
+        start = self._recorder.next_sequence
+        self._record_many(
+            (
+                TraceEvent.start(
+                    self._trace_id,
+                    span_id,
+                    self._session_span_id,
+                    start,
+                    "session",
+                    attributes={
+                        "session_id": _digest(child_id),
+                        "control_event_type": "session.running",
+                        "control_status": _safe_control_status(status),
+                        "leaf_count": active_count,
+                        "journal_position": journal_position,
+                    },
+                    timestamp_ns=timestamp_ns,
+                ),
+                TraceEvent.complete(
+                    self._trace_id,
+                    span_id,
+                    start + 1,
+                    kind="session",
+                    timestamp_ns=timestamp_ns,
+                ),
+            )
+        )
+
+    def _ensure_projection_root(self, *, timestamp_ns: int) -> None:
+        if self._session_span_id is not None:
+            return
+        assert self._trace_id is not None
+        self._session_span_id = _span_id(f"projection-root:{self._trace_id}")
+        self._record_many(
+            (
+                TraceEvent.start(
+                    self._trace_id,
+                    self._session_span_id,
+                    None,
+                    self._recorder.next_sequence,
+                    "session",
+                    attributes={
+                        "session_id": _digest(self._trace_id),
+                        "control_event_type": "session.running",
+                        "control_status": "running",
+                        "journal_position": 0,
+                    },
+                    timestamp_ns=timestamp_ns,
+                ),
+            )
+        )
+
+    def _complete_provider_free_projection(self, *, timestamp_ns: int) -> None:
+        if self._disabled or self._session_span_id is None:
+            return
+        assert self._trace_id is not None
+        span_id = self._session_span_id
+        self._record_many(
+            (
+                TraceEvent.complete(
+                    self._trace_id,
+                    span_id,
+                    self._recorder.next_sequence,
+                    kind="session",
+                    timestamp_ns=timestamp_ns,
+                ),
+            )
+        )
+        self._session_span_id = None
 
     @property
     def _disabled(self) -> bool:
@@ -438,6 +717,43 @@ def _mapping_digest(value: Mapping[str, object]) -> str:
         ensure_ascii=False,
     )
     return _digest(rendered)
+
+
+def _safe_control_status(value: str) -> str:
+    return {
+        "active": "active",
+        "admitted": "admitted",
+        "budget_limited": "budget_limited",
+        "cancelled": "cancelled",
+        "completed": "completed",
+        "created": "created",
+        "failed": "failed",
+        "needs_input": "needs_input",
+        "paused": "paused",
+        "proposed": "proposed",
+        "recovery_required": "recovery_required",
+        "rejected": "rejected",
+        "running": "running",
+        "succeeded": "succeeded",
+        "uncertain": "uncertain",
+    }.get(value, "uncertain")
+
+
+def _safe_counts(value: Mapping[str, int]) -> Mapping[str, int]:
+    if not isinstance(value, Mapping):
+        raise ValueError("process counts are invalid")
+    counts: dict[str, int] = {}
+    for key, item in value.items():
+        if (
+            not isinstance(key, str)
+            or key not in {"fake_daemon", "gateway"}
+            or isinstance(item, bool)
+            or not isinstance(item, int)
+            or item < 0
+        ):
+            raise ValueError("process counts are invalid")
+        counts[key] = item
+    return {key: counts[key] for key in sorted(counts)}
 
 
 def _digest(value: str) -> str:

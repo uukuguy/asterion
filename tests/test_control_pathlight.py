@@ -286,6 +286,56 @@ class TestControlPathlight(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(snapshot.state.actions["action-1"].status, "succeeded")
             self.assertEqual(snapshot.evidence_gaps, ("control-pathlight-recording",))
 
+    async def test_prime_verified_loop_fixed_projections_are_public_safe(self) -> None:
+        from asterion.control.evidence import ControlEvidenceProjector
+
+        recorder = MemoryPathlightRecorder(_opaque_id(500))
+        projector = ControlEvidenceProjector(recorder)
+        projector.project_action_running(
+            action_id="action-SENTINEL_PROMPT",
+            status="running",
+            journal_position=7,
+            timestamp_ns=1,
+        )
+        projector.project_action_receipt(
+            action_id="action-SENTINEL_TOKEN",
+            status="succeeded",
+            receipt=ActionExecutionReceipt(
+                action_id="action-SENTINEL_TOKEN",
+                receipt_ref="receipt-SENTINEL_OUTPUT",
+                usage=BudgetUsage(0, 1, 0, 1, 0),
+            ),
+            journal_position=8,
+            timestamp_ns=2,
+        )
+        projector.project_provider_recovery(
+            scenario_id="prime-loop-SENTINEL_PATH",
+            status="unknown-progress-uncertain",
+            process_counts={"gateway": 2, "fake_daemon": 1},
+            journal_position=9,
+            timestamp_ns=3,
+        )
+        projector.project_child_session(
+            child_id="child-SENTINEL_PROMPT",
+            status="completed",
+            active_count=0,
+            journal_position=10,
+            timestamp_ns=4,
+        )
+        projector.complete_provider_free_projection(timestamp_ns=100)
+
+        graph = recorder.snapshot()
+        assert graph is not None
+        rendered = repr(graph)
+        events = cast(list[dict[str, object]], graph["events"])
+        kinds = tuple(event["kind"] for event in events)
+        self.assertGreaterEqual(kinds.count("action"), 2)
+        self.assertGreaterEqual(kinds.count("session"), 2)
+        for sentinel in ("SENTINEL_PROMPT", "SENTINEL_TOKEN", "SENTINEL_PATH", "SENTINEL_OUTPUT"):
+            self.assertNotIn(sentinel, rendered)
+        self.assertIn("journal_position", rendered)
+        self.assertIn("content_length", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()
