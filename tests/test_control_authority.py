@@ -107,6 +107,12 @@ class TestControlAuthority(unittest.TestCase):
             self.assertEqual(ledger.reported_usage, report.usage)
         with self.assertRaises(AuthorityError):
             ProviderUsageReport(BudgetUsage(10, 1, 0, 10, 0))
+
+    def test_sequential_settlements_and_report_exhaust_later_admission(self) -> None:
+        ledger = AuthorityLedger(_envelope(budget_limit=_limit(application_tokens=100, aggregate_tokens=100)))
+        ledger.record_provider_usage(ProviderUsageReport(BudgetUsage(0, 80, 0, 80, 0)))
+        proposal = _proposal()
+        self.assertEqual(ledger.evaluate(proposal, now_ms=1_000).reason, "budget-exceeded")
     def test_evaluate_does_not_mutate_and_reserve_settle_are_idempotent(self) -> None:
         ledger = AuthorityLedger(_envelope())
         proposal = _proposal()
