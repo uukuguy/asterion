@@ -138,7 +138,6 @@ def derive_prime_child_control_options(
             "gateway_root": str(child_root / "gateway"),
             "generation": str(generation),
             "max_controller_tokens": str(controller_tokens),
-            "prime_socket_path": str(child_root / "prime.sock"),
             "session_dir": str(child_root / "session"),
             "session_id": child_session_id,
             "timeout_ms": str(timeout_ms),

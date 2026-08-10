@@ -71,6 +71,7 @@ class TestPrimeVerifiedLoopChildBoundary(unittest.TestCase):
             self.assertTrue(options["session_dir"].startswith(str(child_root)))
             self.assertTrue(options["gateway_root"].startswith(str(child_root)))
             self.assertTrue(options["agent_dir"].startswith(str(child_root)))
+            self.assertEqual(options["prime_socket_path"], parent.options["prime_socket_path"])
             self.assertEqual(options["model"], parent.options["model"])
             self.assertEqual(options["workspace"], parent.options["workspace"])
             self.assertEqual(options["prime_source_root"], parent.options["prime_source_root"])
