@@ -16,8 +16,10 @@ from asterion.control.providers.prime.factory import (
     PRIME_CONTROL_PLANE_ID,
     PRIME_CONTROL_PLANE_VERSION,
     build_prime_control_plane_client,
+    derive_prime_child_control_options,
     prime_control_plane_binding,
 )
+from tests.test_control_children import _child_envelope
 from asterion.control.providers.prime.process import (
     PrimeSidecarProcess,
     PrimeSidecarLaunchOptions,
@@ -225,6 +227,44 @@ class TestPrimeControlFactory(unittest.TestCase):
 
 
 class TestPrimeSidecarProcess(unittest.IsolatedAsyncioTestCase):
+    async def test_child_descriptor_connects_operator_parent_socket(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            parent_socket = root / "operator.sock"
+            connected = asyncio.Event()
+
+            async def on_connect(reader, writer):
+                await reader.readexactly(1)
+                connected.set()
+                writer.close()
+                await writer.wait_closed()
+
+            server = await asyncio.start_unix_server(on_connect, path=str(parent_socket))
+            child_root = root / "children" / "child-1"
+            child_root.mkdir(parents=True)
+            options = derive_prime_child_control_options(
+                {"max_controller_tokens": "100", "timeout_ms": "1000", "prime_socket_path": str(parent_socket)},
+                child_root=child_root, child_session_id="child-session-child-1",
+                child_authority=_child_envelope(authority_id="child:child-1"), generation=1,
+            )
+            script = root / "connect.py"
+            script.write_text(
+                "import json, os, socket, sys\n"
+                "d=json.loads(os.read(int(os.environ['ASTERION_PRIME_PRIVATE_FD']),65536))\n"
+                "s=socket.socket(socket.AF_UNIX);s.connect(d['prime_socket_path']);s.send(b'x');s.close()\n"
+                "r=json.loads(sys.stdin.readline());print(json.dumps({'protocol':'asterion.prime-gateway-ipc/v1','id':r['id'],'type':'command.accepted'}),flush=True)\n"
+            )
+            process = await PrimeSidecarProcess.start(PrimeSidecarLaunchOptions(
+                node_executable=Path(sys.executable), sidecar_entry=script,
+                private_descriptor=dict(options), environ={"PATH": os.environ.get("PATH", "")},
+            ))
+            try:
+                await asyncio.wait_for(connected.wait(), timeout=1)
+            finally:
+                await process.close()
+                server.close()
+                await server.wait_closed()
+            self.assertFalse((child_root / "prime.sock").exists())
     async def test_sidecar_eof_before_ack_fails_closed_and_close_is_bounded(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
