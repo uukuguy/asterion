@@ -224,9 +224,26 @@ class ChildTerminalReceipt:
 
 
 @dataclass
+class _PinnedChildRoot:
+    path: Path
+    fd: int
+    closed: bool = False
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        try:
+            os.close(self.fd)
+        except OSError:
+            pass
+        self.closed = True
+
+
+@dataclass
 class _ActiveChild:
     binding: ChildSessionBinding
     digest: str
+    child_root: _PinnedChildRoot
     task: asyncio.Task[ActionExecutionReceipt]
     runtime: _ChildRuntime | None = None
 
@@ -257,6 +274,7 @@ class ChildSessionService:
         control_options: Mapping[str, str] = {},
         derive_control_options: DeriveControlOptions | None = None,
         host_services: Mapping[str, object] = {},
+        _private_root_fd: int | None = None,
     ) -> None:
         if (
             not isinstance(plan, AgentSystemPlan)
@@ -267,6 +285,13 @@ class ChildSessionService:
             or not callable(child_action_executor_factory)
             or not callable(clock_ms)
             or (derive_control_options is not None and not callable(derive_control_options))
+            or (
+                _private_root_fd is not None
+                and (
+                    isinstance(_private_root_fd, bool)
+                    or not isinstance(_private_root_fd, int)
+                )
+            )
         ):
             raise ChildSessionError("child service construction is invalid")
         self._plan = plan
@@ -286,6 +311,25 @@ class ChildSessionService:
         self._control_options = MappingProxyType(options)
         self._derive_options = derive_control_options
         self._host_services = MappingProxyType(services)
+        self._private_root_fd = -1
+        self._children_root_fd = -1
+        self._child_roots: dict[str, _PinnedChildRoot] = {}
+        self._require_path_binding = _private_root_fd is None
+        try:
+            self._private_root_fd = (
+                _open_trusted_private_root(private_root)
+                if _private_root_fd is None
+                else _open_trusted_private_root_fd(_private_root_fd)
+            )
+            self._children_root_fd = _open_or_create_private_directory_at(
+                self._private_root_fd,
+                "children",
+                private_root / "children",
+                require_path_binding=self._require_path_binding,
+            )
+        except ChildSessionError:
+            self._close_root_descriptors()
+            raise
         self._entries: dict[str, _ActiveChild] = {}
         self._statuses: dict[str, ChildSessionStatus] = {}
         self._lock = asyncio.Lock()
@@ -303,6 +347,39 @@ class ChildSessionService:
             return self._statuses[child_id]
         except KeyError:
             raise ChildSessionError("child session is unknown") from None
+
+    def _prepare_pinned_child_root(self, child_id: str) -> _PinnedChildRoot:
+        if OPAQUE_ID.fullmatch(child_id) is None or len(Path(child_id).parts) != 1:
+            raise ChildSessionError("child root is invalid")
+        existing = self._child_roots.get(child_id)
+        if existing is not None and not existing.closed:
+            return existing
+        descriptor = _open_or_create_private_directory_at(
+            self._children_root_fd,
+            child_id,
+            self._private_root / "children" / child_id,
+            require_path_binding=self._require_path_binding,
+        )
+        root = _PinnedChildRoot(self._private_root / "children" / child_id, descriptor)
+        self._child_roots[child_id] = root
+        return root
+
+    def _release_child_root(self, child_id: str) -> None:
+        root = self._child_roots.pop(child_id, None)
+        if root is not None:
+            root.close()
+
+    def _close_root_descriptors(self) -> None:
+        for child_id in tuple(self._child_roots):
+            self._release_child_root(child_id)
+        for descriptor in (self._children_root_fd, self._private_root_fd):
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+        self._children_root_fd = -1
+        self._private_root_fd = -1
 
     @staticmethod
     def _binding_for(
@@ -337,7 +414,7 @@ class ChildSessionService:
                     raise ChildSessionError("child binding conflicts")
                 task = entry.task
             else:
-                root = self.prepare_child_root(self._private_root, child_id)
+                root = self._prepare_pinned_child_root(child_id)
                 binding = self.load_binding(root)
                 expected = self._binding_for(proposal, child_id, digest)
                 if binding is not None and binding != expected:
@@ -352,6 +429,7 @@ class ChildSessionService:
                         terminal.receipt.action_id,
                         terminal.receipt.receipt_ref,
                     )
+                    self._release_child_root(child_id)
                     return terminal.receipt
                 if self.load_phase(root) == "provider-create-started":
                     self._statuses[child_id] = ChildSessionStatus(child_id, "uncertain", expected.action_id)
@@ -370,15 +448,20 @@ class ChildSessionService:
                     generation=expected.generation,
                     proposal_digest=expected.proposal_digest,
                 )
-                task = asyncio.create_task(self._run_spawn(root, expected, child_authority, proposal, signal))
-                entry = _ActiveChild(expected, digest, task)
+                task = asyncio.create_task(
+                    self._run_spawn(root, expected, child_authority, proposal, signal)
+                )
+                task.add_done_callback(_consume_child_task_exception)
+                entry = _ActiveChild(expected, digest, root, task)
                 self._entries[child_id] = entry
                 self._statuses[child_id] = ChildSessionStatus(child_id, "starting", expected.action_id)
-        return await asyncio.shield(task)
+        waiter = asyncio.shield(task)
+        waiter.add_done_callback(_consume_child_task_exception)
+        return await waiter
 
     async def _run_spawn(
         self,
-        root: Path,
+        root: _PinnedChildRoot,
         binding: ChildSessionBinding,
         authority: AuthorityEnvelope,
         proposal: ControlEvent,
@@ -387,13 +470,13 @@ class ChildSessionService:
         """Run one fenced child to a terminal state and close its provider."""
 
         runtime: _ChildRuntime | None = None
+        fenced = False
         try:
-            self.persist_phase(child_root=root, phase="provider-create-started")
             options: Mapping[str, str] = self._control_options
             if self._derive_options is not None:
                 options = self._derive_options(
                     self._control_options,
-                    child_root=root,
+                    child_root=root.path,
                     child_session_id=binding.session_id,
                     child_authority=authority,
                     generation=binding.generation,
@@ -403,7 +486,7 @@ class ChildSessionService:
                 system_version=self._plan.version,
                 control_plane_id=self._plan.control_binding.control_plane_id,
                 control_plane_version=self._plan.control_binding.version,
-                private_root=root,
+                private_root=root.path,
                 options=options,
                 host_services=self._host_services,
             )
@@ -411,6 +494,8 @@ class ChildSessionService:
                 self._plan.control_binding.control_plane_id,
                 self._plan.control_binding.version,
             ).factory
+            self.persist_phase(child_root=root, phase="provider-create-started")
+            fenced = True
             client = factory(context)
             runtime = _ChildRuntime(client=client)
             await self._attach_runtime(binding.child_id, runtime)
@@ -418,13 +503,14 @@ class ChildSessionService:
                 plan=self._plan,
                 authority=authority,
                 control_factories=self._factories,
-                private_root=root,
+                private_root=root.path,
                 content=self._content,
                 child_action_executor_factory=self._executor_factory,
                 clock_ms=self._clock_ms,
                 control_options=self._control_options,
                 derive_control_options=self._derive_options,
                 host_services=self._host_services,
+                _private_root_fd=root.fd,
             )
             executor = self._build_executor(authority, nested_children)
             host = ControlHost(
@@ -432,7 +518,7 @@ class ChildSessionService:
                 generation=binding.generation,
                 plan=self._plan,
                 authority=AuthorityLedger(authority),
-                journal=FileCanonicalJournal.open(root, binding.session_id),
+                journal=FileCanonicalJournal.open_at(root.fd, root.path, binding.session_id),
                 client=client,
                 action_executor=executor,
                 clock_ms=self._clock_ms,
@@ -499,12 +585,17 @@ class ChildSessionService:
                 self._statuses[binding.child_id] = ChildSessionStatus(
                     binding.child_id, "cancelled", binding.action_id
                 )
+            if not self._closing:
+                raise
             raise ActionExecutionFailure(
                 "cancelled", "child-close-cancelled", None
             ) from None
         except ActionExecutionFailure:
             raise
         except Exception:
+            if not fenced and runtime is None:
+                await self._finish_known(binding, "failed")
+                raise ChildSessionError("child construction is unavailable") from None
             if runtime is not None:
                 try:
                     await _close_runtime(runtime)
@@ -558,6 +649,7 @@ class ChildSessionService:
 
         async with self._lock:
             self._entries.pop(binding.child_id, None)
+            self._release_child_root(binding.child_id)
             self._statuses[binding.child_id] = ChildSessionStatus(
                 binding.child_id, status, binding.action_id, receipt_ref
             )
@@ -663,6 +755,7 @@ class ChildSessionService:
             self._closed = False
             raise ChildSessionError("child provider close is unavailable")
         self._closed = True
+        self._close_root_descriptors()
 
     async def _active_runtime(
         self, proposal: ControlEvent, kind: str
@@ -729,7 +822,7 @@ class ChildSessionService:
     @staticmethod
     def persist_binding(
         *,
-        child_root: Path,
+        child_root: Path | _PinnedChildRoot,
         child_id: str,
         action_id: str,
         session_id: str,
@@ -756,12 +849,12 @@ class ChildSessionService:
         return binding.proposal_digest
 
     @staticmethod
-    def load_binding(child_root: Path) -> ChildSessionBinding | None:
+    def load_binding(child_root: Path | _PinnedChildRoot) -> ChildSessionBinding | None:
         value = _load_json(child_root, _BINDING_NAME)
         return None if value is None else ChildSessionBinding.from_mapping(value)
 
     @staticmethod
-    def persist_phase(*, child_root: Path, phase: str) -> None:
+    def persist_phase(*, child_root: Path | _PinnedChildRoot, phase: str) -> None:
         if phase != "provider-create-started":
             raise ChildSessionError("child phase is invalid")
         existing = _load_json(child_root, _PHASE_NAME)
@@ -773,7 +866,7 @@ class ChildSessionService:
                     raise ChildSessionError("child phase conflicts")
 
     @staticmethod
-    def load_phase(child_root: Path) -> str | None:
+    def load_phase(child_root: Path | _PinnedChildRoot) -> str | None:
         value = _load_json(child_root, _PHASE_NAME)
         if value is None:
             return None
@@ -783,7 +876,7 @@ class ChildSessionService:
 
     @staticmethod
     def persist_terminal(
-        *, child_root: Path, terminal: ChildTerminalReceipt
+        *, child_root: Path | _PinnedChildRoot, terminal: ChildTerminalReceipt
     ) -> None:
         if not isinstance(terminal, ChildTerminalReceipt):
             raise ChildSessionError("child terminal receipt is invalid")
@@ -801,7 +894,7 @@ class ChildSessionService:
                     raise ChildSessionError("child terminal conflicts")
 
     @staticmethod
-    def load_terminal(child_root: Path) -> ChildTerminalReceipt | None:
+    def load_terminal(child_root: Path | _PinnedChildRoot) -> ChildTerminalReceipt | None:
         value = _load_json(child_root, _TERMINAL_NAME)
         if value is None:
             return None
@@ -890,6 +983,15 @@ def _cancelled(signal: CancellationSignal) -> bool:
         return bool(signal.cancelled)
     except Exception:
         raise ChildSessionError("child cancellation state is unavailable") from None
+
+
+def _consume_child_task_exception(
+    task: asyncio.Future[ActionExecutionReceipt],
+) -> None:
+    try:
+        task.exception()
+    except asyncio.CancelledError:
+        pass
 
 
 def _child_id(proposal: ControlEvent, kind: str) -> str:
@@ -1007,6 +1109,99 @@ def _usage_mapping(receipt: ActionExecutionReceipt) -> Mapping[str, int]:
     }
 
 
+def _identity(details: os.stat_result) -> tuple[int, int]:
+    return details.st_dev, details.st_ino
+
+
+def _open_trusted_private_root(path: Path) -> int:
+    try:
+        before = path.lstat()
+        descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | _NOFOLLOW | _CLOEXEC)
+    except OSError:
+        raise ChildSessionError("child root is unavailable") from None
+    try:
+        details = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(before.st_mode)
+            or not stat.S_ISDIR(details.st_mode)
+            or _identity(before) != _identity(details)
+            or details.st_uid != os.getuid()
+            or stat.S_IMODE(details.st_mode) != 0o700
+        ):
+            raise ChildSessionError("child root is unsafe")
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _open_trusted_private_root_fd(source_fd: int) -> int:
+    try:
+        descriptor = os.dup(source_fd)
+    except OSError:
+        raise ChildSessionError("child root is unavailable") from None
+    try:
+        details = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(details.st_mode)
+            or details.st_uid != os.getuid()
+            or stat.S_IMODE(details.st_mode) != 0o700
+        ):
+            raise ChildSessionError("child root is unsafe")
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def _open_or_create_private_directory_at(
+    parent_fd: int, name: str, path: Path, *, require_path_binding: bool
+) -> int:
+    if (
+        not isinstance(name, str)
+        or not name
+        or len(Path(name).parts) != 1
+        or name in {".", ".."}
+    ):
+        raise ChildSessionError("child root is invalid")
+    try:
+        try:
+            os.mkdir(name, 0o700, dir_fd=parent_fd)
+            os.fsync(parent_fd)
+        except FileExistsError:
+            pass
+        before = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        descriptor = os.open(
+            name,
+            os.O_RDONLY | os.O_DIRECTORY | _NOFOLLOW | _CLOEXEC,
+            dir_fd=parent_fd,
+        )
+    except OSError:
+        raise ChildSessionError("child root is unavailable") from None
+    try:
+        details = os.fstat(descriptor)
+        path_details = path.lstat() if require_path_binding else None
+        if (
+            not stat.S_ISDIR(before.st_mode)
+            or not stat.S_ISDIR(details.st_mode)
+            or _identity(before) != _identity(details)
+            or details.st_uid != os.getuid()
+            or stat.S_IMODE(details.st_mode) != 0o700
+            or (
+                path_details is not None
+                and (
+                    not stat.S_ISDIR(path_details.st_mode)
+                    or _identity(path_details) != _identity(details)
+                )
+            )
+        ):
+            raise ChildSessionError("child root is unsafe")
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
 def _ensure_private_directory(path: Path) -> None:
     try:
         path.mkdir(mode=0o700)
@@ -1027,10 +1222,26 @@ def _ensure_private_directory(path: Path) -> None:
         raise ChildSessionError("child root is unsafe")
 
 
-def _load_json(root: Path, name: str) -> Mapping[str, object] | None:
-    _ensure_private_directory(root)
+def _load_json(root: Path | _PinnedChildRoot, name: str) -> Mapping[str, object] | None:
+    directory_fd: int | None = None
+    root_path: Path | None = None
+    if isinstance(root, _PinnedChildRoot):
+        if root.closed:
+            raise ChildSessionError("child root is unavailable")
+        directory_fd = root.fd
+    else:
+        _ensure_private_directory(root)
+        root_path = root
     try:
-        descriptor = os.open(root / name, os.O_RDONLY | _NOFOLLOW | _CLOEXEC)
+        if directory_fd is None:
+            assert root_path is not None
+            descriptor = os.open(root_path / name, os.O_RDONLY | _NOFOLLOW | _CLOEXEC)
+        else:
+            descriptor = os.open(
+                name,
+                os.O_RDONLY | _NOFOLLOW | _CLOEXEC,
+                dir_fd=directory_fd,
+            )
     except FileNotFoundError:
         return None
     except OSError:
@@ -1056,8 +1267,16 @@ def _load_json(root: Path, name: str) -> Mapping[str, object] | None:
     return value
 
 
-def _write_json(root: Path, name: str, value: Mapping[str, object]) -> bool:
-    _ensure_private_directory(root)
+def _write_json(root: Path | _PinnedChildRoot, name: str, value: Mapping[str, object]) -> bool:
+    directory_fd: int | None = None
+    root_path: Path | None = None
+    if isinstance(root, _PinnedChildRoot):
+        if root.closed:
+            raise ChildSessionError("child root is unavailable")
+        directory_fd = root.fd
+    else:
+        _ensure_private_directory(root)
+        root_path = root
     encoded = (
         json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
             "utf-8"
@@ -1066,13 +1285,19 @@ def _write_json(root: Path, name: str, value: Mapping[str, object]) -> bool:
     )
     temporary = f".{name}.{os.getpid()}.{os.urandom(8).hex()}.tmp"
     try:
-        directory_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | _NOFOLLOW | _CLOEXEC)
+        if directory_fd is None:
+            assert root_path is not None
+            owned_directory_fd = os.open(
+                root_path, os.O_RDONLY | os.O_DIRECTORY | _NOFOLLOW | _CLOEXEC
+            )
+        else:
+            owned_directory_fd = os.dup(directory_fd)
         try:
             descriptor = os.open(
                 temporary,
                 os.O_WRONLY | os.O_CREAT | os.O_EXCL | _CLOEXEC,
                 0o600,
-                dir_fd=directory_fd,
+                dir_fd=owned_directory_fd,
             )
             try:
                 with os.fdopen(descriptor, "wb", closefd=True) as stream:
@@ -1080,18 +1305,24 @@ def _write_json(root: Path, name: str, value: Mapping[str, object]) -> bool:
                     stream.flush()
                     os.fsync(stream.fileno())
                 try:
-                    os.link(temporary, name, src_dir_fd=directory_fd, dst_dir_fd=directory_fd, follow_symlinks=False)
+                    os.link(
+                        temporary,
+                        name,
+                        src_dir_fd=owned_directory_fd,
+                        dst_dir_fd=owned_directory_fd,
+                        follow_symlinks=False,
+                    )
                 except FileExistsError:
                     return False
-                os.fsync(directory_fd)
+                os.fsync(owned_directory_fd)
                 return True
             finally:
                 try:
-                    os.unlink(temporary, dir_fd=directory_fd)
+                    os.unlink(temporary, dir_fd=owned_directory_fd)
                 except FileNotFoundError:
                     pass
         finally:
-            os.close(directory_fd)
+            os.close(owned_directory_fd)
     except ChildSessionError:
         raise
     except OSError:

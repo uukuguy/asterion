@@ -359,11 +359,15 @@ class MemoryCanonicalJournal:
 class FileCanonicalJournal:
     """Descriptor-relative, hash-chained canonical JSONL journal."""
 
-    def __init__(self, root: Path, session_id: str, filename: str) -> None:
+    def __init__(
+        self, root: Path, session_id: str, filename: str, *, root_fd: int | None = None
+    ) -> None:
         self._root = root
         self._parent = root.parent
         self._session_id = session_id
         self._filename = filename
+        self._root_fd = root_fd
+        self._closed = False
         self._entries: tuple[JournalEntry, ...] = ()
         self._by_record_id: dict[str, JournalEntry] = {}
         self._parent_identity: tuple[int, int] | None = None
@@ -396,10 +400,60 @@ class FileCanonicalJournal:
         except (OSError, TypeError, ValueError, UnicodeError):
             raise JournalConflictError("file journal cannot be opened safely") from None
 
+    @classmethod
+    def open_at(
+        cls, root_fd: int, root: os.PathLike[str] | str, session_id: str
+    ) -> FileCanonicalJournal:
+        try:
+            if (
+                isinstance(root_fd, bool)
+                or not isinstance(root_fd, int)
+                or not isinstance(session_id, str)
+                or OPAQUE_ID.fullmatch(session_id) is None
+                or not isinstance(root, (str, os.PathLike))
+            ):
+                raise JournalConflictError("file journal construction is invalid")
+            native_root = Path(os.path.abspath(Path(root)))
+            if ".." in native_root.parts:
+                raise JournalConflictError("file journal construction is invalid")
+            owned_root_fd = os.dup(root_fd)
+            try:
+                _validate_private_directory_fd(owned_root_fd, require_mode=True)
+                filename = (
+                    "journal-"
+                    f"{hashlib.sha256(session_id.encode('utf-8')).hexdigest()}.jsonl"
+                )
+                journal = cls(
+                    native_root,
+                    session_id,
+                    filename,
+                    root_fd=owned_root_fd,
+                )
+                owned_root_fd = -1
+                journal._refresh(exclusive=False, create=True)
+                return journal
+            finally:
+                if owned_root_fd >= 0:
+                    os.close(owned_root_fd)
+        except JournalConflictError:
+            raise
+        except (OSError, TypeError, ValueError, UnicodeError):
+            raise JournalConflictError("file journal cannot be opened safely") from None
+
     @property
     def position(self) -> int:
         self._refresh(exclusive=False, create=False)
         return len(self._entries)
+
+    def close(self) -> None:
+        self._closed = True
+        root_fd = self._root_fd
+        self._root_fd = None
+        if root_fd is not None:
+            try:
+                os.close(root_fd)
+            except OSError:
+                pass
 
     def append(self, expected_position: int, record: JournalRecord) -> JournalEntry:
         if not isinstance(record, JournalRecord):
@@ -450,7 +504,8 @@ class FileCanonicalJournal:
             finally:
                 os.close(file_fd)
                 os.close(root_fd)
-                os.close(parent_fd)
+                if parent_fd is not None:
+                    os.close(parent_fd)
         except JournalConflictError:
             raise
         except (OSError, TypeError, ValueError, UnicodeError):
@@ -507,19 +562,32 @@ class FileCanonicalJournal:
                 if create:
                     os.fsync(file_fd)
                     os.fsync(root_fd)
-                    os.fsync(parent_fd)
+                    if parent_fd is not None:
+                        os.fsync(parent_fd)
                     self._confirm_instance_bindings(parent_fd, root_fd, file_fd)
                     self._file_stamp = _file_stamp(os.fstat(file_fd))
             finally:
                 os.close(file_fd)
                 os.close(root_fd)
-                os.close(parent_fd)
+                if parent_fd is not None:
+                    os.close(parent_fd)
         except JournalConflictError:
             raise
         except (OSError, TypeError, ValueError, UnicodeError):
             raise JournalConflictError("file journal cannot be read safely") from None
 
-    def _open_descriptors(self, *, create: bool) -> tuple[int, int, int]:
+    def _open_descriptors(self, *, create: bool) -> tuple[int | None, int, int]:
+        if self._closed:
+            raise JournalConflictError("file journal is closed")
+        if self._root_fd is not None:
+            root_fd = os.dup(self._root_fd)
+            try:
+                _validate_private_directory_fd(root_fd, require_mode=True)
+                file_fd, _ = _open_private_file(root_fd, self._filename, create=create)
+                return None, root_fd, file_fd
+            except BaseException:
+                os.close(root_fd)
+                raise
         parent_fd = _open_private_parent(self._parent)
         try:
             root_fd = _open_private_root(
@@ -540,14 +608,16 @@ class FileCanonicalJournal:
         return parent_fd, root_fd, file_fd
 
     def _confirm_instance_bindings(
-        self, parent_fd: int, root_fd: int, file_fd: int
+        self, parent_fd: int | None, root_fd: int, file_fd: int
     ) -> None:
-        _verify_parent_binding(self._parent, parent_fd)
-        _verify_root_binding_at(parent_fd, self._root.name, root_fd)
-        _verify_root_binding(self._root, root_fd)
+        _validate_private_directory_fd(root_fd, require_mode=True)
+        if parent_fd is not None:
+            _verify_parent_binding(self._parent, parent_fd)
+            _verify_root_binding_at(parent_fd, self._root.name, root_fd)
+            _verify_root_binding(self._root, root_fd)
         _verify_file_binding(root_fd, self._filename, file_fd)
         identities = (
-            _identity(os.fstat(parent_fd)),
+            None if parent_fd is None else _identity(os.fstat(parent_fd)),
             _identity(os.fstat(root_fd)),
             _identity(os.fstat(file_fd)),
         )
@@ -602,6 +672,19 @@ def _open_private_parent(parent: Path) -> int:
     except BaseException:
         os.close(descriptor)
         raise
+
+
+def _validate_private_directory_fd(
+    descriptor: int, *, require_mode: bool
+) -> os.stat_result:
+    details = os.fstat(descriptor)
+    if (
+        not stat.S_ISDIR(details.st_mode)
+        or details.st_uid != os.getuid()
+        or (require_mode and stat.S_IMODE(details.st_mode) != 0o700)
+    ):
+        raise JournalConflictError("file journal root is unsafe")
+    return details
 
 
 def _open_private_root(

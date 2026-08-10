@@ -556,6 +556,54 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 first,
             )
 
+    async def test_child_durable_records_use_pinned_root_after_ancestor_swap(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audit: list[str] = []
+            clients: list[WaitingChildClient] = []
+
+            def derive_options(
+                base: Mapping[str, str],
+                *,
+                child_root: Path,
+                child_session_id: str,
+                child_authority: AuthorityEnvelope,
+                generation: int,
+            ) -> Mapping[str, str]:
+                del child_root, child_session_id, child_authority, generation
+                original_children = root / "children"
+                original_children.rename(root / "children-original")
+                replacement_child = root / "children" / "child-1"
+                replacement_child.mkdir(parents=True, mode=0o700)
+                replacement_child.chmod(0o700)
+                return dict(base)
+
+            service = ChildSessionService(
+                plan=_plan(root),
+                authority=_child_envelope(),
+                control_factories=_registry(audit, clients),
+                private_root=root,
+                content=RecordingResolver(),
+                child_action_executor_factory=lambda authority: ChildWorkExecutor(audit),
+                clock_ms=lambda: 1_000,
+                derive_control_options=derive_options,
+            )
+
+            receipt = await service.spawn(_child_proposal(), MutableSignal())
+            await service.close()
+
+            old_child = root / "children-original" / "child-1"
+            replacement_child = root / "children" / "child-1"
+            self.assertEqual(receipt.usage, BudgetUsage(0, 0, 17, 17, 3))
+            self.assertTrue((old_child / "binding.json").is_file())
+            self.assertTrue((old_child / "phase.json").is_file())
+            self.assertTrue((old_child / "terminal.json").is_file())
+            self.assertEqual(len(list(old_child.glob("journal-*.jsonl"))), 1)
+            self.assertFalse((replacement_child / "binding.json").exists())
+            self.assertFalse((replacement_child / "phase.json").exists())
+            self.assertFalse((replacement_child / "terminal.json").exists())
+            self.assertEqual(list(replacement_child.glob("journal-*.jsonl")), [])
+
     async def test_provider_create_started_without_terminal_is_uncertain_and_not_recreated(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -668,7 +716,8 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             ):
                 with self.subTest(terminal=terminal):
                     root = Path(directory) / terminal
-                    root.mkdir()
+                    root.mkdir(mode=0o700)
+                    root.chmod(0o700)
                     audit: list[str] = []
                     clients: list[WaitingChildClient] = []
                     service = ChildSessionService(

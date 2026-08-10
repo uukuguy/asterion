@@ -304,12 +304,16 @@ class ControlHost:
 
     async def close(self) -> None:
         await self._close_children()
+        journal_close = getattr(self._journal, "close", None)
         try:
             await self._client.close()
         except Exception:
             raise ControlHostTransportError(
                 "control provider close is uncertain"
             ) from None
+        finally:
+            if callable(journal_close):
+                journal_close()
 
     async def _accept_event(self, event: ControlEvent) -> None:
         if not isinstance(event, ControlEvent):
@@ -317,7 +321,25 @@ class ControlHost:
         report: ProviderUsageReport | None = None
         if event.type == "budget.reported":
             try:
-                report = ProviderUsageReport(BudgetUsage(**event.payload))
+                report = ProviderUsageReport(
+                    BudgetUsage(
+                        controller_tokens=_usage_payload_integer(
+                            event.payload.get("controller_tokens")
+                        ),
+                        application_tokens=_usage_payload_integer(
+                            event.payload.get("application_tokens")
+                        ),
+                        child_tokens=_usage_payload_integer(
+                            event.payload.get("child_tokens")
+                        ),
+                        aggregate_tokens=_usage_payload_integer(
+                            event.payload.get("aggregate_tokens")
+                        ),
+                        cost_micros=_usage_payload_integer(
+                            event.payload.get("cost_micros")
+                        ),
+                    )
+                )
                 self._authority.preview_provider_usage(report)
             except (AuthorityError, TypeError, ValueError):
                 raise ControlHostError("control provider budget report failed") from None
@@ -692,3 +714,9 @@ def _valid_child_service(value: object) -> bool:
         ) and (isinstance(active_ids, property) or isinstance(active_ids, tuple))
     except Exception:
         return False
+
+
+def _usage_payload_integer(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError("control provider budget report failed")
+    return value

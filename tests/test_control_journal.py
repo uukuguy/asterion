@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import unittest
 from pathlib import Path
 
 from asterion.control.host import ControlCommand, ControlEvent
 from asterion.control.journal import (
+    FileCanonicalJournal,
     JournalConflictError,
     JournalCursor,
     JournalRecord,
@@ -156,6 +159,62 @@ class TestControlJournal(unittest.TestCase):
         )
         with self.assertRaises(JournalConflictError):
             journal.accept_event(other, expected_position=3)
+
+    def test_file_journal_open_at_stays_on_pinned_root_after_ancestor_swap(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            children = root / "children"
+            child = children / "child-1"
+            child.mkdir(parents=True, mode=0o700)
+            child.chmod(0o700)
+            child_fd = os.open(
+                child,
+                os.O_RDONLY
+                | os.O_DIRECTORY
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0),
+            )
+            try:
+                journal = FileCanonicalJournal.open_at(child_fd, child, "session-1")
+                first = journal.append(
+                    0,
+                    JournalRecord.system_bound(
+                        system_id="research.system",
+                        system_version="1.0.0",
+                    ),
+                )
+                journal.append(
+                    first.position,
+                    JournalRecord.authority_bound(
+                        authority_id="authority-1",
+                        authority_revision=1,
+                    ),
+                )
+
+                children.rename(root / "children-original")
+                replacement_child = root / "children" / "child-1"
+                replacement_child.mkdir(parents=True, mode=0o700)
+                replacement_child.chmod(0o700)
+                journal.append(
+                    2,
+                    JournalRecord.fault_projected(
+                        fault_id="fault-1",
+                        code="provider-disconnected",
+                        recoverable=True,
+                        evidence_ref=None,
+                    ),
+                )
+
+                self.assertEqual(list(replacement_child.iterdir()), [])
+                self.assertEqual(
+                    len(list((root / "children-original" / "child-1").glob("journal-*.jsonl"))),
+                    1,
+                )
+                journal.close()
+                with self.assertRaises(JournalConflictError):
+                    _ = journal.position
+            finally:
+                os.close(child_fd)
 
 
 if __name__ == "__main__":
