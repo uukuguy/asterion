@@ -109,10 +109,32 @@ class TestControlAuthority(unittest.TestCase):
             ProviderUsageReport(BudgetUsage(10, 1, 0, 10, 0))
 
     def test_sequential_settlements_and_report_exhaust_later_admission(self) -> None:
-        ledger = AuthorityLedger(_envelope(budget_limit=_limit(application_tokens=100, aggregate_tokens=100)))
-        ledger.record_provider_usage(ProviderUsageReport(BudgetUsage(0, 80, 0, 80, 0)))
-        proposal = _proposal()
-        self.assertEqual(ledger.evaluate(proposal, now_ms=1_000).reason, "budget-exceeded")
+        ledger = AuthorityLedger(
+            _envelope(budget_limit=_limit(child_tokens=100, aggregate_tokens=100))
+        )
+        budget = {
+            "controller_tokens": 0, "application_tokens": 0, "child_tokens": 30,
+            "aggregate_tokens": 30, "cost_micros": 0, "deadline_ms": 1_000,
+        }
+        for action_id in ("action-1", "action-2"):
+            decision = ledger.evaluate(
+                _proposal(action_id=action_id, idempotency_key=f"key-{action_id}", budget=budget),
+                now_ms=1_000,
+            )
+            ledger.reserve(decision)
+            ledger.settle(
+                action_id,
+                ActionReceipt(action_id, f"receipt-{action_id}", BudgetUsage(0, 0, 30, 30, 0)),
+            )
+        ledger.record_provider_usage(ProviderUsageReport(BudgetUsage(20, 0, 0, 20, 0)))
+        self.assertEqual(ledger.usage, BudgetUsage(20, 0, 60, 80, 0))
+        third = ledger.evaluate(
+            _proposal(
+                action_id="action-3", idempotency_key="key-action-3",
+                budget={**budget, "child_tokens": 50, "aggregate_tokens": 50},
+            ), now_ms=1_000,
+        )
+        self.assertEqual(third.reason, "budget-exceeded")
     def test_evaluate_does_not_mutate_and_reserve_settle_are_idempotent(self) -> None:
         ledger = AuthorityLedger(_envelope())
         proposal = _proposal()
