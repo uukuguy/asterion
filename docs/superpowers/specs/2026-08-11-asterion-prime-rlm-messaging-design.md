@@ -54,11 +54,13 @@ The shim is an exact **derived-runtime bundle** hunk registered in Asterion
 packaging metadata. Prime's Git checkout remains read-only and clean at all
 times: setup first verifies the pinned source commit, expected source hashes,
 exports and structural anchors, then performs Prime's ordinary offline build
-and applies the hunk only to the ignored generated
-`packages/coding-agent/dist/bundle/cli.js`. The lock records the canonical hunk
-digest and the exact unmodified and derived bundle SHA-256 values. Asterion
+and resolves the generated daemon entry
+`packages/coding-agent/dist/bundle/cli.js` plus its complete local ESM bundle
+closure. It applies the hunk only to the one locked binding chunk in that
+ignored closure. The lock records the canonical hunk digest and exact
+unmodified/derived SHA-256 values for every member of the closure. Asterion
 re-verifies the clean source checkout after deriving the runtime and launches
-only the verified derived bundle. A drift, omitted shim, duplicate shim,
+only the verified derived entry. A drift, omitted shim, duplicate shim,
 malformed discovery file, inaccessible socket, or unexpected bridge reply
 fails closed before a session is created. The hunk is not a general monkey
 patch: it calls only documented `SubagentRuntimeHost` and

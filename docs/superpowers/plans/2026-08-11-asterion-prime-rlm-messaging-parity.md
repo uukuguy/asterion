@@ -8,12 +8,12 @@ evidence boundaries.
 
 **Architecture:** A source-locked, derived-bundle daemon binding shim wraps
 Prime's existing native child-runtime and message controllers. Prime's Git
-checkout stays clean; setup applies the canonical hunk only to the ignored
-ordinary build output after verifying its exact base digest. A private
-authenticated bridge routes pre-effect proposals to the Gateway, while Python
-owns authority, budget, durable child bindings and recovery. The native Prime
-delegate remains the only producer of in-daemon `AgentSession` objects and
-family delivery.
+checkout stays clean; setup resolves the daemon entry's complete ignored local
+bundle closure and applies the canonical hunk only to the exact binding chunk
+after verifying every base digest. A private authenticated bridge routes
+pre-effect proposals to the Gateway, while Python owns authority, budget,
+durable child bindings and recovery. The native Prime delegate remains the
+only producer of in-daemon `AgentSession` objects and family delivery.
 
 **Tech Stack:** Python 3.12/unittest, TypeScript strict Node 22, Prime Agent
 0.7.1 daemon 7/schema 14, Unix sockets, JSON canonicalization and real daemon
@@ -53,12 +53,14 @@ provider-free harnesses.
 
 **Interfaces:**
 - Consumes: exact Prime sources `modes/daemon/daemon-mode.ts` and
-  `modes/daemon/daemon-extension-binding.ts`, plus the ordinary generated
+  `modes/daemon/daemon-extension-binding.ts`, plus the daemon entry's complete
+  ordinary generated local ESM bundle closure rooted at
   `packages/coding-agent/dist/bundle/cli.js`.
 - Produces: an idempotent `derive_prime_rlm_runtime(source_root, lock)` that
   returns the verified generated entry only after the clean source checkout,
-  exact base bundle bytes, canonical hunk anchors and derived bundle bytes
-  agree. It never writes a tracked Prime source file.
+  exact closure base bytes, canonical hunk anchors and derived closure bytes
+  agree. It never writes a tracked Prime source file. The only writable member
+  is the lock-named generated daemon-binding chunk.
 
 - [ ] **Step 1: Write failing setup and lock tests**
 
@@ -92,12 +94,12 @@ Expected: FAIL because the RLM shim lock and verifier do not exist.
 ```python
 def derive_prime_rlm_runtime(source_root: Path, lock: PrimeArtifactLock) -> Path:
     verify_prime_checkout(source_root, lock=lock)
-    bundle = _read_regular_file_beneath(source_root, lock.rlm_runtime.entry)
-    if _sha256(bundle) == lock.rlm_runtime.derived_sha256:
+    closure = _resolve_local_esm_closure(source_root, lock.rlm_runtime.entry)
+    if _closure_sha256(closure) == lock.rlm_runtime.derived_sha256:
         return _verified_runtime_entry(source_root, lock)
-    if _sha256(bundle) != lock.rlm_runtime.base_sha256 or not _has_anchors(bundle, lock):
+    if _closure_sha256(closure) != lock.rlm_runtime.base_sha256 or not _has_anchors(closure, lock):
         raise PrimeSetupError("Prime RLM shim is incompatible")
-    _atomic_replace_regular_file(bundle, _apply_exact_hunk(bundle, lock))
+    _atomic_replace_regular_file(lock.rlm_runtime.binding_chunk, _apply_exact_hunk(closure, lock))
     verify_prime_checkout(source_root, lock=lock)
     return _verified_runtime_entry(source_root, lock)
 ```
@@ -107,14 +109,15 @@ binding time. It must call the original delegate after bridge admission; it may
 not alter `AgentSession._createKernelHostHandlers`, alter model configuration,
 or silently fall back to unwrapped native RLM.
 
-The runtime hunk may modify only the ignored generated bundle. Its lock has an
-exact entry path, canonical patch-file digest, base SHA-256, derived SHA-256,
-and structural anchors derived from the two locked TypeScript source files. A
-fresh ordinary build must reproduce the base digest before derivation. A
-second derivation accepts only the exact derived digest; a third form is
-rejected. `verify_prime_source` remains a source-only clean-check verifier;
-`verify_prime_rlm_runtime` is the separate derived-artifact verifier used by
-preflight and the real daemon harness.
+The runtime hunk may modify only one ignored generated daemon-binding chunk.
+Its lock has an exact entry path, a sorted local ESM closure file map, one
+binding-chunk path, canonical patch-file digest, base/derived SHA-256 for each
+closure member, and structural anchors derived from the two locked TypeScript
+source files. A fresh ordinary build must reproduce the entire base closure
+before derivation. A second derivation accepts only the exact derived closure;
+a third form is rejected. `verify_prime_source` remains a source-only
+clean-check verifier; `verify_prime_rlm_runtime` is the separate
+derived-artifact verifier used by preflight and the real daemon harness.
 
 - [ ] **Step 4: Re-run focused setup, source inventory and lock tests**
 
