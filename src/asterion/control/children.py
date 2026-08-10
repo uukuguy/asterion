@@ -590,6 +590,16 @@ class ChildSessionService:
             close_failed = False
             if journal is not None:
                 journal.close()
+            if runtime is not None and runtime.cancellation_uncertain:
+                async with self._lock:
+                    entry = self._entries.get(binding.child_id)
+                    if entry is not None and entry.runtime is None:
+                        entry.runtime = runtime
+                    if entry is not None:
+                        self._statuses[binding.child_id] = ChildSessionStatus(
+                            binding.child_id, "uncertain", binding.action_id
+                        )
+                raise _uncertain() from None
             if runtime is not None:
                 try:
                     await _close_runtime(runtime)

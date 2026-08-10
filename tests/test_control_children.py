@@ -1543,6 +1543,68 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             spawn.cancel()
             await asyncio.gather(spawn, return_exceptions=True)
 
+    async def test_uncertain_cancelled_child_task_remains_uncertain_and_retained(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audit: list[str] = []
+            clients: list[WaitingChildClient] = []
+
+            class BlockingExecutor(ChildWorkExecutor):
+                async def execute(
+                    self, proposal: ControlEvent, signal: CancellationSignal
+                ) -> ActionExecutionReceipt:
+                    while not signal.cancelled:
+                        await asyncio.sleep(0)
+                    return await super().execute(proposal, signal)
+
+            service = ChildSessionService(
+                plan=_plan(root),
+                authority=_child_envelope(),
+                control_factories=_registry(audit, clients),
+                private_root=root,
+                content=RecordingResolver(),
+                child_action_executor_factory=lambda authority, children: BlockingExecutor(audit),
+                clock_ms=lambda: 1_000,
+            )
+            spawn = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
+            while not clients:
+                await asyncio.sleep(0)
+            original_send = clients[0].send
+
+            async def fail_cancel_send(command: ControlCommand) -> None:
+                if command.type == "session.cancel":
+                    audit.append("child.command.session.cancel.failed")
+                    raise RuntimeError(SENTINEL)
+                await original_send(command)
+
+            clients[0].send = fail_cancel_send  # type: ignore[method-assign]
+            with self.assertRaises(ChildSessionError):
+                await service.close()
+            child_task = service._entries["child-1"].task
+
+            child_task.cancel()
+            task_result, spawn_result = await asyncio.gather(
+                child_task, spawn, return_exceptions=True
+            )
+
+            for result in (task_result, spawn_result):
+                self.assertIsInstance(result, ActionExecutionFailure)
+                assert isinstance(result, ActionExecutionFailure)
+                self.assertEqual(result.status, "uncertain")
+                self.assertEqual(result.reason_code, "child-progress-unknown")
+            self.assertEqual(service.active_ids, ("child-1",))
+            self.assertEqual(service.status("child-1").status, "uncertain")
+            self.assertTrue((root / "children" / "child-1" / "binding.json").is_file())
+            self.assertFalse(clients[0].closed)
+
+            for _ in range(2):
+                with self.assertRaises(ChildSessionError):
+                    await service.close()
+                self.assertEqual(service.active_ids, ("child-1",))
+                self.assertEqual(service.status("child-1").status, "uncertain")
+            self.assertEqual(audit.count("child.command.session.cancel.failed"), 1)
+            self.assertFalse(clients[0].closed)
+
     def test_root_safety_rejects_symlink_wrong_mode_and_conflicting_binding(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
