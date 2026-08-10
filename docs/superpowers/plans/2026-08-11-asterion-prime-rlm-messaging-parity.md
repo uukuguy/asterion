@@ -6,11 +6,14 @@
 family messages only through Asterion-owned admission, durable lifecycle and
 evidence boundaries.
 
-**Architecture:** A source-locked daemon binding shim wraps Prime's existing
-native child-runtime and message controllers. A private authenticated bridge
-routes pre-effect proposals to the Gateway, while Python owns authority,
-budget, durable child bindings and recovery. The native Prime delegate remains
-the only producer of in-daemon `AgentSession` objects and family delivery.
+**Architecture:** A source-locked, derived-bundle daemon binding shim wraps
+Prime's existing native child-runtime and message controllers. Prime's Git
+checkout stays clean; setup applies the canonical hunk only to the ignored
+ordinary build output after verifying its exact base digest. A private
+authenticated bridge routes pre-effect proposals to the Gateway, while Python
+owns authority, budget, durable child bindings and recovery. The native Prime
+delegate remains the only producer of in-daemon `AgentSession` objects and
+family delivery.
 
 **Tech Stack:** Python 3.12/unittest, TypeScript strict Node 22, Prime Agent
 0.7.1 daemon 7/schema 14, Unix sockets, JSON canonicalization and real daemon
@@ -19,7 +22,9 @@ provider-free harnesses.
 ## Global Constraints
 
 - Prime source commit is `a18809e00ea30638584d87b3afea7285a9d7296c`; any
-  source, lock, shim, export or anchor drift fails closed.
+  source, lock, derived-bundle base/derived digest, shim, export or anchor
+  drift fails closed. The source checkout must still satisfy `git status
+  --porcelain --untracked-files=normal` with no output after setup.
 - Do not modify generic framework modules to import Prime code. Python owns
   authority/lifecycle; TypeScript only adapts Prime and validates bridge frames.
 - The public protocols remain `asterion.agent-control/v1` and
@@ -43,25 +48,29 @@ provider-free harnesses.
 - Modify: `packages/typescript/prime-gateway/resources/prime-artifact-lock.json`
 - Modify: `tools/setup_prime_agent.py`
 - Modify: `tools/verify_prime_loop.py`
-- Test: `tests/test_prime_setup.py`
+- Test: `tests/test_setup_prime_agent.py`
 - Test: `packages/typescript/prime-gateway/test/artifact-lock.test.mjs`
 
 **Interfaces:**
 - Consumes: exact Prime sources `modes/daemon/daemon-mode.ts` and
-  `modes/daemon/daemon-extension-binding.ts`.
-- Produces: an idempotent `apply_prime_rlm_host_shim(source_root, lock)` that
-  returns only after exact original bytes, anchors and patched bytes agree.
+  `modes/daemon/daemon-extension-binding.ts`, plus the ordinary generated
+  `packages/coding-agent/dist/bundle/cli.js`.
+- Produces: an idempotent `derive_prime_rlm_runtime(source_root, lock)` that
+  returns the verified generated entry only after the clean source checkout,
+  exact base bundle bytes, canonical hunk anchors and derived bundle bytes
+  agree. It never writes a tracked Prime source file.
 
 - [ ] **Step 1: Write failing setup and lock tests**
 
 ```python
-def test_rlm_host_shim_rejects_source_hash_or_anchor_drift(self) -> None:
+def test_rlm_host_shim_rejects_bundle_hash_or_anchor_drift(self) -> None:
     with self.assertRaisesRegex(PrimeSetupError, "Prime RLM shim is incompatible"):
-        apply_prime_rlm_host_shim(self.source_root, tampered_lock)
+        derive_prime_rlm_runtime(self.source_root, tampered_lock)
 
 def test_rlm_host_shim_is_idempotent_only_for_exact_patched_bytes(self) -> None:
-    apply_prime_rlm_host_shim(self.source_root, self.lock)
-    apply_prime_rlm_host_shim(self.source_root, self.lock)
+    derive_prime_rlm_runtime(self.source_root, self.lock)
+    derive_prime_rlm_runtime(self.source_root, self.lock)
+    self.assertEqual(clean_git_status(self.source_root), "")
 ```
 
 ```js
@@ -72,7 +81,7 @@ it("rejects a lock that omits the exact rlm binding patch", async () => {
 
 - [ ] **Step 2: Run the focused tests and observe failure**
 
-Run: `uv run python -m unittest -v tests.test_prime_setup`
+Run: `uv run python -m unittest -v tests.test_setup_prime_agent`
 
 Run: `npm --prefix packages/typescript/prime-gateway test -- artifact-lock.test.mjs`
 
@@ -81,14 +90,16 @@ Expected: FAIL because the RLM shim lock and verifier do not exist.
 - [ ] **Step 3: Implement a one-binding-point patch verifier**
 
 ```python
-def apply_prime_rlm_host_shim(source_root: Path, lock: PrimeArtifactLock) -> None:
-    for target in lock.rlm_host_shim_targets:
-        original = _read_regular_file_beneath(source_root, target.path)
-        if original == target.patched_bytes:
-            continue
-        if original != target.original_bytes or not all(anchor in original for anchor in target.anchors):
-            raise PrimeSetupError("Prime RLM shim is incompatible")
-        _atomic_replace_regular_file(target.path, target.patched_bytes)
+def derive_prime_rlm_runtime(source_root: Path, lock: PrimeArtifactLock) -> Path:
+    verify_prime_checkout(source_root, lock=lock)
+    bundle = _read_regular_file_beneath(source_root, lock.rlm_runtime.entry)
+    if _sha256(bundle) == lock.rlm_runtime.derived_sha256:
+        return _verified_runtime_entry(source_root, lock)
+    if _sha256(bundle) != lock.rlm_runtime.base_sha256 or not _has_anchors(bundle, lock):
+        raise PrimeSetupError("Prime RLM shim is incompatible")
+    _atomic_replace_regular_file(bundle, _apply_exact_hunk(bundle, lock))
+    verify_prime_checkout(source_root, lock=lock)
+    return _verified_runtime_entry(source_root, lock)
 ```
 
 The patch must only wrap the existing native controller construction at daemon
@@ -96,15 +107,25 @@ binding time. It must call the original delegate after bridge admission; it may
 not alter `AgentSession._createKernelHostHandlers`, alter model configuration,
 or silently fall back to unwrapped native RLM.
 
+The runtime hunk may modify only the ignored generated bundle. Its lock has an
+exact entry path, canonical patch-file digest, base SHA-256, derived SHA-256,
+and structural anchors derived from the two locked TypeScript source files. A
+fresh ordinary build must reproduce the base digest before derivation. A
+second derivation accepts only the exact derived digest; a third form is
+rejected. `verify_prime_source` remains a source-only clean-check verifier;
+`verify_prime_rlm_runtime` is the separate derived-artifact verifier used by
+preflight and the real daemon harness.
+
 - [ ] **Step 4: Re-run focused setup, source inventory and lock tests**
 
-Run: `uv run python -m unittest -v tests.test_prime_setup`
+Run: `uv run python -m unittest -v tests.test_setup_prime_agent`
 
 Run: `npm --prefix packages/typescript/prime-gateway test -- artifact-lock.test.mjs`
 
 Run: `uv run python tools/check_prime_parity.py --claim inventory --source-root 3th-party/prime-agent`
 
-Expected: PASS with one exact patch application and unchanged source inventory.
+Expected: PASS with one exact derived-bundle application, a clean source
+checkout, and unchanged source inventory.
 
 - [ ] **Step 5: Commit the atomic lock change**
 
@@ -112,7 +133,7 @@ Expected: PASS with one exact patch application and unchanged source inventory.
 git add tools/setup_prime_agent.py tools/verify_prime_loop.py \
   packages/typescript/prime-gateway/resources/prime-artifact-lock.json \
   packages/typescript/prime-gateway/resources/prime-rlm-host-shim.patch \
-  tests/test_prime_setup.py packages/typescript/prime-gateway/test/artifact-lock.test.mjs
+  tests/test_setup_prime_agent.py packages/typescript/prime-gateway/test/artifact-lock.test.mjs
 git commit -m "feat: lock prime rlm daemon host shim"
 ```
 
