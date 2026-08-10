@@ -308,9 +308,30 @@ def _write_prime_source(root: Path) -> Mapping[str, object]:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text)
     (root / "prime-agent.sh").chmod(0o755)
+    for command in (
+        ("git", "init", "--quiet"),
+        ("git", "config", "user.name", "Asterion Test"),
+        ("git", "config", "user.email", "asterion@example.invalid"),
+        ("git", "add", "."),
+        ("git", "commit", "--quiet", "-m", "fixture"),
+    ):
+        subprocess.run(
+            command,
+            cwd=root,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    source_commit = subprocess.run(
+        ("git", "rev-parse", "HEAD"),
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
     return {
         "format": "asterion.prime-artifact-lock/v1",
-        "source_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
+        "source_commit": source_commit,
         "package_name": "@earendil-works/pi-coding-agent",
         "package_version": "0.7.1",
         "daemon_protocol": 7,

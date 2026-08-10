@@ -1,4 +1,12 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -96,7 +104,11 @@ export async function startFakePrimeDaemon(options = {}) {
     }
     const body = `${JSON.stringify(observations(), null, 2)}\n`;
     persistence = persistence
-      .then(() => writeFile(options.observationsPath, body))
+      .then(async () => {
+        const temporaryPath = `${options.observationsPath}.tmp`;
+        await writeFile(temporaryPath, body);
+        await rename(temporaryPath, options.observationsPath);
+      })
       .catch(() => undefined);
     return persistence;
   }
