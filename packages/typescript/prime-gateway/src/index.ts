@@ -116,6 +116,7 @@ export type {
   PrimeContinuationDeleteResult,
   PrimeContinuationLocator,
   PrimeContinuationResumeResult,
+  PrimeForkCloneResult,
   PrimeDaemonTransport,
   PrimeInputDelivery,
   PrimePrivateSessionConfig,
@@ -125,7 +126,15 @@ export type {
   PrimeSessionInitialBinding,
   PrimeSessionRecovery,
   PrimeSessionRestoreOptions,
+  PrimeTreeNavigationResult,
 } from "./prime-session.js";
+export {
+  PrimeSessionTreeError,
+  projectPrimeSessionTree,
+} from "./session-tree.js";
+export type {
+  PrimeSessionTreeProjection,
+} from "./session-tree.js";
 export {
   PrimeGateway,
   PrimeGatewayError,

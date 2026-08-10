@@ -10,6 +10,10 @@ import {
   GatewayStoreCorruptionError,
   GatewayStoreWriteError,
 } from "../dist/src/index.js";
+import {
+  canonicalJsonBytes,
+  sha256Hex,
+} from "../dist/src/durable-store.js";
 
 const fixtures = new URL(
   "../../../../tests/fixtures/agent_control/v1/",
@@ -78,6 +82,45 @@ function contextBinding() {
     continuationId: "continuation-1",
     privateRef: "private:00000000-0000-4000-8000-000000000001",
     bindingDigest: "a".repeat(64),
+  };
+}
+
+function forkCommand() {
+  return {
+    protocol: "asterion.session-context/v1",
+    command_id: "context-fork-atomic",
+    session_id: "session-1",
+    generation: 1,
+    authority_revision: 1,
+    idempotency_key: "context-fork-atomic-once",
+    operation: "session.fork",
+    payload: {
+      continuation_id: "continuation-1",
+      entry_id: "entry-1",
+      position: "at",
+    },
+  };
+}
+
+function forkReceipt() {
+  return {
+    protocol: "asterion.session-context/v1",
+    receipt_id: "context-fork-atomic-receipt",
+    command_id: "context-fork-atomic",
+    session_id: "session-1",
+    generation: 1,
+    operation: "session.fork",
+    status: "succeeded",
+    reason_code: "session-context-succeeded",
+    payload: {
+      evidence_ref: null,
+      result: {
+        source_continuation_id: "continuation-1",
+        new_continuation_id: "continuation-2",
+        active_leaf_id: "entry-1",
+        transition_sha256: "d".repeat(64),
+      },
+    },
   };
 }
 
@@ -223,6 +266,145 @@ test("context commit recovery has exactly one binding across every atomic fault"
     } finally {
       await fixtureRoot.cleanup();
     }
+  }
+});
+
+test("fork commit makes refreshed source and replacement binding visible atomically", async () => {
+  const source = contextBinding();
+  const refreshedSource = {
+    ...source,
+    privateRef: "private:00000000-0000-4000-8000-000000000002",
+    bindingDigest: "b".repeat(64),
+  };
+  const replacement = {
+    continuationId: "continuation-2",
+    privateRef: "private:00000000-0000-4000-8000-000000000003",
+    bindingDigest: "c".repeat(64),
+  };
+  for (const faultStage of [
+    "before_write",
+    "after_write",
+    "before_rename",
+    "after_rename",
+    "before_directory_fsync",
+    "after_directory_fsync",
+  ]) {
+    const fixtureRoot = await temporaryStoreRoot();
+    try {
+      const initial = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+      await initial.initializeContextBinding(source);
+      await initial.acceptContextCommand(forkCommand());
+      await initial.prepareContextOperation(forkCommand().command_id, source, {
+        previousLeafId: "entry-1",
+        selectedEntryId: "entry-1",
+      });
+      const faulted = await GatewayDurableStore.open(
+        fixtureRoot.root,
+        "session-1",
+        {
+          faultInjector(stage) {
+            if (stage === faultStage) {
+              throw new Error(`SENTINEL_FORK_${faultStage}`);
+            }
+          },
+        },
+      );
+      await assert.rejects(
+        faulted.commitContextOperation(
+          forkReceipt(),
+          replacement,
+          refreshedSource,
+        ),
+        GatewayStoreWriteError,
+      );
+
+      const reopened = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+      if (reopened.contextOperations().length === 0) {
+        assert.deepEqual(reopened.currentContextBinding("continuation-1"), source);
+        assert.equal(reopened.currentContextBinding("continuation-2"), undefined);
+        assert.deepEqual(reopened.activeContextBinding(), source);
+        await reopened.commitContextOperation(
+          forkReceipt(),
+          replacement,
+          refreshedSource,
+        );
+      } else {
+        assert.deepEqual(
+          reopened.currentContextBinding("continuation-1"),
+          refreshedSource,
+        );
+        assert.deepEqual(
+          reopened.currentContextBinding("continuation-2"),
+          replacement,
+        );
+        assert.deepEqual(reopened.activeContextBinding(), replacement);
+      }
+      assert.deepEqual(
+        reopened.currentContextBinding("continuation-1"),
+        refreshedSource,
+      );
+      assert.deepEqual(reopened.activeContextBinding(), replacement);
+      assert.equal(reopened.preparedContextOperations().length, 0);
+    } finally {
+      await fixtureRoot.cleanup();
+    }
+  }
+});
+
+test("reopen preserves a legacy fork commit that predates mutation preparation", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const source = contextBinding();
+    const replacement = {
+      continuationId: "continuation-2",
+      privateRef: "private:00000000-0000-4000-8000-000000000003",
+      bindingDigest: "c".repeat(64),
+    };
+    const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    await store.initializeContextBinding(source);
+    await store.acceptContextCommand(forkCommand());
+    const previous = JSON.parse(await readFile(
+      join(fixtureRoot.root, "public", "records", "000000000002.json"),
+      "utf8",
+    ));
+    const kind = "context.operation.committed";
+    const recordId = `context-commit:${forkCommand().command_id}`;
+    const payload = {
+      receipt: forkReceipt(),
+      nextBinding: replacement,
+    };
+    const payloadDigest = sha256Hex(canonicalJsonBytes({
+      kind,
+      record_id: recordId,
+      payload,
+    }));
+    const body = {
+      format: "asterion.prime-gateway-record/v1",
+      position: 3,
+      previous_digest: previous.digest,
+      kind,
+      record_id: recordId,
+      payload,
+      payload_digest: payloadDigest,
+    };
+    const record = { ...body, digest: sha256Hex(canonicalJsonBytes(body)) };
+    await writeFile(
+      join(fixtureRoot.root, "public", "records", "000000000003.json"),
+      Buffer.concat([canonicalJsonBytes(record), Buffer.from("\n")]),
+      { mode: 0o600 },
+    );
+
+    const reopened = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    assert.deepEqual(reopened.currentContextBinding("continuation-1"), source);
+    assert.deepEqual(reopened.currentContextBinding("continuation-2"), replacement);
+    assert.deepEqual(reopened.activeContextBinding(), replacement);
+    assert.deepEqual(reopened.contextOperations(), [{
+      command: forkCommand(),
+      receipt: forkReceipt(),
+      nextBinding: replacement,
+    }]);
+  } finally {
+    await fixtureRoot.cleanup();
   }
 });
 

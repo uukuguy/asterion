@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 
 import {
@@ -87,6 +87,8 @@ class FakePrimeSession {
       continuationResults: new Map(),
       nameResults: new Map(),
       sideEffects: [],
+      treeResults: new Map(),
+      forkResults: new Map(),
     };
     this.contextAcknowledgements = this.contextBackend.acknowledgements;
     this.contextSideEffects = this.contextBackend.sideEffects;
@@ -103,6 +105,13 @@ class FakePrimeSession {
         cost_micros: 1234,
       },
       nameSha256: createHash("sha256").update("session-1").digest("hex"),
+    };
+    this.contextTree = {
+      nodes: [
+        { entry_id: "entry-1", parent_id: null, kind: "input", label_sha256: null, token_count: 0 },
+        { entry_id: "entry-2", parent_id: "entry-1", kind: "output", label_sha256: null, token_count: 3 },
+      ],
+      leafId: "entry-2",
     };
     this.afterContextResult = undefined;
     this.contextErrorBeforeResult = undefined;
@@ -173,6 +182,158 @@ class FakePrimeSession {
   acknowledgeContext(commandId) {
     this.contextAcknowledgements.push(
       `session-1-context-${commandId}-set-name`,
+    );
+    return true;
+  }
+
+  async readContextTree(commandId, continuationId) {
+    this.contextCalls.push(["tree.read", commandId, continuationId]);
+    if (continuationId !== this.continuationId) {
+      throw new Error("wrong continuation");
+    }
+    return structuredClone(this.contextTree);
+  }
+
+  async navigateContextTree(commandId, continuationId, entryId, previousLeafId) {
+    this.contextCalls.push(["tree.navigate", commandId, continuationId, entryId]);
+    if (continuationId !== this.continuationId) {
+      throw new Error("wrong continuation");
+    }
+    const stableCommandId = `session-1-context-${commandId}-tree-navigate`;
+    let result = this.contextBackend.treeResults.get(stableCommandId);
+    if (result === undefined) {
+      await writeFile(this.sessionPath, "tree navigation mutation\n", {
+        flag: "a",
+        mode: 0o600,
+      });
+      const target = this.contextTree.nodes.find((node) => node.entry_id === entryId);
+      if (target === undefined) {
+        throw new Error("missing entry");
+      }
+      this.contextTree.leafId = target.kind === "input"
+        ? target.parent_id
+        : target.entry_id;
+      result = {
+        continuationId,
+        previousLeafId,
+        currentLeafId: this.contextTree.leafId,
+        transitionSha256: createHash("sha256")
+          .update(`${continuationId}:${previousLeafId}:${this.contextTree.leafId}:${entryId}`)
+          .digest("hex"),
+      };
+      this.contextBackend.treeResults.set(stableCommandId, result);
+      this.contextBackend.sideEffects.push([stableCommandId, entryId]);
+    }
+    this.afterContextResult?.();
+    return {
+      result,
+      acknowledge: () => {
+        this.contextAcknowledgements.push(stableCommandId);
+        return true;
+      },
+    };
+  }
+
+  acknowledgeTreeMutation(commandId) {
+    this.contextAcknowledgements.push(
+      `session-1-context-${commandId}-tree-navigate`,
+    );
+    return true;
+  }
+
+  async forkContext(commandId, continuationId, entryId, position) {
+    return this.replaceContextByFork(
+      "session.fork",
+      commandId,
+      continuationId,
+      entryId,
+      position,
+    );
+  }
+
+  async cloneContext(commandId, continuationId, selectedLeafId) {
+    return this.replaceContextByFork(
+      "session.clone",
+      commandId,
+      continuationId,
+      selectedLeafId,
+      "at",
+    );
+  }
+
+  async replaceContextByFork(
+    operation,
+    commandId,
+    continuationId,
+    entryId,
+    position,
+  ) {
+    this.contextCalls.push([operation, commandId, continuationId, entryId, position]);
+    const purpose = operation === "session.fork" ? "fork" : "clone";
+    const stableCommandId = `session-1-context-${commandId}-${purpose}`;
+    let replaced = this.contextBackend.forkResults.get(stableCommandId);
+    if (replaced === undefined) {
+      if (this.contextErrorBeforeResult !== undefined) {
+        const error = this.contextErrorBeforeResult;
+        this.contextErrorBeforeResult = undefined;
+        throw error;
+      }
+      if (continuationId !== this.continuationId) {
+        throw new Error("wrong continuation");
+      }
+      const target = this.contextTree.nodes.find((node) => node.entry_id === entryId);
+      if (target === undefined) {
+        throw new Error("missing entry");
+      }
+      if (position === "before" && target.kind !== "input") {
+        throw new Error("invalid before entry");
+      }
+      await writeFile(this.sessionPath, "source fork shutdown mutation\n", {
+        flag: "a",
+        mode: 0o600,
+      });
+      const identityDigest = createHash("sha256")
+        .update(`${operation}:${commandId}`)
+        .digest("hex")
+        .slice(0, 16);
+      const transcriptSessionId = `transcript-${identityDigest}`;
+      const sessionPath = join(dirname(this.sessionPath), `${transcriptSessionId}.jsonl`);
+      await writeFile(sessionPath, "private fork transcript\n", { mode: 0o600 });
+      const newContinuationId = `continuation-${identityDigest}`;
+      replaced = {
+        locator: {
+          continuationId: newContinuationId,
+          activeSessionId: this.activeSessionId,
+          transcriptSessionId,
+          supervisorGeneration: this.supervisorGeneration,
+          sessionPath,
+        },
+        result: {
+          sourceContinuationId: continuationId,
+          newContinuationId,
+          activeLeafId: position === "before" ? target.parent_id : entryId,
+          transitionSha256: createHash("sha256")
+            .update(`${operation}:${continuationId}:${newContinuationId}:${entryId}:${position}`)
+            .digest("hex"),
+        },
+      };
+      this.contextBackend.forkResults.set(stableCommandId, replaced);
+      this.contextBackend.sideEffects.push([stableCommandId, entryId]);
+    }
+    this.afterContextResult?.();
+    return {
+      ...structuredClone(replaced),
+      acknowledge: () => {
+        this.contextAcknowledgements.push(stableCommandId);
+        return true;
+      },
+    };
+  }
+
+  acknowledgeForkClone(commandId, operation) {
+    const purpose = operation === "session.fork" ? "fork" : "clone";
+    this.contextAcknowledgements.push(
+      `session-1-context-${commandId}-${purpose}`,
     );
     return true;
   }
@@ -440,6 +601,10 @@ async function fixture({
         "context-seed-fork",
       );
       await store.acceptContextCommand(fork);
+      await store.prepareContextOperation(fork.command_id, sourceBinding, {
+        previousLeafId: "entry-1",
+        selectedEntryId: "entry-1",
+      });
       await store.commitContextOperation({
         protocol: "asterion.session-context/v1",
         receipt_id: "context-seed-fork-receipt",
@@ -458,7 +623,7 @@ async function fixture({
             transition_sha256: "a".repeat(64),
           },
         },
-      }, nextBinding);
+      }, nextBinding, sourceBinding);
       session.adoptContinuation(nextLocator);
       await store.bindPrimeIdentity({
         activeSessionId: nextLocator.activeSessionId,
@@ -808,6 +973,379 @@ test("gateway replays one stable name mutation after restart between Prime resul
   } finally {
     await reopened?.close().catch(() => undefined);
     await state.cleanup({ allowCloseFailure: true });
+  }
+});
+
+test("gateway reads a closed tree and durably navigates to a nullable root leaf", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const continuationId = state.session.continuationId;
+    const beforeBinding = state.store.activeContextBinding();
+    const tree = await state.gateway.executeSessionContext(contextCommand(
+      "session.tree.read",
+      { continuation_id: continuationId },
+      "context-tree-read-1",
+    ), async () => undefined);
+    assert.deepEqual(tree.payload.result, {
+      continuation_id: continuationId,
+      nodes: state.session.contextTree.nodes,
+      leaf_id: "entry-2",
+    });
+
+    const navigated = await state.gateway.executeSessionContext(contextCommand(
+      "session.tree.navigate",
+      { continuation_id: continuationId, entry_id: "entry-1" },
+      "context-tree-navigate-1",
+    ), async () => undefined);
+    assert.deepEqual(navigated.payload.result, {
+      continuation_id: continuationId,
+      previous_leaf_id: "entry-2",
+      current_leaf_id: null,
+      transition_sha256: navigated.payload.result.transition_sha256,
+    });
+    assert.match(navigated.payload.result.transition_sha256, /^[0-9a-f]{64}$/);
+    const afterBinding = state.store.activeContextBinding();
+    assert.notEqual(afterBinding.privateRef, beforeBinding.privateRef);
+    assert.equal(afterBinding.continuationId, continuationId);
+    await state.privateValues.readContinuationLocator(afterBinding);
+    assert.deepEqual(state.session.contextAcknowledgements, [
+      "session-1-context-context-tree-navigate-1-tree-navigate",
+    ]);
+    assert.equal(JSON.stringify(tree).includes("SENTINEL"), false);
+    assert.equal(JSON.stringify(navigated).includes(state.sessionRoot), false);
+  } finally {
+    await state.cleanup({ allowCloseFailure: true });
+  }
+});
+
+test("gateway atomically forks and clones exact active continuations", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const sourceId = state.session.continuationId;
+    const sourceBindingBefore = state.store.activeContextBinding();
+    const fork = contextCommand("session.fork", {
+      continuation_id: sourceId,
+      entry_id: "entry-1",
+      position: "before",
+    }, "context-fork-1");
+
+    const forkReceipt = await state.gateway.executeSessionContext(
+      fork,
+      async () => undefined,
+    );
+
+    assert.equal(forkReceipt.payload.result.source_continuation_id, sourceId);
+    assert.equal(forkReceipt.payload.result.active_leaf_id, null);
+    assert.match(forkReceipt.payload.result.transition_sha256, /^[0-9a-f]{64}$/);
+    const forkId = forkReceipt.payload.result.new_continuation_id;
+    assert.notEqual(forkId, sourceId);
+    assert.equal(state.store.activeContextBinding().continuationId, forkId);
+    assert.equal(state.session.continuationId, forkId);
+    const sourceBindingAfter = state.store.currentContextBinding(sourceId);
+    assert.ok(sourceBindingAfter);
+    assert.notEqual(sourceBindingAfter.privateRef, sourceBindingBefore.privateRef);
+    await state.privateValues.readContinuationLocator(sourceBindingAfter);
+    await state.privateValues.readContinuationLocator(
+      state.store.activeContextBinding(),
+    );
+
+    const clone = contextCommand("session.clone", {
+      continuation_id: forkId,
+    }, "context-clone-1");
+    const cloneReceipt = await state.gateway.executeSessionContext(
+      clone,
+      async () => undefined,
+    );
+    assert.equal(cloneReceipt.payload.result.source_continuation_id, forkId);
+    assert.equal(cloneReceipt.payload.result.active_leaf_id, "entry-2");
+    assert.notEqual(cloneReceipt.payload.result.new_continuation_id, forkId);
+    assert.equal(
+      state.store.activeContextBinding().continuationId,
+      cloneReceipt.payload.result.new_continuation_id,
+    );
+    assert.equal(
+      state.store.snapshot().primeIdentity.transcriptSessionId,
+      state.session.transcriptSessionId,
+    );
+    assert.deepEqual(state.session.contextAcknowledgements, [
+      "session-1-context-context-fork-1-fork",
+      "session-1-context-context-clone-1-clone",
+    ]);
+    assert.equal(JSON.stringify(forkReceipt).includes(state.sessionRoot), false);
+    assert.equal(JSON.stringify(cloneReceipt).includes(state.sessionRoot), false);
+  } finally {
+    await state.cleanup({ allowCloseFailure: true });
+  }
+});
+
+test("gateway pins fork and clone selectors across failed and conflicting replay", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const continuationId = state.session.continuationId;
+    const clone = contextCommand("session.clone", {
+      continuation_id: continuationId,
+    }, "context-clone-selector");
+    state.failNextContinuationBeforeResult();
+    await assert.rejects(
+      state.gateway.executeSessionContext(clone, async () => undefined),
+    );
+    assert.deepEqual(state.store.preparedContextState(clone.command_id), {
+      previousLeafId: "entry-2",
+      selectedEntryId: "entry-2",
+    });
+    state.session.contextTree.leafId = "entry-1";
+    const cloned = await state.gateway.executeSessionContext(
+      structuredClone(clone),
+      async () => undefined,
+    );
+    assert.equal(cloned.payload.result.active_leaf_id, "entry-2");
+
+    const conflicting = structuredClone(clone);
+    conflicting.payload.continuation_id = "continuation-other";
+    await assert.rejects(
+      state.gateway.executeSessionContext(conflicting, async () => undefined),
+    );
+    assert.equal(
+      state.session.contextSideEffects.filter(
+        ([stableId]) => stableId.endsWith("-clone"),
+      ).length,
+      1,
+    );
+  } finally {
+    await state.cleanup({ allowCloseFailure: true });
+  }
+});
+
+test("gateway recovers tree navigation after Prime mutation but before durable commit", async () => {
+  const state = await fixture();
+  let reopened;
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const navigation = contextCommand("session.tree.navigate", {
+      continuation_id: state.session.continuationId,
+      entry_id: "entry-1",
+    }, "context-tree-crash-after-result");
+    state.failContextCommitAfterResult();
+    await assert.rejects(
+      state.gateway.executeSessionContext(navigation, async () => undefined),
+    );
+    assert.ok(state.store.preparedContextBinding(navigation.command_id));
+    assert.equal(
+      state.session.contextSideEffects.filter(
+        ([stableId]) => stableId.endsWith("-tree-navigate"),
+      ).length,
+      1,
+    );
+    await state.gateway.close().catch(() => undefined);
+
+    const store = await GatewayDurableStore.open(state.root, "session-1");
+    let restoredSession;
+    reopened = await PrimeGateway.open({
+      sessionId: "session-1",
+      generation: 1,
+      authorityId: "authority-1",
+      store,
+      privateValues: state.privateValues,
+      async createSession() {
+        throw new Error("must restore prepared tree navigation");
+      },
+      async restoreSession(identity, onRecovered) {
+        assert.equal(identity.pendingResume, undefined);
+        assert.equal(identity.pendingForkClone, undefined);
+        restoredSession = new FakePrimeSession(
+          identity.sessionPath,
+          state.session.contextBackend,
+          identity,
+        );
+        await onRecovered({
+          transport: recoveryTransport(
+            "supervisor-generation-1",
+            "tree-navigation-recovery",
+          ),
+          primeCursor: { generation: "prime-events-1", sequence: 0 },
+          transcriptSessionId: identity.transcriptSessionId,
+          supervisorGeneration: "supervisor-generation-1",
+          sessionStatus: "running",
+        });
+        return restoredSession;
+      },
+      async createCheckpoint() {
+        throw new Error("not used");
+      },
+    });
+
+    assert.equal(store.preparedContextOperations().length, 0);
+    assert.equal(store.activeContextBinding().continuationId, "continuation-1");
+    await state.privateValues.readContinuationLocator(
+      store.activeContextBinding(),
+    );
+    const [committed] = store.contextOperations().filter(
+      ({ command: candidate }) => candidate.command_id === navigation.command_id,
+    );
+    assert.equal(committed.receipt.payload.result.current_leaf_id, null);
+    assert.equal(
+      state.session.contextSideEffects.filter(
+        ([stableId]) => stableId.endsWith("-tree-navigate"),
+      ).length,
+      1,
+    );
+    assert.deepEqual(state.session.contextAcknowledgements, [
+      "session-1-context-context-tree-crash-after-result-tree-navigate",
+    ]);
+  } finally {
+    await reopened?.close().catch(() => undefined);
+    await state.cleanup({ allowCloseFailure: true });
+  }
+});
+
+test("gateway recovers fork and clone across both replacement crash windows", async () => {
+  for (const operation of ["session.fork", "session.clone"]) {
+    for (const crashWindow of ["before-result", "after-result"]) {
+      const state = await fixture();
+      let reopened;
+      try {
+        const goalRef = await state.privateValues.putInput("goal");
+        await state.gateway.accept(command("session.create", {
+          system_id: "research.system",
+          system_version: "1.0.0",
+          goal_id: "goal-1",
+          goal_ref: goalRef,
+        }, "command-create"));
+        const commandId = `context-${operation.slice("session.".length)}-${crashWindow}`;
+        const replacement = contextCommand(
+          operation,
+          operation === "session.fork"
+            ? {
+                continuation_id: state.session.continuationId,
+                entry_id: "entry-1",
+                position: "before",
+              }
+            : { continuation_id: state.session.continuationId },
+          commandId,
+        );
+        if (crashWindow === "before-result") {
+          state.failNextContinuationBeforeResult();
+        } else {
+          state.failContextCommitAfterResult();
+        }
+        await assert.rejects(
+          state.gateway.executeSessionContext(replacement, async () => undefined),
+        );
+        assert.ok(state.store.preparedContextBinding(replacement.command_id));
+        await state.gateway.close().catch(() => undefined);
+
+        const store = await GatewayDurableStore.open(state.root, "session-1");
+        let restoredSession;
+        reopened = await PrimeGateway.open({
+          sessionId: "session-1",
+          generation: 1,
+          authorityId: "authority-1",
+          store,
+          privateValues: state.privateValues,
+          async createSession() {
+            throw new Error("must restore prepared fork or clone");
+          },
+          async restoreSession(identity, onRecovered) {
+            assert.equal(identity.pendingForkClone.commandId, commandId);
+            assert.equal(identity.pendingForkClone.operation, operation);
+            assert.equal(
+              identity.pendingForkClone.selectedEntryId,
+              operation === "session.fork" ? "entry-1" : "entry-2",
+            );
+            restoredSession = new FakePrimeSession(
+              identity.sessionPath,
+              state.session.contextBackend,
+              identity,
+            );
+            const result = operation === "session.fork"
+              ? await restoredSession.forkContext(
+                  commandId,
+                  identity.continuationId,
+                  identity.pendingForkClone.selectedEntryId,
+                  identity.pendingForkClone.position,
+                )
+              : await restoredSession.cloneContext(
+                  commandId,
+                  identity.continuationId,
+                  identity.pendingForkClone.selectedEntryId,
+                );
+            restoredSession.adoptContinuation(result.locator);
+            await onRecovered({
+              transport: recoveryTransport(
+                "supervisor-generation-1",
+                `${operation}-${crashWindow}-recovery`,
+              ),
+              primeCursor: { generation: "prime-events-1", sequence: 0 },
+              transcriptSessionId: result.locator.transcriptSessionId,
+              supervisorGeneration: "supervisor-generation-1",
+              sessionStatus: "running",
+            });
+            return restoredSession;
+          },
+          async createCheckpoint() {
+            throw new Error("not used");
+          },
+        });
+
+        assert.equal(store.preparedContextOperations().length, 0);
+        assert.equal(
+          store.activeContextBinding().continuationId,
+          restoredSession.continuationId,
+        );
+        assert.notEqual(restoredSession.continuationId, "continuation-1");
+        assert.equal(
+          store.snapshot().primeIdentity.transcriptSessionId,
+          restoredSession.transcriptSessionId,
+        );
+        assert.ok(store.currentContextBinding("continuation-1"));
+        await state.privateValues.readContinuationLocator(
+          store.currentContextBinding("continuation-1"),
+        );
+        await state.privateValues.readContinuationLocator(
+          store.activeContextBinding(),
+        );
+        const purpose = operation === "session.fork" ? "fork" : "clone";
+        assert.equal(
+          state.session.contextSideEffects.filter(
+            ([stableId]) => stableId.endsWith(`-${purpose}`),
+          ).length,
+          1,
+        );
+        assert.deepEqual(state.session.contextAcknowledgements, [
+          `session-1-context-${commandId}-${purpose}`,
+        ]);
+      } finally {
+        await reopened?.close().catch(() => undefined);
+        await state.cleanup({ allowCloseFailure: true });
+      }
+    }
   }
 });
 

@@ -242,10 +242,28 @@ test("validates the closed session context extension", async () => {
     sessionContextFixtures,
     "valid-receipt-tree-read.json",
   );
+  const rootNavigation = await readFixture(
+    sessionContextFixtures,
+    "valid-receipt-tree-navigate-root.json",
+  );
   const validatedCommand = validateSessionContextCommand(command);
   const validatedReceipt = validateSessionContextReceipt(receipt);
   assert.deepEqual(validatedCommand, command);
   assert.deepEqual(validatedReceipt, receipt);
+  assert.equal(
+    validateSessionContextReceipt(rootNavigation).payload.result.current_leaf_id,
+    null,
+  );
+  assert.equal(
+    validateSessionContextReceipt({
+      ...receipt,
+      payload: {
+        ...receipt.payload,
+        result: { ...receipt.payload.result, leaf_id: null },
+      },
+    }).payload.result.leaf_id,
+    null,
+  );
   assert.ok(Object.isFrozen(validatedReceipt.payload.result.nodes[0]));
   assert.throws(
     () => {
@@ -283,6 +301,10 @@ test("validates the closed session context extension", async () => {
   for (const [name, validate] of [
     ["invalid-command-private-path.json", validateSessionContextCommand],
     ["invalid-receipt-provider-payload.json", validateSessionContextReceipt],
+    [
+      "invalid-receipt-tree-navigate-current-leaf.json",
+      validateSessionContextReceipt,
+    ],
   ]) {
     const invalid = await readFixture(sessionContextFixtures, name);
     assert.throws(() => validate(invalid), ProtocolValidationError);

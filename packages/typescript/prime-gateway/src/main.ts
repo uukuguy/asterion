@@ -1120,6 +1120,20 @@ async function createSidecarFromDescriptor(
             identity.pendingResume.target,
           );
           session.adoptContinuation(resumed.locator);
+        } else if (identity.pendingForkClone !== undefined) {
+          const replacement = identity.pendingForkClone.operation === "session.fork"
+            ? await session.forkContext(
+                identity.pendingForkClone.commandId,
+                identity.continuationId,
+                identity.pendingForkClone.selectedEntryId,
+                identity.pendingForkClone.position,
+              )
+            : await session.cloneContext(
+                identity.pendingForkClone.commandId,
+                identity.continuationId,
+                identity.pendingForkClone.selectedEntryId,
+              );
+          session.adoptContinuation(replacement.locator);
         }
         const attachResponse = await session.attach("restore-attach", cursor);
         const recovery = recoveryFromAttach(

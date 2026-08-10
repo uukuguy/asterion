@@ -1,6 +1,6 @@
 # Asterion Prime Session/Context Parity Implementation Plan
 
-> Status: Tasks 4.1-4.7 verified; Task 4.8 tree, navigation, fork and clone is next.
+> Status: Tasks 4.1-4.8 verified; Task 4.9 private rich attachments and delivery replay is next.
 >
 > Program parent: `2026-08-10-asterion-prime-system-parity.md`, Task 4.
 >
@@ -608,6 +608,18 @@ exact replay and redaction.
 Commit: `feat: resume and delete exact prime continuations`.
 
 ### Task 4.8: Implement tree projection, navigation, fork and clone
+
+**Status:** Verified. The Gateway now validates every pinned Prime tree-entry
+kind into a sorted, immutable, body-free projection; root navigation preserves
+Prime's legitimate non-empty tree with a nullable active leaf. Navigate, fork
+and clone pin the exact continuation, entry/leaf and pre-mutation leaf before
+dispatch. Fork and clone reconstruct the replacement transcript identity from
+closed header/state/tree responses and commit the refreshed source binding and
+new active binding in one durable record. Stable replay covers navigation plus
+both replacement operations before and after the Prime result; the six atomic
+record-write faults expose either both fork bindings or neither. Conflicting
+selectors, unknown response fields, topology drift, path escape and raw-value
+projection fail closed.
 
 **Create:**
 

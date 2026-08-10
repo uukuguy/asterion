@@ -88,17 +88,24 @@ class TestSessionContextProtocol(unittest.TestCase):
     def test_valid_fixtures_are_recursively_immutable_snapshots(self) -> None:
         command_source = _fixture("valid-command-tree-read.json")
         receipt_source = _fixture("valid-receipt-tree-read.json")
+        root_navigation_source = _fixture("valid-receipt-tree-navigate-root.json")
 
         command = validate_session_context_command(command_source)
         receipt = validate_session_context_receipt(receipt_source)
+        root_navigation = validate_session_context_receipt(root_navigation_source)
         receipt_payload = receipt["payload"]
         assert isinstance(receipt_payload, Mapping)
         receipt_result = receipt_payload["result"]
         assert isinstance(receipt_result, Mapping)
+        root_navigation_payload = root_navigation["payload"]
+        assert isinstance(root_navigation_payload, Mapping)
+        root_navigation_result = root_navigation_payload["result"]
+        assert isinstance(root_navigation_result, Mapping)
 
         self.assertEqual(command["operation"], "session.tree.read")
         self.assertEqual(receipt_result["leaf_id"], "entry-2")
         self.assertIsInstance(receipt_result["nodes"], tuple)
+        self.assertIsNone(root_navigation_result["current_leaf_id"])
         with self.assertRaises(TypeError):
             command["payload"]["continuation_id"] = "changed"  # type: ignore[index]
         with self.assertRaises(TypeError):
@@ -240,7 +247,7 @@ class TestSessionContextProtocol(unittest.TestCase):
             "session.tree.navigate": {
                 "continuation_id": "continuation-1",
                 "previous_leaf_id": None,
-                "current_leaf_id": "entry-1",
+                "current_leaf_id": None,
                 "transition_sha256": SHA256_A,
             },
             "session.tree.read": {
@@ -310,6 +317,16 @@ class TestSessionContextProtocol(unittest.TestCase):
                 "payload": {
                     "evidence_ref": "evidence-1",
                     "result": {**result, "nodes": parent_after_child},
+                },
+            }
+        )
+
+        validate_session_context_receipt(
+            {
+                **tree,
+                "payload": {
+                    "evidence_ref": "evidence-1",
+                    "result": {**result, "leaf_id": None},
                 },
             }
         )
@@ -403,6 +420,10 @@ class TestSessionContextProtocol(unittest.TestCase):
         cases = (
             ("invalid-command-private-path.json", validate_session_context_command),
             ("invalid-receipt-provider-payload.json", validate_session_context_receipt),
+            (
+                "invalid-receipt-tree-navigate-current-leaf.json",
+                validate_session_context_receipt,
+            ),
         )
         for name, validator in cases:
             with self.subTest(name=name), self.assertRaises(

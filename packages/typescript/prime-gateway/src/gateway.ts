@@ -55,12 +55,15 @@ import type {
   PrimeContinuationDeleteResult,
   PrimeContinuationLocator,
   PrimeContinuationResumeResult,
+  PrimeForkCloneResult,
   PrimeInputDelivery,
   PrimeSessionInitialBinding,
+  PrimeTreeNavigationResult,
 } from "./prime-session.js";
 import {
   PrimePromptAdmissionUncertainError,
 } from "./prime-session.js";
+import type { PrimeSessionTreeProjection } from "./session-tree.js";
 
 type CheckpointPayload = Extract<
   ControlEvent,
@@ -107,6 +110,32 @@ export interface PrimeGatewaySession {
   acknowledgeContinuation(
     commandId: string,
     operation: "session.continuation.delete" | "session.continuation.resume",
+  ): boolean;
+  readContextTree(
+    commandId: string,
+    continuationId: string,
+  ): Promise<PrimeSessionTreeProjection>;
+  navigateContextTree(
+    commandId: string,
+    continuationId: string,
+    entryId: string,
+    previousLeafId: string | null,
+  ): Promise<PrimeTreeNavigationResult>;
+  acknowledgeTreeMutation(commandId: string): boolean;
+  forkContext(
+    commandId: string,
+    continuationId: string,
+    entryId: string,
+    position: "at" | "before",
+  ): Promise<PrimeForkCloneResult>;
+  cloneContext(
+    commandId: string,
+    continuationId: string,
+    selectedLeafId: string,
+  ): Promise<PrimeForkCloneResult>;
+  acknowledgeForkClone(
+    commandId: string,
+    operation: "session.fork" | "session.clone",
   ): boolean;
 }
 
@@ -164,6 +193,12 @@ export interface PrimeGatewayOptions {
         commandId: string;
         target: PrimeContinuationLocator;
       }>;
+      pendingForkClone?: Readonly<{
+        commandId: string;
+        operation: "session.fork" | "session.clone";
+        selectedEntryId: string;
+        position: "at" | "before";
+      }>;
     }>,
     onRecovered: (recovery: PrimeCheckpointRecovery) => Promise<void>,
   ) => Promise<PrimeGatewaySession>;
@@ -180,6 +215,7 @@ export interface PrimeGatewayOptions {
 export interface PrimeGatewaySessionContextResult {
   readonly receipt: SessionContextReceipt;
   readonly nextBinding: GatewayContextBinding | null;
+  readonly sourceBinding?: GatewayContextBinding | null;
   readonly acknowledge?: () => boolean;
 }
 
@@ -717,6 +753,17 @@ export class PrimeGateway {
         (resultKeys !== ["nextBinding", "receipt"].sort().join("\u0000") &&
           resultKeys !== ["acknowledge", "nextBinding", "receipt"]
             .sort()
+            .join("\u0000") &&
+          resultKeys !== ["nextBinding", "receipt", "sourceBinding"]
+            .sort()
+            .join("\u0000") &&
+          resultKeys !== [
+            "acknowledge",
+            "nextBinding",
+            "receipt",
+            "sourceBinding",
+          ]
+            .sort()
             .join("\u0000")) ||
         !Object.hasOwn(result, "receipt") ||
         !Object.hasOwn(result, "nextBinding") ||
@@ -739,6 +786,7 @@ export class PrimeGateway {
         () => this.options.store.commitContextOperation(
           receipt,
           result.nextBinding,
+          result.sourceBinding ?? null,
         ),
       );
       await this.reconcileCommittedContext(command, committed.receipt);
@@ -788,6 +836,76 @@ export class PrimeGateway {
             }),
             nextBinding: null,
             acknowledge: named.acknowledge,
+          });
+        }
+        if (command.operation === "session.tree.read") {
+          this.assertActiveContinuation(command.payload.continuation_id);
+          const tree = await session.readContextTree(
+            command.command_id,
+            command.payload.continuation_id,
+          );
+          return Object.freeze({
+            receipt: this.contextSuccessReceipt(command, {
+              continuation_id: command.payload.continuation_id,
+              nodes: tree.nodes,
+              leaf_id: tree.leafId,
+            }),
+            nextBinding: null,
+          });
+        }
+        if (command.operation === "session.tree.navigate") {
+          const prepared = await this.prepareTreeMutation(command);
+          const navigated = await session.navigateContextTree(
+            command.command_id,
+            command.payload.continuation_id,
+            command.payload.entry_id,
+            prepared.previousLeafId,
+          );
+          const nextBinding = await this.options.privateValues
+            .putContinuationLocator(prepared.locator);
+          return Object.freeze({
+            receipt: this.contextSuccessReceipt(command, {
+              continuation_id: navigated.result.continuationId,
+              previous_leaf_id: navigated.result.previousLeafId,
+              current_leaf_id: navigated.result.currentLeafId,
+              transition_sha256: navigated.result.transitionSha256,
+            }),
+            nextBinding,
+            acknowledge: navigated.acknowledge,
+          });
+        }
+        if (
+          command.operation === "session.fork" ||
+          command.operation === "session.clone"
+        ) {
+          const prepared = await this.prepareForkClone(command);
+          const replaced = command.operation === "session.fork"
+            ? await session.forkContext(
+                command.command_id,
+                command.payload.continuation_id,
+                prepared.selectedEntryId,
+                command.payload.position,
+              )
+            : await session.cloneContext(
+                command.command_id,
+                command.payload.continuation_id,
+                prepared.selectedEntryId,
+              );
+          const sourceBinding = await this.refreshedPreparedContinuationBinding(
+            prepared.binding,
+          );
+          const nextBinding = await this.options.privateValues
+            .putContinuationLocator(replaced.locator);
+          return Object.freeze({
+            receipt: this.contextSuccessReceipt(command, {
+              source_continuation_id: replaced.result.sourceContinuationId,
+              new_continuation_id: replaced.result.newContinuationId,
+              active_leaf_id: replaced.result.activeLeafId,
+              transition_sha256: replaced.result.transitionSha256,
+            }),
+            sourceBinding,
+            nextBinding,
+            acknowledge: replaced.acknowledge,
           });
         }
         if (command.operation === "session.continuation.resume") {
@@ -941,6 +1059,16 @@ export class PrimeGateway {
           command.command_id,
           command.operation,
         );
+      } else if (command.operation === "session.tree.navigate") {
+        this.session.acknowledgeTreeMutation(command.command_id);
+      } else if (
+        command.operation === "session.fork" ||
+        command.operation === "session.clone"
+      ) {
+        this.session.acknowledgeForkClone(
+          command.command_id,
+          command.operation,
+        );
       }
     } catch {
       // A later replay retries the stable acknowledgement.
@@ -1029,6 +1157,192 @@ export class PrimeGateway {
     return replay;
   }
 
+  private assertActiveContinuation(continuationId: string): void {
+    const active = this.options.store.activeContextBinding();
+    const session = this.requireSession();
+    if (
+      active === undefined ||
+      active.continuationId !== continuationId ||
+      session.continuationId !== continuationId
+    ) {
+      throw new PrimeGatewayError();
+    }
+  }
+
+  private async prepareTreeMutation(
+    command: Extract<
+      SessionContextCommand,
+      { readonly operation: "session.tree.navigate" }
+    >,
+  ): Promise<Readonly<{
+    locator: PrivateContinuationLocator;
+    previousLeafId: string | null;
+  }>> {
+    this.assertActiveContinuation(command.payload.continuation_id);
+    let binding = this.options.store.preparedContextBinding(command.command_id);
+    let state = this.options.store.preparedContextState(command.command_id);
+    if (binding === undefined) {
+      const active = this.options.store.activeContextBinding();
+      if (active === undefined) {
+        throw new PrimeGatewayError();
+      }
+      const pinned = await this.ensurePinnedContinuationBinding(active);
+      binding = pinned.binding;
+      const tree = await this.requireSession().readContextTree(
+        `${command.command_id}-prepare`,
+        command.payload.continuation_id,
+      );
+      if (!tree.nodes.some((node) => node.entry_id === command.payload.entry_id)) {
+        throw new PrimeGatewayError();
+      }
+      state = Object.freeze({
+        previousLeafId: tree.leafId,
+        selectedEntryId: command.payload.entry_id,
+      });
+      await this.enqueueDurable(
+        () => this.options.store.prepareContextOperation(
+          command.command_id,
+          binding!,
+          state!,
+        ),
+      );
+      if (!this.sameContextBinding(
+        this.options.store.currentContextBinding(command.payload.continuation_id),
+        binding,
+      )) {
+        throw new PrimeGatewayError();
+      }
+      const revalidated = await this.options.privateValues
+        .readContinuationLocator(binding);
+      this.assertContinuationTarget(
+        revalidated,
+        command.payload.continuation_id,
+      );
+      return Object.freeze({
+        locator: revalidated,
+        previousLeafId: state.previousLeafId,
+      });
+    }
+    if (
+      state === undefined ||
+      state.selectedEntryId !== command.payload.entry_id ||
+      !this.sameContextBinding(
+        this.options.store.currentContextBinding(command.payload.continuation_id),
+        binding,
+      )
+    ) {
+      throw new PrimeGatewayError();
+    }
+    const locator = await this.options.privateValues
+      .readPreparedContinuationLocator(binding, false);
+    this.assertContinuationTarget(locator, command.payload.continuation_id, false);
+    return Object.freeze({
+      locator: Object.freeze({
+        ...locator,
+        supervisorGeneration: this.requireSession().supervisorGeneration,
+      }),
+      previousLeafId: state.previousLeafId,
+    });
+  }
+
+  private async prepareForkClone(
+    command: Extract<
+      SessionContextCommand,
+      { readonly operation: "session.fork" | "session.clone" }
+    >,
+  ): Promise<Readonly<{
+    binding: GatewayContextBinding;
+    locator: PrivateContinuationLocator;
+    previousLeafId: string | null;
+    selectedEntryId: string;
+  }>> {
+    let binding = this.options.store.preparedContextBinding(command.command_id);
+    let state = this.options.store.preparedContextState(command.command_id);
+    if (binding === undefined) {
+      this.assertActiveContinuation(command.payload.continuation_id);
+      const active = this.options.store.activeContextBinding();
+      if (active === undefined) {
+        throw new PrimeGatewayError();
+      }
+      const pinned = await this.ensurePinnedContinuationBinding(active);
+      binding = pinned.binding;
+      const tree = await this.requireSession().readContextTree(
+        `${command.command_id}-prepare`,
+        command.payload.continuation_id,
+      );
+      let selectedEntryId: string;
+      if (command.operation === "session.fork") {
+        const selected = tree.nodes.find(
+          (node) => node.entry_id === command.payload.entry_id,
+        );
+        if (
+          selected === undefined ||
+          (command.payload.position === "before" && selected.kind !== "input")
+        ) {
+          throw new PrimeGatewayError();
+        }
+        selectedEntryId = command.payload.entry_id;
+      } else {
+        if (tree.leafId === null) {
+          throw new PrimeGatewayError();
+        }
+        selectedEntryId = tree.leafId;
+      }
+      state = Object.freeze({
+        previousLeafId: tree.leafId,
+        selectedEntryId,
+      });
+      await this.enqueueDurable(
+        () => this.options.store.prepareContextOperation(
+          command.command_id,
+          binding!,
+          state!,
+        ),
+      );
+      if (!this.sameContextBinding(
+        this.options.store.currentContextBinding(command.payload.continuation_id),
+        binding,
+      )) {
+        throw new PrimeGatewayError();
+      }
+      const revalidated = await this.options.privateValues
+        .readContinuationLocator(binding);
+      this.assertContinuationTarget(
+        revalidated,
+        command.payload.continuation_id,
+      );
+      return Object.freeze({
+        binding,
+        locator: revalidated,
+        previousLeafId: state.previousLeafId,
+        selectedEntryId: state.selectedEntryId!,
+      });
+    }
+    const expectedEntryId = command.operation === "session.fork"
+      ? command.payload.entry_id
+      : state?.previousLeafId;
+    if (
+      state === undefined ||
+      state.selectedEntryId === null ||
+      state.selectedEntryId !== expectedEntryId ||
+      !this.sameContextBinding(
+        this.options.store.currentContextBinding(command.payload.continuation_id),
+        binding,
+      )
+    ) {
+      throw new PrimeGatewayError();
+    }
+    const locator = await this.options.privateValues
+      .readPreparedContinuationLocator(binding, false);
+    this.assertContinuationTarget(locator, command.payload.continuation_id, false);
+    return Object.freeze({
+      binding,
+      locator,
+      previousLeafId: state.previousLeafId,
+      selectedEntryId: state.selectedEntryId,
+    });
+  }
+
   private async ensurePinnedContinuationBinding(
     binding: GatewayContextBinding,
   ): Promise<Readonly<{
@@ -1061,6 +1375,25 @@ export class PrimeGateway {
       );
       return replacement;
     }
+  }
+
+  private async refreshedPreparedContinuationBinding(
+    binding: GatewayContextBinding,
+  ): Promise<GatewayContextBinding> {
+    let locator: PrivateContinuationLocator;
+    try {
+      locator = await this.options.privateValues.readContinuationLocator(binding);
+      if (locator.supervisorGeneration === this.requireSession().supervisorGeneration) {
+        return binding;
+      }
+    } catch {
+      locator = await this.options.privateValues
+        .readPreparedContinuationLocator(binding, false);
+    }
+    return this.options.privateValues.putContinuationLocator(Object.freeze({
+      ...locator,
+      supervisorGeneration: this.requireSession().supervisorGeneration,
+    }));
   }
 
   private assertContinuationTarget(
@@ -1099,11 +1432,18 @@ export class PrimeGateway {
     if (receipt.status !== "succeeded") {
       return;
     }
-    if (command.operation === "session.continuation.resume") {
+    if (
+      command.operation === "session.continuation.resume" ||
+      command.operation === "session.fork" ||
+      command.operation === "session.clone"
+    ) {
       const binding = this.options.store.activeContextBinding();
       const currentId = (receipt.payload.result as {
-        readonly current_continuation_id: string;
-      }).current_continuation_id;
+        readonly current_continuation_id?: string;
+        readonly new_continuation_id?: string;
+      }).current_continuation_id ?? (receipt.payload.result as {
+        readonly new_continuation_id: string;
+      }).new_continuation_id;
       if (binding === undefined) {
         throw new PrimeGatewayError();
       }
@@ -1128,6 +1468,13 @@ export class PrimeGateway {
       ) !== undefined
     ) {
       throw new PrimeGatewayError();
+    } else if (command.operation === "session.tree.navigate") {
+      const session = this.requireSession();
+      await this.enqueueDurable(() => this.options.store.bindPrimeIdentity({
+        activeSessionId: session.activeSessionId,
+        transcriptSessionId: session.transcriptSessionId,
+        supervisorGeneration: session.supervisorGeneration,
+      }));
     }
   }
 
@@ -1470,26 +1817,40 @@ export class PrimeGateway {
           "session.continuation.resume"
         ? preparedOperations[0]
         : undefined;
+      const preparedActiveMutation = preparedOperations[0] !== undefined &&
+          (preparedOperations[0].command.operation === "session.tree.navigate" ||
+            preparedOperations[0].command.operation === "session.fork" ||
+            preparedOperations[0].command.operation === "session.clone") &&
+          this.sameContextBinding(
+            contextBinding,
+            preparedOperations[0].binding,
+          )
+        ? preparedOperations[0]
+        : undefined;
       let locator: PrivateContinuationLocator;
       try {
         const pinned = await this.ensurePinnedContinuationBinding(contextBinding);
         contextBinding = pinned.binding;
         locator = pinned.locator;
       } catch {
-        if (preparedResume === undefined) {
+        if (preparedResume === undefined && preparedActiveMutation === undefined) {
           throw new PrimeGatewayError();
         }
         const mutableSource = await this.options.privateValues
           .readPreparedContinuationLocator(contextBinding, false);
-        const replacement = await this.options.privateValues
-          .putContinuationLocator(mutableSource);
-        await this.enqueueDurable(
-          () => this.options.store.rebindContextBinding(replacement),
-        );
-        contextBinding = replacement;
-        locator = await this.options.privateValues.readContinuationLocator(
-          contextBinding,
-        );
+        if (preparedActiveMutation !== undefined) {
+          locator = mutableSource;
+        } else {
+          const replacement = await this.options.privateValues
+            .putContinuationLocator(mutableSource);
+          await this.enqueueDurable(
+            () => this.options.store.rebindContextBinding(replacement),
+          );
+          contextBinding = replacement;
+          locator = await this.options.privateValues.readContinuationLocator(
+            contextBinding,
+          );
+        }
       }
       if (
         locator.continuationId !== contextBinding.continuationId ||
@@ -1515,6 +1876,12 @@ export class PrimeGateway {
         commandId: string;
         target: PrimeContinuationLocator;
       }> | undefined;
+      let pendingForkClone: Readonly<{
+        commandId: string;
+        operation: "session.fork" | "session.clone";
+        selectedEntryId: string;
+        position: "at" | "before";
+      }> | undefined;
       if (preparedResume !== undefined) {
         const target = await this.options.privateValues
           .readPreparedContinuationLocator(preparedResume.binding, false);
@@ -1533,22 +1900,42 @@ export class PrimeGateway {
           target,
         });
       }
-      const expectedIdentity = pendingResume?.target ?? Object.freeze({
+      if (
+        preparedActiveMutation !== undefined &&
+        (preparedActiveMutation.command.operation === "session.fork" ||
+          preparedActiveMutation.command.operation === "session.clone")
+      ) {
+        if (preparedActiveMutation.selectedEntryId === null) {
+          throw new PrimeGatewayError();
+        }
+        pendingForkClone = Object.freeze({
+          commandId: preparedActiveMutation.command.command_id,
+          operation: preparedActiveMutation.command.operation,
+          selectedEntryId: preparedActiveMutation.selectedEntryId,
+          position: preparedActiveMutation.command.operation === "session.fork"
+            ? preparedActiveMutation.command.payload.position
+            : "at",
+        });
+      }
+      const sourceIdentity = Object.freeze({
         ...restoredIdentity,
         continuationId: locator.continuationId,
         sessionPath: locator.sessionPath,
       });
+      const expectedIdentity = pendingResume?.target ?? sourceIdentity;
       const session = await this.options.restoreSession(Object.freeze({
         ...restoredIdentity,
         continuationId: locator.continuationId,
         sessionPath: locator.sessionPath,
         ...(pendingResume === undefined ? {} : { pendingResume }),
+        ...(pendingForkClone === undefined ? {} : { pendingForkClone }),
       }), async (recovery) => {
         if (
           recovered !== undefined ||
           this.sessionStatus !== "recovery_required" ||
           !this.validRecovery(recovery) ||
-          recovery.transcriptSessionId !== expectedIdentity.transcriptSessionId
+          (pendingForkClone === undefined &&
+            recovery.transcriptSessionId !== expectedIdentity.transcriptSessionId)
         ) {
           throw new PrimeGatewayError();
         }
@@ -1557,8 +1944,13 @@ export class PrimeGateway {
       if (
         recovered === undefined ||
         session.activeSessionId !== expectedIdentity.activeSessionId ||
-        session.transcriptSessionId !== expectedIdentity.transcriptSessionId ||
-        session.continuationId !== expectedIdentity.continuationId ||
+        (pendingForkClone === undefined &&
+          (session.transcriptSessionId !== expectedIdentity.transcriptSessionId ||
+            session.continuationId !== expectedIdentity.continuationId)) ||
+        (pendingForkClone !== undefined &&
+          (session.transcriptSessionId !== recovered.transcriptSessionId ||
+            session.transcriptSessionId === sourceIdentity.transcriptSessionId ||
+            session.continuationId === sourceIdentity.continuationId)) ||
         typeof session.adoptRecovery !== "function" ||
         typeof session.subscribe !== "function"
       ) {
@@ -1568,7 +1960,11 @@ export class PrimeGateway {
       if (session.supervisorGeneration !== recovered.supervisorGeneration) {
         throw new PrimeGatewayError();
       }
-      if (pendingResume === undefined) {
+      if (
+        pendingResume === undefined &&
+        pendingForkClone === undefined &&
+        preparedActiveMutation === undefined
+      ) {
         await this.refreshContextBinding(
           session,
           recovered.supervisorGeneration,

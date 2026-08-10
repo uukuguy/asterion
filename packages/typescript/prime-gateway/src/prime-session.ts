@@ -11,6 +11,10 @@ import type {
   PrimeDaemonHello,
   PrimeDaemonResponse,
 } from "./daemon-wire.js";
+import {
+  projectPrimeSessionTree,
+} from "./session-tree.js";
+import type { PrimeSessionTreeProjection } from "./session-tree.js";
 
 export interface PrimeDaemonTransport {
   readonly hello: PrimeDaemonHello | undefined;
@@ -139,6 +143,27 @@ export interface PrimeContinuationDeleteResult {
   acknowledge(): boolean;
 }
 
+export interface PrimeTreeNavigationResult {
+  readonly result: Readonly<{
+    readonly continuationId: string;
+    readonly previousLeafId: string | null;
+    readonly currentLeafId: string | null;
+    readonly transitionSha256: string;
+  }>;
+  acknowledge(): boolean;
+}
+
+export interface PrimeForkCloneResult {
+  readonly locator: PrimeContinuationLocator;
+  readonly result: Readonly<{
+    readonly sourceContinuationId: string;
+    readonly newContinuationId: string;
+    readonly activeLeafId: string | null;
+    readonly transitionSha256: string;
+  }>;
+  acknowledge(): boolean;
+}
+
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const MAX_PRIVATE_TEXT_BYTES = 1024 * 1024;
 
@@ -219,6 +244,20 @@ function validatePrivateConfig(
 function continuationIdFor(sessionId: string): string {
   return `continuation-${createHash("sha256")
     .update(sessionId, "utf8")
+    .digest("hex")
+    .slice(0, 32)}`;
+}
+
+function continuationIdForTranscript(
+  sessionId: string,
+  transcriptSessionId: string,
+): string {
+  return `continuation-${createHash("sha256")
+    .update(JSON.stringify([
+      "asterion.prime.continuation",
+      sessionId,
+      transcriptSessionId,
+    ]), "utf8")
     .digest("hex")
     .slice(0, 32)}`;
 }
@@ -304,6 +343,25 @@ function validateSessionHeader(
       throw new PrimeSessionError();
     }
   }
+}
+
+function transcriptIdFromSessionHeader(
+  response: PrimeDaemonResponse,
+): string {
+  if (
+    !response.success ||
+    response.command !== "get_session_header" ||
+    !isRecord(response.data) ||
+    !hasExactKeys(response.data, ["header"]) ||
+    !isRecord(response.data.header) ||
+    typeof response.data.header.id !== "string" ||
+    !OPAQUE_ID.test(response.data.header.id)
+  ) {
+    throw new PrimeSessionError();
+  }
+  const transcriptSessionId = response.data.header.id;
+  validateSessionHeader(response, transcriptSessionId);
+  return transcriptSessionId;
 }
 
 interface PrimeContextCounters {
@@ -461,6 +519,32 @@ function validateState(
   });
 }
 
+function sessionPathFromState(
+  response: PrimeDaemonResponse,
+  activeSessionId: string,
+  transcriptSessionId: string,
+  sessionDir: string,
+): string {
+  if (
+    !response.success ||
+    response.command !== "get_state" ||
+    !isRecord(response.data) ||
+    typeof response.data.sessionFile !== "string" ||
+    !isAbsolute(response.data.sessionFile) ||
+    resolve(response.data.sessionFile) !== response.data.sessionFile ||
+    dirname(response.data.sessionFile) !== resolve(sessionDir)
+  ) {
+    throw new PrimeSessionError();
+  }
+  validateState(
+    response,
+    activeSessionId,
+    transcriptSessionId,
+    response.data.sessionFile,
+  );
+  return response.data.sessionFile;
+}
+
 export class PrimeSession {
   private commandSequence = 0;
   private readonly pendingAdmissions = new Set<string>();
@@ -474,6 +558,25 @@ export class PrimeSession {
   private readonly pendingContinuationResumes = new Map<
     string,
     PrimeContinuationResumeResult
+  >();
+  private readonly pendingTreeNavigations = new Map<
+    string,
+    Readonly<{
+      continuationId: string;
+      entryId: string;
+      previousLeafId: string | null;
+      value: PrimeTreeNavigationResult;
+    }>
+  >();
+  private readonly pendingForkClones = new Map<
+    string,
+    Readonly<{
+      operation: "session.fork" | "session.clone";
+      sourceContinuationId: string;
+      entryId: string;
+      position: "at" | "before";
+      value: PrimeForkCloneResult;
+    }>
   >();
 
   private constructor(
@@ -1009,6 +1112,133 @@ export class PrimeSession {
     }
   }
 
+  async readContextTree(
+    commandId: string,
+    continuationId: string,
+  ): Promise<PrimeSessionTreeProjection> {
+    this.validateCurrentContextTarget(commandId, continuationId);
+    return this.readSessionTree(`context-${commandId}-tree-read`);
+  }
+
+  async navigateContextTree(
+    commandId: string,
+    continuationId: string,
+    entryId: string,
+    previousLeafId: string | null,
+  ): Promise<PrimeTreeNavigationResult> {
+    this.validateCurrentContextTarget(commandId, continuationId);
+    if (
+      !OPAQUE_ID.test(entryId) ||
+      (previousLeafId !== null && !OPAQUE_ID.test(previousLeafId))
+    ) {
+      throw new PrimeSessionError();
+    }
+    const stableCommandId = this.contextCommandId(commandId, "tree-navigate");
+    const pending = this.pendingTreeNavigations.get(stableCommandId);
+    if (pending !== undefined) {
+      if (
+        pending.continuationId !== continuationId ||
+        pending.entryId !== entryId ||
+        pending.previousLeafId !== previousLeafId
+      ) {
+        throw new PrimeSessionError();
+      }
+      return pending.value;
+    }
+    try {
+      const before = await this.readSessionTree(
+        `context-${commandId}-tree-navigate-before`,
+      );
+      if (!before.nodes.some((node) => node.entry_id === entryId)) {
+        throw new PrimeSessionError();
+      }
+      const deferred = await this.transport.requestDeferred({
+        type: "navigate_tree",
+        activeSessionId: this.activeSessionId,
+        targetId: entryId,
+        summarize: false,
+      }, stableCommandId);
+      if (
+        !deferred.response.success ||
+        deferred.response.command !== "navigate_tree" ||
+        !isRecord(deferred.response.data) ||
+        !hasOnlyKeys(deferred.response.data, ["cancelled", "editorText"]) ||
+        !Object.hasOwn(deferred.response.data, "cancelled") ||
+        deferred.response.data.cancelled !== false ||
+        (Object.hasOwn(deferred.response.data, "editorText") &&
+          !validText(deferred.response.data.editorText))
+      ) {
+        throw new PrimeSessionError();
+      }
+      const after = await this.readSessionTree(
+        `context-${commandId}-tree-navigate-after`,
+      );
+      const value = Object.freeze({
+        result: Object.freeze({
+          continuationId,
+          previousLeafId,
+          currentLeafId: after.leafId,
+          transitionSha256: sha256Text(JSON.stringify([
+            "session.tree.navigate",
+            continuationId,
+            previousLeafId,
+            after.leafId,
+            entryId,
+            commandId,
+          ])),
+        }),
+        acknowledge: () => {
+          try {
+            return deferred.acknowledge() === true;
+          } catch {
+            return false;
+          }
+        },
+      });
+      this.pendingTreeNavigations.set(stableCommandId, Object.freeze({
+        continuationId,
+        entryId,
+        previousLeafId,
+        value,
+      }));
+      return value;
+    } catch (error) {
+      if (error instanceof PrimeSessionError) {
+        throw error;
+      }
+      throw new PrimeSessionError();
+    }
+  }
+
+  async forkContext(
+    commandId: string,
+    continuationId: string,
+    entryId: string,
+    position: "at" | "before",
+  ): Promise<PrimeForkCloneResult> {
+    return this.replaceContextByFork(
+      "session.fork",
+      commandId,
+      continuationId,
+      entryId,
+      position,
+    );
+  }
+
+  async cloneContext(
+    commandId: string,
+    continuationId: string,
+    selectedLeafId: string,
+  ): Promise<PrimeForkCloneResult> {
+    return this.replaceContextByFork(
+      "session.clone",
+      commandId,
+      continuationId,
+      selectedLeafId,
+      "at",
+    );
+  }
+
   adoptContinuation(targetValue: PrimeContinuationLocator): void {
     const target = this.validateContinuationTarget("adopt-continuation", targetValue);
     this.currentContinuationId = target.continuationId;
@@ -1118,6 +1348,199 @@ export class PrimeSession {
       );
     } catch {
       return false;
+    }
+  }
+
+  acknowledgeTreeMutation(commandId: string): boolean {
+    if (!OPAQUE_ID.test(commandId)) {
+      throw new PrimeSessionError();
+    }
+    try {
+      return this.transport.acknowledgeResult(
+        this.contextCommandId(commandId, "tree-navigate"),
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  acknowledgeForkClone(
+    commandId: string,
+    operation: "session.fork" | "session.clone",
+  ): boolean {
+    if (!OPAQUE_ID.test(commandId)) {
+      throw new PrimeSessionError();
+    }
+    try {
+      return this.transport.acknowledgeResult(
+        this.contextCommandId(
+          commandId,
+          operation === "session.fork" ? "fork" : "clone",
+        ),
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  private async readSessionTree(
+    commandPurpose: string,
+  ): Promise<PrimeSessionTreeProjection> {
+    try {
+      return projectPrimeSessionTree(await this.request({
+        type: "get_session_tree",
+        activeSessionId: this.activeSessionId,
+      }, commandPurpose));
+    } catch {
+      throw new PrimeSessionError();
+    }
+  }
+
+  private async replaceContextByFork(
+    operation: "session.fork" | "session.clone",
+    commandId: string,
+    continuationId: string,
+    entryId: string,
+    position: "at" | "before",
+  ): Promise<PrimeForkCloneResult> {
+    if (
+      !OPAQUE_ID.test(commandId) ||
+      !OPAQUE_ID.test(continuationId) ||
+      !OPAQUE_ID.test(entryId) ||
+      (position !== "at" && position !== "before")
+    ) {
+      throw new PrimeSessionError();
+    }
+    const purpose = operation === "session.fork" ? "fork" : "clone";
+    const stableCommandId = this.contextCommandId(commandId, purpose);
+    const pending = this.pendingForkClones.get(stableCommandId);
+    if (pending !== undefined) {
+      if (
+        pending.operation !== operation ||
+        pending.sourceContinuationId !== continuationId ||
+        pending.entryId !== entryId ||
+        pending.position !== position
+      ) {
+        throw new PrimeSessionError();
+      }
+      return pending.value;
+    }
+    if (
+      continuationId !== this.continuationId ||
+      this.currentSessionPath === undefined
+    ) {
+      throw new PrimeSessionError();
+    }
+    try {
+      const sourceTranscriptSessionId = this.transcriptSessionId;
+      const sourceSessionPath = this.currentSessionPath;
+      const deferred = await this.transport.requestDeferred({
+        type: "fork",
+        activeSessionId: this.activeSessionId,
+        entryId,
+        position,
+      }, stableCommandId);
+      if (
+        !deferred.response.success ||
+        deferred.response.command !== "fork" ||
+        !isRecord(deferred.response.data) ||
+        !hasOnlyKeys(deferred.response.data, ["cancelled", "selectedText"]) ||
+        !Object.hasOwn(deferred.response.data, "cancelled") ||
+        deferred.response.data.cancelled !== false ||
+        (Object.hasOwn(deferred.response.data, "selectedText") &&
+          (typeof deferred.response.data.selectedText !== "string" ||
+            Buffer.byteLength(deferred.response.data.selectedText, "utf8") >
+              MAX_PRIVATE_TEXT_BYTES))
+      ) {
+        throw new PrimeSessionError();
+      }
+      const transcriptSessionId = transcriptIdFromSessionHeader(
+        await this.request({
+          type: "get_session_header",
+          activeSessionId: this.activeSessionId,
+        }, `context-${commandId}-${purpose}-header`),
+      );
+      const sessionPath = sessionPathFromState(
+        await this.request({
+          type: "get_state",
+          activeSessionId: this.activeSessionId,
+        }, `context-${commandId}-${purpose}-state`),
+        this.activeSessionId,
+        transcriptSessionId,
+        dirname(sourceSessionPath),
+      );
+      if (
+        transcriptSessionId === sourceTranscriptSessionId ||
+        sessionPath === sourceSessionPath
+      ) {
+        throw new PrimeSessionError();
+      }
+      const tree = await this.readSessionTree(
+        `context-${commandId}-${purpose}-tree`,
+      );
+      const newContinuationId = continuationIdForTranscript(
+        this.sessionId,
+        transcriptSessionId,
+      );
+      if (newContinuationId === continuationId) {
+        throw new PrimeSessionError();
+      }
+      const locator = Object.freeze({
+        continuationId: newContinuationId,
+        activeSessionId: this.activeSessionId,
+        transcriptSessionId,
+        supervisorGeneration: this.supervisorGeneration,
+        sessionPath,
+      });
+      const value = Object.freeze({
+        locator,
+        result: Object.freeze({
+          sourceContinuationId: continuationId,
+          newContinuationId,
+          activeLeafId: tree.leafId,
+          transitionSha256: sha256Text(JSON.stringify([
+            operation,
+            continuationId,
+            newContinuationId,
+            entryId,
+            position,
+            commandId,
+          ])),
+        }),
+        acknowledge: () => {
+          try {
+            return deferred.acknowledge() === true;
+          } catch {
+            return false;
+          }
+        },
+      });
+      this.pendingForkClones.set(stableCommandId, Object.freeze({
+        operation,
+        sourceContinuationId: continuationId,
+        entryId,
+        position,
+        value,
+      }));
+      return value;
+    } catch (error) {
+      if (error instanceof PrimeSessionError) {
+        throw error;
+      }
+      throw new PrimeSessionError();
+    }
+  }
+
+  private validateCurrentContextTarget(
+    commandId: string,
+    continuationId: string,
+  ): void {
+    if (
+      !OPAQUE_ID.test(commandId) ||
+      !OPAQUE_ID.test(continuationId) ||
+      continuationId !== this.continuationId
+    ) {
+      throw new PrimeSessionError();
     }
   }
 

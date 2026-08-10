@@ -1,0 +1,19 @@
+{
+  "protocol": "asterion.session-context/v1",
+  "receipt_id": "context-receipt-tree-invalid",
+  "command_id": "context-command-tree-invalid",
+  "session_id": "session-1",
+  "generation": 1,
+  "operation": "session.tree.navigate",
+  "status": "succeeded",
+  "reason_code": "session-context-succeeded",
+  "payload": {
+    "evidence_ref": null,
+    "result": {
+      "continuation_id": "continuation-1",
+      "previous_leaf_id": "entry-2",
+      "current_leaf_id": "/SENTINEL_PRIVATE/root",
+      "transition_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  }
+}

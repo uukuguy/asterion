@@ -17,6 +17,9 @@ class FakeTransport {
     this.acknowledgements = [];
     this.switchResponse = { cancelled: false };
     this.deleteResponse = { ok: true, method: "unlink" };
+    this.forkResponse = { cancelled: false };
+    this.forkSequence = 0;
+    this.navigateResponse = { cancelled: false };
     this.sessionFile = "/private/sessions/transcript-1.jsonl";
     this.sessionHeader = {
       type: "session",
@@ -57,6 +60,50 @@ class FakeTransport {
       },
       cost: 0.001234,
       contextUsage: { tokens: 90, contextWindow: 200_000, percent: 0.045 },
+    };
+    this.sessionTree = {
+      flatNodes: [
+        {
+          entry: {
+            type: "message",
+            id: "entry-1",
+            parentId: null,
+            timestamp: "2026-08-10T03:00:00Z",
+            message: {
+              role: "user",
+              content: "SENTINEL_PRIVATE_TREE_INPUT",
+              timestamp: 1,
+            },
+          },
+        },
+        {
+          entry: {
+            type: "message",
+            id: "entry-2",
+            parentId: "entry-1",
+            timestamp: "2026-08-10T03:00:01Z",
+            message: {
+              role: "assistant",
+              content: [{ type: "text", text: "SENTINEL_PRIVATE_TREE_OUTPUT" }],
+              api: "messages",
+              provider: "private-provider",
+              model: "private-model",
+              usage: {
+                input: 1,
+                output: 2,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 3,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+              },
+              stopReason: "stop",
+              timestamp: 2,
+            },
+          },
+          label: "SENTINEL_PRIVATE_TREE_LABEL",
+        },
+      ],
+      leafId: "entry-2",
     };
     this.hello = {
       supervisorGeneration: "supervisor-generation-1",
@@ -115,6 +162,58 @@ class FakeTransport {
         command: command.type,
         success: true,
         data: structuredClone(this.sessionStats),
+      });
+    }
+    if (command.type === "get_session_tree") {
+      return Promise.resolve({
+        id: commandId,
+        type: "response",
+        command: command.type,
+        success: true,
+        data: structuredClone(this.sessionTree),
+      });
+    }
+    if (command.type === "navigate_tree") {
+      if (this.navigateResponse.cancelled === false) {
+        const target = this.sessionTree.flatNodes.find(
+          ({ entry }) => entry.id === command.targetId,
+        )?.entry;
+        this.sessionTree.leafId = target?.type === "message" &&
+            target.message.role === "user"
+          ? target.parentId
+          : command.targetId;
+      }
+      return Promise.resolve({
+        id: commandId,
+        type: "response",
+        command: command.type,
+        success: true,
+        data: structuredClone(this.navigateResponse),
+      });
+    }
+    if (command.type === "fork") {
+      if (this.forkResponse.cancelled === false) {
+        this.forkSequence += 1;
+        const transcriptId = `transcript-fork-${this.forkSequence}`;
+        this.sessionFile = `/private/sessions/${transcriptId}.jsonl`;
+        this.sessionHeader.id = transcriptId;
+        this.sessionState.sessionId = transcriptId;
+        this.sessionState.sessionFile = this.sessionFile;
+        this.sessionStats.sessionId = transcriptId;
+        this.sessionStats.sessionFile = this.sessionFile;
+        const selected = this.sessionTree.flatNodes.find(
+          ({ entry }) => entry.id === command.entryId,
+        )?.entry;
+        this.sessionTree.leafId = command.position === "before"
+          ? selected?.parentId ?? null
+          : command.entryId;
+      }
+      return Promise.resolve({
+        id: commandId,
+        type: "response",
+        command: command.type,
+        success: true,
+        data: structuredClone(this.forkResponse),
       });
     }
     if (command.type === "switch_session") {
@@ -535,6 +634,214 @@ test("continuation mutations reject cancelled failed and unknown Prime result sh
     }));
     assert.equal(JSON.stringify(session).includes("SENTINEL"), false);
   }
+});
+
+test("tree read and navigation expose only closed topology and defer mutation acknowledgement", async () => {
+  const transport = new FakeTransport();
+  const session = await PrimeSession.create({
+    transport,
+    sessionId: "session-1",
+    privateConfig: PRIVATE_CONFIG,
+    bindIdentity: async () => undefined,
+  });
+  transport.commands.length = 0;
+  transport.acknowledgements.length = 0;
+
+  const tree = await session.readContextTree("context-tree-1", session.continuationId);
+  assert.deepEqual(tree, {
+    nodes: [
+      { entry_id: "entry-1", parent_id: null, kind: "input", label_sha256: null, token_count: 0 },
+      { entry_id: "entry-2", parent_id: "entry-1", kind: "output", label_sha256: tree.nodes[1].label_sha256, token_count: 3 },
+    ],
+    leafId: "entry-2",
+  });
+  assert.match(tree.nodes[1].label_sha256, /^[0-9a-f]{64}$/);
+  assert.equal(JSON.stringify(tree).includes("SENTINEL"), false);
+  assert.equal(JSON.stringify(tree).includes("private-provider"), false);
+
+  const navigated = await session.navigateContextTree(
+    "context-navigate-1",
+    session.continuationId,
+    "entry-1",
+    "entry-2",
+  );
+  assert.deepEqual(navigated.result, {
+    continuationId: session.continuationId,
+    previousLeafId: "entry-2",
+    currentLeafId: null,
+    transitionSha256: navigated.result.transitionSha256,
+  });
+  assert.match(navigated.result.transitionSha256, /^[0-9a-f]{64}$/);
+  assert.deepEqual(transport.acknowledgements, []);
+  assert.equal(navigated.acknowledge(), true);
+  assert.deepEqual(transport.acknowledgements, [
+    "session-1-context-context-navigate-1-tree-navigate",
+  ]);
+  assert.deepEqual(transport.commands.map(({ command }) => command.type), [
+    "get_session_tree",
+    "get_session_tree",
+    "navigate_tree",
+    "get_session_tree",
+  ]);
+});
+
+test("tree operations reject scope response and topology drift without raw disclosure", async () => {
+  const transport = new FakeTransport();
+  const session = await PrimeSession.create({
+    transport,
+    sessionId: "session-1",
+    privateConfig: PRIVATE_CONFIG,
+    bindIdentity: async () => undefined,
+  });
+  await assert.rejects(
+    session.readContextTree("tree-wrong-scope", "continuation-other"),
+  );
+  transport.sessionTree.flatNodes[1].entry.parentId = "missing";
+  await assert.rejects(
+    session.readContextTree("tree-invalid", session.continuationId),
+  );
+  transport.sessionTree = new FakeTransport().sessionTree;
+  transport.navigateResponse = { cancelled: false, raw: "SENTINEL_RAW_NAVIGATE" };
+  await assert.rejects(session.navigateContextTree(
+    "navigate-invalid",
+    session.continuationId,
+    "entry-2",
+    "entry-2",
+  ));
+  assert.equal(JSON.stringify(session).includes("SENTINEL"), false);
+});
+
+test("fork and clone reconstruct exact replacement identities and defer acknowledgement", async () => {
+  const forkTransport = new FakeTransport();
+  const forkSession = await PrimeSession.create({
+    transport: forkTransport,
+    sessionId: "session-1",
+    privateConfig: PRIVATE_CONFIG,
+    bindIdentity: async () => undefined,
+  });
+  forkTransport.commands.length = 0;
+  forkTransport.acknowledgements.length = 0;
+
+  const forked = await forkSession.forkContext(
+    "context-fork-1",
+    forkSession.continuationId,
+    "entry-1",
+    "before",
+  );
+
+  assert.equal(forked.result.sourceContinuationId, forkSession.continuationId);
+  assert.notEqual(forked.result.newContinuationId, forkSession.continuationId);
+  assert.equal(forked.result.activeLeafId, null);
+  assert.match(forked.result.transitionSha256, /^[0-9a-f]{64}$/);
+  assert.deepEqual(forked.locator, {
+    continuationId: forked.result.newContinuationId,
+    activeSessionId: "prime-root-1",
+    transcriptSessionId: "transcript-fork-1",
+    supervisorGeneration: "supervisor-generation-1",
+    sessionPath: "/private/sessions/transcript-fork-1.jsonl",
+  });
+  assert.deepEqual(forkTransport.acknowledgements, []);
+  assert.deepEqual(forkTransport.commands.map(({ command }) => command.type), [
+    "fork",
+    "get_session_header",
+    "get_state",
+    "get_session_tree",
+  ]);
+  assert.equal(forked.acknowledge(), true);
+  assert.deepEqual(forkTransport.acknowledgements, [
+    "session-1-context-context-fork-1-fork",
+  ]);
+
+  const cloneTransport = new FakeTransport();
+  const cloneSession = await PrimeSession.create({
+    transport: cloneTransport,
+    sessionId: "session-1",
+    privateConfig: PRIVATE_CONFIG,
+    bindIdentity: async () => undefined,
+  });
+  cloneTransport.commands.length = 0;
+  cloneTransport.acknowledgements.length = 0;
+  const cloned = await cloneSession.cloneContext(
+    "context-clone-1",
+    cloneSession.continuationId,
+    "entry-2",
+  );
+
+  assert.equal(cloned.result.sourceContinuationId, cloneSession.continuationId);
+  assert.equal(cloned.result.activeLeafId, "entry-2");
+  assert.equal(cloned.locator.transcriptSessionId, "transcript-fork-1");
+  assert.deepEqual(cloneTransport.commands.map(({ command }) => command.type), [
+    "fork",
+    "get_session_header",
+    "get_state",
+    "get_session_tree",
+  ]);
+  assert.equal(cloned.acknowledge(), true);
+  assert.deepEqual(cloneTransport.acknowledgements, [
+    "session-1-context-context-clone-1-clone",
+  ]);
+});
+
+test("fork and clone reject conflicting replay and replacement identity drift", async () => {
+  const transport = new FakeTransport();
+  const session = await PrimeSession.create({
+    transport,
+    sessionId: "session-1",
+    privateConfig: PRIVATE_CONFIG,
+    bindIdentity: async () => undefined,
+  });
+  await session.forkContext(
+    "context-fork-replay",
+    session.continuationId,
+    "entry-2",
+    "at",
+  );
+  await assert.rejects(session.forkContext(
+    "context-fork-replay",
+    session.continuationId,
+    "entry-1",
+    "at",
+  ));
+
+  const invalidResponse = new FakeTransport();
+  invalidResponse.forkResponse = {
+    cancelled: false,
+    raw: "SENTINEL_RAW_FORK",
+  };
+  const invalidSession = await PrimeSession.create({
+    transport: invalidResponse,
+    sessionId: "session-1",
+    privateConfig: PRIVATE_CONFIG,
+    bindIdentity: async () => undefined,
+  });
+  await assert.rejects(invalidSession.cloneContext(
+    "context-clone-invalid",
+    invalidSession.continuationId,
+    "entry-2",
+  ));
+
+  const escapedPath = new FakeTransport();
+  const originalRequest = escapedPath.request.bind(escapedPath);
+  escapedPath.request = async (command, commandId) => {
+    const response = await originalRequest(command, commandId);
+    if (command.type === "fork") {
+      escapedPath.sessionState.sessionFile = "/private/outside/fork.jsonl";
+    }
+    return response;
+  };
+  const escapedSession = await PrimeSession.create({
+    transport: escapedPath,
+    sessionId: "session-1",
+    privateConfig: PRIVATE_CONFIG,
+    bindIdentity: async () => undefined,
+  });
+  await assert.rejects(escapedSession.forkContext(
+    "context-fork-escaped",
+    escapedSession.continuationId,
+    "entry-2",
+    "at",
+  ));
+  assert.equal(JSON.stringify(invalidSession).includes("SENTINEL"), false);
 });
 
 test("lifecycle adopts one restored resident identity without creating a new root", async () => {

@@ -376,7 +376,7 @@
       "properties": {
         "continuation_id": {"$ref": "#/$defs/opaque_id"},
         "previous_leaf_id": {"$ref": "#/$defs/nullable_opaque_id"},
-        "current_leaf_id": {"$ref": "#/$defs/opaque_id"},
+        "current_leaf_id": {"$ref": "#/$defs/nullable_opaque_id"},
         "transition_sha256": {"$ref": "#/$defs/sha256"}
       }
     },

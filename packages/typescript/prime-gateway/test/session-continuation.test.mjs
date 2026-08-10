@@ -190,12 +190,16 @@ test("durable continuation prepare fences selector swaps and delete tombstones o
     fork.payload.entry_id = "entry-1";
     fork.payload.position = "at";
     await store.acceptContextCommand(fork);
+    await store.prepareContextOperation(fork.command_id, bindingA, {
+      previousLeafId: "entry-1",
+      selectedEntryId: "entry-1",
+    });
     await store.commitContextOperation(receipt(fork, {
       source_continuation_id: "continuation-1",
       new_continuation_id: "continuation-2",
       active_leaf_id: null,
       transition_sha256: "c".repeat(64),
-    }), bindingB);
+    }), bindingB, bindingA);
     assert.deepEqual(store.activeContextBinding(), bindingB);
 
     const removeA = contextCommand(

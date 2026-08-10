@@ -268,7 +268,7 @@ export type SessionContextReceipt =
       {
         readonly continuation_id: string;
         readonly previous_leaf_id: string | null;
-        readonly current_leaf_id: string;
+        readonly current_leaf_id: string | null;
         readonly transition_sha256: string;
       }
     >

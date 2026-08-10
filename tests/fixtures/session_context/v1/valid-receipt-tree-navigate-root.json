@@ -1,0 +1,19 @@
+{
+  "protocol": "asterion.session-context/v1",
+  "receipt_id": "context-receipt-tree-root",
+  "command_id": "context-command-tree-root",
+  "session_id": "session-1",
+  "generation": 1,
+  "operation": "session.tree.navigate",
+  "status": "succeeded",
+  "reason_code": "session-context-succeeded",
+  "payload": {
+    "evidence_ref": null,
+    "result": {
+      "continuation_id": "continuation-1",
+      "previous_leaf_id": "entry-2",
+      "current_leaf_id": null,
+      "transition_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  }
+}

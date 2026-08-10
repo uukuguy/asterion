@@ -368,7 +368,9 @@ def _validate_success_result(operation: str, value: object) -> None:
         )
         _require_opaque(result.get("continuation_id"), "session tree continuation")
         _require_nullable_opaque(result.get("previous_leaf_id"), "session tree previous leaf")
-        _require_opaque(result.get("current_leaf_id"), "session tree current leaf")
+        _require_nullable_opaque(
+            result.get("current_leaf_id"), "session tree current leaf"
+        )
         _require_sha256(result.get("transition_sha256"), "session tree transition")
         return
     if operation in {"session.fork", "session.clone"}:
@@ -461,10 +463,7 @@ def _validate_tree(nodes_value: object, leaf_id: object) -> None:
                     raise SessionContextProtocolError("session tree parent is invalid")
                 visited.add(current)
                 current = parents[current]
-    if leaf_id is None:
-        if entry_ids:
-            raise SessionContextProtocolError("session tree leaf is invalid")
-    else:
+    if leaf_id is not None:
         _require_opaque(leaf_id, "session tree leaf")
         if leaf_id not in parents:
             raise SessionContextProtocolError("session tree leaf is invalid")

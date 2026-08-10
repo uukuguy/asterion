@@ -301,7 +301,6 @@ export function validateSessionContextReceipt(
       }
     }
     if (
-      (receipt.payload.result.leaf_id === null && entryIds.length !== 0) ||
       (receipt.payload.result.leaf_id !== null &&
         !parents.has(receipt.payload.result.leaf_id))
     ) {
