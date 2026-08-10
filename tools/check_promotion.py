@@ -111,6 +111,15 @@ for name in schema_paths:
     path = root.parent / name
     payload = json.loads(path.read_text(encoding='utf-8'))
     assert payload.get('$id', '').endswith(name.removeprefix('asterion/')), name
+prime_root = root / 'control/providers/prime/resources'
+prime_lock = json.loads(
+    (prime_root / 'prime-artifact-lock.json').read_text(encoding='utf-8')
+)
+assert prime_lock['format'] == 'asterion.prime-artifact-lock/v1'
+assert len(prime_lock['source_commit']) == 40
+assert (prime_root / 'control-plane.json').is_file()
+assert (prime_root / 'skills/asterion-control/SKILL.md').is_file()
+assert (prime_root / 'skills/asterion-control/pyproject.toml').is_file()
 expected = {
     'applications/controlled_code/assemblies/controlled-code-validation.json':
         'asterion.application-assembly/v1',
@@ -513,6 +522,9 @@ def _run_quick(copy_root: Path, runner: Runner) -> int:
 def _run_full(copy_root: Path, venv_root: Path, runner: Runner) -> int:
     initial_commands = (
         ("uv", "sync", "--frozen"),
+        ("npm", "ci", "--prefix", "packages/typescript/asterion-runtime"),
+        ("npm", "run", "build", "--prefix", "packages/typescript/asterion-runtime"),
+        ("npm", "ci", "--prefix", "packages/typescript/prime-gateway"),
         (
             "uv",
             "run",
@@ -577,9 +589,17 @@ def _run_full(copy_root: Path, venv_root: Path, runner: Runner) -> int:
 
     final_commands = (
         ("uv", "run", "python", "tools/check_docs.py"),
-        ("npm", "ci", "--prefix", "packages/typescript/asterion-runtime"),
         ("npm", "test", "--prefix", "packages/typescript/asterion-runtime"),
         ("npm", "test", "--prefix", "packages/typescript/dci-context-extension"),
+        ("npm", "test", "--prefix", "packages/typescript/prime-gateway"),
+        (
+            "uv",
+            "run",
+            "python",
+            "tools/verify_prime_loop.py",
+            "--level",
+            "provider-free",
+        ),
         (
             "cargo",
             "test",

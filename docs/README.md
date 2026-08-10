@@ -26,6 +26,9 @@ read architecture documents when extending the framework.
   recovery and safe evidence boundaries.
 - [Prime parity ledger](status/PRIME-PARITY-LEDGER.md) — pinned baseline,
   evidence levels, stable domains and explicit Prime/native gaps.
+- [Prime Gateway operator guide](guides/prime-control-operator-guide.md) —
+  managed-loop setup, provider-free/preflight/bounded gates, authority, costs,
+  risks, and the native-kernel boundary.
 - [Framework and capability integration](architecture/asterion-framework-capability-integration.md)
   — runtime, adapter, package, capability, assembly, application, provider,
   host service, and CLI integration.

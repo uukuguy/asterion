@@ -27,6 +27,20 @@ PACKAGED_SCHEMAS = {
         "asterion/schemas/control-plane/v1/control-plane-manifest.schema.json"
     ),
 }
+PRIME_DISTRIBUTION_MEMBERS = {
+    "src/asterion/control/providers/prime/resources/control-plane.json": (
+        "asterion/control/providers/prime/resources/control-plane.json"
+    ),
+    "packages/typescript/prime-gateway/resources/prime-artifact-lock.json": (
+        "asterion/control/providers/prime/resources/prime-artifact-lock.json"
+    ),
+    "src/asterion/control/providers/prime/resources/skills/asterion-control/SKILL.md": (
+        "asterion/control/providers/prime/resources/skills/asterion-control/SKILL.md"
+    ),
+    "src/asterion/control/providers/prime/resources/skills/asterion-control/pyproject.toml": (
+        "asterion/control/providers/prime/resources/skills/asterion-control/pyproject.toml"
+    ),
+}
 
 
 class DistributionTests(unittest.TestCase):
@@ -72,6 +86,13 @@ class DistributionTests(unittest.TestCase):
                         )
                 for source, packaged in PACKAGED_SCHEMAS.items():
                     with self.subTest(schema=source):
+                        self.assertIn(packaged, members)
+                        self.assertEqual(
+                            wheel.read(packaged),
+                            (PROJECT / source).read_bytes(),
+                        )
+                for source, packaged in PRIME_DISTRIBUTION_MEMBERS.items():
+                    with self.subTest(prime_resource=source):
                         self.assertIn(packaged, members)
                         self.assertEqual(
                             wheel.read(packaged),

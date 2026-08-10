@@ -13,7 +13,7 @@ Install the locked development environment from the repository root:
 uv sync --frozen
 ```
 
-Python 3.10 or newer and `uv` are required. Node.js 22.19.0 or newer plus npm
+Python 3.10 or newer and `uv` are required. Node.js 22.19.0 (22.x LTS) plus npm
 are required for `make setup-pi`; Rust is needed only for its corresponding
 cross-language checks.
 
@@ -82,6 +82,29 @@ Keep Agent and Judge credentials in `.env`, exported environment variables, or
 the selected Pi agent directory; never commit them. External `pi/`, `data/`,
 `corpus/`, generated outputs, and private evidence remain outside the
 distribution.
+
+## Prime Gateway managed control
+
+Prime Gateway is an optional peer control provider for long-running,
+strongly-controlled sessions. Prime owns the controller session; Asterion owns
+the exact application portfolio, admission, execution, budgets, cancellation,
+journal, and public evidence. Prime source remains external; the wheel contains
+only Asterion's control manifest, exact artifact lock, and authenticated control
+skill.
+
+```bash
+make prime-check ASTERION_PRIME_SOURCE_ROOT=3th-party/prime-agent
+make prime-verify-provider-free
+```
+
+The first command checks the pinned source and performs zero provider work. The
+second launches the real gateway against a deterministic fake daemon and proves
+ten process/fault scenarios with zero model-provider operations. External daemon
+preflight and explicitly authorized bounded readiness are separate; promotion
+never starts bounded provider work. See the
+[Prime Gateway operator guide](docs/guides/prime-control-operator-guide.md) and
+[Prime parity ledger](docs/status/PRIME-PARITY-LEDGER.md) for exact evidence
+labels and the deferred native-kernel scope.
 
 ## Cost boundaries
 

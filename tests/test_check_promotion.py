@@ -230,6 +230,9 @@ class PromotionCheckTests(unittest.TestCase):
             "npm ci --prefix packages/typescript/asterion-runtime",
             "npm test --prefix packages/typescript/asterion-runtime",
             "npm test --prefix packages/typescript/dci-context-extension",
+            "npm ci --prefix packages/typescript/prime-gateway",
+            "npm test --prefix packages/typescript/prime-gateway",
+            "uv run python tools/verify_prime_loop.py --level provider-free",
             "cargo test --manifest-path packages/rust/controlled-executor/Cargo.toml",
             "cargo fmt --manifest-path packages/rust/controlled-executor/Cargo.toml -- --check",
             "cargo clippy --manifest-path packages/rust/controlled-executor/Cargo.toml -- -D warnings",
@@ -327,6 +330,8 @@ class PromotionCheckTests(unittest.TestCase):
         self.assertNotEqual(roots[0], source)
         self.assertEqual(roots[0], roots[0].resolve())
         command_text = "\n".join(rendered).lower()
+        self.assertNotIn("prime-verify-bounded", command_text)
+        self.assertNotIn("--level bounded", command_text)
         for forbidden in (
             "api_key",
             "provider-backed",

@@ -2,6 +2,9 @@ UV_BIN ?= uv
 ASTERION_PROVIDER ?= dci-agent-lite
 ASTERION_ARGS ?=
 DCI_ARGS ?=
+ASTERION_PRIME_SOURCE_ROOT ?= 3th-party/prime-agent
+ASTERION_PRIME_AUTHORITY ?=
+ASTERION_PRIME_MAX_COST_MICROS ?=
 
 .DEFAULT_GOAL := help
 
@@ -17,6 +20,7 @@ DCI_ARGS ?=
 .PHONY: dci-run dci-benchmark
 .PHONY: dci-basic-example dci-runtime-context-example
 .PHONY: test-typescript test-rust check-rust
+.PHONY: prime-check prime-setup prime-verify-provider-free prime-verify-bounded
 
 help:
 	@echo "provider-free setup (network/disk; Agent operations 0; Judge operations 0): setup setup-pi setup-resources-basic setup-resources-benchmark"
@@ -27,6 +31,7 @@ help:
 	@echo "DCI adapter: dci-list dci-describe dci-preflight dci-basic dci-complete dci-run dci-benchmark"
 	@echo "DCI bounded examples: dci-basic-example dci-runtime-context-example"
 	@echo "Cross-language provider-free: test-typescript test-rust check-rust"
+	@echo "Prime Gateway: prime-check prime-setup prime-verify-provider-free prime-verify-bounded"
 	@echo "Cost boundary: full execution requires separate authorization"
 	@echo "Arguments: ASTERION_ARGS='...' or DCI_ARGS='...'"
 
@@ -130,6 +135,18 @@ test-rust:
 check-rust: test-rust
 	cargo fmt --manifest-path packages/rust/controlled-executor/Cargo.toml -- --check
 	cargo clippy --manifest-path packages/rust/controlled-executor/Cargo.toml -- -D warnings
+
+prime-check:
+	$(UV_BIN) run python tools/setup_prime_agent.py --check --source-root "$(ASTERION_PRIME_SOURCE_ROOT)"
+
+prime-setup:
+	$(UV_BIN) run python tools/setup_prime_agent.py --source-root "$(ASTERION_PRIME_SOURCE_ROOT)"
+
+prime-verify-provider-free:
+	$(UV_BIN) run python tools/verify_prime_loop.py --level provider-free
+
+prime-verify-bounded:
+	$(UV_BIN) run python tools/verify_prime_loop.py --level bounded --source-root "$(ASTERION_PRIME_SOURCE_ROOT)" --authority "$(ASTERION_PRIME_AUTHORITY)" --max-cost-micros "$(ASTERION_PRIME_MAX_COST_MICROS)"
 
 dci-basic-example:
 	bash examples/asterion_dci_basic_example.sh
