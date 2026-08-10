@@ -21,6 +21,10 @@ from asterion.control.host import (
     EventCursor,
 )
 from asterion.control.protocol import ControlProtocolError, OPAQUE_ID
+from asterion.control.private_store import (
+    PrivateAttachmentResolver,
+    PrivateContentResolver,
+)
 from asterion.control.session_context import (
     SessionContextCommand,
     SessionContextReceipt,
@@ -38,30 +42,6 @@ class PrimeControlError(RuntimeError):
 
     def __init__(self, message: str = "Prime control operation failed") -> None:
         super().__init__(message)
-
-
-class PrivateContentResolver(Protocol):
-    """Host-owned resolver for private prompt/input references."""
-
-    def resolve_text(self, reference: str, *, max_bytes: int) -> str:
-        """Resolve a private text reference without exposing it publicly."""
-        ...
-
-
-class PrivateAttachmentResolver(Protocol):
-    """Host-owned resolver for verified private attachment bytes."""
-
-    def resolve_bytes(
-        self,
-        reference: str,
-        *,
-        expected_media_type: str,
-        expected_sha256: str,
-        expected_size: int,
-        max_bytes: int,
-    ) -> bytes:
-        """Resolve exact bytes after host authority admission."""
-        ...
 
 
 class PrimeSidecarTransport(Protocol):
@@ -88,12 +68,14 @@ class PrimeControlPlaneClient:
         *,
         process: PrimeSidecarTransport,
         private_content: PrivateContentResolver,
+        private_attachments: PrivateAttachmentResolver | None = None,
         manifest: ControlPlaneManifest | None = None,
     ) -> None:
         if not hasattr(private_content, "resolve_text"):
             raise PrimeControlError()
         self._process = process
         self._private_content = private_content
+        self._private_attachments = private_attachments
         self._manifest = manifest or _load_manifest()
         self._closed = False
         self._result_projections: dict[
@@ -375,7 +357,7 @@ class PrimeControlPlaneClient:
     ) -> Mapping[str, object]:
         payload = command.payload
         if command.operation == "session.attachment.bind":
-            resolver = getattr(self._private_content, "resolve_bytes", None)
+            resolver = getattr(self._private_attachments, "resolve_bytes", None)
             if not callable(resolver):
                 raise PrimeControlError()
             reference = payload["body_ref"]

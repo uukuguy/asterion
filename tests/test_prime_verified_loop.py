@@ -125,6 +125,24 @@ class _PrivateResolver:
             return "SENTINEL_PROMPT SENTINEL_PATH SENTINEL_OUTPUT"
         raise KeyError("private content is unavailable")
 
+    def resolve_bytes(
+        self,
+        reference: str,
+        *,
+        expected_media_type: str,
+        expected_sha256: str,
+        expected_size: int,
+        max_bytes: int,
+    ) -> bytes:
+        del (
+            reference,
+            expected_media_type,
+            expected_sha256,
+            expected_size,
+            max_bytes,
+        )
+        raise KeyError("private attachment is unavailable")
+
 
 class _ScenarioExecutor:
     def __init__(
@@ -596,6 +614,7 @@ async def _run_python_prime_scenario(
             client = PrimeControlPlaneClient(
                 process=process,
                 private_content=private_resolver,
+                private_attachments=private_resolver,
                 manifest=prime_control_plane_binding().manifest,
             )
             recorder = MemoryPathlightRecorder(_opaque_id(600 + index))
@@ -671,7 +690,10 @@ async def _run_python_prime_scenario(
                 clock_ms=lambda: 1_000,
                 control_options=common_options,
                 derive_control_options=derive_child_options,
-                host_services={"private-content": client},
+                host_services={
+                    "private-attachments": private_resolver,
+                    "private-content": client,
+                },
             )
             runtime_factories = RuntimeFactoryRegistry(
                 (

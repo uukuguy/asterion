@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -235,8 +236,15 @@ class FakePrimeSession {
     };
   }
 
-  async submitInput(inputId, delivery, body) {
-    this.calls.push(["input", inputId, delivery, body]);
+  async submitInput(inputId, delivery, body, attachments = []) {
+    this.calls.push(attachments.length === 0
+      ? ["input", inputId, delivery, body]
+      : ["input", inputId, delivery, body, attachments]);
+    return { acknowledge: () => true };
+  }
+
+  acknowledgeInput() {
+    return true;
   }
 
   async pause() {}
@@ -690,6 +698,28 @@ test("real sidecar gateway resolves public refs and persists body-free commands"
     assert.equal(createResponse.type, "command.accepted");
     assert.deepEqual(fixture.createdGoals, ["SENTINEL_RESOLVER_GOAL"]);
 
+    const image = Buffer.from("SENTINEL_RESOLVER_PRIVATE_IMAGE");
+    const attachment = contextCommand("session.attachment.bind", {
+      input_id: "input-1",
+      attachment_id: "attachment-1",
+      body_ref: "attachment-body-ref-1",
+      media_type: "image/png",
+      sha256: createHash("sha256").update(image).digest("hex"),
+      size: image.byteLength,
+    });
+    const attachmentResponse = await fixture.sidecar.handleEnvelope({
+      protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+      id: "request-attachment",
+      type: "session-context.execute",
+      command: attachment,
+      private: { body_base64: image.toString("base64") },
+    });
+    assert.equal(attachmentResponse.type, "session-context.receipt");
+    assert.equal(
+      JSON.stringify(attachmentResponse).includes("SENTINEL_RESOLVER_PRIVATE_IMAGE"),
+      false,
+    );
+
     const input = command("input.submit", {
       input_id: "input-1",
       delivery: "direct",
@@ -704,13 +734,39 @@ test("real sidecar gateway resolves public refs and persists body-free commands"
     });
 
     assert.equal(inputResponse.type, "command.accepted");
-    assert.deepEqual(fixture.session.calls, [
-      ["input", "input-1", "direct", "SENTINEL_RESOLVER_INPUT"],
-    ]);
+    assert.deepEqual(fixture.session.calls.map((call) =>
+      call.length === 4
+        ? call
+        : [
+            ...call.slice(0, 4),
+            call[4].map(({ body, ...metadata }) => ({
+              ...metadata,
+              body: Buffer.from(body),
+            })),
+          ]
+    ), [[
+      "input",
+      "input-1",
+      "direct",
+      "SENTINEL_RESOLVER_INPUT",
+      [{
+        attachmentId: "attachment-1",
+        mediaType: "image/png",
+        sha256: createHash("sha256").update(image).digest("hex"),
+        size: image.byteLength,
+        body: image,
+      }],
+    ]]);
 
     const durableCommands = await durableCommandRecords(fixture.root);
     assert.deepEqual(durableCommands, [create, input]);
     assert.equal(JSON.stringify(durableCommands).includes("SENTINEL_RESOLVER"), false);
+    const publicRecords = await Promise.all(
+      (await readdir(join(fixture.root, "public", "records")))
+        .filter((name) => name.endsWith(".json"))
+        .map((name) => readFile(join(fixture.root, "public", "records", name), "utf8")),
+    );
+    assert.equal(publicRecords.join("").includes("SENTINEL_RESOLVER"), false);
     assert.equal(fixture.store.snapshot().commandCount, 2);
 
     const conflictingReplay = await fixture.sidecar.handleEnvelope({

@@ -84,6 +84,16 @@ export interface PrimeSessionRestoreOptions {
 }
 
 export type PrimeInputDelivery = "direct" | "steer" | "follow_up";
+export interface PrimeInputAttachment {
+  readonly attachmentId: string;
+  readonly mediaType: string;
+  readonly sha256: string;
+  readonly size: number;
+  readonly body: Uint8Array;
+}
+export interface PrimeInputSubmission {
+  acknowledge(): boolean;
+}
 export type PrimePromptCancellation = "cancelled" | "owned";
 export type PrimeContextStatus =
   | "cancelled"
@@ -165,6 +175,13 @@ export interface PrimeForkCloneResult {
 }
 
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
+const SHA256 = /^[0-9a-f]{64}$/u;
+const PRIME_IMAGE_MEDIA_TYPES = new Set([
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
 const MAX_PRIVATE_TEXT_BYTES = 1024 * 1024;
 
 export class PrimeSessionError extends Error {
@@ -789,10 +806,46 @@ export class PrimeSession {
     inputId: string,
     delivery: PrimeInputDelivery,
     body: string,
-  ): Promise<void> {
+    attachmentValues: readonly PrimeInputAttachment[] = Object.freeze([]),
+  ): Promise<PrimeInputSubmission> {
     if (!OPAQUE_ID.test(inputId) || !validText(body)) {
       throw new PrimeSessionError();
     }
+    if (!Array.isArray(attachmentValues)) {
+      throw new PrimeSessionError();
+    }
+    const attachments = attachmentValues.map((value, index) => {
+      if (
+        !isRecord(value) ||
+        !hasExactKeys(value, [
+          "attachmentId",
+          "body",
+          "mediaType",
+          "sha256",
+          "size",
+        ]) ||
+        typeof value.attachmentId !== "string" ||
+        !OPAQUE_ID.test(value.attachmentId) ||
+        (index > 0 &&
+          attachmentValues[index - 1].attachmentId >= value.attachmentId) ||
+        typeof value.mediaType !== "string" ||
+        !PRIME_IMAGE_MEDIA_TYPES.has(value.mediaType) ||
+        typeof value.sha256 !== "string" ||
+        !SHA256.test(value.sha256) ||
+        !Number.isSafeInteger(value.size) ||
+        Number(value.size) <= 0 ||
+        !(value.body instanceof Uint8Array) ||
+        value.body.byteLength !== value.size ||
+        createHash("sha256").update(value.body).digest("hex") !== value.sha256
+      ) {
+        throw new PrimeSessionError();
+      }
+      return Object.freeze({
+        type: "image" as const,
+        data: Buffer.from(value.body).toString("base64"),
+        mimeType: value.mediaType,
+      });
+    });
     const streamingBehavior = delivery === "direct"
       ? undefined
       : delivery === "steer"
@@ -805,18 +858,47 @@ export class PrimeSession {
     }
     this.pendingAdmissions.add(inputId);
     try {
-      await this.request({
+      const stableCommandId = `${this.sessionId}-input-${inputId}`;
+      const deferred = await this.transport.requestDeferred({
         type: "prompt",
         activeSessionId: this.activeSessionId,
         message: body,
+        ...(attachments.length === 0
+          ? {}
+          : { images: Object.freeze(attachments) }),
         queueIfBusy: delivery !== "direct",
         expandPromptTemplates: false,
         source: "rpc",
         admissionId: inputId,
         ...(streamingBehavior === undefined ? {} : { streamingBehavior }),
-      }, `input-${inputId}`);
+      }, stableCommandId);
+      if (!deferred.response.success || deferred.response.command !== "prompt") {
+        throw new PrimeSessionError();
+      }
+      return Object.freeze({
+        acknowledge: () => {
+          try {
+            return deferred.acknowledge() === true;
+          } catch {
+            return false;
+          }
+        },
+      });
     } finally {
       this.pendingAdmissions.delete(inputId);
+    }
+  }
+
+  acknowledgeInput(inputId: string): boolean {
+    if (!OPAQUE_ID.test(inputId)) {
+      throw new PrimeSessionError();
+    }
+    try {
+      return this.transport.acknowledgeResult(
+        `${this.sessionId}-input-${inputId}`,
+      );
+    } catch {
+      return false;
     }
   }
 

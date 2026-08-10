@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -76,6 +76,7 @@ class FakePrimeSession {
     this.supervisorGeneration = identity?.supervisorGeneration ??
       "supervisor-generation-1";
     this.calls = [];
+    this.inputAcknowledgements = [];
     this.recoveries = [];
     this.checkpointAcknowledgements = [];
     this.checkpointAcknowledger = () => true;
@@ -114,6 +115,7 @@ class FakePrimeSession {
       leafId: "entry-2",
     };
     this.afterContextResult = undefined;
+    this.afterInputResult = undefined;
     this.contextErrorBeforeResult = undefined;
     this.mutateSourceOnResume = false;
   }
@@ -125,8 +127,22 @@ class FakePrimeSession {
     };
   }
 
-  async submitInput(inputId, delivery, body) {
-    this.calls.push(["input", inputId, delivery, body]);
+  async submitInput(inputId, delivery, body, attachments = []) {
+    this.calls.push(attachments.length === 0
+      ? ["input", inputId, delivery, body]
+      : ["input", inputId, delivery, body, attachments]);
+    this.afterInputResult?.();
+    return {
+      acknowledge: () => {
+        this.inputAcknowledgements.push(inputId);
+        return true;
+      },
+    };
+  }
+
+  acknowledgeInput(inputId) {
+    this.inputAcknowledgements.push(inputId);
+    return true;
   }
 
   async pause(commandId) {
@@ -1778,6 +1794,500 @@ test("gateway handles input pause resume attach checkpoint and detach", async ()
     assert.deepEqual(events.map(({ sequence }) => sequence), [1, 2, 3, 4, 5, 6, 7]);
   } finally {
     await state.cleanup();
+  }
+});
+
+test("gateway delivers only committed attachments causal to one exact input", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const bodies = [Buffer.from("SENTINEL_IMAGE_ONE"), Buffer.from("SENTINEL_IMAGE_TWO")];
+    const metadata = bodies.map((body, index) => ({
+      sessionId: "session-1",
+      inputId: "input-rich",
+      attachmentId: `attachment-${index + 1}`,
+      mediaType: index === 0 ? "image/png" : "image/jpeg",
+      sha256: createHash("sha256").update(body).digest("hex"),
+      size: body.byteLength,
+    }));
+    for (let index = 0; index < metadata.length; index += 1) {
+      const item = metadata[index];
+      const bind = contextCommand("session.attachment.bind", {
+        input_id: item.inputId,
+        attachment_id: item.attachmentId,
+        body_ref: `body-${index + 1}`,
+        media_type: item.mediaType,
+        sha256: item.sha256,
+        size: item.size,
+      }, `context-attachment-${index + 1}`);
+      const receipt = await state.gateway.executeSessionContext(
+        bind,
+        () => state.privateValues.bindAttachment(item, bodies[index]),
+      );
+      assert.equal(receipt.status, "succeeded");
+      assert.equal(JSON.stringify(receipt).includes("SENTINEL_IMAGE"), false);
+    }
+    const contentRef = await state.privateValues.putInput("private rich input");
+    await state.gateway.accept(command("input.submit", {
+      input_id: "input-rich",
+      delivery: "direct",
+      content_ref: contentRef,
+    }, "command-rich-input"));
+
+    const delivered = state.session.calls.at(-1);
+    assert.deepEqual(delivered.slice(0, 4), [
+      "input", "input-rich", "direct", "private rich input",
+    ]);
+    assert.deepEqual(delivered[4].map(({ body, ...item }) => ({
+      ...item,
+      body: Buffer.from(body),
+    })), metadata.map((item, index) => ({
+      attachmentId: item.attachmentId,
+      mediaType: item.mediaType,
+      sha256: item.sha256,
+      size: item.size,
+      body: bodies[index],
+    })));
+
+    await assert.rejects(state.gateway.accept(command("input.submit", {
+      input_id: "input-rich",
+      delivery: "direct",
+      content_ref: contentRef,
+    }, "command-rich-input-duplicate")));
+    await assert.rejects(state.gateway.executeSessionContext(
+      contextCommand("session.attachment.bind", {
+        input_id: "input-rich",
+        attachment_id: "attachment-3",
+        body_ref: "body-3",
+        media_type: "image/png",
+        sha256: "a".repeat(64),
+        size: 1,
+      }, "context-attachment-late"),
+      async () => undefined,
+    ));
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("gateway replays all delivery modes after restart without resending attachments", async () => {
+  const state = await fixture();
+  let reopened;
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const image = Buffer.from("SENTINEL_RESTART_PRIVATE_IMAGE");
+    const metadata = {
+      sessionId: "session-1",
+      inputId: "input-direct",
+      attachmentId: "attachment-1",
+      mediaType: "image/png",
+      sha256: createHash("sha256").update(image).digest("hex"),
+      size: image.byteLength,
+    };
+    await state.gateway.executeSessionContext(
+      contextCommand("session.attachment.bind", {
+        input_id: metadata.inputId,
+        attachment_id: metadata.attachmentId,
+        body_ref: "body-restart",
+        media_type: metadata.mediaType,
+        sha256: metadata.sha256,
+        size: metadata.size,
+      }, "context-attachment-restart"),
+      () => state.privateValues.bindAttachment(metadata, image),
+    );
+    const inputs = [];
+    for (const [inputId, delivery] of [
+      ["input-direct", "direct"],
+      ["input-steer", "steer"],
+      ["input-follow-up", "follow_up"],
+    ]) {
+      const contentRef = await state.privateValues.putInput(`private-${delivery}`);
+      const input = command("input.submit", {
+        input_id: inputId,
+        delivery,
+        content_ref: contentRef,
+      }, `command-${inputId}`);
+      inputs.push(input);
+      await state.gateway.accept(input);
+    }
+    assert.equal(state.store.inputDeliveries().length, 3);
+    const publicRecords = await Promise.all(
+      (await readdir(join(state.root, "public", "records")))
+        .filter((name) => name.endsWith(".json"))
+        .map((name) => readFile(join(state.root, "public", "records", name), "utf8")),
+    );
+    assert.equal(publicRecords.join("").includes("SENTINEL_RESTART_PRIVATE_IMAGE"), false);
+    await state.gateway.close();
+
+    const reopenedStore = await GatewayDurableStore.open(state.root, "session-1");
+    const restoredSession = new FakePrimeSession(state.session.sessionPath);
+    restoredSession.supervisorGeneration = "supervisor-generation-2";
+    reopened = await PrimeGateway.open({
+      sessionId: "session-1",
+      generation: 1,
+      authorityId: "authority-1",
+      store: reopenedStore,
+      privateValues: state.privateValues,
+      async createSession() {
+        throw new Error("must not create a second Prime root");
+      },
+      async restoreSession(_identity, onRecovered) {
+        await onRecovered({
+          transport: recoveryTransport(
+            "supervisor-generation-2",
+            "delivery-replay-transport",
+          ),
+          primeCursor: { generation: "prime-events-2", sequence: 0 },
+          transcriptSessionId: "transcript-1",
+          supervisorGeneration: "supervisor-generation-2",
+          sessionStatus: "running",
+        });
+        return restoredSession;
+      },
+      async createCheckpoint() {
+        throw new Error("checkpoint not expected");
+      },
+    });
+    for (const input of inputs) {
+      await reopened.accept(structuredClone(input));
+    }
+
+    assert.deepEqual(restoredSession.calls, []);
+    assert.deepEqual(restoredSession.inputAcknowledgements.sort(), [
+      "input-direct",
+      "input-follow-up",
+      "input-steer",
+    ]);
+    assert.equal(reopenedStore.inputDeliveries().length, 3);
+  } finally {
+    await reopened?.close().catch(() => undefined);
+    await state.cleanup({ allowCloseFailure: true });
+  }
+});
+
+test("gateway load-only compatibility never resends a pre-delivery-ledger input", async () => {
+  const state = await fixture();
+  let reopened;
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const legacyRef = await state.privateValues.putInput("private legacy input");
+    const legacyInput = command("input.submit", {
+      input_id: "input-legacy",
+      delivery: "direct",
+      content_ref: legacyRef,
+    }, "command-input-legacy");
+    await state.store.acceptCommand(legacyInput);
+    assert.equal(state.store.inputDeliveryProtocolPosition(), undefined);
+    await state.gateway.close();
+
+    const reopenedStore = await GatewayDurableStore.open(state.root, "session-1");
+    const restoredSession = new FakePrimeSession(state.session.sessionPath);
+    restoredSession.supervisorGeneration = "supervisor-generation-2";
+    reopened = await PrimeGateway.open({
+      sessionId: "session-1",
+      generation: 1,
+      authorityId: "authority-1",
+      store: reopenedStore,
+      privateValues: state.privateValues,
+      async createSession() {
+        throw new Error("must not create a second Prime root");
+      },
+      async restoreSession(_identity, onRecovered) {
+        await onRecovered({
+          transport: recoveryTransport(
+            "supervisor-generation-2",
+            "legacy-delivery-transport",
+          ),
+          primeCursor: { generation: "prime-events-2", sequence: 0 },
+          transcriptSessionId: "transcript-1",
+          supervisorGeneration: "supervisor-generation-2",
+          sessionStatus: "running",
+        });
+        return restoredSession;
+      },
+      async createCheckpoint() {
+        throw new Error("checkpoint not expected");
+      },
+    });
+    await reopened.accept(structuredClone(legacyInput));
+    assert.deepEqual(restoredSession.calls, []);
+
+    const currentRef = await state.privateValues.putInput("private current input");
+    await reopened.accept(command("input.submit", {
+      input_id: "input-current",
+      delivery: "direct",
+      content_ref: currentRef,
+    }, "command-input-current"));
+    assert.equal(reopenedStore.inputDeliveryProtocolPosition() !== undefined, true);
+    assert.deepEqual(restoredSession.calls, [[
+      "input",
+      "input-current",
+      "direct",
+      "private current input",
+    ]]);
+  } finally {
+    await reopened?.close().catch(() => undefined);
+    await state.cleanup({ allowCloseFailure: true });
+  }
+});
+
+test("gateway rejects missing extra reordered conflicting and unsupported attachments", async () => {
+  for (const fault of [
+    "missing",
+    "extra",
+    "reordered",
+    "conflicting",
+    "unsupported",
+  ]) {
+    const state = await fixture();
+    try {
+      const goalRef = await state.privateValues.putInput("goal");
+      await state.gateway.accept(command("session.create", {
+        system_id: "research.system",
+        system_version: "1.0.0",
+        goal_id: "goal-1",
+        goal_ref: goalRef,
+      }, "command-create"));
+      let bindingSequence = 0;
+      const bind = async (attachmentId, mediaType = "image/png") => {
+        bindingSequence += 1;
+        const body = Buffer.from(`SENTINEL_${fault}_${attachmentId}`);
+        const metadata = {
+          sessionId: "session-1",
+          inputId: `input-${fault}`,
+          attachmentId,
+          mediaType,
+          sha256: createHash("sha256").update(body).digest("hex"),
+          size: body.byteLength,
+        };
+        let privateRef;
+        const receipt = await state.gateway.executeSessionContext(
+          contextCommand("session.attachment.bind", {
+            input_id: metadata.inputId,
+            attachment_id: metadata.attachmentId,
+            body_ref: `body-${fault}-${attachmentId}`,
+            media_type: metadata.mediaType,
+            sha256: metadata.sha256,
+            size: metadata.size,
+          }, `context-${fault}-${attachmentId}-${bindingSequence}`),
+          async () => {
+            privateRef = await state.privateValues.bindAttachment(metadata, body);
+          },
+        );
+        return { body, metadata, privateRef, receipt };
+      };
+
+      if (fault === "extra") {
+        const body = Buffer.from("SENTINEL_EXTRA_UNCOMMITTED");
+        await state.privateValues.bindAttachment({
+          sessionId: "session-1",
+          inputId: "input-extra",
+          attachmentId: "attachment-1",
+          mediaType: "image/png",
+          sha256: createHash("sha256").update(body).digest("hex"),
+          size: body.byteLength,
+        }, body);
+      } else if (fault === "reordered") {
+        await bind("attachment-2");
+        await bind("attachment-1");
+      } else if (fault === "unsupported") {
+        await assert.rejects(bind("attachment-1", "application/pdf"));
+      } else {
+        const first = await bind("attachment-1");
+        if (fault === "missing") {
+          assert.ok(first.privateRef);
+          await unlink(join(
+            state.root,
+            "private",
+            "values",
+            `${first.privateRef.slice("private:".length)}.value`,
+          ));
+        } else {
+          await assert.rejects(bind("attachment-1"));
+        }
+      }
+
+      if (fault !== "conflicting" && fault !== "unsupported") {
+        const contentRef = await state.privateValues.putInput(`private-${fault}`);
+        await assert.rejects(state.gateway.accept(command("input.submit", {
+          input_id: `input-${fault}`,
+          delivery: "direct",
+          content_ref: contentRef,
+        }, `command-input-${fault}`)), (error) => {
+          assert.equal(String(error).includes("SENTINEL"), false);
+          return true;
+        });
+      }
+      assert.deepEqual(state.session.calls, []);
+    } finally {
+      await state.cleanup({ allowCloseFailure: true });
+    }
+  }
+});
+
+test("gateway replays one stable input after the Prime result beats delivery commit", async () => {
+  const state = await fixture();
+  let reopened;
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const contentRef = await state.privateValues.putInput(
+      "SENTINEL_PRIVATE_DELIVERY_REPLAY",
+    );
+    const input = command("input.submit", {
+      input_id: "input-replay",
+      delivery: "follow_up",
+      content_ref: contentRef,
+    }, "command-input-replay");
+    state.session.afterInputResult = () => {
+      state.session.afterInputResult = undefined;
+      state.failNextDurableWrite();
+    };
+
+    await assert.rejects(state.gateway.accept(input));
+    assert.equal(state.store.inputDeliveries().length, 0);
+    assert.deepEqual(state.session.inputAcknowledgements, []);
+    await state.gateway.close().catch(() => undefined);
+
+    const reopenedStore = await GatewayDurableStore.open(state.root, "session-1");
+    const restoredSession = new FakePrimeSession(state.session.sessionPath);
+    restoredSession.supervisorGeneration = "supervisor-generation-2";
+    reopened = await PrimeGateway.open({
+      sessionId: "session-1",
+      generation: 1,
+      authorityId: "authority-1",
+      store: reopenedStore,
+      privateValues: state.privateValues,
+      async createSession() {
+        throw new Error("must not create a second Prime root");
+      },
+      async restoreSession(_identity, onRecovered) {
+        await onRecovered({
+          transport: recoveryTransport(
+            "supervisor-generation-2",
+            "input-result-replay-transport",
+          ),
+          primeCursor: { generation: "prime-events-2", sequence: 0 },
+          transcriptSessionId: "transcript-1",
+          supervisorGeneration: "supervisor-generation-2",
+          sessionStatus: "running",
+        });
+        return restoredSession;
+      },
+      async createCheckpoint() {
+        throw new Error("checkpoint not expected");
+      },
+    });
+    await reopened.accept(structuredClone(input));
+
+    assert.deepEqual(restoredSession.calls, [[
+      "input",
+      "input-replay",
+      "follow_up",
+      "SENTINEL_PRIVATE_DELIVERY_REPLAY",
+    ]]);
+    assert.deepEqual(restoredSession.inputAcknowledgements, ["input-replay"]);
+    assert.equal(reopenedStore.inputDeliveries().length, 1);
+    const records = await Promise.all(
+      (await readdir(join(state.root, "public", "records")))
+        .filter((name) => name.endsWith(".json"))
+        .map((name) => readFile(join(state.root, "public", "records", name), "utf8")),
+    );
+    assert.equal(records.join("").includes("SENTINEL_PRIVATE_DELIVERY_REPLAY"), false);
+  } finally {
+    await reopened?.close().catch(() => undefined);
+    await state.cleanup({ allowCloseFailure: true });
+  }
+});
+
+test("gateway fences input while its attachment binding is still uncommitted", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const body = Buffer.from("SENTINEL_PENDING_ATTACHMENT");
+    const metadata = {
+      sessionId: "session-1",
+      inputId: "input-pending-attachment",
+      attachmentId: "attachment-1",
+      mediaType: "image/png",
+      sha256: createHash("sha256").update(body).digest("hex"),
+      size: body.byteLength,
+    };
+    let releaseBinding;
+    const bindingGate = new Promise((resolve) => {
+      releaseBinding = resolve;
+    });
+    let noteBindingStarted;
+    const bindingStarted = new Promise((resolve) => {
+      noteBindingStarted = resolve;
+    });
+    const binding = state.gateway.executeSessionContext(
+      contextCommand("session.attachment.bind", {
+        input_id: metadata.inputId,
+        attachment_id: metadata.attachmentId,
+        body_ref: "body-pending-attachment",
+        media_type: metadata.mediaType,
+        sha256: metadata.sha256,
+        size: metadata.size,
+      }, "context-pending-attachment"),
+      async () => {
+        noteBindingStarted();
+        await bindingGate;
+        await state.privateValues.bindAttachment(metadata, body);
+      },
+    );
+    await bindingStarted;
+    const contentRef = await state.privateValues.putInput("private pending input");
+    const input = command("input.submit", {
+      input_id: metadata.inputId,
+      delivery: "steer",
+      content_ref: contentRef,
+    }, "command-pending-input");
+
+    await assert.rejects(state.gateway.accept(input));
+    assert.equal(
+      state.store.commands().some(
+        ({ command: accepted }) => accepted.command_id === input.command_id,
+      ),
+      false,
+    );
+    releaseBinding();
+    await binding;
+    await state.gateway.accept(input);
+
+    assert.equal(state.store.inputDeliveries().length, 1);
+    assert.equal(state.session.calls.at(-1)[4][0].attachmentId, "attachment-1");
+  } finally {
+    await state.cleanup({ allowCloseFailure: true });
   }
 });
 

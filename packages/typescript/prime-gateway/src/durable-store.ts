@@ -35,6 +35,7 @@ const RECORD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 const RECORD_NAME_PATTERN = /^(?<position>[0-9]{12})\.json$/u;
 const ATOMIC_TEMP_PATTERN = /^\.asterion-[0-9a-f-]{36}\.tmp$/u;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
+const MEDIA_TYPE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$/u;
 const PRIVATE_REF_PATTERN = /^private:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const RECORD_KINDS = new Set([
   "command.accepted",
@@ -44,6 +45,8 @@ const RECORD_KINDS = new Set([
   "context.operation.committed",
   "context.operation.prepared",
   "event.accepted",
+  "input.delivery.committed",
+  "input.delivery.protocol",
   "prime.identity",
   "prime.identity.rebound",
   "prime.cursor",
@@ -82,6 +85,20 @@ export interface GatewayEventReceipt extends GatewayRecordReceipt {
 
 export interface GatewayCommandReceipt extends GatewayRecordReceipt {
   readonly command: ControlCommand;
+}
+
+export interface GatewayInputAttachment {
+  readonly attachmentId: string;
+  readonly mediaType: string;
+  readonly sha256: string;
+  readonly size: number;
+}
+
+export interface GatewayInputDelivery {
+  readonly commandId: string;
+  readonly inputId: string;
+  readonly attachments: readonly GatewayInputAttachment[];
+  readonly deliveryDigest: string;
 }
 
 export interface GatewayContextBinding {
@@ -441,6 +458,76 @@ function validateCursorPayload(value: unknown): PrimeDaemonCursor {
   return Object.freeze({ generation: value.generation, sequence: value.sequence });
 }
 
+function validateInputDeliveryPayload(
+  value: unknown,
+  command: ControlCommand | undefined,
+): GatewayInputDelivery {
+  if (
+    command?.type !== "input.submit" ||
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "attachments",
+      "commandId",
+      "deliveryDigest",
+      "inputId",
+    ]) ||
+    value.commandId !== command.command_id ||
+    value.inputId !== command.payload.input_id ||
+    typeof value.deliveryDigest !== "string" ||
+    !DIGEST_PATTERN.test(value.deliveryDigest) ||
+    !Array.isArray(value.attachments)
+  ) {
+    throw new GatewayStoreConflictError();
+  }
+  const attachmentValues = value.attachments as unknown[];
+  const attachments = attachmentValues.map((attachment, index) => {
+    if (
+      !isRecord(attachment) ||
+      !hasExactKeys(attachment, [
+        "attachmentId",
+        "mediaType",
+        "sha256",
+        "size",
+      ]) ||
+      !nonEmptyIdentifier(attachment.attachmentId) ||
+      typeof attachment.mediaType !== "string" ||
+      !MEDIA_TYPE_PATTERN.test(attachment.mediaType) ||
+      typeof attachment.sha256 !== "string" ||
+      !DIGEST_PATTERN.test(attachment.sha256) ||
+      !nonNegativeInteger(attachment.size)
+    ) {
+      throw new GatewayStoreConflictError();
+    }
+    const previous = attachmentValues[index - 1];
+    if (
+      isRecord(previous) &&
+      typeof previous.attachmentId === "string" &&
+      previous.attachmentId >= attachment.attachmentId
+    ) {
+      throw new GatewayStoreConflictError();
+    }
+    return Object.freeze({
+      attachmentId: attachment.attachmentId,
+      mediaType: attachment.mediaType,
+      sha256: attachment.sha256,
+      size: attachment.size,
+    });
+  });
+  const deliveryDigest = sha256Hex(canonicalJsonBytes({
+    command,
+    attachments,
+  }));
+  if (value.deliveryDigest !== deliveryDigest) {
+    throw new GatewayStoreConflictError();
+  }
+  return Object.freeze({
+    commandId: command.command_id,
+    inputId: command.payload.input_id,
+    attachments: Object.freeze(attachments),
+    deliveryDigest,
+  });
+}
+
 function validateContextBinding(value: unknown): GatewayContextBinding {
   if (
     !isRecord(value) ||
@@ -733,6 +820,8 @@ export class GatewayDurableStore {
   private readonly eventCounts = new Map<number, number>();
   private readonly knownEventGenerations = new Set<number>();
   private readonly contextCommands = new Map<string, SessionContextCommand>();
+  private readonly controlCommands = new Map<string, ControlCommand>();
+  private readonly inputDeliveryValues = new Map<string, GatewayInputDelivery>();
   private readonly contextIdempotency = new Map<string, string>();
   private readonly contextCommits = new Map<
     string,
@@ -766,6 +855,7 @@ export class GatewayDurableStore {
   private eventCount = 0;
   private contextCommandCount = 0;
   private contextCommitCount = 0;
+  private inputDeliveryProtocolRecordPosition?: number;
   private primeIdentity?: PrimeIdentityBinding;
   private primeCursor?: PrimeDaemonCursor;
 
@@ -871,6 +961,52 @@ export class GatewayDurableStore {
       "context.command.accepted",
       `context-command:${validated.command_id}`,
       { command: validated },
+    );
+  }
+
+  async ensureInputDeliveryProtocol(): Promise<GatewayRecordReceipt> {
+    return this.appendRecord(
+      "input.delivery.protocol",
+      "input-delivery-protocol:v1",
+      { version: 1 },
+    );
+  }
+
+  inputDeliveryProtocolPosition(): number | undefined {
+    return this.inputDeliveryProtocolRecordPosition;
+  }
+
+  async commitInputDelivery(
+    commandId: string,
+    attachments: readonly GatewayInputAttachment[],
+  ): Promise<GatewayRecordReceipt> {
+    const command = this.controlCommands.get(commandId);
+    const commandPosition = this.recordsById.get(
+      `command:${commandId}`,
+    )?.stored.position;
+    if (
+      this.inputDeliveryProtocolRecordPosition === undefined ||
+      commandPosition === undefined ||
+      commandPosition <= this.inputDeliveryProtocolRecordPosition
+    ) {
+      throw new GatewayStoreConflictError();
+    }
+    const deliveryDigest = sha256Hex(canonicalJsonBytes({ command, attachments }));
+    const delivery = validateInputDeliveryPayload(
+      {
+        commandId,
+        inputId: command?.type === "input.submit"
+          ? command.payload.input_id
+          : undefined,
+        attachments,
+        deliveryDigest,
+      },
+      command,
+    );
+    return this.appendRecord(
+      "input.delivery.committed",
+      `input-delivery:${delivery.commandId}`,
+      delivery as unknown as Record<string, unknown>,
     );
   }
 
@@ -1190,6 +1326,14 @@ export class GatewayDurableStore {
     );
   }
 
+  inputDeliveries(): readonly GatewayInputDelivery[] {
+    return Object.freeze([...this.inputDeliveryValues.values()]);
+  }
+
+  acceptedContextCommands(): readonly SessionContextCommand[] {
+    return Object.freeze([...this.contextCommands.values()]);
+  }
+
   eventsAfterCursor(cursor: GatewayEventCursor): readonly GatewayEventReceipt[] {
     if (
       !isRecord(cursor) ||
@@ -1385,6 +1529,31 @@ export class GatewayDurableStore {
         }
         return Object.freeze({ event });
       }
+      if (kind === "input.delivery.committed") {
+        if (this.inputDeliveryProtocolRecordPosition === undefined) {
+          throw new GatewayStoreCorruptionError();
+        }
+        const commandId = recordId.slice("input-delivery:".length);
+        const delivery = validateInputDeliveryPayload(
+          payload,
+          this.controlCommands.get(commandId),
+        );
+        if (recordId !== `input-delivery:${delivery.commandId}`) {
+          throw new GatewayStoreCorruptionError();
+        }
+        return delivery as unknown as Record<string, unknown>;
+      }
+      if (kind === "input.delivery.protocol") {
+        if (
+          recordId !== "input-delivery-protocol:v1" ||
+          !hasExactKeys(payload, ["version"]) ||
+          payload.version !== 1 ||
+          this.inputDeliveryProtocolRecordPosition !== undefined
+        ) {
+          throw new GatewayStoreCorruptionError();
+        }
+        return Object.freeze({ version: 1 });
+      }
       if (kind === "context.command.accepted") {
         if (!hasExactKeys(payload, ["command"])) {
           throw new GatewayStoreCorruptionError();
@@ -1542,6 +1711,11 @@ export class GatewayDurableStore {
     this.records.push(record);
     this.recordsById.set(record.stored.record_id, record);
     if (record.stored.kind === "command.accepted") {
+      const command = record.payload.command as ControlCommand;
+      if (this.controlCommands.has(command.command_id)) {
+        throw new GatewayStoreCorruptionError();
+      }
+      this.controlCommands.set(command.command_id, command);
       this.commandCount += 1;
     } else if (record.stored.kind === "context.binding.initialized") {
       const binding = record.payload as unknown as GatewayContextBinding;
@@ -1660,6 +1834,17 @@ export class GatewayDurableStore {
         throw new GatewayStoreCorruptionError();
       }
       this.eventCounts.set(event.generation, count);
+    } else if (record.stored.kind === "input.delivery.committed") {
+      const delivery = record.payload as unknown as GatewayInputDelivery;
+      if (this.inputDeliveryValues.has(delivery.commandId)) {
+        throw new GatewayStoreCorruptionError();
+      }
+      this.inputDeliveryValues.set(delivery.commandId, delivery);
+    } else if (record.stored.kind === "input.delivery.protocol") {
+      if (this.inputDeliveryProtocolRecordPosition !== undefined) {
+        throw new GatewayStoreCorruptionError();
+      }
+      this.inputDeliveryProtocolRecordPosition = record.stored.position;
     } else if (
       record.stored.kind === "prime.identity" ||
       record.stored.kind === "prime.identity.rebound"

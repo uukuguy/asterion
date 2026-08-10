@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from asterion.control.providers.prime.client import (
     MAX_PRIVATE_ATTACHMENT_BYTES,
-    PrivateAttachmentResolver,
     PrimeControlError,
     PrimeControlPlaneClient,
+)
+from asterion.control.private_store import (
+    PrivateAttachmentResolver,
     PrivateContentResolver,
 )
 from asterion.control.providers.prime.factory import (

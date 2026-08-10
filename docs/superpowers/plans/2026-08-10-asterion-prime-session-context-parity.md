@@ -1,6 +1,6 @@
 # Asterion Prime Session/Context Parity Implementation Plan
 
-> Status: Tasks 4.1-4.8 verified; Task 4.9 private rich attachments and delivery replay is next.
+> Status: Tasks 4.1-4.9 verified; Task 4.10 labels and bounded model operations is next.
 >
 > Program parent: `2026-08-10-asterion-prime-system-parity.md`, Task 4.
 >
@@ -642,6 +642,16 @@ projection fail closed.
 Commit: `feat: add prime session tree fork and clone`.
 
 ### Task 4.9: Implement private rich attachments and delivery replay
+
+**Status:** Verified. Text and attachment resolution remain separate narrow
+host services. The Gateway binds digest-checked private bytes to exact input
+IDs, rejects incomplete or non-canonical bundles, and submits canonical Prime
+image content under a stable daemon command ID. A durable body-free delivery
+record precedes daemon acknowledgement, so crash replay is idempotent while
+pre-marker legacy inputs are never duplicated. Direct, steer and follow-up
+delivery, cancellation fences, restart windows, concurrent binding and public
+redaction are covered. `make check` and `make promotion-check` pass, and the
+independent review found no findings.
 
 **Modify:**
 

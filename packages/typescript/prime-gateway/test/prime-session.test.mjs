@@ -925,6 +925,79 @@ test("lifecycle maps input modes pause resume detach and cancellation cascade", 
   assert.equal(transport.commands[6].command.activeSessionId, "prime-root-1");
 });
 
+test("lifecycle delivers exact private images with stable input replay identity", async () => {
+  const transport = new FakeTransport();
+  const session = await PrimeSession.create({
+    transport,
+    sessionId: "session-1",
+    privateConfig: PRIVATE_CONFIG,
+    bindIdentity: async () => undefined,
+  });
+  transport.commands.length = 0;
+  const first = Buffer.from("SENTINEL_PRIVATE_IMAGE_FIRST", "utf8");
+  const second = Buffer.from("SENTINEL_PRIVATE_IMAGE_SECOND", "utf8");
+  const attachments = [
+    {
+      attachmentId: "attachment-1",
+      mediaType: "image/png",
+      sha256: createHash("sha256").update(first).digest("hex"),
+      size: first.byteLength,
+      body: first,
+    },
+    {
+      attachmentId: "attachment-2",
+      mediaType: "image/jpeg",
+      sha256: createHash("sha256").update(second).digest("hex"),
+      size: second.byteLength,
+      body: second,
+    },
+  ];
+
+  for (const [inputId, delivery] of [
+    ["input-images-direct", "direct"],
+    ["input-images-steer", "steer"],
+    ["input-images-follow-up", "follow_up"],
+    ["input-images-direct", "direct"],
+  ]) {
+    await session.submitInput(inputId, delivery, "private text", attachments);
+  }
+
+  assert.deepEqual(transport.commands.map(({ commandId }) => commandId), [
+    "session-1-input-input-images-direct",
+    "session-1-input-input-images-steer",
+    "session-1-input-input-images-follow-up",
+    "session-1-input-input-images-direct",
+  ]);
+  for (const { command } of transport.commands) {
+    assert.deepEqual(command.images, [
+      { type: "image", data: first.toString("base64"), mimeType: "image/png" },
+      { type: "image", data: second.toString("base64"), mimeType: "image/jpeg" },
+    ]);
+    assert.equal(JSON.stringify(command).includes("SENTINEL_PRIVATE_IMAGE"), false);
+  }
+  assert.deepEqual(
+    transport.acknowledgements.filter((value) => value.includes("-input-")),
+    [],
+  );
+  assert.equal(session.acknowledgeInput("input-images-direct"), true);
+  assert.equal(
+    transport.acknowledgements.at(-1),
+    "session-1-input-input-images-direct",
+  );
+
+  for (const invalid of [
+    attachments.toReversed(),
+    [attachments[0], attachments[0]],
+    [{ ...attachments[0], mediaType: "application/octet-stream" }],
+    [{ ...attachments[0], body: Buffer.from("substituted") }],
+  ]) {
+    await assert.rejects(
+      session.submitInput("input-invalid", "direct", "private", invalid),
+    );
+  }
+  assert.equal(transport.commands.length, 4);
+});
+
 test("lifecycle retries one deterministic checkpoint acknowledgement", async () => {
   const transport = new FakeTransport();
   const session = PrimeSession.restore({

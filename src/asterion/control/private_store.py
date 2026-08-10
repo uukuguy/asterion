@@ -25,6 +25,22 @@ class PrivateContentResolver(Protocol):
         ...
 
 
+class PrivateAttachmentResolver(Protocol):
+    """Host-owned resolver for verified private attachment bytes."""
+
+    def resolve_bytes(
+        self,
+        reference: str,
+        *,
+        expected_media_type: str,
+        expected_sha256: str,
+        expected_size: int,
+        max_bytes: int,
+    ) -> bytes:
+        """Resolve exact bytes without exposing the attachment body."""
+        ...
+
+
 @dataclass(frozen=True, repr=False)
 class PrivateResultPublication:
     """Public-safe projection of a privately stored application result."""

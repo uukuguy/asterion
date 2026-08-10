@@ -18,6 +18,9 @@ from asterion.control.host import ControlPlaneClient, ControlPlaneManifest
 from asterion.control.protocol import OPAQUE_ID
 from asterion.control.providers.prime.client import (
     PrimeControlPlaneClient,
+)
+from asterion.control.private_store import (
+    PrivateAttachmentResolver,
     PrivateContentResolver,
 )
 from asterion.control.providers.prime.process import (
@@ -73,6 +76,7 @@ _CAPABILITIES = (
 )
 _CONTINUATION_MEDIA_TYPE = "application/vnd.asterion.control-capsule"
 _PRIVATE_CONTENT_SERVICE = "private-content"
+_PRIVATE_ATTACHMENT_SERVICE = "private-attachments"
 _REQUIRED_OPTIONS = frozenset(
     {
         "agent_dir",
@@ -177,6 +181,11 @@ def build_prime_control_plane_client(
         resolver = context.host_services.get(_PRIVATE_CONTENT_SERVICE)
         if not _is_private_content_resolver(resolver):
             raise ControlPlaneFactoryError("Prime private content service is unavailable")
+        attachment_resolver = context.host_services.get(_PRIVATE_ATTACHMENT_SERVICE)
+        if not _is_private_attachment_resolver(attachment_resolver):
+            raise ControlPlaneFactoryError(
+                "Prime private attachment service is unavailable"
+            )
         launch_options = PrimeSidecarLaunchOptions(
             node_executable=_path_option(context.options, "node_executable"),
             sidecar_entry=_path_option(context.options, "sidecar_entry"),
@@ -187,6 +196,7 @@ def build_prime_control_plane_client(
         return PrimeControlPlaneClient(
             process=process,  # type: ignore[arg-type]
             private_content=resolver,
+            private_attachments=attachment_resolver,
             manifest=prime_control_plane_binding().manifest,
         )
     except (OSError, TypeError, ValueError, PrimeSidecarProcessError):
@@ -208,6 +218,12 @@ def _validate_context_identity(context: ControlPlaneFactoryContext) -> None:
 
 def _is_private_content_resolver(value: object) -> TypeGuard[PrivateContentResolver]:
     return callable(getattr(value, "resolve_text", None))
+
+
+def _is_private_attachment_resolver(
+    value: object,
+) -> TypeGuard[PrivateAttachmentResolver]:
+    return callable(getattr(value, "resolve_bytes", None))
 
 
 def _path_option(options: Mapping[str, str], key: str) -> Path:

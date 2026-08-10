@@ -31,6 +31,8 @@ import type {
 } from "./event-mapper.js";
 import type {
   PrivateContinuationLocator,
+  PrivateAttachmentMetadata,
+  PrivateBoundAttachment,
   PrivateValueRef,
 } from "./private-store.js";
 import type {
@@ -57,6 +59,8 @@ import type {
   PrimeContinuationResumeResult,
   PrimeForkCloneResult,
   PrimeInputDelivery,
+  PrimeInputAttachment,
+  PrimeInputSubmission,
   PrimeSessionInitialBinding,
   PrimeTreeNavigationResult,
 } from "./prime-session.js";
@@ -83,7 +87,9 @@ export interface PrimeGatewaySession {
     inputId: string,
     delivery: PrimeInputDelivery,
     body: string,
-  ): Promise<void>;
+    attachments?: readonly PrimeInputAttachment[],
+  ): Promise<PrimeInputSubmission>;
+  acknowledgeInput(inputId: string): boolean;
   pause(commandId: string): Promise<void>;
   resume(commandId: string): Promise<void>;
   attach(commandId: string, cursor?: PrimeDaemonCursor): Promise<PrimeDaemonResponse>;
@@ -141,6 +147,16 @@ export interface PrimeGatewaySession {
 
 export interface PrimeGatewayPrivateInputs {
   readInput(reference: string): Promise<string>;
+  readBoundAttachment(
+    sessionId: string,
+    inputId: string,
+    attachmentId: string,
+  ): Promise<PrivateBoundAttachment>;
+  readBoundAttachments(
+    sessionId: string,
+    inputId: string,
+    expected: readonly PrivateAttachmentMetadata[],
+  ): Promise<readonly PrivateBoundAttachment[]>;
   putContinuationLocator(
     locator: PrivateContinuationLocator,
   ): Promise<GatewayContextBinding>;
@@ -274,6 +290,12 @@ interface ReservedEventIdentity {
 }
 
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
+const PRIME_IMAGE_MEDIA_TYPES = new Set([
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
 
 export class PrimeGatewayError extends Error {
   constructor() {
@@ -294,6 +316,9 @@ export class PrimeGateway {
   private readonly actions = new Map<string, ActionRecord>();
   private readonly checkpoints = new Set<string>();
   private readonly pendingCheckpointAcknowledgements = new Set<string>();
+  private readonly pendingInputAcknowledgements = new Map<string, string>();
+  private readonly inputClaims = new Map<string, string>();
+  private readonly attachmentClaims = new Map<string, string>();
   private readonly commandExecutions = new Map<string, CommandExecution>();
   private readonly contextExecutions = new Map<string, ContextExecution>();
   private readonly reservedEvents = new Map<number, ReservedEventIdentity>();
@@ -344,6 +369,71 @@ export class PrimeGateway {
         settled: true,
       });
     }
+    for (const command of options.store.acceptedContextCommands()) {
+      if (command.operation !== "session.attachment.bind") {
+        continue;
+      }
+      const key = this.attachmentClaimKey(
+        command.payload.input_id,
+        command.payload.attachment_id,
+      );
+      const existing = this.attachmentClaims.get(key);
+      if (existing !== undefined && existing !== command.command_id) {
+        throw new PrimeGatewayError();
+      }
+      this.attachmentClaims.set(key, command.command_id);
+    }
+    const deliveryProtocolPosition = options.store.inputDeliveryProtocolPosition();
+    const committedInputCommands = new Set(
+      options.store.inputDeliveries().map(({ commandId }) => commandId),
+    );
+    for (const { command, position } of options.store.commands()) {
+      if (command.type !== "input.submit") {
+        continue;
+      }
+      const existing = this.inputClaims.get(command.payload.input_id);
+      if (existing !== undefined && existing !== command.command_id) {
+        throw new PrimeGatewayError();
+      }
+      this.inputClaims.set(command.payload.input_id, command.command_id);
+      if (
+        !committedInputCommands.has(command.command_id) &&
+        (deliveryProtocolPosition === undefined ||
+          position < deliveryProtocolPosition)
+      ) {
+        this.commandExecutions.set(command.command_id, {
+          digest: sha256Hex(canonicalJsonBytes(command)),
+          promise: Promise.resolve(),
+        });
+      }
+    }
+    for (const delivery of options.store.inputDeliveries()) {
+      const command = options.store.commands().find(
+        ({ command: candidate }) => candidate.command_id === delivery.commandId,
+      )?.command;
+      if (
+        command?.type !== "input.submit" ||
+        command.payload.input_id !== delivery.inputId ||
+        sha256Hex(canonicalJsonBytes(
+          this.committedAttachmentMetadata(delivery.inputId).map((metadata) => ({
+            attachmentId: metadata.attachmentId,
+            mediaType: metadata.mediaType,
+            sha256: metadata.sha256,
+            size: metadata.size,
+          })),
+        )) !== sha256Hex(canonicalJsonBytes(delivery.attachments))
+      ) {
+        throw new PrimeGatewayError();
+      }
+      this.commandExecutions.set(command.command_id, {
+        digest: sha256Hex(canonicalJsonBytes(command)),
+        promise: Promise.resolve(),
+      });
+      this.pendingInputAcknowledgements.set(
+        delivery.commandId,
+        delivery.inputId,
+      );
+    }
   }
 
   static async open(options: PrimeGatewayOptions): Promise<PrimeGateway> {
@@ -365,6 +455,7 @@ export class PrimeGateway {
     const gateway = new PrimeGateway(options);
     await gateway.restoreActionCommands();
     await gateway.restoreExistingSession();
+    gateway.retryInputAcknowledgements();
     await gateway.restoreGoalTerminals();
     return gateway;
   }
@@ -413,6 +504,7 @@ export class PrimeGateway {
       throw new PrimeGatewayError();
     }
     this.retryCheckpointAcknowledgements();
+    this.retryInputAcknowledgements();
     const digest = sha256Hex(canonicalJsonBytes(command));
     const existing = this.commandExecutions.get(command.command_id);
     if (existing !== undefined) {
@@ -421,11 +513,44 @@ export class PrimeGateway {
       }
       return existing.promise;
     }
+    if (command.type === "input.submit") {
+      const claimedBy = this.inputClaims.get(command.payload.input_id);
+      const committedAttachments = new Set(
+        this.options.store.contextOperations().map(
+          ({ command: accepted }) => accepted.command_id,
+        ),
+      );
+      const hasPendingAttachment = [...this.attachmentClaims.entries()].some(
+        ([key, attachmentCommandId]) =>
+          key.startsWith(`${command.payload.input_id}\u0000`) &&
+          !committedAttachments.has(attachmentCommandId),
+      );
+      if (
+        (claimedBy !== undefined && claimedBy !== command.command_id) ||
+        hasPendingAttachment
+      ) {
+        throw new PrimeGatewayError();
+      }
+      this.inputClaims.set(command.payload.input_id, command.command_id);
+    }
     let promise: Promise<void>;
-    promise = this.persistAndHandle(command).catch((error) => {
+    promise = (command.type === "input.submit"
+      ? this.enqueueDurable(() =>
+          this.options.store.ensureInputDeliveryProtocol()
+        ).then(() => this.persistAndHandle(command))
+      : this.persistAndHandle(command)).catch((error) => {
       const current = this.commandExecutions.get(command.command_id);
       if (current?.promise === promise) {
         this.commandExecutions.delete(command.command_id);
+      }
+      if (
+        command.type === "input.submit" &&
+        !this.options.store.commands().some(
+          ({ command: accepted }) => accepted.command_id === command.command_id,
+        ) &&
+        this.inputClaims.get(command.payload.input_id) === command.command_id
+      ) {
+        this.inputClaims.delete(command.payload.input_id);
       }
       throw error;
     });
@@ -471,6 +596,22 @@ export class PrimeGateway {
       await this.reconcileCommittedContext(command, receipt);
       this.retryContextAcknowledgement(command);
       return receipt;
+    }
+    if (command.operation === "session.attachment.bind") {
+      const claimKey = this.attachmentClaimKey(
+        command.payload.input_id,
+        command.payload.attachment_id,
+      );
+      const claimedBy = this.attachmentClaims.get(claimKey);
+      if (
+        !PRIME_IMAGE_MEDIA_TYPES.has(command.payload.media_type) ||
+        command.payload.size <= 0 ||
+        this.inputClaims.has(command.payload.input_id) ||
+        (claimedBy !== undefined && claimedBy !== command.command_id)
+      ) {
+        throw new PrimeGatewayError();
+      }
+      this.attachmentClaims.set(claimKey, command.command_id);
     }
     const executor = this.options.sessionContext ?? this.nativeContextExecutor();
     let execution: ContextExecution;
@@ -609,6 +750,115 @@ export class PrimeGateway {
     this.unsubscribe = undefined;
   }
 
+  private async inputAttachments(
+    inputId: string,
+  ): Promise<readonly PrimeInputAttachment[]> {
+    const expected = this.committedAttachmentMetadata(inputId);
+    let bound: readonly PrivateBoundAttachment[];
+    try {
+      bound = await this.options.privateValues.readBoundAttachments(
+        this.options.sessionId,
+        inputId,
+        expected,
+      );
+    } catch {
+      throw new PrimeGatewayError();
+    }
+    if (bound.length !== expected.length) {
+      throw new PrimeGatewayError();
+    }
+    const delivered = bound.map((attachment, index) => {
+      const metadata = expected[index];
+      if (
+        metadata === undefined ||
+        attachment.sessionId !== metadata.sessionId ||
+        attachment.inputId !== metadata.inputId ||
+        attachment.attachmentId !== metadata.attachmentId ||
+        attachment.mediaType !== metadata.mediaType ||
+        attachment.sha256 !== metadata.sha256 ||
+        attachment.size !== metadata.size ||
+        !(attachment.body instanceof Uint8Array)
+      ) {
+        throw new PrimeGatewayError();
+      }
+      return Object.freeze({
+        attachmentId: attachment.attachmentId,
+        mediaType: attachment.mediaType,
+        sha256: attachment.sha256,
+        size: attachment.size,
+        body: Uint8Array.from(attachment.body),
+      });
+    });
+    return Object.freeze(delivered);
+  }
+
+  private committedAttachmentMetadata(
+    inputId: string,
+  ): readonly PrivateAttachmentMetadata[] {
+    const expected: PrivateAttachmentMetadata[] = [];
+    for (const { command, receipt } of this.options.store.contextOperations()) {
+      if (
+        command.operation !== "session.attachment.bind" ||
+        receipt.status !== "succeeded" ||
+        command.payload.input_id !== inputId
+      ) {
+        continue;
+      }
+      const result = receipt.payload.result as Readonly<{
+        input_id: string;
+        attachment_id: string;
+        media_type: string;
+        sha256: string;
+        size: number;
+      }>;
+      if (
+        result.input_id !== command.payload.input_id ||
+        result.attachment_id !== command.payload.attachment_id ||
+        result.media_type !== command.payload.media_type ||
+        result.sha256 !== command.payload.sha256 ||
+        result.size !== command.payload.size ||
+        !PRIME_IMAGE_MEDIA_TYPES.has(result.media_type)
+      ) {
+        throw new PrimeGatewayError();
+      }
+      expected.push(Object.freeze({
+        sessionId: command.session_id,
+        inputId: result.input_id,
+        attachmentId: result.attachment_id,
+        mediaType: result.media_type,
+        sha256: result.sha256,
+        size: result.size,
+      }));
+    }
+    if (expected.some((metadata, index) => {
+      const previous = expected[index - 1];
+      return previous !== undefined &&
+        previous.attachmentId >= metadata.attachmentId;
+    })) {
+      throw new PrimeGatewayError();
+    }
+    return Object.freeze(expected);
+  }
+
+  private retryInputAcknowledgements(): void {
+    if (this.session === undefined) {
+      return;
+    }
+    for (const [commandId, inputId] of this.pendingInputAcknowledgements) {
+      try {
+        if (this.session.acknowledgeInput(inputId)) {
+          this.pendingInputAcknowledgements.delete(commandId);
+        }
+      } catch {
+        // A later replay or restart retries the stable acknowledgement.
+      }
+    }
+  }
+
+  private attachmentClaimKey(inputId: string, attachmentId: string): string {
+    return `${inputId}\u0000${attachmentId}`;
+  }
+
   private async handleCommand(command: ControlCommand): Promise<void> {
     if (this.terminal && command.type !== "action.resolve") {
       throw new PrimeGatewayError();
@@ -620,11 +870,43 @@ export class PrimeGateway {
         return;
       case "input.submit":
         this.requireSessionStatus("running");
-        await this.requireSession().submitInput(
+        const attachments = await this.inputAttachments(
+          command.payload.input_id,
+        );
+        const deliveryMetadata = attachments.map(({ body: _body, ...metadata }) =>
+          metadata
+        );
+        const submission = await this.requireSession().submitInput(
           command.payload.input_id,
           command.payload.delivery,
           await this.options.privateValues.readInput(command.payload.content_ref),
+          attachments,
         );
+        if (
+          typeof submission !== "object" ||
+          submission === null ||
+          Object.keys(submission).length !== 1 ||
+          typeof submission.acknowledge !== "function"
+        ) {
+          throw new PrimeGatewayError();
+        }
+        await this.enqueueDurable(() =>
+          this.options.store.commitInputDelivery(
+            command.command_id,
+            deliveryMetadata,
+          )
+        );
+        this.pendingInputAcknowledgements.set(
+          command.command_id,
+          command.payload.input_id,
+        );
+        try {
+          if (submission.acknowledge()) {
+            this.pendingInputAcknowledgements.delete(command.command_id);
+          }
+        } catch {
+          // The body-free delivery commit wins; restart retries acknowledgement.
+        }
         return;
       case "session.pause":
         this.requireSessionStatus("running");
@@ -781,6 +1063,27 @@ export class PrimeGateway {
       ) {
         throw new PrimeGatewayError();
       }
+      if (
+        command.operation === "session.attachment.bind" &&
+        receipt.status === "succeeded"
+      ) {
+        const attachmentResult = receipt.payload.result as Readonly<{
+          input_id: string;
+          attachment_id: string;
+          media_type: string;
+          sha256: string;
+          size: number;
+        }>;
+        if (
+          attachmentResult.input_id !== command.payload.input_id ||
+          attachmentResult.attachment_id !== command.payload.attachment_id ||
+          attachmentResult.media_type !== command.payload.media_type ||
+          attachmentResult.sha256 !== command.payload.sha256 ||
+          attachmentResult.size !== command.payload.size
+        ) {
+          throw new PrimeGatewayError();
+        }
+      }
       this.assertMonotonicContextReceipt(receipt);
       const committed = await this.enqueueDurable(
         () => this.options.store.commitContextOperation(
@@ -807,6 +1110,36 @@ export class PrimeGateway {
       execute: async (
         command: SessionContextCommand,
       ): Promise<PrimeGatewaySessionContextResult> => {
+        if (command.operation === "session.attachment.bind") {
+          if (!PRIME_IMAGE_MEDIA_TYPES.has(command.payload.media_type)) {
+            throw new PrimeGatewayError();
+          }
+          const bound = await this.options.privateValues.readBoundAttachment(
+            command.session_id,
+            command.payload.input_id,
+            command.payload.attachment_id,
+          );
+          if (
+            bound.sessionId !== command.session_id ||
+            bound.inputId !== command.payload.input_id ||
+            bound.attachmentId !== command.payload.attachment_id ||
+            bound.mediaType !== command.payload.media_type ||
+            bound.sha256 !== command.payload.sha256 ||
+            bound.size !== command.payload.size
+          ) {
+            throw new PrimeGatewayError();
+          }
+          return Object.freeze({
+            receipt: this.contextSuccessReceipt(command, {
+              input_id: bound.inputId,
+              attachment_id: bound.attachmentId,
+              media_type: bound.mediaType,
+              sha256: bound.sha256,
+              size: bound.size,
+            }),
+            nextBinding: null,
+          });
+        }
         if (command.operation === "session.describe") {
           const result = await session.describeContext(
             command.command_id,

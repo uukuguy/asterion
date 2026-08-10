@@ -56,6 +56,38 @@ function contextCommand() {
   };
 }
 
+function inputCommand() {
+  return {
+    protocol: "asterion.agent-control/v1",
+    command_id: "command-input-rich",
+    session_id: "session-1",
+    authority_revision: 1,
+    type: "input.submit",
+    payload: {
+      input_id: "input-rich",
+      delivery: "direct",
+      content_ref: "content-rich",
+    },
+  };
+}
+
+function inputAttachments() {
+  return [
+    {
+      attachmentId: "attachment-1",
+      mediaType: "image/png",
+      sha256: "a".repeat(64),
+      size: 17,
+    },
+    {
+      attachmentId: "attachment-2",
+      mediaType: "image/jpeg",
+      sha256: "b".repeat(64),
+      size: 23,
+    },
+  ];
+}
+
 function contextReceipt() {
   return {
     protocol: "asterion.session-context/v1",
@@ -216,6 +248,129 @@ test("durable store atomically commits safe context receipt and current binding"
         .map((name) => readFile(join(fixtureRoot.root, "public", "records", name), "utf8")),
     );
     assert.equal(records.join("").includes("provider/path"), false);
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
+test("durable input delivery binds one ordered body-free attachment set", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    await store.ensureInputDeliveryProtocol();
+    await store.acceptCommand(inputCommand());
+    const first = await store.commitInputDelivery(
+      "command-input-rich",
+      inputAttachments(),
+    );
+    const replay = await store.commitInputDelivery(
+      "command-input-rich",
+      structuredClone(inputAttachments()),
+    );
+
+    assert.equal(replay.position, first.position);
+    assert.deepEqual(store.inputDeliveries().map((delivery) => ({
+      commandId: delivery.commandId,
+      inputId: delivery.inputId,
+      attachments: delivery.attachments,
+    })), [{
+      commandId: "command-input-rich",
+      inputId: "input-rich",
+      attachments: inputAttachments(),
+    }]);
+    await assert.rejects(
+      store.commitInputDelivery(
+        "command-input-rich",
+        inputAttachments().toReversed(),
+      ),
+      GatewayStoreConflictError,
+    );
+    await assert.rejects(
+      store.commitInputDelivery("missing-command", inputAttachments()),
+      GatewayStoreConflictError,
+    );
+
+    const reopened = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    assert.deepEqual(reopened.inputDeliveries(), store.inputDeliveries());
+    const records = await Promise.all(
+      (await readdir(join(fixtureRoot.root, "public", "records")))
+        .filter((name) => name.endsWith(".json"))
+        .map((name) => readFile(
+          join(fixtureRoot.root, "public", "records", name),
+          "utf8",
+        )),
+    );
+    assert.equal(records.join("").includes("SENTINEL_PRIVATE"), false);
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
+test("durable input delivery recovery selects one exact commit across faults", async () => {
+  for (const faultStage of [
+    "before_write",
+    "after_write",
+    "before_rename",
+    "after_rename",
+    "before_directory_fsync",
+    "after_directory_fsync",
+  ]) {
+    const fixtureRoot = await temporaryStoreRoot();
+    try {
+      const initial = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+      await initial.ensureInputDeliveryProtocol();
+      await initial.acceptCommand(inputCommand());
+      const faulted = await GatewayDurableStore.open(
+        fixtureRoot.root,
+        "session-1",
+        {
+          faultInjector(stage) {
+            if (stage === faultStage) {
+              throw new Error(`SENTINEL_INPUT_${faultStage}`);
+            }
+          },
+        },
+      );
+      await assert.rejects(
+        faulted.commitInputDelivery("command-input-rich", inputAttachments()),
+        GatewayStoreWriteError,
+      );
+
+      const reopened = await GatewayDurableStore.open(
+        fixtureRoot.root,
+        "session-1",
+      );
+      await reopened.commitInputDelivery(
+        "command-input-rich",
+        inputAttachments(),
+      );
+      assert.equal(reopened.inputDeliveries().length, 1);
+      assert.deepEqual(
+        reopened.inputDeliveries()[0].attachments,
+        inputAttachments(),
+      );
+    } finally {
+      await fixtureRoot.cleanup();
+    }
+  }
+});
+
+test("durable input delivery marker separates legacy accepted inputs", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    await store.acceptCommand(inputCommand());
+    assert.equal(store.inputDeliveryProtocolPosition(), undefined);
+    await assert.rejects(
+      store.commitInputDelivery("command-input-rich", inputAttachments()),
+      GatewayStoreConflictError,
+    );
+
+    const marker = await store.ensureInputDeliveryProtocol();
+    assert.equal(store.inputDeliveryProtocolPosition(), marker.position);
+    const reopened = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    assert.equal(reopened.inputDeliveryProtocolPosition(), marker.position);
+    assert.equal(reopened.commands()[0].position < marker.position, true);
   } finally {
     await fixtureRoot.cleanup();
   }

@@ -359,6 +359,7 @@ class TestPrimeControlClient(unittest.IsolatedAsyncioTestCase):
         client = PrimeControlPlaneClient(
             process=fake_process,
             private_content=resolver,
+            private_attachments=resolver,
         )
 
         await client.execute_session_context(attachment_command())
@@ -395,11 +396,27 @@ class TestPrimeControlClient(unittest.IsolatedAsyncioTestCase):
         client = PrimeControlPlaneClient(
             process=fake_process,
             private_content=resolver,
+            private_attachments=resolver,
         )
 
         with self.assertRaises(PrimeControlError):
             await client.execute_session_context(attachment_command())
 
+        self.assertEqual(fake_process.requests, [])
+
+    async def test_session_context_attachment_requires_its_narrow_resolver(
+        self,
+    ) -> None:
+        fake_process = FakeProcess()
+        client = PrimeControlPlaneClient(
+            process=fake_process,
+            private_content=FakeResolver(),
+        )
+
+        with self.assertRaises(PrimeControlError) as raised:
+            await client.execute_session_context(attachment_command())
+
+        self.assertEqual(str(raised.exception), "Prime control operation failed")
         self.assertEqual(fake_process.requests, [])
 
     async def test_session_context_uses_the_same_sidecar_and_validates_receipt(

@@ -37,6 +37,24 @@ class FakeResolver:
         del reference, max_bytes
         return "private"
 
+    def resolve_bytes(
+        self,
+        reference: str,
+        *,
+        expected_media_type: str,
+        expected_sha256: str,
+        expected_size: int,
+        max_bytes: int,
+    ) -> bytes:
+        del (
+            reference,
+            expected_media_type,
+            expected_sha256,
+            expected_size,
+            max_bytes,
+        )
+        raise KeyError("private attachment is unavailable")
+
 
 class FakeProcess:
     def __init__(self, options: PrimeSidecarLaunchOptions) -> None:
@@ -83,7 +101,10 @@ def make_context(
         private_root=root,
         options=values,
         authority=authority if authority is not None else _child_envelope(),
-        host_services={"private-content": FakeResolver()},
+        host_services={
+            "private-attachments": FakeResolver(),
+            "private-content": FakeResolver(),
+        },
     )
 
 
@@ -176,6 +197,28 @@ class TestPrimeControlFactory(unittest.TestCase):
                     context,
                     process_factory=FakeProcess,
                 )
+
+            for services in (
+                {"private-content": FakeResolver()},
+                {"private-attachments": FakeResolver()},
+            ):
+                incomplete = ControlPlaneFactoryContext(
+                    system_id=context.system_id,
+                    system_version=context.system_version,
+                    control_plane_id=context.control_plane_id,
+                    control_plane_version=context.control_plane_version,
+                    private_root=context.private_root,
+                    options=context.options,
+                    authority=context.authority,
+                    host_services=services,
+                )
+                with self.subTest(services=tuple(services)), self.assertRaises(
+                    ControlPlaneFactoryError
+                ):
+                    build_prime_control_plane_client(
+                        incomplete,
+                        process_factory=FakeProcess,
+                    )
 
     def test_factory_builds_client_without_rendering_private_descriptor(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

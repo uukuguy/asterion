@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, open, realpath } from "node:fs/promises";
+import { lstat, open, readdir, realpath } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { TextDecoder } from "node:util";
 
@@ -729,6 +729,75 @@ export class PrivateValueStore {
       privateRef: binding.privateRef,
       body,
     });
+  }
+
+  async readBoundAttachments(
+    sessionId: string,
+    inputId: string,
+    expectedValue: readonly PrivateAttachmentMetadata[],
+  ): Promise<readonly PrivateBoundAttachment[]> {
+    const sessionKey = validateBindingKey(sessionId);
+    const inputKey = validateBindingKey(inputId);
+    if (!Array.isArray(expectedValue)) {
+      throw new PrivateValueInvalidError();
+    }
+    const expected = expectedValue.map((value) => validateAttachmentMetadata(value));
+    if (expected.some((metadata, index) => {
+      const previous = expected[index - 1];
+      return metadata.sessionId !== sessionKey ||
+        metadata.inputId !== inputKey ||
+        (previous !== undefined &&
+          previous.attachmentId >= metadata.attachmentId);
+    })) {
+      throw new PrivateValueInvalidError();
+    }
+    try {
+      await this.ensureBindingsRoot();
+      const actual = new Map<string, PrivateAttachmentBinding>();
+      for (const name of await readdir(this.bindingsRoot)) {
+        if (!name.startsWith("attachment-") || !name.endsWith(".json")) {
+          continue;
+        }
+        const binding = await this.readAttachmentBinding(name);
+        if (binding === undefined) {
+          throw new PrivateValueInvalidError();
+        }
+        if (binding.sessionId !== sessionKey || binding.inputId !== inputKey) {
+          continue;
+        }
+        if (actual.has(binding.attachmentId)) {
+          throw new PrivateValueInvalidError();
+        }
+        actual.set(binding.attachmentId, binding);
+      }
+      if (
+        actual.size !== expected.length ||
+        expected.some((metadata) => {
+          const binding = actual.get(metadata.attachmentId);
+          if (binding === undefined) {
+            return true;
+          }
+          try {
+            this.assertAttachmentBinding(binding, metadata);
+            return false;
+          } catch {
+            return true;
+          }
+        })
+      ) {
+        throw new PrivateValueInvalidError();
+      }
+      const delivered = await Promise.all(expected.map((metadata) =>
+        this.readBoundAttachment(
+          metadata.sessionId,
+          metadata.inputId,
+          metadata.attachmentId,
+        )
+      ));
+      return Object.freeze(delivered);
+    } catch {
+      throw new PrivateValueInvalidError();
+    }
   }
 
   async putContinuationLocator(

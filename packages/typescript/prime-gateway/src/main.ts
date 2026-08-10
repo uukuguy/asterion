@@ -793,6 +793,26 @@ export class PrimeBoundPrivateInputs implements PrimeGatewayPrivateInputs {
     return this.privateValues.readBoundInputReference(reference);
   }
 
+  readBoundAttachment(
+    sessionId: string,
+    inputId: string,
+    attachmentId: string,
+  ): ReturnType<PrivateValueStore["readBoundAttachment"]> {
+    return this.privateValues.readBoundAttachment(
+      sessionId,
+      inputId,
+      attachmentId,
+    );
+  }
+
+  readBoundAttachments(
+    sessionId: string,
+    inputId: string,
+    expected: Parameters<PrivateValueStore["readBoundAttachments"]>[2],
+  ): ReturnType<PrivateValueStore["readBoundAttachments"]> {
+    return this.privateValues.readBoundAttachments(sessionId, inputId, expected);
+  }
+
   putContinuationLocator(
     locator: Parameters<PrivateValueStore["putContinuationLocator"]>[0],
   ): ReturnType<PrivateValueStore["putContinuationLocator"]> {

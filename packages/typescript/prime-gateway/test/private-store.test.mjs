@@ -248,6 +248,58 @@ test("private attachment bindings are exact durable and body-free", async () => 
   }
 });
 
+test("private attachment delivery requires one exact canonical bundle", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  const firstBody = Buffer.from("SENTINEL_PRIVATE_ATTACHMENT_FIRST", "utf8");
+  const secondBody = Buffer.from("SENTINEL_PRIVATE_ATTACHMENT_SECOND", "utf8");
+  const first = attachmentMetadata(firstBody);
+  const second = {
+    ...attachmentMetadata(secondBody),
+    attachmentId: "attachment-2",
+    mediaType: "image/jpeg",
+  };
+  try {
+    const values = await PrivateValueStore.open(fixtureRoot.root);
+    await values.bindAttachment(first, firstBody);
+    await values.bindAttachment(second, secondBody);
+
+    const delivered = await values.readBoundAttachments(
+      "session-1",
+      "input-1",
+      [first, second],
+    );
+    assert.deepEqual(delivered.map(({ privateRef: _privateRef, ...item }) => item), [
+      { ...first, body: firstBody },
+      { ...second, body: secondBody },
+    ]);
+    assert.equal(Object.isFrozen(delivered), true);
+
+    for (const expected of [
+      [second, first],
+      [first],
+      [first, { ...second, sha256: "f".repeat(64) }],
+      [first, second, { ...second, attachmentId: "attachment-3" }],
+    ]) {
+      await assert.rejects(
+        values.readBoundAttachments("session-1", "input-1", expected),
+        PrivateValueInvalidError,
+      );
+    }
+
+    const reopened = await PrivateValueStore.open(fixtureRoot.root);
+    assert.deepEqual(
+      (await reopened.readBoundAttachments(
+        "session-1",
+        "input-1",
+        [first, second],
+      )).map(({ attachmentId }) => attachmentId),
+      ["attachment-1", "attachment-2"],
+    );
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
 test("private bindings coalesce concurrent exact replays", async () => {
   const fixtureRoot = await temporaryStoreRoot();
   const body = Buffer.from("concurrent-private-attachment", "utf8");

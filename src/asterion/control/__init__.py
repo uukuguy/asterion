@@ -49,6 +49,7 @@ from asterion.control.authority import (
 )
 from asterion.control.private_store import (
     MAX_PRIVATE_TEXT_BYTES,
+    PrivateAttachmentResolver,
     PrivateContentResolver,
     PrivateResultPublication,
     PrivateResultStore,
@@ -228,6 +229,7 @@ __all__ = [
     "ParityScenarioResult",
     "ParityScenarioRunner",
     "PrivateContentResolver",
+    "PrivateAttachmentResolver",
     "PrivateResultPublication",
     "PrivateResultStore",
     "PrivateStoreError",
