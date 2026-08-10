@@ -11,6 +11,7 @@ from asterion.control.authority import (
     AuthorityError,
     AuthorityLedger,
     BudgetUsage,
+    ProviderUsageReport,
 )
 from asterion.control.execution import (
     ActionExecutionFailure,
@@ -313,6 +314,13 @@ class ControlHost:
     async def _accept_event(self, event: ControlEvent) -> None:
         if not isinstance(event, ControlEvent):
             raise ControlHostError("control provider event is invalid")
+        report: ProviderUsageReport | None = None
+        if event.type == "budget.reported":
+            try:
+                report = ProviderUsageReport(BudgetUsage(**event.payload))
+                self._authority.preview_provider_usage(report)
+            except (AuthorityError, TypeError, ValueError):
+                raise ControlHostError("control provider budget report failed") from None
         try:
             entry = self._journal.accept_event(
                 event, expected_position=self._journal_position
@@ -330,6 +338,11 @@ class ControlHost:
         except ControlStateError:
             raise ControlHostError("control provider event transition failed") from None
         self._state = reduced
+        if report is not None:
+            try:
+                self._authority.record_provider_usage(report)
+            except AuthorityError:
+                raise ControlHostError("control provider budget report failed") from None
         self._evidence.project_event(
             event,
             journal_position=entry.position,

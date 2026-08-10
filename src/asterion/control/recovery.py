@@ -14,6 +14,7 @@ from asterion.control.authority import (
     AuthorityLedger,
     BudgetRequest,
     BudgetUsage,
+    ProviderUsageReport,
 )
 from asterion.control.host import ControlCommand, ControlEvent, EventCursor
 from asterion.control.journal import (
@@ -107,7 +108,7 @@ def recover_control_host_state(
         proposals: dict[str, ControlEvent] = {}
         accepted_events: dict[str, ControlEvent] = {}
         receipts: dict[str, ActionReceipt] = {}
-        authority_operations: list[AdmissionDecision | ActionReceipt] = []
+        authority_operations: list[AdmissionDecision | ActionReceipt | ProviderUsageReport] = []
         decisions: dict[str, AdmissionDecision] = {}
         terminal_commands: dict[str, ControlCommand] = {}
         admission_commands: dict[str, ControlCommand] = {}
@@ -130,6 +131,10 @@ def recover_control_host_state(
                     if action_id in proposals:
                         raise JournalConflictError("control journal recovery failed")
                     proposals[action_id] = event
+                if event.type == "budget.reported":
+                    authority_operations.append(
+                        ProviderUsageReport(BudgetUsage(**event.payload))
+                    )
                 continue
             if record.kind == "checkpoint.sealed":
                 event = ControlEvent.from_mapping(

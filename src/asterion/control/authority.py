@@ -206,6 +206,17 @@ class ActionReceipt:
             raise AuthorityError("action receipt is invalid")
 
 
+@dataclass(frozen=True)
+class ProviderUsageReport:
+    """Cumulative provider usage; it is not added to action receipts."""
+
+    usage: BudgetUsage
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.usage, BudgetUsage):
+            raise AuthorityError("provider usage report is invalid")
+
+
 class AuthorityLedger:
     """Evaluate without mutation, then reserve and settle exactly once."""
 
@@ -214,6 +225,7 @@ class AuthorityLedger:
             raise AuthorityError("authority envelope is invalid")
         self._envelope = envelope
         self._usage = BudgetUsage.zero()
+        self._reported_usage = BudgetUsage.zero()
         self._reservations: dict[str, AdmissionDecision] = {}
         self._receipts: dict[str, ActionReceipt] = {}
         self._frozen = False
@@ -224,7 +236,11 @@ class AuthorityLedger:
 
     @property
     def usage(self) -> BudgetUsage:
-        return self._usage
+        return _effective_usage(self._reported_usage, self._usage)
+
+    @property
+    def reported_usage(self) -> BudgetUsage:
+        return self._reported_usage
 
     @property
     def reserved_action_ids(self) -> tuple[str, ...]:
@@ -243,6 +259,7 @@ class AuthorityLedger:
             isinstance(other, AuthorityLedger)
             and self._envelope == other._envelope
             and self._usage == other._usage
+            and self._reported_usage == other._reported_usage
             and self._reservations == other._reservations
             and self._receipts == other._receipts
         )
@@ -251,12 +268,15 @@ class AuthorityLedger:
     def _from_recovery(
         cls,
         envelope: AuthorityEnvelope,
-        operations: Sequence[AdmissionDecision | ActionReceipt],
+        operations: Sequence[AdmissionDecision | ActionReceipt | ProviderUsageReport],
     ) -> AuthorityLedger:
         """Build a frozen ledger from an already validated ordered journal."""
 
         ledger = cls(envelope)
         for operation in operations:
+            if isinstance(operation, ProviderUsageReport):
+                ledger.record_provider_usage(operation)
+                continue
             if isinstance(operation, ActionReceipt):
                 ledger.settle(operation.action_id, operation)
                 continue
@@ -272,7 +292,7 @@ class AuthorityLedger:
             ):
                 raise AuthorityError("recovered admission reservation is invalid")
             effective = _add_usage(
-                ledger._usage,
+                ledger.usage,
                 ledger._reserved_usage(),
                 decision.reservation.as_usage(),
             )
@@ -287,6 +307,7 @@ class AuthorityLedger:
 
         ledger = AuthorityLedger(self._envelope)
         ledger._usage = self._usage
+        ledger._reported_usage = self._reported_usage
         ledger._reservations = dict(self._reservations)
         ledger._receipts = dict(self._receipts)
         return ledger
@@ -347,7 +368,7 @@ class AuthorityLedger:
             or now_ms + request.deadline_ms > self._envelope.expires_at_ms
         ):
             return self._rejected(action_id, digest, "deadline-not-authorized")
-        effective = _add_usage(self._usage, self._reserved_usage(), request.as_usage())
+        effective = _add_usage(self.usage, self._reserved_usage(), request.as_usage())
         if not _fits(effective, self._envelope.budget_limit):
             return self._rejected(action_id, digest, "budget-exceeded")
         return AdmissionDecision(
@@ -378,7 +399,7 @@ class AuthorityLedger:
         ):
             raise AuthorityError("admission authority revision is stale")
         effective = _add_usage(
-            self._usage,
+            self.usage,
             self._reserved_usage(),
             decision.reservation.as_usage(),
         )
@@ -401,8 +422,24 @@ class AuthorityLedger:
         if not _fits(receipt.usage, decision.reservation.as_usage()):
             raise AuthorityError("action receipt exceeds reservation")
         self._usage = _add_usage(self._usage, receipt.usage)
+        if not _fits(self.usage, self._envelope.budget_limit):
+            raise AuthorityError("action settlement exceeds authority")
         del self._reservations[action_id]
         self._receipts[action_id] = receipt
+
+    def preview_provider_usage(self, report: ProviderUsageReport) -> None:
+        if not isinstance(report, ProviderUsageReport):
+            raise AuthorityError("provider usage report is invalid")
+        if not _monotonic(self._reported_usage, report.usage):
+            raise AuthorityError("provider usage is not monotonic")
+        effective = _effective_usage(report.usage, self._usage)
+        if not _fits(_add_usage(effective, self._reserved_usage()), self._envelope.budget_limit):
+            raise AuthorityError("provider usage exceeds authority")
+
+    def record_provider_usage(self, report: ProviderUsageReport) -> None:
+        self._ensure_mutable()
+        self.preview_provider_usage(report)
+        self._reported_usage = report.usage
 
     def preview_settlement(self, action_id: str, receipt: ActionReceipt) -> None:
         """Validate an exact settlement without mutating the live ledger."""
@@ -418,7 +455,7 @@ class AuthorityLedger:
             or envelope.revision <= self._envelope.revision
         ):
             raise AuthorityError("authority replacement is invalid")
-        committed = _add_usage(self._usage, self._reserved_usage())
+        committed = _add_usage(self.usage, self._reserved_usage())
         if not _fits(committed, envelope.budget_limit):
             raise AuthorityError("authority replacement budget is insufficient")
         self._envelope = envelope
@@ -494,6 +531,33 @@ def _add_usage(*values: BudgetUsage) -> BudgetUsage:
         child_tokens=sum(value.child_tokens for value in values),
         aggregate_tokens=sum(value.aggregate_tokens for value in values),
         cost_micros=sum(value.cost_micros for value in values),
+    )
+
+
+def _monotonic(previous: BudgetUsage, current: BudgetUsage) -> bool:
+    return all(
+        getattr(current, field) >= getattr(previous, field)
+        for field in (
+            "controller_tokens", "application_tokens", "child_tokens",
+            "aggregate_tokens", "cost_micros",
+        )
+    )
+
+
+def _effective_usage(reported: BudgetUsage, settled: BudgetUsage) -> BudgetUsage:
+    controller = max(reported.controller_tokens, settled.controller_tokens)
+    application = max(reported.application_tokens, settled.application_tokens)
+    child = max(reported.child_tokens, settled.child_tokens)
+    return BudgetUsage(
+        controller_tokens=controller,
+        application_tokens=application,
+        child_tokens=child,
+        aggregate_tokens=max(
+            reported.aggregate_tokens,
+            settled.aggregate_tokens,
+            controller + application + child,
+        ),
+        cost_micros=max(reported.cost_micros, settled.cost_micros),
     )
 
 
