@@ -67,8 +67,8 @@ make promotion-check
 make check
 ```
 
-Observed results were 174 focused Python tests, 122 Prime Gateway TypeScript
-tests, 21 shared-contract TypeScript tests, 1,650 repository Python tests, 32
+Observed results were 175 focused Python tests, 123 Prime Gateway TypeScript
+tests, 21 shared-contract TypeScript tests, 1,651 repository Python tests, 32
 DCI context-extension TypeScript tests, and 19 Rust tests. Documentation checked
 86 Markdown files and 57 local links. Promotion passed 26 commands from an
 isolated standalone copy. The stable ten-scenario ledger observed zero model-
