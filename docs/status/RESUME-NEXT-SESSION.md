@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-08-10 14:38. Phase 2 Task 1 is verified; exhaustive ledger TDD is active.
+> Updated: 2026-08-10 14:55. Phase 2 Task 2 is verified; shared scenario-registry TDD is active.
 
 ## Active objective
 
@@ -26,6 +26,13 @@ kernel. The canonical worklist is
 - Phase 2 Task 1 adds a provider-neutral closed/immutable parity ledger model,
   mechanical evidence-bound claim evaluation, hostile-container rejection and
   exact primary-scenario/exclusion rules.
+- Phase 2 Task 2 pins all 63 feature records, 61 deterministic scenarios and
+  two approved exclusions. Its metadata-only checker proves 48 exact Prime
+  source files, 70 declared source records and 76 anchors at the pinned clean
+  commit without starting a provider or application.
+- `verified-system-parity` currently fails closed with all 61 mandatory feature
+  IDs blocking; the three existing public entry points remain `implemented`,
+  not PASS, until their exact parity scenarios produce admissible evidence.
 
 ## Newly verified external boundary
 
@@ -52,10 +59,13 @@ kernel. The canonical worklist is
   authorized bounded real-model gate. Provider-free and real-daemon preflight
   PASS do not grant that authority.
 
-## Current changes
+## Current Phase 2 state
 
-- `cfe62b8` durably owns the exact offline workspace builds, foreground bundle
-  daemon lifecycle, normalized Gateway hello, tests, operator guide, and ledger.
+- `3fc67d3` owns the closed parity-ledger model and mechanical claim evaluator.
+- The exhaustive fixture, source-evidence checker and Make gates have passed an
+  independent review with zero Critical or Important findings.
+- Full Python verification passes 1674 tests; focused Pyright reports zero
+  errors and zero warnings, and focused Ruff passes.
 - `docs/status/CURRENT-STATE.md`, `DECISIONS.md`, `JOURNAL.md`, and this checkpoint
   carry the resumed program state.
 - Existing `.superpowers/sdd/task-8-report.md` and `task-9-report.md` edits are
@@ -63,8 +73,8 @@ kernel. The canonical worklist is
 
 ## Immediate next boundary
 
-1. Execute Task 2 of the Phase 2 plan test-first: pin all 63 Prime feature
-   records and add the provider-free inventory/source-evidence checker.
+1. Execute Task 3 of the Phase 2 plan test-first: create the shared 61-scenario
+   registry and reporting plumbing without promoting any placeholder to PASS.
 
 ## Invariants
 

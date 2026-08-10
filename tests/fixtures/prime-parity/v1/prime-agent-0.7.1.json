@@ -1,0 +1,3128 @@
+{
+  "format": "asterion.parity-ledger/v1",
+  "ledger_id": "prime-agent-0.7.1",
+  "baseline": {
+    "artifact_lock": "asterion.prime-artifact-lock/v1",
+    "source_commit": "a18809e00ea30638584d87b3afea7285a9d7296c"
+  },
+  "providers": [
+    "asterion.native",
+    "asterion.prime-gateway"
+  ],
+  "features": [
+    {
+      "feature_id": "ecosystem.collision-diagnostics",
+      "domain_id": "ecosystem.capabilities",
+      "disposition": "mandatory",
+      "description": "Resource collisions produce deterministic diagnostics.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/diagnostics.ts",
+          "anchors": [
+            "export interface ResourceCollision"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.ecosystem.collision-diagnostics",
+      "primary_scenario_id": "prime-parity.ecosystem.collision-diagnostics",
+      "compatibility_impacts": [
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "ecosystem.context-files",
+      "domain_id": "ecosystem.capabilities",
+      "disposition": "mandatory",
+      "description": "Explicit project context files load with deterministic precedence.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/resource-loader.ts",
+          "anchors": [
+            "export function loadProjectContextFiles("
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.ecosystem.context-files",
+      "primary_scenario_id": "prime-parity.ecosystem.context-files",
+      "compatibility_impacts": [
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "ecosystem.custom-providers-models",
+      "domain_id": "ecosystem.capabilities",
+      "disposition": "mandatory",
+      "description": "Custom providers and models register under exact identities.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/extensions/types.ts",
+          "anchors": [
+            "registerProvider:"
+          ]
+        },
+        {
+          "path": "packages/coding-agent/src/core/model-registry.ts",
+          "anchors": [
+            "export class ModelRegistry"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.ecosystem.custom-providers-models",
+      "primary_scenario_id": "prime-parity.ecosystem.custom-providers-models",
+      "compatibility_impacts": [
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "ecosystem.extension-state-commands",
+      "domain_id": "ecosystem.capabilities",
+      "disposition": "mandatory",
+      "description": "Extension commands and durable state remain session-scoped.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/extensions/types.ts",
+          "anchors": [
+            "Append a custom entry to the session for state persistence",
+            "registerCommand(name: string"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.ecosystem.extension-state-commands",
+      "primary_scenario_id": "prime-parity.ecosystem.extension-state-commands",
+      "compatibility_impacts": [
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "ecosystem.extensions-lifecycle",
+      "domain_id": "ecosystem.capabilities",
+      "disposition": "mandatory",
+      "description": "Extensions receive bounded lifecycle events and teardown.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/extensions/runner.ts",
+          "anchors": [
+            "export async function emitSessionShutdownEvent("
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.ecosystem.extensions-lifecycle",
+      "primary_scenario_id": "prime-parity.ecosystem.extensions-lifecycle",
+      "compatibility_impacts": [
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "ecosystem.mcp",
+      "domain_id": "ecosystem.capabilities",
+      "disposition": "mandatory",
+      "description": "MCP integrations support explicit configuration and credential refresh.",
+      "prime_evidence": [
+        {
+          "path": "packages/ai/src/mcp/oauth.ts",
+          "anchors": [
+            "export function createMcpOAuthProvider("
+          ]
+        },
+        {
+          "path": "packages/coding-agent/src/core/mcp/mcp-manager.ts",
+          "anchors": [
+            "export class McpManager"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.ecosystem.mcp",
+      "primary_scenario_id": "prime-parity.ecosystem.mcp",
+      "compatibility_impacts": [
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "ecosystem.packages",
+      "domain_id": "ecosystem.capabilities",
+      "disposition": "mandatory",
+      "description": "Packages install and select resources from exact approved sources.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/package-manager.ts",
+          "anchors": [
+            "export class DefaultPackageManager"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.ecosystem.packages",
+      "primary_scenario_id": "prime-parity.ecosystem.packages",
+      "compatibility_impacts": [
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "ecosystem.prompt-templates",
+      "domain_id": "ecosystem.capabilities",
+      "disposition": "mandatory",
+      "description": "Prompt templates parse and expand through explicit resources.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/prompt-templates.ts",
+          "anchors": [
+            "export function loadPromptTemplates("
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.ecosystem.prompt-templates",
+      "primary_scenario_id": "prime-parity.ecosystem.prompt-templates",
+      "compatibility_impacts": [
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "ecosystem.skills",
+      "domain_id": "ecosystem.capabilities",
+      "disposition": "mandatory",
+      "description": "Markdown and Python skills retain validated identities.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/skills.ts",
+          "anchors": [
+            "export type SkillKind = \"markdown\" | \"python\";"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.ecosystem.skills",
+      "primary_scenario_id": "prime-parity.ecosystem.skills",
+      "compatibility_impacts": [
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "ecosystem.tools",
+      "domain_id": "ecosystem.capabilities",
+      "disposition": "mandatory",
+      "description": "Registered, custom and overridden tools resolve deterministically.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/extensions/types.ts",
+          "anchors": [
+            "registerTool<TParams"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.ecosystem.tools",
+      "primary_scenario_id": "prime-parity.ecosystem.tools",
+      "compatibility_impacts": [
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "excluded.hidden-reasoning-identity",
+      "domain_id": "excluded.nonfunctional",
+      "disposition": "excluded",
+      "description": "Byte-identical private hidden reasoning is outside functional parity.",
+      "prime_evidence": [
+        {
+          "path": "packages/agent/src/agent-loop.ts",
+          "anchors": [
+            "export function agentLoop("
+          ]
+        }
+      ],
+      "compatibility_impacts": [],
+      "exclusion_reason_code": "private-hidden-reasoning"
+    },
+    {
+      "feature_id": "excluded.tui-pixel-identity",
+      "domain_id": "excluded.nonfunctional",
+      "disposition": "excluded",
+      "description": "Pixel-identical TUI rendering is outside functional parity.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/modes/interactive/interactive-mode.ts",
+          "anchors": [
+            "export class InteractiveMode"
+          ]
+        }
+      ],
+      "compatibility_impacts": [],
+      "exclusion_reason_code": "nonfunctional-pixel-identity"
+    },
+    {
+      "feature_id": "harness.evidence-refinement",
+      "domain_id": "harness.continual",
+      "disposition": "mandatory",
+      "description": "Refinement proposals cite evidence before admitted activation.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/refinement/refinement.ts",
+          "anchors": [
+            "export interface RefinementProposal"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.harness.evidence-refinement",
+      "primary_scenario_id": "prime-parity.harness.evidence-refinement",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "harness.history-snapshots",
+      "domain_id": "harness.continual",
+      "disposition": "mandatory",
+      "description": "Refinement history and snapshots are append-only and inspectable.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/refinement/refinement.ts",
+          "anchors": [
+            "export function loadGlobalRefinementHistory("
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.harness.history-snapshots",
+      "primary_scenario_id": "prime-parity.harness.history-snapshots",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "harness.memory-entries",
+      "domain_id": "harness.continual",
+      "disposition": "mandatory",
+      "description": "Continual harness memory entries are revisioned by scope.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/refinement/refinement.ts",
+          "anchors": [
+            "export type RefinementKind = \"prompt\" | \"memory\" | \"skill\" | \"subagent\";"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.harness.memory-entries",
+      "primary_scenario_id": "prime-parity.harness.memory-entries",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "harness.prompt-entries",
+      "domain_id": "harness.continual",
+      "disposition": "mandatory",
+      "description": "Continual harness prompt entries are revisioned by scope.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/refinement/refinement.ts",
+          "anchors": [
+            "export type RefinementKind = \"prompt\" | \"memory\" | \"skill\" | \"subagent\";"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.harness.prompt-entries",
+      "primary_scenario_id": "prime-parity.harness.prompt-entries",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "harness.rollback",
+      "domain_id": "harness.continual",
+      "disposition": "mandatory",
+      "description": "Rollback restores a prior snapshot through a new revision.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/refinement/refinement.ts",
+          "anchors": [
+            "rollbackOf?: string;"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.harness.rollback",
+      "primary_scenario_id": "prime-parity.harness.rollback",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "harness.scope-isolation",
+      "domain_id": "harness.continual",
+      "disposition": "mandatory",
+      "description": "Local, global and project harness state remain isolated.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/refinement/refinement.ts",
+          "anchors": [
+            "export type HarnessScope = \"local\" | \"global\";"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.harness.scope-isolation",
+      "primary_scenario_id": "prime-parity.harness.scope-isolation",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "harness.skill-descriptions",
+      "domain_id": "harness.continual",
+      "disposition": "mandatory",
+      "description": "Continual harness skill descriptions are revisioned by scope.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/refinement/refinement.ts",
+          "anchors": [
+            "export type RefinementKind = \"prompt\" | \"memory\" | \"skill\" | \"subagent\";"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.harness.skill-descriptions",
+      "primary_scenario_id": "prime-parity.harness.skill-descriptions",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "harness.subagent-specifications",
+      "domain_id": "harness.continual",
+      "disposition": "mandatory",
+      "description": "Continual harness subagent specifications are revisioned by scope.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/refinement/refinement.ts",
+          "anchors": [
+            "export type RefinementKind = \"prompt\" | \"memory\" | \"skill\" | \"subagent\";"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.harness.subagent-specifications",
+      "primary_scenario_id": "prime-parity.harness.subagent-specifications",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "interface.acp",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "ACP clients translate session and tool lifecycles.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/modes/acp/acp-mode.ts",
+          "anchors": [
+            "export async function runAcpMode("
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.interface.acp",
+      "primary_scenario_id": "prime-parity.interface.acp",
+      "compatibility_impacts": [
+        "client-surface",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "interface.cli-interactive",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "The CLI exposes an interactive session mode.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/cli-main.ts",
+          "anchors": [
+            "export async function runCli("
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.interface.cli-interactive",
+      "primary_scenario_id": "prime-parity.interface.cli-interactive",
+      "compatibility_impacts": [
+        "client-surface",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "interface.export-share",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Export and private sharing produce explicit artifacts and references.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/config.ts",
+          "anchors": [
+            "export function getShareViewerUrl("
+          ]
+        },
+        {
+          "path": "packages/coding-agent/src/core/export-html/index.ts",
+          "anchors": [
+            "export async function exportSessionToHtml("
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.interface.export-share",
+      "primary_scenario_id": "prime-parity.interface.export-share",
+      "compatibility_impacts": [
+        "client-surface",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "interface.headless-print",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Headless and print modes expose terminal completion.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/modes/print-mode.ts",
+          "anchors": [
+            "export async function runPrintMode("
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.interface.headless-print",
+      "primary_scenario_id": "prime-parity.interface.headless-print",
+      "compatibility_impacts": [
+        "client-surface",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "interface.json-stream",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "JSONL event streams use bounded line framing.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/modes/rpc/jsonl.ts",
+          "anchors": [
+            "export function serializeJsonLine("
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.interface.json-stream",
+      "primary_scenario_id": "prime-parity.interface.json-stream",
+      "compatibility_impacts": [
+        "client-surface",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "interface.rpc",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "RPC clients expose the supported command and event surface.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/modes/rpc/rpc-mode.ts",
+          "anchors": [
+            "export async function runRpcMode("
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.interface.rpc",
+      "primary_scenario_id": "prime-parity.interface.rpc",
+      "compatibility_impacts": [
+        "client-surface",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "interface.sdk",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "The SDK creates and controls agent sessions through supported APIs.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/sdk.ts",
+          "anchors": [
+            "export async function createAgentSession("
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.interface.sdk",
+      "primary_scenario_id": "prime-parity.interface.sdk",
+      "compatibility_impacts": [
+        "client-surface",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "interface.tui-commands",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Interactive functional commands resolve through one command registry.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/slash-commands.ts",
+          "anchors": [
+            "export const BUILTIN_SLASH_COMMANDS"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.interface.tui-commands",
+      "primary_scenario_id": "prime-parity.interface.tui-commands",
+      "compatibility_impacts": [
+        "client-surface",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "interface.tui-extension-ui",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Extensions can request validated interactive UI operations.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/modes/rpc/rpc-types.ts",
+          "anchors": [
+            "export type RpcExtensionUIRequest"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.interface.tui-extension-ui",
+      "primary_scenario_id": "prime-parity.interface.tui-extension-ui",
+      "compatibility_impacts": [
+        "client-surface",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.auth",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Authentication stores API key and OAuth identities privately.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/auth-storage.ts",
+          "anchors": [
+            "export class AuthStorage"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.operation.auth",
+      "primary_scenario_id": "prime-parity.operation.auth",
+      "compatibility_impacts": [
+        "client-surface",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.autonomous-quality",
+      "domain_id": "operation.long-running",
+      "disposition": "mandatory",
+      "description": "Autonomous continuations obey finite limits and quality gates.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/autonomous.ts",
+          "anchors": [
+            "export interface AgentAutonomousConfig"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.operation.autonomous-quality",
+      "primary_scenario_id": "prime-parity.operation.autonomous-quality",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.controlled-update-restart",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Controlled update and restart preserve exact daemon identity.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/package-manager-cli.ts",
+          "anchors": [
+            "export function resolveUpdateDaemonSocketPath"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.operation.controlled-update-restart",
+      "primary_scenario_id": "prime-parity.operation.controlled-update-restart",
+      "compatibility_impacts": [
+        "client-surface",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.detach-attach-replay",
+      "domain_id": "operation.long-running",
+      "disposition": "mandatory",
+      "description": "Detach, attach and cursor replay preserve one session history.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/modes/daemon/daemon-protocol.ts",
+          "anchors": [
+            "type: \"attach\"",
+            "type: \"detach\""
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.operation.detach-attach-replay",
+      "primary_scenario_id": "prime-parity.operation.detach-attach-replay",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "implemented",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.doctor",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Diagnostics expose readiness and resource faults without private bodies.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/diagnostics.ts",
+          "anchors": [
+            "export interface ResourceDiagnostic"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.operation.doctor",
+      "primary_scenario_id": "prime-parity.operation.doctor",
+      "compatibility_impacts": [
+        "client-surface",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.goals",
+      "domain_id": "operation.long-running",
+      "disposition": "mandatory",
+      "description": "Persistent goals expose explicit active and terminal states.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/goals.ts",
+          "anchors": [
+            "export interface GoalState"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.operation.goals",
+      "primary_scenario_id": "prime-parity.operation.goals",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "implemented",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.heartbeat-agent",
+      "domain_id": "operation.long-running",
+      "disposition": "mandatory",
+      "description": "Multiple agent-created heartbeats retain owner and source.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/cron-jobs.ts",
+          "anchors": [
+            "export type AgentCronJobSource = \"cron\" | \"heartbeat\" | \"rlm_heartbeat\";"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.operation.heartbeat-agent",
+      "primary_scenario_id": "prime-parity.operation.heartbeat-agent",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.heartbeat-user",
+      "domain_id": "operation.long-running",
+      "disposition": "mandatory",
+      "description": "A user heartbeat is inspectable and controllable.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/modes/daemon/daemon-protocol.ts",
+          "anchors": [
+            "type: \"heartbeat_get\"",
+            "type: \"heartbeat_set\""
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.operation.heartbeat-user",
+      "primary_scenario_id": "prime-parity.operation.heartbeat-user",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.model-selection",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Model, thinking, service tier and transport selections are exact.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/agent-session.ts",
+          "anchors": [
+            "async setModel(",
+            "setServiceTier(",
+            "setThinkingLevel("
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.operation.model-selection",
+      "primary_scenario_id": "prime-parity.operation.model-selection",
+      "compatibility_impacts": [
+        "client-surface",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.orphan-cleanup",
+      "domain_id": "operation.long-running",
+      "disposition": "mandatory",
+      "description": "Shutdown and cancellation clear verified orphan processes.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/orphan-process-journal.ts",
+          "anchors": [
+            "export function clearOrphanProcessJournal("
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.operation.orphan-cleanup",
+      "primary_scenario_id": "prime-parity.operation.orphan-cleanup",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.resident-workers",
+      "domain_id": "operation.long-running",
+      "disposition": "mandatory",
+      "description": "Resident daemon workers host exact active sessions.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/modes/daemon/daemon-protocol.ts",
+          "anchors": [
+            "export const DAEMON_PROTOCOL_NAME"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.operation.resident-workers",
+      "primary_scenario_id": "prime-parity.operation.resident-workers",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.restart-update-recovery",
+      "domain_id": "operation.long-running",
+      "disposition": "mandatory",
+      "description": "Restart and update recovery fence predecessor and replacement identities.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/modes/daemon/daemon-protocol.ts",
+          "anchors": [
+            "type: \"restart\""
+          ]
+        },
+        {
+          "path": "packages/coding-agent/src/package-manager-cli.ts",
+          "anchors": [
+            "export function resolveUpdateDaemonSocketPath"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.operation.restart-update-recovery",
+      "primary_scenario_id": "prime-parity.operation.restart-update-recovery",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.schedule-once-cron",
+      "domain_id": "operation.long-running",
+      "disposition": "mandatory",
+      "description": "One-time and cron schedules execute under durable identities.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/cron-jobs.ts",
+          "anchors": [
+            "export type AgentCronScheduleKind = \"once\" | \"cron\" | \"interval\";"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.operation.schedule-once-cron",
+      "primary_scenario_id": "prime-parity.operation.schedule-once-cron",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.settings-keybindings",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Settings and keybindings resolve exact global and project scopes.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/keybindings.ts",
+          "anchors": [
+            "export class KeybindingsManager"
+          ]
+        },
+        {
+          "path": "packages/coding-agent/src/core/settings-manager.ts",
+          "anchors": [
+            "export class SettingsManager"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.operation.settings-keybindings",
+      "primary_scenario_id": "prime-parity.operation.settings-keybindings",
+      "compatibility_impacts": [
+        "client-surface",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.telemetry-usage",
+      "domain_id": "interfaces.operations",
+      "disposition": "mandatory",
+      "description": "Telemetry, tracing, token and cost reports remain safe and attributable.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/telemetry.ts",
+          "anchors": [
+            "export class TelemetryClient"
+          ]
+        },
+        {
+          "path": "packages/coding-agent/src/core/usage.ts",
+          "anchors": [
+            "export function emptyUsage("
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.operation.telemetry-usage",
+      "primary_scenario_id": "prime-parity.operation.telemetry-usage",
+      "compatibility_impacts": [
+        "client-surface",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "operation.worker-residency-eviction",
+      "domain_id": "operation.long-running",
+      "disposition": "mandatory",
+      "description": "Worker residency and eviction follow explicit idle policy.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/settings-manager.ts",
+          "anchors": [
+            "export const DEFAULT_IDLE_EVICTION_MINUTES = 90;"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.operation.worker-residency-eviction",
+      "primary_scenario_id": "prime-parity.operation.worker-residency-eviction",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-service"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "rlm.cancellation-teardown",
+      "domain_id": "rlm.programmatic",
+      "disposition": "mandatory",
+      "description": "Child cancellation and parent teardown leave no active descendants.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/rlm-runtime.ts",
+          "anchors": [
+            "export interface RlmSpawnHandle"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.rlm.cancellation-teardown",
+      "primary_scenario_id": "prime-parity.rlm.cancellation-teardown",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-api"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "rlm.child-model",
+      "domain_id": "rlm.programmatic",
+      "disposition": "mandatory",
+      "description": "Recursive children use an exact selected model.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/rlm-runtime.ts",
+          "anchors": [
+            "export interface RlmModelMatch"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.rlm.child-model",
+      "primary_scenario_id": "prime-parity.rlm.child-model",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-api"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "rlm.environment",
+      "domain_id": "rlm.programmatic",
+      "disposition": "mandatory",
+      "description": "A persistent IPython-compatible control environment survives turns.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/kernel/index.ts",
+          "anchors": [
+            "export class KernelManager"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.rlm.environment",
+      "primary_scenario_id": "prime-parity.rlm.environment",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-api"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "rlm.generated-program",
+      "domain_id": "rlm.programmatic",
+      "disposition": "mandatory",
+      "description": "Model-generated program execution is admitted and observable.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/rlm-runtime.ts",
+          "anchors": [
+            "export interface RlmRunRequest"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.rlm.generated-program",
+      "primary_scenario_id": "prime-parity.rlm.generated-program",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-api"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "rlm.messaging",
+      "domain_id": "rlm.programmatic",
+      "disposition": "mandatory",
+      "description": "Parent, child and sibling messages retain directional identities.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/agent-messages.ts",
+          "anchors": [
+            "export const AGENT_MESSAGE_CUSTOM_TYPE"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.rlm.messaging",
+      "primary_scenario_id": "prime-parity.rlm.messaging",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-api"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "rlm.recovery",
+      "domain_id": "rlm.programmatic",
+      "disposition": "mandatory",
+      "description": "Recoverable child and kernel state resumes from exact snapshots.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/kernel/state-snapshot.ts",
+          "anchors": [
+            "export interface RestoreResult"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.rlm.recovery",
+      "primary_scenario_id": "prime-parity.rlm.recovery",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-api"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "rlm.recursion-depth",
+      "domain_id": "rlm.programmatic",
+      "disposition": "mandatory",
+      "description": "Recursive child depth is explicitly bounded.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/rlm-max-depth.ts",
+          "anchors": [
+            "export interface RlmMaxDepthStatus"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.rlm.recursion-depth",
+      "primary_scenario_id": "prime-parity.rlm.recursion-depth",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-api"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "rlm.registry-lifecycle",
+      "domain_id": "rlm.programmatic",
+      "disposition": "mandatory",
+      "description": "Child registry entries support retention, listing and deletion.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/rlm-runtime.ts",
+          "anchors": [
+            "export interface RlmSubagentRegistryEntry"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.rlm.registry-lifecycle",
+      "primary_scenario_id": "prime-parity.rlm.registry-lifecycle",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-api"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "rlm.usage-cost",
+      "domain_id": "rlm.programmatic",
+      "disposition": "mandatory",
+      "description": "Child token and cost usage is attributed monotonically.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/usage.ts",
+          "anchors": [
+            "export function addAssistantUsage"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.rlm.usage-cost",
+      "primary_scenario_id": "prime-parity.rlm.usage-cost",
+      "compatibility_impacts": [
+        "authority-policy",
+        "gateway-private",
+        "host-api"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "session.branch-summaries-labels",
+      "domain_id": "session.context",
+      "disposition": "mandatory",
+      "description": "Branch summaries and labels remain attached to their branch identities.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/messages.ts",
+          "anchors": [
+            "export function createBranchSummaryMessage("
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.session.branch-summaries-labels",
+      "primary_scenario_id": "prime-parity.session.branch-summaries-labels",
+      "compatibility_impacts": [
+        "gateway-private",
+        "host-api"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "session.compaction",
+      "domain_id": "session.context",
+      "disposition": "mandatory",
+      "description": "Manual and automatic compaction preserve resumable context.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/compaction/compaction.ts",
+          "anchors": [
+            "export async function compact("
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.session.compaction",
+      "primary_scenario_id": "prime-parity.session.compaction",
+      "compatibility_impacts": [
+        "gateway-private",
+        "host-api"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "session.delivery",
+      "domain_id": "session.context",
+      "disposition": "mandatory",
+      "description": "Direct, steer and follow-up inputs preserve delivery semantics.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/agent-messages.ts",
+          "anchors": [
+            "export type AgentSessionMessageDeliveryMode"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.session.delivery",
+      "primary_scenario_id": "prime-parity.session.delivery",
+      "compatibility_impacts": [
+        "gateway-private",
+        "host-api"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "implemented",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "session.fork-clone",
+      "domain_id": "session.context",
+      "disposition": "mandatory",
+      "description": "Sessions fork at an entry and clone the active branch.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/modes/rpc/rpc-types.ts",
+          "anchors": [
+            "type: \"clone\"",
+            "type: \"fork\""
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.session.fork-clone",
+      "primary_scenario_id": "prime-parity.session.fork-clone",
+      "compatibility_impacts": [
+        "gateway-private",
+        "host-api"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "session.persistence-naming",
+      "domain_id": "session.context",
+      "disposition": "mandatory",
+      "description": "Persistent named sessions retain stable identities.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/session-manager.ts",
+          "anchors": [
+            "export class SessionManager"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.session.persistence-naming",
+      "primary_scenario_id": "prime-parity.session.persistence-naming",
+      "compatibility_impacts": [
+        "gateway-private",
+        "host-api"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "session.resume-delete",
+      "domain_id": "session.context",
+      "disposition": "mandatory",
+      "description": "Sessions resume by exact selector and delete with bounded artifacts.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/session-file-actions.ts",
+          "anchors": [
+            "export async function deleteSessionFile("
+          ]
+        },
+        {
+          "path": "packages/coding-agent/src/core/session-resolver.ts",
+          "anchors": [
+            "export async function resolveSessionPath("
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.session.resume-delete",
+      "primary_scenario_id": "prime-parity.session.resume-delete",
+      "compatibility_impacts": [
+        "gateway-private",
+        "host-api"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "session.rich-attachments",
+      "domain_id": "session.context",
+      "disposition": "mandatory",
+      "description": "Image and rich output attachments retain typed private references.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/tools/ipython.ts",
+          "anchors": [
+            "export function imageBlocksFromAttachments("
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.session.rich-attachments",
+      "primary_scenario_id": "prime-parity.session.rich-attachments",
+      "compatibility_impacts": [
+        "gateway-private",
+        "host-api"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "session.tree-navigation",
+      "domain_id": "session.context",
+      "disposition": "mandatory",
+      "description": "Conversation context trees support deterministic navigation.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/context-tree.ts",
+          "anchors": [
+            "export interface ContextTreeNode"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.session.tree-navigation",
+      "primary_scenario_id": "prime-parity.session.tree-navigation",
+      "compatibility_impacts": [
+        "gateway-private",
+        "host-api"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    },
+    {
+      "feature_id": "session.usage-status",
+      "domain_id": "session.context",
+      "disposition": "mandatory",
+      "description": "Session context, token and usage status are available safely.",
+      "prime_evidence": [
+        {
+          "path": "packages/coding-agent/src/core/session-stats.ts",
+          "anchors": [
+            "export interface SessionStats"
+          ]
+        }
+      ],
+      "asterion_entrypoint": "control.session.usage-status",
+      "primary_scenario_id": "prime-parity.session.usage-status",
+      "compatibility_impacts": [
+        "gateway-private",
+        "host-api"
+      ],
+      "provider_results": [
+        {
+          "provider_id": "asterion.native",
+          "status": "missing",
+          "evidence_ids": []
+        },
+        {
+          "provider_id": "asterion.prime-gateway",
+          "status": "missing",
+          "evidence_ids": []
+        }
+      ]
+    }
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "prime-parity.ecosystem.collision-diagnostics",
+      "feature_ids": [
+        "ecosystem.collision-diagnostics"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.ecosystem.context-files",
+      "feature_ids": [
+        "ecosystem.context-files"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.ecosystem.custom-providers-models",
+      "feature_ids": [
+        "ecosystem.custom-providers-models"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.ecosystem.extension-state-commands",
+      "feature_ids": [
+        "ecosystem.extension-state-commands"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.ecosystem.extensions-lifecycle",
+      "feature_ids": [
+        "ecosystem.extensions-lifecycle"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.ecosystem.mcp",
+      "feature_ids": [
+        "ecosystem.mcp"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.ecosystem.packages",
+      "feature_ids": [
+        "ecosystem.packages"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.ecosystem.prompt-templates",
+      "feature_ids": [
+        "ecosystem.prompt-templates"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.ecosystem.skills",
+      "feature_ids": [
+        "ecosystem.skills"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.ecosystem.tools",
+      "feature_ids": [
+        "ecosystem.tools"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.harness.evidence-refinement",
+      "feature_ids": [
+        "harness.evidence-refinement"
+      ],
+      "boundary": "bounded-provider",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.harness.history-snapshots",
+      "feature_ids": [
+        "harness.history-snapshots"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.harness.memory-entries",
+      "feature_ids": [
+        "harness.memory-entries"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.harness.prompt-entries",
+      "feature_ids": [
+        "harness.prompt-entries"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.harness.rollback",
+      "feature_ids": [
+        "harness.rollback"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.harness.scope-isolation",
+      "feature_ids": [
+        "harness.scope-isolation"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.harness.skill-descriptions",
+      "feature_ids": [
+        "harness.skill-descriptions"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.harness.subagent-specifications",
+      "feature_ids": [
+        "harness.subagent-specifications"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.interface.acp",
+      "feature_ids": [
+        "interface.acp"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.interface.cli-interactive",
+      "feature_ids": [
+        "interface.cli-interactive"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.interface.export-share",
+      "feature_ids": [
+        "interface.export-share"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.interface.headless-print",
+      "feature_ids": [
+        "interface.headless-print"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.interface.json-stream",
+      "feature_ids": [
+        "interface.json-stream"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.interface.rpc",
+      "feature_ids": [
+        "interface.rpc"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.interface.sdk",
+      "feature_ids": [
+        "interface.sdk"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.interface.tui-commands",
+      "feature_ids": [
+        "interface.tui-commands"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.interface.tui-extension-ui",
+      "feature_ids": [
+        "interface.tui-extension-ui"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.auth",
+      "feature_ids": [
+        "operation.auth"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.autonomous-quality",
+      "feature_ids": [
+        "operation.autonomous-quality"
+      ],
+      "boundary": "bounded-provider",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.controlled-update-restart",
+      "feature_ids": [
+        "operation.controlled-update-restart"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.detach-attach-replay",
+      "feature_ids": [
+        "operation.detach-attach-replay"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.doctor",
+      "feature_ids": [
+        "operation.doctor"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.goals",
+      "feature_ids": [
+        "operation.goals"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.heartbeat-agent",
+      "feature_ids": [
+        "operation.heartbeat-agent"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.heartbeat-user",
+      "feature_ids": [
+        "operation.heartbeat-user"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.model-selection",
+      "feature_ids": [
+        "operation.model-selection"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.orphan-cleanup",
+      "feature_ids": [
+        "operation.orphan-cleanup"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.resident-workers",
+      "feature_ids": [
+        "operation.resident-workers"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.restart-update-recovery",
+      "feature_ids": [
+        "operation.restart-update-recovery"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.schedule-once-cron",
+      "feature_ids": [
+        "operation.schedule-once-cron"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.settings-keybindings",
+      "feature_ids": [
+        "operation.settings-keybindings"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.telemetry-usage",
+      "feature_ids": [
+        "operation.telemetry-usage"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.operation.worker-residency-eviction",
+      "feature_ids": [
+        "operation.worker-residency-eviction"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.rlm.cancellation-teardown",
+      "feature_ids": [
+        "rlm.cancellation-teardown"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.rlm.child-model",
+      "feature_ids": [
+        "rlm.child-model"
+      ],
+      "boundary": "bounded-provider",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.rlm.environment",
+      "feature_ids": [
+        "rlm.environment"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.rlm.generated-program",
+      "feature_ids": [
+        "rlm.generated-program"
+      ],
+      "boundary": "bounded-provider",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.rlm.messaging",
+      "feature_ids": [
+        "rlm.messaging"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.rlm.recovery",
+      "feature_ids": [
+        "rlm.recovery"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.rlm.recursion-depth",
+      "feature_ids": [
+        "rlm.recursion-depth"
+      ],
+      "boundary": "bounded-provider",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.rlm.registry-lifecycle",
+      "feature_ids": [
+        "rlm.registry-lifecycle"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.rlm.usage-cost",
+      "feature_ids": [
+        "rlm.usage-cost"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.session.branch-summaries-labels",
+      "feature_ids": [
+        "session.branch-summaries-labels"
+      ],
+      "boundary": "bounded-provider",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.session.compaction",
+      "feature_ids": [
+        "session.compaction"
+      ],
+      "boundary": "bounded-provider",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.session.delivery",
+      "feature_ids": [
+        "session.delivery"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.session.fork-clone",
+      "feature_ids": [
+        "session.fork-clone"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.session.persistence-naming",
+      "feature_ids": [
+        "session.persistence-naming"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.session.resume-delete",
+      "feature_ids": [
+        "session.resume-delete"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.session.rich-attachments",
+      "feature_ids": [
+        "session.rich-attachments"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.session.tree-navigation",
+      "feature_ids": [
+        "session.tree-navigation"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    },
+    {
+      "scenario_id": "prime-parity.session.usage-status",
+      "feature_ids": [
+        "session.usage-status"
+      ],
+      "boundary": "real-prime-provider-free",
+      "deterministic": true,
+      "fault_ids": [
+        "restart-after-admission"
+      ],
+      "assertion_ids": [
+        "authority-preserved",
+        "feature-reachable",
+        "identity-stable",
+        "public-redacted"
+      ]
+    }
+  ],
+  "evidence": []
+}

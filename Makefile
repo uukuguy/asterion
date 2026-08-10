@@ -21,6 +21,7 @@ ASTERION_PRIME_MAX_COST_MICROS ?=
 .PHONY: dci-basic-example dci-runtime-context-example
 .PHONY: test-typescript test-rust check-rust
 .PHONY: prime-check prime-setup prime-verify-provider-free prime-verify-bounded
+.PHONY: prime-parity-inventory prime-verify-system-parity
 
 help:
 	@echo "provider-free setup (network/disk; Agent operations 0; Judge operations 0): setup setup-pi setup-resources-basic setup-resources-benchmark"
@@ -31,7 +32,7 @@ help:
 	@echo "DCI adapter: dci-list dci-describe dci-preflight dci-basic dci-complete dci-run dci-benchmark"
 	@echo "DCI bounded examples: dci-basic-example dci-runtime-context-example"
 	@echo "Cross-language provider-free: test-typescript test-rust check-rust"
-	@echo "Prime Gateway: prime-check prime-setup prime-verify-provider-free prime-verify-bounded"
+	@echo "Prime Gateway: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-parity-inventory prime-verify-system-parity"
 	@echo "Cost boundary: full execution requires separate authorization"
 	@echo "Arguments: ASTERION_ARGS='...' or DCI_ARGS='...'"
 
@@ -147,6 +148,12 @@ prime-verify-provider-free:
 
 prime-verify-bounded:
 	$(UV_BIN) run python tools/verify_prime_loop.py --level bounded --source-root "$(ASTERION_PRIME_SOURCE_ROOT)" --authority "$(ASTERION_PRIME_AUTHORITY)" --max-cost-micros "$(ASTERION_PRIME_MAX_COST_MICROS)"
+
+prime-parity-inventory:
+	$(UV_BIN) run python tools/check_prime_parity.py --claim inventory
+
+prime-verify-system-parity:
+	$(UV_BIN) run python tools/check_prime_parity.py --claim verified-system-parity
 
 dci-basic-example:
 	bash examples/asterion_dci_basic_example.sh

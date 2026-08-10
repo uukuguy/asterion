@@ -211,7 +211,7 @@ git commit -m "feat: add closed parity ledger model"
 
 ### Task 2: Pin the exhaustive Prime feature and scenario ledger
 
-**Status:** In progress.
+**Status:** Completed.
 
 **Files:**
 - Create: `tests/fixtures/prime-parity/v1/prime-agent-0.7.1.json`
@@ -303,6 +303,8 @@ git commit -m "test: pin prime system parity inventory"
 ```
 
 ### Task 3: Create the shared parity-scenario registry
+
+**Status:** In progress.
 
 **Files:**
 - Create: `src/asterion/control/parity_testing.py`

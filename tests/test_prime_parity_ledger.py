@@ -17,6 +17,98 @@ from asterion.control.parity import (
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "prime-parity" / "v1"
 
+EXPECTED_MANDATORY_BY_DOMAIN = {
+    "ecosystem.capabilities": (
+        "ecosystem.collision-diagnostics",
+        "ecosystem.context-files",
+        "ecosystem.custom-providers-models",
+        "ecosystem.extension-state-commands",
+        "ecosystem.extensions-lifecycle",
+        "ecosystem.mcp",
+        "ecosystem.packages",
+        "ecosystem.prompt-templates",
+        "ecosystem.skills",
+        "ecosystem.tools",
+    ),
+    "harness.continual": (
+        "harness.evidence-refinement",
+        "harness.history-snapshots",
+        "harness.memory-entries",
+        "harness.prompt-entries",
+        "harness.rollback",
+        "harness.scope-isolation",
+        "harness.skill-descriptions",
+        "harness.subagent-specifications",
+    ),
+    "interfaces.operations": (
+        "interface.acp",
+        "interface.cli-interactive",
+        "interface.export-share",
+        "interface.headless-print",
+        "interface.json-stream",
+        "interface.rpc",
+        "interface.sdk",
+        "interface.tui-commands",
+        "interface.tui-extension-ui",
+        "operation.auth",
+        "operation.controlled-update-restart",
+        "operation.doctor",
+        "operation.model-selection",
+        "operation.settings-keybindings",
+        "operation.telemetry-usage",
+    ),
+    "operation.long-running": (
+        "operation.autonomous-quality",
+        "operation.detach-attach-replay",
+        "operation.goals",
+        "operation.heartbeat-agent",
+        "operation.heartbeat-user",
+        "operation.orphan-cleanup",
+        "operation.resident-workers",
+        "operation.restart-update-recovery",
+        "operation.schedule-once-cron",
+        "operation.worker-residency-eviction",
+    ),
+    "rlm.programmatic": (
+        "rlm.cancellation-teardown",
+        "rlm.child-model",
+        "rlm.environment",
+        "rlm.generated-program",
+        "rlm.messaging",
+        "rlm.recovery",
+        "rlm.recursion-depth",
+        "rlm.registry-lifecycle",
+        "rlm.usage-cost",
+    ),
+    "session.context": (
+        "session.branch-summaries-labels",
+        "session.compaction",
+        "session.delivery",
+        "session.fork-clone",
+        "session.persistence-naming",
+        "session.resume-delete",
+        "session.rich-attachments",
+        "session.tree-navigation",
+        "session.usage-status",
+    ),
+}
+EXPECTED_MANDATORY_FEATURE_IDS = tuple(
+    sorted(
+        feature_id
+        for feature_ids in EXPECTED_MANDATORY_BY_DOMAIN.values()
+        for feature_id in feature_ids
+    )
+)
+EXPECTED_EXCLUDED_FEATURE_IDS = (
+    "excluded.hidden-reasoning-identity",
+    "excluded.tui-pixel-identity",
+)
+EXPECTED_IMPLEMENTED_PRIME_FEATURE_IDS = (
+    "operation.detach-attach-replay",
+    "operation.goals",
+    "session.delivery",
+)
+
 
 def _fixture(name: str = "valid-ledger-minimal.json") -> dict[str, object]:
     value = json.loads((FIXTURES / name).read_text(encoding="utf-8"))
@@ -309,6 +401,84 @@ class TestPrimeParityLedger(unittest.TestCase):
 
         with self.assertRaises(ParityLedgerError):
             validate_parity_ledger(value)
+
+    def test_exhaustive_prime_inventory_is_exact_closed_and_honest(self) -> None:
+        source = _fixture("prime-agent-0.7.1.json")
+        ledger = validate_parity_ledger(source)
+        features = ledger["features"]
+        scenarios = ledger["scenarios"]
+        assert isinstance(features, tuple)
+        assert isinstance(scenarios, tuple)
+        feature_by_id = {
+            str(feature["feature_id"]): feature
+            for feature in features
+            if isinstance(feature, Mapping)
+        }
+        mandatory = tuple(
+            feature_id
+            for feature_id, feature in feature_by_id.items()
+            if feature["disposition"] == "mandatory"
+        )
+        excluded = tuple(
+            feature_id
+            for feature_id, feature in feature_by_id.items()
+            if feature["disposition"] == "excluded"
+        )
+
+        self.assertEqual(len(feature_by_id), 63)
+        self.assertEqual(mandatory, EXPECTED_MANDATORY_FEATURE_IDS)
+        self.assertEqual(excluded, EXPECTED_EXCLUDED_FEATURE_IDS)
+        self.assertEqual(len(scenarios), 61)
+        self.assertEqual(
+            tuple(str(scenario["scenario_id"]) for scenario in scenarios),
+            tuple(f"prime-parity.{feature_id}" for feature_id in mandatory),
+        )
+        for domain_id, expected in EXPECTED_MANDATORY_BY_DOMAIN.items():
+            with self.subTest(domain_id=domain_id):
+                self.assertEqual(
+                    tuple(
+                        feature_id
+                        for feature_id in mandatory
+                        if feature_by_id[feature_id]["domain_id"] == domain_id
+                    ),
+                    expected,
+                )
+
+        implemented_prime: list[str] = []
+        for feature_id in mandatory:
+            feature = feature_by_id[feature_id]
+            results = feature["provider_results"]
+            assert isinstance(results, tuple)
+            result_by_provider = {
+                str(result["provider_id"]): result
+                for result in results
+                if isinstance(result, Mapping)
+            }
+            self.assertEqual(result_by_provider["asterion.native"]["status"], "missing")
+            prime_status = result_by_provider["asterion.prime-gateway"]["status"]
+            if prime_status == "implemented":
+                implemented_prime.append(feature_id)
+            else:
+                self.assertEqual(prime_status, "missing")
+        self.assertEqual(tuple(implemented_prime), EXPECTED_IMPLEMENTED_PRIME_FEATURE_IDS)
+
+        index = json.loads(
+            (FIXTURES / "feature-index.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            set(index),
+            {"format", "ledger_id", "feature_ids"},
+        )
+        self.assertEqual(index["format"], "asterion.parity-feature-index/v1")
+        self.assertEqual(index["ledger_id"], "prime-agent-0.7.1")
+        self.assertEqual(
+            tuple(index["feature_ids"]),
+            tuple(
+                sorted(
+                    (*EXPECTED_EXCLUDED_FEATURE_IDS, *EXPECTED_MANDATORY_FEATURE_IDS)
+                )
+            ),
+        )
 
 
 if __name__ == "__main__":

@@ -152,6 +152,30 @@ def verify_prime_source(
     node_executable: str = "node",
     runner: Runner = _default_runner,
 ) -> PrimeSetupReport:
+    report = verify_prime_checkout(
+        source_root,
+        lock_path=lock_path,
+        runner=runner,
+    )
+    root = _source_root(source_root)
+    with tempfile.TemporaryDirectory(prefix="asterion-prime-check-") as temporary:
+        environment = _closed_environment(Path(temporary))
+        node = _run(runner, (node_executable, "--version"), root, environment)
+        if node.returncode != 0 or not _supported_node(node.stdout.strip()):
+            raise PrimeSetupError(
+                "Prime setup requires compatible Node.js 22.8.0 through 22.x"
+            )
+    return report
+
+
+def verify_prime_checkout(
+    source_root: Path,
+    *,
+    lock_path: Path | None = None,
+    runner: Runner = _default_runner,
+) -> PrimeSetupReport:
+    """Verify the pinned clean checkout without testing a Node runtime."""
+
     lock = load_prime_artifact_lock(lock_path)
     root = _source_root(source_root)
     _verify_files(root, lock)
@@ -181,11 +205,6 @@ def verify_prime_source(
         ):
             raise PrimeSetupError(
                 "Prime source checkout is not the pinned clean revision"
-            )
-        node = _run(runner, (node_executable, "--version"), root, environment)
-        if node.returncode != 0 or not _supported_node(node.stdout.strip()):
-            raise PrimeSetupError(
-                "Prime setup requires compatible Node.js 22.8.0 through 22.x"
             )
     return _report(lock, installed=False)
 
