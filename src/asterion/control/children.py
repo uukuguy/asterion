@@ -586,29 +586,35 @@ class ChildSessionService:
             await self._finish_known(binding, "completed", receipt.receipt_ref)
             return receipt
         except asyncio.CancelledError:
+            close_failed = False
             if journal is not None:
                 journal.close()
             if runtime is not None:
                 try:
                     await _close_runtime(runtime)
                 except Exception:
-                    pass
+                    close_failed = True
                 if runtime.host is None and nested_children is not None:
                     try:
                         await nested_children.close()
                     except Exception:
-                        pass
+                        close_failed = True
             elif nested_children is not None:
                 try:
                     await nested_children.close()
                 except Exception:
-                    pass
+                    close_failed = True
             async with self._lock:
+                entry = self._entries.get(binding.child_id)
+                if entry is not None and entry.runtime is None and runtime is not None:
+                    entry.runtime = runtime
                 self._statuses[binding.child_id] = ChildSessionStatus(
                     binding.child_id, "cancelled", binding.action_id
                 )
             if not self._closing:
                 raise
+            if not close_failed:
+                await self._finish_known(binding, "cancelled")
             raise ActionExecutionFailure(
                 "cancelled", "child-close-cancelled", None
             ) from None

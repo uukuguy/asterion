@@ -1235,6 +1235,49 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(clients[0].closed)
             self.assertEqual(closed_nested_roots, [root / "children" / "child-1"])
 
+    async def test_close_before_attach_cancels_spawn_and_prevents_late_attach(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audit: list[str] = []
+            clients: list[WaitingChildClient] = []
+            entered = asyncio.Event()
+            release = asyncio.Event()
+            attached: list[str] = []
+            service = ChildSessionService(
+                plan=_plan(root),
+                authority=_child_envelope(),
+                control_factories=_registry(audit, clients),
+                private_root=root,
+                content=RecordingResolver(),
+                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
+                clock_ms=lambda: 1_000,
+            )
+            original_attach = service._attach_runtime
+
+            async def gated_attach(child_id: str, runtime: object) -> None:
+                entered.set()
+                await release.wait()
+                await original_attach(child_id, runtime)  # type: ignore[arg-type]
+                attached.append(child_id)
+
+            service._attach_runtime = gated_attach  # type: ignore[method-assign]
+            spawn = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            self.assertEqual(audit.count("child.provider.create"), 1)
+            self.assertEqual(len(clients), 1)
+
+            await asyncio.wait_for(service.close(), timeout=1)
+            result = await asyncio.gather(spawn, return_exceptions=True)
+            release.set()
+            await asyncio.sleep(0)
+
+            self.assertIsInstance(result[0], (asyncio.CancelledError, ActionExecutionFailure))
+            self.assertTrue(clients[0].closed)
+            self.assertEqual(attached, [])
+            self.assertEqual(service.active_ids, ())
+            with self.assertRaises(ChildSessionError):
+                await service.spawn(_child_proposal(), MutableSignal())
+
     async def test_missing_private_goal_is_a_known_pre_fence_failure(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
