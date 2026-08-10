@@ -380,6 +380,29 @@ class TestChildAuthority(unittest.TestCase):
 
 
 class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
+    async def test_cancelled_duplicate_waiter_does_not_cancel_shared_spawn(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audit: list[str] = []
+            clients: list[WaitingChildClient] = []
+            service = ChildSessionService(
+                plan=_plan(root), authority=_child_envelope(),
+                control_factories=_registry(audit, clients), private_root=root,
+                content=RecordingResolver(),
+                child_action_executor_factory=lambda authority: ChildWorkExecutor(audit),
+                clock_ms=lambda: 1_000,
+            )
+            first = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
+            await asyncio.sleep(0)
+            second = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
+            first.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await first
+            receipt = await second
+            self.assertEqual(receipt.action_id, "spawn-action-1")
+            self.assertEqual(audit.count("child.provider.create"), 1)
+            self.assertEqual(service.active_ids, ())
+
     async def test_concurrent_close_waiters_share_shielded_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

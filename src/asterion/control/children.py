@@ -723,7 +723,11 @@ class ChildSessionService:
 
     async def _close_impl(self) -> None:
         """Cancel, drain, close, and release while the service remains closing."""
-        await self.cancel_all()
+        cancellation_failed = False
+        try:
+            await self.cancel_all()
+        except Exception:
+            cancellation_failed = True
         async with self._lock:
             tasks = tuple(entry.task for entry in self._entries.values())
         for task in tasks:
@@ -737,7 +741,7 @@ class ChildSessionService:
                 for _, entry in sorted(self._entries.items())
                 if entry.runtime is not None
             )
-        failures = False
+        failures = cancellation_failed
         for binding, runtime in active:
             assert runtime is not None
             try:
