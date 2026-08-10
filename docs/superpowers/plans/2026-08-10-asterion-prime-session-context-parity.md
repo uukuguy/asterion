@@ -1,6 +1,6 @@
 # Asterion Prime Session/Context Parity Implementation Plan
 
-> Status: Tasks 4.1-4.9 verified; Task 4.10 labels and bounded model operations is next.
+> Status: Tasks 4.1-4.10 provider-free implementation verified; Task 4.11 exact scenario registration is next. The two bounded-provider scenarios remain external-limited pending explicit finite authorization.
 >
 > Program parent: `2026-08-10-asterion-prime-system-parity.md`, Task 4.
 >
@@ -677,6 +677,18 @@ independent review found no findings.
 Commit: `feat: deliver private prime attachments exactly once`.
 
 ### Task 4.10: Implement labels and bounded model operations
+
+**Status:** Provider-free implementation verified. Private labels set and clear
+through stable deferred results; manual compaction and branch summary keep
+auto-compaction disabled, persist an exact pre-dispatch usage baseline, enforce
+one in-flight transcript model mutation, reconcile bounded safe deltas, and
+publish only closed IDs, digests and usage. Rejection, zero-budget admission,
+cancellation, six atomic preparation faults, result-before-commit restart and
+post-effect/daemon uncertainty are covered. Uncertain receipts durably fence
+host mutations while retaining safe reads. TypeScript/Python focused suites,
+Pyright, lint, promotion and independent review pass. No real model budget was
+authorized, so bounded evidence remains external-limited and the second
+evidence-only commit is intentionally not made.
 
 **Modify:** Prime session/Gateway modules, authority reconciliation and tests.
 

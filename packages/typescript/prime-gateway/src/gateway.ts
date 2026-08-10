@@ -16,6 +16,7 @@ import type {
 import type {
   GatewayDurableStore,
   GatewayContextBinding,
+  GatewayContextModelBaseline,
   PrimeIdentityBinding,
 } from "./durable-store.js";
 import {
@@ -53,6 +54,12 @@ import type {
 import type {
   PrimeContextDescription,
   PrimeContextNameResult,
+  PrimeContextLabelResult,
+  PrimeContextModelBaseline,
+  PrimeContextModelBudget,
+  PrimeContextCompactionResult,
+  PrimeContextBranchSummaryResult,
+  PrimeContextModelOutcome,
   PrimeContextStatus,
   PrimeContinuationDeleteResult,
   PrimeContinuationLocator,
@@ -103,7 +110,42 @@ export interface PrimeGatewaySession {
     commandId: string,
     name: string,
   ): Promise<PrimeContextNameResult>;
+  setContextLabel(
+    commandId: string,
+    continuationId: string,
+    entryId: string,
+    label: string | null,
+  ): Promise<PrimeContextLabelResult>;
+  measureContextModelBaseline(
+    commandId: string,
+    continuationId: string,
+    selectedEntryId?: string,
+  ): Promise<PrimeContextModelBaseline>;
+  compactContext(
+    commandId: string,
+    continuationId: string,
+    instructions: string | null,
+    budget: PrimeContextModelBudget,
+    baseline: PrimeContextModelBaseline,
+  ): Promise<PrimeContextModelOutcome<PrimeContextCompactionResult>>;
+  summarizeContextBranch(
+    commandId: string,
+    continuationId: string,
+    entryId: string,
+    instructions: string | null,
+    budget: PrimeContextModelBudget,
+    baseline: PrimeContextModelBaseline,
+  ): Promise<PrimeContextModelOutcome<PrimeContextBranchSummaryResult>>;
+  abortContextModelOperation(
+    commandId: string,
+    operation: "session.branch.summarize" | "session.compact",
+  ): Promise<void>;
   acknowledgeContext(commandId: string): boolean;
+  acknowledgeLabel(commandId: string): boolean;
+  acknowledgeContextModelOperation(
+    commandId: string,
+    operation: "session.branch.summarize" | "session.compact",
+  ): boolean;
   resumeContinuation(
     commandId: string,
     target: PrimeContinuationLocator,
@@ -280,6 +322,7 @@ interface CommandExecution {
 
 interface ContextExecution {
   readonly digest: string;
+  readonly command: SessionContextCommand;
   readonly promise: Promise<SessionContextReceipt>;
   settled: boolean;
 }
@@ -321,6 +364,7 @@ export class PrimeGateway {
   private readonly attachmentClaims = new Map<string, string>();
   private readonly commandExecutions = new Map<string, CommandExecution>();
   private readonly contextExecutions = new Map<string, ContextExecution>();
+  private modelContextClaim: string | undefined;
   private readonly reservedEvents = new Map<number, ReservedEventIdentity>();
   private readonly now: () => string;
   private nextSequence: number;
@@ -365,10 +409,16 @@ export class PrimeGateway {
     for (const operation of options.store.contextOperations()) {
       this.contextExecutions.set(operation.command.command_id, {
         digest: sha256Hex(canonicalJsonBytes(operation.command)),
+        command: operation.command,
         promise: Promise.resolve(operation.receipt),
         settled: true,
       });
     }
+    const preparedModels = options.store.preparedContextModelOperations();
+    if (preparedModels.length > 1) {
+      throw new PrimeGatewayError();
+    }
+    this.modelContextClaim = preparedModels[0]?.command.command_id;
     for (const command of options.store.acceptedContextCommands()) {
       if (command.operation !== "session.attachment.bind") {
         continue;
@@ -613,6 +663,18 @@ export class PrimeGateway {
       }
       this.attachmentClaims.set(claimKey, command.command_id);
     }
+    if (
+      command.operation === "session.compact" ||
+      command.operation === "session.branch.summarize"
+    ) {
+      if (
+        this.modelContextClaim !== undefined &&
+        this.modelContextClaim !== command.command_id
+      ) {
+        throw new PrimeGatewayError();
+      }
+      this.modelContextClaim = command.command_id;
+    }
     const executor = this.options.sessionContext ?? this.nativeContextExecutor();
     let execution: ContextExecution;
     const promise = this.persistAndExecuteSessionContext(
@@ -622,25 +684,34 @@ export class PrimeGateway {
     )
       .then((receipt) => {
         execution.settled = true;
+        if (this.modelContextClaim === command.command_id) {
+          this.modelContextClaim = undefined;
+        }
         return receipt;
       })
       .catch((error) => {
         if (this.contextExecutions.get(command.command_id) === execution) {
           this.contextExecutions.delete(command.command_id);
         }
+        if (
+          this.modelContextClaim === command.command_id &&
+          this.options.store.preparedContextModelOperation(command.command_id) ===
+            undefined
+        ) {
+          this.modelContextClaim = undefined;
+        }
         throw error;
       });
-    execution = { digest, promise, settled: false };
+    execution = { digest, command, promise, settled: false };
     this.contextExecutions.set(command.command_id, execution);
     return promise;
   }
 
   async cancelSessionContext(commandId: string): Promise<void> {
     this.assertOpen();
-    const executor = this.options.sessionContext;
+    const executor = this.options.sessionContext ?? this.nativeContextExecutor();
     const execution = this.contextExecutions.get(commandId);
     if (
-      executor === undefined ||
       !OPAQUE_ID.test(commandId) ||
       execution === undefined ||
       execution.settled
@@ -1171,6 +1242,115 @@ export class PrimeGateway {
             acknowledge: named.acknowledge,
           });
         }
+        if (command.operation === "session.label.set") {
+          this.assertActiveContinuation(command.payload.continuation_id);
+          const labelled = await session.setContextLabel(
+            command.command_id,
+            command.payload.continuation_id,
+            command.payload.entry_id,
+            command.payload.label_ref === null
+              ? null
+              : await this.options.privateValues.readInput(
+                command.payload.label_ref,
+              ),
+          );
+          return Object.freeze({
+            receipt: this.contextSuccessReceipt(command, {
+              continuation_id: labelled.result.continuationId,
+              entry_id: labelled.result.entryId,
+              label_sha256: labelled.result.labelSha256,
+            }),
+            nextBinding: null,
+            acknowledge: labelled.acknowledge,
+          });
+        }
+        if (
+          command.operation === "session.compact" ||
+          command.operation === "session.branch.summarize"
+        ) {
+          this.assertActiveContinuation(command.payload.continuation_id);
+          if (
+            command.payload.budget.controller_tokens === 0 ||
+            command.payload.budget.aggregate_tokens === 0
+          ) {
+            return Object.freeze({
+              receipt: this.contextTerminalReceipt(
+                command,
+                "rejected",
+                "provider-budget-unsupported",
+              ),
+              nextBinding: null,
+            });
+          }
+          const baseline = await this.prepareContextModelBaseline(command);
+          const instructions = command.payload.instructions_ref === null
+            ? null
+            : await this.options.privateValues.readInput(
+              command.payload.instructions_ref,
+            );
+          if (command.operation === "session.compact") {
+            const outcome = await session.compactContext(
+              command.command_id,
+              command.payload.continuation_id,
+              instructions,
+              command.payload.budget,
+              baseline,
+            );
+            if (outcome.status !== "succeeded") {
+              return Object.freeze({
+                receipt: this.contextTerminalReceipt(
+                  command,
+                  outcome.status,
+                  this.contextModelReasonCode(outcome.status),
+                ),
+                nextBinding: null,
+                acknowledge: outcome.acknowledge,
+              });
+            }
+            return Object.freeze({
+              receipt: this.contextSuccessReceipt(command, {
+                continuation_id: outcome.result.continuationId,
+                covered_leaf_id: outcome.result.coveredLeafId,
+                before_context_tokens: outcome.result.beforeContextTokens,
+                after_context_tokens: outcome.result.afterContextTokens,
+                summary_sha256: outcome.result.summarySha256,
+                usage: outcome.result.usage,
+              }),
+              nextBinding: null,
+              acknowledge: outcome.acknowledge,
+            });
+          }
+          const outcome = await session.summarizeContextBranch(
+            command.command_id,
+            command.payload.continuation_id,
+            command.payload.entry_id,
+            instructions,
+            command.payload.budget,
+            baseline,
+          );
+          if (outcome.status !== "succeeded") {
+            return Object.freeze({
+              receipt: this.contextTerminalReceipt(
+                command,
+                outcome.status,
+                this.contextModelReasonCode(outcome.status),
+              ),
+              nextBinding: null,
+              acknowledge: outcome.acknowledge,
+            });
+          }
+          return Object.freeze({
+            receipt: this.contextSuccessReceipt(command, {
+              continuation_id: outcome.result.continuationId,
+              previous_leaf_id: outcome.result.previousLeafId,
+              current_leaf_id: outcome.result.currentLeafId,
+              summary_sha256: outcome.result.summarySha256,
+              usage: outcome.result.usage,
+            }),
+            nextBinding: null,
+            acknowledge: outcome.acknowledge,
+          });
+        }
         if (command.operation === "session.tree.read") {
           this.assertActiveContinuation(command.payload.continuation_id);
           const tree = await session.readContextTree(
@@ -1284,8 +1464,19 @@ export class PrimeGateway {
         }
         throw new PrimeGatewayError();
       },
-      cancel: async () => {
-        throw new PrimeGatewayError();
+      cancel: async (commandId: string) => {
+        const execution = this.contextExecutions.get(commandId);
+        if (
+          execution === undefined ||
+          (execution.command.operation !== "session.compact" &&
+            execution.command.operation !== "session.branch.summarize")
+        ) {
+          throw new PrimeGatewayError();
+        }
+        await session.abortContextModelOperation(
+          commandId,
+          execution.command.operation,
+        );
       },
     });
   }
@@ -1310,6 +1501,37 @@ export class PrimeGateway {
         result,
       },
     });
+  }
+
+  private contextTerminalReceipt(
+    command: SessionContextCommand,
+    status: "cancelled" | "rejected" | "uncertain",
+    reasonCode: string,
+  ): SessionContextReceipt {
+    return validateSessionContextReceipt({
+      protocol: "asterion.session-context/v1",
+      receipt_id: `context-${sha256Hex(
+        canonicalJsonBytes({ command_id: command.command_id, status }),
+      ).slice(0, 32)}`,
+      command_id: command.command_id,
+      session_id: command.session_id,
+      generation: command.generation,
+      operation: command.operation,
+      status,
+      reason_code: reasonCode,
+      payload: { evidence_ref: null, result: null },
+    });
+  }
+
+  private contextModelReasonCode(
+    status: "cancelled" | "rejected" | "uncertain",
+  ): string {
+    if (status === "cancelled") {
+      return "provider-cancelled";
+    }
+    return status === "uncertain"
+      ? "provider-outcome-uncertain"
+      : "provider-rejected";
   }
 
   private contextStatus(): PrimeContextStatus {
@@ -1384,6 +1606,16 @@ export class PrimeGateway {
     try {
       if (command.operation === "session.name.set") {
         this.session.acknowledgeContext(command.command_id);
+      } else if (command.operation === "session.label.set") {
+        this.session.acknowledgeLabel(command.command_id);
+      } else if (
+        command.operation === "session.compact" ||
+        command.operation === "session.branch.summarize"
+      ) {
+        this.session.acknowledgeContextModelOperation(
+          command.command_id,
+          command.operation,
+        );
       } else if (
         command.operation === "session.continuation.resume" ||
         command.operation === "session.continuation.delete"
@@ -1488,6 +1720,50 @@ export class PrimeGateway {
     );
     this.assertContinuationTarget(replay, targetId);
     return replay;
+  }
+
+  private async prepareContextModelBaseline(
+    command: Extract<
+      SessionContextCommand,
+      {
+        readonly operation:
+          | "session.branch.summarize"
+          | "session.compact";
+      }
+    >,
+  ): Promise<GatewayContextModelBaseline> {
+    const existing = this.options.store.preparedContextModelOperation(
+      command.command_id,
+    );
+    if (existing !== undefined) {
+      if (
+        existing.commandId !== command.command_id ||
+        existing.continuationId !== command.payload.continuation_id
+      ) {
+        throw new PrimeGatewayError();
+      }
+      return existing;
+    }
+    const measured = await this.requireSession().measureContextModelBaseline(
+      command.command_id,
+      command.payload.continuation_id,
+      command.operation === "session.branch.summarize"
+        ? command.payload.entry_id
+        : undefined,
+    );
+    await this.enqueueDurable(
+      () => this.options.store.prepareContextModelOperation(
+        command.command_id,
+        measured,
+      ),
+    );
+    const prepared = this.options.store.preparedContextModelOperation(
+      command.command_id,
+    );
+    if (prepared === undefined) {
+      throw new PrimeGatewayError();
+    }
+    return prepared;
   }
 
   private assertActiveContinuation(continuationId: string): void {
@@ -2349,6 +2625,7 @@ export class PrimeGateway {
       );
       this.contextExecutions.set(command.command_id, {
         digest: sha256Hex(canonicalJsonBytes(command)),
+        command,
         promise: Promise.resolve(receipt),
         settled: true,
       });

@@ -164,6 +164,11 @@ test("daemon wire admits only the pinned session command shapes", () => {
     { type: "abort_branch_summary", activeSessionId: "prime-root" },
     { type: "abort_compaction", activeSessionId: "prime-root" },
     {
+      type: "set_auto_compaction",
+      activeSessionId: "prime-root",
+      enabled: false,
+    },
+    {
       type: "compact",
       activeSessionId: "prime-root",
       customInstructions: "private compact instructions",
@@ -225,6 +230,11 @@ test("daemon wire admits only the pinned session command shapes", () => {
 
   for (const command of [
     { type: "clone", activeSessionId: "prime-root" },
+    {
+      type: "set_auto_compaction",
+      activeSessionId: "prime-root",
+      enabled: true,
+    },
     { type: "toString", activeSessionId: "prime-root" },
     {
       type: "fork",

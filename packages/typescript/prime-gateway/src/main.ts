@@ -1130,6 +1130,7 @@ async function createSidecarFromDescriptor(
         sessionPath: identity.sessionPath,
       });
       return (async () => {
+        await session.ensureManualCompactionOnly("restore-policy");
         const cursor = store.snapshot().primeCursor;
         if (cursor === undefined) {
           throw new PrimeGatewayError();

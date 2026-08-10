@@ -130,6 +130,60 @@ export interface PrimeContextNameResult {
   acknowledge(): boolean;
 }
 
+export interface PrimeContextLabelResult {
+  readonly result: Readonly<{
+    readonly continuationId: string;
+    readonly entryId: string;
+    readonly labelSha256: string | null;
+  }>;
+  acknowledge(): boolean;
+}
+
+export interface PrimeContextModelBudget {
+  readonly controller_tokens: number;
+  readonly application_tokens: number;
+  readonly child_tokens: number;
+  readonly aggregate_tokens: number;
+  readonly cost_micros: number;
+  readonly deadline_ms: number;
+}
+
+export interface PrimeContextModelBaseline {
+  readonly commandId: string;
+  readonly continuationId: string;
+  readonly leafId: string | null;
+  readonly contextTokens: number;
+  readonly controllerTokens: number;
+  readonly costMicros: number;
+}
+
+export type PrimeContextModelOutcome<T> = Readonly<{
+  readonly status: "succeeded";
+  readonly result: Readonly<T>;
+  acknowledge(): boolean;
+}> | Readonly<{
+  readonly status: "cancelled" | "rejected" | "uncertain";
+  readonly result: null;
+  acknowledge(): boolean;
+}>;
+
+export interface PrimeContextCompactionResult {
+  readonly continuationId: string;
+  readonly coveredLeafId: string;
+  readonly beforeContextTokens: number;
+  readonly afterContextTokens: number;
+  readonly summarySha256: string;
+  readonly usage: PrimeContextUsage;
+}
+
+export interface PrimeContextBranchSummaryResult {
+  readonly continuationId: string;
+  readonly previousLeafId: string | null;
+  readonly currentLeafId: string;
+  readonly summarySha256: string;
+  readonly usage: PrimeContextUsage;
+}
+
 export interface PrimeContinuationLocator extends PrimeSessionIdentity {
   readonly continuationId: string;
   readonly sessionPath: string;
@@ -228,6 +282,84 @@ function nonNegativeInteger(value: unknown): value is number {
 
 function positiveInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) > 0;
+}
+
+function validateModelBudget(value: PrimeContextModelBudget): PrimeContextModelBudget {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "aggregate_tokens",
+      "application_tokens",
+      "child_tokens",
+      "controller_tokens",
+      "cost_micros",
+      "deadline_ms",
+    ]) ||
+    !nonNegativeInteger(value.controller_tokens) ||
+    value.controller_tokens === 0 ||
+    !nonNegativeInteger(value.application_tokens) ||
+    !nonNegativeInteger(value.child_tokens) ||
+    !nonNegativeInteger(value.aggregate_tokens) ||
+    value.aggregate_tokens === 0 ||
+    !nonNegativeInteger(value.cost_micros) ||
+    !positiveInteger(value.deadline_ms)
+  ) {
+    throw new PrimeSessionError();
+  }
+  return Object.freeze({ ...value });
+}
+
+function validateModelBaseline(
+  value: PrimeContextModelBaseline,
+  commandId: string,
+  continuationId: string,
+): PrimeContextModelBaseline {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "commandId",
+      "contextTokens",
+      "continuationId",
+      "controllerTokens",
+      "costMicros",
+      "leafId",
+    ]) ||
+    value.commandId !== commandId ||
+    value.continuationId !== continuationId ||
+    (value.leafId !== null &&
+      (typeof value.leafId !== "string" || !OPAQUE_ID.test(value.leafId))) ||
+    !nonNegativeInteger(value.contextTokens) ||
+    !nonNegativeInteger(value.controllerTokens) ||
+    !nonNegativeInteger(value.costMicros)
+  ) {
+    throw new PrimeSessionError();
+  }
+  return Object.freeze({ ...value });
+}
+
+function modelUsage(
+  counters: PrimeContextCounters,
+  baseline: PrimeContextModelBaseline,
+  budget: PrimeContextModelBudget,
+): PrimeContextUsage {
+  const controllerTokens = counters.total - baseline.controllerTokens;
+  const cost = counters.costMicros - baseline.costMicros;
+  if (
+    !nonNegativeInteger(controllerTokens) ||
+    !nonNegativeInteger(cost) ||
+    controllerTokens > budget.controller_tokens ||
+    controllerTokens > budget.aggregate_tokens ||
+    cost > budget.cost_micros
+  ) {
+    throw new PrimeSessionError();
+  }
+  return Object.freeze({
+    controller_tokens: controllerTokens,
+    application_tokens: 0,
+    child_tokens: 0,
+    aggregate_tokens: controllerTokens,
+    cost_micros: cost,
+  });
 }
 
 function validText(value: unknown): value is string {
@@ -400,6 +532,57 @@ function costMicros(value: unknown): number {
     throw new PrimeSessionError();
   }
   return projected;
+}
+
+function branchSummaryFromResponse(value: unknown): Readonly<{
+  id: string;
+  parentId: string | null;
+  fromId: string;
+  summary: string;
+}> {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, [
+      "details",
+      "fromHook",
+      "fromId",
+      "id",
+      "parentId",
+      "summary",
+      "timestamp",
+      "type",
+    ]) ||
+    !["fromId", "id", "parentId", "summary", "timestamp", "type"]
+      .every((key) => Object.hasOwn(value, key)) ||
+    value.type !== "branch_summary" ||
+    typeof value.id !== "string" ||
+    !OPAQUE_ID.test(value.id) ||
+    (value.parentId !== null &&
+      (typeof value.parentId !== "string" || !OPAQUE_ID.test(value.parentId))) ||
+    typeof value.fromId !== "string" ||
+    !OPAQUE_ID.test(value.fromId) ||
+    !validText(value.summary) ||
+    typeof value.timestamp !== "string" ||
+    !validText(value.timestamp) ||
+    (value.fromHook !== undefined && typeof value.fromHook !== "boolean") ||
+    (value.details !== undefined &&
+      (!isRecord(value.details) ||
+        !hasExactKeys(value.details, ["modifiedFiles", "readFiles"]) ||
+        ![value.details.modifiedFiles, value.details.readFiles].every(
+          (items) => Array.isArray(items) && items.every(
+            (item) => typeof item === "string" &&
+              Buffer.byteLength(item, "utf8") <= MAX_PRIVATE_TEXT_BYTES,
+          ),
+        )))
+  ) {
+    throw new PrimeSessionError();
+  }
+  return Object.freeze({
+    id: value.id,
+    parentId: value.parentId,
+    fromId: value.fromId,
+    summary: value.summary,
+  });
 }
 
 function validateStats(
@@ -595,6 +778,11 @@ export class PrimeSession {
       value: PrimeForkCloneResult;
     }>
   >();
+  private readonly pendingModelOperations = new Map<
+    string,
+    "session.branch.summarize" | "session.compact"
+  >();
+  private readonly cancelledModelOperations = new Set<string>();
 
   private constructor(
     transport: PrimeDaemonTransport,
@@ -710,6 +898,7 @@ export class PrimeSession {
         sessionPath,
         generation,
       );
+      await session.ensureManualCompactionOnly("initial-policy");
       await session.request(
         {
           type: "set_rlm_max_depth",
@@ -1058,6 +1247,328 @@ export class PrimeSession {
       }
       throw new PrimeSessionError();
     }
+  }
+
+  async ensureManualCompactionOnly(commandId: string): Promise<void> {
+    if (!OPAQUE_ID.test(commandId)) {
+      throw new PrimeSessionError();
+    }
+    await this.requestStable({
+      type: "set_auto_compaction",
+      activeSessionId: this.activeSessionId,
+      enabled: false,
+    }, this.contextCommandId(commandId, "disable-auto-compaction"));
+  }
+
+  async setContextLabel(
+    commandId: string,
+    continuationId: string,
+    entryId: string,
+    label: string | null,
+  ): Promise<PrimeContextLabelResult> {
+    this.validateCurrentContextTarget(commandId, continuationId);
+    if (
+      !OPAQUE_ID.test(entryId) ||
+      (label !== null &&
+        !validText(label))
+    ) {
+      throw new PrimeSessionError();
+    }
+    const before = await this.readSessionTree(
+      `context-${commandId}-label-before`,
+    );
+    if (!before.nodes.some((node) => node.entry_id === entryId)) {
+      throw new PrimeSessionError();
+    }
+    const stableCommandId = this.contextCommandId(commandId, "label");
+    try {
+      const deferred = await this.transport.requestDeferred({
+        type: "set_session_entry_label",
+        activeSessionId: this.activeSessionId,
+        entryId,
+        ...(label === null ? {} : { label }),
+      }, stableCommandId);
+      if (
+        !deferred.response.success ||
+        deferred.response.command !== "set_session_entry_label"
+      ) {
+        throw new PrimeSessionError();
+      }
+      const labelSha256 = label === null ? null : sha256Text(label);
+      const after = await this.readSessionTree(
+        `context-${commandId}-label-after`,
+      );
+      const node = after.nodes.find((candidate) => candidate.entry_id === entryId);
+      if (node === undefined || node.label_sha256 !== labelSha256) {
+        throw new PrimeSessionError();
+      }
+      return Object.freeze({
+        result: Object.freeze({ continuationId, entryId, labelSha256 }),
+        acknowledge: () => {
+          try {
+            return deferred.acknowledge() === true;
+          } catch {
+            return false;
+          }
+        },
+      });
+    } catch (error) {
+      if (error instanceof PrimeSessionError) {
+        throw error;
+      }
+      throw new PrimeSessionError();
+    }
+  }
+
+  async measureContextModelBaseline(
+    commandId: string,
+    continuationId: string,
+    selectedEntryId?: string,
+  ): Promise<PrimeContextModelBaseline> {
+    this.validateCurrentContextTarget(commandId, continuationId);
+    if (selectedEntryId !== undefined && !OPAQUE_ID.test(selectedEntryId)) {
+      throw new PrimeSessionError();
+    }
+    const tree = await this.readSessionTree(
+      `context-${commandId}-model-baseline-tree`,
+    );
+    if (
+      selectedEntryId !== undefined &&
+      !tree.nodes.some((node) => node.entry_id === selectedEntryId)
+    ) {
+      throw new PrimeSessionError();
+    }
+    const stats = await this.readModelStats(
+      `context-${commandId}-model-baseline-stats`,
+    );
+    return Object.freeze({
+      commandId,
+      continuationId,
+      leafId: tree.leafId,
+      contextTokens: stats.contextTokens,
+      controllerTokens: stats.counters.total,
+      costMicros: stats.counters.costMicros,
+    });
+  }
+
+  async compactContext(
+    commandId: string,
+    continuationId: string,
+    instructions: string | null,
+    budgetValue: PrimeContextModelBudget,
+    baselineValue: PrimeContextModelBaseline,
+  ): Promise<PrimeContextModelOutcome<PrimeContextCompactionResult>> {
+    this.validateCurrentContextTarget(commandId, continuationId);
+    const budget = validateModelBudget(budgetValue);
+    const baseline = validateModelBaseline(
+      baselineValue,
+      commandId,
+      continuationId,
+    );
+    if (
+      baseline.leafId === null ||
+      (instructions !== null &&
+        !validText(instructions))
+    ) {
+      throw new PrimeSessionError();
+    }
+    return this.runContextModelOperation(
+      "session.compact",
+      commandId,
+      async () => {
+        const deferred = await this.transport.requestDeferred({
+          type: "compact",
+          activeSessionId: this.activeSessionId,
+          ...(instructions === null ? {} : { customInstructions: instructions }),
+        }, this.contextCommandId(commandId, "compact"), budget.deadline_ms);
+        const terminal = this.modelNonSuccessOutcome(
+          commandId,
+          "compact",
+          deferred,
+        );
+        if (terminal !== undefined) {
+          return terminal;
+        }
+        if (!deferred.response.success) {
+          throw new PrimeSessionError();
+        }
+        const response = deferred.response;
+        if (
+          response.command !== "compact" ||
+          !isRecord(response.data) ||
+          !hasOnlyKeys(response.data, [
+            "details",
+            "firstKeptEntryId",
+            "summary",
+            "tokensBefore",
+          ]) ||
+          !["firstKeptEntryId", "summary", "tokensBefore"]
+            .every((key) => Object.hasOwn(response.data!, key)) ||
+          typeof response.data.firstKeptEntryId !== "string" ||
+          !OPAQUE_ID.test(response.data.firstKeptEntryId) ||
+          !validText(response.data.summary) ||
+          !nonNegativeInteger(response.data.tokensBefore)
+        ) {
+          throw new PrimeSessionError();
+        }
+        const data = response.data;
+        const afterStats = await this.readModelStats(
+          `context-${commandId}-compact-after-stats`,
+        );
+        const afterTree = await this.readSessionTree(
+          `context-${commandId}-compact-after-tree`,
+        );
+        const leaf = afterTree.nodes.find(
+          (node) => node.entry_id === afterTree.leafId,
+        );
+        if (
+          leaf?.kind !== "compaction" ||
+          leaf.parent_id !== baseline.leafId ||
+          leaf.token_count !== data.tokensBefore ||
+          !afterTree.nodes.some(
+            (node) => node.entry_id === data.firstKeptEntryId,
+          ) ||
+          afterStats.contextTokens > baseline.contextTokens
+        ) {
+          throw new PrimeSessionError();
+        }
+        const result = Object.freeze({
+          continuationId,
+          coveredLeafId: baseline.leafId!,
+          beforeContextTokens: baseline.contextTokens,
+          afterContextTokens: afterStats.contextTokens,
+          summarySha256: sha256Text(data.summary as string),
+          usage: modelUsage(afterStats.counters, baseline, budget),
+        });
+        return Object.freeze({
+          status: "succeeded" as const,
+          result,
+          acknowledge: this.modelAcknowledger(deferred),
+        });
+      },
+    );
+  }
+
+  async summarizeContextBranch(
+    commandId: string,
+    continuationId: string,
+    entryId: string,
+    instructions: string | null,
+    budgetValue: PrimeContextModelBudget,
+    baselineValue: PrimeContextModelBaseline,
+  ): Promise<PrimeContextModelOutcome<PrimeContextBranchSummaryResult>> {
+    this.validateCurrentContextTarget(commandId, continuationId);
+    if (
+      !OPAQUE_ID.test(entryId) ||
+      (instructions !== null &&
+        !validText(instructions))
+    ) {
+      throw new PrimeSessionError();
+    }
+    const budget = validateModelBudget(budgetValue);
+    const baseline = validateModelBaseline(
+      baselineValue,
+      commandId,
+      continuationId,
+    );
+    return this.runContextModelOperation(
+      "session.branch.summarize",
+      commandId,
+      async () => {
+        const deferred = await this.transport.requestDeferred({
+          type: "navigate_tree",
+          activeSessionId: this.activeSessionId,
+          targetId: entryId,
+          summarize: true,
+          ...(instructions === null ? {} : { customInstructions: instructions }),
+          replaceInstructions: false,
+        }, this.contextCommandId(commandId, "branch-summary"), budget.deadline_ms);
+        const terminal = this.modelNonSuccessOutcome(
+          commandId,
+          "branch-summary",
+          deferred,
+        );
+        if (terminal !== undefined) {
+          return terminal;
+        }
+        if (!deferred.response.success) {
+          throw new PrimeSessionError();
+        }
+        const response = deferred.response;
+        if (
+          response.command !== "navigate_tree" ||
+          !isRecord(response.data) ||
+          !hasOnlyKeys(response.data, [
+            "aborted",
+            "cancelled",
+            "editorText",
+            "summaryEntry",
+          ]) ||
+          typeof response.data.cancelled !== "boolean" ||
+          (response.data.aborted !== undefined &&
+            typeof response.data.aborted !== "boolean") ||
+          (response.data.editorText !== undefined &&
+            typeof response.data.editorText !== "string")
+        ) {
+          throw new PrimeSessionError();
+        }
+        if (response.data.cancelled || response.data.aborted === true) {
+          return Object.freeze({
+            status: "cancelled" as const,
+            result: null,
+            acknowledge: this.modelAcknowledger(deferred),
+          });
+        }
+        const summary = branchSummaryFromResponse(response.data.summaryEntry);
+        const afterStats = await this.readModelStats(
+          `context-${commandId}-branch-summary-after-stats`,
+        );
+        const afterTree = await this.readSessionTree(
+          `context-${commandId}-branch-summary-after-tree`,
+        );
+        const leaf = afterTree.nodes.find(
+          (node) => node.entry_id === afterTree.leafId,
+        );
+        if (
+          afterTree.leafId !== summary.id ||
+          leaf?.kind !== "summary" ||
+          leaf.parent_id !== summary.parentId ||
+          summary.fromId !== (summary.parentId ?? "root")
+        ) {
+          throw new PrimeSessionError();
+        }
+        return Object.freeze({
+          status: "succeeded" as const,
+          result: Object.freeze({
+            continuationId,
+            previousLeafId: baseline.leafId,
+            currentLeafId: summary.id,
+            summarySha256: sha256Text(summary.summary),
+            usage: modelUsage(afterStats.counters, baseline, budget),
+          }),
+          acknowledge: this.modelAcknowledger(deferred),
+        });
+      },
+    );
+  }
+
+  async abortContextModelOperation(
+    commandId: string,
+    operation: "session.branch.summarize" | "session.compact",
+  ): Promise<void> {
+    if (
+      !OPAQUE_ID.test(commandId) ||
+      this.pendingModelOperations.get(commandId) !== operation
+    ) {
+      throw new PrimeSessionError();
+    }
+    await this.requestStable({
+      type: operation === "session.compact"
+        ? "abort_compaction"
+        : "abort_branch_summary",
+      activeSessionId: this.activeSessionId,
+    }, this.contextCommandId(commandId, "model-abort"));
+    this.cancelledModelOperations.add(commandId);
   }
 
   async resumeContinuation(
@@ -1414,6 +1925,38 @@ export class PrimeSession {
     }
   }
 
+  acknowledgeLabel(commandId: string): boolean {
+    if (!OPAQUE_ID.test(commandId)) {
+      throw new PrimeSessionError();
+    }
+    try {
+      return this.transport.acknowledgeResult(
+        this.contextCommandId(commandId, "label"),
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  acknowledgeContextModelOperation(
+    commandId: string,
+    operation: "session.branch.summarize" | "session.compact",
+  ): boolean {
+    if (!OPAQUE_ID.test(commandId)) {
+      throw new PrimeSessionError();
+    }
+    try {
+      return this.transport.acknowledgeResult(
+        this.contextCommandId(
+          commandId,
+          operation === "session.compact" ? "compact" : "branch-summary",
+        ),
+      );
+    } catch {
+      return false;
+    }
+  }
+
   acknowledgeContinuation(
     commandId: string,
     operation: "session.continuation.delete" | "session.continuation.resume",
@@ -1476,6 +2019,89 @@ export class PrimeSession {
     } catch {
       throw new PrimeSessionError();
     }
+  }
+
+  private async readModelStats(
+    commandPurpose: string,
+  ): Promise<ReturnType<typeof validateStats>> {
+    if (this.currentSessionPath === undefined) {
+      throw new PrimeSessionError();
+    }
+    return validateStats(
+      await this.request({
+        type: "get_session_stats",
+        activeSessionId: this.activeSessionId,
+      }, commandPurpose),
+      this.transcriptSessionId,
+      this.currentSessionPath,
+    );
+  }
+
+  private async runContextModelOperation<T>(
+    operation: "session.branch.summarize" | "session.compact",
+    commandId: string,
+    run: () => Promise<PrimeContextModelOutcome<T>>,
+  ): Promise<PrimeContextModelOutcome<T>> {
+    if (this.pendingModelOperations.has(commandId)) {
+      throw new PrimeSessionError();
+    }
+    this.pendingModelOperations.set(commandId, operation);
+    try {
+      try {
+        return await run();
+      } catch {
+        try {
+          await this.abortContextModelOperation(commandId, operation);
+        } catch {
+          // The public result remains uncertain whether or not abort was observed.
+        }
+        return Object.freeze({
+          status: "uncertain" as const,
+          result: null,
+          acknowledge: () => false,
+        });
+      }
+    } finally {
+      this.pendingModelOperations.delete(commandId);
+      this.cancelledModelOperations.delete(commandId);
+    }
+  }
+
+  private modelNonSuccessOutcome(
+    commandId: string,
+    expectedCommand: "branch-summary" | "compact",
+    deferred: PrimeDaemonDeferredResponse,
+  ): PrimeContextModelOutcome<never> | undefined {
+    const daemonCommand = expectedCommand === "compact"
+      ? "compact"
+      : "navigate_tree";
+    if (deferred.response.command !== daemonCommand) {
+      throw new PrimeSessionError();
+    }
+    if (deferred.response.success) {
+      return undefined;
+    }
+    return Object.freeze({
+      status: deferred.response.errorInfo !== undefined
+        ? "uncertain" as const
+        : this.cancelledModelOperations.has(commandId)
+        ? "cancelled" as const
+        : "rejected" as const,
+      result: null,
+      acknowledge: this.modelAcknowledger(deferred),
+    });
+  }
+
+  private modelAcknowledger(
+    deferred: PrimeDaemonDeferredResponse,
+  ): () => boolean {
+    return () => {
+      try {
+        return deferred.acknowledge() === true;
+      } catch {
+        return false;
+      }
+    };
   }
 
   private async replaceContextByFork(
@@ -1662,6 +2288,24 @@ export class PrimeSession {
     const commandId = `${this.sessionId}-${this.commandSequence}-${commandPurpose}`;
     try {
       const response = await this.transport.request(command, commandId);
+      if (!response.success || response.command !== command.type) {
+        throw new PrimeSessionError();
+      }
+      return response;
+    } catch (error) {
+      if (error instanceof PrimeSessionError) {
+        throw error;
+      }
+      throw new PrimeSessionError();
+    }
+  }
+
+  private async requestStable(
+    command: PrimeDaemonCommand,
+    stableCommandId: string,
+  ): Promise<PrimeDaemonResponse & { success: true }> {
+    try {
+      const response = await this.transport.request(command, stableCommandId);
       if (!response.success || response.command !== command.type) {
         throw new PrimeSessionError();
       }

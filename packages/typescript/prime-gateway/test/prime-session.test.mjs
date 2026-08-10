@@ -20,6 +20,14 @@ class FakeTransport {
     this.forkResponse = { cancelled: false };
     this.forkSequence = 0;
     this.navigateResponse = { cancelled: false };
+    this.compactResponse = {
+      summary: "SENTINEL_PRIVATE_COMPACTION_SUMMARY",
+      firstKeptEntryId: "entry-2",
+      tokensBefore: 90,
+    };
+    this.modelFailure = undefined;
+    this.holdModelOperations = false;
+    this.modelResolvers = [];
     this.sessionFile = "/private/sessions/transcript-1.jsonl";
     this.sessionHeader = {
       type: "session",
@@ -174,6 +182,49 @@ class FakeTransport {
       });
     }
     if (command.type === "navigate_tree") {
+      if (command.summarize === true) {
+        const respond = () => {
+          if (this.modelFailure !== undefined) {
+            return {
+              id: commandId,
+              type: "response",
+              command: command.type,
+              success: false,
+              ...this.modelFailure,
+            };
+          }
+          const summaryEntry = {
+            type: "branch_summary",
+            id: "summary-entry-1",
+            parentId: command.targetId,
+            timestamp: "2026-08-10T03:00:02Z",
+            fromId: command.targetId,
+            summary: "SENTINEL_PRIVATE_BRANCH_SUMMARY",
+            details: { readFiles: [], modifiedFiles: [] },
+            fromHook: false,
+          };
+          this.sessionTree.flatNodes.push({ entry: summaryEntry });
+          this.sessionTree.leafId = summaryEntry.id;
+          this.sessionStats.tokens.input += 8;
+          this.sessionStats.tokens.output += 4;
+          this.sessionStats.tokens.total += 12;
+          this.sessionStats.cost += 0.0003;
+          this.sessionStats.contextUsage.tokens = 102;
+          return {
+            id: commandId,
+            type: "response",
+            command: command.type,
+            success: true,
+            data: { cancelled: false, summaryEntry },
+          };
+        };
+        if (this.holdModelOperations) {
+          return new Promise((resolve) => this.modelResolvers.push(
+            () => resolve(respond()),
+          ));
+        }
+        return Promise.resolve(respond());
+      }
       if (this.navigateResponse.cancelled === false) {
         const target = this.sessionTree.flatNodes.find(
           ({ entry }) => entry.id === command.targetId,
@@ -189,6 +240,72 @@ class FakeTransport {
         command: command.type,
         success: true,
         data: structuredClone(this.navigateResponse),
+      });
+    }
+    if (command.type === "compact") {
+      const respond = () => {
+        if (this.modelFailure !== undefined) {
+          return {
+            id: commandId,
+            type: "response",
+            command: command.type,
+            success: false,
+            ...this.modelFailure,
+          };
+        }
+        const entry = {
+          type: "compaction",
+          id: "compaction-entry-1",
+          parentId: "entry-2",
+          timestamp: "2026-08-10T03:00:02Z",
+          summary: this.compactResponse.summary,
+          firstKeptEntryId: this.compactResponse.firstKeptEntryId,
+          tokensBefore: this.compactResponse.tokensBefore,
+        };
+        this.sessionTree.flatNodes.push({ entry });
+        this.sessionTree.leafId = entry.id;
+        this.sessionStats.tokens.input += 12;
+        this.sessionStats.tokens.output += 8;
+        this.sessionStats.tokens.total += 20;
+        this.sessionStats.cost += 0.0005;
+        this.sessionStats.contextUsage.tokens = 40;
+        return {
+          id: commandId,
+          type: "response",
+          command: command.type,
+          success: true,
+          data: structuredClone(this.compactResponse),
+        };
+      };
+      if (this.holdModelOperations) {
+        return new Promise((resolve) => this.modelResolvers.push(
+          () => resolve(respond()),
+        ));
+      }
+      return Promise.resolve(respond());
+    }
+    if (command.type === "set_session_entry_label") {
+      const target = this.sessionTree.flatNodes.find(
+        ({ entry }) => entry.id === command.entryId,
+      );
+      if (target === undefined) {
+        return Promise.resolve({
+          id: commandId,
+          type: "response",
+          command: command.type,
+          success: false,
+        });
+      }
+      if (command.label === undefined) {
+        delete target.label;
+      } else {
+        target.label = command.label;
+      }
+      return Promise.resolve({
+        id: commandId,
+        type: "response",
+        command: command.type,
+        success: true,
       });
     }
     if (command.type === "fork") {
@@ -297,7 +414,22 @@ class FakeTransport {
       resolve();
     }
   }
+
+  releaseModelOperations() {
+    for (const resolve of this.modelResolvers.splice(0)) {
+      resolve();
+    }
+  }
 }
+
+const MODEL_BUDGET = Object.freeze({
+  controller_tokens: 50,
+  application_tokens: 0,
+  child_tokens: 0,
+  aggregate_tokens: 50,
+  cost_micros: 5_000,
+  deadline_ms: 30_000,
+});
 
 const PRIVATE_CONFIG = Object.freeze({
   workspace: "/private/workspace",
@@ -344,6 +476,7 @@ test("lifecycle create binds exact resident config and disables native RLM", asy
   assert.deepEqual(transport.commands.map(({ command }) => command.type), [
     "create",
     "get_session_header",
+    "set_auto_compaction",
     "set_rlm_max_depth",
     "attach",
   ]);
@@ -373,8 +506,9 @@ test("lifecycle create binds exact resident config and disables native RLM", asy
     },
   });
   assert.equal(transport.commands[1].command.activeSessionId, "prime-root-1");
-  assert.equal(transport.commands[2].command.maxDepth, 0);
-  assert.deepEqual(transport.commands[3].command.capabilities, [
+  assert.equal(transport.commands[2].command.enabled, false);
+  assert.equal(transport.commands[3].command.maxDepth, 0);
+  assert.deepEqual(transport.commands[4].command.capabilities, [
     "attach_snapshot",
     "chunked_snapshot",
     "event_sequence",
@@ -528,6 +662,277 @@ test("context describe projects post-compaction unknown usage without rejecting 
   const described = await session.describeContext("context-compacted", "running");
 
   assert.equal(described.contextTokens, 0);
+});
+
+test("context labels set and clear privately with stable deferred acknowledgement", async () => {
+  const transport = new FakeTransport();
+  const session = PrimeSession.restore({
+    transport,
+    sessionId: "session-1",
+    activeSessionId: "prime-root-1",
+    transcriptSessionId: "transcript-1",
+    continuationId: "continuation-1",
+    sessionPath: transport.sessionFile,
+  });
+
+  const set = await session.setContextLabel(
+    "context-label-set",
+    "continuation-1",
+    "entry-2",
+    "SENTINEL_PRIVATE_LABEL",
+  );
+  assert.deepEqual(set.result, {
+    continuationId: "continuation-1",
+    entryId: "entry-2",
+    labelSha256: createHash("sha256")
+      .update("SENTINEL_PRIVATE_LABEL")
+      .digest("hex"),
+  });
+  assert.equal(JSON.stringify(set.result).includes("SENTINEL"), false);
+  assert.equal(set.acknowledge(), true);
+
+  const cleared = await session.setContextLabel(
+    "context-label-clear",
+    "continuation-1",
+    "entry-2",
+    null,
+  );
+  assert.equal(cleared.result.labelSha256, null);
+  assert.equal(cleared.acknowledge(), true);
+  await assert.rejects(session.setContextLabel(
+    "context-label-empty",
+    "continuation-1",
+    "entry-2",
+    "",
+  ));
+  assert.deepEqual(
+    transport.commands
+      .filter(({ command }) => command.type === "set_session_entry_label")
+      .map(({ command, commandId }) => [commandId, command.label]),
+    [
+      ["session-1-context-context-label-set-label", "SENTINEL_PRIVATE_LABEL"],
+      ["session-1-context-context-label-clear-label", undefined],
+    ],
+  );
+});
+
+test("manual compaction and branch summary reconcile exact durable baselines and private output", async () => {
+  const transport = new FakeTransport();
+  const session = PrimeSession.restore({
+    transport,
+    sessionId: "session-1",
+    activeSessionId: "prime-root-1",
+    transcriptSessionId: "transcript-1",
+    continuationId: "continuation-1",
+    sessionPath: transport.sessionFile,
+  });
+  await session.ensureManualCompactionOnly("context-model-policy");
+  const compactBaseline = await session.measureContextModelBaseline(
+    "context-compact",
+    "continuation-1",
+  );
+  assert.deepEqual(compactBaseline, {
+    commandId: "context-compact",
+    continuationId: "continuation-1",
+    leafId: "entry-2",
+    contextTokens: 90,
+    controllerTokens: 135,
+    costMicros: 1_234,
+  });
+  const compacted = await session.compactContext(
+    "context-compact",
+    "continuation-1",
+    "SENTINEL_PRIVATE_COMPACT_INSTRUCTIONS",
+    MODEL_BUDGET,
+    compactBaseline,
+  );
+  assert.equal(compacted.status, "succeeded");
+  assert.deepEqual(compacted.result, {
+    continuationId: "continuation-1",
+    coveredLeafId: "entry-2",
+    beforeContextTokens: 90,
+    afterContextTokens: 40,
+    summarySha256: createHash("sha256")
+      .update("SENTINEL_PRIVATE_COMPACTION_SUMMARY")
+      .digest("hex"),
+    usage: {
+      controller_tokens: 20,
+      application_tokens: 0,
+      child_tokens: 0,
+      aggregate_tokens: 20,
+      cost_micros: 500,
+    },
+  });
+  assert.equal(JSON.stringify(compacted.result).includes("SENTINEL"), false);
+  assert.equal(compacted.acknowledge(), true);
+
+  const summaryBaseline = await session.measureContextModelBaseline(
+    "context-summary",
+    "continuation-1",
+  );
+  const summarized = await session.summarizeContextBranch(
+    "context-summary",
+    "continuation-1",
+    "entry-1",
+    "SENTINEL_PRIVATE_BRANCH_INSTRUCTIONS",
+    MODEL_BUDGET,
+    summaryBaseline,
+  );
+  assert.equal(summarized.status, "succeeded");
+  assert.equal(summarized.result.previousLeafId, "compaction-entry-1");
+  assert.equal(summarized.result.currentLeafId, "summary-entry-1");
+  assert.equal(
+    summarized.result.summarySha256,
+    createHash("sha256").update("SENTINEL_PRIVATE_BRANCH_SUMMARY").digest("hex"),
+  );
+  assert.deepEqual(summarized.result.usage, {
+    controller_tokens: 12,
+    application_tokens: 0,
+    child_tokens: 0,
+    aggregate_tokens: 12,
+    cost_micros: 300,
+  });
+  assert.equal(JSON.stringify(summarized.result).includes("SENTINEL"), false);
+  assert.equal(summarized.acknowledge(), true);
+  assert.deepEqual(
+    transport.commands
+      .filter(({ command }) => ["compact", "navigate_tree"].includes(command.type))
+      .map(({ command, commandId }) => [commandId, command]),
+    [
+      ["session-1-context-context-compact-compact", {
+        type: "compact",
+        activeSessionId: "prime-root-1",
+        customInstructions: "SENTINEL_PRIVATE_COMPACT_INSTRUCTIONS",
+      }],
+      ["session-1-context-context-summary-branch-summary", {
+        type: "navigate_tree",
+        activeSessionId: "prime-root-1",
+        targetId: "entry-1",
+        summarize: true,
+        customInstructions: "SENTINEL_PRIVATE_BRANCH_INSTRUCTIONS",
+        replaceInstructions: false,
+      }],
+    ],
+  );
+});
+
+test("bounded model operations distinguish rejection, cancellation, and post-effect uncertainty", async () => {
+  const makeSession = (transport) => PrimeSession.restore({
+    transport,
+    sessionId: "session-1",
+    activeSessionId: "prime-root-1",
+    transcriptSessionId: "transcript-1",
+    continuationId: "continuation-1",
+    sessionPath: transport.sessionFile,
+  });
+
+  const rejectedTransport = new FakeTransport();
+  rejectedTransport.modelFailure = {};
+  const rejectedSession = makeSession(rejectedTransport);
+  const rejectedBaseline = await rejectedSession.measureContextModelBaseline(
+    "context-provider-rejected",
+    "continuation-1",
+  );
+  const rejected = await rejectedSession.compactContext(
+    "context-provider-rejected",
+    "continuation-1",
+    null,
+    MODEL_BUDGET,
+    rejectedBaseline,
+  );
+  assert.equal(rejected.status, "rejected");
+  assert.equal(rejected.result, null);
+  assert.equal(rejected.acknowledge(), true);
+
+  const cancelledTransport = new FakeTransport();
+  cancelledTransport.holdModelOperations = true;
+  cancelledTransport.modelFailure = {};
+  const cancelledSession = makeSession(cancelledTransport);
+  const cancelledBaseline = await cancelledSession.measureContextModelBaseline(
+    "context-cancelled",
+    "continuation-1",
+  );
+  const pending = cancelledSession.compactContext(
+    "context-cancelled",
+    "continuation-1",
+    null,
+    MODEL_BUDGET,
+    cancelledBaseline,
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  await cancelledSession.abortContextModelOperation(
+    "context-cancelled",
+    "session.compact",
+  );
+  cancelledTransport.releaseModelOperations();
+  const cancelled = await pending;
+  assert.equal(cancelled.status, "cancelled");
+  assert.equal(cancelled.result, null);
+  assert.equal(cancelled.acknowledge(), true);
+  assert.equal(
+    cancelledTransport.commands.some(
+      ({ command }) => command.type === "abort_compaction",
+    ),
+    true,
+  );
+
+  const overBudgetTransport = new FakeTransport();
+  const overBudgetSession = makeSession(overBudgetTransport);
+  const overBudgetBaseline = await overBudgetSession.measureContextModelBaseline(
+    "context-over-budget",
+    "continuation-1",
+  );
+  const overBudget = await overBudgetSession.compactContext(
+    "context-over-budget",
+    "continuation-1",
+    null,
+    { ...MODEL_BUDGET, controller_tokens: 19, aggregate_tokens: 19 },
+    overBudgetBaseline,
+  );
+  assert.equal(overBudget.status, "uncertain");
+  assert.equal(overBudget.result, null);
+  assert.equal(
+    overBudgetTransport.acknowledgements.includes(
+      "session-1-context-context-over-budget-compact",
+    ),
+    false,
+  );
+  assert.equal(
+    overBudgetTransport.commands.some(
+      ({ command }) => command.type === "abort_compaction",
+    ),
+    true,
+  );
+
+  const uncertainTransport = new FakeTransport();
+  uncertainTransport.modelFailure = {
+    errorInfo: {
+      code: "command_result_uncertain",
+      clientId: "fake-client-1",
+      commandId: "session-1-context-context-provider-uncertain-compact",
+    },
+  };
+  const uncertainSession = makeSession(uncertainTransport);
+  const uncertainBaseline = await uncertainSession.measureContextModelBaseline(
+    "context-provider-uncertain",
+    "continuation-1",
+  );
+  const uncertain = await uncertainSession.compactContext(
+    "context-provider-uncertain",
+    "continuation-1",
+    null,
+    MODEL_BUDGET,
+    uncertainBaseline,
+  );
+  assert.equal(uncertain.status, "uncertain");
+  assert.equal(uncertain.result, null);
+  assert.equal(
+    uncertainTransport.acknowledgements.includes(
+      "session-1-context-context-provider-uncertain-compact",
+    ),
+    false,
+  );
+  assert.equal(uncertain.acknowledge(), true);
 });
 
 test("continuation resume and delete defer acknowledgement until durable adoption", async () => {

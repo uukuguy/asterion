@@ -43,6 +43,7 @@ const RECORD_KINDS = new Set([
   "context.binding.rebound",
   "context.command.accepted",
   "context.operation.committed",
+  "context.model.prepared",
   "context.operation.prepared",
   "event.accepted",
   "input.delivery.committed",
@@ -111,6 +112,15 @@ export interface GatewayContextOperation {
   readonly command: SessionContextCommand;
   readonly receipt: SessionContextReceipt;
   readonly nextBinding: GatewayContextBinding | null;
+}
+
+export interface GatewayContextModelBaseline {
+  readonly commandId: string;
+  readonly continuationId: string;
+  readonly leafId: string | null;
+  readonly contextTokens: number;
+  readonly controllerTokens: number;
+  readonly costMicros: number;
 }
 
 export interface GatewayContextCommitReceipt extends GatewayRecordReceipt {
@@ -567,6 +577,107 @@ interface GatewayContextPreparation {
   readonly selectedEntryId: string | null;
 }
 
+function validateContextModelBaseline(
+  value: unknown,
+): GatewayContextModelBaseline {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "commandId",
+      "contextTokens",
+      "continuationId",
+      "controllerTokens",
+      "costMicros",
+      "leafId",
+    ]) ||
+    !nonEmptyIdentifier(value.commandId) ||
+    !nonEmptyIdentifier(value.continuationId) ||
+    !nullableIdentifier(value.leafId) ||
+    !nonNegativeInteger(value.contextTokens) ||
+    !nonNegativeInteger(value.controllerTokens) ||
+    !nonNegativeInteger(value.costMicros)
+  ) {
+    throw new GatewayStoreConflictError();
+  }
+  return Object.freeze({
+    commandId: value.commandId,
+    continuationId: value.continuationId,
+    leafId: value.leafId,
+    contextTokens: value.contextTokens,
+    controllerTokens: value.controllerTokens,
+    costMicros: value.costMicros,
+  });
+}
+
+function validContextModelPreparation(
+  command: SessionContextCommand | undefined,
+  baseline: GatewayContextModelBaseline,
+  activeBinding: GatewayContextBinding | undefined,
+): boolean {
+  return command !== undefined &&
+    (command.operation === "session.compact" ||
+      command.operation === "session.branch.summarize") &&
+    baseline.commandId === command.command_id &&
+    baseline.continuationId === command.payload.continuation_id &&
+    activeBinding?.continuationId === baseline.continuationId &&
+    (command.operation !== "session.compact" || baseline.leafId !== null);
+}
+
+function validContextModelCommit(
+  command: SessionContextCommand,
+  baseline: GatewayContextModelBaseline | undefined,
+  payload: ValidatedContextCommit,
+): boolean {
+  if (
+    (command.operation !== "session.compact" &&
+      command.operation !== "session.branch.summarize") ||
+    baseline === undefined ||
+    payload.nextBinding !== null ||
+    payload.sourceBinding !== null ||
+    payload.receipt.status !== "succeeded" ||
+    payload.receipt.payload.result === null
+  ) {
+    return false;
+  }
+  const result = payload.receipt.payload.result as Record<string, unknown>;
+  const usage = result.usage;
+  const budget = command.payload.budget;
+  if (!isRecord(usage) || !isRecord(budget)) {
+    return false;
+  }
+  const fields = [
+    "controller_tokens",
+    "application_tokens",
+    "child_tokens",
+    "aggregate_tokens",
+    "cost_micros",
+  ] as const;
+  if (fields.some((field) =>
+    !nonNegativeInteger(usage[field]) ||
+    !nonNegativeInteger(budget[field]) ||
+    Number(usage[field]) > Number(budget[field])
+  )) {
+    return false;
+  }
+  if (
+    Number(usage.aggregate_tokens) !==
+      Number(usage.controller_tokens) +
+        Number(usage.application_tokens) +
+        Number(usage.child_tokens) ||
+    result.continuation_id !== baseline.continuationId
+  ) {
+    return false;
+  }
+  if (command.operation === "session.compact") {
+    return result.covered_leaf_id === baseline.leafId &&
+      result.before_context_tokens === baseline.contextTokens &&
+      typeof result.after_context_tokens === "number" &&
+      result.after_context_tokens <= baseline.contextTokens;
+  }
+  return command.operation === "session.branch.summarize" &&
+    result.previous_leaf_id === baseline.leafId;
+}
+
 function validateContextPreparationPayload(
   value: unknown,
 ): GatewayContextPreparation {
@@ -849,6 +960,10 @@ export class GatewayDurableStore {
       selectedEntryId: string | null;
     }>
   >();
+  private readonly preparedContextModelBaselines = new Map<
+    string,
+    GatewayContextModelBaseline
+  >();
   private readonly faultInjector: StorageFaultInjector | undefined;
   private failed = false;
   private commandCount = 0;
@@ -1076,6 +1191,32 @@ export class GatewayDurableStore {
     );
   }
 
+  async prepareContextModelOperation(
+    commandId: string,
+    baselineValue: GatewayContextModelBaseline,
+  ): Promise<GatewayRecordReceipt> {
+    const baseline = validateContextModelBaseline(baselineValue);
+    const command = this.contextCommands.get(commandId);
+    if (
+      baseline.commandId !== commandId ||
+      this.contextCommits.has(commandId) ||
+      (this.preparedContextModelBaselines.size !== 0 &&
+        !this.preparedContextModelBaselines.has(commandId)) ||
+      !validContextModelPreparation(
+        command,
+        baseline,
+        this.activeContextBindingValue,
+      )
+    ) {
+      throw new GatewayStoreConflictError();
+    }
+    return this.appendRecord(
+      "context.model.prepared",
+      `context-model-prepare:${commandId}`,
+      baseline as unknown as Record<string, unknown>,
+    );
+  }
+
   async commitContextOperation(
     receipt: unknown,
     nextBinding: GatewayContextBinding | null,
@@ -1131,6 +1272,18 @@ export class GatewayDurableStore {
         ) {
           throw new GatewayStoreConflictError();
         }
+      }
+      if (
+        payload.receipt.status === "succeeded" &&
+        (command.operation === "session.compact" ||
+          command.operation === "session.branch.summarize") &&
+        !validContextModelCommit(
+          command,
+          this.preparedContextModelBaselines.get(commandId),
+          payload,
+        )
+      ) {
+        throw new GatewayStoreConflictError();
       }
       const committed = await this.appendRecord(
         "context.operation.committed",
@@ -1231,6 +1384,32 @@ export class GatewayDurableStore {
         }
         return Object.freeze({ command, binding, ...state });
       }),
+    );
+  }
+
+  preparedContextModelOperation(
+    commandId: string,
+  ): GatewayContextModelBaseline | undefined {
+    if (!nonEmptyIdentifier(commandId)) {
+      throw new GatewayStoreConflictError();
+    }
+    return this.preparedContextModelBaselines.get(commandId);
+  }
+
+  preparedContextModelOperations(): readonly Readonly<{
+    command: SessionContextCommand;
+    baseline: GatewayContextModelBaseline;
+  }>[] {
+    return Object.freeze(
+      [...this.preparedContextModelBaselines.entries()].map(
+        ([commandId, baseline]) => {
+          const command = this.contextCommands.get(commandId);
+          if (command === undefined || this.contextCommits.has(commandId)) {
+            throw new GatewayStoreCorruptionError();
+          }
+          return Object.freeze({ command, baseline });
+        },
+      ),
     );
   }
 
@@ -1613,6 +1792,26 @@ export class GatewayDurableStore {
         }
         return preparation as unknown as Record<string, unknown>;
       }
+      if (kind === "context.model.prepared") {
+        const commandId = recordId.startsWith("context-model-prepare:")
+          ? recordId.slice("context-model-prepare:".length)
+          : "";
+        const baseline = validateContextModelBaseline(payload);
+        if (
+          recordId !== `context-model-prepare:${commandId}` ||
+          baseline.commandId !== commandId ||
+          (this.preparedContextModelBaselines.size !== 0 &&
+            !this.preparedContextModelBaselines.has(commandId)) ||
+          !validContextModelPreparation(
+            this.contextCommands.get(commandId),
+            baseline,
+            this.activeContextBindingValue,
+          )
+        ) {
+          throw new GatewayStoreCorruptionError();
+        }
+        return baseline as unknown as Record<string, unknown>;
+      }
       if (kind === "context.operation.committed") {
         const commandId = recordId.startsWith("context-commit:")
           ? recordId.slice("context-commit:".length)
@@ -1666,6 +1865,18 @@ export class GatewayDurableStore {
           if (!validPrepared && !validLegacy) {
             throw new GatewayStoreCorruptionError();
           }
+        }
+        if (
+          committed.receipt.status === "succeeded" &&
+          (command.operation === "session.compact" ||
+            command.operation === "session.branch.summarize") &&
+          !validContextModelCommit(
+            command,
+            this.preparedContextModelBaselines.get(commandId),
+            committed,
+          )
+        ) {
+          throw new GatewayStoreCorruptionError();
         }
         return Object.freeze({
           receipt: committed.receipt,
@@ -1764,6 +1975,15 @@ export class GatewayDurableStore {
         previousLeafId: preparation.previousLeafId,
         selectedEntryId: preparation.selectedEntryId,
       }));
+    } else if (record.stored.kind === "context.model.prepared") {
+      const baseline = record.payload as unknown as GatewayContextModelBaseline;
+      if (
+        this.preparedContextModelBaselines.has(baseline.commandId) ||
+        this.contextCommits.has(baseline.commandId)
+      ) {
+        throw new GatewayStoreCorruptionError();
+      }
+      this.preparedContextModelBaselines.set(baseline.commandId, baseline);
     } else if (record.stored.kind === "context.operation.committed") {
       const receipt = record.payload.receipt as SessionContextReceipt;
       const nextBinding = record.payload.nextBinding as GatewayContextBinding | null;
@@ -1824,6 +2044,7 @@ export class GatewayDurableStore {
       }
       this.preparedContextBindings.delete(receipt.command_id);
       this.preparedContextStates.delete(receipt.command_id);
+      this.preparedContextModelBaselines.delete(receipt.command_id);
       this.contextCommitCount += 1;
     } else if (record.stored.kind === "event.accepted") {
       this.eventCount += 1;

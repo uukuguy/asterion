@@ -753,7 +753,7 @@ class TestSessionContextManager(unittest.IsolatedAsyncioTestCase):
         manager = SessionContextManager(
             session_id="session-1",
             generation=1,
-            authority=authority("session.tree.read"),
+            authority=authority("session.compact", "session.tree.read"),
             journal=store,
             client=client,
             clock_ms=lambda: 100,
@@ -768,6 +768,20 @@ class TestSessionContextManager(unittest.IsolatedAsyncioTestCase):
         self.assertIs(replayed, first)
         self.assertTrue(manager.snapshot().recovery_required)
         self.assertEqual(len(client.commands), 1)
+
+        fenced = compact_command(command_id="context-command-fenced")
+        rejected = await manager.execute(fenced)
+        self.assertEqual(rejected.status, "rejected")
+        self.assertEqual(rejected.reason_code, "session-recovery-required")
+        self.assertEqual(len(client.commands), 1)
+
+        read = tree_command(
+            command_id="context-command-recovery-read",
+            idempotency_key="context-operation-recovery-read",
+        )
+        client.response = receipt(read)
+        self.assertEqual((await manager.execute(read)).status, "succeeded")
+        self.assertEqual(client.commands, [command, read])
 
 
 if __name__ == "__main__":

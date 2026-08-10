@@ -251,12 +251,20 @@ class SessionContextManager:
             if status is not None and not isinstance(status, str):
                 raise TypeError
             if (
-                status in TERMINAL_SESSION_STATES
+                (
+                    status in TERMINAL_SESSION_STATES
+                    or status == "recovery_required"
+                    or self._recovery_required
+                )
                 and command.operation not in SESSION_CONTEXT_READ_OPERATIONS
             ):
                 decision = self._authority.reject_session_context(
                     command,
-                    reason="session-terminal",
+                    reason=(
+                        "session-recovery-required"
+                        if status == "recovery_required" or self._recovery_required
+                        else "session-terminal"
+                    ),
                 )
             else:
                 decision = self._authority.evaluate_session_context(

@@ -375,7 +375,10 @@ verified. Task 4.7 exact resume and bounded deletion and Task 4.8 closed tree
 projection, navigation, fork/clone identity replacement and crash recovery are
 also verified. Task 4.9 private rich attachments, stable delivery replay,
 legacy upgrade fencing and public redaction are verified; Task 4.10 labels and
-bounded model operations is next.
+bounded model operations is provider-free verified, including durable model
+baselines, cancellation, restart and recovery fencing. The bounded-provider
+evidence remains external-limited because no finite model budget was
+authorized; Task 4.11 exact scenario registration is next.
 
 **Files:**
 - Create before implementation: `docs/superpowers/plans/2026-08-10-asterion-prime-session-context-parity.md`

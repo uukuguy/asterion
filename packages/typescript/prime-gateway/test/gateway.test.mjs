@@ -86,6 +86,8 @@ class FakePrimeSession {
     this.contextBackend = contextBackend ?? {
       acknowledgements: [],
       continuationResults: new Map(),
+      labelResults: new Map(),
+      modelResults: new Map(),
       nameResults: new Map(),
       sideEffects: [],
       treeResults: new Map(),
@@ -118,6 +120,9 @@ class FakePrimeSession {
     this.afterInputResult = undefined;
     this.contextErrorBeforeResult = undefined;
     this.mutateSourceOnResume = false;
+    this.modelOutcomeStatus = "succeeded";
+    this.holdModelOperations = false;
+    this.modelResolvers = [];
   }
 
   subscribe(listener) {
@@ -199,6 +204,211 @@ class FakePrimeSession {
     this.contextAcknowledgements.push(
       `session-1-context-${commandId}-set-name`,
     );
+    return true;
+  }
+
+  async setContextLabel(commandId, continuationId, entryId, label) {
+    this.contextCalls.push(["label", commandId, continuationId, entryId, label]);
+    if (continuationId !== this.continuationId) {
+      throw new Error("wrong continuation");
+    }
+    const target = this.contextTree.nodes.find((node) => node.entry_id === entryId);
+    if (target === undefined) {
+      throw new Error("missing entry");
+    }
+    const stableCommandId = `session-1-context-${commandId}-label`;
+    let result = this.contextBackend.labelResults.get(stableCommandId);
+    if (result === undefined) {
+      result = {
+        continuationId,
+        entryId,
+        labelSha256: label === null
+          ? null
+          : createHash("sha256").update(label).digest("hex"),
+      };
+      target.label_sha256 = result.labelSha256;
+      this.contextBackend.labelResults.set(stableCommandId, result);
+      this.contextBackend.sideEffects.push([stableCommandId, label]);
+    }
+    this.afterContextResult?.();
+    return {
+      result,
+      acknowledge: () => {
+        this.contextAcknowledgements.push(stableCommandId);
+        return true;
+      },
+    };
+  }
+
+  acknowledgeLabel(commandId) {
+    this.contextAcknowledgements.push(`session-1-context-${commandId}-label`);
+    return true;
+  }
+
+  async measureContextModelBaseline(commandId, continuationId, selectedEntryId) {
+    this.contextCalls.push([
+      "model.baseline",
+      commandId,
+      continuationId,
+      selectedEntryId,
+    ]);
+    if (
+      continuationId !== this.continuationId ||
+      (selectedEntryId !== undefined &&
+        !this.contextTree.nodes.some((node) => node.entry_id === selectedEntryId))
+    ) {
+      throw new Error("wrong model target");
+    }
+    return {
+      commandId,
+      continuationId,
+      leafId: this.contextTree.leafId,
+      contextTokens: this.contextDescription.contextTokens,
+      controllerTokens: this.contextDescription.usage.controller_tokens,
+      costMicros: this.contextDescription.usage.cost_micros,
+    };
+  }
+
+  async compactContext(commandId, continuationId, instructions, budget, baseline) {
+    return this.runFakeModelOperation(
+      "session.compact",
+      commandId,
+      continuationId,
+      instructions,
+      budget,
+      baseline,
+    );
+  }
+
+  async summarizeContextBranch(
+    commandId,
+    continuationId,
+    entryId,
+    instructions,
+    budget,
+    baseline,
+  ) {
+    return this.runFakeModelOperation(
+      "session.branch.summarize",
+      commandId,
+      continuationId,
+      instructions,
+      budget,
+      baseline,
+      entryId,
+    );
+  }
+
+  async runFakeModelOperation(
+    operation,
+    commandId,
+    continuationId,
+    instructions,
+    budget,
+    baseline,
+    entryId = undefined,
+  ) {
+    this.contextCalls.push([
+      operation,
+      commandId,
+      continuationId,
+      entryId,
+      instructions,
+      budget,
+      baseline,
+    ]);
+    const purpose = operation === "session.compact" ? "compact" : "branch-summary";
+    const stableCommandId = `session-1-context-${commandId}-${purpose}`;
+    if (this.holdModelOperations) {
+      await new Promise((resolve) => this.modelResolvers.push(resolve));
+    }
+    if (this.modelOutcomeStatus !== "succeeded") {
+      return {
+        status: this.modelOutcomeStatus,
+        result: null,
+        acknowledge: () => {
+          this.contextAcknowledgements.push(stableCommandId);
+          return true;
+        },
+      };
+    }
+    let result = this.contextBackend.modelResults.get(stableCommandId);
+    if (result === undefined) {
+      const usage = {
+        controller_tokens: 20,
+        application_tokens: 0,
+        child_tokens: 0,
+        aggregate_tokens: 20,
+        cost_micros: 500,
+      };
+      if (operation === "session.compact") {
+        result = {
+          continuationId,
+          coveredLeafId: baseline.leafId,
+          beforeContextTokens: baseline.contextTokens,
+          afterContextTokens: 40,
+          summarySha256: createHash("sha256")
+            .update("SENTINEL_PRIVATE_COMPACT_SUMMARY")
+            .digest("hex"),
+          usage,
+        };
+        this.contextTree.nodes.push({
+          entry_id: "compaction-entry-1",
+          parent_id: baseline.leafId,
+          kind: "compaction",
+          label_sha256: null,
+          token_count: baseline.contextTokens,
+        });
+        this.contextTree.leafId = "compaction-entry-1";
+        this.contextDescription.contextTokens = 40;
+      } else {
+        result = {
+          continuationId,
+          previousLeafId: baseline.leafId,
+          currentLeafId: "summary-entry-1",
+          summarySha256: createHash("sha256")
+            .update("SENTINEL_PRIVATE_BRANCH_SUMMARY")
+            .digest("hex"),
+          usage,
+        };
+        this.contextTree.nodes.push({
+          entry_id: "summary-entry-1",
+          parent_id: entryId,
+          kind: "summary",
+          label_sha256: null,
+          token_count: 0,
+        });
+        this.contextTree.leafId = "summary-entry-1";
+        this.contextDescription.contextTokens += 20;
+      }
+      this.contextDescription.usage.controller_tokens += 20;
+      this.contextDescription.usage.aggregate_tokens += 20;
+      this.contextDescription.usage.cost_micros += 500;
+      this.contextBackend.modelResults.set(stableCommandId, result);
+      this.contextBackend.sideEffects.push([stableCommandId, instructions]);
+    }
+    this.afterContextResult?.();
+    return {
+      status: "succeeded",
+      result,
+      acknowledge: () => {
+        this.contextAcknowledgements.push(stableCommandId);
+        return true;
+      },
+    };
+  }
+
+  async abortContextModelOperation(commandId, operation) {
+    this.contextCalls.push(["model.abort", commandId, operation]);
+    this.modelOutcomeStatus = "cancelled";
+    for (const resolve of this.modelResolvers.splice(0)) {
+      resolve();
+    }
+  }
+
+  acknowledgeContextModelOperation(commandId, operation) {
+    const purpose = operation === "session.compact" ? "compact" : "branch-summary";
+    this.contextAcknowledgements.push(`session-1-context-${commandId}-${purpose}`);
     return true;
   }
 
@@ -683,6 +893,15 @@ function contextCommand(operation, payload, commandId) {
   };
 }
 
+const MODEL_CONTEXT_BUDGET = Object.freeze({
+  controller_tokens: 50,
+  application_tokens: 0,
+  child_tokens: 0,
+  aggregate_tokens: 50,
+  cost_micros: 5_000,
+  deadline_ms: 30_000,
+});
+
 function eventTypes(store) {
   return store.eventsAfter(0).map(({ event }) => event.type);
 }
@@ -865,6 +1084,433 @@ test("gateway executes native describe and name operations with closed durable r
       JSON.stringify(state.store.contextOperations()).includes(state.session.sessionPath),
       false,
     );
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("gateway sets and clears exact private labels without persisting label text", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const labelRef = await state.privateValues.putInput(
+      "SENTINEL_PRIVATE_CONTEXT_LABEL",
+    );
+    const set = await state.gateway.executeSessionContext(contextCommand(
+      "session.label.set",
+      {
+        continuation_id: "continuation-1",
+        entry_id: "entry-2",
+        label_ref: labelRef,
+      },
+      "context-label-set",
+    ), async () => undefined);
+    assert.equal(
+      set.payload.result.label_sha256,
+      createHash("sha256").update("SENTINEL_PRIVATE_CONTEXT_LABEL").digest("hex"),
+    );
+    const cleared = await state.gateway.executeSessionContext(contextCommand(
+      "session.label.set",
+      {
+        continuation_id: "continuation-1",
+        entry_id: "entry-2",
+        label_ref: null,
+      },
+      "context-label-clear",
+    ), async () => undefined);
+    assert.equal(cleared.payload.result.label_sha256, null);
+    assert.equal(
+      JSON.stringify(state.store.contextOperations()).includes("SENTINEL"),
+      false,
+    );
+    assert.deepEqual(state.session.contextAcknowledgements, [
+      "session-1-context-context-label-set-label",
+      "session-1-context-context-label-clear-label",
+    ]);
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("gateway durably budgets manual compaction and branch summary with safe usage", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const compactInstructions = await state.privateValues.putInput(
+      "SENTINEL_PRIVATE_COMPACT_INSTRUCTIONS",
+    );
+    const compact = contextCommand("session.compact", {
+      continuation_id: "continuation-1",
+      instructions_ref: compactInstructions,
+      budget: MODEL_CONTEXT_BUDGET,
+    }, "context-compact-1");
+    const compacted = await state.gateway.executeSessionContext(
+      compact,
+      async () => undefined,
+    );
+    assert.deepEqual(compacted.payload.result, {
+      continuation_id: "continuation-1",
+      covered_leaf_id: "entry-2",
+      before_context_tokens: 90,
+      after_context_tokens: 40,
+      summary_sha256: createHash("sha256")
+        .update("SENTINEL_PRIVATE_COMPACT_SUMMARY")
+        .digest("hex"),
+      usage: {
+        controller_tokens: 20,
+        application_tokens: 0,
+        child_tokens: 0,
+        aggregate_tokens: 20,
+        cost_micros: 500,
+      },
+    });
+    assert.equal(
+      state.store.preparedContextModelOperation(compact.command_id),
+      undefined,
+    );
+
+    const summaryInstructions = await state.privateValues.putInput(
+      "SENTINEL_PRIVATE_BRANCH_INSTRUCTIONS",
+    );
+    const summarized = await state.gateway.executeSessionContext(contextCommand(
+      "session.branch.summarize",
+      {
+        continuation_id: "continuation-1",
+        entry_id: "entry-1",
+        instructions_ref: summaryInstructions,
+        budget: MODEL_CONTEXT_BUDGET,
+      },
+      "context-summary-1",
+    ), async () => undefined);
+    assert.equal(summarized.payload.result.previous_leaf_id, "compaction-entry-1");
+    assert.equal(summarized.payload.result.current_leaf_id, "summary-entry-1");
+    assert.equal(
+      summarized.payload.result.summary_sha256,
+      createHash("sha256").update("SENTINEL_PRIVATE_BRANCH_SUMMARY").digest("hex"),
+    );
+    assert.equal(
+      JSON.stringify(state.store.contextOperations()).includes("SENTINEL"),
+      false,
+    );
+    assert.equal(
+      JSON.stringify(state.store.snapshot()).includes("SENTINEL"),
+      false,
+    );
+    assert.deepEqual(state.session.contextAcknowledgements, [
+      "session-1-context-context-compact-1-compact",
+      "session-1-context-context-summary-1-branch-summary",
+    ]);
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("gateway reuses the durable model baseline and stable Prime result after commit crash", async () => {
+  const state = await fixture();
+  let reopened;
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const instructionsRef = await state.privateValues.putInput(
+      "SENTINEL_PRIVATE_RESTART_INSTRUCTIONS",
+    );
+    const compact = contextCommand("session.compact", {
+      continuation_id: "continuation-1",
+      instructions_ref: instructionsRef,
+      budget: MODEL_CONTEXT_BUDGET,
+    }, "context-compact-restart");
+    state.failContextCommitAfterResult();
+    await assert.rejects(
+      state.gateway.executeSessionContext(compact, async () => undefined),
+    );
+    assert.equal(state.session.contextSideEffects.length, 1);
+    assert.deepEqual(state.session.contextAcknowledgements, []);
+    assert.deepEqual(
+      state.store.preparedContextModelOperation(compact.command_id),
+      {
+        commandId: compact.command_id,
+        continuationId: "continuation-1",
+        leafId: "entry-2",
+        contextTokens: 90,
+        controllerTokens: 135,
+        costMicros: 1234,
+      },
+    );
+    await state.gateway.close().catch(() => undefined);
+
+    const store = await GatewayDurableStore.open(state.root, "session-1");
+    const restoredSession = new FakePrimeSession(
+      state.session.sessionPath,
+      state.session.contextBackend,
+    );
+    reopened = await PrimeGateway.open({
+      sessionId: "session-1",
+      generation: 1,
+      authorityId: "authority-1",
+      store,
+      privateValues: state.privateValues,
+      async createSession() {
+        throw new Error("must restore");
+      },
+      async restoreSession(_identity, onRecovered) {
+        await onRecovered({
+          transport: recoveryTransport("supervisor-generation-1", "model-recovery"),
+          primeCursor: { generation: "prime-events-1", sequence: 0 },
+          transcriptSessionId: "transcript-1",
+          supervisorGeneration: "supervisor-generation-1",
+          sessionStatus: "running",
+        });
+        return restoredSession;
+      },
+      async createCheckpoint() {
+        throw new Error("not used");
+      },
+    });
+    const receipt = await reopened.executeSessionContext(
+      structuredClone(compact),
+      async () => undefined,
+    );
+    assert.equal(receipt.status, "succeeded");
+    assert.equal(state.session.contextSideEffects.length, 1);
+    assert.equal(
+      restoredSession.contextCalls.some(([kind]) => kind === "model.baseline"),
+      false,
+    );
+    assert.deepEqual(state.session.contextAcknowledgements, [
+      "session-1-context-context-compact-restart-compact",
+    ]);
+  } finally {
+    await reopened?.close().catch(() => undefined);
+    await state.cleanup({ allowCloseFailure: true });
+  }
+});
+
+test("gateway commits provider rejection as a definitive body-free receipt", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    state.session.modelOutcomeStatus = "rejected";
+    const rejected = await state.gateway.executeSessionContext(contextCommand(
+      "session.compact",
+      {
+        continuation_id: "continuation-1",
+        instructions_ref: null,
+        budget: MODEL_CONTEXT_BUDGET,
+      },
+      "context-compact-rejected",
+    ), async () => undefined);
+    assert.equal(rejected.status, "rejected");
+    assert.equal(rejected.reason_code, "provider-rejected");
+    assert.equal(
+      JSON.stringify(state.store.contextOperations()).includes("SENTINEL"),
+      false,
+    );
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("gateway rejects an unusable model budget before baseline or provider dispatch", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const rejected = await state.gateway.executeSessionContext(contextCommand(
+      "session.compact",
+      {
+        continuation_id: "continuation-1",
+        instructions_ref: null,
+        budget: {
+          ...MODEL_CONTEXT_BUDGET,
+          controller_tokens: 0,
+          aggregate_tokens: 0,
+        },
+      },
+      "context-compact-zero-budget",
+    ), async () => undefined);
+    assert.equal(rejected.status, "rejected");
+    assert.equal(rejected.reason_code, "provider-budget-unsupported");
+    assert.equal(
+      state.session.contextCalls.some(([kind]) => kind === "model.baseline"),
+      false,
+    );
+    assert.equal(
+      state.session.contextCalls.some(([kind]) => kind === "session.compact"),
+      false,
+    );
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("gateway durably commits an uncertain provider outcome before acknowledgement", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    state.session.modelOutcomeStatus = "uncertain";
+    const commandValue = contextCommand("session.compact", {
+      continuation_id: "continuation-1",
+      instructions_ref: null,
+      budget: MODEL_CONTEXT_BUDGET,
+    }, "context-compact-uncertain");
+    const uncertain = await state.gateway.executeSessionContext(
+      commandValue,
+      async () => undefined,
+    );
+    assert.equal(uncertain.status, "uncertain");
+    assert.equal(uncertain.reason_code, "provider-outcome-uncertain");
+    assert.equal(uncertain.payload.result, null);
+    assert.equal(
+      state.store.preparedContextModelOperation(commandValue.command_id),
+      undefined,
+    );
+    assert.deepEqual(state.session.contextAcknowledgements, [
+      "session-1-context-context-compact-uncertain-compact",
+    ]);
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("gateway routes exact model cancellation and commits its terminal receipt", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    state.session.holdModelOperations = true;
+    const commandValue = contextCommand("session.branch.summarize", {
+      continuation_id: "continuation-1",
+      entry_id: "entry-1",
+      instructions_ref: null,
+      budget: MODEL_CONTEXT_BUDGET,
+    }, "context-summary-cancelled");
+    const pending = state.gateway.executeSessionContext(
+      commandValue,
+      async () => undefined,
+    );
+    const observed = pending.then(
+      (value) => ({ value }),
+      (error) => ({ error }),
+    );
+    const waitDeadline = Date.now() + 2_000;
+    while (
+      state.session.modelResolvers.length === 0 &&
+      Date.now() < waitDeadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal(state.session.modelResolvers.length, 1);
+    await state.gateway.cancelSessionContext(commandValue.command_id);
+    const outcome = await observed;
+    assert.equal("error" in outcome, false);
+    if (!("value" in outcome)) throw outcome.error;
+    const cancelled = outcome.value;
+    assert.equal(cancelled.status, "cancelled");
+    assert.equal(cancelled.reason_code, "provider-cancelled");
+    assert.deepEqual(
+      state.session.contextCalls.filter(([kind]) => kind === "model.abort"),
+      [["model.abort", "context-summary-cancelled", "session.branch.summarize"]],
+    );
+    await state.gateway.settle();
+    assert.equal(
+      (await readdir(join(state.root, "public", "records")))
+        .some((name) => name.startsWith(".asterion-")),
+      false,
+    );
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("gateway admits only one transcript model operation at a time", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    state.session.holdModelOperations = true;
+    const compact = contextCommand("session.compact", {
+      continuation_id: "continuation-1",
+      instructions_ref: null,
+      budget: MODEL_CONTEXT_BUDGET,
+    }, "context-compact-held");
+    const pending = state.gateway.executeSessionContext(
+      compact,
+      async () => undefined,
+    );
+    const waitDeadline = Date.now() + 2_000;
+    while (
+      state.session.modelResolvers.length === 0 &&
+      Date.now() < waitDeadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal(state.session.modelResolvers.length, 1);
+
+    await assert.rejects(state.gateway.executeSessionContext(contextCommand(
+      "session.branch.summarize",
+      {
+        continuation_id: "continuation-1",
+        entry_id: "entry-1",
+        instructions_ref: null,
+        budget: MODEL_CONTEXT_BUDGET,
+      },
+      "context-summary-conflict",
+    ), async () => undefined));
+    assert.equal(
+      state.session.contextCalls.some(
+        ([kind, commandId]) =>
+          kind === "model.baseline" && commandId === "context-summary-conflict",
+      ),
+      false,
+    );
+
+    await state.gateway.cancelSessionContext(compact.command_id);
+    const cancelled = await pending;
+    assert.equal(cancelled.status, "cancelled");
   } finally {
     await state.cleanup();
   }

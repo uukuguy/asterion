@@ -57,6 +57,7 @@ export type {
   GatewayDurableStoreOptions,
   GatewayContextBinding,
   GatewayContextCommitReceipt,
+  GatewayContextModelBaseline,
   GatewayContextOperation,
   GatewayEventCursor,
   GatewayEventReceipt,
@@ -112,6 +113,12 @@ export {
 } from "./prime-session.js";
 export type {
   PrimeContextDescription,
+  PrimeContextBranchSummaryResult,
+  PrimeContextCompactionResult,
+  PrimeContextLabelResult,
+  PrimeContextModelBaseline,
+  PrimeContextModelBudget,
+  PrimeContextModelOutcome,
   PrimeContextNameResult,
   PrimeContextStatus,
   PrimeContextUsage,

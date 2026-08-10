@@ -156,6 +156,82 @@ function forkReceipt() {
   };
 }
 
+function modelContextCommand(
+  operation = "session.compact",
+  commandId = "context-model-1",
+) {
+  const budget = {
+    controller_tokens: 50,
+    application_tokens: 0,
+    child_tokens: 0,
+    aggregate_tokens: 50,
+    cost_micros: 5_000,
+    deadline_ms: 30_000,
+  };
+  return {
+    protocol: "asterion.session-context/v1",
+    command_id: commandId,
+    session_id: "session-1",
+    generation: 1,
+    authority_revision: 1,
+    idempotency_key: `${commandId}-once`,
+    operation,
+    payload: operation === "session.compact"
+      ? {
+        continuation_id: "continuation-1",
+        instructions_ref: "instructions-ref-1",
+        budget,
+      }
+      : {
+        continuation_id: "continuation-1",
+        entry_id: "entry-1",
+        instructions_ref: "instructions-ref-1",
+        budget,
+      },
+  };
+}
+
+function modelContextBaseline(commandId = "context-model-1") {
+  return {
+    commandId,
+    continuationId: "continuation-1",
+    leafId: "entry-2",
+    contextTokens: 90,
+    controllerTokens: 135,
+    costMicros: 1_234,
+  };
+}
+
+function compactReceipt(commandId = "context-model-1") {
+  return {
+    protocol: "asterion.session-context/v1",
+    receipt_id: `${commandId}-receipt`,
+    command_id: commandId,
+    session_id: "session-1",
+    generation: 1,
+    operation: "session.compact",
+    status: "succeeded",
+    reason_code: "session-context-succeeded",
+    payload: {
+      evidence_ref: null,
+      result: {
+        continuation_id: "continuation-1",
+        covered_leaf_id: "entry-2",
+        before_context_tokens: 90,
+        after_context_tokens: 40,
+        summary_sha256: "c".repeat(64),
+        usage: {
+          controller_tokens: 20,
+          application_tokens: 0,
+          child_tokens: 0,
+          aggregate_tokens: 20,
+          cost_micros: 500,
+        },
+      },
+    },
+  };
+}
+
 async function temporaryStoreRoot() {
   const parent = await mkdtemp(join(tmpdir(), "asterion-gateway-store-"));
   return {
@@ -250,6 +326,144 @@ test("durable store atomically commits safe context receipt and current binding"
     assert.equal(records.join("").includes("provider/path"), false);
   } finally {
     await fixtureRoot.cleanup();
+  }
+});
+
+test("durable store persists one exact model baseline before dispatch and clears it on commit", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    await store.initializeContextBinding(contextBinding());
+    await store.acceptContextCommand(modelContextCommand());
+    const prepared = await store.prepareContextModelOperation(
+      "context-model-1",
+      modelContextBaseline(),
+    );
+    assert.equal(prepared.position, 3);
+    assert.deepEqual(
+      store.preparedContextModelOperation("context-model-1"),
+      modelContextBaseline(),
+    );
+
+    const reopened = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    assert.deepEqual(reopened.preparedContextModelOperations(), [{
+      command: modelContextCommand(),
+      baseline: modelContextBaseline(),
+    }]);
+    const replay = await reopened.prepareContextModelOperation(
+      "context-model-1",
+      modelContextBaseline(),
+    );
+    assert.equal(replay.position, prepared.position);
+    await assert.rejects(
+      reopened.prepareContextModelOperation("context-model-1", {
+        ...modelContextBaseline(),
+        controllerTokens: 136,
+      }),
+      GatewayStoreConflictError,
+    );
+
+    await reopened.commitContextOperation(compactReceipt(), null);
+    assert.equal(
+      reopened.preparedContextModelOperation("context-model-1"),
+      undefined,
+    );
+    const committed = await GatewayDurableStore.open(
+      fixtureRoot.root,
+      "session-1",
+    );
+    assert.deepEqual(committed.preparedContextModelOperations(), []);
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
+test("durable model baseline rejects wrong identity, unsupported commands, and unbounded success", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    await store.initializeContextBinding(contextBinding());
+    await store.acceptContextCommand(contextCommand());
+    await assert.rejects(
+      store.prepareContextModelOperation(
+        contextCommand().command_id,
+        modelContextBaseline(contextCommand().command_id),
+      ),
+      GatewayStoreConflictError,
+    );
+
+    await store.acceptContextCommand(modelContextCommand());
+    await assert.rejects(
+      store.prepareContextModelOperation("context-model-1", {
+        ...modelContextBaseline(),
+        continuationId: "continuation-foreign",
+      }),
+      GatewayStoreConflictError,
+    );
+    await store.prepareContextModelOperation(
+      "context-model-1",
+      modelContextBaseline(),
+    );
+    const overBudget = structuredClone(compactReceipt());
+    overBudget.payload.result.usage.controller_tokens = 51;
+    overBudget.payload.result.usage.aggregate_tokens = 51;
+    await assert.rejects(
+      store.commitContextOperation(overBudget, null),
+      GatewayStoreConflictError,
+    );
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
+test("durable model baseline recovery selects one exact preparation across faults", async () => {
+  for (const faultStage of [
+    "before_write",
+    "after_write",
+    "before_rename",
+    "after_rename",
+    "before_directory_fsync",
+    "after_directory_fsync",
+  ]) {
+    const fixtureRoot = await temporaryStoreRoot();
+    try {
+      const initial = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+      await initial.initializeContextBinding(contextBinding());
+      await initial.acceptContextCommand(modelContextCommand());
+      const faulted = await GatewayDurableStore.open(
+        fixtureRoot.root,
+        "session-1",
+        {
+          faultInjector(stage) {
+            if (stage === faultStage) {
+              throw new Error(`SENTINEL_MODEL_${faultStage}`);
+            }
+          },
+        },
+      );
+      await assert.rejects(
+        faulted.prepareContextModelOperation(
+          "context-model-1",
+          modelContextBaseline(),
+        ),
+        GatewayStoreWriteError,
+      );
+
+      const reopened = await GatewayDurableStore.open(
+        fixtureRoot.root,
+        "session-1",
+      );
+      await reopened.prepareContextModelOperation(
+        "context-model-1",
+        modelContextBaseline(),
+      );
+      assert.deepEqual(reopened.preparedContextModelOperations(), [{
+        command: modelContextCommand(),
+        baseline: modelContextBaseline(),
+      }]);
+    } finally {
+      await fixtureRoot.cleanup();
+    }
   }
 });
 

@@ -103,6 +103,7 @@ const COMMAND_FIELDS = Object.freeze({
   get_state: ["type", "activeSessionId"],
   get_session_stats: ["type", "activeSessionId"],
   get_session_tree: ["type", "activeSessionId"],
+  set_auto_compaction: ["type", "activeSessionId", "enabled"],
   compact: ["type", "activeSessionId", "customInstructions"],
   abort_compaction: ["type", "activeSessionId"],
   abort_branch_summary: ["type", "activeSessionId"],
@@ -813,6 +814,7 @@ function validateCommand(command: PrimeDaemonCommand): void {
       !nonEmptyString(command.admissionId)) ||
     (command.type === "set_rlm_max_depth" &&
       !nonNegativeInteger(command.maxDepth)) ||
+    (command.type === "set_auto_compaction" && command.enabled !== false) ||
     (command.type === "ack_result" && !nonEmptyString(command.commandId)) ||
     (command.capabilities !== undefined && !validCapabilities(command.capabilities)) ||
     (command.type === "compact" &&
