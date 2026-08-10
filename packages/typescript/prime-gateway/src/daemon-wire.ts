@@ -4,6 +4,7 @@ export const PRIME_DAEMON_SCHEMA_REVISION = 14;
 export const PRIME_DAEMON_SCHEMA_ID = "protocol-7-schema-14-816309b1cd50";
 export const PRIME_DAEMON_APP_VERSION = "0.7.1";
 export const MAX_DAEMON_LINE_BYTES = 1024 * 1024;
+export const MAX_DAEMON_JSON_DEPTH = 32;
 
 export const REQUIRED_SERVER_CAPABILITIES = Object.freeze([
   "attach_snapshot",
@@ -83,6 +84,8 @@ const COMMAND_FIELDS = Object.freeze({
     "type",
     "activeSessionId",
     "message",
+    "content",
+    "images",
     "streamingBehavior",
     "queueIfBusy",
     "expandPromptTemplates",
@@ -99,6 +102,30 @@ const COMMAND_FIELDS = Object.freeze({
   get_session_header: ["type", "activeSessionId"],
   get_state: ["type", "activeSessionId"],
   get_session_stats: ["type", "activeSessionId"],
+  get_session_tree: ["type", "activeSessionId"],
+  compact: ["type", "activeSessionId", "customInstructions"],
+  abort_compaction: ["type", "activeSessionId"],
+  abort_branch_summary: ["type", "activeSessionId"],
+  switch_session: ["type", "activeSessionId", "sessionPath", "cwdOverride"],
+  fork: ["type", "activeSessionId", "entryId", "position"],
+  navigate_tree: [
+    "type",
+    "activeSessionId",
+    "targetId",
+    "summarize",
+    "customInstructions",
+    "replaceInstructions",
+    "label",
+  ],
+  set_session_name: ["type", "activeSessionId", "name"],
+  rename_saved_session: ["type", "activeSessionId", "sessionPath", "name"],
+  delete_saved_session: ["type", "activeSessionId", "sessionPath"],
+  set_session_entry_label: [
+    "type",
+    "activeSessionId",
+    "entryId",
+    "label",
+  ],
   set_rlm_max_depth: ["type", "activeSessionId", "maxDepth", "global"],
   prepare_update_restart: ["type"],
   retry_worker: ["type", "activeSessionId"],
@@ -297,8 +324,11 @@ export type PrimeDaemonResponse =
       type: "response";
       command: string;
       success: false;
-      error: string;
-      errorInfo?: Readonly<Record<string, unknown>>;
+      errorInfo?: Readonly<{
+        code: "command_result_uncertain";
+        clientId: string;
+        commandId: string;
+      }>;
     }>;
 
 export type PrimeDaemonEvent = Readonly<
@@ -346,6 +376,96 @@ function nonEmptyString(value: unknown): value is string {
 
 function nonNegativeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+function hasBoundedDepth(value: unknown): boolean {
+  const pending: Array<Readonly<{ value: unknown; depth: number }>> = [
+    { value, depth: 1 },
+  ];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (current === undefined) {
+      continue;
+    }
+    if (current.depth > MAX_DAEMON_JSON_DEPTH) {
+      return false;
+    }
+    if (Array.isArray(current.value)) {
+      for (const child of current.value) {
+        pending.push({ value: child, depth: current.depth + 1 });
+      }
+    } else if (isRecord(current.value)) {
+      for (const child of Object.values(current.value)) {
+        pending.push({ value: child, depth: current.depth + 1 });
+      }
+    }
+  }
+  return true;
+}
+
+const IMAGE_MEDIA_TYPES = new Set([
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
+const CANONICAL_BASE64 =
+  /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
+
+function validCanonicalBase64(value: unknown): value is string {
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length % 4 !== 0 ||
+    !CANONICAL_BASE64.test(value)
+  ) {
+    return false;
+  }
+  try {
+    return Buffer.from(value, "base64").toString("base64") === value;
+  } catch {
+    return false;
+  }
+}
+
+function validImageContent(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ["type", "data", "mimeType"]) &&
+    Object.keys(value).length === 3 &&
+    value.type === "image" &&
+    validCanonicalBase64(value.data) &&
+    typeof value.mimeType === "string" &&
+    IMAGE_MEDIA_TYPES.has(value.mimeType)
+  );
+}
+
+function validPromptContent(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length === 0) {
+    return false;
+  }
+  return value.every((item) => {
+    if (!isRecord(item)) {
+      return false;
+    }
+    if (item.type === "image") {
+      return validImageContent(item);
+    }
+    return (
+      item.type === "text" &&
+      hasOnlyKeys(item, ["type", "text"]) &&
+      Object.keys(item).length === 2 &&
+      typeof item.text === "string"
+    );
+  });
+}
+
+function validPromptImages(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((item) => validImageContent(item))
+  );
 }
 
 function validProtocol(value: unknown): boolean {
@@ -463,6 +583,64 @@ function decodeHello(value: Record<string, unknown>): PrimeDaemonHello {
   });
 }
 
+function safeUncertainErrorInfo(
+  value: unknown,
+): Readonly<{
+  code: "command_result_uncertain";
+  clientId: string;
+  commandId: string;
+}> | undefined {
+  if (
+    !isRecord(value) ||
+    value.code !== "command_result_uncertain" ||
+    !hasOnlyKeys(value, ["code", "clientId", "commandId"]) ||
+    Object.keys(value).length !== 3 ||
+    !nonEmptyString(value.clientId) ||
+    !nonEmptyString(value.commandId)
+  ) {
+    return undefined;
+  }
+  return Object.freeze({
+    code: "command_result_uncertain",
+    clientId: value.clientId,
+    commandId: value.commandId,
+  });
+}
+
+function validPrivateErrorInfo(value: unknown): boolean {
+  if (!isRecord(value) || typeof value.code !== "string") {
+    return false;
+  }
+  if (value.code === "missing_session_cwd") {
+    const issue = value.issue;
+    return (
+      hasOnlyKeys(value, ["code", "issue"]) &&
+      Object.keys(value).length === 2 &&
+      isRecord(issue) &&
+      hasOnlyKeys(issue, ["sessionFile", "sessionCwd", "fallbackCwd"]) &&
+      nonEmptyString(issue.sessionCwd) &&
+      nonEmptyString(issue.fallbackCwd) &&
+      (issue.sessionFile === undefined || nonEmptyString(issue.sessionFile))
+    );
+  }
+  if (value.code === "session_import_file_not_found") {
+    return (
+      hasOnlyKeys(value, ["code", "filePath"]) &&
+      Object.keys(value).length === 2 &&
+      nonEmptyString(value.filePath)
+    );
+  }
+  if (value.code === "session_already_active") {
+    return (
+      hasOnlyKeys(value, ["code", "sessionPath", "activeSessionId"]) &&
+      nonEmptyString(value.sessionPath) &&
+      (value.activeSessionId === undefined ||
+        nonEmptyString(value.activeSessionId))
+    );
+  }
+  return false;
+}
+
 function decodeResponse(value: Record<string, unknown>): PrimeDaemonResponse {
   if (
     !hasOnlyKeys(value, [
@@ -476,6 +654,7 @@ function decodeResponse(value: Record<string, unknown>): PrimeDaemonResponse {
     ]) ||
     !nonEmptyString(value.id) ||
     !nonEmptyString(value.command) ||
+    !Object.hasOwn(COMMAND_FIELDS, value.command) ||
     typeof value.success !== "boolean"
   ) {
     protocolViolation();
@@ -484,21 +663,33 @@ function decodeResponse(value: Record<string, unknown>): PrimeDaemonResponse {
     if (value.error !== undefined || value.errorInfo !== undefined) {
       protocolViolation();
     }
-  } else if (
-    !nonEmptyString(value.error) ||
-    (value.errorInfo !== undefined && !isRecord(value.errorInfo)) ||
-    value.data !== undefined
+    return deepFreeze(value) as PrimeDaemonResponse;
+  }
+  if (!nonEmptyString(value.error) || value.data !== undefined) {
+    protocolViolation();
+  }
+  const uncertain = safeUncertainErrorInfo(value.errorInfo);
+  if (
+    value.errorInfo !== undefined &&
+    uncertain === undefined &&
+    !validPrivateErrorInfo(value.errorInfo)
   ) {
     protocolViolation();
   }
-  return deepFreeze(value) as PrimeDaemonResponse;
+  return Object.freeze({
+    id: value.id,
+    type: "response",
+    command: value.command,
+    success: false,
+    ...(uncertain === undefined ? {} : { errorInfo: uncertain }),
+  });
 }
 
 function decodeEvent(value: Record<string, unknown>): PrimeDaemonEvent {
   const type = value.type;
   if (
     typeof type !== "string" ||
-    !(type in EVENT_FIELDS) ||
+    !Object.hasOwn(EVENT_FIELDS, type) ||
     !hasOnlyKeys(value, EVENT_FIELDS[type as keyof typeof EVENT_FIELDS])
   ) {
     protocolViolation();
@@ -545,7 +736,11 @@ export function decodePrimeDaemonLine(line: string): PrimeDaemonOutbound {
   } catch {
     protocolViolation();
   }
-  if (!isRecord(value) || !nonEmptyString(value.type)) {
+  if (
+    !hasBoundedDepth(value) ||
+    !isRecord(value) ||
+    !nonEmptyString(value.type)
+  ) {
     protocolViolation();
   }
   if (value.type === "daemon_hello") {
@@ -588,7 +783,7 @@ function validateCommand(command: PrimeDaemonCommand): void {
   if (
     !isRecord(command) ||
     !nonEmptyString(command.type) ||
-    !(command.type in COMMAND_FIELDS) ||
+    !Object.hasOwn(COMMAND_FIELDS, command.type) ||
     !hasOnlyKeys(command, COMMAND_FIELDS[command.type as keyof typeof COMMAND_FIELDS]) ||
     "id" in command
   ) {
@@ -597,6 +792,8 @@ function validateCommand(command: PrimeDaemonCommand): void {
   const needsActiveSession = ![
     "create",
     "detach",
+    "rename_saved_session",
+    "delete_saved_session",
     "prepare_update_restart",
     "shutdown",
     "ack_result",
@@ -606,12 +803,46 @@ function validateCommand(command: PrimeDaemonCommand): void {
     (command.activeSessionId !== undefined && !nonEmptyString(command.activeSessionId)) ||
     (command.type === "reattach" && !nonEmptyString(command.targetActiveSessionId)) ||
     (command.type === "prompt" && !nonEmptyString(command.message)) ||
+    (command.type === "prompt" &&
+      command.content !== undefined &&
+      !validPromptContent(command.content)) ||
+    (command.type === "prompt" &&
+      command.images !== undefined &&
+      !validPromptImages(command.images)) ||
     (command.type === "cancel_prompt_admission" &&
       !nonEmptyString(command.admissionId)) ||
     (command.type === "set_rlm_max_depth" &&
       !nonNegativeInteger(command.maxDepth)) ||
     (command.type === "ack_result" && !nonEmptyString(command.commandId)) ||
-    (command.capabilities !== undefined && !validCapabilities(command.capabilities))
+    (command.capabilities !== undefined && !validCapabilities(command.capabilities)) ||
+    (command.type === "compact" &&
+      command.customInstructions !== undefined &&
+      typeof command.customInstructions !== "string") ||
+    (command.type === "fork" &&
+      (!nonEmptyString(command.entryId) ||
+        (command.position !== undefined &&
+          command.position !== "before" &&
+          command.position !== "at"))) ||
+    (command.type === "navigate_tree" &&
+      (!nonEmptyString(command.targetId) ||
+        (command.summarize !== undefined &&
+          typeof command.summarize !== "boolean") ||
+        (command.customInstructions !== undefined &&
+          typeof command.customInstructions !== "string") ||
+        (command.replaceInstructions !== undefined &&
+          typeof command.replaceInstructions !== "boolean") ||
+        (command.label !== undefined && typeof command.label !== "string"))) ||
+    (["switch_session", "rename_saved_session", "delete_saved_session"].includes(
+      command.type,
+    ) && !nonEmptyString(command.sessionPath)) ||
+    (command.type === "switch_session" &&
+      command.cwdOverride !== undefined &&
+      !nonEmptyString(command.cwdOverride)) ||
+    (["set_session_name", "rename_saved_session"].includes(command.type) &&
+      (typeof command.name !== "string" || command.name.trim().length === 0)) ||
+    (command.type === "set_session_entry_label" &&
+      (!nonEmptyString(command.entryId) ||
+        (command.label !== undefined && typeof command.label !== "string")))
   ) {
     protocolViolation();
   }

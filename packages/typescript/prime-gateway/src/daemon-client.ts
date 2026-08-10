@@ -53,12 +53,14 @@ export interface PrimeDaemonClientOptions {
   readonly clientId: string;
   readonly connectTimeoutMs?: number;
   readonly requestTimeoutMs?: number;
+  readonly expectedRuntimeBuildId?: string;
 }
 
 export type PrimeDaemonListener = (outbound: PrimeDaemonOutbound) => void;
 
 interface PendingRequest {
   readonly commandId: string;
+  readonly commandType: PrimeDaemonCommand["type"];
   readonly wireData: string;
   readonly promise: Promise<PrimeDaemonResponse>;
   readonly resolve: (response: PrimeDaemonResponse) => void;
@@ -100,21 +102,30 @@ export class PrimeDaemonClient {
   private readonly clientId: string;
   private readonly connectTimeoutMs: number;
   private readonly requestTimeoutMs: number;
+  private readonly expectedRuntimeBuildId: string | undefined;
   private readonly listeners = new Set<PrimeDaemonListener>();
   private readonly pending = new Map<string, PendingRequest>();
   private readonly deferredAcknowledgements = new Set<string>();
   private transport: TransportState | undefined;
   private socketPath: string | undefined;
   private currentHello: PrimeDaemonHello | undefined;
+  private boundRuntimeBuildId: string | undefined;
   private reconnectPromise: Promise<void> | undefined;
   private closed = false;
   private acknowledgementSequence = 0;
 
   constructor(options: PrimeDaemonClientOptions) {
-    if (typeof options.clientId !== "string" || options.clientId.length === 0) {
+    if (
+      typeof options.clientId !== "string" ||
+      options.clientId.length === 0 ||
+      (options.expectedRuntimeBuildId !== undefined &&
+        (typeof options.expectedRuntimeBuildId !== "string" ||
+          options.expectedRuntimeBuildId.length === 0))
+    ) {
       throw new PrimeDaemonProtocolError();
     }
     this.clientId = options.clientId;
+    this.expectedRuntimeBuildId = options.expectedRuntimeBuildId;
     this.connectTimeoutMs = positiveMilliseconds(
       options.connectTimeoutMs,
       DEFAULT_CONNECT_TIMEOUT_MS,
@@ -244,6 +255,7 @@ export class PrimeDaemonClient {
     });
     const pending: PendingRequest = {
       commandId: stableCommandId,
+      commandType: command.type,
       wireData,
       promise,
       resolve: resolveRequest,
@@ -366,6 +378,16 @@ export class PrimeDaemonClient {
         this.stopTransport(state, new PrimeDaemonCompatibilityError(), true);
         return;
       }
+      if (
+        (this.expectedRuntimeBuildId !== undefined &&
+          outbound.runtimeBuildId !== this.expectedRuntimeBuildId) ||
+        this.boundRuntimeBuildId !== undefined &&
+        outbound.runtimeBuildId !== this.boundRuntimeBuildId
+      ) {
+        this.stopTransport(state, new PrimeDaemonCompatibilityError(), true);
+        return;
+      }
+      this.boundRuntimeBuildId = outbound.runtimeBuildId;
       state.helloReceived = true;
       this.currentHello = outbound;
       this.settleHandshake(state);
@@ -378,17 +400,29 @@ export class PrimeDaemonClient {
     if (outbound.type === "response") {
       const pending = this.pending.get(outbound.id);
       if (pending !== undefined) {
+        if (outbound.command !== pending.commandType) {
+          this.stopTransport(state, new PrimeDaemonProtocolError(), true);
+          return;
+        }
+        const carriesUncertainMarker =
+          !outbound.success && outbound.errorInfo !== undefined;
+        const uncertain = this.isUncertainResult(outbound, outbound.id);
+        if (carriesUncertainMarker && !uncertain) {
+          this.stopTransport(state, new PrimeDaemonProtocolError(), true);
+          return;
+        }
         this.pending.delete(outbound.id);
         this.clearRequestTimeout(pending);
-        const uncertain = this.isUncertainResult(outbound, outbound.id);
-        if (uncertain || !pending.deferAcknowledgement) {
-          this.writeAcknowledgement(state, outbound.id);
-        } else {
+        if (pending.deferAcknowledgement) {
           this.deferredAcknowledgements.add(outbound.id);
+          pending.resolve(outbound);
+          return;
         }
         if (uncertain) {
+          this.writeAcknowledgement(state, outbound.id);
           pending.reject(new PrimeDaemonUncertainError(outbound.id));
         } else {
+          this.writeAcknowledgement(state, outbound.id);
           pending.resolve(outbound);
         }
         return;

@@ -957,6 +957,7 @@ async function createSidecarFromDescriptor(
     clientId: `asterion-${descriptor.sessionId}`,
     connectTimeoutMs: descriptor.timeoutMs,
     requestTimeoutMs: descriptor.timeoutMs,
+    expectedRuntimeBuildId: descriptor.expectedRuntimeBuildId,
   });
   await transport.connect(descriptor.primeSocketPath);
   const store = await GatewayDurableStore.open(
@@ -1119,6 +1120,7 @@ async function createSidecarFromDescriptor(
               clientId: `asterion-${descriptor.sessionId}-checkpoint`,
               connectTimeoutMs: descriptor.timeoutMs,
               requestTimeoutMs: descriptor.timeoutMs,
+              expectedRuntimeBuildId: descriptor.expectedRuntimeBuildId,
             });
             await relaunched.connect(descriptor.primeSocketPath);
             return relaunched;

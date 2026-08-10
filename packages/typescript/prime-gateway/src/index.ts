@@ -8,6 +8,7 @@ export type {
   PrimeArtifactLock,
 } from "./artifact-lock.js";
 export {
+  MAX_DAEMON_JSON_DEPTH,
   MAX_DAEMON_LINE_BYTES,
   PRIME_DAEMON_APP_VERSION,
   PRIME_DAEMON_PROTOCOL_NAME,

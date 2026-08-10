@@ -1,6 +1,6 @@
 # Asterion Prime Session/Context Parity Implementation Plan
 
-> Status: Tasks 4.1-4.4 verified; Task 4.5 daemon session/context admission is next.
+> Status: Tasks 4.1-4.5 verified; Task 4.6 identity and safe status projection is next.
 >
 > Program parent: `2026-08-10-asterion-prime-system-parity.md`, Task 4.
 >
@@ -495,10 +495,17 @@ Commit: `feat: persist prime session context operations`.
 
 ### Task 4.5: Admit the exact daemon session/context surface
 
+**Status:** Complete. The pinned commands and image types are closed at the
+wire, initial and reconnect build identity is exact, responses are bounded and
+correlated, private daemon failures are redacted, and uncertain results retain
+the deferred durability boundary.
+
 **Modify:**
 
 - `packages/typescript/prime-gateway/src/daemon-wire.ts`
 - `packages/typescript/prime-gateway/src/daemon-client.ts`
+- `packages/typescript/prime-gateway/src/index.ts`
+- `packages/typescript/prime-gateway/src/main.ts`
 - `packages/typescript/prime-gateway/test/daemon-wire.test.mjs`
 - `packages/typescript/prime-gateway/test/daemon-client.test.mjs`
 - `packages/typescript/prime-gateway/test/fixtures/fake-prime-daemon.mjs`

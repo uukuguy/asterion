@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  MAX_DAEMON_JSON_DEPTH,
   MAX_DAEMON_LINE_BYTES,
   PrimeDaemonCompatibilityError,
   PrimeDaemonProtocolError,
@@ -103,7 +104,21 @@ test("daemon wire rejects malformed, oversized, missing, and unknown values", ()
   for (const line of [
     "{SENTINEL_INVALID_JSON",
     "x".repeat(MAX_DAEMON_LINE_BYTES + 1),
+    JSON.stringify({
+      id: "oversized-response",
+      type: "response",
+      command: "get_state",
+      success: true,
+      data: "SENTINEL".repeat(MAX_DAEMON_LINE_BYTES),
+    }),
     JSON.stringify({ type: "response", success: true }),
+    JSON.stringify({
+      id: "inherited-command",
+      type: "response",
+      command: "toString",
+      success: true,
+    }),
+    JSON.stringify({ type: "toString" }),
     JSON.stringify({ type: "SENTINEL_UNKNOWN_OUTBOUND" }),
     JSON.stringify({ ...hello(), unexpected: true }),
   ]) {
@@ -142,6 +157,209 @@ test("daemon wire emits a stable v7 mutation envelope", () => {
     },
   });
   assert.equal(line.endsWith("\n"), true);
+});
+
+test("daemon wire admits only the pinned session command shapes", () => {
+  const commands = [
+    { type: "abort_branch_summary", activeSessionId: "prime-root" },
+    { type: "abort_compaction", activeSessionId: "prime-root" },
+    {
+      type: "compact",
+      activeSessionId: "prime-root",
+      customInstructions: "private compact instructions",
+    },
+    {
+      type: "delete_saved_session",
+      activeSessionId: "prime-root",
+      sessionPath: "/private/session.jsonl",
+    },
+    {
+      type: "fork",
+      activeSessionId: "prime-root",
+      entryId: "entry-1",
+      position: "at",
+    },
+    { type: "get_session_stats", activeSessionId: "prime-root" },
+    { type: "get_session_tree", activeSessionId: "prime-root" },
+    { type: "get_state", activeSessionId: "prime-root" },
+    {
+      type: "navigate_tree",
+      activeSessionId: "prime-root",
+      targetId: "entry-2",
+      summarize: true,
+      customInstructions: "private branch instructions",
+      replaceInstructions: false,
+      label: "private label",
+    },
+    {
+      type: "rename_saved_session",
+      sessionPath: "/private/session.jsonl",
+      name: "private saved name",
+    },
+    {
+      type: "set_session_entry_label",
+      activeSessionId: "prime-root",
+      entryId: "entry-2",
+      label: "private label",
+    },
+    {
+      type: "set_session_name",
+      activeSessionId: "prime-root",
+      name: "private live name",
+    },
+    {
+      type: "switch_session",
+      activeSessionId: "prime-root",
+      sessionPath: "/private/session.jsonl",
+      cwdOverride: "/private/workspace",
+    },
+  ];
+
+  for (const [index, command] of commands.entries()) {
+    const id = `session-command-${index}`;
+    const encoded = JSON.parse(
+      encodePrimeDaemonCommand(command, id, "asterion-client-1"),
+    );
+    assert.deepEqual(encoded.command, { id, ...command });
+  }
+
+  for (const command of [
+    { type: "clone", activeSessionId: "prime-root" },
+    { type: "toString", activeSessionId: "prime-root" },
+    {
+      type: "fork",
+      activeSessionId: "prime-root",
+      entryId: "entry-1",
+      position: "after",
+    },
+    {
+      type: "set_session_name",
+      activeSessionId: "prime-root",
+      name: "name",
+      workerToken: "SENTINEL_WORKER_TOKEN",
+    },
+    {
+      type: "delete_saved_session",
+      sessionPath: "/private/session.jsonl",
+      recursive: true,
+    },
+    {
+      type: "navigate_tree",
+      activeSessionId: "prime-root",
+      targetId: "entry-1",
+      summarize: "yes",
+    },
+  ]) {
+    assertFixedProtocolError(() =>
+      encodePrimeDaemonCommand(command, "invalid-command", "asterion-client-1"),
+    );
+  }
+});
+
+test("daemon wire validates prompt content and images as exact closed values", () => {
+  const image = {
+    type: "image",
+    data: Buffer.from("private image bytes").toString("base64"),
+    mimeType: "image/png",
+  };
+  const line = encodePrimeDaemonCommand(
+    {
+      type: "prompt",
+      activeSessionId: "prime-root",
+      message: "private prompt",
+      content: [{ type: "text", text: "private text" }, image],
+      images: [image],
+    },
+    "image-command",
+    "asterion-client-1",
+  );
+  assert.deepEqual(JSON.parse(line).command.content, [
+    { type: "text", text: "private text" },
+    image,
+  ]);
+
+  for (const invalidContent of [
+    [{ type: "text", text: "private", textSignature: "SENTINEL_SIGNATURE" }],
+    [{ ...image, mimeType: "text/plain" }],
+    [{ ...image, data: "not-canonical-base64" }],
+    [{ ...image, nextBuildField: true }],
+    [],
+  ]) {
+    assertFixedProtocolError(() =>
+      encodePrimeDaemonCommand(
+        {
+          type: "prompt",
+          activeSessionId: "prime-root",
+          message: "private prompt",
+          content: invalidContent,
+        },
+        "invalid-image-command",
+        "asterion-client-1",
+      ),
+    );
+  }
+
+  for (const mimeType of ["application/octet-stream", "image/svg+xml"]) {
+    assertFixedProtocolError(() =>
+      encodePrimeDaemonCommand(
+        {
+          type: "prompt",
+          activeSessionId: "prime-root",
+          message: "private prompt",
+          images: [{ ...image, mimeType }],
+        },
+        "invalid-image-list-command",
+        "asterion-client-1",
+      ),
+    );
+  }
+});
+
+test("daemon wire bounds response depth and strips private failure text", () => {
+  let nested = { value: true };
+  for (let index = 0; index < MAX_DAEMON_JSON_DEPTH + 2; index += 1) {
+    nested = { nested };
+  }
+  assertFixedProtocolError(() =>
+    decodePrimeDaemonLine(JSON.stringify({
+      id: "deep-response",
+      type: "response",
+      command: "get_state",
+      success: true,
+      data: nested,
+    })),
+  );
+
+  const decoded = decodePrimeDaemonLine(JSON.stringify({
+    id: "failed-response",
+    type: "response",
+    command: "switch_session",
+    success: false,
+    error: "SENTINEL_PRIVATE_DAEMON_ERROR",
+  }));
+  assert.deepEqual(decoded, {
+    id: "failed-response",
+    type: "response",
+    command: "switch_session",
+    success: false,
+  });
+  assert.equal(JSON.stringify(decoded).includes("SENTINEL"), false);
+
+  assertFixedProtocolError(() =>
+    decodePrimeDaemonLine(JSON.stringify({
+      id: "next-build-response",
+      type: "response",
+      command: "switch_session",
+      success: false,
+      error: "private",
+      errorInfo: {
+        code: "command_result_uncertain",
+        clientId: "asterion-client-1",
+        commandId: "next-build-response",
+        nextBuildField: "SENTINEL",
+      },
+    })),
+  );
 });
 
 test("daemon wire preserves only a valid generation-aware event cursor", () => {

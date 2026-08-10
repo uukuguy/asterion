@@ -149,6 +149,82 @@ export async function startFakePrimeDaemon(options = {}) {
     if (command.type === "cancel_prompt_admission") {
       return { status: "cancelled" };
     }
+    if (command.type === "get_state") {
+      return {
+        id: activeSessionId,
+        lifecycle: "live",
+        activity: "idle",
+        isSessionActive: false,
+        runtimeKind: "top-level",
+        rlmDepth: 0,
+        activeSessionId,
+        sessionId: transcriptSessionId,
+        sessionFile: "/private/sessions/root.jsonl",
+        sessionName: "private fake session",
+        cwd: "/private/workspace",
+        thinkingLevel: "medium",
+        isStreaming: false,
+        isCompacting: false,
+        isBashRunning: false,
+        hasRunningRlmChildren: false,
+        isRunningTools: false,
+        attachedClients: 1,
+        messageCount: 0,
+        unfinishedActionCount: 0,
+        sessionActions: { queuedCount: 0, steering: [], followUps: [] },
+        diagnostics: [],
+      };
+    }
+    if (command.type === "get_session_stats") {
+      return {
+        sessionFile: "/private/sessions/root.jsonl",
+        sessionId: transcriptSessionId,
+        userMessages: 0,
+        assistantMessages: 0,
+        toolCalls: 0,
+        toolResults: 0,
+        totalMessages: 0,
+        tokens: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          total: 0,
+        },
+        cost: 0,
+      };
+    }
+    if (command.type === "get_session_tree") {
+      return { flatNodes: [], leafId: null };
+    }
+    if (command.type === "compact") {
+      return {
+        summary: "private fake compaction summary",
+        firstKeptEntryId: "entry-1",
+        tokensBefore: 0,
+      };
+    }
+    if (command.type === "switch_session") {
+      return { cancelled: false };
+    }
+    if (command.type === "fork") {
+      return { cancelled: false };
+    }
+    if (command.type === "navigate_tree") {
+      return { cancelled: false };
+    }
+    if (command.type === "delete_saved_session") {
+      return { ok: true, method: "unlink" };
+    }
+    if ([
+      "abort_branch_summary",
+      "abort_compaction",
+      "rename_saved_session",
+      "set_session_entry_label",
+      "set_session_name",
+    ].includes(command.type)) {
+      return undefined;
+    }
     if (command.type === "prepare_update_restart") {
       return {
         formatVersion: 1,

@@ -57,6 +57,21 @@ test("daemon client rejects capability drift before any command", async () => {
   }
 });
 
+test("daemon client rejects an unexpected initial runtime build", async () => {
+  const daemon = await startFakePrimeDaemon({ buildId: "prime-build-other" });
+  const subject = client({ expectedRuntimeBuildId: "prime-build-locked" });
+  try {
+    await assert.rejects(
+      subject.connect(daemon.socketPath),
+      PrimeDaemonCompatibilityError,
+    );
+    assert.deepEqual(daemon.commands, []);
+  } finally {
+    subject.close();
+    await daemon.close();
+  }
+});
+
 test("daemon client replays one stable mutation envelope after disconnect", async () => {
   const daemon = await startFakePrimeDaemon({
     disconnectFirstMutation: true,
@@ -132,6 +147,33 @@ test("daemon client rejects replay when reconnect capabilities downgrade", async
   }
 });
 
+test("daemon client pins the runtime build before replay", async () => {
+  const commandId = "asterion-command-build-drift";
+  const daemon = await startFakePrimeDaemon({
+    disconnectFirstMutation: true,
+    greetings: [
+      { buildId: "prime-build-locked" },
+      { buildId: "prime-build-next" },
+    ],
+  });
+  const subject = client();
+  try {
+    await subject.connect(daemon.socketPath);
+    const pending = subject.request(
+      { type: "get_state", activeSessionId: "prime-root" },
+      commandId,
+    );
+    const rejected = assert.rejects(pending, PrimeDaemonCompatibilityError);
+    await daemon.waitForDeliveries(commandId, 1);
+    await assert.rejects(subject.reconnect(), PrimeDaemonCompatibilityError);
+    await rejected;
+    assert.equal(daemon.deliveryCount(commandId), 1);
+  } finally {
+    subject.close();
+    await daemon.close();
+  }
+});
+
 test("daemon client acknowledges and classifies a structured uncertain result", async () => {
   const daemon = await startFakePrimeDaemon({
     uncertainCommandIds: ["asterion-command-uncertain"],
@@ -159,13 +201,80 @@ test("daemon client acknowledges and classifies a structured uncertain result", 
   }
 });
 
-test("daemon client defers acknowledgement until durable identity binding", async () => {
-  const daemon = await startFakePrimeDaemon();
+test("daemon client defers an uncertain acknowledgement until it is durable", async () => {
+  const commandId = "asterion-command-deferred-uncertain";
+  const daemon = await startFakePrimeDaemon({
+    uncertainCommandIds: [commandId],
+  });
   const subject = client();
   try {
     await subject.connect(daemon.socketPath);
     const deferred = await subject.requestDeferred(
-      { type: "abort", activeSessionId: "prime-root" },
+      { type: "compact", activeSessionId: "prime-root" },
+      commandId,
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(deferred.response.success, false);
+    assert.deepEqual(deferred.response.errorInfo, {
+      code: "command_result_uncertain",
+      clientId: "asterion-client-1",
+      commandId,
+    });
+    assert.equal(daemon.acknowledgements.includes(commandId), false);
+    assert.equal(deferred.acknowledge(), true);
+    await daemon.waitForAcknowledgement(commandId);
+  } finally {
+    subject.close();
+    await daemon.close();
+  }
+});
+
+test("daemon client rejects a deferred uncertain marker for another identity", async () => {
+  const commandId = "asterion-command-mismatched-uncertain";
+  const daemon = await startFakePrimeDaemon({ silentCommandIds: [commandId] });
+  const subject = client();
+  try {
+    await subject.connect(daemon.socketPath);
+    const pending = subject.requestDeferred(
+      { type: "compact", activeSessionId: "prime-root" },
+      commandId,
+    );
+    const rejected = assert.rejects(pending, PrimeDaemonProtocolError);
+    await daemon.waitForDeliveries(commandId, 1);
+    daemon.broadcastRaw(`${JSON.stringify({
+      id: commandId,
+      type: "response",
+      command: "compact",
+      success: false,
+      error: "private uncertain detail",
+      errorInfo: {
+        code: "command_result_uncertain",
+        clientId: "another-client",
+        commandId: "another-command",
+      },
+    })}\n`);
+    await rejected;
+    assert.equal(daemon.acknowledgements.includes(commandId), false);
+  } finally {
+    subject.close();
+    await daemon.close();
+  }
+});
+
+test("daemon client defers acknowledgement until durable identity binding", async () => {
+  const daemon = await startFakePrimeDaemon({
+    responseData: { fork: { cancelled: false } },
+  });
+  const subject = client();
+  try {
+    await subject.connect(daemon.socketPath);
+    const deferred = await subject.requestDeferred(
+      {
+        type: "fork",
+        activeSessionId: "prime-root",
+        entryId: "entry-1",
+        position: "at",
+      },
       "asterion-command-deferred",
     );
     await new Promise((resolve) => setImmediate(resolve));
@@ -176,6 +285,71 @@ test("daemon client defers acknowledgement until durable identity binding", asyn
     deferred.acknowledge();
     await daemon.waitForAcknowledgement("asterion-command-deferred");
     assert.equal(deferred.response.success, true);
+    assert.deepEqual(deferred.response.data, { cancelled: false });
+  } finally {
+    subject.close();
+    await daemon.close();
+  }
+});
+
+test("daemon client rejects a response correlated to the wrong command", async () => {
+  const commandId = "asterion-command-mismatch";
+  const daemon = await startFakePrimeDaemon({ silentCommandIds: [commandId] });
+  const subject = client();
+  try {
+    await subject.connect(daemon.socketPath);
+    const pending = subject.request(
+      { type: "get_state", activeSessionId: "prime-root" },
+      commandId,
+    );
+    const rejected = assert.rejects(pending, PrimeDaemonProtocolError);
+    await daemon.waitForDeliveries(commandId, 1);
+    daemon.broadcastRaw(`${JSON.stringify({
+      id: commandId,
+      type: "response",
+      command: "get_session_stats",
+      success: true,
+      data: {},
+    })}\n`);
+    await rejected;
+    assert.equal(daemon.acknowledgements.includes(commandId), false);
+  } finally {
+    subject.close();
+    await daemon.close();
+  }
+});
+
+test("daemon client never exposes private daemon failure text", async () => {
+  const commandId = "asterion-command-private-failure";
+  const daemon = await startFakePrimeDaemon({ silentCommandIds: [commandId] });
+  const subject = client();
+  try {
+    await subject.connect(daemon.socketPath);
+    const pending = subject.request(
+      {
+        type: "switch_session",
+        activeSessionId: "prime-root",
+        sessionPath: "/private/SENTINEL_SESSION.jsonl",
+      },
+      commandId,
+    );
+    await daemon.waitForDeliveries(commandId, 1);
+    daemon.broadcastRaw(`${JSON.stringify({
+      id: commandId,
+      type: "response",
+      command: "switch_session",
+      success: false,
+      error: "SENTINEL_PRIVATE_DAEMON_ERROR",
+    })}\n`);
+    const response = await pending;
+    assert.deepEqual(response, {
+      id: commandId,
+      type: "response",
+      command: "switch_session",
+      success: false,
+    });
+    assert.equal(JSON.stringify(response).includes("SENTINEL"), false);
+    await daemon.waitForAcknowledgement(commandId);
   } finally {
     subject.close();
     await daemon.close();
