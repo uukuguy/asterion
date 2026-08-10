@@ -5,7 +5,7 @@ import {
   rm,
   unlink,
 } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import process from "node:process";
 import { join } from "node:path";
 import readline from "node:readline/promises";
@@ -14,10 +14,14 @@ import { pathToFileURL } from "node:url";
 import {
   validateControlCommand,
   validateControlEvent,
+  validateSessionContextCommand,
+  validateSessionContextReceipt,
 } from "@dci/agent-runtime";
 import type {
   ControlCommand,
   ControlEvent,
+  SessionContextCommand,
+  SessionContextReceipt,
 } from "@dci/agent-runtime";
 
 import {
@@ -70,7 +74,16 @@ type SidecarEnvelopeType =
   | "authority.update"
   | "command.accept"
   | "events.stream"
-  | "private.read";
+  | "private.read"
+  | "session-context.cancel"
+  | "session-context.execute";
+
+type SessionContextPrivateValues =
+  | Readonly<{ readonly kind: "none" }>
+  | Readonly<{ readonly kind: "attachment"; readonly body: Uint8Array }>
+  | Readonly<{ readonly kind: "instructions"; readonly value: string }>
+  | Readonly<{ readonly kind: "label"; readonly value: string }>
+  | Readonly<{ readonly kind: "name"; readonly value: string }>;
 
 export interface PrimeGatewaySidecarOptions {
   readonly currentGeneration: number;
@@ -78,10 +91,16 @@ export interface PrimeGatewaySidecarOptions {
     accept(command: ControlCommand): Promise<void>;
     updateRemainingBudget(budget: SkillBudget): void;
     eventsAfterCursor(cursor: { readonly generation: number; readonly sequence: number }): readonly ControlEvent[];
+    executeSessionContext?(
+      command: SessionContextCommand,
+      preparePrivate: () => Promise<void>,
+    ): Promise<SessionContextReceipt>;
+    cancelSessionContext?(commandId: string): Promise<void>;
     close(): Promise<void>;
   };
   readonly privateValues: Pick<
     PrivateValueStore,
+    | "bindAttachment"
     | "bindInputReference"
     | "bindResultReference"
     | "readInput"
@@ -123,6 +142,7 @@ interface SidecarEnvelope {
   readonly cursor?: unknown;
   readonly reference?: unknown;
   readonly budget?: unknown;
+  readonly command_id?: unknown;
 }
 
 type SidecarResponse =
@@ -151,12 +171,25 @@ type SidecarResponse =
   | {
     readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
     readonly id: string;
+    readonly type: "session-context.receipt";
+    readonly receipt: SessionContextReceipt;
+  }
+  | {
+    readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
+    readonly id: string;
+    readonly type: "session-context.cancel.accepted";
+  }
+  | {
+    readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
+    readonly id: string;
     readonly type: "error";
     readonly code: "prime-gateway-sidecar-failed";
   };
 
 const REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const MAX_PRIVATE_TEXT_BYTES = 1024 * 1024;
+const MAX_PRIVATE_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const MAX_PRIVATE_FRAME_BYTES = 12 * 1024 * 1024;
 const IDENTIFIER_PATTERN = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/u;
 const VERSION_PATTERN = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$/u;
 const TOKEN_PATTERN = /^[0-9a-f]{64}$/u;
@@ -358,7 +391,9 @@ function validateEnvelope(value: unknown): SidecarEnvelope {
       value.type !== "command.accept" &&
       value.type !== "events.stream" &&
       value.type !== "private.read" &&
-      value.type !== "authority.update"
+      value.type !== "authority.update" &&
+      value.type !== "session-context.cancel" &&
+      value.type !== "session-context.execute"
     )
   ) {
     throw new PrimeGatewayError();
@@ -387,7 +422,75 @@ function validateEnvelope(value: unknown): SidecarEnvelope {
   ) {
     throw new PrimeGatewayError();
   }
+  if (
+    value.type === "session-context.execute" &&
+    !hasExactKeys(value, ["protocol", "id", "type", "command", "private"])
+  ) {
+    throw new PrimeGatewayError();
+  }
+  if (
+    value.type === "session-context.cancel" &&
+    !hasExactKeys(value, ["protocol", "id", "type", "command_id"])
+  ) {
+    throw new PrimeGatewayError();
+  }
   return value as unknown as SidecarEnvelope;
+}
+
+function validateSessionContextPrivateValues(
+  command: SessionContextCommand,
+  value: unknown,
+): SessionContextPrivateValues {
+  if (!isRecord(value)) {
+    throw new PrimeGatewayError();
+  }
+  if (command.operation === "session.attachment.bind") {
+    if (
+      !hasExactKeys(value, ["body_base64"]) ||
+      typeof value.body_base64 !== "string" ||
+      value.body_base64.length > Math.ceil(MAX_PRIVATE_ATTACHMENT_BYTES / 3) * 4
+    ) {
+      throw new PrimeGatewayError();
+    }
+    const body = Buffer.from(value.body_base64, "base64");
+    if (
+      body.toString("base64") !== value.body_base64 ||
+      body.byteLength !== command.payload.size ||
+      body.byteLength > MAX_PRIVATE_ATTACHMENT_BYTES ||
+      createHash("sha256").update(body).digest("hex") !== command.payload.sha256
+    ) {
+      throw new PrimeGatewayError();
+    }
+    return Object.freeze({ kind: "attachment", body: Uint8Array.from(body) });
+  }
+  const privateText = (
+    field: "instructions" | "label" | "name",
+  ): SessionContextPrivateValues => {
+    if (!hasExactKeys(value, [field]) || !validPrivateText(value[field])) {
+      throw new PrimeGatewayError();
+    }
+    return Object.freeze({
+      kind: field,
+      value: value[field],
+    }) as SessionContextPrivateValues;
+  };
+  if (command.operation === "session.name.set") {
+    return privateText("name");
+  }
+  if (command.operation === "session.label.set" && command.payload.label_ref !== null) {
+    return privateText("label");
+  }
+  if (
+    (command.operation === "session.branch.summarize" ||
+      command.operation === "session.compact") &&
+    command.payload.instructions_ref !== null
+  ) {
+    return privateText("instructions");
+  }
+  if (!hasExactKeys(value, [])) {
+    throw new PrimeGatewayError();
+  }
+  return Object.freeze({ kind: "none" });
 }
 
 function sortedUniqueStrings(
@@ -473,6 +576,55 @@ export class PrimeGatewaySidecar {
           id: envelope.id,
           type: "private.value",
           text: await this.readPrivate(envelope),
+        });
+      }
+      if (envelope.type === "session-context.execute") {
+        const command = validateSessionContextCommand(envelope.command);
+        const execute = this.options.gateway.executeSessionContext;
+        if (execute === undefined) {
+          throw new PrimeGatewayError();
+        }
+        const privateValues = validateSessionContextPrivateValues(
+          command,
+          envelope.private,
+        );
+        const receipt = validateSessionContextReceipt(
+          await execute.call(
+            this.options.gateway,
+            command,
+            () => this.bindSessionContextPrivateValues(command, privateValues),
+          ),
+        );
+        if (
+          receipt.command_id !== command.command_id ||
+          receipt.session_id !== command.session_id ||
+          receipt.generation !== command.generation ||
+          receipt.operation !== command.operation
+        ) {
+          throw new PrimeGatewayError();
+        }
+        return Object.freeze({
+          protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+          id: envelope.id,
+          type: "session-context.receipt",
+          receipt,
+        });
+      }
+      if (envelope.type === "session-context.cancel") {
+        const commandId = envelope.command_id;
+        const cancel = this.options.gateway.cancelSessionContext;
+        if (
+          typeof commandId !== "string" ||
+          !REQUEST_ID.test(commandId) ||
+          cancel === undefined
+        ) {
+          throw new PrimeGatewayError();
+        }
+        await cancel.call(this.options.gateway, commandId);
+        return Object.freeze({
+          protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+          id: envelope.id,
+          type: "session-context.cancel.accepted",
         });
       }
       return Object.freeze({
@@ -580,6 +732,57 @@ export class PrimeGatewaySidecar {
     }
     return this.options.privateValues.readInput(reference as `private:${string}`);
   }
+
+  private async bindSessionContextPrivateValues(
+    command: SessionContextCommand,
+    privateValues: SessionContextPrivateValues,
+  ): Promise<void> {
+    if (privateValues.kind === "attachment") {
+      if (command.operation !== "session.attachment.bind") {
+        throw new PrimeGatewayError();
+      }
+      await this.options.privateValues.bindAttachment(
+        {
+          sessionId: command.session_id,
+          inputId: command.payload.input_id,
+          attachmentId: command.payload.attachment_id,
+          mediaType: command.payload.media_type,
+          sha256: command.payload.sha256,
+          size: command.payload.size,
+        },
+        privateValues.body,
+      );
+      return;
+    }
+    if (privateValues.kind === "none") {
+      return;
+    }
+    let reference: string | null;
+    if (privateValues.kind === "name" && command.operation === "session.name.set") {
+      reference = command.payload.name_ref;
+    } else if (
+      privateValues.kind === "label" &&
+      command.operation === "session.label.set"
+    ) {
+      reference = command.payload.label_ref;
+    } else if (
+      privateValues.kind === "instructions" &&
+      (command.operation === "session.branch.summarize" ||
+        command.operation === "session.compact")
+    ) {
+      reference = command.payload.instructions_ref;
+    } else {
+      throw new PrimeGatewayError();
+    }
+    if (reference === null) {
+      throw new PrimeGatewayError();
+    }
+    await this.options.privateValues.bindInputReference(
+      command.command_id,
+      reference,
+      privateValues.value,
+    );
+  }
 }
 
 export class PrimeBoundPrivateInputs implements PrimeGatewayPrivateInputs {
@@ -592,6 +795,38 @@ export class PrimeBoundPrivateInputs implements PrimeGatewayPrivateInputs {
 
 function encodeResponse(value: SidecarResponse): string {
   return `${JSON.stringify(value)}\n`;
+}
+
+export async function servePrimeGatewaySidecar(
+  sidecar: PrimeGatewaySidecar,
+  lines: AsyncIterable<string>,
+  write: (frame: string) => Promise<void>,
+): Promise<void> {
+  const pending = new Set<Promise<void>>();
+  let writeQueue: Promise<void> = Promise.resolve();
+  for await (const line of lines) {
+    let parsed: unknown;
+    try {
+      parsed = Buffer.byteLength(line, "utf8") > MAX_PRIVATE_FRAME_BYTES
+        ? {}
+        : JSON.parse(line);
+    } catch {
+      parsed = {};
+    }
+    const response = sidecar.handleEnvelope(parsed);
+    let operation: Promise<void>;
+    operation = response
+      .then((value) => {
+        writeQueue = writeQueue.then(() => write(encodeResponse(value)));
+        return writeQueue;
+      })
+      .finally(() => {
+        pending.delete(operation);
+      });
+    pending.add(operation);
+  }
+  await Promise.all(pending);
+  await writeQueue;
 }
 
 function readPrivateDescriptor(): PrimeSidecarDescriptor {
@@ -729,7 +964,10 @@ async function createSidecarFromDescriptor(
     descriptor.sessionId,
   );
   store.registerEventGeneration(descriptor.generation);
-  const privateValues = await PrivateValueStore.open(descriptor.gatewayRoot);
+  await ensurePrivateDirectory(descriptor.sessionDir);
+  const privateValues = await PrivateValueStore.open(descriptor.gatewayRoot, {
+    continuationRoot: descriptor.sessionDir,
+  });
   const boundPrivateInputs = new PrimeBoundPrivateInputs(privateValues);
   const lock = await loadPrimeArtifactLock(pathToFileURL(descriptor.artifactLockPath));
   const artifactEvidence = await verifyPrimeArtifact(descriptor.primeSourceRoot, lock);
@@ -911,6 +1149,9 @@ async function createSidecarFromDescriptor(
       },
       eventsAfterCursor: (cursor) =>
         store.eventsAfterCursor(cursor).map((receipt) => receipt.event),
+      executeSessionContext: (command, preparePrivate) =>
+        gateway.executeSessionContext(command, preparePrivate),
+      cancelSessionContext: (commandId) => gateway.cancelSessionContext(commandId),
       close: async () => {
         let failed = false;
         try {
@@ -949,15 +1190,11 @@ async function run(): Promise<void> {
     crlfDelay: Infinity,
   });
   try {
-    for await (const line of rl) {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(line);
-      } catch {
-        parsed = {};
+    await servePrimeGatewaySidecar(sidecar, rl, async (frame) => {
+      if (!process.stdout.write(frame)) {
+        await new Promise<void>((resolve) => process.stdout.once("drain", resolve));
       }
-      process.stdout.write(encodeResponse(await sidecar.handleEnvelope(parsed)));
-    }
+    });
   } finally {
     await sidecar.close();
   }

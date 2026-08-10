@@ -6,7 +6,9 @@ import asyncio
 import json
 import math
 import os
+import re
 from collections.abc import AsyncIterator, Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
@@ -17,6 +19,8 @@ from asterion.immutable import RedactedImmutableMapping
 
 PRIME_GATEWAY_IPC_PROTOCOL = "asterion.prime-gateway-ipc/v1"
 _MAX_FRAME_BYTES = 1024 * 1024
+_MAX_PRIVATE_ATTACHMENT_FRAME_BYTES = 12 * 1024 * 1024
+_REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _PUBLIC_ENV_ALLOWLIST = frozenset(
     {
         "HOME",
@@ -147,6 +151,17 @@ class PrimeSidecarProcess:
         self._descriptor_fd: int | None = None
         self._closed = False
         self._lock = asyncio.Lock()
+        self._write_lock = asyncio.Lock()
+        self._pending: dict[
+            str,
+            tuple[
+                Mapping[str, object],
+                asyncio.Future[Mapping[str, object]],
+                asyncio.TimerHandle,
+            ],
+        ] = {}
+        self._reader_task: asyncio.Task[None] | None = None
+        self._transport_failed = False
         build_prime_sidecar_spawn_plan(options)
 
     @classmethod
@@ -170,29 +185,114 @@ class PrimeSidecarProcess:
         return self._closed
 
     async def request(self, envelope: Mapping[str, object]) -> Mapping[str, object]:
+        request_id = envelope.get("id")
+        if not isinstance(request_id, str) or _REQUEST_ID.fullmatch(request_id) is None:
+            raise PrimeSidecarProcessError()
+        line = _encode_frame(envelope)
+        future: asyncio.Future[Mapping[str, object]] = (
+            asyncio.get_running_loop().create_future()
+        )
         async with self._lock:
-            if self._closed:
+            if self._closed or self._transport_failed or request_id in self._pending:
                 raise PrimeSidecarProcessError()
             sidecar = await self._ensure_started()
             writer = sidecar.stdin
             reader = sidecar.stdout
             if writer is None or reader is None:
                 raise PrimeSidecarProcessError()
-            line = _encode_frame(envelope)
+            timeout_handle = asyncio.get_running_loop().call_later(
+                self._options.request_timeout,
+                self._expire_pending,
+                request_id,
+                future,
+            )
+            self._pending[request_id] = (dict(envelope), future, timeout_handle)
+            if self._reader_task is None:
+                self._reader_task = asyncio.create_task(self._read_responses(reader))
+        try:
             try:
-                writer.write(line)
-                await asyncio.wait_for(
-                    writer.drain(), timeout=self._options.request_timeout
-                )
-                response_line = await asyncio.wait_for(
-                    reader.readline(), timeout=self._options.request_timeout
-                )
+                async with self._write_lock:
+                    if self._closed or self._transport_failed or writer.is_closing():
+                        raise PrimeSidecarProcessError()
+                    current = self._pending.get(request_id)
+                    if current is not None and current[1] is future:
+                        writer.write(line)
+                        await asyncio.wait_for(
+                            writer.drain(), timeout=self._options.request_timeout
+                        )
             except (BrokenPipeError, ConnectionResetError, OSError, TimeoutError):
+                self._fail_transport()
                 raise PrimeSidecarProcessError() from None
-            if not response_line or len(response_line) > _MAX_FRAME_BYTES:
-                raise PrimeSidecarProcessError()
-            response = _decode_frame(response_line)
-            return _validate_response(response, envelope)
+            except PrimeSidecarProcessError:
+                self._fail_transport()
+                raise
+            return await asyncio.shield(future)
+        except asyncio.CancelledError:
+            future.add_done_callback(_consume_future_exception)
+            raise
+
+    async def _read_responses(self, reader: asyncio.StreamReader) -> None:
+        try:
+            while not self._closed and not self._transport_failed:
+                response_line = await reader.readline()
+                if not response_line or len(response_line) > _MAX_FRAME_BYTES:
+                    raise PrimeSidecarProcessError()
+                response = _decode_frame(response_line)
+                response_id = response.get("id")
+                if not isinstance(response_id, str):
+                    raise PrimeSidecarProcessError()
+                pending = self._pending.pop(response_id, None)
+                if pending is None:
+                    raise PrimeSidecarProcessError()
+                request, future, timeout_handle = pending
+                timeout_handle.cancel()
+                if future.cancelled():
+                    continue
+                if _is_exact_error_response(response, request):
+                    future.set_exception(PrimeSidecarProcessError())
+                    continue
+                try:
+                    validated = _validate_response(response, request)
+                except PrimeSidecarProcessError:
+                    future.set_exception(PrimeSidecarProcessError())
+                    raise
+                future.set_result(validated)
+        except asyncio.CancelledError:
+            raise
+        except (OSError, ValueError, PrimeSidecarProcessError):
+            self._fail_transport()
+
+    def _fail_transport(self) -> None:
+        self._transport_failed = True
+        pending = tuple(self._pending.values())
+        self._pending.clear()
+        for _, future, timeout_handle in pending:
+            timeout_handle.cancel()
+            if not future.done():
+                future.set_exception(PrimeSidecarProcessError())
+                future.add_done_callback(_consume_future_exception)
+
+    def _expire_pending(
+        self,
+        request_id: str,
+        future: asyncio.Future[Mapping[str, object]],
+    ) -> None:
+        current = self._pending.get(request_id)
+        if current is None or current[1] is not future:
+            return
+        self._pending.pop(request_id, None)
+        if not future.done():
+            future.set_exception(PrimeSidecarProcessError())
+            future.add_done_callback(_consume_future_exception)
+
+    async def _stop_reader(self) -> None:
+        reader_task = self._reader_task
+        self._reader_task = None
+        if reader_task is None:
+            return
+        reader_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await reader_task
 
     def events(
         self, envelope: Mapping[str, object]
@@ -207,9 +307,11 @@ class PrimeSidecarProcess:
         try:
             await asyncio.wait_for(self._lock.acquire(), timeout=_remaining(deadline))
             acquired = True
+            self._closed = True
+            self._fail_transport()
+            await self._stop_reader()
             process = self._process
             if process is None:
-                self._closed = True
                 return
             try:
                 if process.stdin is not None and not process.stdin.is_closing():
@@ -228,10 +330,12 @@ class PrimeSidecarProcess:
                         process.kill()
                     timeout = _remaining(deadline)
                     await asyncio.wait_for(process.wait(), timeout=timeout)
-            self._closed = process.returncode is not None
-            if not self._closed:
+            stopped = process.returncode is not None
+            if not stopped:
+                self._closed = False
                 raise PrimeSidecarProcessError()
         except (TimeoutError, OSError):
+            self._closed = False
             raise PrimeSidecarProcessError() from None
         finally:
             if acquired:
@@ -266,6 +370,7 @@ class PrimeSidecarProcess:
                 else asyncio.subprocess.DEVNULL,
                 env=dict(plan.env),
                 pass_fds=plan.pass_fds,
+                limit=_MAX_FRAME_BYTES + 1,
             )
             return self._process
         except (OSError, ValueError):
@@ -343,7 +448,15 @@ def _encode_frame(value: Mapping[str, object]) -> bytes:
         )
     except (TypeError, ValueError):
         raise PrimeSidecarProcessError() from None
-    if len(encoded) > _MAX_FRAME_BYTES:
+    maximum = _MAX_FRAME_BYTES
+    command = value.get("command")
+    if (
+        value.get("type") == "session-context.execute"
+        and isinstance(command, Mapping)
+        and command.get("operation") == "session.attachment.bind"
+    ):
+        maximum = _MAX_PRIVATE_ATTACHMENT_FRAME_BYTES
+    if len(encoded) > maximum:
         raise PrimeSidecarProcessError()
     return encoded
 
@@ -360,6 +473,27 @@ def _decode_frame(line: bytes) -> Mapping[str, object]:
     return value
 
 
+def _consume_future_exception(
+    future: asyncio.Future[Mapping[str, object]],
+) -> None:
+    if future.cancelled():
+        return
+    with suppress(PrimeSidecarProcessError):
+        future.exception()
+
+
+def _is_exact_error_response(
+    response: Mapping[str, object], request: Mapping[str, object]
+) -> bool:
+    return (
+        response.get("protocol") == PRIME_GATEWAY_IPC_PROTOCOL
+        and response.get("id") == request.get("id")
+        and response.get("type") == "error"
+        and response.get("code") == "prime-gateway-sidecar-failed"
+        and set(response) == {"protocol", "id", "type", "code"}
+    )
+
+
 def _validate_response(
     response: Mapping[str, object], request: Mapping[str, object]
 ) -> Mapping[str, object]:
@@ -372,15 +506,27 @@ def _validate_response(
         ):
             raise PrimeSidecarProcessError()
         raise PrimeSidecarProcessError()
+    request_type = request.get("type")
+    expected_response_type = {
+        "authority.update": "authority.accepted",
+        "command.accept": "command.accepted",
+        "events.stream": "events.batch",
+        "private.read": "private.value",
+        "session-context.cancel": "session-context.cancel.accepted",
+        "session-context.execute": "session-context.receipt",
+    }.get(request_type) if isinstance(request_type, str) else None
     if (
         response.get("protocol") != PRIME_GATEWAY_IPC_PROTOCOL
         or response.get("id") != request.get("id")
+        or response.get("type") != expected_response_type
         or response.get("type")
         not in {
             "authority.accepted",
             "command.accepted",
             "events.batch",
             "private.value",
+            "session-context.cancel.accepted",
+            "session-context.receipt",
         }
     ):
         raise PrimeSidecarProcessError()
@@ -390,6 +536,10 @@ def _validate_response(
     if response.get("type") == "private.value":
         expected = expected | {"text"}
         if not isinstance(response.get("text"), str):
+            raise PrimeSidecarProcessError()
+    if response.get("type") == "session-context.receipt":
+        expected = expected | {"receipt"}
+        if not isinstance(response.get("receipt"), Mapping):
             raise PrimeSidecarProcessError()
     if set(response) != expected:
         raise PrimeSidecarProcessError()

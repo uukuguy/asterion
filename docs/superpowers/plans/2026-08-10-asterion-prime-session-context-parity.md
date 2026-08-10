@@ -1,6 +1,6 @@
 # Asterion Prime Session/Context Parity Implementation Plan
 
-> Status: Tasks 4.1-4.3 verified; Task 4.4 sidecar IPC and durability is next.
+> Status: Tasks 4.1-4.4 verified; Task 4.5 daemon session/context admission is next.
 >
 > Program parent: `2026-08-10-asterion-prime-system-parity.md`, Task 4.
 >
@@ -448,6 +448,10 @@ uv run python -m unittest -v tests.test_session_context_manager tests.test_contr
 Commit: `feat: manage authorized session context operations`.
 
 ### Task 4.4: Extend the private sidecar IPC and durable store
+
+**Status:** Complete. Context IPC now uses exact request-ID routing, private
+attachment/text preparation, atomic public command/receipt records, and strict
+private attachment/continuation bindings with fault-recovery coverage.
 
 **Modify:**
 

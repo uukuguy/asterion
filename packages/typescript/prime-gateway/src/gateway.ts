@@ -1,16 +1,21 @@
 import {
   validateControlCommand,
   validateControlEvent,
+  validateSessionContextCommand,
+  validateSessionContextReceipt,
 } from "@dci/agent-runtime";
 import type {
   ActionResolution,
   ControlCommand,
   ControlEvent,
   GoalStatus,
+  SessionContextCommand,
+  SessionContextReceipt,
 } from "@dci/agent-runtime";
 
 import type {
   GatewayDurableStore,
+  GatewayContextBinding,
   PrimeIdentityBinding,
 } from "./durable-store.js";
 import {
@@ -117,8 +122,21 @@ export interface PrimeGatewayOptions {
     coveredSequence: number,
     onRecovered: (recovery: PrimeCheckpointRecovery) => Promise<void>,
   ) => Promise<PrimeCheckpointCreated>;
+  readonly sessionContext?: PrimeGatewaySessionContextExecutor;
   readonly onSessionReady?: (context: PrimeGatewayCreateContext) => void;
   readonly now?: () => string;
+}
+
+export interface PrimeGatewaySessionContextResult {
+  readonly receipt: SessionContextReceipt;
+  readonly nextBinding: GatewayContextBinding | null;
+}
+
+export interface PrimeGatewaySessionContextExecutor {
+  execute(
+    command: SessionContextCommand,
+  ): Promise<PrimeGatewaySessionContextResult>;
+  cancel(commandId: string): Promise<void>;
 }
 
 export interface GatewayAdmissionResult {
@@ -157,6 +175,12 @@ interface CommandExecution {
   readonly promise: Promise<void>;
 }
 
+interface ContextExecution {
+  readonly digest: string;
+  readonly promise: Promise<SessionContextReceipt>;
+  settled: boolean;
+}
+
 interface ReservedEventIdentity {
   readonly eventId: string;
   readonly emittedAt: string;
@@ -184,6 +208,7 @@ export class PrimeGateway {
   private readonly checkpoints = new Set<string>();
   private readonly pendingCheckpointAcknowledgements = new Set<string>();
   private readonly commandExecutions = new Map<string, CommandExecution>();
+  private readonly contextExecutions = new Map<string, ContextExecution>();
   private readonly reservedEvents = new Map<number, ReservedEventIdentity>();
   private readonly now: () => string;
   private nextSequence: number;
@@ -225,6 +250,13 @@ export class PrimeGateway {
       }
       this.updateSessionStatus(event);
     }
+    for (const operation of options.store.contextOperations()) {
+      this.contextExecutions.set(operation.command.command_id, {
+        digest: sha256Hex(canonicalJsonBytes(operation.command)),
+        promise: Promise.resolve(operation.receipt),
+        settled: true,
+      });
+    }
   }
 
   static async open(options: PrimeGatewayOptions): Promise<PrimeGateway> {
@@ -236,6 +268,9 @@ export class PrimeGateway {
       typeof options.createCheckpoint !== "function" ||
       (options.restoreSession !== undefined &&
         typeof options.restoreSession !== "function") ||
+      (options.sessionContext !== undefined &&
+        (typeof options.sessionContext.execute !== "function" ||
+          typeof options.sessionContext.cancel !== "function")) ||
       options.store.snapshot().sessionId !== options.sessionId
     ) {
       throw new PrimeGatewayError();
@@ -309,6 +344,84 @@ export class PrimeGateway {
     });
     this.commandExecutions.set(command.command_id, { digest, promise });
     return promise;
+  }
+
+  async executeSessionContext(
+    value: unknown,
+    preparePrivate: () => Promise<void>,
+  ): Promise<SessionContextReceipt> {
+    this.assertOpen();
+    const executor = this.options.sessionContext;
+    if (
+      executor === undefined ||
+      typeof preparePrivate !== "function" ||
+      this.options.store.snapshot().primeIdentity === undefined
+    ) {
+      throw new PrimeGatewayError();
+    }
+    let command: SessionContextCommand;
+    try {
+      command = validateSessionContextCommand(value);
+    } catch {
+      throw new PrimeGatewayError();
+    }
+    if (
+      command.session_id !== this.options.sessionId ||
+      command.generation !== this.options.generation
+    ) {
+      throw new PrimeGatewayError();
+    }
+    const digest = sha256Hex(canonicalJsonBytes(command));
+    const existing = this.contextExecutions.get(command.command_id);
+    if (existing !== undefined) {
+      if (existing.digest !== digest) {
+        throw new PrimeGatewayError();
+      }
+      try {
+        await preparePrivate();
+      } catch {
+        throw new PrimeGatewayError();
+      }
+      return existing.promise;
+    }
+    let execution: ContextExecution;
+    const promise = this.persistAndExecuteSessionContext(
+      command,
+      executor,
+      preparePrivate,
+    )
+      .then((receipt) => {
+        execution.settled = true;
+        return receipt;
+      })
+      .catch((error) => {
+        if (this.contextExecutions.get(command.command_id) === execution) {
+          this.contextExecutions.delete(command.command_id);
+        }
+        throw error;
+      });
+    execution = { digest, promise, settled: false };
+    this.contextExecutions.set(command.command_id, execution);
+    return promise;
+  }
+
+  async cancelSessionContext(commandId: string): Promise<void> {
+    this.assertOpen();
+    const executor = this.options.sessionContext;
+    const execution = this.contextExecutions.get(commandId);
+    if (
+      executor === undefined ||
+      !OPAQUE_ID.test(commandId) ||
+      execution === undefined ||
+      execution.settled
+    ) {
+      throw new PrimeGatewayError();
+    }
+    try {
+      await executor.cancel(commandId);
+    } catch {
+      throw new PrimeGatewayError();
+    }
   }
 
   async emitActionProposal(event: ControlEvent): Promise<void> {
@@ -523,6 +636,48 @@ export class PrimeGateway {
   private async persistAndHandle(command: ControlCommand): Promise<void> {
     await this.enqueueDurable(() => this.options.store.acceptCommand(command));
     await this.handleCommand(command);
+  }
+
+  private async persistAndExecuteSessionContext(
+    command: SessionContextCommand,
+    executor: PrimeGatewaySessionContextExecutor,
+    preparePrivate: () => Promise<void>,
+  ): Promise<SessionContextReceipt> {
+    try {
+      await this.enqueueDurable(
+        () => this.options.store.acceptContextCommand(command),
+      );
+      await preparePrivate();
+      const result = await executor.execute(command);
+      if (
+        typeof result !== "object" ||
+        result === null ||
+        Object.keys(result).sort().join("\u0000") !==
+          ["nextBinding", "receipt"].sort().join("\u0000") ||
+        !Object.hasOwn(result, "receipt") ||
+        !Object.hasOwn(result, "nextBinding")
+      ) {
+        throw new PrimeGatewayError();
+      }
+      const receipt = validateSessionContextReceipt(result.receipt);
+      if (
+        receipt.command_id !== command.command_id ||
+        receipt.session_id !== command.session_id ||
+        receipt.generation !== command.generation ||
+        receipt.operation !== command.operation
+      ) {
+        throw new PrimeGatewayError();
+      }
+      const committed = await this.enqueueDurable(
+        () => this.options.store.commitContextOperation(
+          receipt,
+          result.nextBinding,
+        ),
+      );
+      return committed.receipt;
+    } catch {
+      throw new PrimeGatewayError();
+    }
   }
 
   private async create(

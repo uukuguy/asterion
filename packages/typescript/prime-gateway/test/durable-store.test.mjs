@@ -39,6 +39,48 @@ function event(sequence, generation = 1) {
   };
 }
 
+function contextCommand() {
+  return {
+    protocol: "asterion.session-context/v1",
+    command_id: "context-command-1",
+    session_id: "session-1",
+    generation: 1,
+    authority_revision: 1,
+    idempotency_key: "context-operation-1",
+    operation: "session.tree.read",
+    payload: { continuation_id: "continuation-1" },
+  };
+}
+
+function contextReceipt() {
+  return {
+    protocol: "asterion.session-context/v1",
+    receipt_id: "context-receipt-1",
+    command_id: "context-command-1",
+    session_id: "session-1",
+    generation: 1,
+    operation: "session.tree.read",
+    status: "succeeded",
+    reason_code: "session-context-succeeded",
+    payload: {
+      evidence_ref: null,
+      result: {
+        continuation_id: "continuation-1",
+        nodes: [],
+        leaf_id: null,
+      },
+    },
+  };
+}
+
+function contextBinding() {
+  return {
+    continuationId: "continuation-1",
+    privateRef: "private:00000000-0000-4000-8000-000000000001",
+    bindingDigest: "a".repeat(64),
+  };
+}
+
 async function temporaryStoreRoot() {
   const parent = await mkdtemp(join(tmpdir(), "asterion-gateway-store-"));
   return {
@@ -65,11 +107,13 @@ test("durable store fsyncs before acknowledging and rejects divergent replay", a
 
     assert.equal(first.position, 1);
     assert.equal(replay.position, first.position);
-    assert.deepEqual(stages.slice(-4), [
+    assert.deepEqual(stages.slice(-6), [
       "before_write",
       "after_write",
       "before_rename",
+      "after_rename",
       "before_directory_fsync",
+      "after_directory_fsync",
     ]);
     await assert.rejects(
       store.acceptCommand({ ...command, authority_revision: 2 }),
@@ -78,6 +122,107 @@ test("durable store fsyncs before acknowledging and rejects divergent replay", a
     assert.equal(store.snapshot().position, 1);
   } finally {
     await fixtureRoot.cleanup();
+  }
+});
+
+test("durable store atomically commits safe context receipt and current binding", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    const accepted = await store.acceptContextCommand(contextCommand());
+    const committed = await store.commitContextOperation(
+      contextReceipt(),
+      contextBinding(),
+    );
+
+    assert.equal(accepted.position, 1);
+    assert.equal(committed.position, 2);
+    assert.deepEqual(committed.receipt, contextReceipt());
+    assert.deepEqual(committed.nextBinding, contextBinding());
+    assert.deepEqual(
+      store.currentContextBinding("continuation-1"),
+      contextBinding(),
+    );
+    assert.deepEqual(store.snapshot(), {
+      sessionId: "session-1",
+      position: 2,
+      headDigest: committed.digest,
+      commandCount: 0,
+      eventCount: 0,
+      contextCommandCount: 1,
+      contextCommitCount: 1,
+    });
+
+    const reopened = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    assert.deepEqual(reopened.contextOperations(), [{
+      command: contextCommand(),
+      receipt: contextReceipt(),
+      nextBinding: contextBinding(),
+    }]);
+    await assert.rejects(
+      reopened.commitContextOperation(contextReceipt(), {
+        ...contextBinding(),
+        bindingDigest: "b".repeat(64),
+      }),
+      GatewayStoreConflictError,
+    );
+
+    const records = await Promise.all(
+      (await readdir(join(fixtureRoot.root, "public", "records")))
+        .filter((name) => name.endsWith(".json"))
+        .map((name) => readFile(join(fixtureRoot.root, "public", "records", name), "utf8")),
+    );
+    assert.equal(records.join("").includes("provider/path"), false);
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
+test("context commit recovery has exactly one binding across every atomic fault", async () => {
+  for (const faultStage of [
+    "before_write",
+    "after_write",
+    "before_rename",
+    "after_rename",
+    "before_directory_fsync",
+    "after_directory_fsync",
+  ]) {
+    const fixtureRoot = await temporaryStoreRoot();
+    try {
+      const initial = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+      await initial.acceptContextCommand(contextCommand());
+      const faulted = await GatewayDurableStore.open(
+        fixtureRoot.root,
+        "session-1",
+        {
+          faultInjector(stage) {
+            if (stage === faultStage) {
+              throw new Error(`SENTINEL_${faultStage}`);
+            }
+          },
+        },
+      );
+      await assert.rejects(
+        faulted.commitContextOperation(contextReceipt(), contextBinding()),
+        GatewayStoreWriteError,
+      );
+
+      const reopened = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+      assert.ok([1, 2].includes(reopened.snapshot().position));
+      await reopened.commitContextOperation(contextReceipt(), contextBinding());
+      assert.equal(reopened.snapshot().position, 2);
+      assert.deepEqual(reopened.contextOperations(), [{
+        command: contextCommand(),
+        receipt: contextReceipt(),
+        nextBinding: contextBinding(),
+      }]);
+      assert.deepEqual(
+        reopened.currentContextBinding("continuation-1"),
+        contextBinding(),
+      );
+    } finally {
+      await fixtureRoot.cleanup();
+    }
   }
 });
 

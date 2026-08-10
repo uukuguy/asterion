@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from asterion.control.providers.prime.client import (
+    MAX_PRIVATE_ATTACHMENT_BYTES,
+    PrivateAttachmentResolver,
     PrimeControlError,
     PrimeControlPlaneClient,
     PrivateContentResolver,
@@ -28,6 +30,8 @@ __all__ = (
     "PRIME_CONTROL_PLANE_ID",
     "PRIME_CONTROL_PLANE_VERSION",
     "PRIME_NATIVE_RLM_MAX_DEPTH",
+    "MAX_PRIVATE_ATTACHMENT_BYTES",
+    "PrivateAttachmentResolver",
     "PrimeControlError",
     "PrimeControlPlaneClient",
     "PrimeSidecarLaunchOptions",

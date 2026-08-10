@@ -13,10 +13,14 @@ import { join } from "node:path";
 import {
   validateControlCommand,
   validateControlEvent,
+  validateSessionContextCommand,
+  validateSessionContextReceipt,
 } from "@dci/agent-runtime";
 import type {
   ControlCommand,
   ControlEvent,
+  SessionContextCommand,
+  SessionContextReceipt,
 } from "@dci/agent-runtime";
 
 import type { PrimeDaemonCursor } from "./daemon-wire.js";
@@ -31,8 +35,11 @@ const RECORD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 const RECORD_NAME_PATTERN = /^(?<position>[0-9]{12})\.json$/u;
 const ATOMIC_TEMP_PATTERN = /^\.asterion-[0-9a-f-]{36}\.tmp$/u;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
+const PRIVATE_REF_PATTERN = /^private:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const RECORD_KINDS = new Set([
   "command.accepted",
+  "context.command.accepted",
+  "context.operation.committed",
   "event.accepted",
   "prime.identity",
   "prime.cursor",
@@ -42,7 +49,9 @@ export type StorageFaultStage =
   | "before_write"
   | "after_write"
   | "before_rename"
-  | "before_directory_fsync";
+  | "after_rename"
+  | "before_directory_fsync"
+  | "after_directory_fsync";
 
 export type StorageFaultInjector = (
   stage: StorageFaultStage,
@@ -71,12 +80,31 @@ export interface GatewayCommandReceipt extends GatewayRecordReceipt {
   readonly command: ControlCommand;
 }
 
+export interface GatewayContextBinding {
+  readonly continuationId: string;
+  readonly privateRef: string;
+  readonly bindingDigest: string;
+}
+
+export interface GatewayContextOperation {
+  readonly command: SessionContextCommand;
+  readonly receipt: SessionContextReceipt;
+  readonly nextBinding: GatewayContextBinding | null;
+}
+
+export interface GatewayContextCommitReceipt extends GatewayRecordReceipt {
+  readonly receipt: SessionContextReceipt;
+  readonly nextBinding: GatewayContextBinding | null;
+}
+
 export interface GatewayDurableSnapshot {
   readonly sessionId: string;
   readonly position: number;
   readonly headDigest: string | null;
   readonly commandCount: number;
   readonly eventCount: number;
+  readonly contextCommandCount?: number;
+  readonly contextCommitCount?: number;
   readonly primeIdentity?: PrimeIdentityBinding;
   readonly primeCursor?: PrimeDaemonCursor;
 }
@@ -248,6 +276,7 @@ export async function syncPrivateDirectory(
 ): Promise<void> {
   await faultInjector?.("before_directory_fsync");
   await syncDirectory(path);
+  await faultInjector?.("after_directory_fsync");
 }
 
 export async function atomicWriteFile(
@@ -303,6 +332,7 @@ export async function atomicWriteFile(
       throw error;
     }
     await unlink(temporary);
+    await faultInjector?.("after_rename");
     await syncPrivateDirectory(directory, faultInjector);
   } finally {
     if (!closed) {
@@ -403,15 +433,100 @@ function validateCursorPayload(value: unknown): PrimeDaemonCursor {
   return Object.freeze({ generation: value.generation, sequence: value.sequence });
 }
 
+function validateContextBinding(value: unknown): GatewayContextBinding {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "bindingDigest",
+      "continuationId",
+      "privateRef",
+    ]) ||
+    !nonEmptyIdentifier(value.continuationId) ||
+    typeof value.privateRef !== "string" ||
+    !PRIVATE_REF_PATTERN.test(value.privateRef) ||
+    typeof value.bindingDigest !== "string" ||
+    !DIGEST_PATTERN.test(value.bindingDigest)
+  ) {
+    throw new GatewayStoreConflictError();
+  }
+  return Object.freeze({
+    continuationId: value.continuationId,
+    privateRef: value.privateRef,
+    bindingDigest: value.bindingDigest,
+  });
+}
+
+function validateContextCommitPayload(
+  value: unknown,
+  command: SessionContextCommand,
+): Readonly<{
+  receipt: SessionContextReceipt;
+  nextBinding: GatewayContextBinding | null;
+}> {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ["nextBinding", "receipt"])
+  ) {
+    throw new GatewayStoreConflictError();
+  }
+  let receipt: SessionContextReceipt;
+  try {
+    receipt = validateSessionContextReceipt(value.receipt);
+  } catch {
+    throw new GatewayStoreConflictError();
+  }
+  if (
+    receipt.command_id !== command.command_id ||
+    receipt.session_id !== command.session_id ||
+    receipt.generation !== command.generation ||
+    receipt.operation !== command.operation
+  ) {
+    throw new GatewayStoreConflictError();
+  }
+  const nextBinding = value.nextBinding === null
+    ? null
+    : validateContextBinding(value.nextBinding);
+  if (nextBinding !== null) {
+    if (receipt.status !== "succeeded" || receipt.payload.result === null) {
+      throw new GatewayStoreConflictError();
+    }
+    const result = receipt.payload.result as Record<string, unknown>;
+    const continuationIds = [
+      result.continuation_id,
+      result.current_continuation_id,
+      result.new_continuation_id,
+    ].filter((item): item is string => typeof item === "string");
+    if (!continuationIds.includes(nextBinding.continuationId)) {
+      throw new GatewayStoreConflictError();
+    }
+  }
+  return Object.freeze({ receipt, nextBinding });
+}
+
 export class GatewayDurableStore {
   private readonly records: LoadedRecord[] = [];
   private readonly recordsById = new Map<string, LoadedRecord>();
   private readonly eventCounts = new Map<number, number>();
   private readonly knownEventGenerations = new Set<number>();
+  private readonly contextCommands = new Map<string, SessionContextCommand>();
+  private readonly contextIdempotency = new Map<string, string>();
+  private readonly contextCommits = new Map<
+    string,
+    Readonly<{
+      receipt: SessionContextReceipt;
+      nextBinding: GatewayContextBinding | null;
+    }>
+  >();
+  private readonly currentContextBindings = new Map<
+    string,
+    GatewayContextBinding
+  >();
   private readonly faultInjector: StorageFaultInjector | undefined;
   private failed = false;
   private commandCount = 0;
   private eventCount = 0;
+  private contextCommandCount = 0;
+  private contextCommitCount = 0;
   private primeIdentity?: PrimeIdentityBinding;
   private primeCursor?: PrimeDaemonCursor;
 
@@ -492,6 +607,103 @@ export class GatewayDurableStore {
       `command:${validated.command_id}`,
       { command: validated },
     );
+  }
+
+  async acceptContextCommand(command: unknown): Promise<GatewayRecordReceipt> {
+    let validated: SessionContextCommand;
+    try {
+      validated = validateSessionContextCommand(command);
+    } catch {
+      throw new GatewayStoreConflictError();
+    }
+    if (validated.session_id !== this.sessionId) {
+      throw new GatewayStoreConflictError();
+    }
+    const idempotentCommandId = this.contextIdempotency.get(
+      validated.idempotency_key,
+    );
+    if (
+      idempotentCommandId !== undefined &&
+      idempotentCommandId !== validated.command_id
+    ) {
+      throw new GatewayStoreConflictError();
+    }
+    return this.appendRecord(
+      "context.command.accepted",
+      `context-command:${validated.command_id}`,
+      { command: validated },
+    );
+  }
+
+  async commitContextOperation(
+    receipt: unknown,
+    nextBinding: GatewayContextBinding | null,
+  ): Promise<GatewayContextCommitReceipt> {
+    let commandId: string;
+    try {
+      if (!isRecord(receipt) || typeof receipt.command_id !== "string") {
+        throw new GatewayStoreConflictError();
+      }
+      commandId = receipt.command_id;
+      const command = this.contextCommands.get(commandId);
+      if (command === undefined) {
+        throw new GatewayStoreConflictError();
+      }
+      const payload = validateContextCommitPayload(
+        { receipt, nextBinding },
+        command,
+      );
+      const committed = await this.appendRecord(
+        "context.operation.committed",
+        `context-commit:${commandId}`,
+        {
+          receipt: payload.receipt,
+          nextBinding: payload.nextBinding,
+        },
+      );
+      const stored = this.contextCommits.get(commandId);
+      if (stored === undefined) {
+        throw new GatewayStoreConflictError();
+      }
+      return Object.freeze({
+        ...committed,
+        receipt: stored.receipt,
+        nextBinding: stored.nextBinding,
+      });
+    } catch (error) {
+      if (
+        error instanceof GatewayStoreWriteError ||
+        error instanceof GatewayStoreConflictError
+      ) {
+        throw error;
+      }
+      throw new GatewayStoreConflictError();
+    }
+  }
+
+  contextOperations(): readonly GatewayContextOperation[] {
+    return Object.freeze(
+      [...this.contextCommits.entries()].map(([commandId, committed]) => {
+        const command = this.contextCommands.get(commandId);
+        if (command === undefined) {
+          throw new GatewayStoreCorruptionError();
+        }
+        return Object.freeze({
+          command,
+          receipt: committed.receipt,
+          nextBinding: committed.nextBinding,
+        });
+      }),
+    );
+  }
+
+  currentContextBinding(
+    continuationId: string,
+  ): GatewayContextBinding | undefined {
+    if (!nonEmptyIdentifier(continuationId)) {
+      throw new GatewayStoreConflictError();
+    }
+    return this.currentContextBindings.get(continuationId);
   }
 
   async appendEvent(event: unknown): Promise<GatewayEventReceipt> {
@@ -632,6 +844,12 @@ export class GatewayDurableStore {
       headDigest: head,
       commandCount: this.commandCount,
       eventCount: this.eventCount,
+      ...(this.contextCommandCount === 0
+        ? {}
+        : { contextCommandCount: this.contextCommandCount }),
+      ...(this.contextCommitCount === 0
+        ? {}
+        : { contextCommitCount: this.contextCommitCount }),
       ...(this.primeIdentity === undefined
         ? {}
         : { primeIdentity: this.primeIdentity }),
@@ -767,6 +985,33 @@ export class GatewayDurableStore {
         }
         return Object.freeze({ event });
       }
+      if (kind === "context.command.accepted") {
+        if (!hasExactKeys(payload, ["command"])) {
+          throw new GatewayStoreCorruptionError();
+        }
+        const command = validateSessionContextCommand(payload.command);
+        if (
+          command.session_id !== this.sessionId ||
+          recordId !== `context-command:${command.command_id}`
+        ) {
+          throw new GatewayStoreCorruptionError();
+        }
+        return Object.freeze({ command });
+      }
+      if (kind === "context.operation.committed") {
+        const commandId = recordId.startsWith("context-commit:")
+          ? recordId.slice("context-commit:".length)
+          : "";
+        const command = this.contextCommands.get(commandId);
+        if (command === undefined || recordId !== `context-commit:${command.command_id}`) {
+          throw new GatewayStoreCorruptionError();
+        }
+        const committed = validateContextCommitPayload(payload, command);
+        return Object.freeze({
+          receipt: committed.receipt,
+          nextBinding: committed.nextBinding,
+        });
+      }
       if (kind === "prime.identity") {
         const identity = validateIdentityPayload(payload);
         if (recordId !== `prime-identity:${identity.supervisorGeneration}`) {
@@ -792,6 +1037,33 @@ export class GatewayDurableStore {
     this.recordsById.set(record.stored.record_id, record);
     if (record.stored.kind === "command.accepted") {
       this.commandCount += 1;
+    } else if (record.stored.kind === "context.command.accepted") {
+      const command = record.payload.command as SessionContextCommand;
+      const existingId = this.contextIdempotency.get(command.idempotency_key);
+      if (existingId !== undefined && existingId !== command.command_id) {
+        throw new GatewayStoreCorruptionError();
+      }
+      this.contextCommands.set(command.command_id, command);
+      this.contextIdempotency.set(command.idempotency_key, command.command_id);
+      this.contextCommandCount += 1;
+    } else if (record.stored.kind === "context.operation.committed") {
+      const receipt = record.payload.receipt as SessionContextReceipt;
+      const nextBinding = record.payload.nextBinding as GatewayContextBinding | null;
+      if (
+        this.contextCommits.has(receipt.command_id) ||
+        !this.contextCommands.has(receipt.command_id)
+      ) {
+        throw new GatewayStoreCorruptionError();
+      }
+      const committed = Object.freeze({ receipt, nextBinding });
+      this.contextCommits.set(receipt.command_id, committed);
+      if (nextBinding !== null) {
+        this.currentContextBindings.set(
+          nextBinding.continuationId,
+          nextBinding,
+        );
+      }
+      this.contextCommitCount += 1;
     } else if (record.stored.kind === "event.accepted") {
       this.eventCount += 1;
       const event = record.payload.event as ControlEvent;

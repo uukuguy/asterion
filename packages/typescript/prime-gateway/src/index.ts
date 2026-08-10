@@ -54,6 +54,9 @@ export {
 export type {
   GatewayDurableSnapshot,
   GatewayDurableStoreOptions,
+  GatewayContextBinding,
+  GatewayContextCommitReceipt,
+  GatewayContextOperation,
   GatewayEventCursor,
   GatewayEventReceipt,
   GatewayRecordReceipt,
@@ -68,6 +71,10 @@ export {
 } from "./private-store.js";
 export type {
   PrivateResultProjection,
+  PrivateAttachmentMetadata,
+  PrivateBoundAttachment,
+  PrivateContinuationBinding,
+  PrivateContinuationLocator,
   PrivateValueRef,
   PrivateValueStoreOptions,
 } from "./private-store.js";
@@ -120,6 +127,8 @@ export type {
   PrimeGatewayOptions,
   PrimeGatewayPrivateInputs,
   PrimeGatewaySession,
+  PrimeGatewaySessionContextExecutor,
+  PrimeGatewaySessionContextResult,
 } from "./gateway.js";
 export {
   PrimeGatewaySidecar,

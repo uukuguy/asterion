@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import json
 import uuid
 from collections import OrderedDict
@@ -27,6 +29,7 @@ from asterion.control.providers.prime.process import PRIME_GATEWAY_IPC_PROTOCOL
 
 
 MAX_PRIVATE_TEXT_BYTES = 1024 * 1024
+MAX_PRIVATE_ATTACHMENT_BYTES = 8 * 1024 * 1024
 MAX_PREPARED_PRIVATE_INPUTS = 128
 
 
@@ -42,6 +45,22 @@ class PrivateContentResolver(Protocol):
 
     def resolve_text(self, reference: str, *, max_bytes: int) -> str:
         """Resolve a private text reference without exposing it publicly."""
+        ...
+
+
+class PrivateAttachmentResolver(Protocol):
+    """Host-owned resolver for verified private attachment bytes."""
+
+    def resolve_bytes(
+        self,
+        reference: str,
+        *,
+        expected_media_type: str,
+        expected_sha256: str,
+        expected_size: int,
+        max_bytes: int,
+    ) -> bytes:
+        """Resolve exact bytes after host authority admission."""
         ...
 
 
@@ -208,14 +227,14 @@ class PrimeControlPlaneClient:
 
         if self._closed or not isinstance(command, SessionContextCommand):
             raise PrimeControlError()
-        envelope: dict[str, object] = {
-            "protocol": PRIME_GATEWAY_IPC_PROTOCOL,
-            "id": _request_id(),
-            "type": "session-context.execute",
-            "command": command.to_mapping(),
-            "private": {},
-        }
         try:
+            envelope: dict[str, object] = {
+                "protocol": PRIME_GATEWAY_IPC_PROTOCOL,
+                "id": _request_id(),
+                "type": "session-context.execute",
+                "command": command.to_mapping(),
+                "private": self._private_for_session_context(command),
+            }
             response = await self._process.request(envelope)
             receipt_value = response.get("receipt")
             if (
@@ -349,6 +368,73 @@ class PrimeControlPlaneClient:
                 raise PrimeControlError()
             return {"result": projection}  # type: ignore[return-value]
         return {}
+
+    def _private_for_session_context(
+        self,
+        command: SessionContextCommand,
+    ) -> Mapping[str, object]:
+        payload = command.payload
+        if command.operation == "session.attachment.bind":
+            resolver = getattr(self._private_content, "resolve_bytes", None)
+            if not callable(resolver):
+                raise PrimeControlError()
+            reference = payload["body_ref"]
+            media_type = payload["media_type"]
+            expected_sha256 = payload["sha256"]
+            expected_size = payload["size"]
+            if (
+                not isinstance(reference, str)
+                or not isinstance(media_type, str)
+                or not isinstance(expected_sha256, str)
+                or isinstance(expected_size, bool)
+                or not isinstance(expected_size, int)
+            ):
+                raise PrimeControlError()
+            body = resolver(
+                reference,
+                expected_media_type=media_type,
+                expected_sha256=expected_sha256,
+                expected_size=expected_size,
+                max_bytes=MAX_PRIVATE_ATTACHMENT_BYTES,
+            )
+            if (
+                type(body) is not bytes
+                or len(body) != expected_size
+                or len(body) > MAX_PRIVATE_ATTACHMENT_BYTES
+                or hashlib.sha256(body).hexdigest() != expected_sha256
+            ):
+                raise PrimeControlError()
+            return {"body_base64": base64.b64encode(body).decode("ascii")}
+        if command.operation == "session.name.set":
+            return {"name": self._resolve_context_text(payload["name_ref"])}
+        if command.operation == "session.label.set":
+            reference = payload["label_ref"]
+            return {} if reference is None else {
+                "label": self._resolve_context_text(reference)
+            }
+        if command.operation in {
+            "session.branch.summarize",
+            "session.compact",
+        }:
+            reference = payload["instructions_ref"]
+            return {} if reference is None else {
+                "instructions": self._resolve_context_text(reference)
+            }
+        return {}
+
+    def _resolve_context_text(self, reference: object) -> str:
+        if not isinstance(reference, str):
+            raise PrimeControlError()
+        value = self._private_content.resolve_text(
+            reference,
+            max_bytes=MAX_PRIVATE_TEXT_BYTES,
+        )
+        if (
+            not isinstance(value, str)
+            or len(value.encode("utf-8")) > MAX_PRIVATE_TEXT_BYTES
+        ):
+            raise PrimeControlError()
+        return value
 
     def _cache_private_input(self, reference: str, text: str) -> None:
         if (

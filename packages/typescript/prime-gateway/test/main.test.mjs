@@ -8,6 +8,7 @@ import {
   PrimeBoundPrivateInputs,
   PrimeGatewaySidecar,
   PRIME_GATEWAY_IPC_PROTOCOL,
+  servePrimeGatewaySidecar,
 } from "../dist/src/main.js";
 import {
   GatewayDurableStore,
@@ -23,6 +24,55 @@ function command(type, payload, commandId = "command-1") {
     authority_revision: 1,
     type,
     payload,
+  };
+}
+
+function contextCommand(operation = "session.tree.read", payload = {
+  continuation_id: "continuation-1",
+}) {
+  return {
+    protocol: "asterion.session-context/v1",
+    command_id: "context-command-1",
+    session_id: "session-1",
+    generation: 1,
+    authority_revision: 1,
+    idempotency_key: "context-operation-1",
+    operation,
+    payload,
+  };
+}
+
+function contextReceipt(commandValue = contextCommand()) {
+  const succeeded = [
+    "session.attachment.bind",
+    "session.tree.read",
+  ].includes(commandValue.operation);
+  const result = commandValue.operation === "session.attachment.bind"
+    ? {
+      input_id: commandValue.payload.input_id,
+      attachment_id: commandValue.payload.attachment_id,
+      media_type: commandValue.payload.media_type,
+      sha256: commandValue.payload.sha256,
+      size: commandValue.payload.size,
+    }
+    : commandValue.operation === "session.tree.read" ? {
+      continuation_id: "continuation-1",
+      nodes: [],
+      leaf_id: null,
+    } : null;
+  return {
+    protocol: "asterion.session-context/v1",
+    receipt_id: "context-receipt-1",
+    command_id: commandValue.command_id,
+    session_id: commandValue.session_id,
+    generation: commandValue.generation,
+    operation: commandValue.operation,
+    status: succeeded ? "succeeded" : "failed",
+    reason_code: succeeded ? "session-context-succeeded" : "provider-not-ready",
+    payload: {
+      evidence_ref: null,
+      result,
+    },
   };
 }
 
@@ -60,6 +110,7 @@ class FakePrivateValues {
   constructor() {
     this.inputs = [];
     this.results = [];
+    this.attachments = [];
     this.bindings = new Map();
   }
 
@@ -106,6 +157,11 @@ class FakePrivateValues {
     return privateRef;
   }
 
+  async bindAttachment(metadata, body) {
+    this.attachments.push({ metadata, body: Buffer.from(body) });
+    return `private:22222222-2222-4222-8222-${String(this.attachments.length).padStart(12, "0")}`;
+  }
+
   async readBoundInputReference(sourceRef) {
     for (const binding of this.bindings.values()) {
       if (binding.sourceRef === sourceRef) {
@@ -123,6 +179,8 @@ class FakeGateway {
     this.knownGenerations = new Set(knownGenerations);
     this.eventsBySequence = [event(1, currentGeneration), event(2, currentGeneration)];
     this.cursorRequests = [];
+    this.contextExecutions = [];
+    this.contextCancellations = [];
     this.closed = 0;
   }
 
@@ -146,6 +204,16 @@ class FakeGateway {
 
   async close() {
     this.closed += 1;
+  }
+
+  async executeSessionContext(commandValue, preparePrivate) {
+    await preparePrivate();
+    this.contextExecutions.push(commandValue);
+    return contextReceipt(commandValue);
+  }
+
+  async cancelSessionContext(commandId) {
+    this.contextCancellations.push(commandId);
   }
 }
 
@@ -207,6 +275,25 @@ async function createRealSidecarFixture() {
   const privateValues = await PrivateValueStore.open(fixtureRoot.root);
   const session = new FakePrimeSession();
   const createdGoals = [];
+  const contextCalls = [];
+  const contextCancellations = [];
+  const contextExecutor = {
+    failures: 0,
+    async execute(commandValue) {
+      contextCalls.push(commandValue);
+      if (this.failures > 0) {
+        this.failures -= 1;
+        throw new Error("SENTINEL_PRIVATE_PROVIDER_FAILURE");
+      }
+      return {
+        receipt: contextReceipt(commandValue),
+        nextBinding: null,
+      };
+    },
+    async cancel(commandId) {
+      contextCancellations.push(commandId);
+    },
+  };
   let tick = 0;
   const gateway = await PrimeGateway.open({
     sessionId: "session-1",
@@ -226,6 +313,7 @@ async function createRealSidecarFixture() {
     async createCheckpoint() {
       throw new Error("not used by sidecar integration test");
     },
+    sessionContext: contextExecutor,
     now() {
       tick += 1;
       return `2026-08-10T03:00:${String(tick).padStart(2, "0")}Z`;
@@ -238,6 +326,10 @@ async function createRealSidecarFixture() {
       accept: (value) => gateway.accept(value),
       eventsAfterCursor: (cursor) =>
         store.eventsAfterCursor(cursor).map((receipt) => receipt.event),
+      executeSessionContext: (commandValue, preparePrivate) =>
+        gateway.executeSessionContext(commandValue, preparePrivate),
+      cancelSessionContext: (commandId) =>
+        gateway.cancelSessionContext(commandId),
       close: () => gateway.close(),
     },
   });
@@ -248,6 +340,9 @@ async function createRealSidecarFixture() {
     gateway,
     session,
     createdGoals,
+    contextCalls,
+    contextCancellations,
+    contextExecutor,
     sidecar,
   };
 }
@@ -284,6 +379,223 @@ test("bound private inputs resolve private-looking public refs through bindings"
   } finally {
     await fixtureRoot.cleanup();
   }
+});
+
+test("sidecar validates closed session-context execute and cancel envelopes", async () => {
+  const { gateway, privateValues, sidecar } = createSidecar();
+  const publicCommand = contextCommand();
+  const execute = await sidecar.handleEnvelope({
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "context-execute-1",
+    type: "session-context.execute",
+    command: publicCommand,
+    private: {},
+  });
+
+  assert.deepEqual(execute, {
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "context-execute-1",
+    type: "session-context.receipt",
+    receipt: contextReceipt(publicCommand),
+  });
+  assert.deepEqual(gateway.contextExecutions, [publicCommand]);
+
+  const cancelled = await sidecar.handleEnvelope({
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "context-cancel-1",
+    type: "session-context.cancel",
+    command_id: publicCommand.command_id,
+  });
+  assert.deepEqual(cancelled, {
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "context-cancel-1",
+    type: "session-context.cancel.accepted",
+  });
+  assert.deepEqual(gateway.contextCancellations, [publicCommand.command_id]);
+
+  const rejected = await sidecar.handleEnvelope({
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "context-invalid-1",
+    type: "session-context.execute",
+    command: publicCommand,
+    private: { provider_payload: "SENTINEL_PRIVATE_BODY" },
+  });
+  assert.equal(rejected.type, "error");
+  assert.equal(JSON.stringify(rejected).includes("SENTINEL"), false);
+  assert.equal(gateway.contextExecutions.length, 1);
+});
+
+test("sidecar decodes verified attachment bytes outside the public command", async () => {
+  const { createHash } = await import("node:crypto");
+  const { gateway, privateValues, sidecar } = createSidecar();
+  const body = Buffer.from("SENTINEL_PRIVATE_ATTACHMENT", "utf8");
+  const publicCommand = contextCommand("session.attachment.bind", {
+    input_id: "input-1",
+    attachment_id: "attachment-1",
+    body_ref: "attachment-body-1",
+    media_type: "image/png",
+    sha256: createHash("sha256").update(body).digest("hex"),
+    size: body.byteLength,
+  });
+
+  const response = await sidecar.handleEnvelope({
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "context-attachment-1",
+    type: "session-context.execute",
+    command: publicCommand,
+    private: { body_base64: body.toString("base64") },
+  });
+
+  assert.equal(response.type, "session-context.receipt");
+  assert.deepEqual(gateway.contextExecutions[0], publicCommand);
+  assert.deepEqual(
+    privateValues.attachments[0].body,
+    body,
+  );
+  assert.deepEqual(privateValues.attachments[0].metadata, {
+    sessionId: "session-1",
+    inputId: "input-1",
+    attachmentId: "attachment-1",
+    mediaType: "image/png",
+    sha256: publicCommand.payload.sha256,
+    size: body.byteLength,
+  });
+  assert.equal(JSON.stringify(gateway.contextExecutions[0]).includes("SENTINEL"), false);
+
+  const tampered = await sidecar.handleEnvelope({
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "context-attachment-tampered",
+    type: "session-context.execute",
+    command: publicCommand,
+    private: { body_base64: Buffer.from("different").toString("base64") },
+  });
+  assert.equal(tampered.type, "error");
+  assert.equal(gateway.contextExecutions.length, 1);
+});
+
+test("sidecar binds context names labels and instructions by opaque public refs", async () => {
+  const budget = {
+    controller_tokens: 10,
+    application_tokens: 0,
+    child_tokens: 0,
+    aggregate_tokens: 10,
+    cost_micros: 10,
+    deadline_ms: 1000,
+  };
+  for (const [operation, payload, privateValue, sourceRef] of [
+    [
+      "session.name.set",
+      { name_ref: "name-ref-1" },
+      { name: "SENTINEL_PRIVATE_NAME" },
+      "name-ref-1",
+    ],
+    [
+      "session.label.set",
+      {
+        continuation_id: "continuation-1",
+        entry_id: "entry-1",
+        label_ref: "label-ref-1",
+      },
+      { label: "SENTINEL_PRIVATE_LABEL" },
+      "label-ref-1",
+    ],
+    [
+      "session.compact",
+      {
+        continuation_id: "continuation-1",
+        instructions_ref: "instructions-ref-1",
+        budget,
+      },
+      { instructions: "SENTINEL_PRIVATE_INSTRUCTIONS" },
+      "instructions-ref-1",
+    ],
+  ]) {
+    const { gateway, privateValues, sidecar } = createSidecar();
+    const publicCommand = contextCommand(operation, payload);
+    const response = await sidecar.handleEnvelope({
+      protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+      id: `request-${operation}`,
+      type: "session-context.execute",
+      command: publicCommand,
+      private: privateValue,
+    });
+
+    assert.equal(response.type, "session-context.receipt");
+    assert.equal(
+      await privateValues.readBoundInputReference(sourceRef),
+      Object.values(privateValue)[0],
+    );
+    assert.deepEqual(gateway.contextExecutions, [publicCommand]);
+    assert.equal(JSON.stringify(gateway.contextExecutions).includes("SENTINEL"), false);
+  }
+});
+
+test("sidecar protocol serves execute and cancel concurrently with routed responses", async () => {
+  let releaseExecute;
+  const executeReleased = new Promise((resolve) => {
+    releaseExecute = resolve;
+  });
+  const gateway = new FakeGateway();
+  gateway.executeSessionContext = async (commandValue, preparePrivate) => {
+    await preparePrivate();
+    await executeReleased;
+    return contextReceipt(commandValue);
+  };
+  gateway.cancelSessionContext = async (commandId) => {
+    gateway.contextCancellations.push(commandId);
+    releaseExecute();
+  };
+  const { sidecar } = createSidecar({ gateway });
+  async function* lines() {
+    yield JSON.stringify({
+      protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+      id: "execute-request",
+      type: "session-context.execute",
+      command: contextCommand(),
+      private: {},
+    });
+    yield JSON.stringify({
+      protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+      id: "cancel-request",
+      type: "session-context.cancel",
+      command_id: "context-command-1",
+    });
+  }
+  const frames = [];
+
+  await servePrimeGatewaySidecar(sidecar, lines(), async (frame) => {
+    frames.push(JSON.parse(frame));
+  });
+
+  assert.deepEqual(
+    frames.map((frame) => [frame.id, frame.type]),
+    [
+      ["cancel-request", "session-context.cancel.accepted"],
+      ["execute-request", "session-context.receipt"],
+    ],
+  );
+});
+
+test("sidecar service rejects frames above the private attachment bound", async () => {
+  const { sidecar } = createSidecar();
+  async function* lines() {
+    yield JSON.stringify({
+      id: "oversized-request",
+      padding: "x".repeat(12 * 1024 * 1024),
+    });
+  }
+  const frames = [];
+
+  await servePrimeGatewaySidecar(sidecar, lines(), async (frame) => {
+    frames.push(JSON.parse(frame));
+  });
+
+  assert.deepEqual(frames, [{
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "request-invalid",
+    type: "error",
+    code: "prime-gateway-sidecar-failed",
+  }]);
 });
 
 test("sidecar null event cursor replays the injected current generation", async () => {
@@ -401,6 +713,101 @@ test("real sidecar gateway resolves public refs and persists body-free commands"
     assert.equal(conflictingReplay.type, "error");
     assert.equal(fixture.store.snapshot().commandCount, 2);
     assert.equal(JSON.stringify(conflictingReplay).includes("SENTINEL"), false);
+  } finally {
+    await fixture.sidecar.close().catch(() => undefined);
+    await fixture.cleanup();
+  }
+});
+
+test("real gateway persists context acceptance and one atomic terminal commit", async () => {
+  const fixture = await createRealSidecarFixture();
+  try {
+    await fixture.sidecar.handleEnvelope({
+      protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+      id: "request-create-context-session",
+      type: "command.accept",
+      command: command("session.create", {
+        system_id: "research.system",
+        system_version: "1.0.0",
+        goal_id: "goal-1",
+        goal_ref: "goal-ref-1",
+      }),
+      private: { goal: "private goal" },
+    });
+    const publicCommand = contextCommand();
+    for (const id of ["context-real-1", "context-real-replay"]) {
+      const response = await fixture.sidecar.handleEnvelope({
+        protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+        id,
+        type: "session-context.execute",
+        command: structuredClone(publicCommand),
+        private: {},
+      });
+      assert.equal(response.type, "session-context.receipt");
+      assert.deepEqual(response.receipt, contextReceipt(publicCommand));
+    }
+
+    assert.deepEqual(fixture.contextCalls, [publicCommand]);
+    assert.equal(fixture.store.snapshot().contextCommandCount, 1);
+    assert.equal(fixture.store.snapshot().contextCommitCount, 1);
+    assert.deepEqual(fixture.store.contextOperations(), [{
+      command: publicCommand,
+      receipt: contextReceipt(publicCommand),
+      nextBinding: null,
+    }]);
+    assert.equal(
+      JSON.stringify(fixture.store.contextOperations()).includes("private goal"),
+      false,
+    );
+  } finally {
+    await fixture.sidecar.close().catch(() => undefined);
+    await fixture.cleanup();
+  }
+});
+
+test("real gateway retries one accepted uncommitted context command with the same id", async () => {
+  const fixture = await createRealSidecarFixture();
+  try {
+    await fixture.sidecar.handleEnvelope({
+      protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+      id: "request-create-retry-session",
+      type: "command.accept",
+      command: command("session.create", {
+        system_id: "research.system",
+        system_version: "1.0.0",
+        goal_id: "goal-1",
+        goal_ref: "goal-ref-1",
+      }),
+      private: { goal: "private goal" },
+    });
+    fixture.contextExecutor.failures = 1;
+    const publicCommand = contextCommand();
+    const first = await fixture.sidecar.handleEnvelope({
+      protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+      id: "context-retry-first",
+      type: "session-context.execute",
+      command: publicCommand,
+      private: {},
+    });
+    assert.equal(first.type, "error");
+    assert.equal(JSON.stringify(first).includes("SENTINEL"), false);
+    assert.equal(fixture.store.snapshot().contextCommandCount, 1);
+    assert.equal(fixture.store.snapshot().contextCommitCount, undefined);
+
+    const second = await fixture.sidecar.handleEnvelope({
+      protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+      id: "context-retry-second",
+      type: "session-context.execute",
+      command: structuredClone(publicCommand),
+      private: {},
+    });
+    assert.equal(second.type, "session-context.receipt");
+    assert.deepEqual(
+      fixture.contextCalls.map((item) => item.command_id),
+      [publicCommand.command_id, publicCommand.command_id],
+    );
+    assert.equal(fixture.store.snapshot().contextCommandCount, 1);
+    assert.equal(fixture.store.snapshot().contextCommitCount, 1);
   } finally {
     await fixture.sidecar.close().catch(() => undefined);
     await fixture.cleanup();

@@ -45,6 +45,17 @@ function bindingsPath(root) {
   return join(root, "private", "input-bindings");
 }
 
+function attachmentMetadata(body) {
+  return {
+    sessionId: "session-1",
+    inputId: "input-1",
+    attachmentId: "attachment-1",
+    mediaType: "image/png",
+    sha256: createHash("sha256").update(body).digest("hex"),
+    size: body.byteLength,
+  };
+}
+
 test("private values use opaque references and exact kind projections", async () => {
   const fixtureRoot = await temporaryStoreRoot();
   const sentinel = "SENTINEL_SECRET_INPUT";
@@ -189,6 +200,187 @@ test("private values bind result projections by command and source receipt", asy
         "action-1",
         "receipt-1",
       ),
+      PrivateValueInvalidError,
+    );
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
+test("private attachment bindings are exact durable and body-free", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  const body = Buffer.from("SENTINEL_PRIVATE_ATTACHMENT", "utf8");
+  try {
+    const values = await PrivateValueStore.open(fixtureRoot.root);
+    const metadata = attachmentMetadata(body);
+    const first = await values.bindAttachment(metadata, body);
+    const replay = await values.bindAttachment(metadata, Buffer.from(body));
+    assert.equal(replay, first);
+    assert.deepEqual(await values.readBoundAttachment(
+      metadata.sessionId,
+      metadata.inputId,
+      metadata.attachmentId,
+    ), {
+      ...metadata,
+      privateRef: first,
+      body,
+    });
+
+    const reopened = await PrivateValueStore.open(fixtureRoot.root);
+    assert.equal(await reopened.bindAttachment(metadata, body), first);
+    await assert.rejects(
+      reopened.bindAttachment(
+        { ...metadata, mediaType: "image/jpeg" },
+        body,
+      ),
+      PrivateValueInvalidError,
+    );
+    const bindingFiles = (await readdir(bindingsPath(fixtureRoot.root)))
+      .filter((name) => name.startsWith("attachment-") && name.endsWith(".json"));
+    assert.equal(bindingFiles.length, 1);
+    const bindingText = await readFile(
+      join(bindingsPath(fixtureRoot.root), bindingFiles[0]),
+      "utf8",
+    );
+    assert.equal(bindingText.includes("SENTINEL_PRIVATE_ATTACHMENT"), false);
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
+test("private bindings coalesce concurrent exact replays", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  const body = Buffer.from("concurrent-private-attachment", "utf8");
+  try {
+    const values = await PrivateValueStore.open(fixtureRoot.root);
+    const inputResults = await Promise.allSettled(
+      Array.from({ length: 8 }, (_, index) =>
+        values.bindInputReference(
+          `command-${index + 1}`,
+          "shared-name-ref",
+          "SENTINEL_SHARED_PRIVATE_NAME",
+        ),
+      ),
+    );
+    assert.equal(inputResults.every((result) => result.status === "fulfilled"), true);
+    const inputRefs = inputResults.map((result) => result.value);
+    assert.equal(new Set(inputRefs).size, 1);
+
+    const metadata = attachmentMetadata(body);
+    const attachmentResults = await Promise.allSettled(
+      Array.from({ length: 8 }, () =>
+        values.bindAttachment(metadata, Buffer.from(body)),
+      ),
+    );
+    assert.equal(
+      attachmentResults.every((result) => result.status === "fulfilled"),
+      true,
+    );
+    const attachmentRefs = attachmentResults.map((result) => result.value);
+    assert.equal(new Set(attachmentRefs).size, 1);
+    assert.deepEqual(
+      (await values.readBoundAttachment(
+        metadata.sessionId,
+        metadata.inputId,
+        metadata.attachmentId,
+      )).body,
+      body,
+    );
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
+test("private attachment recovery selects one exact binding across all faults", async () => {
+  const body = Buffer.from("private-attachment", "utf8");
+  for (const faultStage of [
+    "before_write",
+    "after_write",
+    "before_rename",
+    "after_rename",
+    "before_directory_fsync",
+    "after_directory_fsync",
+  ]) {
+    const fixtureRoot = await temporaryStoreRoot();
+    try {
+      await PrivateValueStore.open(fixtureRoot.root);
+      const metadata = attachmentMetadata(body);
+      const faulted = await PrivateValueStore.open(fixtureRoot.root, {
+        faultInjector(stage) {
+          if (stage === faultStage) {
+            throw new Error(`SENTINEL_${faultStage}`);
+          }
+        },
+      });
+      await assert.rejects(
+        faulted.bindAttachment(metadata, body),
+        PrivateValueWriteError,
+      );
+
+      const reopened = await PrivateValueStore.open(fixtureRoot.root);
+      await reopened.bindAttachment(metadata, body);
+      const bindingFiles = (await readdir(bindingsPath(fixtureRoot.root)))
+        .filter((name) => name.startsWith("attachment-") && name.endsWith(".json"));
+      assert.equal(bindingFiles.length, 1);
+      assert.deepEqual(
+        (await reopened.readBoundAttachment(
+          metadata.sessionId,
+          metadata.inputId,
+          metadata.attachmentId,
+        )).body,
+        body,
+      );
+    } finally {
+      await fixtureRoot.cleanup();
+    }
+  }
+});
+
+test("private continuation locators bind an exact no-follow transcript", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  const sessionRoot = join(fixtureRoot.parent, "sessions");
+  const sessionPath = join(sessionRoot, "transcript-1.jsonl");
+  try {
+    await mkdir(sessionRoot, { mode: 0o700 });
+    await writeFile(sessionPath, "private transcript\n", { mode: 0o600 });
+    const values = await PrivateValueStore.open(fixtureRoot.root, {
+      continuationRoot: sessionRoot,
+    });
+    const locator = {
+      continuationId: "continuation-1",
+      activeSessionId: "prime-active-1",
+      transcriptSessionId: "prime-transcript-1",
+      supervisorGeneration: "supervisor-generation-1",
+      sessionPath,
+    };
+    const binding = await values.putContinuationLocator(locator);
+    assert.deepEqual(
+      await values.readContinuationLocator(binding),
+      locator,
+    );
+    assert.equal(JSON.stringify(binding).includes(sessionPath), false);
+
+    await rm(sessionRoot, { recursive: true });
+    const replacementRoot = join(fixtureRoot.parent, "replacement-sessions");
+    await mkdir(replacementRoot, { mode: 0o700 });
+    await writeFile(
+      join(replacementRoot, "transcript-1.jsonl"),
+      "private transcript\n",
+      { mode: 0o600 },
+    );
+    await symlink(replacementRoot, sessionRoot, "dir");
+    await assert.rejects(
+      values.readContinuationLocator(binding),
+      PrivateValueInvalidError,
+    );
+
+    await rm(sessionRoot);
+    await mkdir(sessionRoot, { mode: 0o700 });
+    const external = join(fixtureRoot.parent, "external-session.jsonl");
+    await writeFile(external, "private transcript\n", { mode: 0o600 });
+    await symlink(external, sessionPath);
+    await assert.rejects(
+      values.readContinuationLocator(binding),
       PrivateValueInvalidError,
     );
   } finally {

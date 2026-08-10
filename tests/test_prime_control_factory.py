@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import sys
@@ -26,6 +27,7 @@ from asterion.control.providers.prime.process import (
     PrimeSidecarProcess,
     PrimeSidecarLaunchOptions,
     PrimeSidecarProcessError,
+    _encode_frame,
     build_prime_sidecar_spawn_plan,
 )
 
@@ -240,6 +242,136 @@ class TestPrimeControlFactory(unittest.TestCase):
 
 
 class TestPrimeSidecarProcess(unittest.IsolatedAsyncioTestCase):
+    async def test_attachment_execute_has_a_bounded_private_frame_exception(
+        self,
+    ) -> None:
+        body = b"x" * (8 * 1024 * 1024)
+        envelope = {
+            "protocol": "asterion.prime-gateway-ipc/v1",
+            "id": "attachment-request",
+            "type": "session-context.execute",
+            "command": {"operation": "session.attachment.bind"},
+            "private": {"body_base64": base64.b64encode(body).decode("ascii")},
+        }
+
+        encoded = _encode_frame(envelope)
+
+        self.assertGreater(len(encoded), 1024 * 1024)
+        self.assertLessEqual(len(encoded), 12 * 1024 * 1024)
+        with self.assertRaises(PrimeSidecarProcessError):
+            _encode_frame({**envelope, "type": "command.accept"})
+
+    async def test_cancelled_waiter_drains_stale_execute_before_cancel_ack(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = root / "stale_then_cancel.py"
+            script.write_text(
+                "import json, sys\n"
+                "execute = json.loads(sys.stdin.readline())\n"
+                "cancel = json.loads(sys.stdin.readline())\n"
+                "print(json.dumps({'protocol':'asterion.prime-gateway-ipc/v1','id':execute['id'],'type':'session-context.receipt','receipt':{'protocol':'asterion.session-context/v1','receipt_id':'context-receipt-stale','command_id':'context-command-1','session_id':'session-1','generation':1,'operation':'session.tree.read','status':'succeeded','reason_code':'session-context-succeeded','payload':{'evidence_ref':None,'result':{'continuation_id':'continuation-1','nodes':[],'leaf_id':None}}}}), flush=True)\n"
+                "print(json.dumps({'protocol':'asterion.prime-gateway-ipc/v1','id':cancel['id'],'type':'session-context.cancel.accepted'}), flush=True)\n"
+            )
+            process = await PrimeSidecarProcess.start(
+                PrimeSidecarLaunchOptions(
+                    node_executable=Path(sys.executable),
+                    sidecar_entry=script,
+                    private_descriptor={},
+                    environ={"PATH": os.environ.get("PATH", "")},
+                    request_timeout=0.5,
+                )
+            )
+            execute = asyncio.create_task(
+                process.request(
+                    {
+                        "protocol": "asterion.prime-gateway-ipc/v1",
+                        "id": "execute-stale",
+                        "type": "session-context.execute",
+                        "command": {},
+                        "private": {},
+                    }
+                )
+            )
+            await asyncio.sleep(0.01)
+            execute.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await execute
+            try:
+                cancel = await process.request(
+                    {
+                        "protocol": "asterion.prime-gateway-ipc/v1",
+                        "id": "cancel-after-stale",
+                        "type": "session-context.cancel",
+                        "command_id": "context-command-1",
+                    }
+                )
+            finally:
+                await process.close()
+
+            self.assertEqual(cancel["id"], "cancel-after-stale")
+            self.assertEqual(cancel["type"], "session-context.cancel.accepted")
+
+    async def test_context_execute_and_cancel_route_out_of_order_by_request_id(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = root / "out_of_order.py"
+            script.write_text(
+                "import json, sys\n"
+                "first = json.loads(sys.stdin.readline())\n"
+                "second = json.loads(sys.stdin.readline())\n"
+                "requests = {first['type']: first, second['type']: second}\n"
+                "cancel = requests['session-context.cancel']\n"
+                "execute = requests['session-context.execute']\n"
+                "print(json.dumps({'protocol':'asterion.prime-gateway-ipc/v1','id':cancel['id'],'type':'session-context.cancel.accepted'}), flush=True)\n"
+                "print(json.dumps({'protocol':'asterion.prime-gateway-ipc/v1','id':execute['id'],'type':'session-context.receipt','receipt':{'protocol':'asterion.session-context/v1','receipt_id':'context-receipt-1','command_id':'context-command-1','session_id':'session-1','generation':1,'operation':'session.tree.read','status':'succeeded','reason_code':'session-context-succeeded','payload':{'evidence_ref':None,'result':{'continuation_id':'continuation-1','nodes':[],'leaf_id':None}}}}), flush=True)\n"
+            )
+            process = await PrimeSidecarProcess.start(
+                PrimeSidecarLaunchOptions(
+                    node_executable=Path(sys.executable),
+                    sidecar_entry=script,
+                    private_descriptor={},
+                    environ={"PATH": os.environ.get("PATH", "")},
+                    request_timeout=0.5,
+                )
+            )
+            execute = asyncio.create_task(
+                process.request(
+                    {
+                        "protocol": "asterion.prime-gateway-ipc/v1",
+                        "id": "execute-request",
+                        "type": "session-context.execute",
+                        "command": {},
+                        "private": {},
+                    }
+                )
+            )
+            cancel = asyncio.create_task(
+                process.request(
+                    {
+                        "protocol": "asterion.prime-gateway-ipc/v1",
+                        "id": "cancel-request",
+                        "type": "session-context.cancel",
+                        "command_id": "context-command-1",
+                    }
+                )
+            )
+            try:
+                execute_response, cancel_response = await asyncio.gather(
+                    execute,
+                    cancel,
+                )
+            finally:
+                await process.close()
+
+            self.assertEqual(execute_response["type"], "session-context.receipt")
+            self.assertEqual(cancel_response["type"], "session-context.cancel.accepted")
+            self.assertEqual(execute_response["id"], "execute-request")
+            self.assertEqual(cancel_response["id"], "cancel-request")
+
     async def test_child_descriptor_connects_operator_parent_socket(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

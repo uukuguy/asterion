@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstat } from "node:fs/promises";
-import { join } from "node:path";
+import { constants } from "node:fs";
+import { lstat, open, realpath } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import { TextDecoder } from "node:util";
 
 import {
@@ -26,10 +27,41 @@ export interface PrivateResultProjection {
 
 export interface PrivateValueStoreOptions {
   readonly faultInjector?: StorageFaultInjector;
+  readonly continuationRoot?: string;
+}
+
+export interface PrivateAttachmentMetadata {
+  readonly sessionId: string;
+  readonly inputId: string;
+  readonly attachmentId: string;
+  readonly mediaType: string;
+  readonly sha256: string;
+  readonly size: number;
+}
+
+export interface PrivateBoundAttachment extends PrivateAttachmentMetadata {
+  readonly privateRef: PrivateValueRef;
+  readonly body: Buffer;
+}
+
+export interface PrivateContinuationLocator {
+  readonly continuationId: string;
+  readonly activeSessionId: string;
+  readonly transcriptSessionId: string;
+  readonly supervisorGeneration: string;
+  readonly sessionPath: string;
+}
+
+export interface PrivateContinuationBinding {
+  readonly continuationId: string;
+  readonly privateRef: PrivateValueRef;
+  readonly bindingDigest: string;
 }
 
 const PRIVATE_VALUE_FORMAT = "asterion.prime-private-value/v1";
 const PRIVATE_INPUT_BINDING_FORMAT = "asterion.prime-private-input-binding/v1";
+const PRIVATE_ATTACHMENT_BINDING_FORMAT = "asterion.prime-private-attachment-binding/v1";
+const PRIVATE_CONTINUATION_FORMAT = "asterion.prime-private-continuation/v1";
 const PRIVATE_REF_PATTERN = /^private:(?<id>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/u;
 const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const MEDIA_TYPE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$/u;
@@ -39,9 +71,12 @@ const BINDING_LIMIT_BYTES = 4096;
 const INPUT_LIMIT_BYTES = 1024 * 1024;
 const RESULT_LIMIT_BYTES = 64 * 1024;
 const CAPSULE_LIMIT_BYTES = 8 * 1024 * 1024;
+const ATTACHMENT_LIMIT_BYTES = 8 * 1024 * 1024;
+const CONTINUATION_LIMIT_BYTES = 16 * 1024;
+const TRANSCRIPT_LIMIT_BYTES = 64 * 1024 * 1024;
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 
-type PrivateValueKind = "input" | "result" | "capsule";
+type PrivateValueKind = "input" | "result" | "capsule" | "attachment" | "continuation";
 
 interface PrivateValueHeader {
   readonly format: typeof PRIVATE_VALUE_FORMAT;
@@ -57,6 +92,29 @@ interface PrivateInputBinding {
   readonly sourceRef: string;
   readonly valueDigest: string;
   readonly privateRef: PrivateValueRef;
+}
+
+interface PrivateAttachmentBinding extends PrivateAttachmentMetadata {
+  readonly format: typeof PRIVATE_ATTACHMENT_BINDING_FORMAT;
+  readonly privateRef: PrivateValueRef;
+}
+
+interface StoredContinuationLocator {
+  readonly format: typeof PRIVATE_CONTINUATION_FORMAT;
+  readonly continuationId: string;
+  readonly activeSessionId: string;
+  readonly transcriptSessionId: string;
+  readonly supervisorGeneration: string;
+  readonly sessionFileName: string;
+  readonly transcriptSize: number;
+  readonly transcriptSha256: string;
+}
+
+interface ContinuationRootIdentity {
+  readonly path: string;
+  readonly realPath: string;
+  readonly device: number;
+  readonly inode: number;
 }
 
 export class PrivateValueInvalidError extends Error {
@@ -116,6 +174,12 @@ function limitForKind(kind: PrivateValueKind): number {
   if (kind === "result") {
     return RESULT_LIMIT_BYTES;
   }
+  if (kind === "attachment") {
+    return ATTACHMENT_LIMIT_BYTES;
+  }
+  if (kind === "continuation") {
+    return CONTINUATION_LIMIT_BYTES;
+  }
   return CAPSULE_LIMIT_BYTES;
 }
 
@@ -165,10 +229,22 @@ function validateBindingKey(value: unknown): string {
 }
 
 function bindingDigest(
-  kind: "command" | "public" | "result-command",
+  kind: "attachment" | "command" | "public" | "result-command",
   values: readonly string[],
 ): string {
   return sha256(canonicalJsonBytes({ kind, values: [...values] }));
+}
+
+function attachmentBindingName(
+  sessionId: string,
+  inputId: string,
+  attachmentId: string,
+): string {
+  return `attachment-${bindingDigest("attachment", [
+    sessionId,
+    inputId,
+    attachmentId,
+  ])}.json`;
 }
 
 function commandBindingName(commandId: string, sourceRef: string): string {
@@ -228,6 +304,115 @@ function parseBinding(bytes: Buffer): PrivateInputBinding {
   });
 }
 
+function validateAttachmentMetadata(value: unknown): PrivateAttachmentMetadata {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "attachmentId",
+      "inputId",
+      "mediaType",
+      "sessionId",
+      "sha256",
+      "size",
+    ]) ||
+    ![value.sessionId, value.inputId, value.attachmentId].every(
+      (item) => typeof item === "string" && OPAQUE_ID_PATTERN.test(item),
+    ) ||
+    typeof value.mediaType !== "string" ||
+    !MEDIA_TYPE_PATTERN.test(value.mediaType) ||
+    typeof value.sha256 !== "string" ||
+    !DIGEST_PATTERN.test(value.sha256) ||
+    !Number.isSafeInteger(value.size) ||
+    Number(value.size) < 0 ||
+    Number(value.size) > ATTACHMENT_LIMIT_BYTES
+  ) {
+    throw new PrivateValueInvalidError();
+  }
+  return Object.freeze({
+    sessionId: String(value.sessionId),
+    inputId: String(value.inputId),
+    attachmentId: String(value.attachmentId),
+    mediaType: value.mediaType,
+    sha256: value.sha256,
+    size: Number(value.size),
+  });
+}
+
+function parseAttachmentBinding(bytes: Buffer): PrivateAttachmentBinding {
+  if (bytes.byteLength > BINDING_LIMIT_BYTES || bytes.at(-1) !== 0x0a) {
+    throw new PrivateValueInvalidError();
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(bytes.subarray(0, -1).toString("utf8"));
+  } catch {
+    throw new PrivateValueInvalidError();
+  }
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "attachmentId",
+      "format",
+      "inputId",
+      "mediaType",
+      "privateRef",
+      "sessionId",
+      "sha256",
+      "size",
+    ]) ||
+    value.format !== PRIVATE_ATTACHMENT_BINDING_FORMAT ||
+    typeof value.privateRef !== "string" ||
+    !PRIVATE_REF_PATTERN.test(value.privateRef)
+  ) {
+    throw new PrivateValueInvalidError();
+  }
+  const metadata = validateAttachmentMetadata({
+    sessionId: value.sessionId,
+    inputId: value.inputId,
+    attachmentId: value.attachmentId,
+    mediaType: value.mediaType,
+    sha256: value.sha256,
+    size: value.size,
+  });
+  return Object.freeze({
+    format: PRIVATE_ATTACHMENT_BINDING_FORMAT,
+    ...metadata,
+    privateRef: value.privateRef as PrivateValueRef,
+  });
+}
+
+function validateContinuationLocator(
+  value: unknown,
+): Omit<PrivateContinuationLocator, "sessionPath"> & { readonly sessionPath: string } {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "activeSessionId",
+      "continuationId",
+      "sessionPath",
+      "supervisorGeneration",
+      "transcriptSessionId",
+    ]) ||
+    ![
+      value.activeSessionId,
+      value.continuationId,
+      value.supervisorGeneration,
+      value.transcriptSessionId,
+    ].every((item) => typeof item === "string" && OPAQUE_ID_PATTERN.test(item)) ||
+    typeof value.sessionPath !== "string" ||
+    value.sessionPath.length === 0
+  ) {
+    throw new PrivateValueInvalidError();
+  }
+  return Object.freeze({
+    continuationId: String(value.continuationId),
+    activeSessionId: String(value.activeSessionId),
+    transcriptSessionId: String(value.transcriptSessionId),
+    supervisorGeneration: String(value.supervisorGeneration),
+    sessionPath: value.sessionPath,
+  });
+}
+
 async function regularPathExists(path: string): Promise<boolean> {
   try {
     await lstat(path);
@@ -246,7 +431,14 @@ function parseHeader(value: unknown, reference: PrivateValueRef): PrivateValueHe
     !hasExactKeys(value, ["format", "reference", "kind", "size", "digest"]) ||
     value.format !== PRIVATE_VALUE_FORMAT ||
     value.reference !== reference ||
-    (value.kind !== "input" && value.kind !== "result" && value.kind !== "capsule") ||
+    typeof value.kind !== "string" ||
+    ![
+      "attachment",
+      "capsule",
+      "continuation",
+      "input",
+      "result",
+    ].includes(String(value.kind)) ||
     !Number.isSafeInteger(value.size) ||
     Number(value.size) < 0 ||
     typeof value.digest !== "string" ||
@@ -257,20 +449,45 @@ function parseHeader(value: unknown, reference: PrivateValueRef): PrivateValueHe
   return Object.freeze({
     format: PRIVATE_VALUE_FORMAT,
     reference,
-    kind: value.kind,
+    kind: value.kind as PrivateValueKind,
     size: Number(value.size),
     digest: value.digest,
   });
 }
 
+async function validateContinuationRoot(
+  path: string,
+): Promise<ContinuationRootIdentity> {
+  if (typeof path !== "string" || path.length === 0) {
+    throw new PrivateValueInvalidError();
+  }
+  const normalized = resolve(path);
+  const metadata = await lstat(normalized);
+  if (
+    metadata.isSymbolicLink() ||
+    !metadata.isDirectory() ||
+    (metadata.mode & 0o777) !== 0o700
+  ) {
+    throw new PrivateValueInvalidError();
+  }
+  return Object.freeze({
+    path: normalized,
+    realPath: await realpath(normalized),
+    device: metadata.dev,
+    inode: metadata.ino,
+  });
+}
+
 export class PrivateValueStore {
   private readonly faultInjector: StorageFaultInjector | undefined;
+  private bindingQueue: Promise<void> = Promise.resolve();
 
   private constructor(
     private readonly root: string,
     private readonly privateRoot: string,
     private readonly valuesRoot: string,
     private readonly bindingsRoot: string,
+    private readonly continuationRoot: ContinuationRootIdentity | undefined,
     options: PrivateValueStoreOptions,
   ) {
     this.faultInjector = options.faultInjector;
@@ -288,11 +505,15 @@ export class PrivateValueStore {
       await ensurePrivateDirectory(privateRoot);
       await ensurePrivateDirectory(valuesRoot);
       await ensurePrivateDirectory(bindingsRoot);
+      const continuationRoot = options.continuationRoot === undefined
+        ? undefined
+        : await validateContinuationRoot(options.continuationRoot);
       return new PrivateValueStore(
         root,
         privateRoot,
         valuesRoot,
         bindingsRoot,
+        continuationRoot,
         options,
       );
     } catch {
@@ -321,38 +542,40 @@ export class PrivateValueStore {
     sourceRef: string,
     value: string,
   ): Promise<PrivateValueRef> {
-    const commandKey = validateBindingKey(commandId);
-    const publicKey = validateBindingKey(sourceRef);
-    if (!validInputValue(value)) {
-      throw new PrivateValueInvalidError();
-    }
-    const valueDigest = sha256(Buffer.from(value, "utf8"));
-    const publicBinding = await this.readBinding(publicBindingName(publicKey));
-    if (publicBinding !== undefined) {
-      this.assertBinding(publicBinding, {
+    return this.serializeBinding(async () => {
+      const commandKey = validateBindingKey(commandId);
+      const publicKey = validateBindingKey(sourceRef);
+      if (!validInputValue(value)) {
+        throw new PrivateValueInvalidError();
+      }
+      const valueDigest = sha256(Buffer.from(value, "utf8"));
+      const publicBinding = await this.readBinding(publicBindingName(publicKey));
+      if (publicBinding !== undefined) {
+        this.assertBinding(publicBinding, {
+          commandId: null,
+          sourceRef,
+          valueDigest,
+        });
+        await this.syncBindingsRootForAcknowledgement();
+        await this.bindCommandReference(
+          commandKey,
+          sourceRef,
+          valueDigest,
+          publicBinding.privateRef,
+        );
+        return publicBinding.privateRef;
+      }
+      const privateRef = await this.putInput(value);
+      await this.writeBinding(publicBindingName(publicKey), {
+        format: PRIVATE_INPUT_BINDING_FORMAT,
         commandId: null,
         sourceRef,
         valueDigest,
+        privateRef,
       });
-      await this.syncBindingsRootForAcknowledgement();
-      await this.bindCommandReference(
-        commandKey,
-        sourceRef,
-        valueDigest,
-        publicBinding.privateRef,
-      );
-      return publicBinding.privateRef;
-    }
-    const privateRef = await this.putInput(value);
-    await this.writeBinding(publicBindingName(publicKey), {
-      format: PRIVATE_INPUT_BINDING_FORMAT,
-      commandId: null,
-      sourceRef,
-      valueDigest,
-      privateRef,
+      await this.bindCommandReference(commandKey, sourceRef, valueDigest, privateRef);
+      return privateRef;
     });
-    await this.bindCommandReference(commandKey, sourceRef, valueDigest, privateRef);
-    return privateRef;
   }
 
   async readBoundInputReference(sourceRef: string): Promise<string> {
@@ -370,34 +593,36 @@ export class PrivateValueStore {
     sourceRef: string,
     value: PrivateResultProjection,
   ): Promise<PrivateValueRef> {
-    const commandKey = validateBindingKey(commandId);
-    const actionKey = validateBindingKey(actionId);
-    const publicKey = validateBindingKey(sourceRef);
-    const projection = validateProjection(value);
-    if (projection.receiptRef !== publicKey) {
-      throw new PrivateValueInvalidError();
-    }
-    const valueDigest = sha256(canonicalJsonBytes(projection));
-    const targetName = resultBindingName(commandKey, actionKey, publicKey);
-    const existing = await this.readBinding(targetName);
-    if (existing !== undefined) {
-      this.assertBinding(existing, {
+    return this.serializeBinding(async () => {
+      const commandKey = validateBindingKey(commandId);
+      const actionKey = validateBindingKey(actionId);
+      const publicKey = validateBindingKey(sourceRef);
+      const projection = validateProjection(value);
+      if (projection.receiptRef !== publicKey) {
+        throw new PrivateValueInvalidError();
+      }
+      const valueDigest = sha256(canonicalJsonBytes(projection));
+      const targetName = resultBindingName(commandKey, actionKey, publicKey);
+      const existing = await this.readBinding(targetName);
+      if (existing !== undefined) {
+        this.assertBinding(existing, {
+          commandId: commandKey,
+          sourceRef: publicKey,
+          valueDigest,
+        });
+        await this.syncBindingsRootForAcknowledgement();
+        return existing.privateRef;
+      }
+      const privateRef = await this.putResult(projection);
+      await this.writeBinding(targetName, {
+        format: PRIVATE_INPUT_BINDING_FORMAT,
         commandId: commandKey,
         sourceRef: publicKey,
         valueDigest,
+        privateRef,
       });
-      await this.syncBindingsRootForAcknowledgement();
-      return existing.privateRef;
-    }
-    const privateRef = await this.putResult(projection);
-    await this.writeBinding(targetName, {
-      format: PRIVATE_INPUT_BINDING_FORMAT,
-      commandId: commandKey,
-      sourceRef: publicKey,
-      valueDigest,
-      privateRef,
+      return privateRef;
     });
-    return privateRef;
   }
 
   async readBoundResultReference(
@@ -426,6 +651,184 @@ export class PrivateValueStore {
     });
     await this.syncBindingsRootForAcknowledgement();
     return binding.privateRef;
+  }
+
+  async bindAttachment(
+    metadataValue: PrivateAttachmentMetadata,
+    value: Uint8Array,
+  ): Promise<PrivateValueRef> {
+    return this.serializeBinding(async () => {
+      const metadata = validateAttachmentMetadata(metadataValue);
+      if (
+        !(value instanceof Uint8Array) ||
+        value.byteLength !== metadata.size ||
+        value.byteLength > ATTACHMENT_LIMIT_BYTES ||
+        sha256(value) !== metadata.sha256
+      ) {
+        throw new PrivateValueInvalidError();
+      }
+      const targetName = attachmentBindingName(
+        metadata.sessionId,
+        metadata.inputId,
+        metadata.attachmentId,
+      );
+      const existing = await this.readAttachmentBinding(targetName);
+      if (existing !== undefined) {
+        this.assertAttachmentBinding(existing, metadata);
+        const body = await this.read(existing.privateRef, "attachment");
+        if (body.byteLength !== metadata.size || sha256(body) !== metadata.sha256) {
+          throw new PrivateValueInvalidError();
+        }
+        await this.syncBindingsRootForAcknowledgement();
+        return existing.privateRef;
+      }
+      const privateRef = await this.put("attachment", Buffer.from(value));
+      await this.writeAttachmentBinding(targetName, {
+        format: PRIVATE_ATTACHMENT_BINDING_FORMAT,
+        ...metadata,
+        privateRef,
+      });
+      return privateRef;
+    });
+  }
+
+  async readBoundAttachment(
+    sessionId: string,
+    inputId: string,
+    attachmentId: string,
+  ): Promise<PrivateBoundAttachment> {
+    const sessionKey = validateBindingKey(sessionId);
+    const inputKey = validateBindingKey(inputId);
+    const attachmentKey = validateBindingKey(attachmentId);
+    const binding = await this.readAttachmentBinding(
+      attachmentBindingName(
+        sessionKey,
+        inputKey,
+        attachmentKey,
+      ),
+    );
+    if (binding === undefined) {
+      throw new PrivateValueInvalidError();
+    }
+    const body = Buffer.from(await this.read(binding.privateRef, "attachment"));
+    if (body.byteLength !== binding.size || sha256(body) !== binding.sha256) {
+      throw new PrivateValueInvalidError();
+    }
+    return Object.freeze({
+      sessionId: binding.sessionId,
+      inputId: binding.inputId,
+      attachmentId: binding.attachmentId,
+      mediaType: binding.mediaType,
+      sha256: binding.sha256,
+      size: binding.size,
+      privateRef: binding.privateRef,
+      body,
+    });
+  }
+
+  async putContinuationLocator(
+    value: PrivateContinuationLocator,
+  ): Promise<PrivateContinuationBinding> {
+    const locator = validateContinuationLocator(value);
+    const transcript = await this.inspectContinuation(locator.sessionPath);
+    const stored: StoredContinuationLocator = {
+      format: PRIVATE_CONTINUATION_FORMAT,
+      continuationId: locator.continuationId,
+      activeSessionId: locator.activeSessionId,
+      transcriptSessionId: locator.transcriptSessionId,
+      supervisorGeneration: locator.supervisorGeneration,
+      sessionFileName: transcript.fileName,
+      transcriptSize: transcript.size,
+      transcriptSha256: transcript.digest,
+    };
+    const body = canonicalJsonBytes(stored);
+    const privateRef = await this.put("continuation", body);
+    return Object.freeze({
+      continuationId: locator.continuationId,
+      privateRef,
+      bindingDigest: sha256(body),
+    });
+  }
+
+  async readContinuationLocator(
+    bindingValue: PrivateContinuationBinding,
+  ): Promise<PrivateContinuationLocator> {
+    if (
+      !isRecord(bindingValue) ||
+      !hasExactKeys(bindingValue, [
+        "bindingDigest",
+        "continuationId",
+        "privateRef",
+      ]) ||
+      typeof bindingValue.continuationId !== "string" ||
+      !OPAQUE_ID_PATTERN.test(bindingValue.continuationId) ||
+      typeof bindingValue.privateRef !== "string" ||
+      !PRIVATE_REF_PATTERN.test(bindingValue.privateRef) ||
+      typeof bindingValue.bindingDigest !== "string" ||
+      !DIGEST_PATTERN.test(bindingValue.bindingDigest) ||
+      this.continuationRoot === undefined
+    ) {
+      throw new PrivateValueInvalidError();
+    }
+    const body = await this.read(
+      bindingValue.privateRef as PrivateValueRef,
+      "continuation",
+    );
+    if (sha256(body) !== bindingValue.bindingDigest) {
+      throw new PrivateValueInvalidError();
+    }
+    let stored: unknown;
+    try {
+      stored = JSON.parse(UTF8_DECODER.decode(body));
+    } catch {
+      throw new PrivateValueInvalidError();
+    }
+    if (!canonicalJsonBytes(stored).equals(body)) {
+      throw new PrivateValueInvalidError();
+    }
+    if (
+      !isRecord(stored) ||
+      !hasExactKeys(stored, [
+        "activeSessionId",
+        "continuationId",
+        "format",
+        "sessionFileName",
+        "supervisorGeneration",
+        "transcriptSessionId",
+        "transcriptSha256",
+        "transcriptSize",
+      ]) ||
+      stored.format !== PRIVATE_CONTINUATION_FORMAT ||
+      stored.continuationId !== bindingValue.continuationId ||
+      ![
+        stored.activeSessionId,
+        stored.continuationId,
+        stored.supervisorGeneration,
+        stored.transcriptSessionId,
+      ].every((item) => typeof item === "string" && OPAQUE_ID_PATTERN.test(item)) ||
+      typeof stored.sessionFileName !== "string" ||
+      basename(stored.sessionFileName) !== stored.sessionFileName ||
+      typeof stored.transcriptSha256 !== "string" ||
+      !DIGEST_PATTERN.test(stored.transcriptSha256) ||
+      !Number.isSafeInteger(stored.transcriptSize)
+    ) {
+      throw new PrivateValueInvalidError();
+    }
+    const sessionPath = join(this.continuationRoot.path, stored.sessionFileName);
+    const transcript = await this.inspectContinuation(sessionPath);
+    if (
+      transcript.size !== stored.transcriptSize ||
+      transcript.digest !== stored.transcriptSha256
+    ) {
+      throw new PrivateValueInvalidError();
+    }
+    return Object.freeze({
+      continuationId: String(stored.continuationId),
+      activeSessionId: String(stored.activeSessionId),
+      transcriptSessionId: String(stored.transcriptSessionId),
+      supervisorGeneration: String(stored.supervisorGeneration),
+      sessionPath,
+    });
   }
 
   async putResult(value: PrivateResultProjection): Promise<PrivateValueRef> {
@@ -560,6 +963,68 @@ export class PrivateValueStore {
     }
   }
 
+  private async readAttachmentBinding(
+    targetName: string,
+  ): Promise<PrivateAttachmentBinding | undefined> {
+    try {
+      await this.ensureBindingsRoot();
+      const path = join(this.bindingsRoot, targetName);
+      if (!(await regularPathExists(path))) {
+        return undefined;
+      }
+      return parseAttachmentBinding(
+        await readPrivateRegularFile(path, BINDING_LIMIT_BYTES),
+      );
+    } catch {
+      throw new PrivateValueInvalidError();
+    }
+  }
+
+  private assertAttachmentBinding(
+    binding: PrivateAttachmentBinding,
+    expected: PrivateAttachmentMetadata,
+  ): void {
+    if (
+      binding.sessionId !== expected.sessionId ||
+      binding.inputId !== expected.inputId ||
+      binding.attachmentId !== expected.attachmentId ||
+      binding.mediaType !== expected.mediaType ||
+      binding.sha256 !== expected.sha256 ||
+      binding.size !== expected.size
+    ) {
+      throw new PrivateValueInvalidError();
+    }
+  }
+
+  private async writeAttachmentBinding(
+    targetName: string,
+    binding: PrivateAttachmentBinding,
+  ): Promise<void> {
+    try {
+      await this.ensureBindingsRoot();
+      await atomicWriteFile(
+        this.bindingsRoot,
+        targetName,
+        Buffer.concat([canonicalJsonBytes(binding), Buffer.from("\n")]),
+        this.faultInjector,
+      );
+      await this.ensureBindingsRoot();
+    } catch (error) {
+      if (!(error instanceof AtomicTargetExistsError)) {
+        throw new PrivateValueWriteError();
+      }
+      const existing = await this.readAttachmentBinding(targetName);
+      if (existing === undefined) {
+        throw new PrivateValueWriteError();
+      }
+      this.assertAttachmentBinding(existing, binding);
+      if (existing.privateRef !== binding.privateRef) {
+        throw new PrivateValueInvalidError();
+      }
+      await this.syncBindingsRootForAcknowledgement();
+    }
+  }
+
   private async writeBinding(
     targetName: string,
     binding: PrivateInputBinding,
@@ -640,6 +1105,63 @@ export class PrivateValueStore {
     }
   }
 
+  private async inspectContinuation(
+    sessionPath: string,
+  ): Promise<Readonly<{ fileName: string; size: number; digest: string }>> {
+    if (
+      this.continuationRoot === undefined ||
+      resolve(sessionPath) !== sessionPath ||
+      dirname(sessionPath) !== this.continuationRoot.path ||
+      basename(sessionPath) !== basename(resolve(sessionPath))
+    ) {
+      throw new PrivateValueInvalidError();
+    }
+    let descriptor: Awaited<ReturnType<typeof open>> | undefined;
+    try {
+      const rootMetadata = await lstat(this.continuationRoot.path);
+      if (
+        rootMetadata.isSymbolicLink() ||
+        !rootMetadata.isDirectory() ||
+        (rootMetadata.mode & 0o777) !== 0o700 ||
+        rootMetadata.dev !== this.continuationRoot.device ||
+        rootMetadata.ino !== this.continuationRoot.inode ||
+        await realpath(this.continuationRoot.path) !==
+          this.continuationRoot.realPath
+      ) {
+        throw new PrivateValueInvalidError();
+      }
+      descriptor = await open(
+        sessionPath,
+        constants.O_RDONLY | constants.O_NOFOLLOW,
+      );
+      const metadata = await descriptor.stat();
+      if (
+        !metadata.isFile() ||
+        (metadata.mode & 0o777) !== 0o600 ||
+        metadata.size < 1 ||
+        metadata.size > TRANSCRIPT_LIMIT_BYTES
+      ) {
+        throw new PrivateValueInvalidError();
+      }
+      const body = await descriptor.readFile();
+      if (body.byteLength !== metadata.size) {
+        throw new PrivateValueInvalidError();
+      }
+      return Object.freeze({
+        fileName: basename(sessionPath),
+        size: body.byteLength,
+        digest: sha256(body),
+      });
+    } catch (error) {
+      if (error instanceof PrivateValueInvalidError) {
+        throw error;
+      }
+      throw new PrivateValueInvalidError();
+    } finally {
+      await descriptor?.close().catch(() => undefined);
+    }
+  }
+
   private async ensureRoots(): Promise<void> {
     try {
       await ensurePrivateDirectory(this.root);
@@ -652,6 +1174,15 @@ export class PrivateValueStore {
       }
       throw error;
     }
+  }
+
+  private async serializeBinding<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.bindingQueue.then(operation);
+    this.bindingQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   private async ensureBindingsRoot(): Promise<void> {

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import unittest
 from collections.abc import AsyncIterator, Mapping
 
@@ -21,11 +23,33 @@ from asterion.control.authority import BudgetUsage, RemainingBudget
 class FakeResolver:
     def __init__(self) -> None:
         self.values: dict[str, str] = {}
+        self.byte_values: dict[str, bytes] = {}
         self.requests: list[tuple[str, int]] = []
+        self.byte_requests: list[tuple[str, str, str, int, int]] = []
 
     def resolve_text(self, reference: str, *, max_bytes: int) -> str:
         self.requests.append((reference, max_bytes))
         return self.values[reference]
+
+    def resolve_bytes(
+        self,
+        reference: str,
+        *,
+        expected_media_type: str,
+        expected_sha256: str,
+        expected_size: int,
+        max_bytes: int,
+    ) -> bytes:
+        self.byte_requests.append(
+            (
+                reference,
+                expected_media_type,
+                expected_sha256,
+                expected_size,
+                max_bytes,
+            )
+        )
+        return self.byte_values[reference]
 
 
 class FakeProcess:
@@ -188,7 +212,196 @@ def context_receipt() -> SessionContextReceipt:
     )
 
 
+def attachment_command() -> SessionContextCommand:
+    body = b"private-image-bytes"
+    return SessionContextCommand(
+        command_id="context-command-attachment",
+        session_id="session-1",
+        generation=1,
+        authority_revision=1,
+        idempotency_key="context-operation-attachment",
+        operation="session.attachment.bind",
+        payload={
+            "input_id": "input-1",
+            "attachment_id": "attachment-1",
+            "body_ref": "attachment-body-1",
+            "media_type": "image/png",
+            "sha256": hashlib.sha256(body).hexdigest(),
+            "size": len(body),
+        },
+    )
+
+
+def attachment_receipt() -> SessionContextReceipt:
+    command = attachment_command()
+    return SessionContextReceipt(
+        receipt_id="context-receipt-attachment",
+        command_id=command.command_id,
+        session_id=command.session_id,
+        generation=command.generation,
+        operation=command.operation,
+        status="succeeded",
+        reason_code="session-context-succeeded",
+        payload={
+            "evidence_ref": None,
+            "result": {
+                "input_id": "input-1",
+                "attachment_id": "attachment-1",
+                "media_type": "image/png",
+                "sha256": command.payload["sha256"],
+                "size": command.payload["size"],
+            },
+        },
+    )
+
+
+def failed_context_receipt(command: SessionContextCommand) -> SessionContextReceipt:
+    return SessionContextReceipt(
+        receipt_id=f"receipt:{command.command_id}",
+        command_id=command.command_id,
+        session_id=command.session_id,
+        generation=command.generation,
+        operation=command.operation,
+        status="failed",
+        reason_code="provider-not-ready",
+        payload={"evidence_ref": None, "result": None},
+    )
+
+
 class TestPrimeControlClient(unittest.IsolatedAsyncioTestCase):
+    async def test_session_context_text_values_use_only_closed_private_fields(
+        self,
+    ) -> None:
+        budget = {
+            "controller_tokens": 10,
+            "application_tokens": 0,
+            "child_tokens": 0,
+            "aggregate_tokens": 10,
+            "cost_micros": 10,
+            "deadline_ms": 1_000,
+        }
+        cases = (
+            (
+                "session.name.set",
+                {"name_ref": "name-ref-1"},
+                "name-ref-1",
+                {"name": "SENTINEL_PRIVATE_NAME"},
+            ),
+            (
+                "session.label.set",
+                {
+                    "continuation_id": "continuation-1",
+                    "entry_id": "entry-1",
+                    "label_ref": "label-ref-1",
+                },
+                "label-ref-1",
+                {"label": "SENTINEL_PRIVATE_LABEL"},
+            ),
+            (
+                "session.compact",
+                {
+                    "continuation_id": "continuation-1",
+                    "instructions_ref": "instructions-ref-1",
+                    "budget": budget,
+                },
+                "instructions-ref-1",
+                {"instructions": "SENTINEL_PRIVATE_INSTRUCTIONS"},
+            ),
+        )
+        for index, (operation, payload, reference, expected_private) in enumerate(
+            cases,
+            start=1,
+        ):
+            with self.subTest(operation=operation):
+                resolver = FakeResolver()
+                resolver.values[reference] = next(iter(expected_private.values()))
+                command = SessionContextCommand(
+                    command_id=f"context-command-text-{index}",
+                    session_id="session-1",
+                    generation=1,
+                    authority_revision=1,
+                    idempotency_key=f"context-operation-text-{index}",
+                    operation=operation,
+                    payload=payload,
+                )
+                fake_process = FakeProcess()
+                fake_process.response = {
+                    "protocol": "asterion.prime-gateway-ipc/v1",
+                    "id": "<request>",
+                    "type": "session-context.receipt",
+                    "receipt": failed_context_receipt(command).to_mapping(),
+                }
+                client = PrimeControlPlaneClient(
+                    process=fake_process,
+                    private_content=resolver,
+                )
+
+                await client.execute_session_context(command)
+
+                self.assertEqual(fake_process.requests[0]["private"], expected_private)
+                self.assertEqual(
+                    resolver.requests,
+                    [(reference, 1024 * 1024)],
+                )
+
+    async def test_session_context_attachment_resolves_verified_bytes_privately(
+        self,
+    ) -> None:
+        resolver = FakeResolver()
+        resolver.byte_values["attachment-body-1"] = b"private-image-bytes"
+        fake_process = FakeProcess()
+        fake_process.response = {
+            "protocol": "asterion.prime-gateway-ipc/v1",
+            "id": "<request>",
+            "type": "session-context.receipt",
+            "receipt": attachment_receipt().to_mapping(),
+        }
+        client = PrimeControlPlaneClient(
+            process=fake_process,
+            private_content=resolver,
+        )
+
+        await client.execute_session_context(attachment_command())
+
+        envelope = fake_process.requests[0]
+        self.assertEqual(
+            envelope["private"],
+            {
+                "body_base64": base64.b64encode(
+                    b"private-image-bytes"
+                ).decode("ascii")
+            },
+        )
+        command = attachment_command()
+        self.assertEqual(
+            resolver.byte_requests,
+            [
+                (
+                    "attachment-body-1",
+                    "image/png",
+                    str(command.payload["sha256"]),
+                    len(b"private-image-bytes"),
+                    8 * 1024 * 1024,
+                )
+            ],
+        )
+
+    async def test_session_context_attachment_rechecks_private_digest_and_size(
+        self,
+    ) -> None:
+        resolver = FakeResolver()
+        resolver.byte_values["attachment-body-1"] = b"tampered"
+        fake_process = FakeProcess()
+        client = PrimeControlPlaneClient(
+            process=fake_process,
+            private_content=resolver,
+        )
+
+        with self.assertRaises(PrimeControlError):
+            await client.execute_session_context(attachment_command())
+
+        self.assertEqual(fake_process.requests, [])
+
     async def test_session_context_uses_the_same_sidecar_and_validates_receipt(
         self,
     ) -> None:
