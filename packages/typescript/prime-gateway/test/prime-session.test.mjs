@@ -15,6 +15,8 @@ class FakeTransport {
     this.holdPrompts = false;
     this.promptResolvers = [];
     this.acknowledgements = [];
+    this.switchResponse = { cancelled: false };
+    this.deleteResponse = { ok: true, method: "unlink" };
     this.sessionFile = "/private/sessions/transcript-1.jsonl";
     this.sessionHeader = {
       type: "session",
@@ -113,6 +115,30 @@ class FakeTransport {
         command: command.type,
         success: true,
         data: structuredClone(this.sessionStats),
+      });
+    }
+    if (command.type === "switch_session") {
+      this.sessionFile = command.sessionPath;
+      this.sessionHeader.id = "transcript-2";
+      this.sessionState.sessionId = "transcript-2";
+      this.sessionState.sessionFile = command.sessionPath;
+      this.sessionStats.sessionId = "transcript-2";
+      this.sessionStats.sessionFile = command.sessionPath;
+      return Promise.resolve({
+        id: commandId,
+        type: "response",
+        command: command.type,
+        success: true,
+        data: structuredClone(this.switchResponse),
+      });
+    }
+    if (command.type === "delete_saved_session") {
+      return Promise.resolve({
+        id: commandId,
+        type: "response",
+        command: command.type,
+        success: true,
+        data: structuredClone(this.deleteResponse),
       });
     }
     if (command.type === "attach") {
@@ -403,6 +429,112 @@ test("context describe projects post-compaction unknown usage without rejecting 
   const described = await session.describeContext("context-compacted", "running");
 
   assert.equal(described.contextTokens, 0);
+});
+
+test("continuation resume and delete defer acknowledgement until durable adoption", async () => {
+  const transport = new FakeTransport();
+  const session = await PrimeSession.create({
+    transport,
+    sessionId: "session-1",
+    privateConfig: PRIVATE_CONFIG,
+    bindIdentity: async () => undefined,
+  });
+  transport.commands.length = 0;
+  transport.acknowledgements.length = 0;
+  const target = Object.freeze({
+    continuationId: "continuation-2",
+    activeSessionId: "prime-root-1",
+    transcriptSessionId: "transcript-2",
+    supervisorGeneration: "supervisor-generation-1",
+    sessionPath: "/private/sessions/transcript-2.jsonl",
+  });
+
+  const resumed = await session.resumeContinuation("context-resume-1", target);
+
+  assert.deepEqual(resumed.result, {
+    previousContinuationId: session.continuationId,
+    currentContinuationId: "continuation-2",
+    transitionSha256: resumed.result.transitionSha256,
+  });
+  assert.match(resumed.result.transitionSha256, /^[0-9a-f]{64}$/);
+  assert.equal(session.continuationId.startsWith("continuation-"), true);
+  assert.deepEqual(transport.acknowledgements, []);
+  assert.deepEqual(transport.commands.map(({ command }) => command.type), [
+    "switch_session",
+    "get_session_header",
+    "get_state",
+  ]);
+
+  session.adoptContinuation(resumed.locator);
+  assert.equal(session.continuationId, "continuation-2");
+  assert.equal(session.transcriptSessionId, "transcript-2");
+  assert.equal(resumed.acknowledge(), true);
+
+  await assert.rejects(
+    session.deleteContinuation("context-delete-active", resumed.locator),
+  );
+  const deleted = await session.deleteContinuation("context-delete-1", {
+    ...target,
+    continuationId: "continuation-1",
+    transcriptSessionId: "transcript-1",
+    sessionPath: "/private/sessions/transcript-1.jsonl",
+  });
+  assert.equal(deleted.result.continuationId, "continuation-1");
+  assert.match(deleted.result.deletionSha256, /^[0-9a-f]{64}$/);
+  assert.deepEqual(transport.acknowledgements, [
+    "session-1-context-context-resume-1-resume",
+  ]);
+  assert.equal(deleted.acknowledge(), true);
+});
+
+test("continuation mutations reject cancelled failed and unknown Prime result shapes", async () => {
+  for (const mutate of [
+    (transport) => {
+      transport.switchResponse = { cancelled: true };
+    },
+    (transport) => {
+      transport.switchResponse = { cancelled: false, raw: "SENTINEL_RAW" };
+    },
+  ]) {
+    const transport = new FakeTransport();
+    const session = await PrimeSession.create({
+      transport,
+      sessionId: "session-1",
+      privateConfig: PRIVATE_CONFIG,
+      bindIdentity: async () => undefined,
+    });
+    mutate(transport);
+    await assert.rejects(session.resumeContinuation("resume-invalid", {
+      continuationId: "continuation-2",
+      activeSessionId: "prime-root-1",
+      transcriptSessionId: "transcript-2",
+      supervisorGeneration: "supervisor-generation-1",
+      sessionPath: "/private/sessions/transcript-2.jsonl",
+    }));
+    assert.equal(JSON.stringify(session).includes("SENTINEL"), false);
+  }
+
+  for (const deleteResponse of [
+    { ok: false, error: "SENTINEL_PRIVATE_DELETE" },
+    { ok: true, method: "unlink", raw: "SENTINEL_RAW" },
+  ]) {
+    const transport = new FakeTransport();
+    const session = await PrimeSession.create({
+      transport,
+      sessionId: "session-1",
+      privateConfig: PRIVATE_CONFIG,
+      bindIdentity: async () => undefined,
+    });
+    transport.deleteResponse = deleteResponse;
+    await assert.rejects(session.deleteContinuation("delete-invalid", {
+      continuationId: "continuation-2",
+      activeSessionId: "prime-root-1",
+      transcriptSessionId: "transcript-2",
+      supervisorGeneration: "supervisor-generation-1",
+      sessionPath: "/private/sessions/transcript-2.jsonl",
+    }));
+    assert.equal(JSON.stringify(session).includes("SENTINEL"), false);
+  }
 });
 
 test("lifecycle adopts one restored resident identity without creating a new root", async () => {

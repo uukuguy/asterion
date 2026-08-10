@@ -806,6 +806,24 @@ export class PrimeBoundPrivateInputs implements PrimeGatewayPrivateInputs {
       binding as PrivateContinuationBinding,
     );
   }
+
+  ensurePreparedContinuationLocator(
+    binding: import("./durable-store.js").GatewayContextBinding,
+  ): ReturnType<PrivateValueStore["ensurePreparedContinuationLocator"]> {
+    return this.privateValues.ensurePreparedContinuationLocator(
+      binding as PrivateContinuationBinding,
+    );
+  }
+
+  readPreparedContinuationLocator(
+    binding: import("./durable-store.js").GatewayContextBinding,
+    allowMissing: boolean,
+  ): ReturnType<PrivateValueStore["readPreparedContinuationLocator"]> {
+    return this.privateValues.readPreparedContinuationLocator(
+      binding as PrivateContinuationBinding,
+      allowMissing,
+    );
+  }
 }
 
 function encodeResponse(value: SidecarResponse): string {
@@ -1096,17 +1114,24 @@ async function createSidecarFromDescriptor(
         if (cursor === undefined) {
           throw new PrimeGatewayError();
         }
+        if (identity.pendingResume !== undefined) {
+          const resumed = await session.resumeContinuation(
+            identity.pendingResume.commandId,
+            identity.pendingResume.target,
+          );
+          session.adoptContinuation(resumed.locator);
+        }
         const attachResponse = await session.attach("restore-attach", cursor);
         const recovery = recoveryFromAttach(
           attachResponse,
-          identity.activeSessionId,
-          identity.transcriptSessionId,
+          session.activeSessionId,
+          session.transcriptSessionId,
           cursor,
         );
         await onRecovered({
           transport,
           primeCursor: recovery.primeCursor,
-          transcriptSessionId: identity.transcriptSessionId,
+          transcriptSessionId: session.transcriptSessionId,
           supervisorGeneration: transport.hello?.supervisorGeneration ?? identity.supervisorGeneration,
           sessionStatus: recovery.sessionStatus,
         });

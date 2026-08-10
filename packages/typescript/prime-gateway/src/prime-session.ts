@@ -116,6 +116,29 @@ export interface PrimeContextNameResult {
   acknowledge(): boolean;
 }
 
+export interface PrimeContinuationLocator extends PrimeSessionIdentity {
+  readonly continuationId: string;
+  readonly sessionPath: string;
+}
+
+export interface PrimeContinuationResumeResult {
+  readonly locator: PrimeContinuationLocator;
+  readonly result: Readonly<{
+    readonly previousContinuationId: string;
+    readonly currentContinuationId: string;
+    readonly transitionSha256: string;
+  }>;
+  acknowledge(): boolean;
+}
+
+export interface PrimeContinuationDeleteResult {
+  readonly result: Readonly<{
+    readonly continuationId: string;
+    readonly deletionSha256: string;
+  }>;
+  acknowledge(): boolean;
+}
+
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const MAX_PRIVATE_TEXT_BYTES = 1024 * 1024;
 
@@ -236,7 +259,7 @@ function identityFromCreate(
 function validateSessionHeader(
   response: PrimeDaemonResponse,
   transcriptSessionId: string,
-  workspace: string,
+  workspace?: string,
 ): void {
   if (
     !response.success ||
@@ -263,7 +286,9 @@ function validateSessionHeader(
     header.id !== transcriptSessionId ||
     typeof header.timestamp !== "string" ||
     Number.isNaN(Date.parse(header.timestamp)) ||
-    header.cwd !== workspace ||
+    (workspace === undefined
+      ? typeof header.cwd !== "string" || !isAbsolute(header.cwd)
+      : header.cwd !== workspace) ||
     (header.version !== undefined && !positiveInteger(header.version)) ||
     (header.parentSession !== undefined && typeof header.parentSession !== "string") ||
     (header.rlmDepth !== undefined && !nonNegativeInteger(header.rlmDepth))
@@ -443,22 +468,40 @@ export class PrimeSession {
   private currentSupervisorGeneration: string;
   private latestAttachResponse: (PrimeDaemonResponse & { success: true }) | undefined;
   private lastContextCounters: PrimeContextCounters | undefined;
+  private currentTranscriptSessionId: string;
+  private currentContinuationId: string;
+  private currentSessionPath: string | undefined;
+  private readonly pendingContinuationResumes = new Map<
+    string,
+    PrimeContinuationResumeResult
+  >();
 
   private constructor(
     transport: PrimeDaemonTransport,
     private readonly sessionId: string,
     readonly activeSessionId: string,
-    readonly transcriptSessionId: string,
-    readonly continuationId: string,
-    private readonly sessionPath: string | undefined,
+    transcriptSessionId: string,
+    continuationId: string,
+    sessionPath: string | undefined,
     supervisorGeneration: string,
   ) {
     this.transport = transport;
     this.currentSupervisorGeneration = supervisorGeneration;
+    this.currentTranscriptSessionId = transcriptSessionId;
+    this.currentContinuationId = continuationId;
+    this.currentSessionPath = sessionPath;
   }
 
   get supervisorGeneration(): string {
     return this.currentSupervisorGeneration;
+  }
+
+  get transcriptSessionId(): string {
+    return this.currentTranscriptSessionId;
+  }
+
+  get continuationId(): string {
+    return this.currentContinuationId;
   }
 
   get lastAttachResponse(): PrimeDaemonResponse | undefined {
@@ -832,6 +875,148 @@ export class PrimeSession {
     }
   }
 
+  async resumeContinuation(
+    commandId: string,
+    targetValue: PrimeContinuationLocator,
+  ): Promise<PrimeContinuationResumeResult> {
+    const target = this.validateContinuationTarget(commandId, targetValue);
+    const stableCommandId = this.contextCommandId(commandId, "resume");
+    const pending = this.pendingContinuationResumes.get(stableCommandId);
+    if (pending !== undefined) {
+      if (
+        pending.locator.continuationId !== target.continuationId ||
+        pending.locator.transcriptSessionId !== target.transcriptSessionId ||
+        pending.locator.sessionPath !== target.sessionPath
+      ) {
+        throw new PrimeSessionError();
+      }
+      return pending;
+    }
+    if (target.continuationId === this.continuationId) {
+      throw new PrimeSessionError();
+    }
+    try {
+      const deferred = await this.transport.requestDeferred({
+        type: "switch_session",
+        activeSessionId: this.activeSessionId,
+        sessionPath: target.sessionPath,
+      }, stableCommandId);
+      if (
+        !deferred.response.success ||
+        deferred.response.command !== "switch_session" ||
+        !isRecord(deferred.response.data) ||
+        !hasExactKeys(deferred.response.data, ["cancelled"]) ||
+        deferred.response.data.cancelled !== false
+      ) {
+        throw new PrimeSessionError();
+      }
+      validateSessionHeader(
+        await this.request({
+          type: "get_session_header",
+          activeSessionId: this.activeSessionId,
+        }, `context-${commandId}-resume-header`),
+        target.transcriptSessionId,
+      );
+      validateState(
+        await this.request({
+          type: "get_state",
+          activeSessionId: this.activeSessionId,
+        }, `context-${commandId}-resume-state`),
+        this.activeSessionId,
+        target.transcriptSessionId,
+        target.sessionPath,
+      );
+      const previousContinuationId = this.continuationId;
+      const transitionSha256 = sha256Text(JSON.stringify([
+        "session.continuation.resume",
+        previousContinuationId,
+        target.continuationId,
+        commandId,
+      ]));
+      const resumed = Object.freeze({
+        locator: target,
+        result: Object.freeze({
+          previousContinuationId,
+          currentContinuationId: target.continuationId,
+          transitionSha256,
+        }),
+        acknowledge: () => {
+          try {
+            return deferred.acknowledge() === true;
+          } catch {
+            return false;
+          }
+        },
+      });
+      this.pendingContinuationResumes.set(stableCommandId, resumed);
+      return resumed;
+    } catch (error) {
+      if (error instanceof PrimeSessionError) {
+        throw error;
+      }
+      throw new PrimeSessionError();
+    }
+  }
+
+  async deleteContinuation(
+    commandId: string,
+    targetValue: PrimeContinuationLocator,
+  ): Promise<PrimeContinuationDeleteResult> {
+    const target = this.validateContinuationTarget(commandId, targetValue);
+    if (target.continuationId === this.continuationId) {
+      throw new PrimeSessionError();
+    }
+    const stableCommandId = this.contextCommandId(commandId, "delete");
+    try {
+      const deferred = await this.transport.requestDeferred({
+        type: "delete_saved_session",
+        activeSessionId: this.activeSessionId,
+        sessionPath: target.sessionPath,
+      }, stableCommandId);
+      if (
+        !deferred.response.success ||
+        deferred.response.command !== "delete_saved_session" ||
+        !isRecord(deferred.response.data) ||
+        !hasExactKeys(deferred.response.data, ["method", "ok"]) ||
+        deferred.response.data.ok !== true ||
+        (deferred.response.data.method !== "trash" &&
+          deferred.response.data.method !== "unlink")
+      ) {
+        throw new PrimeSessionError();
+      }
+      return Object.freeze({
+        result: Object.freeze({
+          continuationId: target.continuationId,
+          deletionSha256: sha256Text(JSON.stringify([
+            "session.continuation.delete",
+            target.continuationId,
+            commandId,
+          ])),
+        }),
+        acknowledge: () => {
+          try {
+            return deferred.acknowledge() === true;
+          } catch {
+            return false;
+          }
+        },
+      });
+    } catch (error) {
+      if (error instanceof PrimeSessionError) {
+        throw error;
+      }
+      throw new PrimeSessionError();
+    }
+  }
+
+  adoptContinuation(targetValue: PrimeContinuationLocator): void {
+    const target = this.validateContinuationTarget("adopt-continuation", targetValue);
+    this.currentContinuationId = target.continuationId;
+    this.currentTranscriptSessionId = target.transcriptSessionId;
+    this.currentSessionPath = target.sessionPath;
+    this.lastContextCounters = undefined;
+  }
+
   async describeContext(
     commandId: string,
     sessionStatus: PrimeContextStatus,
@@ -848,7 +1033,7 @@ export class PrimeSession {
         "recovery-required",
         "running",
       ].includes(sessionStatus) ||
-      this.sessionPath === undefined
+      this.currentSessionPath === undefined
     ) {
       throw new PrimeSessionError();
     }
@@ -859,7 +1044,7 @@ export class PrimeSession {
       }, `context-${commandId}-state`),
       this.activeSessionId,
       this.transcriptSessionId,
-      this.sessionPath,
+      this.currentSessionPath,
     );
     const stats = validateStats(
       await this.request({
@@ -867,7 +1052,7 @@ export class PrimeSession {
         activeSessionId: this.activeSessionId,
       }, `context-${commandId}-stats`),
       this.transcriptSessionId,
-      this.sessionPath,
+      this.currentSessionPath,
     );
     if (state.messageCount !== stats.totalMessages) {
       throw new PrimeSessionError();
@@ -911,6 +1096,25 @@ export class PrimeSession {
     try {
       return this.transport.acknowledgeResult(
         this.contextCommandId(commandId, "set-name"),
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  acknowledgeContinuation(
+    commandId: string,
+    operation: "session.continuation.delete" | "session.continuation.resume",
+  ): boolean {
+    if (!OPAQUE_ID.test(commandId)) {
+      throw new PrimeSessionError();
+    }
+    const purpose = operation === "session.continuation.resume"
+      ? "resume"
+      : "delete";
+    try {
+      return this.transport.acknowledgeResult(
+        this.contextCommandId(commandId, purpose),
       );
     } catch {
       return false;
@@ -967,5 +1171,42 @@ export class PrimeSession {
 
   private contextCommandId(commandId: string, purpose: string): string {
     return `${this.sessionId}-context-${commandId}-${purpose}`;
+  }
+
+  private validateContinuationTarget(
+    commandId: string,
+    value: PrimeContinuationLocator,
+  ): PrimeContinuationLocator {
+    if (
+      !OPAQUE_ID.test(commandId) ||
+      !isRecord(value) ||
+      !hasExactKeys(value, [
+        "activeSessionId",
+        "continuationId",
+        "sessionPath",
+        "supervisorGeneration",
+        "transcriptSessionId",
+      ]) ||
+      ![
+        value.activeSessionId,
+        value.continuationId,
+        value.supervisorGeneration,
+        value.transcriptSessionId,
+      ].every((item) => typeof item === "string" && OPAQUE_ID.test(item)) ||
+      value.activeSessionId !== this.activeSessionId ||
+      value.supervisorGeneration !== this.supervisorGeneration ||
+      typeof value.sessionPath !== "string" ||
+      !isAbsolute(value.sessionPath) ||
+      resolve(value.sessionPath) !== value.sessionPath
+    ) {
+      throw new PrimeSessionError();
+    }
+    return Object.freeze({
+      activeSessionId: value.activeSessionId,
+      continuationId: value.continuationId,
+      transcriptSessionId: value.transcriptSessionId,
+      supervisorGeneration: value.supervisorGeneration,
+      sessionPath: value.sessionPath,
+    });
   }
 }

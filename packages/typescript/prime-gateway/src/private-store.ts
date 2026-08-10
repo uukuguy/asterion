@@ -61,7 +61,8 @@ export interface PrivateContinuationBinding {
 const PRIVATE_VALUE_FORMAT = "asterion.prime-private-value/v1";
 const PRIVATE_INPUT_BINDING_FORMAT = "asterion.prime-private-input-binding/v1";
 const PRIVATE_ATTACHMENT_BINDING_FORMAT = "asterion.prime-private-attachment-binding/v1";
-const PRIVATE_CONTINUATION_FORMAT = "asterion.prime-private-continuation/v1";
+const PRIVATE_CONTINUATION_FORMAT_V1 = "asterion.prime-private-continuation/v1";
+const PRIVATE_CONTINUATION_FORMAT_V2 = "asterion.prime-private-continuation/v2";
 const PRIVATE_REF_PATTERN = /^private:(?<id>[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/u;
 const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 const MEDIA_TYPE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$/u;
@@ -100,12 +101,16 @@ interface PrivateAttachmentBinding extends PrivateAttachmentMetadata {
 }
 
 interface StoredContinuationLocator {
-  readonly format: typeof PRIVATE_CONTINUATION_FORMAT;
+  readonly format:
+    | typeof PRIVATE_CONTINUATION_FORMAT_V1
+    | typeof PRIVATE_CONTINUATION_FORMAT_V2;
   readonly continuationId: string;
   readonly activeSessionId: string;
   readonly transcriptSessionId: string;
   readonly supervisorGeneration: string;
   readonly sessionFileName: string;
+  readonly transcriptDevice: number | null;
+  readonly transcriptInode: number | null;
   readonly transcriptSize: number;
   readonly transcriptSha256: string;
 }
@@ -732,12 +737,14 @@ export class PrivateValueStore {
     const locator = validateContinuationLocator(value);
     const transcript = await this.inspectContinuation(locator.sessionPath);
     const stored: StoredContinuationLocator = {
-      format: PRIVATE_CONTINUATION_FORMAT,
+      format: PRIVATE_CONTINUATION_FORMAT_V2,
       continuationId: locator.continuationId,
       activeSessionId: locator.activeSessionId,
       transcriptSessionId: locator.transcriptSessionId,
       supervisorGeneration: locator.supervisorGeneration,
       sessionFileName: transcript.fileName,
+      transcriptDevice: transcript.device,
+      transcriptInode: transcript.inode,
       transcriptSize: transcript.size,
       transcriptSha256: transcript.digest,
     };
@@ -750,9 +757,82 @@ export class PrivateValueStore {
     });
   }
 
+  async ensurePreparedContinuationLocator(
+    bindingValue: PrivateContinuationBinding,
+  ): Promise<Readonly<{
+    binding: PrivateContinuationBinding;
+    locator: PrivateContinuationLocator;
+  }>> {
+    const locator = await this.readContinuationLocator(bindingValue);
+    const { stored } = await this.readStoredContinuation(bindingValue);
+    if (stored.format === PRIVATE_CONTINUATION_FORMAT_V2) {
+      return Object.freeze({ binding: bindingValue, locator });
+    }
+    const binding = await this.putContinuationLocator(locator);
+    return Object.freeze({ binding, locator });
+  }
+
   async readContinuationLocator(
     bindingValue: PrivateContinuationBinding,
   ): Promise<PrivateContinuationLocator> {
+    const { stored, sessionPath } = await this.readStoredContinuation(
+      bindingValue,
+    );
+    const transcript = await this.inspectContinuation(sessionPath);
+    if (
+      (stored.format === PRIVATE_CONTINUATION_FORMAT_V2 &&
+        (transcript.device !== stored.transcriptDevice ||
+          transcript.inode !== stored.transcriptInode)) ||
+      transcript.size !== stored.transcriptSize ||
+      transcript.digest !== stored.transcriptSha256
+    ) {
+      throw new PrivateValueInvalidError();
+    }
+    return this.projectContinuationLocator(stored, sessionPath);
+  }
+
+  async readPreparedContinuationLocator(
+    bindingValue: PrivateContinuationBinding,
+    allowMissing: boolean,
+  ): Promise<PrivateContinuationLocator> {
+    if (typeof allowMissing !== "boolean") {
+      throw new PrivateValueInvalidError();
+    }
+    const { stored, sessionPath } = await this.readStoredContinuation(
+      bindingValue,
+    );
+    if (
+      stored.transcriptDevice === null ||
+      stored.transcriptInode === null
+    ) {
+      throw new PrivateValueInvalidError();
+    }
+    try {
+      const transcript = await this.inspectContinuation(sessionPath);
+      if (
+        transcript.device !== stored.transcriptDevice ||
+        transcript.inode !== stored.transcriptInode
+      ) {
+        throw new PrivateValueInvalidError();
+      }
+    } catch {
+      if (!allowMissing) {
+        throw new PrivateValueInvalidError();
+      }
+      await this.assertContinuationRootIdentity();
+      if (await regularPathExists(sessionPath)) {
+        throw new PrivateValueInvalidError();
+      }
+    }
+    return this.projectContinuationLocator(stored, sessionPath);
+  }
+
+  private async readStoredContinuation(
+    bindingValue: PrivateContinuationBinding,
+  ): Promise<Readonly<{
+    stored: StoredContinuationLocator;
+    sessionPath: string;
+  }>> {
     if (
       !isRecord(bindingValue) ||
       !hasExactKeys(bindingValue, [
@@ -788,17 +868,32 @@ export class PrivateValueStore {
     }
     if (
       !isRecord(stored) ||
-      !hasExactKeys(stored, [
-        "activeSessionId",
-        "continuationId",
-        "format",
-        "sessionFileName",
-        "supervisorGeneration",
-        "transcriptSessionId",
-        "transcriptSha256",
-        "transcriptSize",
-      ]) ||
-      stored.format !== PRIVATE_CONTINUATION_FORMAT ||
+      !(
+        (stored.format === PRIVATE_CONTINUATION_FORMAT_V1 &&
+          hasExactKeys(stored, [
+            "activeSessionId",
+            "continuationId",
+            "format",
+            "sessionFileName",
+            "supervisorGeneration",
+            "transcriptSessionId",
+            "transcriptSha256",
+            "transcriptSize",
+          ])) ||
+        (stored.format === PRIVATE_CONTINUATION_FORMAT_V2 &&
+          hasExactKeys(stored, [
+            "activeSessionId",
+            "continuationId",
+            "format",
+            "sessionFileName",
+            "supervisorGeneration",
+            "transcriptDevice",
+            "transcriptInode",
+            "transcriptSessionId",
+            "transcriptSha256",
+            "transcriptSize",
+          ]))
+      ) ||
       stored.continuationId !== bindingValue.continuationId ||
       ![
         stored.activeSessionId,
@@ -808,20 +903,44 @@ export class PrivateValueStore {
       ].every((item) => typeof item === "string" && OPAQUE_ID_PATTERN.test(item)) ||
       typeof stored.sessionFileName !== "string" ||
       basename(stored.sessionFileName) !== stored.sessionFileName ||
+      (stored.format === PRIVATE_CONTINUATION_FORMAT_V2 &&
+        (!Number.isSafeInteger(stored.transcriptDevice) ||
+          Number(stored.transcriptDevice) < 0 ||
+          !Number.isSafeInteger(stored.transcriptInode) ||
+          Number(stored.transcriptInode) < 0)) ||
       typeof stored.transcriptSha256 !== "string" ||
       !DIGEST_PATTERN.test(stored.transcriptSha256) ||
-      !Number.isSafeInteger(stored.transcriptSize)
+      !Number.isSafeInteger(stored.transcriptSize) ||
+      Number(stored.transcriptSize) < 1
     ) {
       throw new PrivateValueInvalidError();
     }
     const sessionPath = join(this.continuationRoot.path, stored.sessionFileName);
-    const transcript = await this.inspectContinuation(sessionPath);
-    if (
-      transcript.size !== stored.transcriptSize ||
-      transcript.digest !== stored.transcriptSha256
-    ) {
-      throw new PrivateValueInvalidError();
-    }
+    return Object.freeze({
+      stored: Object.freeze({
+        format: stored.format,
+        continuationId: String(stored.continuationId),
+        activeSessionId: String(stored.activeSessionId),
+        transcriptSessionId: String(stored.transcriptSessionId),
+        supervisorGeneration: String(stored.supervisorGeneration),
+        sessionFileName: stored.sessionFileName,
+        transcriptDevice: stored.format === PRIVATE_CONTINUATION_FORMAT_V2
+          ? Number(stored.transcriptDevice)
+          : null,
+        transcriptInode: stored.format === PRIVATE_CONTINUATION_FORMAT_V2
+          ? Number(stored.transcriptInode)
+          : null,
+        transcriptSize: Number(stored.transcriptSize),
+        transcriptSha256: stored.transcriptSha256,
+      }),
+      sessionPath,
+    });
+  }
+
+  private projectContinuationLocator(
+    stored: StoredContinuationLocator,
+    sessionPath: string,
+  ): PrivateContinuationLocator {
     return Object.freeze({
       continuationId: String(stored.continuationId),
       activeSessionId: String(stored.activeSessionId),
@@ -1107,7 +1226,13 @@ export class PrivateValueStore {
 
   private async inspectContinuation(
     sessionPath: string,
-  ): Promise<Readonly<{ fileName: string; size: number; digest: string }>> {
+  ): Promise<Readonly<{
+    fileName: string;
+    device: number;
+    inode: number;
+    size: number;
+    digest: string;
+  }>> {
     if (
       this.continuationRoot === undefined ||
       resolve(sessionPath) !== sessionPath ||
@@ -1118,18 +1243,7 @@ export class PrivateValueStore {
     }
     let descriptor: Awaited<ReturnType<typeof open>> | undefined;
     try {
-      const rootMetadata = await lstat(this.continuationRoot.path);
-      if (
-        rootMetadata.isSymbolicLink() ||
-        !rootMetadata.isDirectory() ||
-        (rootMetadata.mode & 0o777) !== 0o700 ||
-        rootMetadata.dev !== this.continuationRoot.device ||
-        rootMetadata.ino !== this.continuationRoot.inode ||
-        await realpath(this.continuationRoot.path) !==
-          this.continuationRoot.realPath
-      ) {
-        throw new PrivateValueInvalidError();
-      }
+      await this.assertContinuationRootIdentity();
       descriptor = await open(
         sessionPath,
         constants.O_RDONLY | constants.O_NOFOLLOW,
@@ -1149,6 +1263,8 @@ export class PrivateValueStore {
       }
       return Object.freeze({
         fileName: basename(sessionPath),
+        device: metadata.dev,
+        inode: metadata.ino,
         size: body.byteLength,
         digest: sha256(body),
       });
@@ -1159,6 +1275,28 @@ export class PrivateValueStore {
       throw new PrivateValueInvalidError();
     } finally {
       await descriptor?.close().catch(() => undefined);
+    }
+  }
+
+  private async assertContinuationRootIdentity(): Promise<void> {
+    if (this.continuationRoot === undefined) {
+      throw new PrivateValueInvalidError();
+    }
+    try {
+      const rootMetadata = await lstat(this.continuationRoot.path);
+      if (
+        rootMetadata.isSymbolicLink() ||
+        !rootMetadata.isDirectory() ||
+        (rootMetadata.mode & 0o777) !== 0o700 ||
+        rootMetadata.dev !== this.continuationRoot.device ||
+        rootMetadata.ino !== this.continuationRoot.inode ||
+        await realpath(this.continuationRoot.path) !==
+          this.continuationRoot.realPath
+      ) {
+        throw new PrivateValueInvalidError();
+      }
+    } catch {
+      throw new PrivateValueInvalidError();
     }
   }
 

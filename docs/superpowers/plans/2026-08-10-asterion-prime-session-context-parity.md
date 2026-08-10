@@ -1,6 +1,6 @@
 # Asterion Prime Session/Context Parity Implementation Plan
 
-> Status: Tasks 4.1-4.6 verified; Task 4.7 exact resume and bounded deletion is next.
+> Status: Tasks 4.1-4.7 verified; Task 4.8 tree, navigation, fork and clone is next.
 >
 > Program parent: `2026-08-10-asterion-prime-system-parity.md`, Task 4.
 >
@@ -578,6 +578,20 @@ Run the two focused Gateway test files. Commit:
 `feat: project prime session identity and status`.
 
 ### Task 4.7: Implement exact resume and bounded deletion
+
+**Status:** Complete. Private continuation locators now pin the exact
+owner-only direct-child transcript by root identity, device and inode; legacy
+v1 locators are upgraded privately before restored or mutating execution.
+Resume and inactive deletion persist one exact prepared selector before the
+stable Prime mutation, revalidate immediately before dispatch, and acknowledge
+only after the closed receipt and binding transition are durable. Resume also
+refreshes a source transcript mutated during Prime shutdown, including the
+crash-after-result recovery window. Delete persists a cross-restart tombstone,
+so a removed continuation ID cannot be reintroduced by a later binding. The
+focused continuation/Gateway matrix and all 162 Prime Gateway tests pass,
+covering selector replacement, symlinks, active delete, competing mutations,
+source mutation, crash-before-result, crash-after-result, missing-after-delete,
+exact replay and redaction.
 
 **Modify:** the same Prime session/Gateway/durable modules.
 

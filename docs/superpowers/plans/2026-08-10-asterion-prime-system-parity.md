@@ -371,7 +371,8 @@ git commit -m "test: register prime parity scenarios"
 complete, including host authority, journal and recovery management; Task 4.4
 sidecar IPC and durable session-context storage plus Task 4.5 exact daemon
 session/context admission and Task 4.6 safe identity/status projection are
-verified; Task 4.7 exact resume and bounded deletion is next.
+verified; Task 4.7 exact resume and bounded deletion is also verified, and
+Task 4.8 tree projection, navigation, fork and clone is next.
 
 **Files:**
 - Create before implementation: `docs/superpowers/plans/2026-08-10-asterion-prime-session-context-parity.md`

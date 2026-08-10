@@ -42,8 +42,10 @@ const RECORD_KINDS = new Set([
   "context.binding.rebound",
   "context.command.accepted",
   "context.operation.committed",
+  "context.operation.prepared",
   "event.accepted",
   "prime.identity",
+  "prime.identity.rebound",
   "prime.cursor",
 ]);
 
@@ -458,6 +460,16 @@ function validateContextBinding(value: unknown): GatewayContextBinding {
   });
 }
 
+function sameContextBinding(
+  left: GatewayContextBinding | undefined,
+  right: GatewayContextBinding,
+): boolean {
+  return left !== undefined &&
+    left.continuationId === right.continuationId &&
+    left.privateRef === right.privateRef &&
+    left.bindingDigest === right.bindingDigest;
+}
+
 function validateContextCommitPayload(
   value: unknown,
   command: SessionContextCommand,
@@ -523,7 +535,13 @@ export class GatewayDurableStore {
     string,
     GatewayContextBinding
   >();
+  private readonly tombstonedContextIds = new Set<string>();
   private initialContextBindingValue?: GatewayContextBinding;
+  private activeContextBindingValue?: GatewayContextBinding;
+  private readonly preparedContextBindings = new Map<
+    string,
+    GatewayContextBinding
+  >();
   private readonly faultInjector: StorageFaultInjector | undefined;
   private failed = false;
   private commandCount = 0;
@@ -642,6 +660,9 @@ export class GatewayDurableStore {
     binding: GatewayContextBinding,
   ): Promise<GatewayRecordReceipt> {
     const validated = validateContextBinding(binding);
+    if (this.tombstonedContextIds.has(validated.continuationId)) {
+      throw new GatewayStoreConflictError();
+    }
     return this.appendRecord(
       "context.binding.initialized",
       "context-binding:initial",
@@ -653,12 +674,46 @@ export class GatewayDurableStore {
     binding: GatewayContextBinding,
   ): Promise<GatewayRecordReceipt> {
     const validated = validateContextBinding(binding);
-    if (!this.currentContextBindings.has(validated.continuationId)) {
+    if (
+      this.tombstonedContextIds.has(validated.continuationId) ||
+      !this.currentContextBindings.has(validated.continuationId)
+    ) {
       throw new GatewayStoreConflictError();
     }
     return this.appendRecord(
       "context.binding.rebound",
       `context-binding:${validated.continuationId}:${validated.bindingDigest}`,
+      validated as unknown as Record<string, unknown>,
+    );
+  }
+
+  async prepareContextOperation(
+    commandId: string,
+    binding: GatewayContextBinding,
+  ): Promise<GatewayRecordReceipt> {
+    const command = this.contextCommands.get(commandId);
+    const validated = validateContextBinding(binding);
+    if (
+      command === undefined ||
+      (command.operation !== "session.continuation.resume" &&
+        command.operation !== "session.continuation.delete") ||
+      command.payload.continuation_id !== validated.continuationId ||
+      this.tombstonedContextIds.has(validated.continuationId) ||
+      (this.preparedContextBindings.size !== 0 &&
+        !this.preparedContextBindings.has(commandId)) ||
+      !sameContextBinding(
+        this.currentContextBindings.get(validated.continuationId),
+        validated,
+      ) ||
+      (command.operation === "session.continuation.delete" &&
+        this.activeContextBindingValue?.continuationId ===
+          validated.continuationId)
+    ) {
+      throw new GatewayStoreConflictError();
+    }
+    return this.appendRecord(
+      "context.operation.prepared",
+      `context-prepare:${commandId}`,
       validated as unknown as Record<string, unknown>,
     );
   }
@@ -681,6 +736,40 @@ export class GatewayDurableStore {
         { receipt, nextBinding },
         command,
       );
+      if (
+        payload.nextBinding !== null &&
+        this.tombstonedContextIds.has(payload.nextBinding.continuationId)
+      ) {
+        throw new GatewayStoreConflictError();
+      }
+      if (
+        payload.receipt.status === "succeeded" &&
+        (command.operation === "session.continuation.resume" ||
+          command.operation === "session.continuation.delete")
+      ) {
+        const prepared = this.preparedContextBindings.get(commandId);
+        if (
+          prepared === undefined ||
+          !sameContextBinding(
+            this.currentContextBindings.get(prepared.continuationId),
+            prepared,
+          ) ||
+          (command.operation === "session.continuation.resume" &&
+            (payload.nextBinding === null ||
+              payload.nextBinding.continuationId !==
+                command.payload.continuation_id)) ||
+          (command.operation === "session.continuation.delete" &&
+            (payload.nextBinding !== null ||
+              (payload.receipt.payload.result as {
+                readonly continuation_id: string;
+              }).continuation_id !==
+                command.payload.continuation_id ||
+              this.activeContextBindingValue?.continuationId ===
+                command.payload.continuation_id))
+        ) {
+          throw new GatewayStoreConflictError();
+        }
+      }
       const committed = await this.appendRecord(
         "context.operation.committed",
         `context-commit:${commandId}`,
@@ -738,6 +827,34 @@ export class GatewayDurableStore {
     return this.initialContextBindingValue;
   }
 
+  activeContextBinding(): GatewayContextBinding | undefined {
+    return this.activeContextBindingValue;
+  }
+
+  preparedContextBinding(
+    commandId: string,
+  ): GatewayContextBinding | undefined {
+    if (!nonEmptyIdentifier(commandId)) {
+      throw new GatewayStoreConflictError();
+    }
+    return this.preparedContextBindings.get(commandId);
+  }
+
+  preparedContextOperations(): readonly Readonly<{
+    command: SessionContextCommand;
+    binding: GatewayContextBinding;
+  }>[] {
+    return Object.freeze(
+      [...this.preparedContextBindings.entries()].map(([commandId, binding]) => {
+        const command = this.contextCommands.get(commandId);
+        if (command === undefined || this.contextCommits.has(commandId)) {
+          throw new GatewayStoreCorruptionError();
+        }
+        return Object.freeze({ command, binding });
+      }),
+    );
+  }
+
   async appendEvent(event: unknown): Promise<GatewayEventReceipt> {
     let validated: ControlEvent;
     try {
@@ -769,9 +886,17 @@ export class GatewayDurableStore {
 
   async bindPrimeIdentity(identity: PrimeIdentityBinding): Promise<GatewayRecordReceipt> {
     const validated = validateIdentityPayload(identity);
+    const rebound = this.primeIdentity?.supervisorGeneration ===
+        validated.supervisorGeneration &&
+      (this.primeIdentity.activeSessionId !== validated.activeSessionId ||
+        this.primeIdentity.transcriptSessionId !== validated.transcriptSessionId);
     return this.appendRecord(
-      "prime.identity",
-      `prime-identity:${validated.supervisorGeneration}`,
+      rebound ? "prime.identity.rebound" : "prime.identity",
+      rebound
+        ? `prime-identity:${validated.supervisorGeneration}:${sha256Hex(
+          canonicalJsonBytes(validated),
+        )}`
+        : `prime-identity:${validated.supervisorGeneration}`,
       validated as unknown as Record<string, unknown>,
     );
   }
@@ -1032,7 +1157,10 @@ export class GatewayDurableStore {
       }
       if (kind === "context.binding.initialized") {
         const binding = validateContextBinding(payload);
-        if (recordId !== "context-binding:initial") {
+        if (
+          recordId !== "context-binding:initial" ||
+          this.tombstonedContextIds.has(binding.continuationId)
+        ) {
           throw new GatewayStoreCorruptionError();
         }
         return binding as unknown as Record<string, unknown>;
@@ -1042,7 +1170,35 @@ export class GatewayDurableStore {
         if (
           recordId !==
             `context-binding:${binding.continuationId}:${binding.bindingDigest}` ||
+          this.tombstonedContextIds.has(binding.continuationId) ||
           !this.currentContextBindings.has(binding.continuationId)
+        ) {
+          throw new GatewayStoreCorruptionError();
+        }
+        return binding as unknown as Record<string, unknown>;
+      }
+      if (kind === "context.operation.prepared") {
+        const commandId = recordId.startsWith("context-prepare:")
+          ? recordId.slice("context-prepare:".length)
+          : "";
+        const command = this.contextCommands.get(commandId);
+        const binding = validateContextBinding(payload);
+        if (
+          command === undefined ||
+          recordId !== `context-prepare:${command.command_id}` ||
+          (command.operation !== "session.continuation.resume" &&
+            command.operation !== "session.continuation.delete") ||
+          command.payload.continuation_id !== binding.continuationId ||
+          this.tombstonedContextIds.has(binding.continuationId) ||
+          (this.preparedContextBindings.size !== 0 &&
+            !this.preparedContextBindings.has(commandId)) ||
+          !sameContextBinding(
+            this.currentContextBindings.get(binding.continuationId),
+            binding,
+          ) ||
+          (command.operation === "session.continuation.delete" &&
+            this.activeContextBindingValue?.continuationId ===
+              binding.continuationId)
         ) {
           throw new GatewayStoreCorruptionError();
         }
@@ -1057,6 +1213,40 @@ export class GatewayDurableStore {
           throw new GatewayStoreCorruptionError();
         }
         const committed = validateContextCommitPayload(payload, command);
+        if (
+          committed.nextBinding !== null &&
+          this.tombstonedContextIds.has(committed.nextBinding.continuationId)
+        ) {
+          throw new GatewayStoreCorruptionError();
+        }
+        if (
+          committed.receipt.status === "succeeded" &&
+          (command.operation === "session.continuation.resume" ||
+            command.operation === "session.continuation.delete")
+        ) {
+          const prepared = this.preparedContextBindings.get(commandId);
+          if (
+            prepared === undefined ||
+            !sameContextBinding(
+              this.currentContextBindings.get(prepared.continuationId),
+              prepared,
+            ) ||
+            (command.operation === "session.continuation.resume" &&
+              (committed.nextBinding === null ||
+                committed.nextBinding.continuationId !==
+                  command.payload.continuation_id)) ||
+            (command.operation === "session.continuation.delete" &&
+              (committed.nextBinding !== null ||
+                (committed.receipt.payload.result as {
+                  readonly continuation_id: string;
+                }).continuation_id !==
+                  command.payload.continuation_id ||
+                this.activeContextBindingValue?.continuationId ===
+                  command.payload.continuation_id))
+          ) {
+            throw new GatewayStoreCorruptionError();
+          }
+        }
         return Object.freeze({
           receipt: committed.receipt,
           nextBinding: committed.nextBinding,
@@ -1065,6 +1255,20 @@ export class GatewayDurableStore {
       if (kind === "prime.identity") {
         const identity = validateIdentityPayload(payload);
         if (recordId !== `prime-identity:${identity.supervisorGeneration}`) {
+          throw new GatewayStoreCorruptionError();
+        }
+        return identity as unknown as Record<string, unknown>;
+      }
+      if (kind === "prime.identity.rebound") {
+        const identity = validateIdentityPayload(payload);
+        if (
+          this.primeIdentity?.supervisorGeneration !==
+            identity.supervisorGeneration ||
+          recordId !==
+            `prime-identity:${identity.supervisorGeneration}:${sha256Hex(
+              canonicalJsonBytes(identity),
+            )}`
+        ) {
           throw new GatewayStoreCorruptionError();
         }
         return identity as unknown as Record<string, unknown>;
@@ -1097,6 +1301,7 @@ export class GatewayDurableStore {
       }
       this.initialContextBindingValue = binding;
       this.currentContextBindings.set(binding.continuationId, binding);
+      this.activeContextBindingValue = binding;
     } else if (record.stored.kind === "context.binding.rebound") {
       const binding = record.payload as unknown as GatewayContextBinding;
       const existing = this.currentContextBindings.get(binding.continuationId);
@@ -1107,6 +1312,9 @@ export class GatewayDurableStore {
       if (this.initialContextBindingValue?.continuationId === binding.continuationId) {
         this.initialContextBindingValue = binding;
       }
+      if (this.activeContextBindingValue?.continuationId === binding.continuationId) {
+        this.activeContextBindingValue = binding;
+      }
     } else if (record.stored.kind === "context.command.accepted") {
       const command = record.payload.command as SessionContextCommand;
       const existingId = this.contextIdempotency.get(command.idempotency_key);
@@ -1116,6 +1324,15 @@ export class GatewayDurableStore {
       this.contextCommands.set(command.command_id, command);
       this.contextIdempotency.set(command.idempotency_key, command.command_id);
       this.contextCommandCount += 1;
+    } else if (record.stored.kind === "context.operation.prepared") {
+      const commandId = record.stored.record_id.slice("context-prepare:".length);
+      if (this.preparedContextBindings.has(commandId)) {
+        throw new GatewayStoreCorruptionError();
+      }
+      this.preparedContextBindings.set(
+        commandId,
+        record.payload as unknown as GatewayContextBinding,
+      );
     } else if (record.stored.kind === "context.operation.committed") {
       const receipt = record.payload.receipt as SessionContextReceipt;
       const nextBinding = record.payload.nextBinding as GatewayContextBinding | null;
@@ -1128,11 +1345,26 @@ export class GatewayDurableStore {
       const committed = Object.freeze({ receipt, nextBinding });
       this.contextCommits.set(receipt.command_id, committed);
       if (nextBinding !== null) {
+        if (this.tombstonedContextIds.has(nextBinding.continuationId)) {
+          throw new GatewayStoreCorruptionError();
+        }
         this.currentContextBindings.set(
           nextBinding.continuationId,
           nextBinding,
         );
+        this.activeContextBindingValue = nextBinding;
+      } else if (
+        receipt.status === "succeeded" &&
+        receipt.operation === "session.continuation.delete"
+      ) {
+        const deleted = receipt.payload.result.continuation_id;
+        if (this.activeContextBindingValue?.continuationId === deleted) {
+          throw new GatewayStoreCorruptionError();
+        }
+        this.currentContextBindings.delete(deleted);
+        this.tombstonedContextIds.add(deleted);
       }
+      this.preparedContextBindings.delete(receipt.command_id);
       this.contextCommitCount += 1;
     } else if (record.stored.kind === "event.accepted") {
       this.eventCount += 1;
@@ -1143,7 +1375,10 @@ export class GatewayDurableStore {
         throw new GatewayStoreCorruptionError();
       }
       this.eventCounts.set(event.generation, count);
-    } else if (record.stored.kind === "prime.identity") {
+    } else if (
+      record.stored.kind === "prime.identity" ||
+      record.stored.kind === "prime.identity.rebound"
+    ) {
       this.primeIdentity = record.payload as unknown as PrimeIdentityBinding;
     } else if (record.stored.kind === "prime.cursor") {
       const cursor = record.payload as unknown as PrimeDaemonCursor;

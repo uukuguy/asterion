@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -15,6 +15,35 @@ import {
   PrimePromptAdmissionUncertainError,
   PrivateValueStore,
 } from "../dist/src/index.js";
+import { canonicalJsonBytes } from "../dist/src/durable-store.js";
+
+async function downgradeContinuationBinding(root, binding) {
+  const valuePath = join(
+    root,
+    "private",
+    "values",
+    `${binding.privateRef.slice("private:".length)}.value`,
+  );
+  const storedBytes = await readFile(valuePath);
+  const newline = storedBytes.indexOf(0x0a);
+  const header = JSON.parse(storedBytes.subarray(0, newline).toString("utf8"));
+  const body = JSON.parse(storedBytes.subarray(newline + 1).toString("utf8"));
+  delete body.transcriptDevice;
+  delete body.transcriptInode;
+  body.format = "asterion.prime-private-continuation/v1";
+  const legacyBody = canonicalJsonBytes(body);
+  header.size = legacyBody.byteLength;
+  header.digest = createHash("sha256").update(legacyBody).digest("hex");
+  await writeFile(valuePath, Buffer.concat([
+    canonicalJsonBytes(header),
+    Buffer.from("\n"),
+    legacyBody,
+  ]), { mode: 0o600 });
+  return {
+    ...binding,
+    bindingDigest: header.digest,
+  };
+}
 
 function recoveryTransport(supervisorGeneration, name) {
   return {
@@ -38,12 +67,14 @@ class FakePrimeSession {
   constructor(
     sessionPath = "/private/sessions/transcript-1.jsonl",
     contextBackend = undefined,
+    identity = undefined,
   ) {
-    this.activeSessionId = "prime-root-1";
-    this.transcriptSessionId = "transcript-1";
-    this.continuationId = "continuation-1";
+    this.activeSessionId = identity?.activeSessionId ?? "prime-root-1";
+    this.transcriptSessionId = identity?.transcriptSessionId ?? "transcript-1";
+    this.continuationId = identity?.continuationId ?? "continuation-1";
     this.sessionPath = sessionPath;
-    this.supervisorGeneration = "supervisor-generation-1";
+    this.supervisorGeneration = identity?.supervisorGeneration ??
+      "supervisor-generation-1";
     this.calls = [];
     this.recoveries = [];
     this.checkpointAcknowledgements = [];
@@ -53,6 +84,7 @@ class FakePrimeSession {
     this.contextCalls = [];
     this.contextBackend = contextBackend ?? {
       acknowledgements: [],
+      continuationResults: new Map(),
       nameResults: new Map(),
       sideEffects: [],
     };
@@ -73,6 +105,8 @@ class FakePrimeSession {
       nameSha256: createHash("sha256").update("session-1").digest("hex"),
     };
     this.afterContextResult = undefined;
+    this.contextErrorBeforeResult = undefined;
+    this.mutateSourceOnResume = false;
   }
 
   subscribe(listener) {
@@ -139,6 +173,97 @@ class FakePrimeSession {
   acknowledgeContext(commandId) {
     this.contextAcknowledgements.push(
       `session-1-context-${commandId}-set-name`,
+    );
+    return true;
+  }
+
+  async resumeContinuation(commandId, target) {
+    this.contextCalls.push(["continuation.resume", commandId, target.continuationId]);
+    if (this.contextErrorBeforeResult !== undefined) {
+      const error = this.contextErrorBeforeResult;
+      this.contextErrorBeforeResult = undefined;
+      throw error;
+    }
+    const stableCommandId = `session-1-context-${commandId}-resume`;
+    let resumed = this.contextBackend.continuationResults.get(stableCommandId);
+    if (resumed === undefined) {
+      if (this.mutateSourceOnResume) {
+        await writeFile(this.sessionPath, "source shutdown mutation\n", {
+          flag: "a",
+          mode: 0o600,
+        });
+      }
+      resumed = {
+        locator: structuredClone(target),
+        result: {
+          previousContinuationId: this.continuationId,
+          currentContinuationId: target.continuationId,
+          transitionSha256: createHash("sha256")
+            .update(`${this.continuationId}:${target.continuationId}:${commandId}`)
+            .digest("hex"),
+        },
+      };
+      this.contextBackend.continuationResults.set(stableCommandId, resumed);
+      this.contextBackend.sideEffects.push([stableCommandId, target.continuationId]);
+    }
+    this.afterContextResult?.();
+    return {
+      ...resumed,
+      acknowledge: () => {
+        this.contextAcknowledgements.push(stableCommandId);
+        return true;
+      },
+    };
+  }
+
+  async deleteContinuation(commandId, target) {
+    this.contextCalls.push(["continuation.delete", commandId, target.continuationId]);
+    if (this.contextErrorBeforeResult !== undefined) {
+      const error = this.contextErrorBeforeResult;
+      this.contextErrorBeforeResult = undefined;
+      throw error;
+    }
+    if (target.continuationId === this.continuationId) {
+      throw new Error("active continuation");
+    }
+    const stableCommandId = `session-1-context-${commandId}-delete`;
+    let deleted = this.contextBackend.continuationResults.get(stableCommandId);
+    if (deleted === undefined) {
+      await unlink(target.sessionPath);
+      deleted = {
+        result: {
+          continuationId: target.continuationId,
+          deletionSha256: createHash("sha256")
+            .update(`${target.continuationId}:${commandId}`)
+            .digest("hex"),
+        },
+      };
+      this.contextBackend.continuationResults.set(stableCommandId, deleted);
+      this.contextBackend.sideEffects.push([stableCommandId, target.continuationId]);
+    }
+    this.afterContextResult?.();
+    return {
+      ...deleted,
+      acknowledge: () => {
+        this.contextAcknowledgements.push(stableCommandId);
+        return true;
+      },
+    };
+  }
+
+  adoptContinuation(target) {
+    this.continuationId = target.continuationId;
+    this.transcriptSessionId = target.transcriptSessionId;
+    this.sessionPath = target.sessionPath;
+    this.contextDescription.continuationId = target.continuationId;
+  }
+
+  acknowledgeContinuation(commandId, operation) {
+    const purpose = operation === "session.continuation.resume"
+      ? "resume"
+      : "delete";
+    this.contextAcknowledgements.push(
+      `session-1-context-${commandId}-${purpose}`,
     );
     return true;
   }
@@ -285,6 +410,62 @@ async function fixture({
         session.afterContextResult = undefined;
         failNextWrite = true;
       };
+    },
+    failNextContinuationBeforeResult() {
+      session.contextErrorBeforeResult = new Error("SENTINEL_BEFORE_RESULT");
+    },
+    async forkToContinuation2() {
+      const sourceBinding = store.activeContextBinding();
+      assert.ok(sourceBinding);
+      const sourceLocator = await privateValues.readContinuationLocator(
+        sourceBinding,
+      );
+      const nextPath = join(sessionRoot, "transcript-2.jsonl");
+      await writeFile(nextPath, "private transcript 2\n", { mode: 0o600 });
+      const nextLocator = {
+        continuationId: "continuation-2",
+        activeSessionId: session.activeSessionId,
+        transcriptSessionId: "transcript-2",
+        supervisorGeneration: session.supervisorGeneration,
+        sessionPath: nextPath,
+      };
+      const nextBinding = await privateValues.putContinuationLocator(nextLocator);
+      const fork = contextCommand(
+        "session.fork",
+        {
+          continuation_id: sourceLocator.continuationId,
+          entry_id: "entry-1",
+          position: "at",
+        },
+        "context-seed-fork",
+      );
+      await store.acceptContextCommand(fork);
+      await store.commitContextOperation({
+        protocol: "asterion.session-context/v1",
+        receipt_id: "context-seed-fork-receipt",
+        command_id: fork.command_id,
+        session_id: fork.session_id,
+        generation: fork.generation,
+        operation: fork.operation,
+        status: "succeeded",
+        reason_code: "session-context-succeeded",
+        payload: {
+          evidence_ref: null,
+          result: {
+            source_continuation_id: sourceLocator.continuationId,
+            new_continuation_id: nextLocator.continuationId,
+            active_leaf_id: null,
+            transition_sha256: "a".repeat(64),
+          },
+        },
+      }, nextBinding);
+      session.adoptContinuation(nextLocator);
+      await store.bindPrimeIdentity({
+        activeSessionId: nextLocator.activeSessionId,
+        transcriptSessionId: nextLocator.transcriptSessionId,
+        supervisorGeneration: nextLocator.supervisorGeneration,
+      });
+      return { sourceLocator, nextLocator };
     },
     async cleanup({ allowCloseFailure = false } = {}) {
       if (allowCloseFailure) {
@@ -624,6 +805,371 @@ test("gateway replays one stable name mutation after restart between Prime resul
       receipt,
     );
     assert.equal(restoredSession.contextCalls.length, 1);
+  } finally {
+    await reopened?.close().catch(() => undefined);
+    await state.cleanup({ allowCloseFailure: true });
+  }
+});
+
+test("gateway upgrades a legacy active locator before restored execution", async () => {
+  const state = await fixture();
+  let reopened;
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const current = state.store.activeContextBinding();
+    assert.ok(current);
+    const legacy = await downgradeContinuationBinding(state.root, current);
+    await state.store.rebindContextBinding(legacy);
+    await state.gateway.close();
+
+    const store = await GatewayDurableStore.open(state.root, "session-1");
+    const restoredSession = new FakePrimeSession(state.session.sessionPath);
+    reopened = await PrimeGateway.open({
+      sessionId: "session-1",
+      generation: 1,
+      authorityId: "authority-1",
+      store,
+      privateValues: state.privateValues,
+      async createSession() {
+        throw new Error("must restore active continuation");
+      },
+      async restoreSession(identity, onRecovered) {
+        assert.equal(identity.continuationId, state.session.continuationId);
+        await onRecovered({
+          transport: recoveryTransport(
+            "supervisor-generation-1",
+            "legacy-locator-recovery",
+          ),
+          primeCursor: { generation: "prime-events-1", sequence: 0 },
+          transcriptSessionId: state.session.transcriptSessionId,
+          supervisorGeneration: "supervisor-generation-1",
+          sessionStatus: "running",
+        });
+        return restoredSession;
+      },
+      async createCheckpoint() {
+        throw new Error("not used");
+      },
+    });
+
+    const upgraded = store.activeContextBinding();
+    assert.ok(upgraded);
+    assert.notEqual(upgraded.privateRef, legacy.privateRef);
+    const originalBody = await readFile(state.session.sessionPath);
+    await rename(state.session.sessionPath, `${state.session.sessionPath}.old`);
+    await writeFile(state.session.sessionPath, originalBody, { mode: 0o600 });
+    await assert.rejects(
+      state.privateValues.readContinuationLocator(upgraded),
+    );
+  } finally {
+    await reopened?.close().catch(() => undefined);
+    await state.cleanup({ allowCloseFailure: true });
+  }
+});
+
+test("gateway resumes one exact private continuation and deletes only the inactive target", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const { sourceLocator, nextLocator } = await state.forkToContinuation2();
+    state.session.mutateSourceOnResume = true;
+
+    const resume = contextCommand(
+      "session.continuation.resume",
+      { continuation_id: sourceLocator.continuationId },
+      "context-resume-1",
+    );
+    const resumed = await state.gateway.executeSessionContext(
+      resume,
+      async () => undefined,
+    );
+    assert.deepEqual(resumed.payload.result, {
+      previous_continuation_id: nextLocator.continuationId,
+      current_continuation_id: sourceLocator.continuationId,
+      transition_sha256: resumed.payload.result.transition_sha256,
+    });
+    assert.match(resumed.payload.result.transition_sha256, /^[0-9a-f]{64}$/);
+    assert.equal(state.session.continuationId, sourceLocator.continuationId);
+    assert.equal(
+      state.store.activeContextBinding().continuationId,
+      sourceLocator.continuationId,
+    );
+    assert.equal(JSON.stringify(resumed).includes(state.sessionRoot), false);
+
+    const activeDelete = contextCommand(
+      "session.continuation.delete",
+      { continuation_id: sourceLocator.continuationId },
+      "context-delete-active",
+    );
+    const sideEffectsBefore = state.session.contextSideEffects.length;
+    await assert.rejects(
+      state.gateway.executeSessionContext(activeDelete, async () => undefined),
+    );
+    assert.equal(state.session.contextSideEffects.length, sideEffectsBefore);
+
+    const remove = contextCommand(
+      "session.continuation.delete",
+      { continuation_id: nextLocator.continuationId },
+      "context-delete-1",
+    );
+    const deleted = await state.gateway.executeSessionContext(
+      remove,
+      async () => undefined,
+    );
+    assert.equal(deleted.payload.result.continuation_id, nextLocator.continuationId);
+    assert.match(deleted.payload.result.deletion_sha256, /^[0-9a-f]{64}$/);
+    assert.equal(
+      state.store.currentContextBinding(nextLocator.continuationId),
+      undefined,
+    );
+    assert.deepEqual(state.session.contextAcknowledgements, [
+      "session-1-context-context-resume-1-resume",
+      "session-1-context-context-delete-1-delete",
+    ]);
+    assert.deepEqual(
+      await state.gateway.executeSessionContext(
+        structuredClone(remove),
+        async () => undefined,
+      ),
+      deleted,
+    );
+  } finally {
+    await state.cleanup({ allowCloseFailure: true });
+  }
+});
+
+test("gateway replays a prepared resume after a crash before the Prime result", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const { sourceLocator } = await state.forkToContinuation2();
+    const resume = contextCommand(
+      "session.continuation.resume",
+      { continuation_id: sourceLocator.continuationId },
+      "context-resume-before-result",
+    );
+    const effectsBefore = state.session.contextSideEffects.length;
+    state.failNextContinuationBeforeResult();
+
+    await assert.rejects(
+      state.gateway.executeSessionContext(resume, async () => undefined),
+    );
+    assert.ok(state.store.preparedContextBinding(resume.command_id));
+    assert.equal(state.session.contextSideEffects.length, effectsBefore);
+
+    const receipt = await state.gateway.executeSessionContext(
+      structuredClone(resume),
+      async () => undefined,
+    );
+    assert.equal(receipt.status, "succeeded");
+    assert.equal(state.session.contextSideEffects.length, effectsBefore + 1);
+    assert.equal(state.session.continuationId, sourceLocator.continuationId);
+  } finally {
+    await state.cleanup({ allowCloseFailure: true });
+  }
+});
+
+test("gateway completes a prepared resume after restart between Prime result and durable commit", async () => {
+  const state = await fixture();
+  let reopened;
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const { sourceLocator, nextLocator } = await state.forkToContinuation2();
+    state.session.mutateSourceOnResume = true;
+    const resume = contextCommand(
+      "session.continuation.resume",
+      { continuation_id: sourceLocator.continuationId },
+      "context-resume-after-result",
+    );
+    state.failContextCommitAfterResult();
+
+    await assert.rejects(
+      state.gateway.executeSessionContext(resume, async () => undefined),
+    );
+    const resumeEffects = state.session.contextSideEffects.filter(
+      ([stableId]) => stableId.endsWith("-resume"),
+    );
+    assert.equal(resumeEffects.length, 1);
+    assert.equal(state.session.continuationId, nextLocator.continuationId);
+    await state.gateway.close().catch(() => undefined);
+
+    const store = await GatewayDurableStore.open(state.root, "session-1");
+    const restoredSession = new FakePrimeSession(
+      nextLocator.sessionPath,
+      state.session.contextBackend,
+      nextLocator,
+    );
+    reopened = await PrimeGateway.open({
+      sessionId: "session-1",
+      generation: 1,
+      authorityId: "authority-1",
+      store,
+      privateValues: state.privateValues,
+      async createSession() {
+        throw new Error("must recover prepared continuation resume");
+      },
+      async restoreSession(identity, onRecovered) {
+        assert.equal(identity.continuationId, nextLocator.continuationId);
+        assert.equal(identity.pendingResume.commandId, resume.command_id);
+        const resumed = await restoredSession.resumeContinuation(
+          identity.pendingResume.commandId,
+          identity.pendingResume.target,
+        );
+        restoredSession.adoptContinuation(resumed.locator);
+        await onRecovered({
+          transport: recoveryTransport(
+            "supervisor-generation-1",
+            "continuation-resume-recovery",
+          ),
+          primeCursor: { generation: "prime-events-1", sequence: 0 },
+          transcriptSessionId: sourceLocator.transcriptSessionId,
+          supervisorGeneration: "supervisor-generation-1",
+          sessionStatus: "running",
+        });
+        return restoredSession;
+      },
+      async createCheckpoint() {
+        throw new Error("not used");
+      },
+    });
+
+    assert.equal(restoredSession.continuationId, sourceLocator.continuationId);
+    assert.equal(
+      store.activeContextBinding().continuationId,
+      sourceLocator.continuationId,
+    );
+    assert.equal(
+      store.snapshot().primeIdentity.transcriptSessionId,
+      sourceLocator.transcriptSessionId,
+    );
+    assert.equal(
+      state.session.contextSideEffects.filter(
+        ([stableId]) => stableId.endsWith("-resume"),
+      ).length,
+      1,
+    );
+    const replay = await reopened.executeSessionContext(
+      structuredClone(resume),
+      async () => undefined,
+    );
+    assert.equal(replay.status, "succeeded");
+  } finally {
+    await reopened?.close().catch(() => undefined);
+    await state.cleanup({ allowCloseFailure: true });
+  }
+});
+
+test("gateway recovers delete after side effect without resolving a missing path broadly", async () => {
+  const state = await fixture();
+  let reopened;
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const { sourceLocator, nextLocator } = await state.forkToContinuation2();
+    await state.gateway.executeSessionContext(contextCommand(
+      "session.continuation.resume",
+      { continuation_id: sourceLocator.continuationId },
+      "context-resume-for-delete",
+    ), async () => undefined);
+    const remove = contextCommand(
+      "session.continuation.delete",
+      { continuation_id: nextLocator.continuationId },
+      "context-delete-after-side-effect",
+    );
+    state.failContextCommitAfterResult();
+
+    await assert.rejects(
+      state.gateway.executeSessionContext(remove, async () => undefined),
+    );
+    const deleteEffects = state.session.contextSideEffects.filter(
+      ([stableId]) => stableId.endsWith("-delete"),
+    );
+    assert.equal(deleteEffects.length, 1);
+    assert.ok(state.store.preparedContextBinding(remove.command_id));
+    assert.equal(state.store.snapshot().contextCommitCount, 2);
+    await state.gateway.close().catch(() => undefined);
+
+    const store = await GatewayDurableStore.open(state.root, "session-1");
+    const restoredSession = new FakePrimeSession(
+      sourceLocator.sessionPath,
+      state.session.contextBackend,
+    );
+    reopened = await PrimeGateway.open({
+      sessionId: "session-1",
+      generation: 1,
+      authorityId: "authority-1",
+      store,
+      privateValues: state.privateValues,
+      async createSession() {
+        throw new Error("must restore exact active continuation");
+      },
+      async restoreSession(identity, onRecovered) {
+        assert.equal(identity.continuationId, sourceLocator.continuationId);
+        assert.equal(identity.sessionPath, sourceLocator.sessionPath);
+        await onRecovered({
+          transport: recoveryTransport(
+            "supervisor-generation-1",
+            "continuation-delete-recovery",
+          ),
+          primeCursor: { generation: "prime-events-1", sequence: 0 },
+          transcriptSessionId: sourceLocator.transcriptSessionId,
+          supervisorGeneration: "supervisor-generation-1",
+          sessionStatus: "running",
+        });
+        return restoredSession;
+      },
+      async createCheckpoint() {
+        throw new Error("not used");
+      },
+    });
+
+    const receipt = await reopened.executeSessionContext(
+      structuredClone(remove),
+      async () => undefined,
+    );
+    assert.equal(receipt.status, "succeeded");
+    assert.equal(
+      store.currentContextBinding(nextLocator.continuationId),
+      undefined,
+    );
+    assert.equal(
+      state.session.contextSideEffects.filter(
+        ([stableId]) => stableId.endsWith("-delete"),
+      ).length,
+      1,
+    );
+    assert.deepEqual(restoredSession.contextAcknowledgements.slice(-1), [
+      "session-1-context-context-delete-after-side-effect-delete",
+    ]);
   } finally {
     await reopened?.close().catch(() => undefined);
     await state.cleanup({ allowCloseFailure: true });
