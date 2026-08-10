@@ -36,6 +36,10 @@ class PrimeParityCheckError(RuntimeError):
     """Raised with a fixed, redacted message when source evidence is unsafe."""
 
 
+class PrimeParitySelectionError(RuntimeError):
+    """Raised without rendering invalid command-line selection values."""
+
+
 @dataclass(frozen=True, repr=False)
 class PrimeSourceEvidenceReport:
     source_commit: str
@@ -199,8 +203,12 @@ def _inventory_report(
     }
 
 
-def _claim_report(ledger: Mapping[str, object]) -> tuple[dict[str, object], int]:
-    decision = evaluate_parity_claim(ledger, provider_id=PRIME_PROVIDER_ID)
+def _claim_report(
+    ledger: Mapping[str, object],
+    *,
+    provider_id: str,
+) -> tuple[dict[str, object], int]:
+    decision = evaluate_parity_claim(ledger, provider_id=provider_id)
     status = "PASS" if decision.eligible else "BLOCKED"
     report: dict[str, object] = {
         "application_operations": 0,
@@ -216,6 +224,76 @@ def _claim_report(ledger: Mapping[str, object]) -> tuple[dict[str, object], int]
     return report, 0 if decision.eligible else 1
 
 
+def _feature_claim_report(
+    ledger: Mapping[str, object],
+    *,
+    provider_id: str,
+    domain_id: str | None,
+    feature_selection: str | None,
+) -> tuple[dict[str, object], int]:
+    if (domain_id is None) == (feature_selection is None):
+        raise PrimeParitySelectionError("Prime parity selection is invalid")
+    providers = ledger.get("providers")
+    if not isinstance(providers, tuple) or provider_id not in providers:
+        raise PrimeParitySelectionError("Prime parity selection is invalid")
+    features = _mapping_sequence(ledger.get("features"))
+    mandatory = {
+        str(feature["feature_id"]): feature
+        for feature in features
+        if feature.get("disposition") == "mandatory"
+    }
+    selection_kind: str
+    selection_id: str | None = None
+    if domain_id is not None:
+        selected = tuple(
+            feature_id
+            for feature_id, feature in mandatory.items()
+            if feature.get("domain_id") == domain_id
+        )
+        if not selected:
+            raise PrimeParitySelectionError("Prime parity selection is invalid")
+        selection_kind = "domain"
+        selection_id = domain_id
+    else:
+        assert feature_selection is not None
+        requested = tuple(feature_selection.split(","))
+        if (
+            not requested
+            or any(not item or item not in mandatory for item in requested)
+            or len(requested) != len(set(requested))
+        ):
+            raise PrimeParitySelectionError("Prime parity selection is invalid")
+        selected = tuple(sorted(requested))
+        selection_kind = "features"
+
+    decision = evaluate_parity_claim(ledger, provider_id=provider_id)
+    passed_set = set(decision.passed_feature_ids)
+    blocking_set = set(decision.blocking_feature_ids)
+    passed = tuple(feature_id for feature_id in selected if feature_id in passed_set)
+    blocking = tuple(
+        feature_id for feature_id in selected if feature_id in blocking_set
+    )
+    if len(passed) + len(blocking) != len(selected):
+        raise PrimeParitySelectionError("Prime parity selection is invalid")
+    status = "PASS" if not blocking else "BLOCKED"
+    report: dict[str, object] = {
+        "application_operations": 0,
+        "blocking_feature_count": len(blocking),
+        "blocking_feature_ids": blocking,
+        "claim": "feature-parity",
+        "passed_feature_count": len(passed),
+        "provider_operations": 0,
+        "reason_codes": decision.reason_codes if blocking else (),
+        "selected_feature_count": len(selected),
+        "selected_feature_ids": selected,
+        "selection_kind": selection_kind,
+        "status": status,
+    }
+    if selection_id is not None:
+        report["selection_id"] = selection_id
+    return report, 0 if not blocking else 1
+
+
 def _write_report(report: Mapping[str, object]) -> None:
     print(json.dumps(report, sort_keys=True, separators=(",", ":")))
 
@@ -224,10 +302,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--claim",
-        required=True,
         choices=("inventory", "verified-system-parity"),
     )
     parser.add_argument("--source-root", type=Path)
+    parser.add_argument("--domain")
+    parser.add_argument("--features")
+    parser.add_argument("--provider", default=PRIME_PROVIDER_ID)
     arguments = parser.parse_args(argv)
     try:
         ledger = load_prime_parity_ledger()
@@ -239,18 +319,50 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             source_verified = True
         if arguments.claim == "inventory":
+            if arguments.domain is not None or arguments.features is not None:
+                raise PrimeParitySelectionError(
+                    "Prime parity selection is invalid"
+                )
             _write_report(
                 _inventory_report(ledger, source_verified=source_verified)
             )
             return 0
-        report, exit_code = _claim_report(ledger)
+        if arguments.claim == "verified-system-parity":
+            if arguments.domain is not None or arguments.features is not None:
+                raise PrimeParitySelectionError(
+                    "Prime parity selection is invalid"
+                )
+            report, exit_code = _claim_report(
+                ledger,
+                provider_id=arguments.provider,
+            )
+        elif arguments.claim is None:
+            report, exit_code = _feature_claim_report(
+                ledger,
+                provider_id=arguments.provider,
+                domain_id=arguments.domain,
+                feature_selection=arguments.features,
+            )
+        else:
+            raise PrimeParitySelectionError("Prime parity selection is invalid")
         _write_report(report)
         return exit_code
+    except PrimeParitySelectionError:
+        _write_report(
+            {
+                "application_operations": 0,
+                "claim": "feature-parity",
+                "provider_operations": 0,
+                "reason_codes": ("selection-invalid",),
+                "status": "ERROR",
+            }
+        )
+        return 2
     except (ParityLedgerError, PrimeParityCheckError):
         _write_report(
             {
                 "application_operations": 0,
-                "claim": arguments.claim,
+                "claim": arguments.claim or "feature-parity",
                 "provider_operations": 0,
                 "reason_codes": ("inventory-invalid",),
                 "status": "ERROR",

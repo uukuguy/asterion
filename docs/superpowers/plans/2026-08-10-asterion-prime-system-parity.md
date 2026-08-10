@@ -304,7 +304,7 @@ git commit -m "test: pin prime system parity inventory"
 
 ### Task 3: Create the shared parity-scenario registry
 
-**Status:** In progress.
+**Status:** Completed.
 
 **Files:**
 - Create: `src/asterion/control/parity_testing.py`
@@ -365,6 +365,8 @@ git commit -m "test: register prime parity scenarios"
 ```
 
 ### Task 4: Deliver session and context parity
+
+**Status:** In progress.
 
 **Files:**
 - Create before implementation: `docs/superpowers/plans/2026-08-10-asterion-prime-session-context-parity.md`

@@ -79,6 +79,74 @@ class TestCheckPrimeParity(unittest.TestCase):
         self.assertNotIn(str(ROOT), rendered)
         self.assertNotIn(PINNED_COMMIT, rendered)
 
+    def test_domain_report_is_provider_specific_and_fails_closed(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exit_code = parity_checker.main(
+                [
+                    "--domain",
+                    "session.context",
+                    "--provider",
+                    "asterion.prime-gateway",
+                ]
+            )
+
+        report = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(report["claim"], "feature-parity")
+        self.assertEqual(report["selection_kind"], "domain")
+        self.assertEqual(report["selection_id"], "session.context")
+        self.assertEqual(report["selected_feature_count"], 9)
+        self.assertEqual(report["blocking_feature_count"], 9)
+        self.assertEqual(report["passed_feature_count"], 0)
+        self.assertEqual(report["status"], "BLOCKED")
+
+    def test_feature_report_canonicalizes_explicit_selection_without_passing(
+        self,
+    ) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exit_code = parity_checker.main(
+                [
+                    "--features",
+                    "operation.goals,operation.detach-attach-replay",
+                    "--provider",
+                    "asterion.prime-gateway",
+                ]
+            )
+
+        report = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 1)
+        self.assertEqual(report["selection_kind"], "features")
+        self.assertEqual(
+            report["selected_feature_ids"],
+            [
+                "operation.detach-attach-replay",
+                "operation.goals",
+            ],
+        )
+        self.assertEqual(report["blocking_feature_count"], 2)
+        self.assertEqual(report["passed_feature_count"], 0)
+
+    def test_invalid_feature_selection_returns_one_fixed_redacted_object(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exit_code = parity_checker.main(
+                [
+                    "--features",
+                    "session.delivery,SENTINEL_SECRET",
+                    "--provider",
+                    "asterion.prime-gateway",
+                ]
+            )
+
+        rendered = output.getvalue()
+        report = json.loads(rendered)
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(report["status"], "ERROR")
+        self.assertEqual(report["reason_codes"], ["selection-invalid"])
+        self.assertNotIn("SENTINEL_SECRET", rendered)
+
     def test_source_mismatch_and_symlink_fail_without_rendering_values(self) -> None:
         fixture = json.loads(
             (FIXTURES / "valid-ledger-minimal.json").read_text(encoding="utf-8")

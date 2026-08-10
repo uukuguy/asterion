@@ -96,6 +96,16 @@ from asterion.control.parity import (
     evaluate_parity_claim,
     validate_parity_ledger,
 )
+from asterion.control.parity_testing import (
+    ParityClock,
+    ParityFaultInjector,
+    ParityPrivateFixtureStore,
+    ParityScenarioRegistry,
+    ParityScenarioRegistryError,
+    ParityScenarioReport,
+    ParityScenarioResult,
+    ParityScenarioRunner,
+)
 from asterion.control.system import (
     AgentSystemError,
     AgentSystemPlan,
@@ -185,7 +195,15 @@ __all__ = [
     "PortfolioGrant",
     "PARITY_LEDGER_FORMAT",
     "ParityClaimReport",
+    "ParityClock",
+    "ParityFaultInjector",
     "ParityLedgerError",
+    "ParityPrivateFixtureStore",
+    "ParityScenarioRegistry",
+    "ParityScenarioRegistryError",
+    "ParityScenarioReport",
+    "ParityScenarioResult",
+    "ParityScenarioRunner",
     "PrivateContentResolver",
     "PrivateResultPublication",
     "PrivateResultStore",

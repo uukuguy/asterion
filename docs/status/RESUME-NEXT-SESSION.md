@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-08-10 14:55. Phase 2 Task 2 is verified; shared scenario-registry TDD is active.
+> Updated: 2026-08-10 15:18. Phase 2 Task 3 is verified; session/context subplanning is active.
 
 ## Active objective
 
@@ -33,6 +33,14 @@ kernel. The canonical worklist is
 - `verified-system-parity` currently fails closed with all 61 mandatory feature
   IDs blocking; the three existing public entry points remain `implemented`,
   not PASS, until their exact parity scenarios produce admissible evidence.
+- Commit `4482915` owns the exhaustive inventory, exact source-evidence checker,
+  fail-closed system claim and provider-free Make gates.
+- Phase 2 Task 3 adds a provider-neutral registry whose key set is exactly the
+  61 primary scenarios. Missing runners stay blocking, and boundary, feature,
+  clock, fault, credential-access and evidence-digest drift fail closed.
+- The Prime-specific Phase 1 adapter remains under the Prime provider and maps
+  only `operation.detach-attach-replay` and `operation.goals`; narrower child,
+  checkpoint, budget and redaction observations do not become feature PASS.
 
 ## Newly verified external boundary
 
@@ -62,9 +70,9 @@ kernel. The canonical worklist is
 ## Current Phase 2 state
 
 - `3fc67d3` owns the closed parity-ledger model and mechanical claim evaluator.
-- The exhaustive fixture, source-evidence checker and Make gates have passed an
-  independent review with zero Critical or Important findings.
-- Full Python verification passes 1674 tests; focused Pyright reports zero
+- `4482915` has passed an independent review with zero Critical or Important
+  findings.
+- Full Python verification passes 1686 tests; focused Pyright reports zero
   errors and zero warnings, and focused Ruff passes.
 - `docs/status/CURRENT-STATE.md`, `DECISIONS.md`, `JOURNAL.md`, and this checkpoint
   carry the resumed program state.
@@ -73,8 +81,8 @@ kernel. The canonical worklist is
 
 ## Immediate next boundary
 
-1. Execute Task 3 of the Phase 2 plan test-first: create the shared 61-scenario
-   registry and reporting plumbing without promoting any placeholder to PASS.
+1. Create the Task 4 session/context parity subplan before implementation. It
+   must close all nine `session.*` scenarios across Gateway, host and evidence.
 
 ## Invariants
 

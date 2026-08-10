@@ -35,6 +35,8 @@ from asterion.control.factory import ControlPlaneFactoryRegistry
 from asterion.control.host import ControlCommand, ControlEvent, ControlPlaneClient
 from asterion.control.journal import FileCanonicalJournal, JournalCursor
 from asterion.control.manager import ControlHost, ControlHostTransportError
+from asterion.control.parity import validate_parity_ledger
+from asterion.control.parity_testing import ParityScenarioRegistry
 from asterion.control.providers.prime.client import PrimeControlPlaneClient
 from asterion.control.providers.prime.factory import (
     PRIME_NATIVE_RLM_MAX_DEPTH,
@@ -48,6 +50,10 @@ from asterion.control.providers.prime.process import (
 )
 from asterion.control.providers.prime.system_actions import PrimeSystemActionService
 from asterion.control.system import AgentSystemPlan, resolve_agent_system
+from asterion.control.providers.prime.parity_testing import (
+    PROVEN_PHASE1_PARITY_SCENARIO_IDS,
+    register_proven_phase1_prime_subset,
+)
 from asterion.pathlight import MemoryPathlightRecorder
 from asterion.runtime.host import CancellationSignal
 from asterion.runtime.factory import RuntimeFactoryBinding, RuntimeFactoryRegistry
@@ -95,6 +101,7 @@ class PrimeLoopScenarioResult:
     scenario_id: str
     status: str
     outcome: str
+    evidence_id: str
     provider_operations: int
     application_operations: int
     process_counts: Mapping[str, int]
@@ -1033,6 +1040,7 @@ async def _run_python_prime_scenario(
                 scenario_id=scenario_id,
                 status="PASS",
                 outcome=_scenario_outcome(scenario_id, actions),
+                evidence_id=f"evidence.phase1.{_sha256(serialized)}",
                 provider_operations=_integer_observation(
                     observations["modelProviderOperations"]
                 ),
@@ -1342,6 +1350,33 @@ class TestPrimeProviderFreeVerifiedLoop(unittest.TestCase):
             self.assertEqual(result.pathlight_gaps, ())
             for sentinel in SENTINELS:
                 self.assertNotIn(sentinel, result.serialized_observations)
+
+        parity_fixture = (
+            Path(__file__).resolve().parent
+            / "fixtures"
+            / "prime-parity"
+            / "v1"
+            / "prime-agent-0.7.1.json"
+        )
+        parity_ledger = validate_parity_ledger(
+            json.loads(parity_fixture.read_text(encoding="utf-8"))
+        )
+        registry = ParityScenarioRegistry(
+            parity_ledger,
+            provider_id="asterion.prime-gateway",
+        )
+        register_proven_phase1_prime_subset(
+            registry,
+            results,
+            provider_factory=lambda: object(),
+        )
+        parity_report = asyncio.run(
+            registry.run(PROVEN_PHASE1_PARITY_SCENARIO_IDS)
+        )
+        self.assertEqual(
+            parity_report.passed_scenario_ids,
+            PROVEN_PHASE1_PARITY_SCENARIO_IDS,
+        )
 
 
 if __name__ == "__main__":

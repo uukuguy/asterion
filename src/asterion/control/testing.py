@@ -31,7 +31,6 @@ REQUIRED_PHASE0_SCENARIOS = frozenset(
     }
 )
 
-
 class ControlProviderConformanceError(RuntimeError):
     """Raised by the deterministic provider when conformance fails closed."""
 
@@ -46,22 +45,27 @@ class ControlConformanceDriver(ControlPlaneClient, Protocol):
     @property
     def command_log(self) -> tuple[ControlCommand, ...]:
         """Return persisted safe commands in acceptance order."""
+        ...
 
     def emit_goal_status(self, status: str) -> ControlEvent:
         """Drive a deterministic goal transition for the scenario harness."""
+        ...
 
     def emit_session_status(
         self, status: str, *, reason_code: str
     ) -> ControlEvent:
         """Drive a deterministic terminal session transition."""
+        ...
 
     def emit_fault(
         self, code: str, *, recoverable: bool
     ) -> tuple[ControlEvent, ...]:
         """Inject one public-safe deterministic provider fault."""
+        ...
 
     def emit_application_proposal(self) -> ControlEvent:
         """Emit one deterministic application proposal."""
+        ...
 
 
 class FakeControlPlaneClient:
