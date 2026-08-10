@@ -741,3 +741,5 @@
 - 14:09 修复独立审查发现的测试类型缺口，并移除 preflight 遗留 launcher readiness 耦合 [pending]
 - 14:15 最终真实 preflight、1653 全仓测试与 26 命令 promotion 在审查修复后通过 [pending]
 - 14:16 提交离线 Prime setup 与精确 daemon preflight，建立真实零提供方外部边界 [cfe62b8]
+- 14:17 固化同级控制提供方决策与 Phase 2 恢复入口，保证长期计划可续 [18b4a87]
+- 14:23 将已批准 Phase 2 设计固化为 63 项固定台账与领域执行计划 [pending]

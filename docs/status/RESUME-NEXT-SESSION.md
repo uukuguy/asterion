@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-08-10 14:09. Prime Phase 1 external-boundary closure is active.
+> Updated: 2026-08-10 14:23. Phase 2 system-parity planning is durable; ledger-model TDD is active.
 
 ## Active objective
 
@@ -19,6 +19,10 @@ kernel. The canonical worklist is
   packaged resources, checkout hardening, tests, and refreshed evidence.
 - Commit `cfe62b8` fixes offline setup and proves the real Node 22 bundle-daemon
   preflight without model/provider work.
+- Commit `18b4a87` records the managed program state and peer-provider decision.
+- `docs/superpowers/plans/2026-08-10-asterion-prime-system-parity.md`
+  fixes 61 mandatory feature IDs, two exclusions, claim rules, domain delivery
+  order, and the Phase 2 exit gate.
 
 ## Newly verified external boundary
 
@@ -56,9 +60,8 @@ kernel. The canonical worklist is
 
 ## Immediate next boundary
 
-1. Commit the managed program state files and journal correction.
-2. Start an explicit Phase 2 system-parity plan from the pinned ledger without
-   claiming bounded `Verified-loop` PASS.
+1. Execute Task 1 of the Phase 2 plan test-first: add the provider-neutral,
+   closed and immutable parity-ledger model without changing a runtime protocol.
 
 ## Invariants
 
