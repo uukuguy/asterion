@@ -263,6 +263,7 @@ class _ChildRuntime:
     host: ControlHost | None = None
     closed: bool = False
     cancel_requested: bool = False
+    cancel_task: asyncio.Task[None] | None = None
     cancellation_uncertain: bool = False
 
 
@@ -750,11 +751,18 @@ class ChildSessionService:
                 and not entry.runtime.closed
                 and not entry.runtime.cancel_requested
             )
-        for binding, runtime in active:
-            assert runtime is not None
-            await self._send_cancel(
-                binding, runtime, command_id=f"child-cancel-all-{binding.child_id}"
-            )
+        results = await asyncio.gather(
+            *(
+                self._send_cancel(
+                    binding, runtime, command_id=f"child-cancel-all-{binding.child_id}"
+                )
+                for binding, runtime in active
+                if runtime is not None
+            ),
+            return_exceptions=True,
+        )
+        if any(isinstance(result, BaseException) for result in results):
+            raise _uncertain()
 
     async def close(self) -> None:
         """Await the one service-owned shutdown task without cancelling it."""
@@ -779,10 +787,26 @@ class ChildSessionService:
             tasks = tuple(
                 entry.task
                 for entry in entries
-                if entry.runtime is None or not entry.runtime.cancellation_uncertain
+                if entry.runtime is None
+                or (
+                    entry.runtime.cancel_requested
+                    and not entry.runtime.cancellation_uncertain
+                    and (
+                        entry.runtime.cancel_task is None
+                        or entry.runtime.cancel_task.done()
+                    )
+                )
             )
-            uncertain_cancellations = any(
-                entry.runtime is not None and entry.runtime.cancellation_uncertain
+            unconfirmed_cancellations = any(
+                entry.runtime is not None
+                and (
+                    entry.runtime.cancellation_uncertain
+                    or not entry.runtime.cancel_requested
+                    or (
+                        entry.runtime.cancel_task is not None
+                        and not entry.runtime.cancel_task.done()
+                    )
+                )
                 for entry in entries
             )
         for task in tasks:
@@ -796,10 +820,14 @@ class ChildSessionService:
                 for _, entry in sorted(self._entries.items())
                 if entry.runtime is not None
             )
-        failures = cancellation_failed or uncertain_cancellations
+        failures = cancellation_failed or unconfirmed_cancellations
         for binding, runtime in active:
             assert runtime is not None
-            if runtime.cancellation_uncertain:
+            if (
+                runtime.cancellation_uncertain
+                or not runtime.cancel_requested
+                or (runtime.cancel_task is not None and not runtime.cancel_task.done())
+            ):
                 failures = True
                 continue
             try:
@@ -849,7 +877,16 @@ class ChildSessionService:
     async def _send_cancel(
         self, binding: ChildSessionBinding, runtime: _ChildRuntime, *, command_id: str
     ) -> None:
-        runtime.cancel_requested = True
+        if runtime.cancel_task is None:
+            runtime.cancel_task = asyncio.create_task(
+                self._deliver_cancel(binding, runtime, command_id=command_id)
+            )
+            runtime.cancel_task.add_done_callback(_consume_cancel_task_exception)
+        await _await_cancel_task(runtime.cancel_task)
+
+    async def _deliver_cancel(
+        self, binding: ChildSessionBinding, runtime: _ChildRuntime, *, command_id: str
+    ) -> None:
         try:
             await runtime.client.send(
                 ControlCommand(
@@ -864,6 +901,7 @@ class ChildSessionService:
             runtime.cancellation_uncertain = True
             await self._mark_uncertain(binding.child_id, binding.action_id)
             raise _uncertain() from None
+        runtime.cancel_requested = True
 
     @staticmethod
     def proposal_digest(proposal: ControlEvent) -> str:
@@ -1064,6 +1102,13 @@ def _consume_child_task_exception(
         pass
 
 
+def _consume_cancel_task_exception(task: asyncio.Future[None]) -> None:
+    try:
+        task.exception()
+    except asyncio.CancelledError:
+        pass
+
+
 async def _await_without_cancelling(
     task: asyncio.Task[ActionExecutionReceipt],
 ) -> ActionExecutionReceipt:
@@ -1072,6 +1117,14 @@ async def _await_without_cancelling(
     if not task.done():
         await asyncio.wait((task,), return_when=asyncio.FIRST_COMPLETED)
     return task.result()
+
+
+async def _await_cancel_task(task: asyncio.Task[None]) -> None:
+    """Await shared cancellation delivery without cancelling the send."""
+
+    if not task.done():
+        await asyncio.wait((task,), return_when=asyncio.FIRST_COMPLETED)
+    task.result()
 
 
 def _child_id(proposal: ControlEvent, kind: str) -> str:
