@@ -90,6 +90,12 @@ export {
   SkillBridgeConflictError,
   generateSkillBridgeToken,
 } from "./skill-bridge.js";
+export { RlmHostBridge } from "./rlm-host-bridge.js";
+export type {
+  RlmHostBridgeOptions,
+  RlmSpawnProposal,
+  RlmSpawnResolution,
+} from "./rlm-host-bridge.js";
 export type {
   AsterionSkillBridgeOptions,
   SkillAdmission,
