@@ -893,10 +893,11 @@ git commit -m "feat: admit recursive prime child sessions"
 
 **Interfaces:**
 - Stable scenario IDs: `prime-loop-application`, `prime-loop-child`, `prime-loop-detach-attach`, `prime-loop-checkpoint`, `prime-loop-gateway-crash`, `prime-loop-supervisor-crash`, `prime-loop-worker-crash`, `prime-loop-cancel`, `prime-loop-budget`, `prime-loop-redaction`.
-- Each scenario records exact process/model/application operation counts and required Pathlight nodes/gaps.
+- Each scenario records exact process/model/application operation counts plus required
+  canonical Pathlight node kinds, control event types, and observation gaps.
 - Provider-free fake daemon uses real sockets/processes and deterministic frames; it never contacts a model or real application provider.
 
-- [ ] **Step 1: Write the closed scenario ledger and failing harness test**
+- [x] **Step 1: Write the closed scenario ledger and failing harness test**
 
 ```python
 def test_all_provider_free_prime_loop_scenarios_pass(self) -> None:
@@ -908,7 +909,7 @@ def test_all_provider_free_prime_loop_scenarios_pass(self) -> None:
 
 Every scenario injects `SENTINEL_PROMPT`, `SENTINEL_TOKEN`, `SENTINEL_PATH` and `SENTINEL_OUTPUT` into private locations and scans event JSON, journal, Pathlight, stdout, stderr and exception strings for absence.
 
-- [ ] **Step 2: Run harness tests to verify RED**
+- [x] **Step 2: Run harness tests to verify RED**
 
 Run:
 
@@ -919,7 +920,7 @@ npm test --prefix packages/typescript/prime-gateway -- --test-name-pattern='veri
 
 Expected: FAIL until the scenario harness and all fault mappings exist.
 
-- [ ] **Step 3: Implement real-process orchestration and causal assertions**
+- [x] **Step 3: Implement real-process orchestration and causal assertions**
 
 Launch the compiled gateway and fake daemon in temporary private roots. Kill the named process at the persisted command, Prime admission, proposal, application start, receipt, checkpoint and replay boundaries. Require one of:
 
@@ -929,15 +930,27 @@ proven effect + exact succeeded receipt
 unknown progress + explicit uncertain action
 ```
 
-Extend Pathlight with fixed `action-running`, `action-receipt`, `provider-recovery` and `child-session` projections using only IDs' SHA-256, statuses, counts and journal positions. Observation failure adds an evidence gap and prevents the aggregate scenario from PASS.
+Project only canonical facts already owned by the host: `action.proposed`, the
+admission decision, the terminal execution receipt, checkpoint events, and actual
+provider recovery/session events. Action kind and target shape are SHA-256 digests;
+identities are digested; statuses, bounded usage counts, and canonical journal
+positions remain public. Child execution is evidenced by the canonical
+`child.spawn` proposal/decision/receipt plus the independently observed child
+sidecar process count. No test-only running, receipt, recovery, or child event is
+fabricated. Observation failure adds an evidence gap and prevents the aggregate
+scenario from PASS.
 
-- [ ] **Step 4: Run provider-free verified-loop tests**
+The application scenario additionally proves the real cross-language terminal
+chain `skill bridge → Python host/system service → action.resolve → gateway
+goal.updated/session.completed` after the application receipt.
+
+- [x] **Step 4: Run provider-free verified-loop tests**
 
 Run the two Step 2 commands.
 
 Expected: all ten stable scenarios PASS with zero model/provider operations and no sentinel leakage.
 
-- [ ] **Step 5: Commit the provider-free loop evidence**
+- [x] **Step 5: Commit the provider-free loop evidence**
 
 ```bash
 git add tests/test_prime_verified_loop.py tests/fixtures/prime_gateway packages/typescript/prime-gateway/test/fixtures/fake-prime-daemon.mjs packages/typescript/prime-gateway/test/verified-loop.test.mjs src/asterion/control/evidence.py tests/test_control_pathlight.py
@@ -964,7 +977,7 @@ git commit -m "test: prove the provider-free prime control loop"
 - `verify_prime_loop.py --level bounded --authority PATH --max-cost-micros N` rejects missing/zero/inconsistent finite authorization before Prime start.
 - Make targets: `prime-check`, `prime-setup`, `prime-verify-provider-free`, `prime-verify-bounded`.
 
-- [ ] **Step 1: Write failing packaging/setup/promotion tests**
+- [x] **Step 1: Write failing packaging/setup/promotion tests**
 
 ```python
 def test_installed_wheel_contains_prime_manifest_skill_and_gateway_lock(self) -> None:
@@ -981,13 +994,13 @@ def test_promotion_runs_prime_provider_free_but_never_bounded(self) -> None:
 
 Test setup against a fixture checkout for exact commit/digest, dirty tree, missing Node 22.8, failed `npm ci`, no source path in output and no inherited sentinel environment.
 
-- [ ] **Step 2: Run tests to verify RED**
+- [x] **Step 2: Run tests to verify RED**
 
 Run: `uv run python -m unittest -v tests.test_distribution tests.test_check_promotion tests.test_prime_control_factory`
 
 Expected: FAIL because packaged resources and tools are absent.
 
-- [ ] **Step 3: Implement explicit setup and verification surfaces**
+- [x] **Step 3: Implement explicit setup and verification surfaces**
 
 The operator guide states:
 
@@ -1000,7 +1013,7 @@ restricted: unavailable unless execution.domain is injected and verified
 
 Package Asterion-owned manifests/skill/lock explicitly. Do not package Prime source. Promotion builds the gateway, runs its provider-free tests and the ten fake scenarios from a standalone copy; it must observe zero provider operations.
 
-- [ ] **Step 4: Run distribution and promotion tests**
+- [x] **Step 4: Run distribution and promotion tests**
 
 Run:
 
@@ -1012,7 +1025,7 @@ make promotion-check
 
 Expected: PASS; promotion reports no full dataset and zero provider operations.
 
-- [ ] **Step 5: Commit setup and packaging**
+- [x] **Step 5: Commit setup and packaging**
 
 ```bash
 git add tools/setup_prime_agent.py tools/verify_prime_loop.py docs/guides/prime-control-operator-guide.md Makefile pyproject.toml tools/check_promotion.py tests/test_distribution.py tests/test_check_promotion.py docs/README.md README.md
@@ -1031,7 +1044,7 @@ git commit -m "feat: package prime control verification"
 - `Verified-loop: PASS` requires both the provider-free gate and one separately authorized bounded real-Prime/model run with complete causal evidence.
 - Full `rlm.programmatic`, `Verified-system-parity`, native `Verified-loop` and `Verified-native-parity` remain missing.
 
-- [ ] **Step 1: Run the complete provider-free Phase 1 gate**
+- [x] **Step 1: Run the complete provider-free Phase 1 gate**
 
 Run:
 
@@ -1048,7 +1061,7 @@ make check
 
 Expected: PASS with provider/model operation count zero.
 
-- [ ] **Step 2: Run external Prime preflight without model work**
+- [x] **Step 2: Run external Prime preflight without model work**
 
 Run:
 
@@ -1073,7 +1086,7 @@ uv run python tools/verify_prime_loop.py \
 
 Expected: one exact root goal proves autonomous continuation, one admitted application, one admitted child, detach/attach, checkpoint/restart, cancellation probe, budget report, terminal goal and complete Pathlight without sentinel leakage. A missing credential, authority, execution domain or required artifact records `External-limited`.
 
-- [ ] **Step 4: Update the parity ledger with exact observed commands**
+- [x] **Step 4: Update the parity ledger with exact observed commands**
 
 Record each command, count, commit and boundary. Set `Verified-loop` to PASS only when Steps 1–3 pass on the same closure candidate. Keep `rlm.programmatic` marked partial because native Prime `rlm.run` is deliberately disabled.
 

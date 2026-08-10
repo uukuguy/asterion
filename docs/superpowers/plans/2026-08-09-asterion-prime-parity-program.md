@@ -26,7 +26,7 @@
 | Phase | Detailed plan | Required exit | Cost/risk magnitude |
 |---|---|---|---|
 | 0 — Control-plane foundation | `2026-08-09-asterion-control-plane-foundation.md` | Fake provider proves a complete pause/resume/fault/recovery session without model/runtime access | 4–7 engineer-weeks; abstraction and recovery semantics |
-| 1 — Prime verified loop | Create after Phase 0 conformance APIs freeze | `Verified-loop`, including bounded Prime/RLM child work, portfolio invocation, detach/attach, checkpoint/recovery, cancellation, budget, redaction and fault injection | 8–14 engineer-weeks; RPC extension points and crash windows |
+| 1 — Prime verified loop | `2026-08-10-asterion-prime-verified-loop.md` | `Verified-loop`, including bounded Prime/RLM child work, portfolio invocation, detach/attach, checkpoint/recovery, cancellation, budget, redaction and fault injection | 8–14 engineer-weeks; RPC extension points and crash windows |
 | 2 — Prime system parity | Create from the pinned parity ledger after Phase 1 | No missing mandatory pinned Prime feature and passing `Verified-system-parity` | 3–6 engineer-months; interface/ecosystem breadth |
 | 3 — Native long-running kernel | Create after Phase 1 supplies a stable differential oracle | Native provider passes the common verified-loop suite and foundational parity domains | 5–9 engineer-months; persistent kernel and recursive consistency |
 | 4 — Native full parity | Create from the same closed ledger after Phase 3 | No missing mandatory scenario and passing `Verified-native-parity` | 3–7 engineer-months; long-tail ecosystem and governance |
@@ -44,11 +44,11 @@
 - Produces immutable system resolution, authority/admission, journal, state reducer, provider registry, conformance harness and safe Pathlight projection.
 - Does not contact Prime, a model provider or an application runtime.
 
-- [ ] **Step 1: Execute the detailed Phase 0 plan task-by-task**
+- [x] **Step 1: Execute the detailed Phase 0 plan task-by-task**
 
 Run every focused RED/GREEN command and commit boundary named in the detailed plan.
 
-- [ ] **Step 2: Run the Phase 0 exit gate**
+- [x] **Step 2: Run the Phase 0 exit gate**
 
 Run:
 
@@ -64,7 +64,7 @@ make check
 
 Expected: all commands PASS provider-free. The fake provider scenario includes contiguous replay, one terminal event, pause/resume, recoverable fault, rejected unauthorized action, budget-limited behavior and sentinel redaction.
 
-- [ ] **Step 3: Record the evidence level honestly**
+- [x] **Step 3: Record the evidence level honestly**
 
 Record `control-plane-foundation: PASS`. Do not record `Verified-loop`, `Verified-system-parity`, `Verified-native-parity` or full Prime parity.
 
@@ -83,17 +83,22 @@ Record `control-plane-foundation: PASS`. Do not record `Verified-loop`, `Verifie
 - Uses Prime public RPC with exact distribution version/digest and explicit feature negotiation.
 - Produces `Verified-loop` evidence only after provider-free and bounded provider-backed commands pass.
 
-- [ ] **Step 1: Inventory and lock the public Prime RPC boundary**
+- [x] **Step 1: Inventory and lock the public Prime RPC boundary**
 
 Map every required Phase 1 operation to a documented RPC request/event, pin the exact Prime artifact and digest, and fail preflight on any missing capability. Keep RPC request IDs, Prime active-session IDs and Asterion session IDs distinct.
 
-- [ ] **Step 2: Write the detailed Phase 1 plan**
+- [x] **Step 2: Write the detailed Phase 1 plan**
 
 The plan must cover gateway process hygiene, authenticated session-private bridge, action admission, application receipts, RLM children, goal/autonomous continuation, cursor replay/resync, capsule sealing, crash-window reconciliation, cancellation cascade, finite budgets, redaction and Pathlight causality.
 
 - [ ] **Step 3: Implement through the common provider conformance suite**
 
 Start with a deterministic fake Prime RPC process, then the pinned local Prime build, then bounded model-backed verification. Every external-effect crash point must result in a proven receipt or `uncertain`.
+
+Provider-free implementation and real-process fault coverage are complete. The
+pinned local Prime preflight is currently `External-limited` on Node 23.11.0;
+the approved compatibility boundary is Node 22.8.0 through 22.x. Bounded
+model-backed verification remains unrun and this step therefore remains open.
 
 - [ ] **Step 4: Run and publish the Verified-loop gate**
 
