@@ -51,6 +51,7 @@ from asterion.control.providers.prime.process import (
 from asterion.control.providers.prime.system_actions import PrimeSystemActionService
 from asterion.control.system import AgentSystemPlan, resolve_agent_system
 from asterion.control.providers.prime.parity_testing import (
+    PRIME_SESSION_CONTEXT_SCENARIO_IDS,
     PROVEN_PHASE1_PARITY_SCENARIO_IDS,
     register_proven_phase1_prime_subset,
 )
@@ -1391,6 +1392,15 @@ class TestPrimeProviderFreeVerifiedLoop(unittest.TestCase):
             registry,
             results,
             provider_factory=lambda: object(),
+        )
+        self.assertEqual(
+            registry.registered_scenario_ids,
+            PROVEN_PHASE1_PARITY_SCENARIO_IDS,
+        )
+        self.assertTrue(
+            set(registry.registered_scenario_ids).isdisjoint(
+                PRIME_SESSION_CONTEXT_SCENARIO_IDS
+            )
         )
         parity_report = asyncio.run(
             registry.run(PROVEN_PHASE1_PARITY_SCENARIO_IDS)

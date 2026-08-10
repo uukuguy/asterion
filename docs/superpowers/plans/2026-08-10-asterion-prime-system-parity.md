@@ -366,19 +366,17 @@ git commit -m "test: register prime parity scenarios"
 
 ### Task 4: Deliver session and context parity
 
-**Status:** In progress. The approved code-level subplan and closed
-`asterion.session-context/v1` contract plus selected-provider binding are
-complete, including host authority, journal and recovery management; Task 4.4
-sidecar IPC and durable session-context storage plus Task 4.5 exact daemon
-session/context admission and Task 4.6 safe identity/status projection are
-verified. Task 4.7 exact resume and bounded deletion and Task 4.8 closed tree
-projection, navigation, fork/clone identity replacement and crash recovery are
-also verified. Task 4.9 private rich attachments, stable delivery replay,
-legacy upgrade fencing and public redaction are verified; Task 4.10 labels and
-bounded model operations is provider-free verified, including durable model
-baselines, cancellation, restart and recovery fencing. The bounded-provider
-evidence remains external-limited because no finite model budget was
-authorized; Task 4.11 exact scenario registration is next.
+**Status:** Provider-free session/context parity complete. The closed
+`asterion.session-context/v1` contract, selected-provider binding, host
+authority, journal/recovery management, sidecar IPC, exact daemon admission,
+identity/status projection, resume/delete, tree navigation, fork/clone,
+private rich attachments, labels and admitted model-operation implementation
+are verified. All nine exact scenarios are registered; seven real Prime
+provider-free features have one-to-one evidence, while branch summary and
+compaction remain honestly `external-limited` because no finite model budget
+was authorized. Full cross-language, packaging and promotion gates plus
+independent review pass. Work can now advance to the next parity domain without
+weakening the two bounded blockers.
 
 **Files:**
 - Create before implementation: `docs/superpowers/plans/2026-08-10-asterion-prime-session-context-parity.md`

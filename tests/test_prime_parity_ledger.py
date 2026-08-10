@@ -106,7 +106,19 @@ EXPECTED_EXCLUDED_FEATURE_IDS = (
 EXPECTED_IMPLEMENTED_PRIME_FEATURE_IDS = (
     "operation.detach-attach-replay",
     "operation.goals",
+)
+EXPECTED_PROVIDER_FREE_PRIME_FEATURE_IDS = (
     "session.delivery",
+    "session.fork-clone",
+    "session.persistence-naming",
+    "session.resume-delete",
+    "session.rich-attachments",
+    "session.tree-navigation",
+    "session.usage-status",
+)
+EXPECTED_EXTERNAL_LIMITED_PRIME_FEATURE_IDS = (
+    "session.branch-summaries-labels",
+    "session.compaction",
 )
 
 
@@ -444,7 +456,11 @@ class TestPrimeParityLedger(unittest.TestCase):
                     expected,
                 )
 
-        implemented_prime: list[str] = []
+        prime_features_by_status: dict[str, list[str]] = {
+            "external-limited": [],
+            "implemented": [],
+            "provider-free-pass": [],
+        }
         for feature_id in mandatory:
             feature = feature_by_id[feature_id]
             results = feature["provider_results"]
@@ -456,11 +472,23 @@ class TestPrimeParityLedger(unittest.TestCase):
             }
             self.assertEqual(result_by_provider["asterion.native"]["status"], "missing")
             prime_status = result_by_provider["asterion.prime-gateway"]["status"]
-            if prime_status == "implemented":
-                implemented_prime.append(feature_id)
-            else:
+            if prime_status == "missing":
                 self.assertEqual(prime_status, "missing")
-        self.assertEqual(tuple(implemented_prime), EXPECTED_IMPLEMENTED_PRIME_FEATURE_IDS)
+            else:
+                self.assertIn(prime_status, prime_features_by_status)
+                prime_features_by_status[str(prime_status)].append(feature_id)
+        self.assertEqual(
+            tuple(prime_features_by_status["implemented"]),
+            EXPECTED_IMPLEMENTED_PRIME_FEATURE_IDS,
+        )
+        self.assertEqual(
+            tuple(prime_features_by_status["provider-free-pass"]),
+            EXPECTED_PROVIDER_FREE_PRIME_FEATURE_IDS,
+        )
+        self.assertEqual(
+            tuple(prime_features_by_status["external-limited"]),
+            EXPECTED_EXTERNAL_LIMITED_PRIME_FEATURE_IDS,
+        )
 
         index = json.loads(
             (FIXTURES / "feature-index.json").read_text(encoding="utf-8")

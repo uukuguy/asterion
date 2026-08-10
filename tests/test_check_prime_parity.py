@@ -75,9 +75,10 @@ class TestCheckPrimeParity(unittest.TestCase):
         report = json.loads(rendered)
         self.assertEqual(exit_code, 1)
         self.assertEqual(report["status"], "BLOCKED")
-        self.assertEqual(report["blocking_feature_count"], 61)
-        self.assertEqual(len(report["blocking_feature_ids"]), 61)
-        self.assertEqual(report["passed_feature_count"], 0)
+        self.assertEqual(report["blocking_feature_count"], 54)
+        self.assertEqual(len(report["blocking_feature_ids"]), 54)
+        self.assertEqual(report["passed_feature_count"], 7)
+        self.assertIn("result-external-limited", report["reason_codes"])
         self.assertNotIn("prime_evidence", rendered)
         self.assertNotIn("anchors", rendered)
         self.assertNotIn(str(ROOT), rendered)
@@ -101,8 +102,13 @@ class TestCheckPrimeParity(unittest.TestCase):
         self.assertEqual(report["selection_kind"], "domain")
         self.assertEqual(report["selection_id"], "session.context")
         self.assertEqual(report["selected_feature_count"], 9)
-        self.assertEqual(report["blocking_feature_count"], 9)
-        self.assertEqual(report["passed_feature_count"], 0)
+        self.assertEqual(report["blocking_feature_count"], 2)
+        self.assertEqual(
+            report["blocking_feature_ids"],
+            ["session.branch-summaries-labels", "session.compaction"],
+        )
+        self.assertEqual(report["passed_feature_count"], 7)
+        self.assertEqual(report["reason_codes"], ["result-external-limited"])
         self.assertEqual(report["status"], "BLOCKED")
 
     def test_feature_report_canonicalizes_explicit_selection_without_passing(
@@ -131,6 +137,7 @@ class TestCheckPrimeParity(unittest.TestCase):
         )
         self.assertEqual(report["blocking_feature_count"], 2)
         self.assertEqual(report["passed_feature_count"], 0)
+        self.assertEqual(report["reason_codes"], ["result-implemented"])
 
     def test_invalid_feature_selection_returns_one_fixed_redacted_object(self) -> None:
         output = io.StringIO()

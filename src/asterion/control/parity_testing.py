@@ -79,6 +79,8 @@ class ParityScenarioRunner:
     provider_id: str
     boundary: str
     feature_ids: tuple[str, ...]
+    assertion_ids: tuple[str, ...]
+    fault_ids: tuple[str, ...]
     provider_factory: ParityProviderFactory
     clock: ParityClock
     private_fixture_store: ParityPrivateFixtureStore
@@ -168,6 +170,9 @@ class ParityScenarioRegistry:
             if (
                 runner.boundary != contract.get("boundary")
                 or runner.feature_ids != _string_sequence(contract.get("feature_ids"))
+                or runner.assertion_ids
+                != _string_sequence(contract.get("assertion_ids"))
+                or runner.fault_ids != _string_sequence(contract.get("fault_ids"))
                 or not callable(runner.provider_factory)
                 or not callable(runner.executor)
                 or runner.clock.deterministic is not True

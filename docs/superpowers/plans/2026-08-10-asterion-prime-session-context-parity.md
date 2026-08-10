@@ -712,6 +712,14 @@ If no budget is authorized, make only the first commit and retain
 
 ### Task 4.11: Register exact scenarios and promote only exact evidence
 
+**Status:** Verified. All nine exact runners are registered with assertion and
+fault matrices bound to the ledger. The locked real Prime daemon and upstream
+queue/image code path verify seven provider-free features under a closed HOME
+with zero credential reads and provider operations. Each feature has one exact
+evidence record bound to the source lock and executable named command. Branch
+summary and compaction remain honestly `external-limited` because no finite
+model authority was granted.
+
 **Modify:**
 
 - `tests/fixtures/prime-parity/v1/prime-agent-0.7.1.json`
@@ -759,6 +767,13 @@ in the full-system claim.
 Commit: `test: verify prime session context parity`.
 
 ### Task 4.12: Full verification and independent review
+
+**Status:** Complete for the provider-free boundary. The named cross-language
+gate, full Python suite, lint, docs, Pyright, Rust tests/fmt/clippy, package
+build and isolated promotion check pass with zero provider operations. The
+independent review found no Critical, Important or Minor issues. The domain
+claim intentionally remains blocked only by the two unauthorized bounded
+model scenarios.
 
 Run from a clean worktree except durable status files and explicitly unrelated
 user changes:

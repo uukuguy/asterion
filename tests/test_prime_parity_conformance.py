@@ -34,6 +34,20 @@ PROVIDER_ID = "asterion.prime-gateway"
 SCENARIO_ID = "prime-parity.session.delivery"
 FEATURE_IDS = ("session.delivery",)
 BOUNDARY = "real-prime-provider-free"
+ASSERTION_IDS = (
+    "cancel-before-ownership",
+    "direct-idle-ownership",
+    "follow-up-next-turn",
+    "input-id-exactly-once",
+    "steer-current-turn",
+)
+FAULT_IDS = (
+    "cancel-before-ownership",
+    "replay-direct",
+    "replay-follow-up",
+    "replay-steer",
+    "restart-after-admission",
+)
 
 
 def _ledger():
@@ -124,6 +138,8 @@ def _runner(
     provider_id: str = PROVIDER_ID,
     boundary: str = BOUNDARY,
     feature_ids: tuple[str, ...] = FEATURE_IDS,
+    assertion_ids: tuple[str, ...] = ASSERTION_IDS,
+    fault_ids: tuple[str, ...] = FAULT_IDS,
     clock: _Clock | None = None,
     private_fixture_store: _PrivateFixtureStore | None = None,
     executor=_passing_executor,
@@ -133,6 +149,8 @@ def _runner(
         provider_id=provider_id,
         boundary=boundary,
         feature_ids=feature_ids,
+        assertion_ids=assertion_ids,
+        fault_ids=fault_ids,
         provider_factory=lambda: object(),
         clock=clock or _Clock(),
         private_fixture_store=private_fixture_store or _PrivateFixtureStore(),
@@ -199,6 +217,16 @@ class TestPrimeParityConformance(unittest.TestCase):
                 "coverage",
                 SCENARIO_ID,
                 _runner(feature_ids=("operation.goals",)),
+            ),
+            (
+                "assertions",
+                SCENARIO_ID,
+                _runner(assertion_ids=("feature-reachable",)),
+            ),
+            (
+                "faults",
+                SCENARIO_ID,
+                _runner(fault_ids=("restart-after-admission",)),
             ),
             ("clock", SCENARIO_ID, _runner(clock=_Clock(deterministic=False))),
         )

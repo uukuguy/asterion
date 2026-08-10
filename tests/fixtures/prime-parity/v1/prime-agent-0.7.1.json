@@ -1816,8 +1816,10 @@
         },
         {
           "provider_id": "asterion.prime-gateway",
-          "status": "missing",
-          "evidence_ids": []
+          "status": "external-limited",
+          "evidence_ids": [
+            "evidence.session-context.4d080fc940d93170f2af41b5d5d62aa01f92ed79871554c99885128b86773c34"
+          ]
         }
       ]
     },
@@ -1848,8 +1850,10 @@
         },
         {
           "provider_id": "asterion.prime-gateway",
-          "status": "missing",
-          "evidence_ids": []
+          "status": "external-limited",
+          "evidence_ids": [
+            "evidence.session-context.8930af27f2b3c2162f8fdf89fbd2deb0942142d87a06ad8a9b75ae14305f5324"
+          ]
         }
       ]
     },
@@ -1880,8 +1884,10 @@
         },
         {
           "provider_id": "asterion.prime-gateway",
-          "status": "implemented",
-          "evidence_ids": []
+          "status": "provider-free-pass",
+          "evidence_ids": [
+            "evidence.session-context.92b0a4566c4f4e227bc95a257a52284dea5f1fa1e4d7a5861478cdd375e29594"
+          ]
         }
       ]
     },
@@ -1913,8 +1919,10 @@
         },
         {
           "provider_id": "asterion.prime-gateway",
-          "status": "missing",
-          "evidence_ids": []
+          "status": "provider-free-pass",
+          "evidence_ids": [
+            "evidence.session-context.9ffa446c2d82d8a867db1ceb1f01a08624c007567d91e1ccf829d43b25b65c6f"
+          ]
         }
       ]
     },
@@ -1945,8 +1953,10 @@
         },
         {
           "provider_id": "asterion.prime-gateway",
-          "status": "missing",
-          "evidence_ids": []
+          "status": "provider-free-pass",
+          "evidence_ids": [
+            "evidence.session-context.e986e49fa3e95c1526678bcafdb39b9dbb4b21c1eab3e30a6009a9ccb2e73dcf"
+          ]
         }
       ]
     },
@@ -1983,8 +1993,10 @@
         },
         {
           "provider_id": "asterion.prime-gateway",
-          "status": "missing",
-          "evidence_ids": []
+          "status": "provider-free-pass",
+          "evidence_ids": [
+            "evidence.session-context.ea9c17afed272522e61a1cd1a64958b31af57b3ebc8707a3968143b33cb0d0b0"
+          ]
         }
       ]
     },
@@ -2015,8 +2027,10 @@
         },
         {
           "provider_id": "asterion.prime-gateway",
-          "status": "missing",
-          "evidence_ids": []
+          "status": "provider-free-pass",
+          "evidence_ids": [
+            "evidence.session-context.de89161f1c7d37aaa1428943031cdce06f790ff49a124f8e576c4f2695ee9344"
+          ]
         }
       ]
     },
@@ -2047,8 +2061,10 @@
         },
         {
           "provider_id": "asterion.prime-gateway",
-          "status": "missing",
-          "evidence_ids": []
+          "status": "provider-free-pass",
+          "evidence_ids": [
+            "evidence.session-context.2895fa0c8b4fc122855e001a92defd1c98f0500139209b727387cf05a40d536c"
+          ]
         }
       ]
     },
@@ -2079,8 +2095,10 @@
         },
         {
           "provider_id": "asterion.prime-gateway",
-          "status": "missing",
-          "evidence_ids": []
+          "status": "provider-free-pass",
+          "evidence_ids": [
+            "evidence.session-context.134e44871b115fb0571ef011ee4a1d840bfe0e6ef71cfbb6afc400d4e16f9315"
+          ]
         }
       ]
     }
@@ -2978,13 +2996,17 @@
       "boundary": "bounded-provider",
       "deterministic": true,
       "fault_ids": [
-        "restart-after-admission"
+        "cancel-during-summary",
+        "label-replay-conflict",
+        "restart-after-summary-result",
+        "restart-before-summary-result",
+        "stale-entry"
       ],
       "assertion_ids": [
-        "authority-preserved",
-        "feature-reachable",
-        "identity-stable",
-        "public-redacted"
+        "branch-identity-retained",
+        "label-set-clear-exact-entry",
+        "summary-admitted-budgeted",
+        "summary-label-text-private"
       ]
     },
     {
@@ -2995,13 +3017,17 @@
       "boundary": "bounded-provider",
       "deterministic": true,
       "fault_ids": [
-        "restart-after-admission"
+        "bounded-provider-failure",
+        "cancel-during-compaction",
+        "restart-after-compaction-result",
+        "restart-before-compaction-result"
       ],
       "assertion_ids": [
-        "authority-preserved",
-        "feature-reachable",
-        "identity-stable",
-        "public-redacted"
+        "auto-compaction-disabled",
+        "budget-admitted-before-model-call",
+        "context-usage-monotonic",
+        "private-summary",
+        "resumable-compacted-context"
       ]
     },
     {
@@ -3012,13 +3038,18 @@
       "boundary": "real-prime-provider-free",
       "deterministic": true,
       "fault_ids": [
+        "cancel-before-ownership",
+        "replay-direct",
+        "replay-follow-up",
+        "replay-steer",
         "restart-after-admission"
       ],
       "assertion_ids": [
-        "authority-preserved",
-        "feature-reachable",
-        "identity-stable",
-        "public-redacted"
+        "cancel-before-ownership",
+        "direct-idle-ownership",
+        "follow-up-next-turn",
+        "input-id-exactly-once",
+        "steer-current-turn"
       ]
     },
     {
@@ -3029,13 +3060,18 @@
       "boundary": "real-prime-provider-free",
       "deterministic": true,
       "fault_ids": [
-        "restart-after-admission"
+        "missing-leaf",
+        "response-binding-conflict",
+        "restart-after-clone-binding",
+        "restart-after-clone-result",
+        "restart-after-fork-binding",
+        "restart-after-fork-result"
       ],
       "assertion_ids": [
-        "authority-preserved",
-        "feature-reachable",
-        "identity-stable",
-        "public-redacted"
+        "clone-equals-leaf-fork-at",
+        "fork-requested-entry",
+        "new-binding-atomically-committed",
+        "source-remains-resumable"
       ]
     },
     {
@@ -3046,13 +3082,14 @@
       "boundary": "real-prime-provider-free",
       "deterministic": true,
       "fault_ids": [
-        "restart-after-admission"
+        "conflicting-rename-replay",
+        "restart-after-daemon-result-before-commit"
       ],
       "assertion_ids": [
-        "authority-preserved",
-        "feature-reachable",
-        "identity-stable",
-        "public-redacted"
+        "active-transcript-continuation-identities-separated",
+        "duplicate-rename-idempotent",
+        "name-persists-detach-restart",
+        "public-name-digest-only"
       ]
     },
     {
@@ -3063,13 +3100,16 @@
       "boundary": "real-prime-provider-free",
       "deterministic": true,
       "fault_ids": [
-        "restart-after-admission"
+        "delete-after-side-effect-before-commit",
+        "restart-after-switch",
+        "selector-swap",
+        "symlink-replacement"
       ],
       "assertion_ids": [
-        "authority-preserved",
-        "feature-reachable",
-        "identity-stable",
-        "public-redacted"
+        "active-continuation-delete-rejected",
+        "exact-continuation-resumed",
+        "inactive-exact-artifact-deleted",
+        "public-paths-absent"
       ]
     },
     {
@@ -3080,13 +3120,18 @@
       "boundary": "real-prime-provider-free",
       "deterministic": true,
       "fault_ids": [
-        "restart-after-admission"
+        "body-swap",
+        "digest-mismatch",
+        "media-mismatch",
+        "restart-after-attachment-bind",
+        "restart-after-prompt-admission",
+        "size-mismatch"
       ],
       "assertion_ids": [
-        "authority-preserved",
-        "feature-reachable",
-        "identity-stable",
-        "public-redacted"
+        "attachment-causal-to-exact-input",
+        "body-private",
+        "prime-receives-verified-bytes-once",
+        "typed-digest-size-projection"
       ]
     },
     {
@@ -3097,13 +3142,15 @@
       "boundary": "real-prime-provider-free",
       "deterministic": true,
       "fault_ids": [
-        "restart-after-admission"
+        "foreign-entry-id",
+        "restart-after-navigation",
+        "stale-continuation"
       ],
       "assertion_ids": [
-        "authority-preserved",
-        "feature-reachable",
-        "identity-stable",
-        "public-redacted"
+        "canonical-topology-projected",
+        "deterministic-active-leaf",
+        "exact-entry-scope",
+        "raw-message-label-absent"
       ]
     },
     {
@@ -3114,15 +3161,145 @@
       "boundary": "real-prime-provider-free",
       "deterministic": true,
       "fault_ids": [
-        "restart-after-admission"
+        "malformed-stats",
+        "overflow-stats",
+        "restart-during-read",
+        "stale-generation"
       ],
       "assertion_ids": [
-        "authority-preserved",
-        "feature-reachable",
-        "identity-stable",
-        "public-redacted"
+        "current-identity",
+        "nonnegative-monotonic-counts",
+        "private-provider-fields-absent",
+        "safe-status-vocabulary"
       ]
     }
   ],
-  "evidence": []
+  "evidence": [
+    {
+      "evidence_id": "evidence.session-context.134e44871b115fb0571ef011ee4a1d840bfe0e6ef71cfbb6afc400d4e16f9315",
+      "provider_id": "asterion.prime-gateway",
+      "boundary": "real-prime-provider-free",
+      "status": "pass",
+      "command_id": "test.prime-session-context-parity.provider-free",
+      "baseline_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
+      "feature_ids": [
+        "session.usage-status"
+      ],
+      "scenario_ids": [
+        "prime-parity.session.usage-status"
+      ]
+    },
+    {
+      "evidence_id": "evidence.session-context.2895fa0c8b4fc122855e001a92defd1c98f0500139209b727387cf05a40d536c",
+      "provider_id": "asterion.prime-gateway",
+      "boundary": "real-prime-provider-free",
+      "status": "pass",
+      "command_id": "test.prime-session-context-parity.provider-free",
+      "baseline_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
+      "feature_ids": [
+        "session.tree-navigation"
+      ],
+      "scenario_ids": [
+        "prime-parity.session.tree-navigation"
+      ]
+    },
+    {
+      "evidence_id": "evidence.session-context.4d080fc940d93170f2af41b5d5d62aa01f92ed79871554c99885128b86773c34",
+      "provider_id": "asterion.prime-gateway",
+      "boundary": "bounded-provider",
+      "status": "external-limited",
+      "command_id": "test.prime-session-context-parity.provider-free",
+      "baseline_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
+      "feature_ids": [
+        "session.branch-summaries-labels"
+      ],
+      "scenario_ids": [
+        "prime-parity.session.branch-summaries-labels"
+      ]
+    },
+    {
+      "evidence_id": "evidence.session-context.8930af27f2b3c2162f8fdf89fbd2deb0942142d87a06ad8a9b75ae14305f5324",
+      "provider_id": "asterion.prime-gateway",
+      "boundary": "bounded-provider",
+      "status": "external-limited",
+      "command_id": "test.prime-session-context-parity.provider-free",
+      "baseline_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
+      "feature_ids": [
+        "session.compaction"
+      ],
+      "scenario_ids": [
+        "prime-parity.session.compaction"
+      ]
+    },
+    {
+      "evidence_id": "evidence.session-context.92b0a4566c4f4e227bc95a257a52284dea5f1fa1e4d7a5861478cdd375e29594",
+      "provider_id": "asterion.prime-gateway",
+      "boundary": "real-prime-provider-free",
+      "status": "pass",
+      "command_id": "test.prime-session-context-parity.provider-free",
+      "baseline_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
+      "feature_ids": [
+        "session.delivery"
+      ],
+      "scenario_ids": [
+        "prime-parity.session.delivery"
+      ]
+    },
+    {
+      "evidence_id": "evidence.session-context.9ffa446c2d82d8a867db1ceb1f01a08624c007567d91e1ccf829d43b25b65c6f",
+      "provider_id": "asterion.prime-gateway",
+      "boundary": "real-prime-provider-free",
+      "status": "pass",
+      "command_id": "test.prime-session-context-parity.provider-free",
+      "baseline_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
+      "feature_ids": [
+        "session.fork-clone"
+      ],
+      "scenario_ids": [
+        "prime-parity.session.fork-clone"
+      ]
+    },
+    {
+      "evidence_id": "evidence.session-context.de89161f1c7d37aaa1428943031cdce06f790ff49a124f8e576c4f2695ee9344",
+      "provider_id": "asterion.prime-gateway",
+      "boundary": "real-prime-provider-free",
+      "status": "pass",
+      "command_id": "test.prime-session-context-parity.provider-free",
+      "baseline_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
+      "feature_ids": [
+        "session.rich-attachments"
+      ],
+      "scenario_ids": [
+        "prime-parity.session.rich-attachments"
+      ]
+    },
+    {
+      "evidence_id": "evidence.session-context.e986e49fa3e95c1526678bcafdb39b9dbb4b21c1eab3e30a6009a9ccb2e73dcf",
+      "provider_id": "asterion.prime-gateway",
+      "boundary": "real-prime-provider-free",
+      "status": "pass",
+      "command_id": "test.prime-session-context-parity.provider-free",
+      "baseline_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
+      "feature_ids": [
+        "session.persistence-naming"
+      ],
+      "scenario_ids": [
+        "prime-parity.session.persistence-naming"
+      ]
+    },
+    {
+      "evidence_id": "evidence.session-context.ea9c17afed272522e61a1cd1a64958b31af57b3ebc8707a3968143b33cb0d0b0",
+      "provider_id": "asterion.prime-gateway",
+      "boundary": "real-prime-provider-free",
+      "status": "pass",
+      "command_id": "test.prime-session-context-parity.provider-free",
+      "baseline_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
+      "feature_ids": [
+        "session.resume-delete"
+      ],
+      "scenario_ids": [
+        "prime-parity.session.resume-delete"
+      ]
+    }
+  ]
 }

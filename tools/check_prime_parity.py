@@ -275,6 +275,18 @@ def _feature_claim_report(
     )
     if len(passed) + len(blocking) != len(selected):
         raise PrimeParitySelectionError("Prime parity selection is invalid")
+    blocking_statuses: set[str] = set()
+    for feature_id in blocking:
+        provider_results = tuple(
+            result
+            for result in _mapping_sequence(
+                mandatory[feature_id].get("provider_results")
+            )
+            if result.get("provider_id") == provider_id
+        )
+        if len(provider_results) != 1:
+            raise PrimeParitySelectionError("Prime parity selection is invalid")
+        blocking_statuses.add(str(provider_results[0]["status"]))
     status = "PASS" if not blocking else "BLOCKED"
     report: dict[str, object] = {
         "application_operations": 0,
@@ -283,7 +295,10 @@ def _feature_claim_report(
         "claim": "feature-parity",
         "passed_feature_count": len(passed),
         "provider_operations": 0,
-        "reason_codes": decision.reason_codes if blocking else (),
+        "reason_codes": tuple(
+            f"result-{result_status}"
+            for result_status in sorted(blocking_statuses)
+        ),
         "selected_feature_count": len(selected),
         "selected_feature_ids": selected,
         "selection_kind": selection_kind,
