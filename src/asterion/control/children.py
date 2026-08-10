@@ -7,7 +7,6 @@ import json
 import os
 import stat
 import asyncio
-import inspect
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,6 +55,14 @@ class DeriveControlOptions(Protocol):
         child_authority: AuthorityEnvelope,
         generation: int,
     ) -> Mapping[str, str]: ...
+
+
+class ChildActionExecutorFactory(Protocol):
+    """Build a child executor with its exact nested lifecycle boundary."""
+
+    def __call__(
+        self, authority: AuthorityEnvelope, children: "ChildSessionService"
+    ) -> ActionExecutor: ...
 
 
 @dataclass(frozen=True, repr=False)
@@ -269,7 +276,7 @@ class ChildSessionService:
         control_factories: ControlPlaneFactoryRegistry,
         private_root: Path,
         content: PrivateContentResolver,
-        child_action_executor_factory: Callable[..., ActionExecutor],
+        child_action_executor_factory: ChildActionExecutorFactory,
         clock_ms: Callable[[], int],
         control_options: Mapping[str, str] = {},
         derive_control_options: DeriveControlOptions | None = None,
@@ -471,6 +478,8 @@ class ChildSessionService:
         """Run one fenced child to a terminal state and close its provider."""
 
         runtime: _ChildRuntime | None = None
+        nested_children: ChildSessionService | None = None
+        journal: FileCanonicalJournal | None = None
         fenced = False
         try:
             options: Mapping[str, str] = self._control_options
@@ -495,11 +504,6 @@ class ChildSessionService:
                 self._plan.control_binding.control_plane_id,
                 self._plan.control_binding.version,
             ).factory
-            self.persist_phase(child_root=root, phase="provider-create-started")
-            fenced = True
-            client = factory(context)
-            runtime = _ChildRuntime(client=client)
-            await self._attach_runtime(binding.child_id, runtime)
             nested_children = ChildSessionService(
                 plan=self._plan,
                 authority=authority,
@@ -513,19 +517,26 @@ class ChildSessionService:
                 host_services=self._host_services,
                 _private_root_fd=root.fd,
             )
-            executor = self._build_executor(authority, nested_children)
+            executor = self._executor_factory(authority, nested_children)
+            journal = FileCanonicalJournal.open_at(root.fd, root.path, binding.session_id)
+            self.persist_phase(child_root=root, phase="provider-create-started")
+            fenced = True
+            client = factory(context)
+            runtime = _ChildRuntime(client=client)
+            await self._attach_runtime(binding.child_id, runtime)
             host = ControlHost(
                 session_id=binding.session_id,
                 generation=binding.generation,
                 plan=self._plan,
                 authority=AuthorityLedger(authority),
-                journal=FileCanonicalJournal.open_at(root.fd, root.path, binding.session_id),
+                journal=journal,
                 client=client,
                 action_executor=executor,
                 clock_ms=self._clock_ms,
                 cancellation_signal=signal,
                 child_service=nested_children,
             )
+            journal = None
             runtime.host = host
             await self._mark_running(binding)
             await host.dispatch(
@@ -577,9 +588,16 @@ class ChildSessionService:
             await self._finish_known(binding, "completed", receipt.receipt_ref)
             return receipt
         except asyncio.CancelledError:
+            if journal is not None:
+                journal.close()
             if runtime is not None:
                 try:
                     await _close_runtime(runtime)
+                except Exception:
+                    pass
+            elif nested_children is not None:
+                try:
+                    await nested_children.close()
                 except Exception:
                     pass
             async with self._lock:
@@ -592,14 +610,30 @@ class ChildSessionService:
                 "cancelled", "child-close-cancelled", None
             ) from None
         except ActionExecutionFailure:
+            if journal is not None:
+                journal.close()
             raise
         except Exception:
             if not fenced and runtime is None:
+                if journal is not None:
+                    journal.close()
+                if nested_children is not None:
+                    try:
+                        await nested_children.close()
+                    except Exception:
+                        pass
                 await self._finish_known(binding, "failed")
                 raise ChildSessionError("child construction is unavailable") from None
+            if journal is not None:
+                journal.close()
             if runtime is not None:
                 try:
                     await _close_runtime(runtime)
+                except Exception:
+                    pass
+            elif nested_children is not None:
+                try:
+                    await nested_children.close()
                 except Exception:
                     pass
             async with self._lock:
@@ -618,19 +652,6 @@ class ChildSessionService:
             if entry is None or self._closing or self._closed:
                 raise RuntimeError("child registry is unavailable")
             entry.runtime = runtime
-
-    def _build_executor(
-        self, authority: AuthorityEnvelope, children: ChildSessionService
-    ) -> ActionExecutor:
-        """Inject the exact nested lifecycle service without requiring a new API."""
-
-        try:
-            parameters = inspect.signature(self._executor_factory).parameters
-        except (TypeError, ValueError):
-            parameters = {}
-        if len(parameters) >= 2:
-            return self._executor_factory(authority, children)
-        return self._executor_factory(authority)
 
     async def _mark_running(self, binding: ChildSessionBinding) -> None:
         async with self._lock:

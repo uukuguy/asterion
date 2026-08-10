@@ -389,7 +389,7 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 plan=_plan(root), authority=_child_envelope(),
                 control_factories=_registry(audit, clients), private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
                 clock_ms=lambda: 1_000,
             )
             first = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
@@ -410,7 +410,7 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 plan=_plan(root), authority=_child_envelope(),
                 control_factories=_registry([], []), private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority: ChildWorkExecutor([]),
+                child_action_executor_factory=lambda authority, children: ChildWorkExecutor([]),
                 clock_ms=lambda: 1_000,
             )
             first = asyncio.create_task(service.close())
@@ -459,7 +459,7 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 plan=_plan(root), authority=_child_envelope(),
                 control_factories=_registry(audit, clients), private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority: BlockingExecutor(audit),
+                child_action_executor_factory=lambda authority, children: BlockingExecutor(audit),
                 clock_ms=lambda: 1_000,
             )
             task = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
@@ -488,7 +488,7 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 plan=_plan(Path(directory)), authority=_child_envelope(),
                 control_factories=_registry(audit, clients), private_root=Path(directory),
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
                 clock_ms=lambda: 1_000,
             )
             signal = MutableSignal()
@@ -518,7 +518,7 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                     plan=_plan(Path(directory)), authority=_child_envelope(),
                     control_factories=_registry([], []), private_root=Path(directory),
                     content=RecordingResolver(),
-                    child_action_executor_factory=lambda authority: ChildWorkExecutor([]),
+                    child_action_executor_factory=lambda authority, children: ChildWorkExecutor([]),
                     clock_ms=lambda: 1_000, control_options=HostileMapping(),
                 )
             self.assertNotIn(SENTINEL, str(raised.exception))
@@ -535,7 +535,7 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
                 clock_ms=lambda: 1_000,
             )
 
@@ -567,7 +567,7 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
                 clock_ms=lambda: 1_000,
             )
             proposal = _child_proposal()
@@ -581,7 +581,7 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
                 clock_ms=lambda: 1_000,
             )
             second = await reopened.spawn(proposal, MutableSignal())
@@ -627,7 +627,7 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
                 clock_ms=lambda: 1_000,
                 derive_control_options=derive_options,
             )
@@ -670,7 +670,7 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, []),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
                 clock_ms=lambda: 1_000,
             )
 
@@ -691,7 +691,7 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, [], factory_failure="known"),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
                 clock_ms=lambda: 1_000,
             )
 
@@ -704,30 +704,95 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             )
             self.assertNotIn(SENTINEL, repr(raised.exception))
 
-    async def test_post_fence_executor_factory_fault_closes_created_client_once(self) -> None:
+    async def test_derive_options_fault_is_known_pre_fence_and_redacted(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             audit: list[str] = []
-            clients: list[WaitingChildClient] = []
+
+            def derive_options(
+                base: Mapping[str, str],
+                *,
+                child_root: Path,
+                child_session_id: str,
+                child_authority: AuthorityEnvelope,
+                generation: int,
+            ) -> Mapping[str, str]:
+                del base, child_root, child_session_id, child_authority, generation
+                raise RuntimeError(SENTINEL)
+
             service = ChildSessionService(
                 plan=_plan(root),
                 authority=_child_envelope(),
-                control_factories=_registry(audit, clients),
+                control_factories=_registry(audit, []),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority: (_ for _ in ()).throw(
-                    RuntimeError("executor construction failed")
-                ),
+                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
+                clock_ms=lambda: 1_000,
+                derive_control_options=derive_options,
+            )
+
+            with self.assertRaises(ChildSessionError) as raised:
+                await service.spawn(_child_proposal(), MutableSignal())
+
+            self.assertEqual(audit, [])
+            self.assertNotIn(SENTINEL, str(raised.exception))
+            self.assertIsNone(ChildSessionService.load_phase(root / "children" / "child-1"))
+
+    async def test_registry_fault_is_known_pre_fence_and_writes_no_phase(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            service = ChildSessionService(
+                plan=_plan(root),
+                authority=_child_envelope(),
+                control_factories=ControlPlaneFactoryRegistry(()),
+                private_root=root,
+                content=RecordingResolver(),
+                child_action_executor_factory=lambda authority, children: ChildWorkExecutor([]),
                 clock_ms=lambda: 1_000,
             )
 
-            with self.assertRaises(ActionExecutionFailure) as raised:
+            with self.assertRaises(ChildSessionError):
                 await service.spawn(_child_proposal(), MutableSignal())
 
-            self.assertEqual(raised.exception.status, "uncertain")
+            self.assertEqual(service.active_ids, ())
+            self.assertIsNone(ChildSessionService.load_phase(root / "children" / "child-1"))
+
+    async def test_executor_factory_fault_is_known_pre_fence_and_retryable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audit: list[str] = []
+            fail = True
+
+            def executor_factory(
+                authority: AuthorityEnvelope, children: ChildSessionService
+            ) -> ChildWorkExecutor:
+                del authority, children
+                if fail:
+                    raise RuntimeError(f"{SENTINEL} executor")
+                return ChildWorkExecutor(audit)
+
+            service = ChildSessionService(
+                plan=_plan(root),
+                authority=_child_envelope(),
+                control_factories=_registry(audit, []),
+                private_root=root,
+                content=RecordingResolver(),
+                child_action_executor_factory=executor_factory,
+                clock_ms=lambda: 1_000,
+            )
+            proposal = _child_proposal()
+
+            with self.assertRaises(ChildSessionError) as raised:
+                await service.spawn(proposal, MutableSignal())
+            self.assertIsNone(ChildSessionService.load_phase(root / "children" / "child-1"))
+            self.assertEqual(audit.count("child.provider.create"), 0)
+            fail = False
+            receipt = await service.spawn(proposal, MutableSignal())
+
+            self.assertEqual(receipt.action_id, "spawn-action-1")
             self.assertEqual(audit.count("child.provider.create"), 1)
-            self.assertEqual(audit.count("child.close"), 1)
-            self.assertTrue(clients[0].closed)
+            self.assertNotIn(SENTINEL, str(raised.exception))
+            self.assertEqual(service.active_ids, ())
 
     async def test_missing_private_goal_is_a_known_pre_fence_failure(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -739,7 +804,7 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, []),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
                 clock_ms=lambda: 1_000,
             )
 
@@ -769,7 +834,7 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                         control_factories=_registry(audit, clients, terminal=terminal),
                         private_root=root,
                         content=RecordingResolver(),
-                        child_action_executor_factory=lambda authority: ChildWorkExecutor(audit),
+                        child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
                         clock_ms=lambda: 1_000,
                     )
                     with self.assertRaises(ActionExecutionFailure) as raised:
@@ -788,7 +853,7 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
                 clock_ms=lambda: 1_000,
             )
             proposal = _child_proposal()
@@ -820,7 +885,7 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority: BlockingExecutor(audit),
+                child_action_executor_factory=lambda authority, children: BlockingExecutor(audit),
                 clock_ms=lambda: 1_000,
             )
             first = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
@@ -850,7 +915,7 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority: BlockingExecutor(audit),
+                child_action_executor_factory=lambda authority, children: BlockingExecutor(audit),
                 clock_ms=lambda: 1_000,
             )
             spawn = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
@@ -923,7 +988,7 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients, close_fails=True),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority: BlockingExecutor(audit),
+                child_action_executor_factory=lambda authority, children: BlockingExecutor(audit),
                 clock_ms=lambda: 1_000,
             )
             task = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
@@ -993,7 +1058,7 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
                 clock_ms=lambda: 1_000,
             )
             proposal = _child_proposal()
@@ -1005,7 +1070,7 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
                 clock_ms=lambda: 1_000,
             )
             second = await reopened.spawn(proposal, MutableSignal())
@@ -1062,7 +1127,7 @@ class TestManagerChildIntegration(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
                 clock_ms=lambda: 1_000,
             )
             executor, _, _, _ = _application_executor(
@@ -1118,7 +1183,7 @@ class TestManagerChildIntegration(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority: BlockingExecutor(audit),
+                child_action_executor_factory=lambda authority, children: BlockingExecutor(audit),
                 clock_ms=lambda: 1_000,
             )
             task = asyncio.create_task(children.spawn(_child_proposal(), MutableSignal()))
