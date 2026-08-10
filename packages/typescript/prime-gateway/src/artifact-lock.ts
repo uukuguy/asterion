@@ -1,6 +1,6 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, readFile } from "node:fs/promises";
+import { lstat, readFile, realpath } from "node:fs/promises";
 import { isAbsolute, join, normalize, sep } from "node:path";
 import { promisify } from "node:util";
 
@@ -168,23 +168,6 @@ function verifyPackageIdentity(
   }
 }
 
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await lstat(path);
-    return true;
-  } catch (error) {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      error.code === "ENOENT"
-    ) {
-      return false;
-    }
-    incompatible();
-  }
-}
-
 async function readLockedFile(root: string, relativePath: string): Promise<Buffer> {
   const parts = relativePath.split("/");
   let target = root;
@@ -215,13 +198,24 @@ async function verifyGit(root: string, expectedCommit: string): Promise<void> {
     timeout: 10_000,
   };
   try {
+    const topLevel = await execFile(
+      "git",
+      ["rev-parse", "--show-toplevel"],
+      options,
+    );
     const status = await execFile(
       "git",
-      ["status", "--porcelain", "--untracked-files=no"],
+      ["status", "--porcelain", "--untracked-files=normal"],
       options,
     );
     const head = await execFile("git", ["rev-parse", "HEAD"], options);
-    if (status.stdout.length !== 0 || head.stdout.trim() !== expectedCommit) {
+    const topLevelPath = topLevel.stdout.trim();
+    if (
+      topLevelPath.length === 0 ||
+      (await realpath(topLevelPath)) !== (await realpath(root)) ||
+      status.stdout.length !== 0 ||
+      head.stdout.trim() !== expectedCommit
+    ) {
       incompatible();
     }
   } catch (error) {
@@ -272,9 +266,14 @@ export async function verifyPrimeArtifact(
       incompatible();
     }
     verifyPackageIdentity(packageLockBytes, codingPackageBytes, lock);
-    if (await pathExists(join(root, ".git"))) {
-      await verifyGit(root, lock.source_commit);
+    const gitMetadata = await lstat(join(root, ".git"));
+    if (
+      gitMetadata.isSymbolicLink() ||
+      (!gitMetadata.isDirectory() && !gitMetadata.isFile())
+    ) {
+      incompatible();
     }
+    await verifyGit(root, lock.source_commit);
     const fileDigests = Object.freeze({ ...lock.files });
     return Object.freeze({
       commit: lock.source_commit,

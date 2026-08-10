@@ -150,7 +150,7 @@ Use this lock content:
 }
 ```
 
-Read every file with `lstat`, reject symlinks, hash bytes, parse the two package files, and run `git status --porcelain --untracked-files=no` plus `git rev-parse HEAD` only when `.git` exists. Never include command stderr or a path in the raised error.
+Read every file with `lstat`, reject symlinks, hash bytes, parse the two package files, require `.git`, and verify `git rev-parse --show-toplevel`, `git status --porcelain --untracked-files=normal`, and `git rev-parse HEAD`. The Git top level must be the selected source root. Never include command stderr or a path in the raised error.
 
 - [ ] **Step 4: Run the focused package tests**
 
@@ -972,7 +972,7 @@ git commit -m "test: prove the provider-free prime control loop"
 - Modify: `README.md`
 
 **Interfaces:**
-- `setup_prime_agent.py --check --source-root PATH` verifies an exact clean Git checkout only; setup requires an explicit source root and runs `npm ci` with no model/provider operations.
+- `setup_prime_agent.py --check --source-root PATH` verifies an exact clean Git checkout only; setup requires an explicit source root, runs `npm ci` with no model/provider operations, and revalidates the source after install and build.
 - `verify_prime_loop.py --level provider-free` runs the fake real-process gate.
 - `verify_prime_loop.py --level bounded --authority PATH --max-cost-micros N` rejects missing/zero/inconsistent finite authorization before Prime start.
 - Make targets: `prime-check`, `prime-setup`, `prime-verify-provider-free`, `prime-verify-bounded`.

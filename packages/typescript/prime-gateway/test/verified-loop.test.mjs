@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFile as execFileCallback, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmod,
@@ -14,6 +14,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import test from "node:test";
 
 import {
@@ -21,6 +22,7 @@ import {
 } from "../dist/src/main.js";
 
 const packageRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const execFile = promisify(execFileCallback);
 const scenariosUrl = new URL(
   "../../../../tests/fixtures/prime_gateway/v1/verified-loop-scenarios.json",
   import.meta.url,
@@ -83,9 +85,32 @@ async function createPrimeSource(root) {
     await writeFixtureFile(root, relativePath, value);
   }
   await chmod(join(root, "prime-agent.sh"), 0o755);
+  let sourceCommit;
+  try {
+    ({ stdout: sourceCommit } = await execFile("git", ["rev-parse", "HEAD"], {
+      cwd: root,
+    }));
+  } catch {
+    await execFile("git", ["init", "--quiet"], { cwd: root });
+    await execFile("git", ["config", "user.name", "Asterion Test"], {
+      cwd: root,
+    });
+    await execFile(
+      "git",
+      ["config", "user.email", "asterion@example.invalid"],
+      { cwd: root },
+    );
+    await execFile("git", ["add", "."], { cwd: root });
+    await execFile("git", ["commit", "--quiet", "-m", "fixture"], {
+      cwd: root,
+    });
+    ({ stdout: sourceCommit } = await execFile("git", ["rev-parse", "HEAD"], {
+      cwd: root,
+    }));
+  }
   const lock = {
     format: "asterion.prime-artifact-lock/v1",
-    source_commit: "a18809e00ea30638584d87b3afea7285a9d7296c",
+    source_commit: sourceCommit.trim(),
     package_name: "@earendil-works/pi-coding-agent",
     package_version: "0.7.1",
     daemon_protocol: 7,

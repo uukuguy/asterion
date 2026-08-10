@@ -57,7 +57,9 @@ stderr in their result, and perform zero model-provider operations. The source
 must be a Git checkout at the exact clean commit and match every locked digest;
 source exports without Git metadata are rejected before any command runs. The
 pinned compatibility boundary is Node.js 22.8.0 through 22.x; a non-LTS odd
-major is rejected before dependency installation.
+major is rejected before dependency installation. Setup revalidates the exact
+Git root, commit, clean tracked/untracked state, and locked bytes after install
+and again after build before reporting success.
 
 ## Provider-free and preflight gates
 

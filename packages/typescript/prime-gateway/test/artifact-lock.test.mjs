@@ -101,6 +101,25 @@ async function createFixture() {
   };
 }
 
+async function initializeGitFixture(fixture) {
+  await writeFile(join(fixture.root, "tracked-metadata.txt"), "clean");
+  await execFile("git", ["init", "--quiet"], { cwd: fixture.root });
+  await execFile("git", ["config", "user.name", "Asterion Test"], {
+    cwd: fixture.root,
+  });
+  await execFile("git", ["config", "user.email", "asterion@example.invalid"], {
+    cwd: fixture.root,
+  });
+  await execFile("git", ["add", "."], { cwd: fixture.root });
+  await execFile("git", ["commit", "--quiet", "-m", "fixture"], {
+    cwd: fixture.root,
+  });
+  const { stdout } = await execFile("git", ["rev-parse", "HEAD"], {
+    cwd: fixture.root,
+  });
+  fixture.lock.source_commit = stdout.trim();
+}
+
 async function assertIncompatible(action, forbidden = []) {
   await assert.rejects(action, (error) => {
     assert.ok(error instanceof PrimeArtifactCompatibilityError);
@@ -132,9 +151,10 @@ test("ships the exact pinned Prime source artifact lock", async () => {
 test("accepts only the pinned clean source artifact", async () => {
   const fixture = await createFixture();
   try {
+    await initializeGitFixture(fixture);
     const evidence = await verifyPrimeArtifact(fixture.root, fixture.lock);
     assert.deepEqual(evidence, {
-      commit: "a18809e00ea30638584d87b3afea7285a9d7296c",
+      commit: fixture.lock.source_commit,
       packageName: "@earendil-works/pi-coding-agent",
       packageVersion: "0.7.1",
       protocolVersion: 7,
@@ -149,6 +169,18 @@ test("accepts only the pinned clean source artifact", async () => {
     await assertIncompatible(
       () => verifyPrimeArtifact(fixture.root, fixture.lock),
       [fixture.root, sentinel],
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
+test("rejects a source export without Git metadata", async () => {
+  const fixture = await createFixture();
+  try {
+    await assertIncompatible(
+      () => verifyPrimeArtifact(fixture.root, fixture.lock),
+      [fixture.root],
     );
   } finally {
     await fixture.cleanup();
@@ -270,32 +302,19 @@ test("rejects package identity and every locked digest mismatch", async () => {
 test("rejects dirty or wrong-commit git worktrees", async () => {
   const fixture = await createFixture();
   try {
-    await writeFile(join(fixture.root, "tracked-metadata.txt"), "clean");
-    await execFile("git", ["init", "--quiet"], { cwd: fixture.root });
-    await execFile("git", ["config", "user.name", "Asterion Test"], {
-      cwd: fixture.root,
-    });
-    await execFile("git", ["config", "user.email", "asterion@example.invalid"], {
-      cwd: fixture.root,
-    });
-    await execFile("git", ["add", "."], { cwd: fixture.root });
-    await execFile("git", ["commit", "--quiet", "-m", "fixture"], {
-      cwd: fixture.root,
-    });
-    const { stdout } = await execFile("git", ["rev-parse", "HEAD"], {
-      cwd: fixture.root,
-    });
-    const gitLock = { ...fixture.lock, source_commit: stdout.trim() };
-
-    await verifyPrimeArtifact(fixture.root, gitLock);
+    await initializeGitFixture(fixture);
+    await verifyPrimeArtifact(fixture.root, fixture.lock);
     await writeFile(join(fixture.root, "tracked-metadata.txt"), "dirty");
-    await assertIncompatible(() => verifyPrimeArtifact(fixture.root, gitLock));
+    await assertIncompatible(() => verifyPrimeArtifact(fixture.root, fixture.lock));
     await execFile("git", ["checkout", "--quiet", "--", "tracked-metadata.txt"], {
       cwd: fixture.root,
     });
+    await writeFile(join(fixture.root, "untracked-metadata.txt"), "dirty");
+    await assertIncompatible(() => verifyPrimeArtifact(fixture.root, fixture.lock));
+    await rm(join(fixture.root, "untracked-metadata.txt"));
     await assertIncompatible(() =>
       verifyPrimeArtifact(fixture.root, {
-        ...gitLock,
+        ...fixture.lock,
         source_commit: "0".repeat(40),
       }),
     );

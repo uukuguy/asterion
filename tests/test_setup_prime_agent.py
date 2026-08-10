@@ -90,7 +90,9 @@ class RecordingRunner:
         self.calls.append((command, cwd, dict(env)))
         if command[-1] == "--version":
             return _completed(command, stdout=f"{self.node_version}\n")
-        if command[:2] == ("git", "rev-parse"):
+        if command == ("git", "rev-parse", "--show-toplevel"):
+            return _completed(command, stdout=f"{cwd}\n")
+        if command == ("git", "rev-parse", "HEAD"):
             return _completed(
                 command,
                 stdout="a18809e00ea30638584d87b3afea7285a9d7296c\n",
@@ -153,6 +155,34 @@ class TestSetupPrimeAgent(unittest.TestCase):
         self.assertNotIn("ASTERION_PRIVATE", npm_call[2])
         self.assertNotIn("SENTINEL_SECRET", repr(npm_call))
         self.assertIn(("npm", "run", "build"), (call[0] for call in runner.calls))
+
+    def test_setup_revalidates_after_install_and_build(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            for mutation_command in (("npm", "ci"), ("npm", "run", "build")):
+                source, lock_path = _fixture_source(parent / "-".join(mutation_command))
+                runner = RecordingRunner()
+
+                def mutating_runner(command, cwd, env):
+                    completed = runner(command, cwd, env)
+                    if command == mutation_command:
+                        (cwd / "prime-agent.sh").write_text("SENTINEL_SECRET\n")
+                    return completed
+
+                with (
+                    self.subTest(command=mutation_command),
+                    self.assertRaises(PrimeSetupError) as raised,
+                ):
+                    setup_prime_source(
+                        source, lock_path=lock_path, runner=mutating_runner
+                    )
+                self.assertNotIn(str(source), str(raised.exception))
+                self.assertNotIn("SENTINEL_SECRET", str(raised.exception))
+                if mutation_command == ("npm", "ci"):
+                    self.assertNotIn(
+                        ("npm", "run", "build"),
+                        (call[0] for call in runner.calls),
+                    )
 
     def test_drift_old_node_dirty_tree_and_install_failure_are_redacted(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

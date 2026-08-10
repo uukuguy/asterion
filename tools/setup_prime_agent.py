@@ -152,6 +152,9 @@ def verify_prime_source(
         raise PrimeSetupError("Prime source checkout is unavailable")
     with tempfile.TemporaryDirectory(prefix="asterion-prime-check-") as temporary:
         environment = _closed_environment(Path(temporary))
+        top_level = _run(
+            runner, ("git", "rev-parse", "--show-toplevel"), root, environment
+        )
         head = _run(runner, ("git", "rev-parse", "HEAD"), root, environment)
         status = _run(
             runner,
@@ -160,7 +163,8 @@ def verify_prime_source(
             environment,
         )
         if (
-            head.returncode != 0
+            not _is_exact_git_root(top_level, root)
+            or head.returncode != 0
             or head.stdout.strip() != lock.source_commit
             or status.returncode != 0
             or status.stdout.strip()
@@ -199,6 +203,12 @@ def setup_prime_source(
         )
     if completed.returncode != 0:
         raise PrimeSetupError("Prime dependency installation failed")
+    verify_prime_source(
+        root,
+        lock_path=lock_path,
+        node_executable=node_executable,
+        runner=runner,
+    )
     with tempfile.TemporaryDirectory(prefix="asterion-prime-build-") as temporary:
         built = _run(
             runner,
@@ -208,6 +218,12 @@ def setup_prime_source(
         )
     if built.returncode != 0:
         raise PrimeSetupError("Prime source build failed")
+    verify_prime_source(
+        root,
+        lock_path=lock_path,
+        node_executable=node_executable,
+        runner=runner,
+    )
     return PrimeSetupReport(
         source_commit=report.source_commit,
         package_version=report.package_version,
@@ -246,6 +262,19 @@ def _verify_files(root: Path, lock: PrimeArtifactLock) -> None:
             raise PrimeSetupError(
                 "Prime source artifact does not match the lock"
             ) from None
+
+
+def _is_exact_git_root(completed: subprocess.CompletedProcess[str], root: Path) -> bool:
+    if completed.returncode != 0:
+        return False
+    value = completed.stdout.strip()
+    candidate = Path(value)
+    if not value or not candidate.is_absolute():
+        return False
+    try:
+        return candidate.resolve(strict=True) == root
+    except (OSError, RuntimeError):
+        return False
 
 
 def _closed_environment(private_home: Path) -> dict[str, str]:
