@@ -22,6 +22,16 @@ MINIMUM_NODE_VERSION = (22, 8, 0)
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _VERSION = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$")
+_STATIC_LOCAL_ESM_IMPORT = re.compile(
+    r"^import(?:[\s\S]*?\sfrom)?\s*[\"'](\.[^\"']+)[\"']",
+    re.MULTILINE,
+)
+_ENTRY_DYNAMIC_LOCAL_ESM_IMPORT = re.compile(
+    r"\bawait\s+import\(\s*[\"'](\.[^\"']+)[\"']"
+)
+_LINE_DYNAMIC_LOCAL_ESM_IMPORT = re.compile(
+    r"^\s*import\(\s*[\"'](\.[^\"']+)[\"']", re.MULTILINE
+)
 _OFFLINE_BUILD_COMMANDS = (
     ("npm", "--prefix", "packages/tui", "run", "build"),
     (
@@ -43,6 +53,15 @@ class PrimeSetupError(RuntimeError):
 
 
 @dataclass(frozen=True, repr=False)
+class PrimeRlmRuntimeLock:
+    entry: str
+    binding_chunk: str
+    closure: Mapping[str, str]
+    derived_closure: Mapping[str, str]
+    patch_sha256: str
+
+
+@dataclass(frozen=True, repr=False)
 class PrimeArtifactLock:
     source_commit: str
     package_name: str
@@ -51,6 +70,7 @@ class PrimeArtifactLock:
     daemon_schema_revision: int
     daemon_schema_id: str
     files: Mapping[str, str]
+    rlm_runtime: PrimeRlmRuntimeLock | None
 
 
 @dataclass(frozen=True)
@@ -89,10 +109,78 @@ def default_lock_path() -> Path:
     return Path(str(packaged))
 
 
+def default_rlm_shim_path() -> Path:
+    repository = (
+        Path(__file__).resolve().parents[1]
+        / "packages/typescript/prime-gateway/resources/prime-rlm-host-shim.json"
+    )
+    if repository.is_file():
+        return repository
+    packaged = resources.files("asterion").joinpath(
+        "control/providers/prime/resources/prime-rlm-host-shim.json"
+    )
+    return Path(str(packaged))
+
+
+def _parse_digest_mapping(value: object) -> Mapping[str, str]:
+    if not isinstance(value, dict) or not value:
+        raise TypeError
+    normalized: dict[str, str] = {}
+    for relative, digest in value.items():
+        candidate = Path(relative)
+        if (
+            not isinstance(relative, str)
+            or candidate.is_absolute()
+            or ".." in candidate.parts
+            or candidate.as_posix() != relative
+            or not isinstance(digest, str)
+            or _SHA256.fullmatch(digest) is None
+        ):
+            raise TypeError
+        normalized[relative] = digest
+    if tuple(normalized) != tuple(sorted(normalized)):
+        raise TypeError
+    return MappingProxyType(normalized)
+
+
+def _parse_rlm_runtime_lock(value: object) -> PrimeRlmRuntimeLock | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != {
+        "entry",
+        "binding_chunk",
+        "closure",
+        "derived_closure",
+        "patch_sha256",
+    }:
+        raise TypeError
+    closure = _parse_digest_mapping(value["closure"])
+    derived = _parse_digest_mapping(value["derived_closure"])
+    entry = value["entry"]
+    binding = value["binding_chunk"]
+    if (
+        not isinstance(entry, str)
+        or not isinstance(binding, str)
+        or entry not in closure
+        or binding not in closure
+        or tuple(closure) != tuple(derived)
+        or not isinstance(value["patch_sha256"], str)
+        or _SHA256.fullmatch(value["patch_sha256"]) is None
+    ):
+        raise TypeError
+    return PrimeRlmRuntimeLock(
+        entry=entry,
+        binding_chunk=binding,
+        closure=closure,
+        derived_closure=derived,
+        patch_sha256=value["patch_sha256"],
+    )
+
+
 def load_prime_artifact_lock(path: Path | None = None) -> PrimeArtifactLock:
     try:
         value = json.loads((path or default_lock_path()).read_text(encoding="utf-8"))
-        if not isinstance(value, dict) or set(value) != {
+        if not isinstance(value, dict) or set(value) not in ({
             "format",
             "source_commit",
             "package_name",
@@ -101,7 +189,17 @@ def load_prime_artifact_lock(path: Path | None = None) -> PrimeArtifactLock:
             "daemon_schema_revision",
             "daemon_schema_id",
             "files",
-        }:
+        }, {
+            "format",
+            "source_commit",
+            "package_name",
+            "package_version",
+            "daemon_protocol",
+            "daemon_schema_revision",
+            "daemon_schema_id",
+            "files",
+            "rlm_runtime",
+        }):
             raise TypeError
         files = value["files"]
         if (
@@ -132,6 +230,7 @@ def load_prime_artifact_lock(path: Path | None = None) -> PrimeArtifactLock:
             normalized[relative] = digest
         if tuple(normalized) != tuple(sorted(normalized)):
             raise TypeError
+        runtime = _parse_rlm_runtime_lock(value.get("rlm_runtime"))
         return PrimeArtifactLock(
             source_commit=value["source_commit"],
             package_name=value["package_name"],
@@ -140,6 +239,7 @@ def load_prime_artifact_lock(path: Path | None = None) -> PrimeArtifactLock:
             daemon_schema_revision=value["daemon_schema_revision"],
             daemon_schema_id=value["daemon_schema_id"],
             files=MappingProxyType(normalized),
+            rlm_runtime=runtime,
         )
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         raise PrimeSetupError("Prime artifact lock is invalid") from None
@@ -213,6 +313,7 @@ def setup_prime_source(
     source_root: Path,
     *,
     lock_path: Path | None = None,
+    rlm_shim_path: Path | None = None,
     node_executable: str = "node",
     runner: Runner = _default_runner,
 ) -> PrimeSetupReport:
@@ -250,6 +351,14 @@ def setup_prime_source(
         node_executable=node_executable,
         runner=runner,
     )
+    lock = load_prime_artifact_lock(lock_path)
+    if lock.rlm_runtime is not None:
+        derive_prime_rlm_runtime(
+            root,
+            lock_path=lock_path,
+            shim_path=rlm_shim_path,
+            runner=runner,
+        )
     return PrimeSetupReport(
         source_commit=report.source_commit,
         package_version=report.package_version,
@@ -257,6 +366,43 @@ def setup_prime_source(
         daemon_schema_revision=report.daemon_schema_revision,
         installed=True,
     )
+
+
+def derive_prime_rlm_runtime(
+    source_root: Path,
+    *,
+    lock_path: Path | None = None,
+    shim_path: Path | None = None,
+    runner: Runner = _default_runner,
+) -> Path:
+    """Derive the exact ignored Prime daemon bundle without changing source."""
+
+    lock = load_prime_artifact_lock(lock_path)
+    runtime = lock.rlm_runtime
+    if runtime is None:
+        raise PrimeSetupError("Prime RLM runtime lock is unavailable")
+    root = _source_root(source_root)
+    verify_prime_checkout(root, lock_path=lock_path, runner=runner)
+    shim = _read_regular_file(shim_path or default_rlm_shim_path())
+    if hashlib.sha256(shim).hexdigest() != runtime.patch_sha256:
+        raise PrimeSetupError("Prime RLM shim is incompatible")
+    closure = _resolve_local_esm_closure(root, runtime.entry)
+    if tuple(closure) != tuple(runtime.closure):
+        raise PrimeSetupError("Prime RLM shim is incompatible")
+    digests = _closure_digests(root, closure)
+    if digests == dict(runtime.derived_closure):
+        return root / runtime.entry
+    if digests != dict(runtime.closure):
+        raise PrimeSetupError("Prime RLM shim is incompatible")
+    target, anchor, replacement = _parse_rlm_shim(shim, runtime)
+    original = _read_regular_file_beneath(root, target)
+    if original.count(anchor) != 1 or replacement in original:
+        raise PrimeSetupError("Prime RLM shim is incompatible")
+    _atomic_replace_regular_file(root / target, original.replace(anchor, replacement))
+    if _closure_digests(root, closure) != dict(runtime.derived_closure):
+        raise PrimeSetupError("Prime RLM shim is incompatible")
+    verify_prime_checkout(root, lock_path=lock_path, runner=runner)
+    return root / runtime.entry
 
 
 def _source_root(value: Path) -> Path:
@@ -288,6 +434,111 @@ def _verify_files(root: Path, lock: PrimeArtifactLock) -> None:
             raise PrimeSetupError(
                 "Prime source artifact does not match the lock"
             ) from None
+
+
+def _read_regular_file(path: Path) -> bytes:
+    try:
+        if path.is_symlink() or not path.is_file():
+            raise OSError
+        return path.read_bytes()
+    except (OSError, RuntimeError):
+        raise PrimeSetupError("Prime RLM shim is incompatible") from None
+
+
+def _read_regular_file_beneath(root: Path, relative: str) -> bytes:
+    try:
+        target = root / relative
+        if target.is_symlink() or not target.is_file():
+            raise OSError
+        resolved = target.resolve(strict=True)
+        resolved.relative_to(root)
+        if any(parent.is_symlink() for parent in target.parents if parent != root):
+            raise OSError
+        return resolved.read_bytes()
+    except (OSError, RuntimeError, ValueError):
+        raise PrimeSetupError("Prime RLM shim is incompatible") from None
+
+
+def _resolve_local_esm_closure(root: Path, entry: str) -> tuple[str, ...]:
+    try:
+        root = root.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise PrimeSetupError("Prime RLM shim is incompatible") from None
+    pending = [entry]
+    resolved: set[str] = set()
+    while pending:
+        relative = pending.pop()
+        if relative in resolved:
+            continue
+        contents = _read_regular_file_beneath(root, relative).decode("utf-8")
+        resolved.add(relative)
+        parent = Path(relative).parent
+        imports = _STATIC_LOCAL_ESM_IMPORT.findall(contents)
+        if relative == entry:
+            imports += _ENTRY_DYNAMIC_LOCAL_ESM_IMPORT.findall(contents)
+        else:
+            imports += _LINE_DYNAMIC_LOCAL_ESM_IMPORT.findall(contents)
+        for imported in imports:
+            candidate = Path(imported)
+            if candidate.suffix != ".js" or ".." in candidate.parts:
+                raise PrimeSetupError("Prime RLM shim is incompatible")
+            child = (parent / candidate).as_posix()
+            if child.startswith("./"):
+                child = child[2:]
+            pending.append(child)
+    return tuple(sorted(resolved))
+
+
+def _closure_digests(root: Path, closure: Sequence[str]) -> dict[str, str]:
+    return {
+        relative: hashlib.sha256(_read_regular_file_beneath(root, relative)).hexdigest()
+        for relative in closure
+    }
+
+
+def _parse_rlm_shim(
+    bytes_value: bytes, runtime: PrimeRlmRuntimeLock
+) -> tuple[str, bytes, bytes]:
+    try:
+        value = json.loads(bytes_value)
+        if not isinstance(value, dict) or set(value) != {
+            "format",
+            "target",
+            "anchor",
+            "replacement",
+        }:
+            raise TypeError
+        target = value["target"]
+        anchor = value["anchor"]
+        replacement = value["replacement"]
+        if (
+            value["format"] != "asterion.prime-rlm-host-shim/v1"
+            or target != runtime.binding_chunk
+            or not isinstance(anchor, str)
+            or not isinstance(replacement, str)
+            or not anchor
+            or not replacement
+            or anchor == replacement
+        ):
+            raise TypeError
+        return target, anchor.encode("utf-8"), replacement.encode("utf-8")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        raise PrimeSetupError("Prime RLM shim is incompatible") from None
+
+
+def _atomic_replace_regular_file(path: Path, value: bytes) -> None:
+    try:
+        if path.is_symlink() or not path.is_file():
+            raise OSError
+        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as temporary:
+            temporary.write(value)
+            temporary_path = Path(temporary.name)
+        try:
+            os.replace(temporary_path, path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+    except (OSError, RuntimeError):
+        raise PrimeSetupError("Prime RLM shim is incompatible") from None
 
 
 def _is_exact_git_root(completed: subprocess.CompletedProcess[str], root: Path) -> bool:

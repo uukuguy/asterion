@@ -22,9 +22,13 @@ from asterion.control.authority import (
 )
 
 try:
-    from tools.setup_prime_agent import PrimeSetupError, verify_prime_source
+    from tools.setup_prime_agent import (
+        PrimeSetupError,
+        derive_prime_rlm_runtime,
+        verify_prime_source,
+    )
 except ModuleNotFoundError:  # Direct ``python tools/verify_prime_loop.py`` execution.
-    from setup_prime_agent import PrimeSetupError, verify_prime_source
+    from setup_prime_agent import PrimeSetupError, derive_prime_rlm_runtime, verify_prime_source
 
 
 BOUNDED_AUTHORIZATION_FORMAT = "asterion.prime-bounded-authorization/v1"
@@ -243,7 +247,10 @@ def verify_preflight(source_root: Path) -> Mapping[str, object]:
     except PrimeSetupError as error:
         raise PrimeExternalLimit(str(error)) from None
     source = source_root.resolve()
-    daemon_entry = source / "packages/coding-agent/dist/bundle/cli.js"
+    try:
+        daemon_entry = derive_prime_rlm_runtime(source)
+    except PrimeSetupError as error:
+        raise PrimeExternalLimit(str(error)) from None
     package_root = (
         Path(__file__).resolve().parents[1] / "packages/typescript/prime-gateway"
     )

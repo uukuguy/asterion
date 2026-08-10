@@ -1,0 +1,6 @@
+{
+  "anchor": "  state.runtime.setSubagentRuntimeHost(callbacks.subagentRuntimeHost);",
+  "format": "asterion.prime-rlm-host-shim/v1",
+  "replacement": "  const asterionPrimeRlmHostBinding = callbacks.subagentRuntimeHost;\n  state.runtime.setSubagentRuntimeHost(asterionPrimeRlmHostBinding);",
+  "target": "packages/coding-agent/dist/bundle/chunk-UGFTGOX2.js"
+}

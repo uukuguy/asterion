@@ -11,6 +11,7 @@ from unittest import mock
 
 from tools.setup_prime_agent import (
     PrimeSetupError,
+    derive_prime_rlm_runtime,
     setup_prime_source,
     verify_prime_source,
 )
@@ -73,6 +74,51 @@ def _fixture_source(root: Path) -> tuple[Path, Path]:
         )
     )
     return source, lock_path
+
+
+def _rlm_runtime_fixture(root: Path) -> tuple[Path, Path, Path]:
+    source, lock_path = _fixture_source(root)
+    entry = source / "packages/coding-agent/dist/bundle/cli.js"
+    binding = source / "packages/coding-agent/dist/bundle/chunk-binding.js"
+    entry.parent.mkdir(parents=True, exist_ok=True)
+    entry.write_text('import "./chunk-binding.js";\n')
+    binding.write_text('const binding = "native-host";\n')
+    shim_path = root / "prime-rlm-host-shim.json"
+    shim_path.write_text(
+        json.dumps(
+            {
+                "format": "asterion.prime-rlm-host-shim/v1",
+                "target": "packages/coding-agent/dist/bundle/chunk-binding.js",
+                "anchor": 'const binding = "native-host";',
+                "replacement": 'const binding = "asterion-host";',
+            },
+            sort_keys=True,
+        )
+    )
+    lock = json.loads(lock_path.read_text())
+    closure = {
+        "packages/coding-agent/dist/bundle/chunk-binding.js": hashlib.sha256(
+            binding.read_bytes()
+        ).hexdigest(),
+        "packages/coding-agent/dist/bundle/cli.js": hashlib.sha256(
+            entry.read_bytes()
+        ).hexdigest(),
+    }
+    derived_binding = binding.read_text().replace("native-host", "asterion-host")
+    lock["rlm_runtime"] = {
+        "entry": "packages/coding-agent/dist/bundle/cli.js",
+        "binding_chunk": "packages/coding-agent/dist/bundle/chunk-binding.js",
+        "closure": closure,
+        "derived_closure": {
+            **closure,
+            "packages/coding-agent/dist/bundle/chunk-binding.js": hashlib.sha256(
+                derived_binding.encode()
+            ).hexdigest(),
+        },
+        "patch_sha256": hashlib.sha256(shim_path.read_bytes()).hexdigest(),
+    }
+    lock_path.write_text(json.dumps(lock))
+    return source, lock_path, shim_path
 
 
 def _completed(
@@ -184,6 +230,21 @@ class TestSetupPrimeAgent(unittest.TestCase):
             OFFLINE_BUILD_COMMANDS,
         )
 
+    def test_setup_derives_the_locked_rlm_runtime_after_the_ordinary_build(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source, lock_path, shim_path = _rlm_runtime_fixture(Path(directory))
+            setup_prime_source(
+                source,
+                lock_path=lock_path,
+                rlm_shim_path=shim_path,
+                runner=RecordingRunner(),
+            )
+
+            binding = source / "packages/coding-agent/dist/bundle/chunk-binding.js"
+            self.assertIn("asterion-host", binding.read_text())
+
     def test_setup_revalidates_after_install_and_build(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             parent = Path(directory)
@@ -211,6 +272,53 @@ class TestSetupPrimeAgent(unittest.TestCase):
                         OFFLINE_BUILD_COMMANDS[0],
                         (call[0] for call in runner.calls),
                     )
+
+    def test_derives_locked_rlm_bundle_without_mutating_prime_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source, lock_path, shim_path = _rlm_runtime_fixture(Path(directory))
+            runner = RecordingRunner()
+            source_file = source / "packages/coding-agent/src/modes/daemon/daemon-client.ts"
+            original_source = source_file.read_bytes()
+
+            runtime_entry = derive_prime_rlm_runtime(
+                source,
+                lock_path=lock_path,
+                shim_path=shim_path,
+                runner=runner,
+            )
+            repeated_entry = derive_prime_rlm_runtime(
+                source,
+                lock_path=lock_path,
+                shim_path=shim_path,
+                runner=runner,
+            )
+
+            self.assertEqual(runtime_entry, repeated_entry)
+            self.assertEqual(source_file.read_bytes(), original_source)
+            self.assertIn(
+                "asterion-host",
+                (source / "packages/coding-agent/dist/bundle/chunk-binding.js").read_text(),
+            )
+            self.assertTrue(
+                any(call[0][:2] == ("git", "status") for call in runner.calls)
+            )
+
+    def test_derivation_rejects_runtime_anchor_drift_without_private_output(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source, lock_path, shim_path = _rlm_runtime_fixture(Path(directory))
+            (source / "packages/coding-agent/dist/bundle/chunk-binding.js").write_text(
+                "SENTINEL_SECRET\n"
+            )
+
+            with self.assertRaises(PrimeSetupError) as raised:
+                derive_prime_rlm_runtime(
+                    source,
+                    lock_path=lock_path,
+                    shim_path=shim_path,
+                    runner=RecordingRunner(),
+                )
+
+        self.assertNotIn("SENTINEL_SECRET", str(raised.exception))
 
     def test_drift_old_node_dirty_tree_and_install_failure_are_redacted(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

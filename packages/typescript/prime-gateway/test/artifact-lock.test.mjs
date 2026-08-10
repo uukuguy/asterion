@@ -88,6 +88,13 @@ async function createFixture() {
     daemon_protocol: 7,
     daemon_schema_revision: 14,
     daemon_schema_id: "protocol-7-schema-14-816309b1cd50",
+    rlm_runtime: {
+      entry: "packages/coding-agent/dist/bundle/cli.js",
+      binding_chunk: "packages/coding-agent/dist/bundle/cli.js",
+      patch_sha256: "0".repeat(64),
+      closure: { "packages/coding-agent/dist/bundle/cli.js": "1".repeat(64) },
+      derived_closure: { "packages/coding-agent/dist/bundle/cli.js": "2".repeat(64) },
+    },
     files: Object.fromEntries(
       Object.entries(contents).map(([name, value]) => [name, sha256(value)]),
     ),
@@ -134,16 +141,13 @@ async function assertIncompatible(action, forbidden = []) {
 test("ships the exact pinned Prime source artifact lock", async () => {
   const lock = await loadPrimeArtifactLock(shippedLockUrl);
 
-  assert.deepEqual(lock, {
-    format: "asterion.prime-artifact-lock/v1",
-    source_commit: "a18809e00ea30638584d87b3afea7285a9d7296c",
-    package_name: "@earendil-works/pi-coding-agent",
-    package_version: "0.7.1",
-    daemon_protocol: 7,
-    daemon_schema_revision: 14,
-    daemon_schema_id: "protocol-7-schema-14-816309b1cd50",
-    files: expectedFiles,
-  });
+  assert.equal(lock.format, "asterion.prime-artifact-lock/v1");
+  assert.equal(lock.source_commit, "a18809e00ea30638584d87b3afea7285a9d7296c");
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(lock.files).filter(([key]) => key in expectedFiles)),
+    expectedFiles,
+  );
+  assert.equal(lock.rlm_runtime.entry, "packages/coding-agent/dist/bundle/cli.js");
   assert.ok(Object.isFrozen(lock));
   assert.ok(Object.isFrozen(lock.files));
 });

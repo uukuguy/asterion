@@ -14,6 +14,7 @@ const LOCK_KEYS = Object.freeze([
   "format",
   "package_name",
   "package_version",
+  "rlm_runtime",
   "source_commit",
 ]);
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
@@ -28,6 +29,15 @@ export interface PrimeArtifactLock {
   readonly daemon_schema_revision: number;
   readonly daemon_schema_id: string;
   readonly files: Readonly<Record<string, string>>;
+  readonly rlm_runtime: PrimeRlmRuntimeLock;
+}
+
+export interface PrimeRlmRuntimeLock {
+  readonly entry: string;
+  readonly binding_chunk: string;
+  readonly patch_sha256: string;
+  readonly closure: Readonly<Record<string, string>>;
+  readonly derived_closure: Readonly<Record<string, string>>;
 }
 
 export interface PrimeArtifactEvidence {
@@ -77,11 +87,32 @@ function isSafeRelativeFile(value: string): boolean {
   );
 }
 
+function parseDigestMap(value: unknown): Readonly<Record<string, string>> {
+  if (!isRecord(value) || Object.keys(value).length === 0) incompatible();
+  const entries = Object.entries(value);
+  if (entries.some(([path, digest]) => !isSafeRelativeFile(path) || typeof digest !== "string" || !SHA256_PATTERN.test(digest))) incompatible();
+  if (entries.map(([path]) => path).join("\n") !== [...entries.map(([path]) => path)].sort().join("\n")) incompatible();
+  return Object.freeze(Object.fromEntries(entries) as Record<string, string>);
+}
+
+function parseRlmRuntime(value: unknown): PrimeRlmRuntimeLock {
+  if (!isRecord(value) || !hasExactKeys(value, ["binding_chunk", "closure", "derived_closure", "entry", "patch_sha256"])) incompatible();
+  if (typeof value.entry !== "string" || typeof value.binding_chunk !== "string" || typeof value.patch_sha256 !== "string" || !SHA256_PATTERN.test(value.patch_sha256)) incompatible();
+  const closure = parseDigestMap(value.closure);
+  const derivedClosure = parseDigestMap(value.derived_closure);
+  const keys = Object.keys(closure);
+  if (!keys.includes(value.entry) || !keys.includes(value.binding_chunk) || keys.join("\n") !== Object.keys(derivedClosure).join("\n")) incompatible();
+  const changed = keys.filter((path) => closure[path] !== derivedClosure[path]);
+  if (changed.length !== 1 || changed[0] !== value.binding_chunk) incompatible();
+  return Object.freeze({ entry: value.entry, binding_chunk: value.binding_chunk, patch_sha256: value.patch_sha256, closure, derived_closure: derivedClosure });
+}
+
 function parseLock(value: unknown): PrimeArtifactLock {
   if (!isRecord(value) || !hasExactKeys(value, LOCK_KEYS)) {
     incompatible();
   }
   const files = value.files;
+  const rlmRuntime = value.rlm_runtime;
   if (
     value.format !== LOCK_FORMAT ||
     typeof value.source_commit !== "string" ||
@@ -96,7 +127,8 @@ function parseLock(value: unknown): PrimeArtifactLock {
     Number(value.daemon_schema_revision) < 1 ||
     typeof value.daemon_schema_id !== "string" ||
     value.daemon_schema_id.length === 0 ||
-    !isRecord(files)
+    !isRecord(files) ||
+    !isRecord(rlmRuntime)
   ) {
     incompatible();
   }
@@ -116,6 +148,7 @@ function parseLock(value: unknown): PrimeArtifactLock {
     checkedFiles[path] = digest;
   }
   const frozenFiles = Object.freeze(checkedFiles);
+  const frozenRuntime = parseRlmRuntime(rlmRuntime);
   return Object.freeze({
     format: LOCK_FORMAT,
     source_commit: value.source_commit,
@@ -125,6 +158,7 @@ function parseLock(value: unknown): PrimeArtifactLock {
     daemon_schema_revision: Number(value.daemon_schema_revision),
     daemon_schema_id: value.daemon_schema_id,
     files: frozenFiles,
+    rlm_runtime: frozenRuntime,
   });
 }
 
