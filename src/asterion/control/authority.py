@@ -213,7 +213,13 @@ class ProviderUsageReport:
     usage: BudgetUsage
 
     def __post_init__(self) -> None:
-        if not isinstance(self.usage, BudgetUsage):
+        if (
+            not isinstance(self.usage, BudgetUsage)
+            or self.usage.aggregate_tokens
+            < self.usage.controller_tokens
+            + self.usage.application_tokens
+            + self.usage.child_tokens
+        ):
             raise AuthorityError("provider usage report is invalid")
 
 
@@ -421,9 +427,13 @@ class AuthorityLedger:
             raise AuthorityError("action reservation is unavailable")
         if not _fits(receipt.usage, decision.reservation.as_usage()):
             raise AuthorityError("action receipt exceeds reservation")
-        self._usage = _add_usage(self._usage, receipt.usage)
-        if not _fits(self.usage, self._envelope.budget_limit):
+        candidate = _add_usage(self._usage, receipt.usage)
+        if not _fits(
+            _effective_usage(self._reported_usage, candidate),
+            self._envelope.budget_limit,
+        ):
             raise AuthorityError("action settlement exceeds authority")
+        self._usage = candidate
         del self._reservations[action_id]
         self._receipts[action_id] = receipt
 

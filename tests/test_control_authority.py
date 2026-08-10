@@ -14,6 +14,7 @@ from asterion.control.authority import (
     BudgetLimit,
     BudgetUsage,
     PortfolioGrant,
+    ProviderUsageReport,
 )
 
 
@@ -73,6 +74,39 @@ def _envelope(**changes: object) -> AuthorityEnvelope:
 
 
 class TestControlAuthority(unittest.TestCase):
+    def test_cumulative_provider_usage_is_maxed_not_double_counted(self) -> None:
+        ledger = AuthorityLedger(_envelope())
+        ledger.record_provider_usage(
+            ProviderUsageReport(BudgetUsage(30, 80, 0, 110, 7))
+        )
+        decision = ledger.evaluate(_proposal(), now_ms=1_000)
+        ledger.reserve(decision)
+        ledger.settle(
+            "action-1",
+            ActionReceipt("action-1", "receipt-1", BudgetUsage(0, 80, 0, 80, 7)),
+        )
+        self.assertEqual(ledger.usage, BudgetUsage(30, 80, 0, 110, 7))
+
+    def test_controller_report_and_disjoint_receipt_have_coherent_aggregate(self) -> None:
+        ledger = AuthorityLedger(_envelope())
+        ledger.record_provider_usage(ProviderUsageReport(BudgetUsage(30, 0, 0, 30, 0)))
+        decision = ledger.evaluate(_proposal(), now_ms=1_000)
+        ledger.reserve(decision)
+        ledger.settle("action-1", ActionReceipt("action-1", "receipt-1", BudgetUsage(0, 80, 0, 80, 0)))
+        self.assertEqual(ledger.usage.aggregate_tokens, 110)
+
+    def test_provider_reports_are_monotonic_coherent_and_immutable_on_failure(self) -> None:
+        ledger = AuthorityLedger(_envelope())
+        report = ProviderUsageReport(BudgetUsage(10, 0, 0, 10, 0))
+        ledger.record_provider_usage(report)
+        for invalid in (
+            ProviderUsageReport(BudgetUsage(5, 0, 0, 5, 0)),
+        ):
+            with self.assertRaises(AuthorityError):
+                ledger.record_provider_usage(invalid)
+            self.assertEqual(ledger.reported_usage, report.usage)
+        with self.assertRaises(AuthorityError):
+            ProviderUsageReport(BudgetUsage(10, 1, 0, 10, 0))
     def test_evaluate_does_not_mutate_and_reserve_settle_are_idempotent(self) -> None:
         ledger = AuthorityLedger(_envelope())
         proposal = _proposal()
