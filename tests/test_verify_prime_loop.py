@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
 
 from tools.verify_prime_loop import (
     PrimeVerificationError,
@@ -25,6 +25,14 @@ EXPECTED_IDS = (
     "prime-loop-budget",
     "prime-loop-redaction",
 )
+
+
+@dataclass(frozen=True)
+class _ScenarioResult:
+    scenario_id: str
+    status: str
+    provider_operations: int
+    application_operations: int
 
 
 def _authorization(**authority_changes: object) -> dict[str, object]:
@@ -71,9 +79,11 @@ def _authorization(**authority_changes: object) -> dict[str, object]:
 
 
 class TestVerifyPrimeLoop(unittest.TestCase):
-    def test_provider_free_report_requires_all_exact_zero_provider_scenarios(self) -> None:
+    def test_provider_free_report_requires_all_exact_zero_provider_scenarios(
+        self,
+    ) -> None:
         results = tuple(
-            SimpleNamespace(
+            _ScenarioResult(
                 scenario_id=scenario_id,
                 status="PASS",
                 provider_operations=0,
@@ -91,11 +101,15 @@ class TestVerifyPrimeLoop(unittest.TestCase):
 
         for mutation in (
             results[:-1],
-            (*results[:-1], SimpleNamespace(**{**vars(results[-1]), "status": "FAIL"})),
-            (*results[:-1], SimpleNamespace(**{**vars(results[-1]), "provider_operations": 1})),
+            (*results[:-1], _ScenarioResult(**{**vars(results[-1]), "status": "FAIL"})),
+            (
+                *results[:-1],
+                _ScenarioResult(**{**vars(results[-1]), "provider_operations": 1}),
+            ),
         ):
-            with self.subTest(length=len(mutation)), self.assertRaises(
-                PrimeVerificationError
+            with (
+                self.subTest(length=len(mutation)),
+                self.assertRaises(PrimeVerificationError),
             ):
                 verify_provider_free(lambda mutation=mutation: mutation)
 
@@ -118,7 +132,10 @@ class TestVerifyPrimeLoop(unittest.TestCase):
                 ("lower-cap", valid, 999),
                 (
                     "restricted",
-                    _write(root / "restricted.json", _authorization(execution_domain="restricted")),
+                    _write(
+                        root / "restricted.json",
+                        _authorization(execution_domain="restricted"),
+                    ),
                     1_000,
                 ),
                 (
@@ -136,12 +153,8 @@ class TestVerifyPrimeLoop(unittest.TestCase):
                 ),
             )
             for name, path, maximum in invalid_values:
-                with self.subTest(name=name), self.assertRaises(
-                    PrimeVerificationError
-                ):
-                    load_bounded_authority(
-                        path, max_cost_micros=maximum, now_ms=1_000
-                    )
+                with self.subTest(name=name), self.assertRaises(PrimeVerificationError):
+                    load_bounded_authority(path, max_cost_micros=maximum, now_ms=1_000)
 
     def test_bounded_authority_errors_never_render_private_file_content(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

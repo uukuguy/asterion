@@ -62,10 +62,17 @@ class PrimeExternalLimit(PrimeVerificationError):
 
 
 class ScenarioResult(Protocol):
-    scenario_id: str
-    status: str
-    provider_operations: int
-    application_operations: int
+    @property
+    def scenario_id(self) -> str: ...
+
+    @property
+    def status(self) -> str: ...
+
+    @property
+    def provider_operations(self) -> int: ...
+
+    @property
+    def application_operations(self) -> int: ...
 
 
 def verify_provider_free(

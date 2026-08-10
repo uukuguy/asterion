@@ -972,7 +972,7 @@ git commit -m "test: prove the provider-free prime control loop"
 - Modify: `README.md`
 
 **Interfaces:**
-- `setup_prime_agent.py --check --source-root PATH` verifies only; setup requires an explicit source root and runs `npm ci` with no model/provider operations.
+- `setup_prime_agent.py --check --source-root PATH` verifies an exact clean Git checkout only; setup requires an explicit source root and runs `npm ci` with no model/provider operations.
 - `verify_prime_loop.py --level provider-free` runs the fake real-process gate.
 - `verify_prime_loop.py --level bounded --authority PATH --max-cost-micros N` rejects missing/zero/inconsistent finite authorization before Prime start.
 - Make targets: `prime-check`, `prime-setup`, `prime-verify-provider-free`, `prime-verify-bounded`.
@@ -992,7 +992,7 @@ def test_promotion_runs_prime_provider_free_but_never_bounded(self) -> None:
     self.assertNotIn("prime-verify-bounded", source)
 ```
 
-Test setup against a fixture checkout for exact commit/digest, dirty tree, missing Node 22.8, failed `npm ci`, no source path in output and no inherited sentinel environment.
+Test setup against a fixture checkout for exact commit/digest, missing Git metadata, dirty tree, missing Node 22.8, failed `npm ci`, no source path in output and no inherited sentinel environment.
 
 - [x] **Step 2: Run tests to verify RED**
 

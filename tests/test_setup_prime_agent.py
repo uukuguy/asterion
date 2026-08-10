@@ -119,16 +119,16 @@ class TestSetupPrimeAgent(unittest.TestCase):
         self.assertNotIn(str(source), repr(report))
         self.assertFalse(any(call[0] == ("npm", "ci") for call in runner.calls))
 
-    def test_digest_locked_export_without_git_metadata_skips_git_commands(self) -> None:
+    def test_export_without_git_metadata_is_rejected_before_commands(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             source, lock_path = _fixture_source(Path(directory))
             (source / ".git").rmdir()
             runner = RecordingRunner()
 
-            report = verify_prime_source(source, lock_path=lock_path, runner=runner)
+            with self.assertRaises(PrimeSetupError):
+                verify_prime_source(source, lock_path=lock_path, runner=runner)
 
-        self.assertFalse(report.installed)
-        self.assertFalse(any(call[0][0] == "git" for call in runner.calls))
+        self.assertEqual(runner.calls, [])
 
     def test_setup_runs_npm_ci_with_a_closed_environment(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

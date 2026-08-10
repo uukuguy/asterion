@@ -54,9 +54,10 @@ make prime-setup ASTERION_PRIME_SOURCE_ROOT=3th-party/prime-agent
 
 Both commands use a closed setup environment, expose no source path or command
 stderr in their result, and perform zero model-provider operations. The source
-must match every locked digest; a Git checkout must additionally be at the
-exact clean commit. The pinned compatibility boundary is Node.js 22.8.0 through
-22.x; a non-LTS odd major is rejected before dependency installation.
+must be a Git checkout at the exact clean commit and match every locked digest;
+source exports without Git metadata are rejected before any command runs. The
+pinned compatibility boundary is Node.js 22.8.0 through 22.x; a non-LTS odd
+major is rejected before dependency installation.
 
 ## Provider-free and preflight gates
 

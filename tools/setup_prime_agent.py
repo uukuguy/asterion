@@ -145,33 +145,34 @@ def verify_prime_source(
     lock = load_prime_artifact_lock(lock_path)
     root = _source_root(source_root)
     _verify_files(root, lock)
+    git_metadata = root / ".git"
+    if git_metadata.is_symlink() or not (
+        git_metadata.is_dir() or git_metadata.is_file()
+    ):
+        raise PrimeSetupError("Prime source checkout is unavailable")
     with tempfile.TemporaryDirectory(prefix="asterion-prime-check-") as temporary:
         environment = _closed_environment(Path(temporary))
+        head = _run(runner, ("git", "rev-parse", "HEAD"), root, environment)
+        status = _run(
+            runner,
+            ("git", "status", "--porcelain", "--untracked-files=normal"),
+            root,
+            environment,
+        )
+        if (
+            head.returncode != 0
+            or head.stdout.strip() != lock.source_commit
+            or status.returncode != 0
+            or status.stdout.strip()
+        ):
+            raise PrimeSetupError(
+                "Prime source checkout is not the pinned clean revision"
+            )
         node = _run(runner, (node_executable, "--version"), root, environment)
         if node.returncode != 0 or not _supported_node(node.stdout.strip()):
             raise PrimeSetupError(
                 "Prime setup requires compatible Node.js 22.8.0 through 22.x"
             )
-        git_metadata = root / ".git"
-        if git_metadata.exists():
-            if git_metadata.is_symlink():
-                raise PrimeSetupError("Prime source checkout is unavailable")
-            head = _run(runner, ("git", "rev-parse", "HEAD"), root, environment)
-            status = _run(
-                runner,
-                ("git", "status", "--porcelain", "--untracked-files=no"),
-                root,
-                environment,
-            )
-            if (
-                head.returncode != 0
-                or head.stdout.strip() != lock.source_commit
-                or status.returncode != 0
-                or status.stdout.strip()
-            ):
-                raise PrimeSetupError(
-                    "Prime source checkout is not the pinned clean revision"
-                )
     return _report(lock, installed=False)
 
 

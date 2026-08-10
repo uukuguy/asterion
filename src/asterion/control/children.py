@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Literal, Protocol
+from typing import Literal, Protocol, TypeAlias, cast
 
 from asterion.control.authority import (
     AuthorityEnvelope,
@@ -64,15 +64,30 @@ class DeriveControlOptions(Protocol):
     ) -> Mapping[str, str]: ...
 
 
-class ChildActionExecutorFactory(Protocol):
-    """Build a child executor with its exact nested lifecycle boundary."""
+class LegacyChildActionExecutorFactory(Protocol):
+    """Build a child executor with the original nested lifecycle boundary."""
 
     def __call__(
         self,
         authority: AuthorityEnvelope,
         children: "ChildSessionService",
-        client: ControlPlaneClient | None = None,
     ) -> ActionExecutor: ...
+
+
+class ClientAwareChildActionExecutorFactory(Protocol):
+    """Build a child executor with its exact nested client boundary."""
+
+    def __call__(
+        self,
+        authority: AuthorityEnvelope,
+        children: "ChildSessionService",
+        client: ControlPlaneClient,
+    ) -> ActionExecutor: ...
+
+
+ChildActionExecutorFactory: TypeAlias = (
+    LegacyChildActionExecutorFactory | ClientAwareChildActionExecutorFactory
+)
 
 
 @dataclass(frozen=True, repr=False)
@@ -558,7 +573,10 @@ class ChildSessionService:
                     host_services=self._host_services,
                     _private_root_fd=root.fd,
                 )
-                executor = self._executor_factory(authority, nested_children)
+                legacy_factory = cast(
+                    LegacyChildActionExecutorFactory, self._executor_factory
+                )
+                executor = legacy_factory(authority, nested_children)
             journal = FileCanonicalJournal.open_at(
                 root.fd, root.path, binding.session_id
             )
@@ -1264,8 +1282,10 @@ def _build_child_executor(
     client: ControlPlaneClient,
 ) -> ActionExecutor:
     if _factory_accepts_client(factory):
-        return factory(authority, children, client)
-    return factory(authority, children)
+        client_factory = cast(ClientAwareChildActionExecutorFactory, factory)
+        return client_factory(authority, children, client)
+    legacy_factory = cast(LegacyChildActionExecutorFactory, factory)
+    return legacy_factory(authority, children)
 
 
 def _factory_accepts_client(factory: ChildActionExecutorFactory) -> bool:
