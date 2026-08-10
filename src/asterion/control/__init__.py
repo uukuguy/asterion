@@ -42,7 +42,10 @@ from asterion.control.authority import (
     BudgetUsage,
     RemainingBudget,
     PortfolioGrant,
+    SessionContextDecision,
+    SessionContextSettlement,
     action_proposal_digest,
+    session_context_command_digest,
 )
 from asterion.control.private_store import (
     MAX_PRIVATE_TEXT_BYTES,
@@ -109,14 +112,22 @@ from asterion.control.parity_testing import (
     ParityScenarioRunner,
 )
 from asterion.control.session_context import (
+    SESSION_CONTEXT_MODEL_OPERATIONS,
     SESSION_CONTEXT_OPERATIONS,
     SESSION_CONTEXT_PROTOCOL,
+    SESSION_CONTEXT_READ_OPERATIONS,
     SessionContextClient,
     SessionContextCommand,
     SessionContextProtocolError,
     SessionContextReceipt,
     validate_session_context_command,
     validate_session_context_receipt,
+)
+from asterion.control.session_context_manager import (
+    SessionContextManager,
+    SessionContextManagerError,
+    SessionContextManagerSnapshot,
+    SessionContextTransportError,
 )
 from asterion.control.system import (
     AgentSystemError,
@@ -227,10 +238,19 @@ __all__ = [
     "SESSION_CONTEXT_CAPABILITY",
     "SessionContextClient",
     "SessionContextCommand",
+    "SessionContextDecision",
+    "SessionContextManager",
+    "SessionContextManagerError",
+    "SessionContextManagerSnapshot",
+    "SESSION_CONTEXT_MODEL_OPERATIONS",
     "SessionContextProtocolError",
+    "SESSION_CONTEXT_READ_OPERATIONS",
     "SessionContextReceipt",
+    "SessionContextSettlement",
+    "SessionContextTransportError",
     "ConformanceReport",
     "action_proposal_digest",
+    "session_context_command_digest",
     "bind_selected_session_context_client",
     "derive_child_authority",
     "apply_action_admission",

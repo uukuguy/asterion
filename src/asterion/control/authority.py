@@ -15,6 +15,11 @@ from asterion.control.protocol import (
     OPAQUE_ID,
     SEMANTIC_VERSION,
 )
+from asterion.control.session_context import (
+    SESSION_CONTEXT_MODEL_OPERATIONS,
+    SESSION_CONTEXT_OPERATIONS,
+    SessionContextCommand,
+)
 from asterion.protocol_ordering import is_sorted_unique_scalar_strings
 
 
@@ -151,7 +156,8 @@ class AuthorityEnvelope:
             raise AuthorityError("authority portfolio is invalid")
         operations = tuple(self.allowed_operations)
         if any(
-            operation not in ACTION_KINDS for operation in operations
+            operation not in ACTION_KINDS | SESSION_CONTEXT_OPERATIONS
+            for operation in operations
         ) or not is_sorted_unique_scalar_strings(list(operations)):
             raise AuthorityError("authority operations are invalid")
         grants = tuple(self.host_service_grants)
@@ -239,6 +245,66 @@ class ProviderUsageReport:
             raise AuthorityError("provider usage report is invalid")
 
 
+@dataclass(frozen=True)
+class SessionContextDecision:
+    """Host authority decision for one exact session-context command."""
+
+    command_id: str
+    idempotency_key: str
+    authority_id: str
+    authority_revision: int
+    operation: str
+    command_digest: str
+    status: str
+    reason: str
+    reservation: BudgetRequest | None
+
+    def __post_init__(self) -> None:
+        admitted = self.status == "admitted"
+        requires_budget = self.operation in SESSION_CONTEXT_MODEL_OPERATIONS
+        if (
+            OPAQUE_ID.fullmatch(self.command_id) is None
+            or OPAQUE_ID.fullmatch(self.idempotency_key) is None
+            or OPAQUE_ID.fullmatch(self.authority_id) is None
+            or self.operation not in SESSION_CONTEXT_OPERATIONS
+            or self.status not in {"admitted", "rejected"}
+            or IDENTIFIER.fullmatch(self.reason) is None
+            or len(self.command_digest) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in self.command_digest
+            )
+            or (not admitted and self.reservation is not None)
+            or (
+                admitted
+                and requires_budget
+                and not isinstance(self.reservation, BudgetRequest)
+            )
+            or (admitted and not requires_budget and self.reservation is not None)
+        ):
+            raise AuthorityError("session context decision is invalid")
+        _require_positive_integer(
+            self.authority_revision, "session context authority revision"
+        )
+
+
+@dataclass(frozen=True)
+class SessionContextSettlement:
+    """Safe usage settlement for one definitive session-context receipt."""
+
+    command_id: str
+    receipt_id: str
+    usage: BudgetUsage
+
+    def __post_init__(self) -> None:
+        if (
+            OPAQUE_ID.fullmatch(self.command_id) is None
+            or OPAQUE_ID.fullmatch(self.receipt_id) is None
+            or not isinstance(self.usage, BudgetUsage)
+        ):
+            raise AuthorityError("session context settlement is invalid")
+
+
 class AuthorityLedger:
     """Evaluate without mutation, then reserve and settle exactly once."""
 
@@ -250,6 +316,8 @@ class AuthorityLedger:
         self._reported_usage = BudgetUsage.zero()
         self._reservations: dict[str, AdmissionDecision] = {}
         self._receipts: dict[str, ActionReceipt] = {}
+        self._context_reservations: dict[str, SessionContextDecision] = {}
+        self._context_settlements: dict[str, SessionContextSettlement] = {}
         self._frozen = False
 
     @property
@@ -275,6 +343,22 @@ class AuthorityLedger:
     @property
     def receipts(self) -> Mapping[str, ActionReceipt]:
         return MappingProxyType(dict(self._receipts))
+
+    @property
+    def reserved_session_context_ids(self) -> tuple[str, ...]:
+        return tuple(sorted(self._context_reservations))
+
+    @property
+    def session_context_reservations(
+        self,
+    ) -> Mapping[str, SessionContextDecision]:
+        return MappingProxyType(dict(self._context_reservations))
+
+    @property
+    def session_context_settlements(
+        self,
+    ) -> Mapping[str, SessionContextSettlement]:
+        return MappingProxyType(dict(self._context_settlements))
 
     def remaining_budget(self, *, now_ms: int) -> RemainingBudget:
         """Return the exact conservative capacity after usage and reservations."""
@@ -310,13 +394,21 @@ class AuthorityLedger:
             and self._reported_usage == other._reported_usage
             and self._reservations == other._reservations
             and self._receipts == other._receipts
+            and self._context_reservations == other._context_reservations
+            and self._context_settlements == other._context_settlements
         )
 
     @classmethod
     def _from_recovery(
         cls,
         envelope: AuthorityEnvelope,
-        operations: Sequence[AdmissionDecision | ActionReceipt | ProviderUsageReport],
+        operations: Sequence[
+            AdmissionDecision
+            | ActionReceipt
+            | ProviderUsageReport
+            | SessionContextDecision
+            | SessionContextSettlement
+        ],
     ) -> AuthorityLedger:
         """Build a frozen ledger from an already validated ordered journal."""
 
@@ -324,6 +416,36 @@ class AuthorityLedger:
         for operation in operations:
             if isinstance(operation, ProviderUsageReport):
                 ledger.record_provider_usage(operation)
+                continue
+            if isinstance(operation, SessionContextSettlement):
+                ledger.settle_session_context(operation.command_id, operation)
+                continue
+            if isinstance(operation, SessionContextDecision):
+                if (
+                    operation.status != "admitted"
+                    or operation.authority_id != envelope.authority_id
+                    or operation.authority_revision > envelope.revision
+                    or operation.operation not in envelope.allowed_operations
+                    or operation.reason != "authorized"
+                    or operation.command_id in ledger._context_reservations
+                    or operation.command_id in ledger._context_settlements
+                ):
+                    raise AuthorityError(
+                        "recovered session context reservation is invalid"
+                    )
+                requested = (
+                    BudgetUsage.zero()
+                    if operation.reservation is None
+                    else operation.reservation.as_usage()
+                )
+                if not _fits(
+                    _add_usage(ledger.usage, ledger._reserved_usage(), requested),
+                    envelope.budget_limit,
+                ):
+                    raise AuthorityError(
+                        "recovered session context budget is unavailable"
+                    )
+                ledger._context_reservations[operation.command_id] = operation
                 continue
             if isinstance(operation, ActionReceipt):
                 ledger.settle(operation.action_id, operation)
@@ -358,7 +480,157 @@ class AuthorityLedger:
         ledger._reported_usage = self._reported_usage
         ledger._reservations = dict(self._reservations)
         ledger._receipts = dict(self._receipts)
+        ledger._context_reservations = dict(self._context_reservations)
+        ledger._context_settlements = dict(self._context_settlements)
         return ledger
+
+    def evaluate_session_context(
+        self,
+        command: SessionContextCommand,
+        *,
+        now_ms: int,
+    ) -> SessionContextDecision:
+        """Evaluate one closed session-context command without mutation."""
+
+        if not isinstance(command, SessionContextCommand):
+            raise AuthorityError("session context command is invalid")
+        _require_nonnegative_integer(now_ms, "session context evaluation time")
+        digest = session_context_command_digest(command)
+        if self._envelope.cancelled:
+            return self._context_rejected(command, digest, "authority-cancelled")
+        if command.authority_revision != self._envelope.revision:
+            return self._context_rejected(
+                command, digest, "authority-revision-mismatch"
+            )
+        if now_ms >= self._envelope.expires_at_ms:
+            return self._context_rejected(command, digest, "authority-expired")
+        if command.operation not in self._envelope.allowed_operations:
+            return self._context_rejected(
+                command, digest, "operation-not-authorized"
+            )
+        reservation = None
+        if command.operation in SESSION_CONTEXT_MODEL_OPERATIONS:
+            budget = command.payload.get("budget")
+            if not isinstance(budget, Mapping):
+                raise AuthorityError("session context budget is invalid")
+            reservation = BudgetRequest.from_mapping(budget)
+            if (
+                reservation.deadline_ms > self._envelope.max_action_deadline_ms
+                or now_ms + reservation.deadline_ms
+                > self._envelope.expires_at_ms
+            ):
+                return self._context_rejected(
+                    command, digest, "deadline-not-authorized"
+                )
+            effective = _add_usage(
+                self.usage,
+                self._reserved_usage(),
+                reservation.as_usage(),
+            )
+            if not _fits(effective, self._envelope.budget_limit):
+                return self._context_rejected(command, digest, "budget-exceeded")
+        return SessionContextDecision(
+            command_id=command.command_id,
+            idempotency_key=command.idempotency_key,
+            authority_id=self._envelope.authority_id,
+            authority_revision=self._envelope.revision,
+            operation=command.operation,
+            command_digest=digest,
+            status="admitted",
+            reason="authorized",
+            reservation=reservation,
+        )
+
+    def reject_session_context(
+        self,
+        command: SessionContextCommand,
+        *,
+        reason: str,
+    ) -> SessionContextDecision:
+        """Create a closed host rejection bound to the current authority."""
+
+        if not isinstance(command, SessionContextCommand):
+            raise AuthorityError("session context command is invalid")
+        return self._context_rejected(
+            command,
+            session_context_command_digest(command),
+            reason,
+        )
+
+    def reserve_session_context(self, decision: SessionContextDecision) -> None:
+        self._ensure_mutable()
+        if (
+            not isinstance(decision, SessionContextDecision)
+            or decision.status != "admitted"
+        ):
+            raise AuthorityError("session context reservation is invalid")
+        existing = self._context_reservations.get(decision.command_id)
+        if existing is not None:
+            if existing != decision:
+                raise AuthorityError("session context reservation conflicts")
+            return
+        if decision.command_id in self._context_settlements:
+            raise AuthorityError("session context command is already settled")
+        if (
+            decision.authority_id != self._envelope.authority_id
+            or decision.authority_revision != self._envelope.revision
+        ):
+            raise AuthorityError("session context authority revision is stale")
+        requested = (
+            BudgetUsage.zero()
+            if decision.reservation is None
+            else decision.reservation.as_usage()
+        )
+        if not _fits(
+            _add_usage(self.usage, self._reserved_usage(), requested),
+            self._envelope.budget_limit,
+        ):
+            raise AuthorityError("session context budget is no longer available")
+        self._context_reservations[decision.command_id] = decision
+
+    def preview_session_context_settlement(
+        self,
+        command_id: str,
+        settlement: SessionContextSettlement,
+    ) -> None:
+        preview = self._mutable_copy()
+        preview.settle_session_context(command_id, settlement)
+
+    def settle_session_context(
+        self,
+        command_id: str,
+        settlement: SessionContextSettlement,
+    ) -> None:
+        self._ensure_mutable()
+        if (
+            not isinstance(settlement, SessionContextSettlement)
+            or settlement.command_id != command_id
+        ):
+            raise AuthorityError("session context settlement is invalid")
+        existing = self._context_settlements.get(command_id)
+        if existing is not None:
+            if existing != settlement:
+                raise AuthorityError("session context settlement conflicts")
+            return
+        decision = self._context_reservations.get(command_id)
+        if decision is None:
+            raise AuthorityError("session context reservation is unavailable")
+        limit = (
+            BudgetUsage.zero()
+            if decision.reservation is None
+            else decision.reservation.as_usage()
+        )
+        if not _fits(settlement.usage, limit):
+            raise AuthorityError("session context receipt exceeds reservation")
+        candidate = _add_usage(self._usage, settlement.usage)
+        if not _fits(
+            _effective_usage(self._reported_usage, candidate),
+            self._envelope.budget_limit,
+        ):
+            raise AuthorityError("session context settlement exceeds authority")
+        self._usage = candidate
+        del self._context_reservations[command_id]
+        self._context_settlements[command_id] = settlement
 
     def evaluate(
         self,
@@ -535,7 +807,28 @@ class AuthorityLedger:
         for decision in self._reservations.values():
             assert decision.reservation is not None
             usage = _add_usage(usage, decision.reservation.as_usage())
+        for decision in self._context_reservations.values():
+            if decision.reservation is not None:
+                usage = _add_usage(usage, decision.reservation.as_usage())
         return usage
+
+    def _context_rejected(
+        self,
+        command: SessionContextCommand,
+        command_digest: str,
+        reason: str,
+    ) -> SessionContextDecision:
+        return SessionContextDecision(
+            command_id=command.command_id,
+            idempotency_key=command.idempotency_key,
+            authority_id=self._envelope.authority_id,
+            authority_revision=self._envelope.revision,
+            operation=command.operation,
+            command_digest=command_digest,
+            status="rejected",
+            reason=reason,
+            reservation=None,
+        )
 
     def _rejected(
         self, action_id: str, proposal_digest: str, reason: str
@@ -558,6 +851,20 @@ def action_proposal_digest(proposal: ControlEvent) -> str:
         raise AuthorityError("authority proposal is invalid")
     encoded = json.dumps(
         proposal.to_mapping(),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def session_context_command_digest(command: SessionContextCommand) -> str:
+    """Return the canonical public digest binding one context decision."""
+
+    if not isinstance(command, SessionContextCommand):
+        raise AuthorityError("session context command is invalid")
+    encoded = json.dumps(
+        command.to_mapping(),
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,

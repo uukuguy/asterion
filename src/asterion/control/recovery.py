@@ -15,6 +15,9 @@ from asterion.control.authority import (
     BudgetRequest,
     BudgetUsage,
     ProviderUsageReport,
+    SessionContextDecision,
+    SessionContextSettlement,
+    session_context_command_digest,
 )
 from asterion.control.execution import ActionExecutionReceipt
 from asterion.control.host import ControlCommand, ControlEvent, EventCursor
@@ -22,12 +25,18 @@ from asterion.control.journal import (
     JournalConflictError,
     JournalEntry,
 )
+from asterion.control.session_context import (
+    SESSION_CONTEXT_MODEL_OPERATIONS,
+    SessionContextCommand,
+    SessionContextReceipt,
+)
 from asterion.control.state import (
     ControlState,
     ControlStateError,
     apply_action_admission,
     apply_action_resolution,
     apply_authority_revision,
+    mark_session_recovery_required,
     mark_action_running,
     reconcile_uncertain_action,
     reduce_control_event,
@@ -45,6 +54,9 @@ class RecoveredControlState:
     terminal_commands: Mapping[str, ControlCommand]
     result_receipts: Mapping[str, ActionExecutionReceipt]
     running_action_ids: tuple[str, ...]
+    session_context_commands: Mapping[str, SessionContextCommand]
+    session_context_decisions: Mapping[str, SessionContextDecision]
+    session_context_receipts: Mapping[str, SessionContextReceipt]
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "proposals", MappingProxyType(dict(self.proposals)))
@@ -62,6 +74,21 @@ class RecoveredControlState:
             self,
             "result_receipts",
             MappingProxyType(dict(self.result_receipts)),
+        )
+        object.__setattr__(
+            self,
+            "session_context_commands",
+            MappingProxyType(dict(self.session_context_commands)),
+        )
+        object.__setattr__(
+            self,
+            "session_context_decisions",
+            MappingProxyType(dict(self.session_context_decisions)),
+        )
+        object.__setattr__(
+            self,
+            "session_context_receipts",
+            MappingProxyType(dict(self.session_context_receipts)),
         )
 
     @property
@@ -116,11 +143,21 @@ def recover_control_host_state(
         accepted_events: dict[str, ControlEvent] = {}
         receipts: dict[str, ActionReceipt] = {}
         result_receipts: dict[str, ActionExecutionReceipt] = {}
-        authority_operations: list[AdmissionDecision | ActionReceipt | ProviderUsageReport] = []
+        authority_operations: list[
+            AdmissionDecision
+            | ActionReceipt
+            | ProviderUsageReport
+            | SessionContextDecision
+            | SessionContextSettlement
+        ] = []
         decisions: dict[str, AdmissionDecision] = {}
         terminal_commands: dict[str, ControlCommand] = {}
         admission_commands: dict[str, ControlCommand] = {}
         running_action_ids: set[str] = set()
+        context_commands: dict[str, SessionContextCommand] = {}
+        context_decisions: dict[str, SessionContextDecision] = {}
+        context_receipts: dict[str, SessionContextReceipt] = {}
+        context_idempotency: dict[str, str] = {}
 
         for entry in values[start:]:
             record = entry.record
@@ -177,6 +214,117 @@ def recover_control_host_state(
                         admission_commands=admission_commands,
                         terminal_commands=terminal_commands,
                     )
+                continue
+            if record.kind == "context.command.accepted":
+                command = SessionContextCommand.from_mapping(
+                    _mapping(record.payload["command"])
+                )
+                session_id = _bind_session(session_id, command.session_id)
+                if (
+                    command.generation
+                    != (
+                        expected_generation
+                        if state is None
+                        else state.generation
+                    )
+                    or command.authority_revision != journal_revision
+                    or command.command_id in context_commands
+                ):
+                    raise JournalConflictError("control journal recovery failed")
+                digest = session_context_command_digest(command)
+                prior_digest = context_idempotency.get(command.idempotency_key)
+                if prior_digest is not None and prior_digest != digest:
+                    raise JournalConflictError("control journal recovery failed")
+                context_commands[command.command_id] = command
+                context_idempotency[command.idempotency_key] = digest
+                continue
+            if record.kind == "context.operation.decided":
+                command_id = str(record.payload["command_id"])
+                command = context_commands.get(command_id)
+                if command is None or command_id in context_decisions:
+                    raise JournalConflictError("control journal recovery failed")
+                status = str(record.payload["status"])
+                reservation = None
+                if status == "admitted" and (
+                    command.operation in SESSION_CONTEXT_MODEL_OPERATIONS
+                ):
+                    reservation = BudgetRequest.from_mapping(
+                        _mapping(command.payload["budget"])
+                    )
+                decision = SessionContextDecision(
+                    command_id=command_id,
+                    idempotency_key=str(record.payload["idempotency_key"]),
+                    authority_id=authority_id,
+                    authority_revision=_integer(
+                        record.payload["authority_revision"]
+                    ),
+                    operation=str(record.payload["operation"]),
+                    command_digest=str(record.payload["command_digest"]),
+                    status=status,
+                    reason=str(record.payload["reason"]),
+                    reservation=reservation,
+                )
+                if (
+                    decision.idempotency_key != command.idempotency_key
+                    or decision.authority_revision != command.authority_revision
+                    or decision.operation != command.operation
+                    or decision.command_digest
+                    != session_context_command_digest(command)
+                ):
+                    raise JournalConflictError("control journal recovery failed")
+                context_decisions[command_id] = decision
+                if decision.status == "admitted":
+                    authority_operations.append(decision)
+                continue
+            if record.kind == "context.operation.receipted":
+                receipt = SessionContextReceipt.from_mapping(
+                    _mapping(record.payload["receipt"])
+                )
+                command = context_commands.get(receipt.command_id)
+                decision = context_decisions.get(receipt.command_id)
+                if (
+                    command is None
+                    or decision is None
+                    or receipt.command_id in context_receipts
+                    or receipt.session_id != command.session_id
+                    or receipt.generation != command.generation
+                    or receipt.operation != command.operation
+                    or (
+                        decision.status == "rejected"
+                        and receipt.status != "rejected"
+                    )
+                ):
+                    raise JournalConflictError("control journal recovery failed")
+                usage_value = record.payload["usage"]
+                if receipt.status == "uncertain":
+                    if usage_value is not None:
+                        raise JournalConflictError(
+                            "control journal recovery failed"
+                        )
+                elif decision.status == "admitted":
+                    usage = _usage(usage_value)
+                    if (
+                        receipt.status == "succeeded"
+                        and command.operation
+                        in SESSION_CONTEXT_MODEL_OPERATIONS
+                        and usage
+                        != _usage(_mapping(receipt.payload["result"])["usage"])
+                    ):
+                        raise JournalConflictError(
+                            "control journal recovery failed"
+                        )
+                    authority_operations.append(
+                        SessionContextSettlement(
+                            command_id=receipt.command_id,
+                            receipt_id=receipt.receipt_id,
+                            usage=usage,
+                        )
+                    )
+                elif _usage(usage_value) != BudgetUsage.zero():
+                    raise JournalConflictError("control journal recovery failed")
+                context_receipts[receipt.command_id] = receipt
+                if receipt.status == "uncertain" and state is not None:
+                    state = mark_session_recovery_required(state)
                 continue
             if record.kind == "action.decided":
                 if state is None:
@@ -311,6 +459,9 @@ def recover_control_host_state(
             terminal_commands=terminal_commands,
             result_receipts=result_receipts,
             running_action_ids=tuple(sorted(running_action_ids)),
+            session_context_commands=context_commands,
+            session_context_decisions=context_decisions,
+            session_context_receipts=context_receipts,
         )
     except JournalConflictError:
         raise

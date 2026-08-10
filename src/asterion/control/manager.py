@@ -33,11 +33,20 @@ from asterion.control.journal import (
     JournalRecord,
 )
 from asterion.control.recovery import recover_control_host_state
+from asterion.control.session_context import (
+    SESSION_CONTEXT_CAPABILITY,
+    SessionContextClient,
+)
+from asterion.control.session_context_manager import (
+    SessionContextManager,
+    SessionContextManagerError,
+)
 from asterion.control.state import (
     ControlState,
     ControlStateError,
     apply_action_admission,
     apply_action_resolution,
+    mark_session_recovery_required,
     mark_action_running,
     reduce_control_event,
 )
@@ -140,6 +149,7 @@ class ControlHost:
         cancellation_signal: CancellationSignal | None = None,
         pathlight: PathlightRecorder = NOOP_PATHLIGHT_RECORDER,
         child_service: ChildLifecycleService | None = None,
+        session_context_client: SessionContextClient | None = None,
     ) -> None:
         if (
             not isinstance(plan, AgentSystemPlan)
@@ -156,7 +166,18 @@ class ControlHost:
             or authority.usage != BudgetUsage.zero()
             or authority.reserved_action_ids
             or authority.receipts
+            or authority.reserved_session_context_ids
+            or authority.session_context_settlements
             or not _valid_child_service(child_service)
+            or (
+                session_context_client is not None
+                and (
+                    session_context_client is not client
+                    or not isinstance(session_context_client, SessionContextClient)
+                    or SESSION_CONTEXT_CAPABILITY
+                    not in client.manifest.capabilities
+                )
+            )
         ):
             raise ControlHostError("control host construction is invalid")
         plan_grants = set(plan.portfolio_by_identity)
@@ -267,6 +288,27 @@ class ControlHost:
         except (JournalConflictError, TypeError, ValueError):
             raise ControlHostError("control host recovery failed") from None
         self._journal_position = authority_entry.position
+        try:
+            self._session_context_manager = (
+                None
+                if session_context_client is None
+                else SessionContextManager(
+                    session_id=session_id,
+                    generation=generation,
+                    authority=self._authority,
+                    journal=self._journal,
+                    client=session_context_client,
+                    clock_ms=self._clock_ms,
+                    cancellation_signal=self._cancellation_signal,
+                    session_status=lambda: self._state.session_status,
+                    position_sink=self._advance_from_session_context,
+                    recovery_sink=self._mark_session_context_recovery_required,
+                )
+            )
+        except SessionContextManagerError:
+            raise ControlHostError(
+                "control host session context recovery failed"
+            ) from None
         self._evidence.start_system(
             plan,
             session_id=session_id,
@@ -275,6 +317,12 @@ class ControlHost:
             journal_position=self._journal_position,
             timestamp_ns=self._clock_ms() * 1_000_000,
         )
+
+    @property
+    def session_context_manager(self) -> SessionContextManager | None:
+        """Return the explicitly injected extension without discovering one."""
+
+        return self._session_context_manager
 
     async def dispatch(self, command: ControlCommand) -> None:
         if (
@@ -838,6 +886,19 @@ class ControlHost:
             return len(active_ids)
         except Exception:
             raise ControlHostError("control child lifecycle is unavailable") from None
+
+    def _advance_from_session_context(self, position: int) -> None:
+        if position < self._journal_position or position != self._journal.position:
+            raise ControlHostError("control journal position conflicts")
+        self._journal_position = position
+
+    def _mark_session_context_recovery_required(self) -> None:
+        try:
+            self._state = mark_session_recovery_required(self._state)
+        except ControlStateError:
+            raise ControlHostError(
+                "control session context recovery fence failed"
+            ) from None
 
 
 def _valid_child_service(value: object) -> bool:

@@ -367,6 +367,16 @@ def _replace_action(state: ControlState, action: ActionState) -> ControlState:
     return replace(state, actions=actions)
 
 
+def mark_session_recovery_required(state: ControlState) -> ControlState:
+    """Fence one non-terminal session after a durable uncertain operation."""
+
+    if not isinstance(state, ControlState):
+        raise ControlStateError("session recovery fence is invalid")
+    if state.session_status in TERMINAL_SESSION_STATES:
+        return state
+    return replace(state, session_status="recovery_required")
+
+
 def _valid_optional_receipt(value: str | None, *, required: bool = False) -> bool:
     if value is None:
         return not required

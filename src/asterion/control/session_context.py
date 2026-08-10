@@ -11,6 +11,7 @@ from asterion.control.protocol import IDENTIFIER, MEDIA_TYPE, OPAQUE_ID
 
 
 SESSION_CONTEXT_PROTOCOL = "asterion.session-context/v1"
+SESSION_CONTEXT_CAPABILITY = "session.context-v1"
 SESSION_CONTEXT_OPERATIONS = frozenset(
     {
         "session.attachment.bind",
@@ -29,6 +30,12 @@ SESSION_CONTEXT_OPERATIONS = frozenset(
 )
 SESSION_CONTEXT_STATUSES = frozenset(
     {"succeeded", "rejected", "failed", "cancelled", "uncertain"}
+)
+SESSION_CONTEXT_MODEL_OPERATIONS = frozenset(
+    {"session.branch.summarize", "session.compact"}
+)
+SESSION_CONTEXT_READ_OPERATIONS = frozenset(
+    {"session.describe", "session.tree.read"}
 )
 SESSION_STATUS_CODES = frozenset(
     {

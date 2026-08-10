@@ -14,6 +14,7 @@ from typing import Protocol
 
 import fcntl
 
+from asterion.control.authority import SessionContextDecision
 from asterion.control.host import ControlCommand, ControlEvent
 from asterion.control.protocol import (
     IDENTIFIER,
@@ -22,6 +23,13 @@ from asterion.control.protocol import (
     SEMANTIC_VERSION,
     validate_control_command,
     validate_control_event,
+)
+from asterion.control.session_context import (
+    SESSION_CONTEXT_OPERATIONS,
+    SessionContextCommand,
+    SessionContextReceipt,
+    validate_session_context_command,
+    validate_session_context_receipt,
 )
 from asterion.protocol_ordering import is_sorted_unique_scalar_strings
 
@@ -36,6 +44,9 @@ JOURNAL_RECORD_KINDS = frozenset(
         "action.decided",
         "action.running",
         "action.receipted",
+        "context.command.accepted",
+        "context.operation.decided",
+        "context.operation.receipted",
         "checkpoint.sealed",
         "fault.projected",
     }
@@ -213,6 +224,45 @@ class JournalRecord:
         )
 
     @classmethod
+    def context_operation_decided(
+        cls,
+        decision: SessionContextDecision,
+    ) -> JournalRecord:
+        if not isinstance(decision, SessionContextDecision):
+            raise JournalConflictError("journal context decision is invalid")
+        return cls(
+            record_id=f"context-decision:{decision.command_id}",
+            kind="context.operation.decided",
+            payload={
+                "command_id": decision.command_id,
+                "idempotency_key": decision.idempotency_key,
+                "authority_revision": decision.authority_revision,
+                "operation": decision.operation,
+                "command_digest": decision.command_digest,
+                "status": decision.status,
+                "reason": decision.reason,
+            },
+        )
+
+    @classmethod
+    def context_operation_receipted(
+        cls,
+        receipt: SessionContextReceipt,
+        *,
+        usage: object | None,
+    ) -> JournalRecord:
+        if not isinstance(receipt, SessionContextReceipt):
+            raise JournalConflictError("journal context receipt is invalid")
+        return cls(
+            record_id=f"context-receipt:{receipt.command_id}",
+            kind="context.operation.receipted",
+            payload={
+                "receipt": receipt.to_mapping(),
+                "usage": None if usage is None else _public_usage(usage),
+            },
+        )
+
+    @classmethod
     def checkpoint_sealed(cls, *, checkpoint_event: ControlEvent) -> JournalRecord:
         if not isinstance(checkpoint_event, ControlEvent):
             raise JournalConflictError("journal checkpoint event is invalid")
@@ -264,6 +314,15 @@ class CanonicalJournal(Protocol):
         self, event: ControlEvent, *, expected_position: int | None = None
     ) -> JournalEntry:
         """Append one validated event record."""
+        ...
+
+    def accept_session_context_command(
+        self,
+        command: SessionContextCommand,
+        *,
+        expected_position: int | None = None,
+    ) -> JournalEntry:
+        """Append one validated session-context command record."""
         ...
 
 
@@ -339,6 +398,23 @@ class MemoryCanonicalJournal:
             ),
         )
 
+    def accept_session_context_command(
+        self,
+        command: SessionContextCommand,
+        *,
+        expected_position: int | None = None,
+    ) -> JournalEntry:
+        if not isinstance(command, SessionContextCommand):
+            raise JournalConflictError("journal context command is invalid")
+        return self.append(
+            self.position if expected_position is None else expected_position,
+            JournalRecord(
+                record_id=f"context-command:{command.command_id}",
+                kind="context.command.accepted",
+                payload={"command": command.to_mapping()},
+            ),
+        )
+
     def _validate_prefix(self, record: JournalRecord) -> None:
         if self.position == 0 and record.kind != "system.bound":
             raise JournalConflictError("journal system binding is missing")
@@ -351,6 +427,8 @@ class MemoryCanonicalJournal:
         field = {
             "command.accepted": "command",
             "event.accepted": "event",
+            "context.command.accepted": "command",
+            "context.operation.receipted": "receipt",
         }.get(record.kind)
         if field is None:
             return
@@ -552,6 +630,24 @@ class FileCanonicalJournal:
                 record_id=f"event:{event.event_id}",
                 kind="event.accepted",
                 payload={"event": event.to_mapping()},
+            ),
+        )
+
+    def accept_session_context_command(
+        self,
+        command: SessionContextCommand,
+        *,
+        expected_position: int | None = None,
+    ) -> JournalEntry:
+        if not isinstance(command, SessionContextCommand):
+            raise JournalConflictError("journal context command is invalid")
+        position = self.position if expected_position is None else expected_position
+        return self.append(
+            position,
+            JournalRecord(
+                record_id=f"context-command:{command.command_id}",
+                kind="context.command.accepted",
+                payload={"command": command.to_mapping()},
             ),
         )
 
@@ -928,6 +1024,8 @@ def _validate_session(session_id: str, record: JournalRecord) -> None:
         "command.accepted": "command",
         "event.accepted": "event",
         "checkpoint.sealed": "checkpoint_event",
+        "context.command.accepted": "command",
+        "context.operation.receipted": "receipt",
     }.get(record.kind)
     if field is None:
         return
@@ -1000,6 +1098,46 @@ def _validate_record_payload(kind: str, value: object) -> None:
         _require_fields(value, {"action_id", "proposal_digest"})
         _require_opaque_id(value["action_id"], "journal running action")
         _require_digest(value["proposal_digest"], "journal running proposal digest")
+        return
+    if kind == "context.command.accepted":
+        _require_fields(value, {"command"})
+        validate_session_context_command(value["command"])
+        return
+    if kind == "context.operation.decided":
+        _require_fields(
+            value,
+            {
+                "command_id",
+                "idempotency_key",
+                "authority_revision",
+                "operation",
+                "command_digest",
+                "status",
+                "reason",
+            },
+        )
+        _require_opaque_id(value["command_id"], "journal context command")
+        _require_opaque_id(
+            value["idempotency_key"], "journal context idempotency key"
+        )
+        _require_positive_integer(
+            value["authority_revision"], "journal context authority revision"
+        )
+        if value["operation"] not in SESSION_CONTEXT_OPERATIONS:
+            raise JournalConflictError("journal context operation is invalid")
+        _require_digest(value["command_digest"], "journal context command digest")
+        if value["status"] not in {"admitted", "rejected"}:
+            raise JournalConflictError("journal context decision status is invalid")
+        _require_identifier(value["reason"], "journal context decision reason")
+        return
+    if kind == "context.operation.receipted":
+        _require_fields(value, {"receipt", "usage"})
+        receipt = validate_session_context_receipt(value["receipt"])
+        if receipt["status"] == "uncertain":
+            if value["usage"] is not None:
+                raise JournalConflictError("journal context receipt usage is invalid")
+        else:
+            _validate_usage(value["usage"])
         return
     if kind == "checkpoint.sealed":
         _require_fields(value, {"checkpoint_event"})

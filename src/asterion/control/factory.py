@@ -11,7 +11,10 @@ from types import MappingProxyType
 from asterion.control.authority import AuthorityEnvelope
 from asterion.control.host import ControlPlaneClient, ControlPlaneManifest
 from asterion.control.protocol import IDENTIFIER, SEMANTIC_VERSION
-from asterion.control.session_context import SessionContextClient
+from asterion.control.session_context import (
+    SESSION_CONTEXT_CAPABILITY,
+    SessionContextClient,
+)
 from asterion.immutable import RedactedImmutableMapping
 
 
@@ -20,7 +23,6 @@ class ControlPlaneFactoryError(ValueError):
 
 
 CONTEXT_KEY = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]*$")
-SESSION_CONTEXT_CAPABILITY = "session.context-v1"
 
 
 @dataclass(frozen=True, repr=False)

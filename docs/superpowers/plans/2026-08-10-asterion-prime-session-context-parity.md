@@ -1,6 +1,6 @@
 # Asterion Prime Session/Context Parity Implementation Plan
 
-> Status: Tasks 4.1-4.2 verified; Task 4.3 host authority and recovery is next.
+> Status: Tasks 4.1-4.3 verified; Task 4.4 sidecar IPC and durability is next.
 >
 > Program parent: `2026-08-10-asterion-prime-system-parity.md`, Task 4.
 >
@@ -408,6 +408,10 @@ Commit: `feat: bind selected session context provider`.
 
 ### Task 4.3: Add host authority, journal and recovery management
 
+**Status:** Complete. The host persists commands and authority decisions before
+dispatch, accounts for shared budgets, replays exact receipts, and fences
+post-dispatch cancellation as uncertain until Task 4.4 adds routed IPC cancel.
+
 **Create:**
 
 - `src/asterion/control/session_context_manager.py`
@@ -431,6 +435,9 @@ Commit: `feat: bind selected session context provider`.
    reads private data, or chooses a provider.
 4. Recover accepted/decided/receipted context operations from the same
    canonical journal as lifecycle events.
+5. Until Task 4.4 provides request-ID response routing, cancellation after
+   dispatch records an uncertain receipt and fences the session. It must not
+   send a cancel request through the blocked sequential sidecar channel.
 
 Run:
 
@@ -444,6 +451,10 @@ Commit: `feat: manage authorized session context operations`.
 
 **Modify:**
 
+- `src/asterion/control/providers/prime/client.py`
+- `src/asterion/control/providers/prime/process.py`
+- `tests/test_prime_control_client.py`
+- `tests/test_prime_control_factory.py`
 - `packages/typescript/prime-gateway/src/main.ts`
 - `packages/typescript/prime-gateway/src/durable-store.ts`
 - `packages/typescript/prime-gateway/src/private-store.ts`
@@ -462,12 +473,18 @@ Commit: `feat: manage authorized session context operations`.
    fsync. Reopen after each fault and assert exactly one current binding.
 4. Add private attachment bytes and continuation locator bindings with strict
    roots, no-follow opens, caps and digest checks.
+5. Replace the Python sidecar's lock-across-response request path for this
+   surface with exact request-ID routing. Admit only the two context response
+   types, route stale/out-of-order replies correctly, and prove an in-flight
+   execute can be cancelled without consuming either response as the other.
 
 Run:
 
 ```bash
 npm --prefix packages/typescript/prime-gateway test -- \
   test/main.test.mjs test/durable-store.test.mjs test/private-store.test.mjs
+uv run python -m unittest -v \
+  tests.test_prime_control_client tests.test_prime_control_factory
 ```
 
 Commit: `feat: persist prime session context operations`.
