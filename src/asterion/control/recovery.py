@@ -133,7 +133,7 @@ def recover_control_host_state(
                     proposals[action_id] = event
                 if event.type == "budget.reported":
                     authority_operations.append(
-                        ProviderUsageReport(BudgetUsage(**event.payload))
+                        ProviderUsageReport(_usage(event.payload))
                     )
                 continue
             if record.kind == "checkpoint.sealed":
