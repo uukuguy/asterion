@@ -106,6 +106,22 @@ class BudgetRequest:
 
 
 @dataclass(frozen=True)
+class RemainingBudget:
+    """Current host-authoritative capacity, including a possibly zero deadline."""
+
+    controller_tokens: int
+    application_tokens: int
+    child_tokens: int
+    aggregate_tokens: int
+    cost_micros: int
+    deadline_ms: int
+
+    def __post_init__(self) -> None:
+        _validate_budget_values(self, "remaining budget")
+        _require_nonnegative_integer(self.deadline_ms, "remaining budget deadline")
+
+
+@dataclass(frozen=True)
 class AuthorityEnvelope:
     authority_id: str
     revision: int
@@ -259,6 +275,32 @@ class AuthorityLedger:
     @property
     def receipts(self) -> Mapping[str, ActionReceipt]:
         return MappingProxyType(dict(self._receipts))
+
+    def remaining_budget(self, *, now_ms: int) -> RemainingBudget:
+        """Return the exact conservative capacity after usage and reservations."""
+
+        _require_nonnegative_integer(now_ms, "remaining budget time")
+        envelope = self._envelope
+        if envelope.cancelled or now_ms >= envelope.expires_at_ms:
+            return RemainingBudget(0, 0, 0, 0, 0, 0)
+        committed = _add_usage(self.usage, self._reserved_usage())
+        limit = envelope.budget_limit
+        return RemainingBudget(
+            controller_tokens=max(0, limit.controller_tokens - committed.controller_tokens),
+            application_tokens=max(
+                0, limit.application_tokens - committed.application_tokens
+            ),
+            child_tokens=max(0, limit.child_tokens - committed.child_tokens),
+            aggregate_tokens=max(0, limit.aggregate_tokens - committed.aggregate_tokens),
+            cost_micros=max(0, limit.cost_micros - committed.cost_micros),
+            deadline_ms=max(
+                0,
+                min(
+                    envelope.max_action_deadline_ms,
+                    envelope.expires_at_ms - now_ms,
+                ),
+            ),
+        )
 
     def __eq__(self, other: object) -> bool:
         return (

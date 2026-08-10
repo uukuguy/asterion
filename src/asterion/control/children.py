@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 import stat
@@ -22,11 +23,17 @@ from asterion.control.authority import (
     AuthorityLedger,
 )
 from asterion.control.execution import ActionExecutionFailure, ActionExecutionReceipt
-from asterion.control.factory import ControlPlaneFactoryContext, ControlPlaneFactoryRegistry
+from asterion.control.factory import (
+    ControlPlaneFactoryContext,
+    ControlPlaneFactoryRegistry,
+)
 from asterion.control.host import ControlCommand, ControlEvent, ControlPlaneClient
 from asterion.control.journal import FileCanonicalJournal
 from asterion.control.manager import ActionExecutor, ControlHost
-from asterion.control.private_store import MAX_PRIVATE_TEXT_BYTES, PrivateContentResolver
+from asterion.control.private_store import (
+    MAX_PRIVATE_TEXT_BYTES,
+    PrivateContentResolver,
+)
 from asterion.control.protocol import OPAQUE_ID
 from asterion.control.system import AgentSystemPlan
 from asterion.runtime.host import CancellationSignal
@@ -61,7 +68,10 @@ class ChildActionExecutorFactory(Protocol):
     """Build a child executor with its exact nested lifecycle boundary."""
 
     def __call__(
-        self, authority: AuthorityEnvelope, children: "ChildSessionService"
+        self,
+        authority: AuthorityEnvelope,
+        children: "ChildSessionService",
+        client: ControlPlaneClient | None = None,
     ) -> ActionExecutor: ...
 
 
@@ -143,16 +153,28 @@ class ChildSessionStatus:
         if (
             not isinstance(self.child_id, str)
             or OPAQUE_ID.fullmatch(self.child_id) is None
-            or self.status not in {
-                "starting", "running", "completed", "failed", "cancelled", "uncertain"
+            or self.status
+            not in {
+                "starting",
+                "running",
+                "completed",
+                "failed",
+                "cancelled",
+                "uncertain",
             }
             or (
                 self.action_id is not None
-                and (not isinstance(self.action_id, str) or OPAQUE_ID.fullmatch(self.action_id) is None)
+                and (
+                    not isinstance(self.action_id, str)
+                    or OPAQUE_ID.fullmatch(self.action_id) is None
+                )
             )
             or (
                 self.receipt_ref is not None
-                and (not isinstance(self.receipt_ref, str) or OPAQUE_ID.fullmatch(self.receipt_ref) is None)
+                and (
+                    not isinstance(self.receipt_ref, str)
+                    or OPAQUE_ID.fullmatch(self.receipt_ref) is None
+                )
             )
             or (self.status == "completed" and self.receipt_ref is None)
             or (self.status != "completed" and self.receipt_ref is not None)
@@ -293,7 +315,10 @@ class ChildSessionService:
             or not callable(getattr(content, "resolve_text", None))
             or not callable(child_action_executor_factory)
             or not callable(clock_ms)
-            or (derive_control_options is not None and not callable(derive_control_options))
+            or (
+                derive_control_options is not None
+                and not callable(derive_control_options)
+            )
             or (
                 _private_root_fd is not None
                 and (
@@ -313,7 +338,10 @@ class ChildSessionService:
         try:
             options = dict(control_options)
             services = dict(host_services)
-            if any(type(key) is not str or type(value) is not str for key, value in options.items()):
+            if any(
+                type(key) is not str or type(value) is not str
+                for key, value in options.items()
+            ):
                 raise TypeError
         except Exception:
             raise ChildSessionError("child service construction is invalid") from None
@@ -407,7 +435,9 @@ class ChildSessionService:
             proposal_digest=digest,
         )
 
-    async def spawn(self, proposal: ControlEvent, signal: CancellationSignal) -> ActionExecutionReceipt:
+    async def spawn(
+        self, proposal: ControlEvent, signal: CancellationSignal
+    ) -> ActionExecutionReceipt:
         child_id = _child_id(proposal, "child.spawn")
         digest = self.proposal_digest(proposal)
         if _cancelled(signal):
@@ -442,13 +472,17 @@ class ChildSessionService:
                     self._release_child_root(child_id)
                     return terminal.receipt
                 if self.load_phase(root) == "provider-create-started":
-                    self._statuses[child_id] = ChildSessionStatus(child_id, "uncertain", expected.action_id)
+                    self._statuses[child_id] = ChildSessionStatus(
+                        child_id, "uncertain", expected.action_id
+                    )
                     raise _uncertain()
                 if len(self._entries) >= self._authority.max_concurrent_children:
                     raise ChildSessionError("child concurrency is unavailable")
                 # Validation is deliberately before the durable provider fence.
                 _validate_goal(self._content, proposal)
-                child_authority = derive_child_authority(self._authority, proposal, child_id, now_ms=self._clock_ms())
+                child_authority = derive_child_authority(
+                    self._authority, proposal, child_id, now_ms=self._clock_ms()
+                )
                 self.persist_binding(
                     child_root=root,
                     child_id=expected.child_id,
@@ -464,7 +498,9 @@ class ChildSessionService:
                 task.add_done_callback(_consume_child_task_exception)
                 entry = _ActiveChild(expected, digest, root, task)
                 self._entries[child_id] = entry
-                self._statuses[child_id] = ChildSessionStatus(child_id, "starting", expected.action_id)
+                self._statuses[child_id] = ChildSessionStatus(
+                    child_id, "starting", expected.action_id
+                )
         return await _await_without_cancelling(task)
 
     async def _run_spawn(
@@ -498,30 +534,69 @@ class ChildSessionService:
                 control_plane_version=self._plan.control_binding.version,
                 private_root=root.path,
                 options=options,
+                authority=authority,
                 host_services=self._host_services,
             )
             factory = self._factories.select(
                 self._plan.control_binding.control_plane_id,
                 self._plan.control_binding.version,
             ).factory
-            nested_children = ChildSessionService(
-                plan=self._plan,
-                authority=authority,
-                control_factories=self._factories,
-                private_root=root.path,
-                content=self._content,
-                child_action_executor_factory=self._executor_factory,
-                clock_ms=self._clock_ms,
-                control_options=self._control_options,
-                derive_control_options=self._derive_options,
-                host_services=self._host_services,
-                _private_root_fd=root.fd,
+            client_executor = _factory_accepts_client(self._executor_factory)
+            nested_children: ChildSessionService | None = None
+            executor: ActionExecutor | None = None
+            if not client_executor:
+                nested_children = ChildSessionService(
+                    plan=self._plan,
+                    authority=authority,
+                    control_factories=self._factories,
+                    private_root=root.path,
+                    content=self._content,
+                    child_action_executor_factory=self._executor_factory,
+                    clock_ms=self._clock_ms,
+                    control_options=self._control_options,
+                    derive_control_options=self._derive_options,
+                    host_services=self._host_services,
+                    _private_root_fd=root.fd,
+                )
+                executor = self._executor_factory(authority, nested_children)
+            journal = FileCanonicalJournal.open_at(
+                root.fd, root.path, binding.session_id
             )
-            executor = self._executor_factory(authority, nested_children)
-            journal = FileCanonicalJournal.open_at(root.fd, root.path, binding.session_id)
             self.persist_phase(child_root=root, phase="provider-create-started")
             fenced = True
             client = factory(context)
+            _seed_child_client_goal(client, self._content, proposal)
+            if nested_children is None:
+                nested_content = (
+                    client
+                    if callable(getattr(client, "resolve_text", None))
+                    else self._content
+                )
+                nested_services = (
+                    {**self._host_services, "private-content": client}
+                    if callable(getattr(client, "resolve_text", None))
+                    else self._host_services
+                )
+                nested_children = ChildSessionService(
+                    plan=self._plan,
+                    authority=authority,
+                    control_factories=self._factories,
+                    private_root=root.path,
+                    content=nested_content,  # type: ignore[arg-type]
+                    child_action_executor_factory=self._executor_factory,
+                    clock_ms=self._clock_ms,
+                    control_options=self._control_options,
+                    derive_control_options=self._derive_options,
+                    host_services=nested_services,
+                    _private_root_fd=root.fd,
+                )
+            if executor is None:
+                executor = _build_child_executor(
+                    self._executor_factory,
+                    authority,
+                    nested_children,
+                    client,
+                )
             runtime = _ChildRuntime(client=client)
             await self._attach_runtime(binding.child_id, runtime)
             host = ControlHost(
@@ -721,7 +796,11 @@ class ChildSessionService:
                     session_id=binding.session_id,
                     authority_revision=binding.generation,
                     type="input.submit",
-                    payload={"input_id": action_id, "delivery": "steer", "content_ref": input_ref},
+                    payload={
+                        "input_id": action_id,
+                        "delivery": "steer",
+                        "content_ref": input_ref,
+                    },
                 )
             )
         except Exception:
@@ -730,14 +809,17 @@ class ChildSessionService:
         return _zero_receipt(action_id, f"child-message-{binding.child_id}-{action_id}")
 
     async def cancel(
-        self, proposal: ControlEvent, signal: CancellationSignal) -> ActionExecutionReceipt:
+        self, proposal: ControlEvent, signal: CancellationSignal
+    ) -> ActionExecutionReceipt:
         """Request cancellation of one exact active child session."""
 
         del signal
         binding, runtime = await self._active_runtime(proposal, "child.cancel")
         action_id = proposal.payload.get("action_id")
         assert isinstance(action_id, str)
-        await self._send_cancel(binding, runtime, command_id=f"child-cancel-{action_id}")
+        await self._send_cancel(
+            binding, runtime, command_id=f"child-cancel-{action_id}"
+        )
         return _zero_receipt(action_id, f"child-cancel-{binding.child_id}-{action_id}")
 
     async def cancel_all(self) -> None:
@@ -840,7 +922,11 @@ class ChildSessionService:
                 entry = self._entries.get(binding.child_id)
                 if entry is not None and entry.runtime is runtime and entry.task.done():
                     status = self._statuses.get(binding.child_id)
-                    if status is not None and status.status in {"completed", "failed", "cancelled"}:
+                    if status is not None and status.status in {
+                        "completed",
+                        "failed",
+                        "cancelled",
+                    }:
                         self._entries.pop(binding.child_id, None)
         if failures:
             self._closed = False
@@ -908,7 +994,10 @@ class ChildSessionService:
         if not isinstance(proposal, ControlEvent) or proposal.type != "action.proposed":
             raise ChildSessionError("child proposal is invalid")
         encoded = json.dumps(
-            proposal.to_mapping(), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            proposal.to_mapping(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
         ).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
 
@@ -947,12 +1036,18 @@ class ChildSessionService:
             proposal_digest=proposal_digest,
         )
         existing = _load_json(child_root, _BINDING_NAME)
-        if existing is not None and ChildSessionBinding.from_mapping(existing) != binding:
+        if (
+            existing is not None
+            and ChildSessionBinding.from_mapping(existing) != binding
+        ):
             raise ChildSessionError("child binding conflicts")
         if existing is None:
             if not _write_json(child_root, _BINDING_NAME, binding.to_mapping()):
                 concurrent = _load_json(child_root, _BINDING_NAME)
-                if concurrent is None or ChildSessionBinding.from_mapping(concurrent) != binding:
+                if (
+                    concurrent is None
+                    or ChildSessionBinding.from_mapping(concurrent) != binding
+                ):
                     raise ChildSessionError("child binding conflicts")
         return binding.proposal_digest
 
@@ -978,7 +1073,9 @@ class ChildSessionService:
         value = _load_json(child_root, _PHASE_NAME)
         if value is None:
             return None
-        if not isinstance(value, Mapping) or dict(value) != {"phase": "provider-create-started"}:
+        if not isinstance(value, Mapping) or dict(value) != {
+            "phase": "provider-create-started"
+        }:
             raise ChildSessionError("child phase is invalid")
         return "provider-create-started"
 
@@ -1002,7 +1099,9 @@ class ChildSessionService:
                     raise ChildSessionError("child terminal conflicts")
 
     @staticmethod
-    def load_terminal(child_root: Path | _PinnedChildRoot) -> ChildTerminalReceipt | None:
+    def load_terminal(
+        child_root: Path | _PinnedChildRoot,
+    ) -> ChildTerminalReceipt | None:
         value = _load_json(child_root, _TERMINAL_NAME)
         if value is None:
             return None
@@ -1140,6 +1239,52 @@ def _child_id(proposal: ControlEvent, kind: str) -> str:
     return child_id
 
 
+def _seed_child_client_goal(
+    client: ControlPlaneClient,
+    content: PrivateContentResolver,
+    proposal: ControlEvent,
+) -> None:
+    cacher = getattr(client, "cache_private_input", None)
+    if not callable(cacher):
+        return
+    reference = proposal.payload.get("input_ref")
+    if not isinstance(reference, str):
+        raise ChildSessionError("child private input is invalid")
+    try:
+        body = content.resolve_text(reference, max_bytes=MAX_PRIVATE_TEXT_BYTES)
+        cacher(reference, body)
+    except Exception:
+        raise ChildSessionError("child private input is unavailable") from None
+
+
+def _build_child_executor(
+    factory: ChildActionExecutorFactory,
+    authority: AuthorityEnvelope,
+    children: ChildSessionService,
+    client: ControlPlaneClient,
+) -> ActionExecutor:
+    if _factory_accepts_client(factory):
+        return factory(authority, children, client)
+    return factory(authority, children)
+
+
+def _factory_accepts_client(factory: ChildActionExecutorFactory) -> bool:
+    try:
+        parameters = inspect.signature(factory).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    positional = 0
+    for parameter in parameters:
+        if parameter.kind is inspect.Parameter.VAR_POSITIONAL:
+            return True
+        if parameter.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            positional += 1
+    return positional >= 3
+
+
 def _validate_goal(content: PrivateContentResolver, proposal: ControlEvent) -> None:
     reference = proposal.payload.get("input_ref")
     if not isinstance(reference, str) or OPAQUE_ID.fullmatch(reference) is None:
@@ -1157,7 +1302,9 @@ def _terminal_failure(host: ControlHost) -> ActionExecutionFailure | None:
     if status == "completed":
         return None
     if status == "failed":
-        return ActionExecutionFailure("failed", "child-terminal-failed", "child-terminal")
+        return ActionExecutionFailure(
+            "failed", "child-terminal-failed", "child-terminal"
+        )
     if status == "cancelled":
         return ActionExecutionFailure("cancelled", "child-terminal-cancelled", None)
     if status == "budget_limited":
@@ -1400,7 +1547,9 @@ def _load_json(root: Path | _PinnedChildRoot, name: str) -> Mapping[str, object]
     return value
 
 
-def _write_json(root: Path | _PinnedChildRoot, name: str, value: Mapping[str, object]) -> bool:
+def _write_json(
+    root: Path | _PinnedChildRoot, name: str, value: Mapping[str, object]
+) -> bool:
     directory_fd: int | None = None
     root_path: Path | None = None
     if isinstance(root, _PinnedChildRoot):
@@ -1411,9 +1560,9 @@ def _write_json(root: Path | _PinnedChildRoot, name: str, value: Mapping[str, ob
         _ensure_private_directory(root)
         root_path = root
     encoded = (
-        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(
-            "utf-8"
-        )
+        json.dumps(
+            value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode("utf-8")
         + b"\n"
     )
     temporary = f".{name}.{os.getpid()}.{os.urandom(8).hex()}.tmp"

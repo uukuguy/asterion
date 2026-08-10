@@ -65,6 +65,14 @@ class ChildActionService(Protocol):
     ) -> ActionExecutionReceipt: ...
 
 
+class SystemActionService(Protocol):
+    """Execute exact control-system actions through the selected provider."""
+
+    async def execute(
+        self, proposal: ControlEvent, signal: CancellationSignal
+    ) -> ActionExecutionReceipt: ...
+
+
 class ApplicationActionExecutor:
     """ActionExecutor for one preflight-resolved application portfolio.
 
@@ -85,6 +93,7 @@ class ApplicationActionExecutor:
         host_services: Mapping[str, object],
         pathlight: PathlightRecorder | None = None,
         child_service: ChildActionService | None = None,
+        system_service: SystemActionService | None = None,
     ) -> None:
         if (
             not isinstance(plan, AgentSystemPlan)
@@ -93,6 +102,7 @@ class ApplicationActionExecutor:
             or not callable(getattr(results, "publish_application_result", None))
             or not isinstance(host_services, Mapping)
             or not _valid_child_action_service(child_service)
+            or not _valid_system_action_service(system_service)
         ):
             raise ValueError("application action executor is invalid")
         self._plan = plan
@@ -106,10 +116,27 @@ class ApplicationActionExecutor:
         self._host_services = MappingProxyType(dict(host_services))
         self._pathlight = pathlight
         self._child_service = child_service
+        self._system_service = system_service
 
     async def execute(
         self, proposal: ControlEvent, signal: CancellationSignal
     ) -> ActionExecutionReceipt:
+        if self._is_system_action(proposal):
+            if self._system_service is None:
+                raise _failed(proposal, "system-service-unavailable")
+            try:
+                receipt = await self._system_service.execute(proposal, signal)
+            except ActionExecutionFailure:
+                raise
+            except Exception:
+                raise ActionExecutionFailure(
+                    "uncertain", "system-progress-unknown", None
+                ) from None
+            if type(receipt) is not ActionExecutionReceipt:
+                raise ActionExecutionFailure(
+                    "uncertain", "system-progress-unknown", None
+                )
+            return receipt
         child_action = self._child_action(proposal)
         if child_action is not None:
             if self._child_service is None:
@@ -241,6 +268,15 @@ class ApplicationActionExecutor:
         return target, identity, self._plan.portfolio_entry(*identity)
 
     @staticmethod
+    def _is_system_action(proposal: object) -> bool:
+        return (
+            isinstance(proposal, ControlEvent)
+            and proposal.type == "action.proposed"
+            and proposal.payload.get("kind")
+            in {"checkpoint.create", "goal.complete", "goal.fail"}
+        )
+
+    @staticmethod
     def _child_action(proposal: object) -> str | None:
         if not isinstance(proposal, ControlEvent) or proposal.type != "action.proposed":
             return None
@@ -293,6 +329,15 @@ def _valid_child_action_service(value: object) -> bool:
             callable(getattr(value, method, None))
             for method in ("spawn", "message", "cancel")
         )
+    except Exception:
+        return False
+
+
+def _valid_system_action_service(value: object) -> bool:
+    if value is None:
+        return True
+    try:
+        return callable(getattr(value, "execute", None))
     except Exception:
         return False
 

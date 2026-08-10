@@ -7,7 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
-from asterion.control.authority import AuthorityLedger, BudgetUsage
+from asterion.control.authority import AuthorityLedger, BudgetUsage, RemainingBudget
 from asterion.control.execution import (
     ActionExecutionFailure,
     ActionExecutionReceipt,
@@ -106,6 +106,7 @@ class ExecutionClient:
         self.cancel_on_admission = cancel_on_admission
         self.sent: list[ControlCommand] = []
         self.attempted: list[ControlCommand] = []
+        self.authority_snapshots: list[RemainingBudget] = []
 
     @property
     def manifest(self) -> ControlPlaneManifest:
@@ -135,6 +136,9 @@ class ExecutionClient:
     def events(self, cursor: EventCursor | None = None) -> AsyncIterator[ControlEvent]:
         del cursor
         return self._iterate()
+
+    async def sync_authority_snapshot(self, budget: RemainingBudget) -> None:
+        self.authority_snapshots.append(budget)
 
     async def close(self) -> None:
         return None
@@ -356,6 +360,14 @@ class TestControlExecution(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(ledger.usage, USAGE)
             self.assertEqual(len(executor.calls), 1)
+            self.assertEqual(
+                client.authority_snapshots,
+                [
+                    RemainingBudget(1000, 1000, 1000, 3000, 100_000, 20_000),
+                    RemainingBudget(1000, 900, 1000, 2900, 95_000, 20_000),
+                    RemainingBudget(1000, 920, 1000, 2920, 96_000, 20_000),
+                ],
+            )
 
     async def test_cancelled_before_start_never_contacts_executor(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

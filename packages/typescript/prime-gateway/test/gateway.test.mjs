@@ -111,6 +111,23 @@ async function fixture({
     },
   });
   const privateValues = await PrivateValueStore.open(root);
+  const resultLookups = [];
+  let failAfterResultLookup = false;
+  const privateResults = {
+    async readBoundResultReference(commandId, actionId, sourceRef) {
+      resultLookups.push([commandId, actionId, sourceRef]);
+      const result = await privateValues.readBoundResultReference(
+        commandId,
+        actionId,
+        sourceRef,
+      );
+      if (failAfterResultLookup) {
+        failAfterResultLookup = false;
+        failNextWrite = true;
+      }
+      return result;
+    },
+  };
   const session = new FakePrimeSession();
   const createdGoals = [];
   const checkpointAcknowledgements = [];
@@ -131,6 +148,7 @@ async function fixture({
     authorityId: "authority-1",
     store,
     privateValues,
+    privateResults,
     async createSession(goal, bindIdentity) {
       createdGoals.push(goal);
       await bindIdentity({
@@ -178,11 +196,15 @@ async function fixture({
     root,
     store,
     privateValues,
+    resultLookups,
     session,
     gateway,
     createdGoals,
     checkpointAcknowledgements,
     checkpointAcknowledgementAttempts,
+    failNextGoalEventWrite() {
+      failAfterResultLookup = true;
+    },
     async cleanup({ allowCloseFailure = false } = {}) {
       if (allowCloseFailure) {
         await gateway.close().catch(() => undefined);
@@ -241,6 +263,25 @@ function proposal(identity, actionId, inputRef) {
         deadline_ms: 1_000,
       },
       causal_parent_ids: ["goal-1"],
+    },
+  };
+}
+
+function goalProposal(identity, actionId, inputRef, kind) {
+  return {
+    ...proposal(identity, actionId, inputRef),
+    payload: {
+      ...proposal(identity, actionId, inputRef).payload,
+      kind,
+      target: { kind: "goal", goal_id: "goal-1" },
+      budget: {
+        controller_tokens: 0,
+        application_tokens: 0,
+        child_tokens: 0,
+        aggregate_tokens: 0,
+        cost_micros: 0,
+        deadline_ms: 1_000,
+      },
     },
   };
 }
@@ -964,6 +1005,312 @@ test("gateway resolves admitted actions and preserves uncertain transport state"
       status: "uncertain",
       reason_code: "transport-uncertain",
     });
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("gateway keeps public terminal command stable while resolving private result lookup", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const inputRef = await state.privateValues.putInput("private action input");
+    const identity = state.gateway.nextEventIdentity();
+    await state.gateway.emitActionProposal(proposal(identity, "action-1", inputRef));
+    await state.gateway.accept(command("action.resolve", {
+      action_id: "action-1",
+      resolution: "admitted",
+      reason_code: "authorized",
+      receipt_ref: null,
+    }, "command-admit"));
+    const privateRef = await state.privateValues.bindResultReference(
+      "command-terminal",
+      "action-1",
+      "receipt-1",
+      {
+        receiptRef: "receipt-1",
+        artifactIds: ["artifact-1"],
+        mediaTypes: ["text/plain"],
+      },
+    );
+
+    const terminal = state.gateway.waitForTerminal("action-1");
+    const publicCommand = command("action.resolve", {
+      action_id: "action-1",
+      resolution: "succeeded",
+      reason_code: "executed",
+      receipt_ref: "receipt-1",
+    }, "command-terminal");
+    await state.gateway.accept(structuredClone(publicCommand));
+
+    assert.deepEqual(await terminal, {
+      resolution: "succeeded",
+      reasonCode: "executed",
+      resultRef: privateRef,
+    });
+    assert.deepEqual(
+      state.store
+        .snapshot()
+        .commandCount,
+      3,
+    );
+    const storedTerminal = state.store
+      .eventsAfter(0);
+    assert.deepEqual(state.resultLookups, [["command-terminal", "action-1", "receipt-1"]]);
+    assert.equal(JSON.stringify(storedTerminal).includes(privateRef), false);
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("successful goal action resolution applies one canonical session terminal", async () => {
+  for (const [kind, goalStatus, sessionType, reasonCode] of [
+    ["goal.complete", "completed", "session.completed", "host-admitted-goal-complete"],
+    ["goal.fail", "failed", "session.failed", "host-admitted-goal-fail"],
+  ]) {
+    const state = await fixture();
+    try {
+      const goalRef = await state.privateValues.putInput("goal");
+      await state.gateway.accept(command("session.create", {
+        system_id: "research.system",
+        system_version: "1.0.0",
+        goal_id: "goal-1",
+        goal_ref: goalRef,
+      }, "command-create"));
+      const inputRef = await state.privateValues.putInput("private goal result");
+      const actionId = kind === "goal.complete" ? "action-complete" : "action-fail";
+      await state.gateway.emitActionProposal(goalProposal(
+        state.gateway.nextEventIdentity(),
+        actionId,
+        inputRef,
+        kind,
+      ));
+      await state.gateway.accept(command("action.resolve", {
+        action_id: actionId,
+        resolution: "admitted",
+        reason_code: "authorized",
+        receipt_ref: null,
+      }, `admit-${actionId}`));
+      const terminalCommandId = `terminal-${actionId}`;
+      const receiptRef = `system-${kind}-${actionId}`;
+      await state.privateValues.bindResultReference(
+        terminalCommandId,
+        actionId,
+        receiptRef,
+        { receiptRef, artifactIds: [], mediaTypes: [] },
+      );
+
+      await state.gateway.accept(command("action.resolve", {
+        action_id: actionId,
+        resolution: "succeeded",
+        reason_code: "executed",
+        receipt_ref: receiptRef,
+      }, terminalCommandId));
+
+      const events = state.store.eventsAfter(0).map(({ event }) => event);
+      assert.deepEqual(events.slice(-2).map((event) => event.type), [
+        "goal.updated",
+        sessionType,
+      ]);
+      assert.deepEqual(events.at(-2).payload, {
+        goal_id: "goal-1",
+        status: goalStatus,
+      });
+      assert.deepEqual(events.at(-1).payload, { reason_code: reasonCode });
+      assert.deepEqual(validateControlEventStream(events), events);
+    } finally {
+      await state.cleanup();
+    }
+  }
+});
+
+test("durable goal resolution completes its terminal events after gateway restart", async () => {
+  const state = await fixture();
+  let reopened;
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const inputRef = await state.privateValues.putInput("private goal result");
+    const actionId = "action-complete";
+    await state.gateway.emitActionProposal(goalProposal(
+      state.gateway.nextEventIdentity(), actionId, inputRef, "goal.complete",
+    ));
+    await state.gateway.accept(command("action.resolve", {
+      action_id: actionId,
+      resolution: "admitted",
+      reason_code: "authorized",
+      receipt_ref: null,
+    }, "command-admit"));
+    const receiptRef = `system-goal.complete-${actionId}`;
+    await state.privateValues.bindResultReference(
+      "command-terminal",
+      actionId,
+      receiptRef,
+      { receiptRef, artifactIds: [], mediaTypes: [] },
+    );
+    state.failNextGoalEventWrite();
+    await assert.rejects(state.gateway.accept(command("action.resolve", {
+      action_id: actionId,
+      resolution: "succeeded",
+      reason_code: "executed",
+      receipt_ref: receiptRef,
+    }, "command-terminal")));
+    await state.gateway.close().catch(() => undefined);
+
+    const store = await GatewayDurableStore.open(state.root, "session-1");
+    const privateValues = await PrivateValueStore.open(state.root);
+    const session = new FakePrimeSession();
+    let tick = 30;
+    reopened = await PrimeGateway.open({
+      sessionId: "session-1",
+      generation: 1,
+      authorityId: "authority-1",
+      store,
+      privateValues,
+      privateResults: privateValues,
+      async createSession() {
+        throw new Error("must restore");
+      },
+      async restoreSession(identity, onRecovered) {
+        await onRecovered({
+          transport: recoveryTransport(
+            identity.supervisorGeneration,
+            "goal-recovery-transport",
+          ),
+          primeCursor: { generation: "prime-events-1", sequence: 0 },
+          transcriptSessionId: identity.transcriptSessionId,
+          supervisorGeneration: identity.supervisorGeneration,
+          sessionStatus: "running",
+        });
+        return session;
+      },
+      async createCheckpoint() {
+        throw new Error("not used");
+      },
+      now() {
+        tick += 1;
+        return `2026-08-10T03:00:${String(tick).padStart(2, "0")}Z`;
+      },
+    });
+
+    const events = store.eventsAfter(0).map(({ event }) => event);
+    assert.equal(events.filter((event) =>
+      event.type === "goal.updated" && event.payload.status === "completed"
+    ).length, 1);
+    assert.equal(events.filter((event) => event.type === "session.completed").length, 1);
+    assert.deepEqual(validateControlEventStream(events), events);
+  } finally {
+    await reopened?.close();
+    await state.cleanup({ allowCloseFailure: true });
+  }
+});
+
+test("gateway leaves action admitted when successful result binding is missing and permits replay", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const inputRef = await state.privateValues.putInput("private action input");
+    const identity = state.gateway.nextEventIdentity();
+    await state.gateway.emitActionProposal(proposal(identity, "action-1", inputRef));
+    await state.gateway.accept(command("action.resolve", {
+      action_id: "action-1",
+      resolution: "admitted",
+      reason_code: "authorized",
+      receipt_ref: null,
+    }, "command-admit"));
+    const publicCommand = command("action.resolve", {
+      action_id: "action-1",
+      resolution: "succeeded",
+      reason_code: "executed",
+      receipt_ref: "receipt-1",
+    }, "command-terminal");
+    const terminal = state.gateway.waitForTerminal("action-1");
+
+    await assert.rejects(state.gateway.accept(structuredClone(publicCommand)));
+    assert.deepEqual(await state.gateway.actionStatus("action-1"), {
+      action_id: "action-1",
+      status: "admitted",
+      reason_code: "authorized",
+    });
+    assert.deepEqual(state.resultLookups, [["command-terminal", "action-1", "receipt-1"]]);
+
+    const privateRef = await state.privateValues.bindResultReference(
+      "command-terminal",
+      "action-1",
+      "receipt-1",
+      {
+        receiptRef: "receipt-1",
+        artifactIds: ["artifact-1"],
+        mediaTypes: ["text/plain"],
+      },
+    );
+    await state.gateway.accept(structuredClone(publicCommand));
+
+    assert.deepEqual(await terminal, {
+      resolution: "succeeded",
+      reasonCode: "executed",
+      resultRef: privateRef,
+    });
+    assert.deepEqual(state.resultLookups, [
+      ["command-terminal", "action-1", "receipt-1"],
+      ["command-terminal", "action-1", "receipt-1"],
+    ]);
+    assert.equal(state.store.snapshot().commandCount, 3);
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("gateway accepts failed receipts without private result lookup", async () => {
+  const state = await fixture();
+  try {
+    const goalRef = await state.privateValues.putInput("goal");
+    await state.gateway.accept(command("session.create", {
+      system_id: "research.system",
+      system_version: "1.0.0",
+      goal_id: "goal-1",
+      goal_ref: goalRef,
+    }, "command-create"));
+    const inputRef = await state.privateValues.putInput("private action input");
+    const identity = state.gateway.nextEventIdentity();
+    await state.gateway.emitActionProposal(proposal(identity, "action-1", inputRef));
+    await state.gateway.accept(command("action.resolve", {
+      action_id: "action-1",
+      resolution: "admitted",
+      reason_code: "authorized",
+      receipt_ref: null,
+    }, "command-admit"));
+
+    const terminal = state.gateway.waitForTerminal("action-1");
+    await state.gateway.accept(command("action.resolve", {
+      action_id: "action-1",
+      resolution: "failed",
+      reason_code: "executor-failed",
+      receipt_ref: "failure-receipt-1",
+    }, "command-terminal"));
+
+    assert.deepEqual(await terminal, {
+      resolution: "failed",
+      reasonCode: "executor-failed",
+    });
+    assert.deepEqual(state.resultLookups, []);
   } finally {
     await state.cleanup();
   }

@@ -27,6 +27,7 @@ from asterion.capability_packages import CapabilityPackageRef, InstalledCapabili
 from asterion.control.application_executor import (
     ApplicationActionExecutor,
     ChildActionService,
+    SystemActionService,
 )
 from asterion.control.authority import BudgetUsage
 from asterion.control.execution import ActionExecutionFailure, ActionExecutionReceipt
@@ -276,6 +277,15 @@ def _child_receipt(proposal: ControlEvent) -> ActionExecutionReceipt:
     )
 
 
+def _system_proposal(kind: str) -> ControlEvent:
+    target = (
+        {"kind": "checkpoint", "checkpoint_id": "checkpoint-1"}
+        if kind == "checkpoint.create"
+        else {"kind": "goal", "goal_id": "goal-1"}
+    )
+    return _proposal(kind=kind, target=target)
+
+
 def _assembly(
     root: Path,
     implementation: UsageImplementation,
@@ -419,6 +429,7 @@ def _executor(
     runtime_id: str = "fake.runtime",
     runtime_manifest: Mapping[str, object] | None = None,
     child_service: object | None = None,
+    system_service: object | None = None,
 ):
     audit = [] if audit is None else audit
     implementation = implementation or UsageImplementation(audit)
@@ -482,11 +493,66 @@ def _executor(
         else {"secret.service": {"value": SENTINEL}},
         pathlight=None,
         child_service=cast(ChildActionService | None, child_service),
+        system_service=cast(SystemActionService | None, system_service),
     )
     return executor, resolver, results, implementation
 
 
 class TestApplicationActionExecutor(unittest.IsolatedAsyncioTestCase):
+    async def test_system_actions_are_forwarded_to_the_injected_service(self) -> None:
+        class SystemActions:
+            def __init__(self) -> None:
+                self.calls: list[ControlEvent] = []
+
+            async def execute(self, proposal: ControlEvent, signal: MutableSignal):
+                del signal
+                self.calls.append(proposal)
+                return _child_receipt(proposal)
+
+        with tempfile.TemporaryDirectory() as directory:
+            service = SystemActions()
+            executor, _, _, _ = _executor(
+                Path(directory), system_service=service
+            )
+            for kind in ("checkpoint.create", "goal.complete", "goal.fail"):
+                proposal = _system_proposal(kind)
+                receipt = await executor.execute(proposal, MutableSignal())
+                self.assertEqual(receipt.action_id, proposal.payload["action_id"])
+            self.assertEqual(
+                [call.payload["kind"] for call in service.calls],
+                ["checkpoint.create", "goal.complete", "goal.fail"],
+            )
+
+    async def test_missing_or_faulting_system_service_fails_closed(self) -> None:
+        class FaultingSystemActions:
+            async def execute(self, proposal: ControlEvent, signal: MutableSignal):
+                del proposal, signal
+                raise RuntimeError(SENTINEL)
+
+        with tempfile.TemporaryDirectory() as directory:
+            executor, _, _, _ = _executor(Path(directory))
+            with self.assertRaises(ActionExecutionFailure) as missing:
+                await executor.execute(
+                    _system_proposal("goal.complete"), MutableSignal()
+                )
+            self.assertEqual(missing.exception.status, "failed")
+            self.assertEqual(
+                missing.exception.reason_code, "system-service-unavailable"
+            )
+
+            executor, _, _, _ = _executor(
+                Path(directory), system_service=FaultingSystemActions()
+            )
+            with self.assertRaises(ActionExecutionFailure) as faulting:
+                await executor.execute(
+                    _system_proposal("checkpoint.create"), MutableSignal()
+                )
+            self.assertEqual(faulting.exception.status, "uncertain")
+            self.assertEqual(
+                faulting.exception.reason_code, "system-progress-unknown"
+            )
+            self.assertNotIn(SENTINEL, str(faulting.exception))
+
     async def test_child_service_transport_fault_is_uncertain_and_redacted(self) -> None:
         class FaultingChildren:
             async def spawn(self, proposal: ControlEvent, signal: MutableSignal):

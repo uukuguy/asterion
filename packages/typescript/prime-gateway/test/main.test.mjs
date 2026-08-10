@@ -59,6 +59,7 @@ function event(sequence, generation = 1) {
 class FakePrivateValues {
   constructor() {
     this.inputs = [];
+    this.results = [];
     this.bindings = new Map();
   }
 
@@ -67,8 +68,17 @@ class FakePrivateValues {
     return `private:00000000-0000-4000-8000-${String(this.inputs.length).padStart(12, "0")}`;
   }
 
+  async readInput(reference) {
+    const index = Number(reference.split("-").at(-1));
+    const value = this.inputs[index - 1];
+    if (value === undefined) {
+      throw new Error("missing private input");
+    }
+    return value;
+  }
+
   async bindInputReference(commandId, sourceRef, value) {
-    const key = `${commandId}:${sourceRef}`;
+    const key = `input:${commandId}:${sourceRef}`;
     const existing = this.bindings.get(key);
     if (existing !== undefined) {
       if (existing.value !== value) {
@@ -77,7 +87,22 @@ class FakePrivateValues {
       return existing.privateRef;
     }
     const privateRef = await this.putInput(value);
-    this.bindings.set(key, { privateRef, value });
+    this.bindings.set(key, { privateRef, sourceRef, value });
+    return privateRef;
+  }
+
+  async bindResultReference(commandId, actionId, sourceRef, value) {
+    const key = `result:${commandId}:${actionId}:${sourceRef}`;
+    const existing = this.bindings.get(key);
+    if (existing !== undefined) {
+      if (JSON.stringify(existing.value) !== JSON.stringify(value)) {
+        throw new Error("SENTINEL_CONFLICTING_PRIVATE_RESULT");
+      }
+      return existing.privateRef;
+    }
+    this.results.push(value);
+    const privateRef = `private:11111111-1111-4111-8111-${String(this.results.length).padStart(12, "0")}`;
+    this.bindings.set(key, { privateRef, sourceRef, value });
     return privateRef;
   }
 
@@ -488,6 +513,126 @@ test("sidecar rejects replay when the same command ref has different private con
 
   assert.equal(response.type, "error");
   assert.equal(JSON.stringify(response).includes("SENTINEL_SECRET"), false);
+});
+
+test("sidecar binds successful action receipts to stable private result refs", async () => {
+  const { gateway, privateValues, sidecar } = createSidecar();
+  const publicCommand = command("action.resolve", {
+    action_id: "action-1",
+    resolution: "succeeded",
+    reason_code: "executed",
+    receipt_ref: "receipt-1",
+  }, "terminal-action-1");
+  const privateProjection = {
+    result: {
+      receipt_ref: "receipt-1",
+      artifact_ids: ["artifact-1"],
+      media_types: ["text/plain"],
+    },
+  };
+
+  for (const id of ["request-1", "request-2"]) {
+    const response = await sidecar.handleEnvelope({
+      protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+      id,
+      type: "command.accept",
+      command: structuredClone(publicCommand),
+      private: structuredClone(privateProjection),
+    });
+    assert.equal(response.type, "command.accepted");
+  }
+
+  assert.equal(privateValues.results.length, 1);
+  assert.equal(gateway.accepted.length, 2);
+  assert.deepEqual(gateway.accepted, [publicCommand, publicCommand]);
+  assert.match(privateValues.bindings.get(
+    "result:terminal-action-1:action-1:receipt-1",
+  ).privateRef, /^private:/);
+  assert.equal(JSON.stringify(gateway.accepted).includes("artifact-1"), false);
+});
+
+test("sidecar passes failed action receipts byte-identically without private result", async () => {
+  const { gateway, privateValues, sidecar } = createSidecar();
+  const publicCommand = command("action.resolve", {
+    action_id: "action-1",
+    resolution: "failed",
+    reason_code: "executor-failed",
+    receipt_ref: "failure-receipt-1",
+  }, "terminal-action-1");
+
+  const response = await sidecar.handleEnvelope({
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "request-1",
+    type: "command.accept",
+    command: structuredClone(publicCommand),
+    private: {},
+  });
+
+  assert.equal(response.type, "command.accepted");
+  assert.deepEqual(gateway.accepted, [publicCommand]);
+  assert.equal(privateValues.results.length, 0);
+});
+
+test("sidecar private read resolves generated input refs outside public command flow", async () => {
+  const { gateway, privateValues, sidecar } = createSidecar();
+  const reference = await privateValues.putInput("SENTINEL_PRIVATE_ACTION_INPUT");
+
+  const response = await sidecar.handleEnvelope({
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "request-private-read",
+    type: "private.read",
+    reference,
+  });
+
+  assert.deepEqual(response, {
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "request-private-read",
+    type: "private.value",
+    text: "SENTINEL_PRIVATE_ACTION_INPUT",
+  });
+  assert.deepEqual(gateway.accepted, []);
+});
+
+test("sidecar rejects conflicting result projection replay", async () => {
+  const { sidecar } = createSidecar();
+  const publicCommand = command("action.resolve", {
+    action_id: "action-1",
+    resolution: "succeeded",
+    reason_code: "executed",
+    receipt_ref: "receipt-1",
+  }, "terminal-action-1");
+  const first = {
+    result: {
+      receipt_ref: "receipt-1",
+      artifact_ids: ["artifact-1"],
+      media_types: ["text/plain"],
+    },
+  };
+  const second = {
+    result: {
+      receipt_ref: "receipt-1",
+      artifact_ids: ["artifact-2"],
+      media_types: ["text/plain"],
+    },
+  };
+
+  await sidecar.handleEnvelope({
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "request-1",
+    type: "command.accept",
+    command: publicCommand,
+    private: first,
+  });
+  const response = await sidecar.handleEnvelope({
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "request-2",
+    type: "command.accept",
+    command: publicCommand,
+    private: second,
+  });
+
+  assert.equal(response.type, "error");
+  assert.equal(JSON.stringify(response).includes("artifact-2"), false);
 });
 
 test("sidecar replays public events after an exact cursor", async () => {

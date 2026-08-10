@@ -16,6 +16,7 @@ from asterion.control.authority import (
 from asterion.control.host import ControlCommand, ControlEvent, EventCursor
 from asterion.control.execution import ActionExecutionReceipt
 from asterion.control.journal import (
+    FileCanonicalJournal,
     JournalConflictError,
     JournalCursor,
     JournalEntry,
@@ -179,6 +180,130 @@ def _action_prefix() -> tuple[MemoryCanonicalJournal, ControlEvent]:
 
 
 class TestControlRecovery(unittest.TestCase):
+    def test_live_terminal_delivery_binds_public_safe_result_projection(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            proposal = _proposal_event()
+            plan = _plan(directory)
+
+            class BindingClient(ScriptedClient):
+                def __init__(self) -> None:
+                    super().__init__(
+                        plan.control_binding.manifest,
+                        (_created(), _running(), proposal),
+                    )
+                    self.bound: list[ActionExecutionReceipt] = []
+
+                def bind_action_result(self, receipt: ActionExecutionReceipt) -> None:
+                    self.bound.append(receipt)
+
+            class SuccessfulExecutor:
+                async def execute(
+                    self, proposal: ControlEvent, signal: CancellationSignal
+                ) -> ActionExecutionReceipt:
+                    del proposal, signal
+                    return ActionExecutionReceipt(
+                        action_id="action-1",
+                        receipt_ref="receipt-1",
+                        usage=BudgetUsage(0, 80, 0, 80, 4_000),
+                        artifact_ids=("artifact-1",),
+                        media_types=("text/plain",),
+                    )
+
+            client = BindingClient()
+            host = ControlHost(
+                session_id="session-1",
+                generation=1,
+                plan=plan,
+                authority=AuthorityLedger(_envelope()),
+                journal=MemoryCanonicalJournal("session-1"),
+                client=client,
+                action_executor=SuccessfulExecutor(),
+                clock_ms=lambda: 1_000,
+            )
+
+            asyncio.run(host.pump())
+
+            self.assertEqual(
+                tuple(receipt.artifact_ids for receipt in client.bound),
+                (("artifact-1",),),
+            )
+            self.assertEqual(client.bound[0].media_types, ("text/plain",))
+
+    def test_recovered_terminal_delivery_rebinds_result_projection_from_file_journal(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            journal = FileCanonicalJournal.open(root / "journal", "session-1")
+            first = journal.append(
+                0,
+                JournalRecord.system_bound(
+                    system_id="research.system", system_version="1.0.0"
+                ),
+            )
+            journal.append(
+                first.position,
+                JournalRecord.authority_bound(
+                    authority_id="authority-1", authority_revision=1
+                ),
+            )
+            proposal = _proposal_event()
+            for event in (_created(), _running(), proposal):
+                journal.accept_event(event, expected_position=journal.position)
+            _decision(journal, proposal)  # type: ignore[arg-type]
+            journal.accept_command(
+                _admission_command(),
+                expected_position=journal.position,
+            )
+            journal.append(
+                journal.position,
+                JournalRecord.action_running(
+                    action_id="action-1",
+                    proposal_digest=action_proposal_digest(proposal),
+                ),
+            )
+            journal.append(
+                journal.position,
+                JournalRecord.action_receipted(
+                    action_id="action-1",
+                    receipt_ref="receipt-1",
+                    usage=BudgetUsage(0, 80, 0, 80, 4_000),
+                    artifact_ids=("artifact-1",),
+                    media_types=("text/plain",),
+                ),
+            )
+            journal.accept_command(
+                _terminal_command("succeeded", "receipt-1"),
+                expected_position=journal.position,
+            )
+            journal.close()
+            plan = _plan(directory)
+
+            class BindingClient(ScriptedClient):
+                def __init__(self) -> None:
+                    super().__init__(plan.control_binding.manifest)
+                    self.bound: list[ActionExecutionReceipt] = []
+
+                def bind_action_result(self, receipt: ActionExecutionReceipt) -> None:
+                    self.bound.append(receipt)
+
+            client = BindingClient()
+            host = ControlHost(
+                session_id="session-1",
+                generation=1,
+                plan=plan,
+                authority=AuthorityLedger(_envelope()),
+                journal=FileCanonicalJournal.open(root / "journal", "session-1"),
+                client=client,
+                action_executor=SpyExecutor(),
+                clock_ms=lambda: 1_000,
+            )
+
+            asyncio.run(host.pump())
+
+            self.assertEqual(client.bound[0].artifact_ids, ("artifact-1",))
+            self.assertEqual(client.bound[0].media_types, ("text/plain",))
+
     def test_budget_report_recovery_is_exact_and_frozen(self) -> None:
         journal = _journal()
         _accept(journal, _created(), _running(), _event("budget.reported", 3, {

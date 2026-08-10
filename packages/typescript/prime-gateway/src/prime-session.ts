@@ -13,6 +13,8 @@ import type {
 
 export interface PrimeDaemonTransport {
   readonly hello: PrimeDaemonHello | undefined;
+  readonly isConnected?: boolean;
+  reconnect?(): Promise<void>;
   acknowledgeResult(stableCommandId: string): boolean;
   request(
     command: PrimeDaemonCommand,
@@ -151,6 +153,7 @@ export class PrimeSession {
   private readonly pendingAdmissions = new Set<string>();
   private transport: PrimeDaemonTransport;
   private currentSupervisorGeneration: string;
+  private latestAttachResponse: (PrimeDaemonResponse & { success: true }) | undefined;
 
   private constructor(
     transport: PrimeDaemonTransport,
@@ -165,6 +168,10 @@ export class PrimeSession {
 
   get supervisorGeneration(): string {
     return this.currentSupervisorGeneration;
+  }
+
+  get lastAttachResponse(): PrimeDaemonResponse | undefined {
+    return this.latestAttachResponse;
   }
 
   static async create(options: PrimeSessionCreateOptions): Promise<PrimeSession> {
@@ -408,8 +415,8 @@ export class PrimeSession {
   async attach(
     commandId: string,
     cursor?: PrimeDaemonCursor,
-  ): Promise<void> {
-    const response = await this.request({
+  ): Promise<PrimeDaemonResponse & { success: true }> {
+    const attachCommand: PrimeDaemonCommand = {
       type: "attach",
       activeSessionId: this.activeSessionId,
       supportsExtensionUi: false,
@@ -422,13 +429,33 @@ export class PrimeSession {
       ],
       ...(cursor === undefined ? {} : { resumeCursor: cursor }),
       telemetryDisabled: true,
-    }, commandId);
+    };
+    let response: PrimeDaemonResponse & { success: true };
+    try {
+      response = await this.request(attachCommand, commandId);
+    } catch (error) {
+      if (
+        this.transport.isConnected !== false ||
+        typeof this.transport.reconnect !== "function"
+      ) {
+        throw error;
+      }
+      await this.transport.reconnect();
+      const generation = this.transport.hello?.supervisorGeneration;
+      if (typeof generation !== "string" || !OPAQUE_ID.test(generation)) {
+        throw new PrimeSessionError();
+      }
+      this.currentSupervisorGeneration = generation;
+      response = await this.request(attachCommand, `${commandId}-reconnect`);
+    }
     if (
       !isRecord(response.data) ||
       response.data.activeSessionId !== this.activeSessionId
     ) {
       throw new PrimeSessionError();
     }
+    this.latestAttachResponse = response;
+    return response;
   }
 
   async detach(commandId: string): Promise<void> {

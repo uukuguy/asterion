@@ -12,6 +12,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import MappingProxyType
+from typing import cast
 from unittest.mock import patch
 
 
@@ -269,7 +270,8 @@ class TestPrimeSkill(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(received[1]["operation"], "application.invoke")
         self.assertEqual(received[1]["session_id"], "session-1")
-        payload = received[1]["payload"]
+        payload = cast(dict[str, object], received[1]["payload"])
+        self.assertIsInstance(payload, dict)
         self.assertEqual(payload["input_text"], "SENTINEL_SECRET")
         self.assertNotIn("token", received[1])
 
@@ -305,6 +307,81 @@ class TestPrimeSkill(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second_received[0]["token"], "44" * 32)
         self.assertEqual(second_received[1]["session_id"], "session-2")
 
+    async def test_discovers_control_record_from_prime_agent_dir_without_explicit_env(
+        self,
+    ) -> None:
+        response = {
+            "protocol": "asterion.skill-control/v1",
+            "status": "ok",
+            "result": [],
+        }
+        async with _fake_bridge(response) as (socket_path, received):
+            with tempfile.TemporaryDirectory() as directory:
+                discovery = Path(directory) / "asterion-control.json"
+                discovery.write_text(
+                    json.dumps(
+                        {
+                            "protocol": "asterion.skill-control-discovery/v1",
+                            "socket_path": str(socket_path),
+                            "token": TOKEN,
+                            "session_id": "session-1",
+                        },
+                        sort_keys=True,
+                    )
+                    + "\n"
+                )
+                discovery.chmod(0o600)
+                with patch.dict(
+                    os.environ,
+                    {
+                        "PRIME_AGENT_CODING_AGENT_DIR": directory,
+                    },
+                    clear=True,
+                ):
+                    await self.skill.portfolio()
+
+        self.assertEqual(received[0]["token"], TOKEN)
+        self.assertEqual(received[1]["session_id"], "session-1")
+
+    async def test_discovery_file_rejects_symlink_unsafe_mode_and_oversize(
+        self,
+    ) -> None:
+        response = {
+            "protocol": "asterion.skill-control/v1",
+            "status": "ok",
+            "result": [],
+        }
+        async with _fake_bridge(response) as (socket_path, _received):
+            for case in ("symlink", "mode", "oversize"):
+                with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    discovery = root / "asterion-control.json"
+                    record = {
+                        "protocol": "asterion.skill-control-discovery/v1",
+                        "socket_path": str(socket_path),
+                        "token": TOKEN,
+                        "session_id": "session-1",
+                    }
+                    if case == "symlink":
+                        target = root / "target.json"
+                        target.write_text(json.dumps(record) + "\n")
+                        target.chmod(0o600)
+                        discovery.symlink_to(target)
+                    elif case == "mode":
+                        discovery.write_text(json.dumps(record) + "\n")
+                        discovery.chmod(0o644)
+                    else:
+                        discovery.write_text(json.dumps({**record, "pad": "x" * 5000}))
+                        discovery.chmod(0o600)
+                    with patch.dict(
+                        os.environ,
+                        {"PRIME_AGENT_CODING_AGENT_DIR": directory},
+                        clear=True,
+                    ):
+                        with self.assertRaises(self.skill.AsterionControlError) as raised:
+                            await self.skill.portfolio()
+                    self.assertNotIn(str(discovery), str(raised.exception))
+
     async def test_effect_disconnect_is_uncertain_but_query_disconnect_is_not(
         self,
     ) -> None:
@@ -332,7 +409,7 @@ class TestPrimeSkill(unittest.IsolatedAsyncioTestCase):
                 )
 
     async def test_rejects_mismatched_or_oversized_response_without_body(self) -> None:
-        response = {
+        response: dict[str, object] = {
             "protocol": "asterion.skill-control/v1",
             "status": "ok",
             "result": "SENTINEL_PRIVATE_RESULT" * 10_000,

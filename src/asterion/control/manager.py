@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, cast
 
 from asterion.control.authority import (
     ActionReceipt,
     AuthorityError,
     AuthorityLedger,
     BudgetUsage,
+    RemainingBudget,
     ProviderUsageReport,
 )
 from asterion.control.execution import (
@@ -63,6 +65,29 @@ class ActionExecutor(Protocol):
         ...
 
 
+class ActionResultBinder(Protocol):
+    def bind_action_result(self, receipt: ActionExecutionReceipt) -> None:
+        """Bind one public-safe execution projection before terminal delivery."""
+        ...
+
+
+class ActionInputPreparer(Protocol):
+    async def prepare_private_input(self, reference: str) -> None:
+        """Prepare one provider-owned private action input for sync executor use."""
+        ...
+
+    def release_private_input(self, reference: str) -> None:
+        """Release one previously prepared private action input."""
+        ...
+
+
+class AuthoritySnapshotSink(Protocol):
+    async def sync_authority_snapshot(self, budget: RemainingBudget) -> None:
+        """Accept the latest host-authoritative remaining budget."""
+
+        ...
+
+
 class ChildLifecycleService(Protocol):
     """Lifecycle boundary injected by the host without child implementation imports."""
 
@@ -84,6 +109,10 @@ class _NeverCancelled:
     @property
     def cancelled(self) -> bool:
         return False
+
+
+_TERMINAL_POLL_INTERVAL_SECONDS = 0.01
+_TERMINAL_MAX_EMPTY_POLLS = 100
 
 
 @dataclass(frozen=True)
@@ -173,6 +202,7 @@ class ControlHost:
                 self._pending_proposals: dict[str, ControlEvent] = {}
                 self._pending_admissions: dict[str, ControlCommand] = {}
                 self._pending_terminals: dict[str, ControlCommand] = {}
+                self._result_receipts: dict[str, ActionExecutionReceipt] = {}
                 self._durable_terminal_ids: set[str] = set()
             else:
                 entries = self._journal.replay(JournalCursor(0))
@@ -226,6 +256,7 @@ class ControlHost:
                 self._pending_proposals = dict(recovered.proposals)
                 self._pending_admissions = dict(recovered.admission_commands)
                 self._pending_terminals = dict(recovered.terminal_commands)
+                self._result_receipts = dict(recovered.result_receipts)
                 self._durable_terminal_ids = {
                     command.command_id
                     for command in recovered.terminal_commands.values()
@@ -274,19 +305,35 @@ class ControlHost:
             raise ControlHostTransportError(
                 "persisted control command delivery is uncertain"
             ) from None
+        await self._sync_authority_snapshot()
 
     async def pump(self, *, until_terminal: bool = False) -> None:
+        await self._sync_authority_snapshot()
         await self._resume_pending_actions()
-        cursor = EventCursor(
-            generation=self._state.generation,
-            sequence=self._state.next_sequence - 1,
-        )
+        empty_polls = 0
         try:
-            events = self._client.events(cursor)
-            async for event in events:
-                await self._accept_event(event)
-                if until_terminal and self._state.terminal_event_id is not None:
+            while True:
+                cursor = EventCursor(
+                    generation=self._state.generation,
+                    sequence=self._state.next_sequence - 1,
+                )
+                seen = False
+                events = self._client.events(cursor)
+                async for event in events:
+                    seen = True
+                    await self._accept_event(event)
+                    if until_terminal and self._state.terminal_event_id is not None:
+                        break
+                if not until_terminal or self._state.terminal_event_id is not None:
                     break
+                if self._cancellation_signal.cancelled:
+                    raise ControlHostError("control terminal polling cancelled")
+                empty_polls = 0 if seen else empty_polls + 1
+                if empty_polls > _TERMINAL_MAX_EMPTY_POLLS:
+                    raise ControlHostTransportError(
+                        "control terminal polling did not reach terminal state"
+                    )
+                await asyncio.sleep(_TERMINAL_POLL_INTERVAL_SECONDS)
         except ControlHostError:
             raise
         except Exception:
@@ -303,6 +350,9 @@ class ControlHost:
         )
 
     async def close(self) -> None:
+        self._evidence.complete_open_spans(
+            timestamp_ns=self._clock_ms() * 1_000_000
+        )
         await self._close_children()
         journal_close = getattr(self._journal, "close", None)
         try:
@@ -387,6 +437,7 @@ class ControlHost:
                 self._authority.record_provider_usage(report)
             except AuthorityError:
                 raise ControlHostError("control provider budget report failed") from None
+            await self._sync_authority_snapshot()
         self._evidence.project_event(
             event,
             journal_position=entry.position,
@@ -438,6 +489,7 @@ class ControlHost:
         self._pending_proposals[decision.action_id] = proposal
         self._persist_command(command)
         self._pending_admissions[decision.action_id] = command
+        await self._sync_authority_snapshot()
         await self._deliver_pending_admission(decision.action_id)
 
     async def _resume_pending_actions(self) -> None:
@@ -465,12 +517,14 @@ class ControlHost:
                 self._pending_admissions.pop(action_id, None)
                 receipt = self._authority.receipts.get(action_id)
                 if receipt is not None:
+                    result_receipt = self._result_receipts.get(action_id)
                     await self._complete_action(
                         action_id,
                         status="succeeded",
                         reason_code="executed",
                         receipt_ref=receipt.receipt_ref,
                         usage=receipt.usage,
+                        execution_receipt=result_receipt,
                     )
                 else:
                     await self._complete_action(
@@ -519,6 +573,7 @@ class ControlHost:
         terminal = self._pending_terminals.pop(action_id, None)
         if terminal is not None:
             self._durable_terminal_ids.discard(terminal.command_id)
+        self._result_receipts.pop(action_id, None)
 
     async def _execute_admitted_action(self, proposal: ControlEvent) -> None:
         action_id = str(proposal.payload["action_id"])
@@ -549,6 +604,7 @@ class ControlHost:
         ):
             raise ControlHostError("control action running fence failed") from None
 
+        prepared_reference = await self._prepare_action_input(proposal)
         try:
             result = await self._action_executor.execute(
                 proposal, self._cancellation_signal
@@ -567,6 +623,9 @@ class ControlHost:
         except Exception:
             await self._resolve_unknown_progress(action_id)
             return
+        finally:
+            if prepared_reference is not None:
+                self._release_action_input(prepared_reference)
 
         if type(result) is not ActionExecutionReceipt:
             await self._resolve_unknown_progress(action_id)
@@ -591,6 +650,8 @@ class ControlHost:
                 action_id=receipt.action_id,
                 receipt_ref=receipt.receipt_ref,
                 usage=receipt.usage,
+                artifact_ids=receipt.artifact_ids,
+                media_types=receipt.media_types,
             ),
         )
         self._journal_position = max(self._journal_position, entry.position)
@@ -598,6 +659,8 @@ class ControlHost:
             self._authority.settle(action_id, authority_receipt)
         except AuthorityError:
             raise ControlHostError("durable action receipt settlement failed") from None
+        self._result_receipts[action_id] = receipt
+        await self._sync_authority_snapshot()
         await self._complete_action(
             action_id,
             status="succeeded",
@@ -694,10 +757,62 @@ class ControlHost:
 
     async def _send_persisted_command(self, command: ControlCommand) -> None:
         try:
+            self._bind_private_result_for_command(command)
             await self._client.send(command)
         except Exception:
             raise ControlHostTransportError(
                 "persisted control command delivery is uncertain"
+            ) from None
+
+    def _bind_private_result_for_command(self, command: ControlCommand) -> None:
+        binder = getattr(self._client, "bind_action_result", None)
+        if not callable(binder) or command.type != "action.resolve":
+            return
+        if command.payload["resolution"] != "succeeded":
+            return
+        receipt_ref = command.payload["receipt_ref"]
+        if receipt_ref is None:
+            return
+        action_id = str(command.payload["action_id"])
+        receipt = self._result_receipts.get(action_id)
+        if receipt is None or receipt.receipt_ref != receipt_ref:
+            raise ControlHostError("control action result projection is unavailable")
+        binder(receipt)
+
+    async def _prepare_action_input(self, proposal: ControlEvent) -> str | None:
+        preparer = getattr(self._client, "prepare_private_input", None)
+        if not callable(preparer):
+            return None
+        reference = proposal.payload.get("input_ref")
+        if not isinstance(reference, str):
+            raise ControlHostError("control action private input is unavailable")
+        try:
+            await cast(Callable[[str], Awaitable[None]], preparer)(reference)
+        except Exception:
+            raise ControlHostError("control action private input is unavailable") from None
+        return reference
+
+    def _release_action_input(self, reference: str) -> None:
+        releaser = getattr(self._client, "release_private_input", None)
+        if not callable(releaser):
+            return
+        try:
+            cast(Callable[[str], None], releaser)(reference)
+        except Exception:
+            raise ControlHostError("control action private input release failed") from None
+
+    async def _sync_authority_snapshot(self) -> None:
+        sink = getattr(self._client, "sync_authority_snapshot", None)
+        if not callable(sink):
+            return
+        try:
+            await cast(
+                Callable[[RemainingBudget], Awaitable[None]],
+                sink,
+            )(self._authority.remaining_budget(now_ms=self._clock_ms()))
+        except Exception:
+            raise ControlHostTransportError(
+                "control authority snapshot delivery is uncertain"
             ) from None
 
     async def _close_children(self) -> None:

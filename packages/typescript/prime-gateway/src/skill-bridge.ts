@@ -107,6 +107,7 @@ export interface AsterionSkillBridgeOptions {
   readonly portfolio: readonly SkillApplicationTarget[];
   readonly remainingBudget: SkillBudget;
   readonly privateValues: PrivateValueStore;
+  readonly beforeEffect?: () => Promise<void>;
   readonly nextEventIdentity: () => SkillEventIdentity;
   readonly emitActionProposal: (event: ControlEvent) => Promise<void>;
   readonly waitForAdmission: (actionId: string) => Promise<SkillAdmission>;
@@ -195,7 +196,10 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-function validateBudget(value: unknown): SkillBudget {
+function validateBudget(
+  value: unknown,
+  allowZeroDeadline = false,
+): SkillBudget {
   if (
     !isRecord(value) ||
     !hasExactKeys(value, [
@@ -211,7 +215,11 @@ function validateBudget(value: unknown): SkillBudget {
     !nonNegativeInteger(value.child_tokens) ||
     !nonNegativeInteger(value.aggregate_tokens) ||
     !nonNegativeInteger(value.cost_micros) ||
-    !positiveInteger(value.deadline_ms)
+    !(
+      allowZeroDeadline
+        ? nonNegativeInteger(value.deadline_ms)
+        : positiveInteger(value.deadline_ms)
+    )
   ) {
     throw new SkillBridgeConfigurationError();
   }
@@ -221,7 +229,7 @@ function validateBudget(value: unknown): SkillBudget {
     child_tokens: value.child_tokens,
     aggregate_tokens: value.aggregate_tokens,
     cost_micros: value.cost_micros,
-    deadline_ms: value.deadline_ms,
+    deadline_ms: Number(value.deadline_ms),
   });
 }
 
@@ -441,6 +449,7 @@ async function existingPath(path: string): Promise<boolean> {
 export class AsterionSkillBridge {
   private readonly sockets = new Set<Socket>();
   private readonly activeHandlers = new Set<Promise<void>>();
+  private readonly closeWaiters = new Set<() => void>();
   private readonly effects = new Map<string, EffectRecord>();
   private closed = false;
 
@@ -449,7 +458,7 @@ export class AsterionSkillBridge {
     private readonly server: Server,
     private readonly options: AsterionSkillBridgeOptions,
     private readonly portfolio: readonly SkillApplicationTarget[],
-    private readonly remainingBudget: SkillBudget,
+    private remainingBudget: SkillBudget,
   ) {}
 
   static async listen(
@@ -495,11 +504,20 @@ export class AsterionSkillBridge {
     return Object.freeze({ kind: "asterion-private-skill-bridge" });
   }
 
+  updateRemainingBudget(value: unknown): void {
+    this.throwIfClosed();
+    this.remainingBudget = validateBudget(value, true);
+  }
+
   async close(): Promise<void> {
     if (this.closed) {
       return;
     }
     this.closed = true;
+    for (const waiter of this.closeWaiters) {
+      waiter();
+    }
+    this.closeWaiters.clear();
     for (const socket of this.sockets) {
       socket.destroy();
     }
@@ -526,6 +544,10 @@ export class AsterionSkillBridge {
       !nonEmptyOpaqueId(options.goalId) ||
       !TOKEN_PATTERN.test(options.token) ||
       !(options.privateValues instanceof PrivateValueStore) ||
+      (
+        options.beforeEffect !== undefined &&
+        typeof options.beforeEffect !== "function"
+      ) ||
       typeof options.nextEventIdentity !== "function" ||
       typeof options.emitActionProposal !== "function" ||
       typeof options.waitForAdmission !== "function" ||
@@ -539,7 +561,7 @@ export class AsterionSkillBridge {
       OPAQUE_ID_PATTERN,
     );
     const portfolio = Object.freeze(options.portfolio.map(validateTarget));
-    const remainingBudget = validateBudget(options.remainingBudget);
+    const remainingBudget = validateBudget(options.remainingBudget, true);
     return Object.freeze({
       ...options,
       causalParentIds,
@@ -684,6 +706,7 @@ export class AsterionSkillBridge {
   }
 
   private async dispatch(request: SkillRequest): Promise<unknown> {
+    this.throwIfClosed();
     if (request.operation === "portfolio.get") {
       return this.portfolio;
     }
@@ -719,9 +742,14 @@ export class AsterionSkillBridge {
     request: SkillRequest,
     derivedActionId: string,
   ): Promise<unknown> {
+    await this.failOnClose(
+      Promise.resolve().then(() => this.options.beforeEffect?.()),
+    );
+    this.throwIfClosed();
     const inputRef = await this.options.privateValues.putInput(
       this.privateInput(request),
     );
+    this.throwIfClosed();
     const identity = this.options.nextEventIdentity();
     const event = validateControlEvent({
       protocol: "asterion.agent-control/v1",
@@ -746,8 +774,10 @@ export class AsterionSkillBridge {
         causal_parent_ids: this.options.causalParentIds,
       },
     });
-    await this.options.emitActionProposal(event);
-    const admission = await this.options.waitForAdmission(derivedActionId);
+    await this.failOnClose(this.options.emitActionProposal(event));
+    const admission = await this.failOnClose(
+      this.options.waitForAdmission(derivedActionId),
+    );
     this.validateAdmission(admission);
     const result: Record<string, unknown> = {
       action_id: derivedActionId,
@@ -759,7 +789,9 @@ export class AsterionSkillBridge {
     if (admission.resolution === "rejected") {
       return deepFreeze(result);
     }
-    const terminal = await this.options.waitForTerminal(derivedActionId);
+    const terminal = await this.failOnClose(
+      this.options.waitForTerminal(derivedActionId),
+    );
     this.validateTerminal(terminal);
     result.terminal = {
       resolution: terminal.resolution,
@@ -772,6 +804,26 @@ export class AsterionSkillBridge {
       result.result = this.projectResult(projection);
     }
     return deepFreeze(result);
+  }
+
+  private async failOnClose<T>(operation: Promise<T>): Promise<T> {
+    this.throwIfClosed();
+    let release: () => void = () => undefined;
+    const closed = new Promise<never>((_, reject) => {
+      release = () => reject(new SkillBridgeConfigurationError());
+    });
+    this.closeWaiters.add(release);
+    try {
+      return await Promise.race([operation, closed]);
+    } finally {
+      this.closeWaiters.delete(release);
+    }
+  }
+
+  private throwIfClosed(): void {
+    if (this.closed) {
+      throw new SkillBridgeConfigurationError();
+    }
   }
 
   private privateInput(request: SkillRequest): string {

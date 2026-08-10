@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 from types import MappingProxyType
 
+from asterion.control.authority import AuthorityEnvelope
 from asterion.control.host import ControlPlaneClient, ControlPlaneManifest
 from asterion.control.protocol import IDENTIFIER, SEMANTIC_VERSION
 from asterion.immutable import RedactedImmutableMapping
@@ -28,6 +29,7 @@ class ControlPlaneFactoryContext:
     control_plane_version: str
     private_root: Path
     options: Mapping[str, str]
+    authority: AuthorityEnvelope | None = None
     host_services: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -42,6 +44,10 @@ class ControlPlaneFactoryContext:
             )
             or not isinstance(self.private_root, Path)
             or not isinstance(self.options, Mapping)
+            or (
+                self.authority is not None
+                and not isinstance(self.authority, AuthorityEnvelope)
+            )
             or any(
                 not isinstance(key, str)
                 or CONTEXT_KEY.fullmatch(key) is None
@@ -78,7 +84,7 @@ class ControlPlaneFactoryContext:
             f"system_version={self.system_version!r}, "
             f"control_plane_id={self.control_plane_id!r}, "
             f"control_plane_version={self.control_plane_version!r}, "
-            "private_root=<redacted>, options=<redacted>, "
+            "private_root=<redacted>, options=<redacted>, authority=<redacted>, "
             "host_services=<redacted>)"
         )
 

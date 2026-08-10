@@ -126,6 +126,115 @@ test("private values bind public input references durably and reject conflicts",
   }
 });
 
+test("private values bind result projections by command and source receipt", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const values = await PrivateValueStore.open(fixtureRoot.root);
+    const projection = {
+      receiptRef: "receipt-1",
+      artifactIds: ["artifact-1"],
+      mediaTypes: ["text/plain"],
+    };
+    const first = await values.bindResultReference(
+      "terminal-action-1",
+      "action-1",
+      "receipt-1",
+      projection,
+    );
+    const replay = await values.bindResultReference(
+      "terminal-action-1",
+      "action-1",
+      "receipt-1",
+      projection,
+    );
+
+    assert.equal(replay, first);
+    assert.deepEqual(await values.readResult(first), projection);
+
+    const reopened = await PrivateValueStore.open(fixtureRoot.root);
+    assert.equal(
+      await reopened.bindResultReference(
+        "terminal-action-1",
+        "action-1",
+        "receipt-1",
+        projection,
+      ),
+      first,
+    );
+    await assert.rejects(
+      reopened.bindResultReference(
+        "terminal-action-1",
+        "action-1",
+        "receipt-1",
+        {
+          receiptRef: "receipt-1",
+          artifactIds: ["artifact-2"],
+          mediaTypes: ["text/plain"],
+        },
+      ),
+      PrivateValueInvalidError,
+    );
+    assert.equal(
+      await reopened.readBoundResultReference(
+        "terminal-action-1",
+        "action-1",
+        "receipt-1",
+      ),
+      first,
+    );
+    await rm(valuePath(fixtureRoot.root, first), { force: true });
+    await assert.rejects(
+      reopened.readBoundResultReference(
+        "terminal-action-1",
+        "action-1",
+        "receipt-1",
+      ),
+      PrivateValueInvalidError,
+    );
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
+test("private values fail closed when a bound result blob is tampered", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const values = await PrivateValueStore.open(fixtureRoot.root);
+    const first = await values.bindResultReference(
+      "terminal-action-1",
+      "action-1",
+      "receipt-1",
+      {
+        receiptRef: "receipt-1",
+        artifactIds: ["artifact-1"],
+        mediaTypes: ["text/plain"],
+      },
+    );
+    await writeFile(
+      valuePath(fixtureRoot.root, first),
+      `${JSON.stringify({
+        format: "asterion.prime-private-value/v1",
+        reference: first,
+        kind: "result",
+        size: 2,
+        digest: "0".repeat(64),
+      })}\n{}\n`,
+    );
+    await chmod(valuePath(fixtureRoot.root, first), 0o600);
+
+    await assert.rejects(
+      values.readBoundResultReference(
+        "terminal-action-1",
+        "action-1",
+        "receipt-1",
+      ),
+      PrivateValueInvalidError,
+    );
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
 test("private values fail closed when the binding root is replaced by a symlink", async () => {
   const fixtureRoot = await temporaryStoreRoot();
   try {

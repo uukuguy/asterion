@@ -34,6 +34,7 @@ from asterion.control.factory import (
 from asterion.control.host import (
     ControlCommand,
     ControlEvent,
+    ControlPlaneClient,
     ControlPlaneManifest,
     EventCursor,
 )
@@ -134,7 +135,10 @@ class WaitingChildClient:
         elif command.type == "action.resolve":
             if command.payload["resolution"] == "succeeded":
                 if self.terminal == "completed":
-                    self._emit("goal.updated", {"goal_id": self._goal_id, "status": "completed"})
+                    self._emit(
+                        "goal.updated",
+                        {"goal_id": self._goal_id, "status": "completed"},
+                    )
                     self._emit("session.completed", {"reason_code": "done"})
                 elif self.terminal == "failed":
                     self._emit("session.failed", {"reason_code": "child-failed"})
@@ -144,7 +148,9 @@ class WaitingChildClient:
             self.messages.append(str(command.payload["input_id"]))
         elif command.type == "session.cancel":
             self.cancelled = True
-            self._emit("session.cancelled", {"reason_code": command.payload["reason_code"]})
+            self._emit(
+                "session.cancelled", {"reason_code": command.payload["reason_code"]}
+            )
 
     def events(self, cursor: EventCursor | None = None) -> AsyncIterator[ControlEvent]:
         start = cursor.sequence if cursor is not None else 0
@@ -221,7 +227,9 @@ class WaitingChildClient:
 def _plan(root: Path) -> AgentSystemPlan:
     return cast(
         AgentSystemPlan,
-        __import__("asterion.control.system", fromlist=["resolve_agent_system"]).resolve_agent_system(
+        __import__(
+            "asterion.control.system", fromlist=["resolve_agent_system"]
+        ).resolve_agent_system(
             _manifest(),
             application_providers=(_provider(root),),
             control_factories=_control_factories([]),
@@ -278,7 +286,12 @@ def _child_envelope(**changes: object) -> AuthorityEnvelope:
                 runtime_id="fake.runtime",
             ),
         ),
-        "allowed_operations": ("application.invoke", "child.cancel", "child.message", "child.spawn"),
+        "allowed_operations": (
+            "application.invoke",
+            "child.cancel",
+            "child.message",
+            "child.spawn",
+        ),
         "budget_limit": BudgetLimit(100, 100, 100, 300, 100),
         "expires_at_ms": 10_000,
         "max_action_deadline_ms": 2_000,
@@ -323,7 +336,9 @@ def _registry(
             ControlPlaneFactoryBinding(
                 control_plane_id="fake.control",
                 version="1.0.0",
-                commands=_control_factories([]).select("fake.control", "1.0.0").commands,
+                commands=_control_factories([])
+                .select("fake.control", "1.0.0")
+                .commands,
                 events=_control_factories([]).select("fake.control", "1.0.0").events,
                 capabilities=("action-proposals",),
                 continuation_media_type="application/vnd.asterion.control-capsule",
@@ -381,7 +396,9 @@ class RecursiveChildClient:
         elif command.type == "action.resolve":
             resolution = command.payload["resolution"]
             if resolution == "succeeded":
-                self._emit("goal.updated", {"goal_id": self._goal_id, "status": "completed"})
+                self._emit(
+                    "goal.updated", {"goal_id": self._goal_id, "status": "completed"}
+                )
                 self._emit("session.completed", {"reason_code": "done"})
             elif resolution == "cancelled":
                 self._emit("session.cancelled", {"reason_code": "action-cancelled"})
@@ -389,7 +406,9 @@ class RecursiveChildClient:
                 self._emit("session.failed", {"reason_code": f"action-{resolution}"})
         elif command.type == "session.cancel":
             self.cancelled = True
-            self._emit("session.cancelled", {"reason_code": command.payload["reason_code"]})
+            self._emit(
+                "session.cancelled", {"reason_code": command.payload["reason_code"]}
+            )
 
     def events(self, cursor: EventCursor | None = None) -> AsyncIterator[ControlEvent]:
         start = cursor.sequence if cursor is not None else 0
@@ -576,7 +595,9 @@ class RecursiveRouterExecutor:
 
 
 class TestChildAuthority(unittest.TestCase):
-    def test_derive_child_authority_is_strict_subset_of_parent_reservation(self) -> None:
+    def test_derive_child_authority_is_strict_subset_of_parent_reservation(
+        self,
+    ) -> None:
         parent = _child_envelope()
         proposal = _child_proposal()
 
@@ -595,7 +616,9 @@ class TestChildAuthority(unittest.TestCase):
         self.assertEqual(child.max_recursion_depth, 0)
         self.assertEqual(child.max_concurrent_children, parent.max_concurrent_children)
 
-    def test_derive_child_authority_rejects_depth_zero_and_target_mismatch(self) -> None:
+    def test_derive_child_authority_rejects_depth_zero_and_target_mismatch(
+        self,
+    ) -> None:
         with self.assertRaises(AuthorityError):
             derive_child_authority(
                 replace(_child_envelope(), max_recursion_depth=0),
@@ -611,30 +634,44 @@ class TestChildAuthority(unittest.TestCase):
                 now_ms=1_000,
             )
 
-    def test_phase0_spawn_admission_uses_remaining_depth_not_exceeded_depth(self) -> None:
+    def test_phase0_spawn_admission_uses_remaining_depth_not_exceeded_depth(
+        self,
+    ) -> None:
         ledger = AuthorityLedger(replace(_child_envelope(), max_recursion_depth=0))
 
         decision = ledger.evaluate(_child_proposal(), now_ms=1_000)
 
-        self.assertEqual((decision.status, decision.reason), ("rejected", "recursion-depth-exceeded"))
+        self.assertEqual(
+            (decision.status, decision.reason), ("rejected", "recursion-depth-exceeded")
+        )
 
 
 class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
-    async def test_cancelled_duplicate_waiter_does_not_cancel_shared_spawn(self) -> None:
+    async def test_cancelled_duplicate_waiter_does_not_cancel_shared_spawn(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             audit: list[str] = []
             clients: list[WaitingChildClient] = []
             service = ChildSessionService(
-                plan=_plan(root), authority=_child_envelope(),
-                control_factories=_registry(audit, clients), private_root=root,
+                plan=_plan(root),
+                authority=_child_envelope(),
+                control_factories=_registry(audit, clients),
+                private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    ChildWorkExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
-            first = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
+            first = asyncio.create_task(
+                service.spawn(_child_proposal(), MutableSignal())
+            )
             await asyncio.sleep(0)
-            second = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
+            second = asyncio.create_task(
+                service.spawn(_child_proposal(), MutableSignal())
+            )
             first.cancel()
             with self.assertRaises(asyncio.CancelledError):
                 await first
@@ -647,10 +684,14 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             service = ChildSessionService(
-                plan=_plan(root), authority=_child_envelope(),
-                control_factories=_registry([], []), private_root=root,
+                plan=_plan(root),
+                authority=_child_envelope(),
+                control_factories=_registry([], []),
+                private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: ChildWorkExecutor([]),
+                child_action_executor_factory=lambda authority, children: (
+                    ChildWorkExecutor([])
+                ),
                 clock_ms=lambda: 1_000,
             )
             first = asyncio.create_task(service.close())
@@ -663,28 +704,37 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ChildSessionError):
                 await service.spawn(_child_proposal(), MutableSignal())
 
-    async def test_child_executor_factory_receives_nested_lifecycle_service(self) -> None:
+    async def test_child_executor_factory_receives_nested_lifecycle_service(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             audit: list[str] = []
             received: list[ChildSessionService] = []
 
-            def factory(authority: AuthorityEnvelope, children: ChildSessionService) -> ChildWorkExecutor:
+            def factory(
+                authority: AuthorityEnvelope, children: ChildSessionService
+            ) -> ChildWorkExecutor:
                 del authority
                 received.append(children)
                 return ChildWorkExecutor(audit)
 
             service = ChildSessionService(
-                plan=_plan(root), authority=_child_envelope(),
-                control_factories=_registry(audit, []), private_root=root,
-                content=RecordingResolver(), child_action_executor_factory=factory,
+                plan=_plan(root),
+                authority=_child_envelope(),
+                control_factories=_registry(audit, []),
+                private_root=root,
+                content=RecordingResolver(),
+                child_action_executor_factory=factory,
                 clock_ms=lambda: 1_000,
             )
             await service.spawn(_child_proposal(), MutableSignal())
             self.assertEqual(len(received), 1)
             self.assertEqual(received[0].active_ids, ())
 
-    async def test_child_host_spawn_reaches_nested_service_and_grandchild_completes(self) -> None:
+    async def test_child_host_spawn_reaches_nested_service_and_grandchild_completes(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             audit: list[str] = []
@@ -737,7 +787,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(clients["child-1"].closed)
             self.assertTrue(clients["grandchild-1"].closed)
 
-    async def test_nested_concurrency_rejects_second_grandchild_before_provider_create(self) -> None:
+    async def test_nested_concurrency_rejects_second_grandchild_before_provider_create(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             audit: list[str] = []
@@ -766,7 +818,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 child_action_executor_factory=factory,
                 clock_ms=lambda: 1_000,
             )
-            spawn = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
+            spawn = asyncio.create_task(
+                service.spawn(_child_proposal(), MutableSignal())
+            )
             await asyncio.wait_for(application_started.wait(), timeout=1)
             nested = nested_by_authority["child:child-1"]
 
@@ -790,7 +844,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(receipt.usage, BudgetUsage(0, 0, 7, 7, 2))
             self.assertEqual(service.active_ids, ())
 
-    async def test_root_close_cascades_to_active_grandchild_before_client_close(self) -> None:
+    async def test_root_close_cascades_to_active_grandchild_before_client_close(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             audit: list[str] = []
@@ -818,13 +874,17 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 child_action_executor_factory=factory,
                 clock_ms=lambda: 1_000,
             )
-            spawn = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
+            spawn = asyncio.create_task(
+                service.spawn(_child_proposal(), MutableSignal())
+            )
             await asyncio.wait_for(application_started.wait(), timeout=1)
 
             await service.close()
             result = await asyncio.gather(spawn, return_exceptions=True)
 
-            self.assertIsInstance(result[0], (asyncio.CancelledError, ActionExecutionFailure))
+            self.assertIsInstance(
+                result[0], (asyncio.CancelledError, ActionExecutionFailure)
+            )
             self.assertTrue(clients["child-1"].cancelled)
             self.assertTrue(clients["grandchild-1"].cancelled)
             self.assertTrue(clients["child-1"].closed)
@@ -850,18 +910,26 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             clients: list[WaitingChildClient] = []
 
             class BlockingExecutor(ChildWorkExecutor):
-                async def execute(self, proposal: ControlEvent, signal: CancellationSignal) -> ActionExecutionReceipt:
+                async def execute(
+                    self, proposal: ControlEvent, signal: CancellationSignal
+                ) -> ActionExecutionReceipt:
                     await asyncio.sleep(0.05)
                     return await super().execute(proposal, signal)
 
             service = ChildSessionService(
-                plan=_plan(root), authority=_child_envelope(),
-                control_factories=_registry(audit, clients), private_root=root,
+                plan=_plan(root),
+                authority=_child_envelope(),
+                control_factories=_registry(audit, clients),
+                private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: BlockingExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    BlockingExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
-            task = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
+            task = asyncio.create_task(
+                service.spawn(_child_proposal(), MutableSignal())
+            )
             while not clients:
                 await asyncio.sleep(0)
 
@@ -884,10 +952,14 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             audit: list[str] = []
             clients: list[WaitingChildClient] = []
             service = ChildSessionService(
-                plan=_plan(Path(directory)), authority=_child_envelope(),
-                control_factories=_registry(audit, clients), private_root=Path(directory),
+                plan=_plan(Path(directory)),
+                authority=_child_envelope(),
+                control_factories=_registry(audit, clients),
+                private_root=Path(directory),
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    ChildWorkExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
             signal = MutableSignal()
@@ -914,15 +986,22 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(ChildSessionError) as raised:
                 ChildSessionService(
-                    plan=_plan(Path(directory)), authority=_child_envelope(),
-                    control_factories=_registry([], []), private_root=Path(directory),
+                    plan=_plan(Path(directory)),
+                    authority=_child_envelope(),
+                    control_factories=_registry([], []),
+                    private_root=Path(directory),
                     content=RecordingResolver(),
-                    child_action_executor_factory=lambda authority, children: ChildWorkExecutor([]),
-                    clock_ms=lambda: 1_000, control_options=HostileMapping(),
+                    child_action_executor_factory=lambda authority, children: (
+                        ChildWorkExecutor([])
+                    ),
+                    clock_ms=lambda: 1_000,
+                    control_options=HostileMapping(),
                 )
             self.assertNotIn(SENTINEL, str(raised.exception))
 
-    async def test_spawn_persists_binding_before_provider_create_and_charges_verified_usage(self) -> None:
+    async def test_spawn_persists_binding_before_provider_create_and_charges_verified_usage(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             plan = _plan(root)
@@ -934,7 +1013,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    ChildWorkExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
 
@@ -953,9 +1034,13 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 ),
             )
             self.assertTrue((root / "children" / "child-1").is_dir())
-            self.assertEqual(oct((root / "children" / "child-1").stat().st_mode & 0o777), "0o700")
+            self.assertEqual(
+                oct((root / "children" / "child-1").stat().st_mode & 0o777), "0o700"
+            )
 
-    async def test_completed_reopen_uses_durable_safe_receipt_without_provider_recreation(self) -> None:
+    async def test_completed_reopen_uses_durable_safe_receipt_without_provider_recreation(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             audit: list[str] = []
@@ -966,7 +1051,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    ChildWorkExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
             proposal = _child_proposal()
@@ -980,7 +1067,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    ChildWorkExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
             second = await reopened.spawn(proposal, MutableSignal())
@@ -998,7 +1087,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 first,
             )
 
-    async def test_child_durable_records_use_pinned_root_after_ancestor_swap(self) -> None:
+    async def test_child_durable_records_use_pinned_root_after_ancestor_swap(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             audit: list[str] = []
@@ -1026,7 +1117,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    ChildWorkExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
                 derive_control_options=derive_options,
             )
@@ -1046,7 +1139,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             self.assertFalse((replacement_child / "terminal.json").exists())
             self.assertEqual(list(replacement_child.glob("journal-*.jsonl")), [])
 
-    async def test_provider_create_started_without_terminal_is_uncertain_and_not_recreated(self) -> None:
+    async def test_provider_create_started_without_terminal_is_uncertain_and_not_recreated(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             proposal = _child_proposal()
@@ -1061,7 +1156,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 proposal_digest=ChildSessionService.proposal_digest(proposal),
             )
             self.assertEqual(digest, ChildSessionService.proposal_digest(proposal))
-            ChildSessionService.persist_phase(child_root=child_root, phase="provider-create-started")
+            ChildSessionService.persist_phase(
+                child_root=child_root, phase="provider-create-started"
+            )
             audit: list[str] = []
             service = ChildSessionService(
                 plan=_plan(root),
@@ -1069,7 +1166,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, []),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    ChildWorkExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
 
@@ -1080,7 +1179,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(raised.exception.reason_code, "child-progress-unknown")
             self.assertEqual(audit, [])
 
-    async def test_child_factory_failure_after_the_durable_fence_is_uncertain(self) -> None:
+    async def test_child_factory_failure_after_the_durable_fence_is_uncertain(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             audit: list[str] = []
@@ -1090,7 +1191,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, [], factory_failure="known"),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    ChildWorkExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
 
@@ -1125,7 +1228,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, []),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    ChildWorkExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
                 derive_control_options=derive_options,
             )
@@ -1135,7 +1240,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(audit, [])
             self.assertNotIn(SENTINEL, str(raised.exception))
-            self.assertIsNone(ChildSessionService.load_phase(root / "children" / "child-1"))
+            self.assertIsNone(
+                ChildSessionService.load_phase(root / "children" / "child-1")
+            )
 
     async def test_registry_fault_is_known_pre_fence_and_writes_no_phase(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1146,7 +1253,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=ControlPlaneFactoryRegistry(()),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: ChildWorkExecutor([]),
+                child_action_executor_factory=lambda authority, children: (
+                    ChildWorkExecutor([])
+                ),
                 clock_ms=lambda: 1_000,
             )
 
@@ -1154,9 +1263,13 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 await service.spawn(_child_proposal(), MutableSignal())
 
             self.assertEqual(service.active_ids, ())
-            self.assertIsNone(ChildSessionService.load_phase(root / "children" / "child-1"))
+            self.assertIsNone(
+                ChildSessionService.load_phase(root / "children" / "child-1")
+            )
 
-    async def test_executor_factory_fault_is_known_pre_fence_and_retryable(self) -> None:
+    async def test_executor_factory_fault_is_known_pre_fence_and_retryable(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             audit: list[str] = []
@@ -1183,7 +1296,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
 
             with self.assertRaises(ChildSessionError) as raised:
                 await service.spawn(proposal, MutableSignal())
-            self.assertIsNone(ChildSessionService.load_phase(root / "children" / "child-1"))
+            self.assertIsNone(
+                ChildSessionService.load_phase(root / "children" / "child-1")
+            )
             self.assertEqual(audit.count("child.provider.create"), 0)
             fail = False
             receipt = await service.spawn(proposal, MutableSignal())
@@ -1192,6 +1307,40 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(audit.count("child.provider.create"), 1)
             self.assertNotIn(SENTINEL, str(raised.exception))
             self.assertEqual(service.active_ids, ())
+
+    async def test_three_argument_executor_factory_type_error_is_not_retried(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            calls = 0
+
+            def executor_factory(
+                authority: AuthorityEnvelope,
+                children: ChildSessionService,
+                client: ControlPlaneClient,
+            ) -> ChildWorkExecutor:
+                nonlocal calls
+                del authority, children, client
+                calls += 1
+                raise TypeError(f"{SENTINEL} internal factory failure")
+
+            service = ChildSessionService(
+                plan=_plan(root),
+                authority=_child_envelope(),
+                control_factories=_registry([], []),
+                private_root=root,
+                content=RecordingResolver(),
+                child_action_executor_factory=executor_factory,
+                clock_ms=lambda: 1_000,
+            )
+
+            with self.assertRaises(ActionExecutionFailure) as raised:
+                await service.spawn(_child_proposal(), MutableSignal())
+
+            self.assertEqual(calls, 1)
+            self.assertEqual(raised.exception.status, "uncertain")
+            self.assertNotIn(SENTINEL, str(raised.exception))
 
     async def test_attach_failure_closes_unowned_nested_lifecycle(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1205,7 +1354,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    ChildWorkExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
             original_close = ChildSessionService.close
@@ -1235,7 +1386,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(clients[0].closed)
             self.assertEqual(closed_nested_roots, [root / "children" / "child-1"])
 
-    async def test_close_before_attach_cancels_spawn_and_prevents_late_attach(self) -> None:
+    async def test_close_before_attach_cancels_spawn_and_prevents_late_attach(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             audit: list[str] = []
@@ -1249,7 +1402,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    ChildWorkExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
             original_attach = service._attach_runtime
@@ -1261,7 +1416,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 attached.append(child_id)
 
             service._attach_runtime = gated_attach  # type: ignore[method-assign]
-            spawn = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
+            spawn = asyncio.create_task(
+                service.spawn(_child_proposal(), MutableSignal())
+            )
             await asyncio.wait_for(entered.wait(), timeout=1)
             self.assertEqual(audit.count("child.provider.create"), 1)
             self.assertEqual(len(clients), 1)
@@ -1271,7 +1428,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             release.set()
             await asyncio.sleep(0)
 
-            self.assertIsInstance(result[0], (asyncio.CancelledError, ActionExecutionFailure))
+            self.assertIsInstance(
+                result[0], (asyncio.CancelledError, ActionExecutionFailure)
+            )
             self.assertTrue(clients[0].closed)
             self.assertEqual(attached, [])
             self.assertEqual(service.active_ids, ())
@@ -1288,19 +1447,25 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, []),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    ChildWorkExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
 
             with self.assertRaises(ChildSessionError):
-                await service.spawn(_child_proposal(input_ref="missing-ref"), MutableSignal())
+                await service.spawn(
+                    _child_proposal(input_ref="missing-ref"), MutableSignal()
+                )
 
             self.assertEqual(audit, [])
             self.assertIsNone(
                 ChildSessionService.load_phase(root / "children" / "child-1")
             )
 
-    async def test_child_terminal_failed_and_cancelled_map_to_safe_failures(self) -> None:
+    async def test_child_terminal_failed_and_cancelled_map_to_safe_failures(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             for terminal, status, reason in (
                 ("failed", "failed", "child-terminal-failed"),
@@ -1318,15 +1483,22 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                         control_factories=_registry(audit, clients, terminal=terminal),
                         private_root=root,
                         content=RecordingResolver(),
-                        child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
+                        child_action_executor_factory=lambda authority, children: (
+                            ChildWorkExecutor(audit)
+                        ),
                         clock_ms=lambda: 1_000,
                     )
                     with self.assertRaises(ActionExecutionFailure) as raised:
                         await service.spawn(_child_proposal(), MutableSignal())
-                    self.assertEqual((raised.exception.status, raised.exception.reason_code), (status, reason))
+                    self.assertEqual(
+                        (raised.exception.status, raised.exception.reason_code),
+                        (status, reason),
+                    )
                     self.assertEqual(audit.count("child.executor"), 1)
 
-    async def test_duplicate_equal_spawn_is_idempotent_and_conflicting_duplicate_fails_closed(self) -> None:
+    async def test_duplicate_equal_spawn_is_idempotent_and_conflicting_duplicate_fails_closed(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             audit: list[str] = []
@@ -1337,7 +1509,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    ChildWorkExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
             proposal = _child_proposal()
@@ -1348,9 +1522,13 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(first, second)
             self.assertEqual(audit.count("child.provider.create"), 1)
             with self.assertRaises(ChildSessionError):
-                await service.spawn(_child_proposal(input_ref="other-goal-ref"), MutableSignal())
+                await service.spawn(
+                    _child_proposal(input_ref="other-goal-ref"), MutableSignal()
+                )
 
-    async def test_concurrent_spawn_limit_is_enforced_before_second_provider_create(self) -> None:
+    async def test_concurrent_spawn_limit_is_enforced_before_second_provider_create(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             audit: list[str] = []
@@ -1369,13 +1547,20 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: BlockingExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    BlockingExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
-            first = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
+            first = asyncio.create_task(
+                service.spawn(_child_proposal(), MutableSignal())
+            )
             await asyncio.sleep(0)
             with self.assertRaises(ChildSessionError):
-                await service.spawn(_child_proposal(action_id="spawn-action-2", child_id="child-2"), MutableSignal())
+                await service.spawn(
+                    _child_proposal(action_id="spawn-action-2", child_id="child-2"),
+                    MutableSignal(),
+                )
             await first
 
             self.assertEqual(audit.count("child.provider.create"), 1)
@@ -1399,10 +1584,14 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: BlockingExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    BlockingExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
-            spawn = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
+            spawn = asyncio.create_task(
+                service.spawn(_child_proposal(), MutableSignal())
+            )
             while not clients:
                 await asyncio.sleep(0)
             message = _child_proposal(
@@ -1453,7 +1642,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 await spawn
             self.assertEqual(raised.exception.status, "cancelled")
 
-    async def test_cancel_all_precedes_close_and_close_failure_retains_entry(self) -> None:
+    async def test_cancel_all_precedes_close_and_close_failure_retains_entry(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             audit: list[str] = []
@@ -1473,10 +1664,14 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients, close_fails=True),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: BlockingExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    BlockingExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
-            task = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
+            task = asyncio.create_task(
+                service.spawn(_child_proposal(), MutableSignal())
+            )
             while not clients:
                 await asyncio.sleep(0)
 
@@ -1490,10 +1685,14 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 await task
             self.assertEqual(raised.exception.status, "cancelled")
             self.assertTrue(clients[0].closed)
-            self.assertLess(audit.index("child.command.session.cancel"), audit.index("child.close"))
+            self.assertLess(
+                audit.index("child.command.session.cancel"), audit.index("child.close")
+            )
             self.assertEqual(audit.count("child.command.session.cancel"), 1)
 
-    async def test_cancel_send_failure_keeps_child_uncertain_across_close_retries(self) -> None:
+    async def test_cancel_send_failure_keeps_child_uncertain_across_close_retries(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             audit: list[str] = []
@@ -1513,10 +1712,14 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: BlockingExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    BlockingExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
-            spawn = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
+            spawn = asyncio.create_task(
+                service.spawn(_child_proposal(), MutableSignal())
+            )
             while not clients:
                 await asyncio.sleep(0)
             original_send = clients[0].send
@@ -1533,7 +1736,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                     await service.close()
                 self.assertEqual(service.active_ids, ("child-1",))
                 self.assertEqual(service.status("child-1").status, "uncertain")
-                self.assertTrue((root / "children" / "child-1" / "binding.json").is_file())
+                self.assertTrue(
+                    (root / "children" / "child-1" / "binding.json").is_file()
+                )
                 self.assertFalse(spawn.done())
             self.assertEqual(audit.count("child.command.session.cancel.failed"), 1)
             self.assertFalse(clients[0].closed)
@@ -1544,7 +1749,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             spawn.cancel()
             await asyncio.gather(spawn, return_exceptions=True)
 
-    async def test_uncertain_cancelled_child_task_remains_uncertain_and_retained(self) -> None:
+    async def test_uncertain_cancelled_child_task_remains_uncertain_and_retained(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             audit: list[str] = []
@@ -1564,10 +1771,14 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: BlockingExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    BlockingExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
-            spawn = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
+            spawn = asyncio.create_task(
+                service.spawn(_child_proposal(), MutableSignal())
+            )
             while not clients:
                 await asyncio.sleep(0)
             original_send = clients[0].send
@@ -1628,10 +1839,14 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: BlockingExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    BlockingExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
-            spawn = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
+            spawn = asyncio.create_task(
+                service.spawn(_child_proposal(), MutableSignal())
+            )
             while not clients:
                 await asyncio.sleep(0)
             original_send = clients[0].send
@@ -1646,7 +1861,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 await original_send(command)
 
             clients[0].send = gated_cancel_send  # type: ignore[method-assign]
-            cancel = asyncio.create_task(service.cancel(_cancel_proposal("child-1"), MutableSignal()))
+            cancel = asyncio.create_task(
+                service.cancel(_cancel_proposal("child-1"), MutableSignal())
+            )
             await asyncio.wait_for(entered.wait(), timeout=1)
             close = asyncio.create_task(service.close())
             await asyncio.sleep(0)
@@ -1695,10 +1912,14 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: BlockingExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    BlockingExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
-            spawn = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
+            spawn = asyncio.create_task(
+                service.spawn(_child_proposal(), MutableSignal())
+            )
             while not clients:
                 await asyncio.sleep(0)
             original_send = clients[0].send
@@ -1711,8 +1932,12 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 await original_send(command)
 
             clients[0].send = gated_cancel_send  # type: ignore[method-assign]
-            first = asyncio.create_task(service.cancel(_cancel_proposal("child-1"), MutableSignal()))
-            second = asyncio.create_task(service.cancel(_cancel_proposal("child-1"), MutableSignal()))
+            first = asyncio.create_task(
+                service.cancel(_cancel_proposal("child-1"), MutableSignal())
+            )
+            second = asyncio.create_task(
+                service.cancel(_cancel_proposal("child-1"), MutableSignal())
+            )
             await asyncio.wait_for(entered.wait(), timeout=1)
             await asyncio.sleep(0)
             self.assertEqual(audit.count("child.cancel.entered"), 1)
@@ -1728,7 +1953,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 await spawn
             self.assertEqual(raised.exception.status, "cancelled")
 
-    async def test_cancel_all_attempts_all_children_and_closes_only_confirmed_cancels(self) -> None:
+    async def test_cancel_all_attempts_all_children_and_closes_only_confirmed_cancels(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             audit: list[str] = []
@@ -1772,10 +1999,14 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=registry(),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    ChildWorkExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
-            spawn_1 = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
+            spawn_1 = asyncio.create_task(
+                service.spawn(_child_proposal(), MutableSignal())
+            )
             spawn_2 = asyncio.create_task(
                 service.spawn(
                     _child_proposal(action_id="spawn-action-2", child_id="child-2"),
@@ -1784,7 +2015,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             )
             while len(clients) < 2:
                 await asyncio.sleep(0)
-            clients_by_session = {client.sent[0].session_id: client for client in clients}
+            clients_by_session = {
+                client.sent[0].session_id: client for client in clients
+            }
             child_1_client = clients_by_session["child-session-child-1"]
             child_2_client = clients_by_session["child-session-child-2"]
             child_1_send = child_1_client.send
@@ -1832,7 +2065,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             child_1_task.cancel()
             await asyncio.gather(child_1_task, spawn_1, return_exceptions=True)
 
-    def test_root_safety_rejects_symlink_wrong_mode_and_conflicting_binding(self) -> None:
+    def test_root_safety_rejects_symlink_wrong_mode_and_conflicting_binding(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "children").mkdir()
@@ -1871,7 +2106,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                     proposal_digest="b" * 64,
                 )
 
-    async def test_reopen_adopts_exact_binding_and_file_journal_without_reexecuting_completed_child(self) -> None:
+    async def test_reopen_adopts_exact_binding_and_file_journal_without_reexecuting_completed_child(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             audit: list[str] = []
@@ -1882,7 +2119,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    ChildWorkExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
             proposal = _child_proposal()
@@ -1894,7 +2133,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    ChildWorkExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
             second = await reopened.spawn(proposal, MutableSignal())
@@ -1902,7 +2143,9 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(first, second)
             self.assertEqual(audit.count("child.provider.create"), 1)
             self.assertEqual(audit.count("child.executor"), 1)
-            journal = FileCanonicalJournal.open(root / "children" / "child-1", "child-session-child-1")
+            journal = FileCanonicalJournal.open(
+                root / "children" / "child-1", "child-session-child-1"
+            )
             self.assertGreater(journal.position, 0)
 
 
@@ -1924,19 +2167,30 @@ class TestManagerChildIntegration(unittest.IsolatedAsyncioTestCase):
                     return None
 
             proposal = ControlEvent.from_mapping(
-                {**_child_proposal().to_mapping(), "sequence": 3, "event_id": "hostile-event"}
+                {
+                    **_child_proposal().to_mapping(),
+                    "sequence": 3,
+                    "event_id": "hostile-event",
+                }
             )
             host = ControlHost(
-                session_id="session-1", generation=1, plan=plan,
+                session_id="session-1",
+                generation=1,
+                plan=plan,
                 authority=AuthorityLedger(_child_envelope()),
                 journal=FileCanonicalJournal.open(root / "parent", "session-1"),
-                client=ScriptedClient(plan.control_binding.manifest, _session_events(proposal)),
-                action_executor=ChildWorkExecutor([]), clock_ms=lambda: 1_000,
+                client=ScriptedClient(
+                    plan.control_binding.manifest, _session_events(proposal)
+                ),
+                action_executor=ChildWorkExecutor([]),
+                clock_ms=lambda: 1_000,
                 child_service=HostileChildren(),
             )
             with self.assertRaises(ControlHostError) as raised:
                 await host.pump()
-            self.assertEqual(str(raised.exception), "control child lifecycle is unavailable")
+            self.assertEqual(
+                str(raised.exception), "control child lifecycle is unavailable"
+            )
             self.assertNotIn(SENTINEL, str(raised.exception))
 
     async def test_child_model_work_starts_only_after_parent_admission(self) -> None:
@@ -1951,7 +2205,9 @@ class TestManagerChildIntegration(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: ChildWorkExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    ChildWorkExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
             executor, _, _, _ = _application_executor(
@@ -1960,7 +2216,11 @@ class TestManagerChildIntegration(unittest.IsolatedAsyncioTestCase):
                 child_service=children,
             )
             parent_proposal = ControlEvent.from_mapping(
-                {**_child_proposal().to_mapping(), "sequence": 3, "event_id": "parent-event-3"}
+                {
+                    **_child_proposal().to_mapping(),
+                    "sequence": 3,
+                    "event_id": "parent-event-3",
+                }
             )
             client = ScriptedClient(
                 plan.control_binding.manifest,
@@ -1983,11 +2243,16 @@ class TestManagerChildIntegration(unittest.IsolatedAsyncioTestCase):
 
             await host.pump()
 
-            self.assertLess(audit.index("parent.provider.admitted"), audit.index("child.provider.create"))
+            self.assertLess(
+                audit.index("parent.provider.admitted"),
+                audit.index("child.provider.create"),
+            )
             self.assertEqual(children.active_ids, ())
             self.assertGreater(host.snapshot().authority_usage.child_tokens, 0)
 
-    async def test_parent_cancel_cascades_to_active_children_before_provider_close(self) -> None:
+    async def test_parent_cancel_cascades_to_active_children_before_provider_close(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             plan = _plan(root)
@@ -2007,10 +2272,14 @@ class TestManagerChildIntegration(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: BlockingExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    BlockingExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
-            task = asyncio.create_task(children.spawn(_child_proposal(), MutableSignal()))
+            task = asyncio.create_task(
+                children.spawn(_child_proposal(), MutableSignal())
+            )
             while not clients:
                 await asyncio.sleep(0)
             client = ScriptedClient(plan.control_binding.manifest, audit=audit)
@@ -2040,7 +2309,9 @@ class TestManagerChildIntegration(unittest.IsolatedAsyncioTestCase):
 
             await host.close()
 
-            self.assertLess(audit.index("child.command.session.cancel"), audit.index("child.close"))
+            self.assertLess(
+                audit.index("child.command.session.cancel"), audit.index("child.close")
+            )
             self.assertLess(audit.index("child.close"), audit.index("provider.send"))
             self.assertLess(audit.index("child.close"), audit.index("provider.close"))
 
@@ -2089,7 +2360,9 @@ class TestManagerChildIntegration(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(client.sent, [])
             self.assertNotIn(SENTINEL, str(raised.exception))
 
-    async def test_child_cancel_send_failure_prevents_parent_cancel_delivery(self) -> None:
+    async def test_child_cancel_send_failure_prevents_parent_cancel_delivery(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             plan = _plan(root)
@@ -2110,10 +2383,14 @@ class TestManagerChildIntegration(unittest.IsolatedAsyncioTestCase):
                 control_factories=_registry(audit, child_clients),
                 private_root=root,
                 content=RecordingResolver(),
-                child_action_executor_factory=lambda authority, children: BlockingExecutor(audit),
+                child_action_executor_factory=lambda authority, children: (
+                    BlockingExecutor(audit)
+                ),
                 clock_ms=lambda: 1_000,
             )
-            spawn = asyncio.create_task(children.spawn(_child_proposal(), MutableSignal()))
+            spawn = asyncio.create_task(
+                children.spawn(_child_proposal(), MutableSignal())
+            )
             while not child_clients:
                 await asyncio.sleep(0)
             original_send = child_clients[0].send
@@ -2164,7 +2441,9 @@ class TestManagerChildIntegration(unittest.IsolatedAsyncioTestCase):
             spawn.cancel()
             await asyncio.gather(spawn, return_exceptions=True)
 
-    async def test_active_children_rejects_a_child_spawn_at_the_concurrency_limit(self) -> None:
+    async def test_active_children_rejects_a_child_spawn_at_the_concurrency_limit(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             plan = _plan(root)
@@ -2180,7 +2459,11 @@ class TestManagerChildIntegration(unittest.IsolatedAsyncioTestCase):
                     return None
 
             proposal = ControlEvent.from_mapping(
-                {**_child_proposal().to_mapping(), "sequence": 3, "event_id": "parent-event-3"}
+                {
+                    **_child_proposal().to_mapping(),
+                    "sequence": 3,
+                    "event_id": "parent-event-3",
+                }
             )
             client = ScriptedClient(
                 plan.control_binding.manifest,
@@ -2205,7 +2488,9 @@ class TestManagerChildIntegration(unittest.IsolatedAsyncioTestCase):
                 command for command in client.sent if command.type == "action.resolve"
             )
             self.assertEqual(resolution.payload["resolution"], "rejected")
-            self.assertEqual(resolution.payload["reason_code"], "child-concurrency-exceeded")
+            self.assertEqual(
+                resolution.payload["reason_code"], "child-concurrency-exceeded"
+            )
 
 
 def _cancel_proposal(child_id: str) -> ControlEvent:

@@ -17,11 +17,13 @@ import fcntl
 from asterion.control.host import ControlCommand, ControlEvent
 from asterion.control.protocol import (
     IDENTIFIER,
+    MEDIA_TYPE,
     OPAQUE_ID,
     SEMANTIC_VERSION,
     validate_control_command,
     validate_control_event,
 )
+from asterion.protocol_ordering import is_sorted_unique_scalar_strings
 
 
 JOURNAL_RECORD_KINDS = frozenset(
@@ -184,12 +186,16 @@ class JournalRecord:
         action_id: str,
         receipt_ref: str,
         usage: object,
+        artifact_ids: tuple[str, ...] = (),
+        media_types: tuple[str, ...] = (),
     ) -> JournalRecord:
         return cls(
             record_id=f"receipt:{action_id}",
             kind="action.receipted",
             payload={
                 "action_id": action_id,
+                "artifact_ids": artifact_ids,
+                "media_types": media_types,
                 "receipt_ref": receipt_ref,
                 "usage": _public_usage(usage),
             },
@@ -974,9 +980,20 @@ def _validate_record_payload(kind: str, value: object) -> None:
         _require_digest(value["proposal_digest"], "journal proposal digest")
         return
     if kind == "action.receipted":
-        _require_fields(value, {"action_id", "receipt_ref", "usage"})
+        if set(value) == {"action_id", "receipt_ref", "usage"}:
+            value = {
+                **value,
+                "artifact_ids": (),
+                "media_types": (),
+            }
+        _require_fields(
+            value,
+            {"action_id", "artifact_ids", "media_types", "receipt_ref", "usage"},
+        )
         _require_opaque_id(value["action_id"], "journal receipt action")
         _require_opaque_id(value["receipt_ref"], "journal receipt reference")
+        _require_opaque_ids(value["artifact_ids"], "journal receipt artifacts")
+        _require_media_types(value["media_types"], "journal receipt media types")
         _validate_usage(value["usage"])
         return
     if kind == "action.running":
@@ -1058,6 +1075,26 @@ def _require_version(value: object, label: str) -> None:
 def _require_opaque_id(value: object, label: str) -> None:
     if not isinstance(value, str) or OPAQUE_ID.fullmatch(value) is None:
         raise JournalConflictError(f"{label} is invalid")
+
+
+def _require_opaque_ids(value: object, label: str) -> None:
+    if (
+        not isinstance(value, (list, tuple))
+        or any(not isinstance(item, str) for item in value)
+        or not is_sorted_unique_scalar_strings(list(value))
+        or any(OPAQUE_ID.fullmatch(item) is None for item in value)
+    ):
+        raise JournalConflictError(f"{label} are invalid")
+
+
+def _require_media_types(value: object, label: str) -> None:
+    if (
+        not isinstance(value, (list, tuple))
+        or any(not isinstance(item, str) for item in value)
+        or not is_sorted_unique_scalar_strings(list(value))
+        or any(MEDIA_TYPE.fullmatch(item) is None for item in value)
+    ):
+        raise JournalConflictError(f"{label} are invalid")
 
 
 def _require_positive_integer(value: object, label: str) -> None:

@@ -186,8 +186,12 @@ _TRUSTED_STRING_ATTRIBUTE_VALUES = {
     "control_event_type": frozenset(
         {
             "action.admitted",
+            "action.cancelled",
+            "action.failed",
             "action.proposed",
             "action.rejected",
+            "action.succeeded",
+            "action.uncertain",
             "budget.reported",
             "checkpoint.created",
             "fault.raised",

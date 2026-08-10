@@ -6,18 +6,22 @@ import asyncio
 import json
 import os
 import re
+import stat
 import uuid
 from collections.abc import Mapping
 from types import MappingProxyType
 
 
 PROTOCOL = "asterion.skill-control/v1"
+DISCOVERY_PROTOCOL = "asterion.skill-control-discovery/v1"
+DISCOVERY_FILE = "asterion-control.json"
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_RESPONSE_BYTES = 64 * 1024
 MAX_INPUT_BYTES = 1024 * 1024
 
 _TOKEN = re.compile(r"^[0-9a-f]{64}$")
 _OPAQUE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_MAX_DISCOVERY_BYTES = 4096
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 _VERSION = re.compile(r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$")
 
@@ -134,8 +138,57 @@ def _environment() -> tuple[str, str, str]:
     socket_path = os.environ.get("ASTERION_CONTROL_SOCKET")
     token = os.environ.get("ASTERION_CONTROL_TOKEN")
     session_id = os.environ.get("ASTERION_CONTROL_SESSION_ID")
+    if socket_path is None and token is None and session_id is None:
+        return _discovered_environment()
     if (
         not isinstance(socket_path, str)
+        or not socket_path
+        or not isinstance(token, str)
+        or _TOKEN.fullmatch(token) is None
+        or not isinstance(session_id, str)
+        or _OPAQUE_ID.fullmatch(session_id) is None
+    ):
+        raise AsterionControlError("Asterion control environment is unavailable")
+    return socket_path, token, session_id
+
+
+def _discovered_environment() -> tuple[str, str, str]:
+    agent_dir = os.environ.get("PRIME_AGENT_CODING_AGENT_DIR")
+    if not isinstance(agent_dir, str) or not agent_dir:
+        raise AsterionControlError("Asterion control environment is unavailable")
+    try:
+        discovery_path = os.path.join(agent_dir, DISCOVERY_FILE)
+        descriptor = os.open(
+            discovery_path,
+            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+        )
+        try:
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_mode & 0o077
+                or metadata.st_size > _MAX_DISCOVERY_BYTES
+            ):
+                raise OSError
+            with os.fdopen(descriptor, encoding="utf-8") as handle:
+                descriptor = -1
+                raw = handle.read(_MAX_DISCOVERY_BYTES + 1)
+            if len(raw.encode("utf-8")) > _MAX_DISCOVERY_BYTES:
+                raise OSError
+            value = json.loads(raw)
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+    except (OSError, ValueError, json.JSONDecodeError):
+        raise AsterionControlError("Asterion control environment is unavailable") from None
+    if not isinstance(value, Mapping):
+        raise AsterionControlError("Asterion control environment is unavailable")
+    socket_path = value.get("socket_path")
+    token = value.get("token")
+    session_id = value.get("session_id")
+    if (
+        value.get("protocol") != DISCOVERY_PROTOCOL
+        or not isinstance(socket_path, str)
         or not socket_path
         or not isinstance(token, str)
         or _TOKEN.fullmatch(token) is None

@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
+from typing import IO
 
 from asterion.immutable import RedactedImmutableMapping
 
@@ -45,6 +46,9 @@ class PrimeSidecarLaunchOptions:
     environ: Mapping[str, str] = field(default_factory=lambda: dict(os.environ))
     close_timeout: float = 2.0
     request_timeout: float = 30.0
+    private_stderr_sink: IO[bytes] | None = field(
+        default=None, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         if (
@@ -58,6 +62,7 @@ class PrimeSidecarLaunchOptions:
             )
             or not _positive_finite(self.close_timeout)
             or not _positive_finite(self.request_timeout)
+            or not _valid_private_sink(self.private_stderr_sink)
         ):
             raise PrimeSidecarProcessError()
         object.__setattr__(
@@ -155,6 +160,12 @@ class PrimeSidecarProcess:
         return self._process.returncode if self._process is not None else None
 
     @property
+    def pid(self) -> int | None:
+        """Return the exact live sidecar PID without exposing launch inputs."""
+
+        return self._process.pid if self._process is not None else None
+
+    @property
     def closed(self) -> bool:
         return self._closed
 
@@ -170,7 +181,9 @@ class PrimeSidecarProcess:
             line = _encode_frame(envelope)
             try:
                 writer.write(line)
-                await asyncio.wait_for(writer.drain(), timeout=self._options.request_timeout)
+                await asyncio.wait_for(
+                    writer.drain(), timeout=self._options.request_timeout
+                )
                 response_line = await asyncio.wait_for(
                     reader.readline(), timeout=self._options.request_timeout
                 )
@@ -202,9 +215,7 @@ class PrimeSidecarProcess:
                 if process.stdin is not None and not process.stdin.is_closing():
                     process.stdin.close()
                     timeout = _phase_timeout(deadline, self._options.close_timeout)
-                    await asyncio.wait_for(
-                        process.stdin.wait_closed(), timeout=timeout
-                    )
+                    await asyncio.wait_for(process.stdin.wait_closed(), timeout=timeout)
             except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
             if process.returncode is None:
@@ -250,7 +261,9 @@ class PrimeSidecarProcess:
                 *plan.argv,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
+                stderr=self._options.private_stderr_sink
+                if self._options.private_stderr_sink is not None
+                else asyncio.subprocess.DEVNULL,
                 env=dict(plan.env),
                 pass_fds=plan.pass_fds,
             )
@@ -285,6 +298,19 @@ def _positive_finite(value: object) -> bool:
     )
 
 
+def _valid_private_sink(value: object) -> bool:
+    if value is None:
+        return True
+    fileno = getattr(value, "fileno", None)
+    if not callable(fileno):
+        return False
+    try:
+        descriptor = fileno()
+    except (OSError, ValueError):
+        return False
+    return type(descriptor) is int and descriptor >= 0
+
+
 def _remaining(deadline: float) -> float:
     remaining = deadline - asyncio.get_running_loop().time()
     if remaining <= 0:
@@ -311,9 +337,10 @@ def _regular_existing_path(path: Path, *, executable: bool) -> Path:
 
 def _encode_frame(value: Mapping[str, object]) -> bytes:
     try:
-        encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode(
-            "utf-8"
-        ) + b"\n"
+        encoded = (
+            json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            + b"\n"
+        )
     except (TypeError, ValueError):
         raise PrimeSidecarProcessError() from None
     if len(encoded) > _MAX_FRAME_BYTES:
@@ -348,12 +375,22 @@ def _validate_response(
     if (
         response.get("protocol") != PRIME_GATEWAY_IPC_PROTOCOL
         or response.get("id") != request.get("id")
-        or response.get("type") not in {"command.accepted", "events.batch"}
+        or response.get("type")
+        not in {
+            "authority.accepted",
+            "command.accepted",
+            "events.batch",
+            "private.value",
+        }
     ):
         raise PrimeSidecarProcessError()
     expected = {"protocol", "id", "type"}
     if response.get("type") == "events.batch":
         expected = expected | {"events"}
+    if response.get("type") == "private.value":
+        expected = expected | {"text"}
+        if not isinstance(response.get("text"), str):
+            raise PrimeSidecarProcessError()
     if set(response) != expected:
         raise PrimeSidecarProcessError()
     return response

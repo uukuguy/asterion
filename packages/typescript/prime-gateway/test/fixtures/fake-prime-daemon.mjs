@@ -1,5 +1,5 @@
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
-import { createServer } from "node:net";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createConnection, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -48,13 +48,24 @@ export async function startFakePrimeDaemon(options = {}) {
   const rawCommands = [];
   const clientIds = [];
   const acknowledgements = [];
+  const skillOperations = [];
+  const skillResponses = [];
+  const skillFailures = [];
+  const skillDisconnects = [];
+  const emittedGoalUpdates = [];
   const deliveries = new Map();
   const mutations = new Map();
   const commandCounts = new Map();
   const cachedResponses = new Map();
   const sockets = new Set();
+  const activeSessionSockets = new Map();
+  const transcriptByActiveSession = new Map();
   let connectionCount = 0;
+  let createCount = 0;
+  let outboundSequence = 0;
   let attachedActiveSessionId;
+  let createConfig;
+  let persistence = Promise.resolve();
 
   function observations() {
     return {
@@ -63,38 +74,286 @@ export async function startFakePrimeDaemon(options = {}) {
       socketPath,
       connectionCount,
       modelProviderOperations: 0,
-      applicationOperations: 0,
+      applicationOperations: skillResponses.filter((response) =>
+        response.operation === "application.invoke",
+      ).length,
       commandCounts: Object.fromEntries(
         [...commandCounts.entries()].sort(([left], [right]) => left.localeCompare(right)),
       ),
+      skillOperations: [...skillOperations],
+      skillResponses: [...skillResponses],
+      skillFailures: [...skillFailures],
+      skillDisconnects: [...skillDisconnects],
+      emittedGoalUpdates: [...emittedGoalUpdates],
       clientIds: [...clientIds],
       acknowledgements: [...acknowledgements],
     };
   }
 
-  async function persistObservations() {
+  function persistObservations() {
     if (typeof options.observationsPath !== "string") {
-      return;
+      return Promise.resolve();
     }
-    await writeFile(options.observationsPath, `${JSON.stringify(observations(), null, 2)}\n`)
+    const body = `${JSON.stringify(observations(), null, 2)}\n`;
+    persistence = persistence
+      .then(() => writeFile(options.observationsPath, body))
       .catch(() => undefined);
+    return persistence;
   }
 
   function defaultResponseData(command) {
-    const activeSessionId = command.activeSessionId ?? "prime-root-1";
+    const activeSessionId = command.fakeActiveSessionId ?? command.activeSessionId ?? "prime-root-1";
+    const transcriptSessionId = command.fakeTranscriptSessionId
+      ?? transcriptByActiveSession.get(activeSessionId)
+      ?? "prime-transcript-1";
     if (command.type === "create") {
       return {
         activeSessionId,
-        sessionId: "prime-transcript-1",
+        sessionId: transcriptSessionId,
       };
     }
     if (command.type === "attach") {
-      return { activeSessionId };
+      const cursor = { generation: "prime-events-1", sequence: 0 };
+      return {
+        activeSessionId,
+        protocol: { name: "prime-agent.daemon", version: 7 },
+        replay: { status: "complete", toSequence: 0 },
+        lastEventSequence: 0,
+        lastEventCursor: cursor,
+        snapshot: {
+          activeSessionId,
+          lastEventSequence: 0,
+          lastEventCursor: cursor,
+          summary: {
+            sessionId: transcriptSessionId,
+            activeSessionId,
+          },
+          state: {
+            goal: { status: "active" },
+          },
+        },
+      };
     }
     if (command.type === "cancel_prompt_admission") {
       return { status: "cancelled" };
     }
+    if (command.type === "prepare_update_restart") {
+      return {
+        formatVersion: 1,
+        createdAt: "2026-08-10T04:00:00.000Z",
+        sessions: [
+          {
+            activeSessionId: "prime-root-1",
+            sessionId: "prime-transcript-1",
+            sessionFile: "/private/sessions/root.jsonl",
+            runtimeMetadata: { kind: "top-level" },
+          },
+        ],
+      };
+    }
     return { accepted: true };
+  }
+
+  function scenarioRequest(command) {
+    const budget = {
+      controller_tokens: 0,
+      application_tokens: 10,
+      child_tokens: 10,
+      aggregate_tokens: 20,
+      cost_micros: 0,
+      deadline_ms: 10_000,
+    };
+    const scenarioId = options.scenarioId ?? "embedded";
+    if (
+      scenarioId === "prime-loop-application" ||
+      scenarioId === "prime-loop-gateway-crash" ||
+      scenarioId === "prime-loop-supervisor-crash" ||
+      scenarioId === "prime-loop-worker-crash" ||
+      scenarioId === "prime-loop-cancel" ||
+      scenarioId === "prime-loop-budget"
+    ) {
+      return {
+        operation: "application.invoke",
+        payload: {
+          target: {
+            kind: "application",
+            provider_id: "example.provider",
+            application_id: "alpha",
+            version: "1.0.0",
+            runtime_id: "fake.runtime",
+          },
+          input_text: `SENTINEL_TOKEN ${scenarioId}`,
+          expected_artifacts: ["report.alpha"],
+          idempotency_key: `${scenarioId}-application`,
+          budget,
+        },
+      };
+    }
+    if (scenarioId === "prime-loop-child") {
+      return {
+        operation: "child.spawn",
+        payload: {
+          child_id: "child-1",
+          goal_text: "SENTINEL_PATH child goal",
+          idempotency_key: `${scenarioId}-child`,
+          budget,
+        },
+      };
+    }
+    if (scenarioId === "prime-loop-checkpoint") {
+      return {
+        operation: "checkpoint.request",
+        payload: {
+          checkpoint_id: "checkpoint-1",
+          idempotency_key: `${scenarioId}-checkpoint`,
+          budget,
+        },
+      };
+    }
+    if (scenarioId === "prime-loop-redaction") {
+      return {
+        operation: "child.spawn",
+        payload: {
+          child_id: "child-1",
+          goal_text: "SENTINEL_PATH SENTINEL_OUTPUT child goal",
+          idempotency_key: `${scenarioId}-child`,
+          budget,
+        },
+      };
+    }
+    return undefined;
+  }
+
+  function scenarioRequests(command) {
+    const first = scenarioRequest(command);
+    if (first === undefined) {
+      return [];
+    }
+    if ((options.scenarioId ?? "embedded") !== "prime-loop-application") {
+      return [first];
+    }
+    return [
+      first,
+      {
+        operation: "goal.complete",
+        payload: {
+          goal_id: "goal-1",
+          summary: "SENTINEL_OUTPUT verified goal completion",
+          idempotency_key: "prime-loop-application-goal-complete",
+          budget: {
+            controller_tokens: 0,
+            application_tokens: 0,
+            child_tokens: 0,
+            aggregate_tokens: 0,
+            cost_micros: 0,
+            deadline_ms: 10_000,
+          },
+        },
+      },
+    ];
+  }
+
+  function emitGoalUpdate(activeSessionId, status = "complete") {
+    const socket = activeSessionSockets.get(activeSessionId);
+    if (socket === undefined || socket.destroyed) {
+      emittedGoalUpdates.push({ activeSessionId, status, delivered: false });
+      void persistObservations();
+      return;
+    }
+    outboundSequence += 1;
+    const cursor = {
+      generation: "prime-events-1",
+      sequence: outboundSequence,
+    };
+    socket.write(`${JSON.stringify({
+      type: "session_event",
+      activeSessionId,
+      event: {
+        type: "goal_update",
+        goal: {
+          status,
+          tokensUsed: 0,
+        },
+      },
+      meta: {
+        id: `prime-event-${outboundSequence}`,
+        protocol: { name: "prime-agent.daemon", version: 7 },
+        cursor,
+        sequence: outboundSequence,
+        activeSessionId,
+        emittedAt: "2026-08-10T04:00:00.000Z",
+      },
+    })}\n`);
+    emittedGoalUpdates.push({ activeSessionId, status, delivered: true, cursor });
+    void persistObservations();
+  }
+
+  function readLine(socket, label) {
+    return new Promise((resolve, reject) => {
+      let buffer = "";
+      const timer = setTimeout(
+        () => reject(new Error(`timeout waiting for ${label}`)),
+        5_000,
+      );
+      socket.setEncoding("utf8");
+      socket.on("data", (chunk) => {
+        buffer += chunk;
+        const newline = buffer.indexOf("\n");
+        if (newline !== -1) {
+          clearTimeout(timer);
+          resolve(buffer.slice(0, newline));
+        }
+      });
+      socket.once("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      socket.once("close", () => {
+        if (buffer.length === 0) {
+          clearTimeout(timer);
+          reject(new Error(`closed waiting for ${label}`));
+        }
+      });
+    });
+  }
+
+  async function exchangeOneWithSkillBridge(request) {
+    const discoveryPath = join(createConfig.agentDir, "asterion-control.json");
+    const discovery = JSON.parse(await readFile(discoveryPath, "utf8"));
+    const socket = createConnection(discovery.socket_path);
+    await new Promise((resolve, reject) => {
+      socket.once("connect", resolve);
+      socket.once("error", reject);
+    });
+    const requestId = `${request.operation.replace(".", "-")}-request`;
+    skillOperations.push(request.operation);
+    socket.write(`${JSON.stringify({
+      protocol: "asterion.skill-control/v1",
+      type: "authenticate",
+      token: discovery.token,
+      session_id: discovery.session_id,
+    })}\n${JSON.stringify({
+      protocol: "asterion.skill-control/v1",
+      request_id: requestId,
+      session_id: discovery.session_id,
+      operation: request.operation,
+      payload: request.payload,
+    })}\n`);
+    const response = JSON.parse(await readLine(socket, request.operation));
+    socket.end();
+    skillResponses.push({
+      operation: request.operation,
+      status: response.status,
+      admission: response.result?.admission?.resolution,
+      terminal: response.result?.terminal?.resolution,
+    });
+    await persistObservations();
+  }
+
+  async function exchangeWithSkillBridge(command) {
+    for (const request of scenarioRequests(command)) {
+      await exchangeOneWithSkillBridge(request);
+    }
   }
 
   const server = createServer((socket) => {
@@ -120,7 +379,7 @@ export async function startFakePrimeDaemon(options = {}) {
         buildId:
           greetingOverride.buildId ??
           options.buildId ??
-          `fake-build-${connectionIndex + 1}`,
+          "fake-build-1",
         executablePath: "/private/sentinel/node",
         entrypointPath: "/private/sentinel/prime.ts",
       },
@@ -168,6 +427,17 @@ export async function startFakePrimeDaemon(options = {}) {
             commandCounts.set(command.type, (commandCounts.get(command.type) ?? 0) + 1);
             if (command.type === "attach") {
               attachedActiveSessionId = command.activeSessionId;
+              activeSessionSockets.set(command.activeSessionId, socket);
+            }
+            if (command.type === "create") {
+              createCount += 1;
+              command.fakeActiveSessionId = `prime-root-${createCount}`;
+              command.fakeTranscriptSessionId = `prime-transcript-${createCount}`;
+              transcriptByActiveSession.set(
+                command.fakeActiveSessionId,
+                command.fakeTranscriptSessionId,
+              );
+              createConfig = command.config;
             }
             void persistObservations();
             deliveries.set(commandId, (deliveries.get(commandId) ?? 0) + 1);
@@ -207,7 +477,33 @@ export async function startFakePrimeDaemon(options = {}) {
                   },
                 }
               : cachedResponses.get(commandId);
+            if (command.type === "create" && skillOperations.length === 0) {
+              setTimeout(() => {
+                exchangeWithSkillBridge(command)
+                  .catch((error) => {
+                    if (
+                      (options.scenarioId ?? "embedded") === "prime-loop-gateway-crash" &&
+                      error.message === "closed waiting for application.invoke"
+                    ) {
+                      skillDisconnects.push("application.invoke");
+                    } else {
+                      skillFailures.push(error.message);
+                    }
+                  })
+                  .finally(() => {
+                    void persistObservations();
+                  });
+              }, 0);
+            }
             socket.write(`${JSON.stringify(response)}\n`);
+            if (
+              command.type === "attach" &&
+              command.activeSessionId !== "prime-root-1"
+            ) {
+              // Let the gateway finish create/attach and install its listener;
+              // this still exercises snapshot polling rather than a synthetic host event.
+              setTimeout(() => emitGoalUpdate(command.activeSessionId), 200);
+            }
             void persistObservations();
           }
         }

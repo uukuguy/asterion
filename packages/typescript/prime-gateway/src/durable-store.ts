@@ -67,6 +67,10 @@ export interface GatewayEventReceipt extends GatewayRecordReceipt {
   readonly event: ControlEvent;
 }
 
+export interface GatewayCommandReceipt extends GatewayRecordReceipt {
+  readonly command: ControlCommand;
+}
+
 export interface GatewayDurableSnapshot {
   readonly sessionId: string;
   readonly position: number;
@@ -559,6 +563,18 @@ export class GatewayDurableStore {
             event,
           });
         }),
+    );
+  }
+
+  commands(): readonly GatewayCommandReceipt[] {
+    return Object.freeze(
+      this.records
+        .filter((record) => record.stored.kind === "command.accepted")
+        .map((record) => Object.freeze({
+          position: record.stored.position,
+          digest: record.stored.digest,
+          command: record.payload.command as ControlCommand,
+        })),
     );
   }
 

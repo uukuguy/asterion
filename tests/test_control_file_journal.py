@@ -212,12 +212,39 @@ class TestControlFileJournal(unittest.TestCase):
             action_id="action-1",
             receipt_ref="receipt-1",
             usage=BudgetUsage(0, 80, 0, 80, 4_000),
+            artifact_ids=("artifact-1",),
+            media_types=("text/plain",),
         )
         checkpoint = JournalRecord.checkpoint_sealed(checkpoint_event=_checkpoint())
 
-        self.assertEqual(set(receipt.payload), {"action_id", "receipt_ref", "usage"})
+        self.assertEqual(
+            set(receipt.payload),
+            {"action_id", "artifact_ids", "media_types", "receipt_ref", "usage"},
+        )
+        self.assertEqual(receipt.payload["artifact_ids"], ("artifact-1",))
+        self.assertEqual(receipt.payload["media_types"], ("text/plain",))
         self.assertEqual(set(checkpoint.payload), {"checkpoint_event"})
         self.assertNotIn("SENTINEL_SECRET", repr((receipt, checkpoint)))
+
+        with self.assertRaises(JournalConflictError) as raised:
+            JournalRecord.action_receipted(
+                action_id="action-1",
+                receipt_ref="receipt-1",
+                usage=BudgetUsage(0, 80, 0, 80, 4_000),
+                artifact_ids=("artifact-2", "artifact-1"),
+                media_types=("text/plain",),
+            )
+        self.assertNotIn("artifact-2", str(raised.exception))
+
+        with self.assertRaises(JournalConflictError) as raised:
+            JournalRecord.action_receipted(
+                action_id="action-1",
+                receipt_ref="receipt-1",
+                usage=BudgetUsage(0, 80, 0, 80, 4_000),
+                artifact_ids=("SENTINEL SECRET",),
+                media_types=("text/plain",),
+            )
+        self.assertNotIn("SENTINEL SECRET", str(raised.exception))
 
         private = JournalRecord(
             record_id="command:private",

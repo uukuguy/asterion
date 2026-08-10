@@ -31,12 +31,16 @@ import type {
   PrimeCheckpointCreated,
   PrimeCheckpointRecovery,
 } from "./checkpoint.js";
+import {
+  recoveryFromAttach,
+} from "./checkpoint.js";
 import type {
   PrimeDaemonListener,
 } from "./daemon-client.js";
 import type {
   PrimeDaemonCursor,
   PrimeDaemonOutbound,
+  PrimeDaemonResponse,
 } from "./daemon-wire.js";
 import type {
   PrimeInputDelivery,
@@ -54,6 +58,7 @@ export interface PrimeGatewaySession {
   readonly activeSessionId: string;
   readonly transcriptSessionId: string;
   readonly supervisorGeneration: string;
+  readonly lastAttachResponse: PrimeDaemonResponse | undefined;
   adoptRecovery(recovery: PrimeCheckpointRecovery): void;
   acknowledgeCheckpoint(checkpointId: string): boolean;
   subscribe(listener: PrimeDaemonListener): () => void;
@@ -64,7 +69,7 @@ export interface PrimeGatewaySession {
   ): Promise<void>;
   pause(commandId: string): Promise<void>;
   resume(commandId: string): Promise<void>;
-  attach(commandId: string, cursor?: PrimeDaemonCursor): Promise<void>;
+  attach(commandId: string, cursor?: PrimeDaemonCursor): Promise<PrimeDaemonResponse>;
   detach(commandId: string): Promise<void>;
   cancel(commandId: string): Promise<void>;
 }
@@ -73,12 +78,27 @@ export interface PrimeGatewayPrivateInputs {
   readInput(reference: string): Promise<string>;
 }
 
+export interface PrimeGatewayPrivateResults {
+  readBoundResultReference(
+    commandId: string,
+    actionId: string,
+    sourceReceiptRef: string,
+  ): Promise<PrivateValueRef>;
+}
+
+export interface PrimeGatewayCreateContext {
+  readonly goalId: string;
+  readonly authorityRevision: number;
+  readonly causalParentIds: readonly string[];
+}
+
 export interface PrimeGatewayOptions {
   readonly sessionId: string;
   readonly generation: number;
   readonly authorityId: string;
   readonly store: GatewayDurableStore;
   readonly privateValues: PrimeGatewayPrivateInputs;
+  readonly privateResults?: PrimeGatewayPrivateResults;
   readonly createSession: (
     goal: string,
     bindIdentity: (identity: {
@@ -86,6 +106,7 @@ export interface PrimeGatewayOptions {
       readonly transcriptSessionId: string;
       readonly supervisorGeneration: string;
     }) => Promise<void>,
+    context: PrimeGatewayCreateContext,
   ) => Promise<PrimeGatewaySession>;
   readonly restoreSession?: (
     identity: PrimeIdentityBinding,
@@ -96,6 +117,7 @@ export interface PrimeGatewayOptions {
     coveredSequence: number,
     onRecovered: (recovery: PrimeCheckpointRecovery) => Promise<void>,
   ) => Promise<PrimeCheckpointCreated>;
+  readonly onSessionReady?: (context: PrimeGatewayCreateContext) => void;
   readonly now?: () => string;
 }
 
@@ -120,6 +142,8 @@ type GatewaySessionStatus =
 
 interface ActionRecord {
   status: GatewayActionStatus;
+  kind: string;
+  targetId: string;
   reasonCode?: string;
   resultRef?: PrivateValueRef;
   admissionPromise?: Promise<GatewayAdmissionResult>;
@@ -191,7 +215,11 @@ export class PrimeGateway {
       } else if (event.type === "goal.updated") {
         this.goalStatus = event.payload.status;
       } else if (event.type === "action.proposed") {
-        this.actions.set(event.payload.action_id, { status: "proposed" });
+        this.actions.set(event.payload.action_id, {
+          status: "proposed",
+          kind: event.payload.kind,
+          targetId: this.actionTargetId(event),
+        });
       } else if (event.type === "checkpoint.created") {
         this.checkpoints.add(event.payload.checkpoint_id);
       }
@@ -213,7 +241,9 @@ export class PrimeGateway {
       throw new PrimeGatewayError();
     }
     const gateway = new PrimeGateway(options);
+    await gateway.restoreActionCommands();
     await gateway.restoreExistingSession();
+    await gateway.restoreGoalTerminals();
     return gateway;
   }
 
@@ -269,7 +299,14 @@ export class PrimeGateway {
       }
       return existing.promise;
     }
-    const promise = this.persistAndHandle(command);
+    let promise: Promise<void>;
+    promise = this.persistAndHandle(command).catch((error) => {
+      const current = this.commandExecutions.get(command.command_id);
+      if (current?.promise === promise) {
+        this.commandExecutions.delete(command.command_id);
+      }
+      throw error;
+    });
     this.commandExecutions.set(command.command_id, { digest, promise });
     return promise;
   }
@@ -284,10 +321,22 @@ export class PrimeGateway {
       !this.matchesReservation(event) ||
       this.actions.has(event.payload.action_id)
     ) {
+      if (
+        event.type === "action.proposed" &&
+        event.session_id === this.options.sessionId &&
+        event.generation === this.options.generation &&
+        this.matchesReservation(event)
+      ) {
+        this.releaseReservedEvent(event);
+      }
       throw new PrimeGatewayError();
     }
     await this.append(event);
-    this.actions.set(event.payload.action_id, { status: "proposed" });
+    this.actions.set(event.payload.action_id, {
+      status: "proposed",
+      kind: event.payload.kind,
+      targetId: this.actionTargetId(event),
+    });
   }
 
   waitForAdmission(actionId: string): Promise<GatewayAdmissionResult> {
@@ -359,7 +408,7 @@ export class PrimeGateway {
   }
 
   private async handleCommand(command: ControlCommand): Promise<void> {
-    if (this.terminal) {
+    if (this.terminal && command.type !== "action.resolve") {
       throw new PrimeGatewayError();
     }
     switch (command.type) {
@@ -408,10 +457,43 @@ export class PrimeGateway {
         if (this.sessionStatus === undefined || this.sessionStatus === "terminal") {
           throw new PrimeGatewayError();
         }
-        await this.requireSession().attach(
+        const attachedSession = this.requireSession();
+        const previousSupervisorGeneration = attachedSession.supervisorGeneration;
+        const fallbackCursor = this.options.store.snapshot().primeCursor;
+        const attachResponse = await attachedSession.attach(
           command.command_id,
-          this.options.store.snapshot().primeCursor,
+          fallbackCursor,
         );
+        if (attachedSession.supervisorGeneration !== previousSupervisorGeneration) {
+          const recovery = recoveryFromAttach(
+            attachResponse,
+            attachedSession.activeSessionId,
+            attachedSession.transcriptSessionId,
+            fallbackCursor ?? {
+              generation: attachedSession.supervisorGeneration,
+              sequence: 0,
+            },
+          );
+          await this.append(this.reasonEvent(
+            "session.recovery-required",
+            "prime-supervisor-restart",
+          ));
+          await this.enqueueDurable(() => this.options.store.bindPrimeIdentity({
+            activeSessionId: attachedSession.activeSessionId,
+            transcriptSessionId: attachedSession.transcriptSessionId,
+            supervisorGeneration: attachedSession.supervisorGeneration,
+          }));
+          await this.enqueueDurable(
+            () => this.options.store.recordPrimeCursor(recovery.primeCursor),
+          );
+          this.mapper = this.recoveredMapper(recovery.primeCursor);
+          const restoredStatus = recovery.sessionStatus;
+          await this.append(this.reasonEvent(
+            restoredStatus === "running" ? "session.running" : "session.paused",
+            "prime-supervisor-restored",
+          ));
+          this.mapper.noteExternalSessionStatus(restoredStatus);
+        }
         return;
       case "session.cancel":
         if (
@@ -433,7 +515,7 @@ export class PrimeGateway {
         await this.checkpoint(command.payload.checkpoint_id);
         return;
       case "action.resolve":
-        this.resolveAction(command);
+        await this.resolveAction(command);
         return;
     }
   }
@@ -455,18 +537,27 @@ export class PrimeGateway {
       readonly transcriptSessionId: string;
       readonly supervisorGeneration: string;
     } | undefined;
-    const session = await this.options.createSession(goal, async (identity) => {
-      if (
-        boundIdentity !== undefined ||
-        !OPAQUE_ID.test(identity.activeSessionId) ||
-        !OPAQUE_ID.test(identity.transcriptSessionId) ||
-        !OPAQUE_ID.test(identity.supervisorGeneration)
-      ) {
-        throw new PrimeGatewayError();
-      }
-      await this.enqueueDurable(() => this.options.store.bindPrimeIdentity(identity));
-      boundIdentity = Object.freeze({ ...identity });
+    const createContext = Object.freeze({
+      goalId: command.payload.goal_id,
+      authorityRevision: command.authority_revision,
+      causalParentIds: Object.freeze([command.payload.goal_id]),
     });
+    const session = await this.options.createSession(
+      goal,
+      async (identity) => {
+        if (
+          boundIdentity !== undefined ||
+          !OPAQUE_ID.test(identity.activeSessionId) ||
+          !OPAQUE_ID.test(identity.transcriptSessionId) ||
+          !OPAQUE_ID.test(identity.supervisorGeneration)
+        ) {
+          throw new PrimeGatewayError();
+        }
+        await this.enqueueDurable(() => this.options.store.bindPrimeIdentity(identity));
+        boundIdentity = Object.freeze({ ...identity });
+      },
+      createContext,
+    );
     if (
       boundIdentity === undefined ||
       !OPAQUE_ID.test(session.activeSessionId) ||
@@ -481,6 +572,17 @@ export class PrimeGateway {
     this.session = session;
     this.goalId = command.payload.goal_id;
     this.goalStatus = "active";
+    if (session.lastAttachResponse !== undefined) {
+      const recovery = recoveryFromAttach(
+        session.lastAttachResponse,
+        session.activeSessionId,
+        session.transcriptSessionId,
+        { generation: session.supervisorGeneration, sequence: 0 },
+      );
+      await this.enqueueDurable(
+        () => this.options.store.recordPrimeCursor(recovery.primeCursor),
+      );
+    }
     this.mapper = new PrimeEventMapper({
       sessionId: this.options.sessionId,
       generation: this.options.generation,
@@ -497,6 +599,7 @@ export class PrimeGateway {
       authority_revision: command.authority_revision,
     }));
     await this.append(this.reasonEvent("session.running", "prime-resident-started"));
+    this.options.onSessionReady?.(createContext);
     this.unsubscribe = session.subscribe((outbound) => this.enqueue(outbound));
   }
 
@@ -791,9 +894,73 @@ export class PrimeGateway {
     }
   }
 
-  private resolveAction(
+  private actionTargetId(
+    event: Extract<ControlEvent, { readonly type: "action.proposed" }>,
+  ): string {
+    const target = event.payload.target;
+    if (target.kind === "application") {
+      return [
+        target.provider_id,
+        target.application_id,
+        target.version,
+        target.runtime_id,
+      ].join("@");
+    }
+    const field = {
+      child: "child_id",
+      checkpoint: "checkpoint_id",
+      goal: "goal_id",
+      input: "request_id",
+      session: "session_id",
+    }[target.kind] as keyof typeof target;
+    const value = target[field];
+    if (typeof value !== "string" || !OPAQUE_ID.test(value)) {
+      throw new PrimeGatewayError();
+    }
+    return value;
+  }
+
+  private async restoreActionCommands(): Promise<void> {
+    for (const { command } of this.options.store.commands()) {
+      if (command.type !== "action.resolve") {
+        continue;
+      }
+      const action = this.requireAction(command.payload.action_id);
+      const { resolution, reason_code: reasonCode } = command.payload;
+      if (resolution === "admitted" || resolution === "rejected") {
+        if (action.status !== "proposed") {
+          throw new PrimeGatewayError();
+        }
+        action.status = resolution;
+        action.reasonCode = reasonCode;
+        continue;
+      }
+      if (action.status !== "admitted") {
+        throw new PrimeGatewayError();
+      }
+      if (resolution === "succeeded") {
+        const receiptRef = command.payload.receipt_ref;
+        if (receiptRef === null || this.options.privateResults === undefined) {
+          throw new PrimeGatewayError();
+        }
+        const resultRef = await this.options.privateResults.readBoundResultReference(
+          command.command_id,
+          command.payload.action_id,
+          receiptRef,
+        );
+        if (!isPrivateRef(resultRef)) {
+          throw new PrimeGatewayError();
+        }
+        action.resultRef = resultRef;
+      }
+      action.status = resolution;
+      action.reasonCode = reasonCode;
+    }
+  }
+
+  private async resolveAction(
     command: Extract<ControlCommand, { type: "action.resolve" }>,
-  ): void {
+  ): Promise<void> {
     const { action_id: actionId, resolution, reason_code: reasonCode } =
       command.payload;
     const action = this.requireAction(actionId);
@@ -813,16 +980,76 @@ export class PrimeGateway {
     if (action.status !== "admitted") {
       throw new PrimeGatewayError();
     }
-    action.status = resolution;
-    action.reasonCode = reasonCode;
-    if (command.payload.receipt_ref !== null) {
-      if (!isPrivateRef(command.payload.receipt_ref)) {
+    let resultRef: PrivateValueRef | undefined;
+    if (resolution === "succeeded") {
+      if (command.payload.receipt_ref === null) {
         throw new PrimeGatewayError();
       }
-      action.resultRef = command.payload.receipt_ref;
+      if (this.options.privateResults === undefined) {
+        throw new PrimeGatewayError();
+      }
+      resultRef = await this.options.privateResults.readBoundResultReference(
+        command.command_id,
+        actionId,
+        command.payload.receipt_ref,
+      );
+      if (!isPrivateRef(resultRef)) {
+        throw new PrimeGatewayError();
+      }
+      await this.applyGoalTerminal(action);
+    }
+    action.status = resolution;
+    action.reasonCode = reasonCode;
+    if (resultRef === undefined) {
+      delete action.resultRef;
+    } else {
+      action.resultRef = resultRef;
     }
     action.resolveTerminal?.(this.terminalResult(action));
     delete action.resolveTerminal;
+  }
+
+  private async restoreGoalTerminals(): Promise<void> {
+    for (const action of this.actions.values()) {
+      if (action.status === "succeeded") {
+        await this.applyGoalTerminal(action);
+      }
+    }
+  }
+
+  private async applyGoalTerminal(action: ActionRecord): Promise<void> {
+    if (action.kind !== "goal.complete" && action.kind !== "goal.fail") {
+      return;
+    }
+    const goalId = this.requireGoalId();
+    if (action.targetId !== goalId) {
+      throw new PrimeGatewayError();
+    }
+    const completed = action.kind === "goal.complete";
+    const goalStatus: GoalStatus = completed ? "completed" : "failed";
+    const sessionType = completed ? "session.completed" : "session.failed";
+    const reasonCode = completed
+      ? "host-admitted-goal-complete"
+      : "host-admitted-goal-fail";
+    if (this.goalStatus === "active") {
+      await this.append(this.event("goal.updated", {
+        goal_id: goalId,
+        status: goalStatus,
+      }));
+    } else if (this.goalStatus !== goalStatus) {
+      throw new PrimeGatewayError();
+    }
+    if (this.sessionStatus !== "terminal") {
+      await this.append(this.reasonEvent(sessionType, reasonCode));
+    } else {
+      const lastEvent = this.options.store.eventsAfter(0).at(-1)?.event;
+      if (lastEvent?.type !== sessionType) {
+        throw new PrimeGatewayError();
+      }
+    }
+    this.mapper?.noteExternalGoalStatus(goalStatus);
+    this.mapper?.noteExternalTerminal();
+    this.terminal = true;
   }
 
   private terminalResult(action: ActionRecord): GatewayTerminalResult {
@@ -911,6 +1138,8 @@ export class PrimeGateway {
       | "session.running"
       | "session.paused"
       | "session.recovery-required"
+      | "session.completed"
+      | "session.failed"
       | "session.cancelled",
     reasonCode: string,
   ): ControlEvent {

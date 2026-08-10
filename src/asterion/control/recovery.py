@@ -16,6 +16,7 @@ from asterion.control.authority import (
     BudgetUsage,
     ProviderUsageReport,
 )
+from asterion.control.execution import ActionExecutionReceipt
 from asterion.control.host import ControlCommand, ControlEvent, EventCursor
 from asterion.control.journal import (
     JournalConflictError,
@@ -42,6 +43,7 @@ class RecoveredControlState:
     proposals: Mapping[str, ControlEvent]
     admission_commands: Mapping[str, ControlCommand]
     terminal_commands: Mapping[str, ControlCommand]
+    result_receipts: Mapping[str, ActionExecutionReceipt]
     running_action_ids: tuple[str, ...]
 
     def __post_init__(self) -> None:
@@ -55,6 +57,11 @@ class RecoveredControlState:
             self,
             "terminal_commands",
             MappingProxyType(dict(self.terminal_commands)),
+        )
+        object.__setattr__(
+            self,
+            "result_receipts",
+            MappingProxyType(dict(self.result_receipts)),
         )
 
     @property
@@ -108,6 +115,7 @@ def recover_control_host_state(
         proposals: dict[str, ControlEvent] = {}
         accepted_events: dict[str, ControlEvent] = {}
         receipts: dict[str, ActionReceipt] = {}
+        result_receipts: dict[str, ActionExecutionReceipt] = {}
         authority_operations: list[AdmissionDecision | ActionReceipt | ProviderUsageReport] = []
         decisions: dict[str, AdmissionDecision] = {}
         terminal_commands: dict[str, ControlCommand] = {}
@@ -227,10 +235,18 @@ def recover_control_host_state(
                     receipt_ref=str(record.payload["receipt_ref"]),
                     usage=usage,
                 )
+                result_receipt = ActionExecutionReceipt(
+                    action_id=action_id,
+                    receipt_ref=receipt.receipt_ref,
+                    usage=usage,
+                    artifact_ids=_string_tuple(record.payload.get("artifact_ids", ())),
+                    media_types=_string_tuple(record.payload.get("media_types", ())),
+                )
                 existing = receipts.get(action_id)
                 if existing is not None:
                     raise JournalConflictError("control journal recovery failed")
                 receipts[action_id] = receipt
+                result_receipts[action_id] = result_receipt
                 authority_operations.append(receipt)
                 action = state.actions.get(action_id)
                 if action is None:
@@ -293,6 +309,7 @@ def recover_control_host_state(
             proposals=proposals,
             admission_commands=admission_commands,
             terminal_commands=terminal_commands,
+            result_receipts=result_receipts,
             running_action_ids=tuple(sorted(running_action_ids)),
         )
     except JournalConflictError:
@@ -458,6 +475,14 @@ def _usage(value: object) -> BudgetUsage:
         aggregate_tokens=_integer(usage["aggregate_tokens"]),
         cost_micros=_integer(usage["cost_micros"]),
     )
+
+
+def _string_tuple(value: object) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)) or any(
+        not isinstance(item, str) for item in value
+    ):
+        raise JournalConflictError("control journal recovery failed")
+    return tuple(value)
 
 
 def _integer(value: object) -> int:

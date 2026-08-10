@@ -240,6 +240,37 @@ test("skill bridge deduplicates equal effects and rejects divergent reuse", asyn
   }
 });
 
+test("skill bridge close aborts an active admission wait before returning", async () => {
+  const fixtureRoot = await temporaryRoot();
+  let admissionStarted;
+  const admissionReady = new Promise((resolve) => {
+    admissionStarted = resolve;
+  });
+  let state;
+  state = await createBridge(fixtureRoot, {
+    async waitForAdmission() {
+      state.calls.push("admission-waiting");
+      admissionStarted();
+      return new Promise(() => undefined);
+    },
+  });
+  try {
+    const pending = exchange(state.bridge.socketPath, applicationRequest())
+      .catch((error) => ({ error: String(error) }));
+    await admissionReady;
+    await state.bridge.close();
+    const response = await pending;
+
+    assert.equal(state.calls.includes("admission-waiting"), true);
+    if (response !== undefined && !("error" in response)) {
+      assert.equal(response.status, "error");
+    }
+  } finally {
+    await state.bridge.close();
+    await fixtureRoot.cleanup();
+  }
+});
+
 test("skill bridge rejects wrong token and cross-session authentication", async () => {
   const fixtureRoot = await temporaryRoot();
   const state = await createBridge(fixtureRoot);
@@ -364,6 +395,30 @@ test("skill bridge serves safe queries and enforces request and response caps", 
       payload: {},
     });
     assert.deepEqual(budget.result, BUDGET);
+
+    state.bridge.updateRemainingBudget({
+      controller_tokens: 1,
+      application_tokens: 2,
+      child_tokens: 3,
+      aggregate_tokens: 4,
+      cost_micros: 5,
+      deadline_ms: 0,
+    });
+    const updatedBudget = await exchange(state.bridge.socketPath, {
+      protocol: "asterion.skill-control/v1",
+      request_id: "request-budget-updated",
+      session_id: "session-1",
+      operation: "budget.get",
+      payload: {},
+    });
+    assert.deepEqual(updatedBudget.result, {
+      controller_tokens: 1,
+      application_tokens: 2,
+      child_tokens: 3,
+      aggregate_tokens: 4,
+      cost_micros: 5,
+      deadline_ms: 0,
+    });
 
     const oversizedStatus = await exchange(state.bridge.socketPath, {
       protocol: "asterion.skill-control/v1",

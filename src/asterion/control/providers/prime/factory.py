@@ -224,11 +224,16 @@ def _positive_integer_option(options: Mapping[str, str], key: str) -> int:
 
 def _private_descriptor(context: ControlPlaneFactoryContext) -> Mapping[str, object]:
     options = context.options
+    authority = context.authority
+    if authority is None or authority.authority_id != options["authority_id"]:
+        raise ControlPlaneFactoryError("Prime authority snapshot is unavailable")
     resource_root = Path(__file__).resolve().parent / "resources"
+    budget = authority.budget_limit
     return {
         "agentDir": str(_path_option(options, "agent_dir").resolve()),
         "artifactLockPath": str(_path_option(options, "artifact_lock_path").resolve()),
         "authorityId": options["authority_id"],
+        "authorityRevision": authority.revision,
         "expectedRuntimeBuildId": options["expected_runtime_build_id"],
         "gatewayRoot": str(_path_option(options, "gateway_root").resolve()),
         "generation": _positive_integer_option(options, "generation"),
@@ -238,9 +243,27 @@ def _private_descriptor(context: ControlPlaneFactoryContext) -> Mapping[str, obj
         ),
         "maxTurns": _positive_integer_option(options, "max_turns"),
         "model": options["model"],
+        "portfolio": [
+            {
+                "kind": "application",
+                "provider_id": grant.provider_id,
+                "application_id": grant.application_id,
+                "version": grant.version,
+                "runtime_id": grant.runtime_id,
+            }
+            for grant in authority.allowed_portfolio
+        ],
         "primeSocketPath": str(_path_option(options, "prime_socket_path").resolve()),
         "primeSourceRoot": str(_path_option(options, "prime_source_root").resolve()),
         "provider": options["provider"],
+        "remainingBudget": {
+            "controller_tokens": budget.controller_tokens,
+            "application_tokens": budget.application_tokens,
+            "child_tokens": budget.child_tokens,
+            "aggregate_tokens": budget.aggregate_tokens,
+            "cost_micros": budget.cost_micros,
+            "deadline_ms": authority.max_action_deadline_ms,
+        },
         "sessionDir": str(_path_option(options, "session_dir").resolve()),
         "sessionId": options["session_id"],
         "skillPath": str((resource_root / "skills" / "asterion-control").resolve()),

@@ -6,27 +6,30 @@
     "process_counts": {"fake_daemon": 1, "gateway": 1},
     "model_provider_operations": 0,
     "application_operations": 1,
-    "required_pathlight_nodes": ["action-running", "action-receipt"],
+    "required_pathlight_nodes": ["admission", "action", "goal", "session", "system"],
+    "required_pathlight_control_events": ["action.admitted", "action.proposed", "action.succeeded", "goal.updated", "session.completed", "session.created", "session.running"],
     "required_pathlight_gaps": []
   },
   {
     "scenario_id": "prime-loop-child",
     "boundary": "child-session",
     "outcome": "proven-effect-succeeded",
-    "process_counts": {"fake_daemon": 1, "gateway": 1},
+    "process_counts": {"fake_daemon": 1, "gateway": 2},
     "model_provider_operations": 0,
     "application_operations": 0,
-    "required_pathlight_nodes": ["child-session", "action-receipt"],
+    "required_pathlight_nodes": ["admission", "action", "session", "system"],
+    "required_pathlight_control_events": ["action.admitted", "action.proposed", "action.succeeded", "session.created", "session.running"],
     "required_pathlight_gaps": []
   },
   {
     "scenario_id": "prime-loop-detach-attach",
     "boundary": "detach-attach",
     "outcome": "proven-effect-succeeded",
-    "process_counts": {"fake_daemon": 1, "gateway": 1},
+    "process_counts": {"fake_daemon": 1, "gateway": 2},
     "model_provider_operations": 0,
     "application_operations": 0,
-    "required_pathlight_nodes": ["provider-recovery", "action-receipt"],
+    "required_pathlight_nodes": ["session", "system"],
+    "required_pathlight_control_events": ["session.created", "session.recovery-required", "session.running"],
     "required_pathlight_gaps": []
   },
   {
@@ -36,7 +39,8 @@
     "process_counts": {"fake_daemon": 1, "gateway": 1},
     "model_provider_operations": 0,
     "application_operations": 0,
-    "required_pathlight_nodes": ["provider-recovery", "action-receipt"],
+    "required_pathlight_nodes": ["admission", "action", "checkpoint", "session", "system"],
+    "required_pathlight_control_events": ["action.admitted", "action.proposed", "action.succeeded", "checkpoint.created", "session.created", "session.recovery-required", "session.running"],
     "required_pathlight_gaps": []
   },
   {
@@ -46,7 +50,8 @@
     "process_counts": {"fake_daemon": 1, "gateway": 2},
     "model_provider_operations": 0,
     "application_operations": 0,
-    "required_pathlight_nodes": ["provider-recovery"],
+    "required_pathlight_nodes": ["admission", "action", "session", "system"],
+    "required_pathlight_control_events": ["action.admitted", "action.proposed", "action.uncertain", "session.created", "session.recovery-required", "session.running"],
     "required_pathlight_gaps": []
   },
   {
@@ -56,17 +61,19 @@
     "process_counts": {"fake_daemon": 2, "gateway": 1},
     "model_provider_operations": 0,
     "application_operations": 0,
-    "required_pathlight_nodes": ["provider-recovery"],
+    "required_pathlight_nodes": ["admission", "action", "session", "system"],
+    "required_pathlight_control_events": ["action.admitted", "action.proposed", "action.uncertain", "session.created", "session.running"],
     "required_pathlight_gaps": []
   },
   {
     "scenario_id": "prime-loop-worker-crash",
     "boundary": "worker-crash-after-application-start",
     "outcome": "unknown-progress-uncertain",
-    "process_counts": {"fake_daemon": 2, "gateway": 1},
+    "process_counts": {"fake_daemon": 1, "gateway": 1, "worker": 1},
     "model_provider_operations": 0,
     "application_operations": 1,
-    "required_pathlight_nodes": ["action-running", "provider-recovery"],
+    "required_pathlight_nodes": ["admission", "action", "session", "system"],
+    "required_pathlight_control_events": ["action.admitted", "action.proposed", "action.uncertain", "session.created", "session.running"],
     "required_pathlight_gaps": []
   },
   {
@@ -76,7 +83,8 @@
     "process_counts": {"fake_daemon": 1, "gateway": 1},
     "model_provider_operations": 0,
     "application_operations": 0,
-    "required_pathlight_nodes": ["action-running", "action-receipt"],
+    "required_pathlight_nodes": ["admission", "action", "session", "system"],
+    "required_pathlight_control_events": ["action.admitted", "action.cancelled", "action.proposed", "session.created", "session.running"],
     "required_pathlight_gaps": []
   },
   {
@@ -86,17 +94,19 @@
     "process_counts": {"fake_daemon": 1, "gateway": 1},
     "model_provider_operations": 0,
     "application_operations": 0,
-    "required_pathlight_nodes": ["action-receipt"],
+    "required_pathlight_nodes": ["admission", "action", "session", "system"],
+    "required_pathlight_control_events": ["action.proposed", "action.rejected", "session.created", "session.running"],
     "required_pathlight_gaps": []
   },
   {
     "scenario_id": "prime-loop-redaction",
     "boundary": "redaction-sentinel-scan",
     "outcome": "proven-effect-succeeded",
-    "process_counts": {"fake_daemon": 1, "gateway": 1},
+    "process_counts": {"fake_daemon": 1, "gateway": 2},
     "model_provider_operations": 0,
     "application_operations": 0,
-    "required_pathlight_nodes": ["action-running", "action-receipt", "provider-recovery", "child-session"],
+    "required_pathlight_nodes": ["admission", "action", "session", "system"],
+    "required_pathlight_control_events": ["action.admitted", "action.proposed", "action.succeeded", "session.created", "session.running"],
     "required_pathlight_gaps": []
   }
 ]

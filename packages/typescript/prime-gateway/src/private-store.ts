@@ -164,7 +164,10 @@ function validateBindingKey(value: unknown): string {
   return value;
 }
 
-function bindingDigest(kind: "command" | "public", values: readonly string[]): string {
+function bindingDigest(
+  kind: "command" | "public" | "result-command",
+  values: readonly string[],
+): string {
   return sha256(canonicalJsonBytes({ kind, values: [...values] }));
 }
 
@@ -174,6 +177,14 @@ function commandBindingName(commandId: string, sourceRef: string): string {
 
 function publicBindingName(sourceRef: string): string {
   return `public-${bindingDigest("public", [sourceRef])}.json`;
+}
+
+function resultBindingName(
+  commandId: string,
+  actionId: string,
+  sourceRef: string,
+): string {
+  return `result-${bindingDigest("result-command", [commandId, actionId, sourceRef])}.json`;
 }
 
 function parseBinding(bytes: Buffer): PrivateInputBinding {
@@ -351,6 +362,70 @@ export class PrivateValueStore {
       throw new PrivateValueInvalidError();
     }
     return this.readInput(binding.privateRef);
+  }
+
+  async bindResultReference(
+    commandId: string,
+    actionId: string,
+    sourceRef: string,
+    value: PrivateResultProjection,
+  ): Promise<PrivateValueRef> {
+    const commandKey = validateBindingKey(commandId);
+    const actionKey = validateBindingKey(actionId);
+    const publicKey = validateBindingKey(sourceRef);
+    const projection = validateProjection(value);
+    if (projection.receiptRef !== publicKey) {
+      throw new PrivateValueInvalidError();
+    }
+    const valueDigest = sha256(canonicalJsonBytes(projection));
+    const targetName = resultBindingName(commandKey, actionKey, publicKey);
+    const existing = await this.readBinding(targetName);
+    if (existing !== undefined) {
+      this.assertBinding(existing, {
+        commandId: commandKey,
+        sourceRef: publicKey,
+        valueDigest,
+      });
+      await this.syncBindingsRootForAcknowledgement();
+      return existing.privateRef;
+    }
+    const privateRef = await this.putResult(projection);
+    await this.writeBinding(targetName, {
+      format: PRIVATE_INPUT_BINDING_FORMAT,
+      commandId: commandKey,
+      sourceRef: publicKey,
+      valueDigest,
+      privateRef,
+    });
+    return privateRef;
+  }
+
+  async readBoundResultReference(
+    commandId: string,
+    actionId: string,
+    sourceRef: string,
+  ): Promise<PrivateValueRef> {
+    const commandKey = validateBindingKey(commandId);
+    const actionKey = validateBindingKey(actionId);
+    const publicKey = validateBindingKey(sourceRef);
+    const binding = await this.readBinding(
+      resultBindingName(commandKey, actionKey, publicKey),
+    );
+    if (binding === undefined) {
+      throw new PrivateValueInvalidError();
+    }
+    const projection = await this.readResult(binding.privateRef);
+    if (projection.receiptRef !== publicKey) {
+      throw new PrivateValueInvalidError();
+    }
+    const valueDigest = sha256(canonicalJsonBytes(projection));
+    this.assertBinding(binding, {
+      commandId: commandKey,
+      sourceRef: publicKey,
+      valueDigest,
+    });
+    await this.syncBindingsRootForAcknowledgement();
+    return binding.privateRef;
   }
 
   async putResult(value: PrivateResultProjection): Promise<PrivateValueRef> {

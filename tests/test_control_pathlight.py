@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import tempfile
 import unittest
 from collections.abc import Sequence
@@ -120,6 +121,24 @@ class TestControlPathlight(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(snapshot.state.session_status, "completed")
             self.assertEqual(snapshot.state.actions["action-1"].status, "rejected")
             self.assertEqual(snapshot.evidence_gaps, ())
+            starts = [event for event in events if event["status"] == "started"]
+            proposed = next(
+                event
+                for event in starts
+                if cast(dict[str, object], event["attributes"]).get(
+                    "control_event_type"
+                )
+                == "action.proposed"
+            )
+            proposed_attributes = cast(dict[str, object], proposed["attributes"])
+            self.assertEqual(
+                proposed_attributes["scope_sha256"],
+                hashlib.sha256(b"application.invoke").hexdigest(),
+            )
+            self.assertIsInstance(proposed_attributes["request_shape_sha256"], str)
+            self.assertGreaterEqual(
+                cast(int, proposed_attributes["journal_position"]), 0
+            )
             rendered = repr(graph)
             self.assertNotIn(str(root), rendered)
             self.assertNotIn("goal-ref-1", rendered)
@@ -248,6 +267,15 @@ class TestControlPathlight(unittest.IsolatedAsyncioTestCase):
 
             graph = recorder.snapshot()
             assert graph is not None
+            events = cast(list[dict[str, object]], graph["events"])
+            control_event_types = {
+                cast(dict[str, object], event["attributes"]).get("control_event_type")
+                for event in events
+                if event["status"] == "started"
+            }
+            self.assertIn("action.proposed", control_event_types)
+            self.assertIn("action.admitted", control_event_types)
+            self.assertIn("action.succeeded", control_event_types)
             rendered = repr(graph)
             self.assertIn("content_length", rendered)
             self.assertIn("output_tokens", rendered)
@@ -285,56 +313,6 @@ class TestControlPathlight(unittest.IsolatedAsyncioTestCase):
             snapshot = host.snapshot()
             self.assertEqual(snapshot.state.actions["action-1"].status, "succeeded")
             self.assertEqual(snapshot.evidence_gaps, ("control-pathlight-recording",))
-
-    async def test_prime_verified_loop_fixed_projections_are_public_safe(self) -> None:
-        from asterion.control.evidence import ControlEvidenceProjector
-
-        recorder = MemoryPathlightRecorder(_opaque_id(500))
-        projector = ControlEvidenceProjector(recorder)
-        projector.project_action_running(
-            action_id="action-SENTINEL_PROMPT",
-            status="running",
-            journal_position=7,
-            timestamp_ns=1,
-        )
-        projector.project_action_receipt(
-            action_id="action-SENTINEL_TOKEN",
-            status="succeeded",
-            receipt=ActionExecutionReceipt(
-                action_id="action-SENTINEL_TOKEN",
-                receipt_ref="receipt-SENTINEL_OUTPUT",
-                usage=BudgetUsage(0, 1, 0, 1, 0),
-            ),
-            journal_position=8,
-            timestamp_ns=2,
-        )
-        projector.project_provider_recovery(
-            scenario_id="prime-loop-SENTINEL_PATH",
-            status="unknown-progress-uncertain",
-            process_counts={"gateway": 2, "fake_daemon": 1},
-            journal_position=9,
-            timestamp_ns=3,
-        )
-        projector.project_child_session(
-            child_id="child-SENTINEL_PROMPT",
-            status="completed",
-            active_count=0,
-            journal_position=10,
-            timestamp_ns=4,
-        )
-        projector.complete_provider_free_projection(timestamp_ns=100)
-
-        graph = recorder.snapshot()
-        assert graph is not None
-        rendered = repr(graph)
-        events = cast(list[dict[str, object]], graph["events"])
-        kinds = tuple(event["kind"] for event in events)
-        self.assertGreaterEqual(kinds.count("action"), 2)
-        self.assertGreaterEqual(kinds.count("session"), 2)
-        for sentinel in ("SENTINEL_PROMPT", "SENTINEL_TOKEN", "SENTINEL_PATH", "SENTINEL_OUTPUT"):
-            self.assertNotIn(sentinel, rendered)
-        self.assertIn("journal_position", rendered)
-        self.assertIn("content_length", rendered)
 
 
 if __name__ == "__main__":

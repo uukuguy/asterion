@@ -22,6 +22,7 @@ from asterion.control.providers.prime.process import (
     PrimeSidecarSpawnPlan,
     build_prime_sidecar_spawn_plan,
 )
+from asterion.control.providers.prime.system_actions import PrimeSystemActionService
 
 __all__ = (
     "PRIME_CONTROL_PLANE_ID",
@@ -33,6 +34,7 @@ __all__ = (
     "PrimeSidecarProcess",
     "PrimeSidecarProcessError",
     "PrimeSidecarSpawnPlan",
+    "PrimeSystemActionService",
     "PrivateContentResolver",
     "build_prime_control_plane_client",
     "derive_prime_child_control_options",

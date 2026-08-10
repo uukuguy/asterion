@@ -12,6 +12,7 @@ from asterion.control.authority import (
     AuthorityError,
     AuthorityLedger,
     BudgetLimit,
+    RemainingBudget,
     BudgetUsage,
     PortfolioGrant,
     ProviderUsageReport,
@@ -74,6 +75,27 @@ def _envelope(**changes: object) -> AuthorityEnvelope:
 
 
 class TestControlAuthority(unittest.TestCase):
+    def test_remaining_budget_subtracts_effective_usage_and_reservations(self) -> None:
+        ledger = AuthorityLedger(_envelope())
+        ledger.record_provider_usage(
+            ProviderUsageReport(BudgetUsage(30, 20, 0, 50, 7))
+        )
+        decision = ledger.evaluate(_proposal(), now_ms=1_000)
+        ledger.reserve(decision)
+
+        self.assertEqual(
+            ledger.remaining_budget(now_ms=90_000),
+            RemainingBudget(970, 880, 1000, 2850, 94_993, 10_000),
+        )
+        self.assertEqual(
+            AuthorityLedger(_envelope(cancelled=True)).remaining_budget(now_ms=1_000),
+            RemainingBudget(0, 0, 0, 0, 0, 0),
+        )
+        self.assertEqual(
+            AuthorityLedger(_envelope()).remaining_budget(now_ms=100_000),
+            RemainingBudget(0, 0, 0, 0, 0, 0),
+        )
+
     def test_cumulative_provider_usage_is_maxed_not_double_counted(self) -> None:
         ledger = AuthorityLedger(_envelope())
         ledger.record_provider_usage(

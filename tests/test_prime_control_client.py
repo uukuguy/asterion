@@ -6,9 +6,12 @@ from collections.abc import AsyncIterator, Mapping
 
 from asterion.control.host import ControlCommand, EventCursor
 from asterion.control.providers.prime.client import (
+    MAX_PRIVATE_TEXT_BYTES,
     PrimeControlError,
     PrimeControlPlaneClient,
 )
+from asterion.control.execution import ActionExecutionReceipt
+from asterion.control.authority import BudgetUsage, RemainingBudget
 
 
 class FakeResolver:
@@ -30,6 +33,7 @@ class FakeProcess:
         self.close_failures = 0
         self.response: Mapping[str, object] | None = None
         self.event_values: list[Mapping[str, object]] = []
+        self.private_values: dict[str, str] = {}
 
     def fail_with(self, message: str) -> None:
         self.failure = RuntimeError(message)
@@ -42,6 +46,19 @@ class FakeProcess:
             if self.response.get("id") == "<request>":
                 return {**self.response, "id": envelope["id"]}
             return self.response
+        if envelope.get("type") == "private.read":
+            return {
+                "protocol": "asterion.prime-gateway-ipc/v1",
+                "id": envelope["id"],
+                "type": "private.value",
+                "text": self.private_values[str(envelope["reference"])],
+            }
+        if envelope.get("type") == "authority.update":
+            return {
+                "protocol": "asterion.prime-gateway-ipc/v1",
+                "id": envelope["id"],
+                "type": "authority.accepted",
+            }
         return {
             "protocol": "asterion.prime-gateway-ipc/v1",
             "id": envelope["id"],
@@ -92,6 +109,36 @@ def input_command() -> ControlCommand:
     )
 
 
+def terminal_command() -> ControlCommand:
+    return ControlCommand(
+        command_id="terminal:action-1",
+        session_id="session-1",
+        authority_revision=1,
+        type="action.resolve",
+        payload={
+            "action_id": "action-1",
+            "resolution": "succeeded",
+            "reason_code": "executed",
+            "receipt_ref": "receipt-1",
+        },
+    )
+
+
+def failed_terminal_command() -> ControlCommand:
+    return ControlCommand(
+        command_id="terminal:action-1",
+        session_id="session-1",
+        authority_revision=1,
+        type="action.resolve",
+        payload={
+            "action_id": "action-1",
+            "resolution": "failed",
+            "reason_code": "executor-failed",
+            "receipt_ref": "failure-receipt-1",
+        },
+    )
+
+
 def event(sequence: int) -> Mapping[str, object]:
     return {
         "protocol": "asterion.agent-control/v1",
@@ -106,6 +153,31 @@ def event(sequence: int) -> Mapping[str, object]:
 
 
 class TestPrimeControlClient(unittest.IsolatedAsyncioTestCase):
+    async def test_remaining_budget_update_is_private_and_exact(self) -> None:
+        fake_process = FakeProcess()
+        client = PrimeControlPlaneClient(
+            process=fake_process,
+            private_content=FakeResolver(),
+        )
+
+        await client.sync_authority_snapshot(
+            RemainingBudget(1, 2, 3, 4, 5, 0)
+        )
+
+        envelope = fake_process.requests[0]
+        self.assertEqual(envelope["type"], "authority.update")
+        self.assertEqual(
+            envelope["budget"],
+            {
+                "controller_tokens": 1,
+                "application_tokens": 2,
+                "child_tokens": 3,
+                "aggregate_tokens": 4,
+                "cost_micros": 5,
+                "deadline_ms": 0,
+            },
+        )
+
     async def test_command_is_accepted_only_after_sidecar_ack(self) -> None:
         fake_process = FakeProcess()
         resolver = FakeResolver()
@@ -168,6 +240,71 @@ class TestPrimeControlClient(unittest.IsolatedAsyncioTestCase):
         await client.send(input_command())
 
         self.assertEqual(fake_process.requests[0]["private"], {"content": "private input"})
+
+    async def test_prepared_provider_input_is_cached_for_sync_resolver(self) -> None:
+        fake_process = FakeProcess()
+        fake_process.private_values["private:input-1"] = "SENTINEL_PROVIDER_INPUT"
+        resolver = FakeResolver()
+        client = PrimeControlPlaneClient(
+            process=fake_process,
+            private_content=resolver,
+        )
+
+        await client.prepare_private_input("private:input-1")
+
+        self.assertEqual(
+            client.resolve_text("private:input-1", max_bytes=MAX_PRIVATE_TEXT_BYTES),
+            "SENTINEL_PROVIDER_INPUT",
+        )
+        self.assertEqual(resolver.requests, [])
+        self.assertEqual(fake_process.requests[0]["type"], "private.read")
+        client.release_private_input("private:input-1")
+        with self.assertRaises(KeyError):
+            client.resolve_text("private:input-1", max_bytes=MAX_PRIVATE_TEXT_BYTES)
+
+    async def test_successful_action_resolution_carries_public_safe_private_projection(
+        self,
+    ) -> None:
+        fake_process = FakeProcess()
+        client = PrimeControlPlaneClient(
+            process=fake_process,
+            private_content=FakeResolver(),
+        )
+        client.bind_action_result(
+            ActionExecutionReceipt(
+                action_id="action-1",
+                receipt_ref="receipt-1",
+                usage=BudgetUsage(0, 1, 0, 1, 0),
+                artifact_ids=("artifact-1",),
+                media_types=("text/plain",),
+            )
+        )
+
+        await client.send(terminal_command())
+
+        self.assertEqual(
+            fake_process.requests[0]["private"],
+            {
+                "result": {
+                    "receipt_ref": "receipt-1",
+                    "artifact_ids": ["artifact-1"],
+                    "media_types": ["text/plain"],
+                }
+            },
+        )
+
+    async def test_failed_action_resolution_with_receipt_carries_no_private_result(
+        self,
+    ) -> None:
+        fake_process = FakeProcess()
+        client = PrimeControlPlaneClient(
+            process=fake_process,
+            private_content=FakeResolver(),
+        )
+
+        await client.send(failed_terminal_command())
+
+        self.assertEqual(fake_process.requests[0]["private"], {})
 
     async def test_events_use_exact_cursor_and_validate_public_events(self) -> None:
         fake_process = FakeProcess()

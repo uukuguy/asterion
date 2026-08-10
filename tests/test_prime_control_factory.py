@@ -9,6 +9,7 @@ import unittest
 from collections.abc import Mapping
 from pathlib import Path
 
+from asterion.control.authority import AuthorityEnvelope
 from asterion.control.factory import ControlPlaneFactoryContext, ControlPlaneFactoryError
 from asterion.control.host import ControlPlaneManifest
 from asterion.control.providers.prime.client import PrimeControlPlaneClient
@@ -39,7 +40,12 @@ class FakeProcess:
         self.options = options
 
 
-def make_context(root: Path, **options: str) -> ControlPlaneFactoryContext:
+def make_context(
+    root: Path,
+    *,
+    authority: AuthorityEnvelope | None = None,
+    **options: str,
+) -> ControlPlaneFactoryContext:
     values = {
         "execution_domain": "trusted-local",
         "node_executable": str(root / "node"),
@@ -73,6 +79,7 @@ def make_context(root: Path, **options: str) -> ControlPlaneFactoryContext:
         ),
         private_root=root,
         options=values,
+        authority=authority if authority is not None else _child_envelope(),
         host_services={"private-content": FakeResolver()},
     )
 
@@ -144,7 +151,7 @@ class TestPrimeControlFactory(unittest.TestCase):
                     ControlPlaneFactoryError,
                 ):
                     build_prime_control_plane_client(
-                        make_context(root, **overrides),
+                        make_context(root, authority=None, **overrides),
                         process_factory=FakeProcess,
                     )
 
@@ -156,6 +163,7 @@ class TestPrimeControlFactory(unittest.TestCase):
                 control_plane_version=context.control_plane_version,
                 private_root=context.private_root,
                 options=context.options,
+                authority=context.authority,
                 host_services={},
             )
             with self.assertRaises(ControlPlaneFactoryError):
@@ -259,6 +267,8 @@ class TestPrimeSidecarProcess(unittest.IsolatedAsyncioTestCase):
                 private_descriptor=dict(options), environ={"PATH": os.environ.get("PATH", "")},
             ))
             try:
+                self.assertIsInstance(process.pid, int)
+                self.assertGreater(process.pid or 0, 0)
                 await asyncio.wait_for(connected.wait(), timeout=1)
             finally:
                 await process.close()
@@ -524,6 +534,45 @@ class TestPrimeSidecarProcess(unittest.IsolatedAsyncioTestCase):
                 await process.close()
 
             self.assertEqual(response["type"], "command.accepted")
+
+    async def test_sidecar_private_value_response_is_validated(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = root / "private_value.py"
+            script.write_text(
+                "import json, sys\n"
+                "request = json.loads(sys.stdin.readline())\n"
+                "sys.stdout.write(json.dumps({\n"
+                "    'protocol': 'asterion.prime-gateway-ipc/v1',\n"
+                "    'id': request['id'],\n"
+                "    'type': 'private.value',\n"
+                "    'text': 'SENTINEL_PRIVATE_TEXT',\n"
+                "}) + '\\n')\n"
+                "sys.stdout.flush()\n",
+            )
+            process = await PrimeSidecarProcess.start(
+                PrimeSidecarLaunchOptions(
+                    node_executable=Path(sys.executable),
+                    sidecar_entry=script,
+                    private_descriptor={},
+                    environ={"PATH": os.environ.get("PATH", "")},
+                    request_timeout=0.2,
+                )
+            )
+            try:
+                response = await process.request(
+                    {
+                        "protocol": "asterion.prime-gateway-ipc/v1",
+                        "id": "request-private",
+                        "type": "private.read",
+                        "reference": "private:input-1",
+                    }
+                )
+            finally:
+                await process.close()
+
+            self.assertEqual(response["type"], "private.value")
+            self.assertEqual(response["text"], "SENTINEL_PRIVATE_TEXT")
 
 
 def create_context_command() -> dict[str, object]:

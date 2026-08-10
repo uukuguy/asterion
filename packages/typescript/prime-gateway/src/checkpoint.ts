@@ -309,7 +309,7 @@ function requireSuccessful(
   return response;
 }
 
-function recoveryFromAttach(
+export function recoveryFromAttach(
   response: PrimeDaemonResponse,
   activeSessionId: string,
   transcriptSessionId: string,
