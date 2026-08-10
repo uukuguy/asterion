@@ -11,6 +11,7 @@ from pathlib import Path
 
 from asterion.control.authority import AuthorityEnvelope
 from asterion.control.factory import ControlPlaneFactoryContext, ControlPlaneFactoryError
+from asterion.control.factory import bind_selected_session_context_client
 from asterion.control.host import ControlPlaneManifest
 from asterion.control.providers.prime.client import PrimeControlPlaneClient
 from asterion.control.providers.prime.factory import (
@@ -105,10 +106,12 @@ class TestPrimeControlFactory(unittest.TestCase):
             manifest.compatibility_ids,
             (
                 "asterion.agent-control/v1",
+                "asterion.session-context/v1",
                 "prime-agent.daemon/v7",
                 "prime-agent.schema/v14",
             ),
         )
+        self.assertIn("session.context-v1", manifest.capabilities)
 
     def test_packaged_manifest_matches_exact_factory_binding(self) -> None:
         manifest_path = (
@@ -189,6 +192,8 @@ class TestPrimeControlFactory(unittest.TestCase):
             )
 
             self.assertIsInstance(client, PrimeControlPlaneClient)
+            self.assertIs(bind_selected_session_context_client(client), client)
+            self.assertEqual(len(seen), 1)
             self.assertEqual(seen[0].argv, (str((root / "node").resolve()), str((root / "main.js").resolve())))
             self.assertNotIn("SENTINEL_SECRET", repr(seen[0]))
 

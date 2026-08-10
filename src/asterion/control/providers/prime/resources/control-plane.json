@@ -31,12 +31,14 @@
     "action-proposals",
     "checkpointing",
     "event-replay",
-    "session-lifecycle"
+    "session-lifecycle",
+    "session.context-v1"
   ],
   "continuation_media_type": "application/vnd.asterion.control-capsule",
   "checkpoint_version": "1.0.0",
   "compatibility_ids": [
     "asterion.agent-control/v1",
+    "asterion.session-context/v1",
     "prime-agent.daemon/v7",
     "prime-agent.schema/v14"
   ]

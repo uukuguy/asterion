@@ -34,6 +34,7 @@ PRIME_CHECKPOINT_VERSION = "1.0.0"
 PRIME_NATIVE_RLM_MAX_DEPTH = 0
 PRIME_COMPATIBILITY_IDS = (
     "asterion.agent-control/v1",
+    "asterion.session-context/v1",
     "prime-agent.daemon/v7",
     "prime-agent.schema/v14",
 )
@@ -68,6 +69,7 @@ _CAPABILITIES = (
     "checkpointing",
     "event-replay",
     "session-lifecycle",
+    "session.context-v1",
 )
 _CONTINUATION_MEDIA_TYPE = "application/vnd.asterion.control-capsule"
 _PRIVATE_CONTENT_SERVICE = "private-content"

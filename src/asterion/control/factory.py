@@ -11,6 +11,7 @@ from types import MappingProxyType
 from asterion.control.authority import AuthorityEnvelope
 from asterion.control.host import ControlPlaneClient, ControlPlaneManifest
 from asterion.control.protocol import IDENTIFIER, SEMANTIC_VERSION
+from asterion.control.session_context import SessionContextClient
 from asterion.immutable import RedactedImmutableMapping
 
 
@@ -19,6 +20,7 @@ class ControlPlaneFactoryError(ValueError):
 
 
 CONTEXT_KEY = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]*$")
+SESSION_CONTEXT_CAPABILITY = "session.context-v1"
 
 
 @dataclass(frozen=True, repr=False)
@@ -155,3 +157,20 @@ class ControlPlaneFactoryRegistry:
             raise ControlPlaneFactoryError(
                 "control plane factory is unavailable"
             ) from None
+
+
+def bind_selected_session_context_client(
+    client: object,
+) -> SessionContextClient | None:
+    """Return one explicitly selected extension when declaration and shape agree."""
+
+    manifest = getattr(client, "manifest", None)
+    if not isinstance(manifest, ControlPlaneManifest):
+        raise ControlPlaneFactoryError("control plane client manifest is invalid")
+    declared = SESSION_CONTEXT_CAPABILITY in manifest.capabilities
+    implemented = isinstance(client, SessionContextClient)
+    if declared != implemented:
+        raise ControlPlaneFactoryError(
+            "session context provider binding is invalid"
+        )
+    return client if implemented else None

@@ -5,6 +5,10 @@ import unittest
 from collections.abc import AsyncIterator, Mapping
 
 from asterion.control.host import ControlCommand, EventCursor
+from asterion.control.session_context import (
+    SessionContextCommand,
+    SessionContextReceipt,
+)
 from asterion.control.providers.prime.client import (
     MAX_PRIVATE_TEXT_BYTES,
     PrimeControlError,
@@ -152,7 +156,103 @@ def event(sequence: int) -> Mapping[str, object]:
     }
 
 
+def context_command() -> SessionContextCommand:
+    return SessionContextCommand(
+        command_id="context-command-1",
+        session_id="session-1",
+        generation=1,
+        authority_revision=1,
+        idempotency_key="context-operation-1",
+        operation="session.tree.read",
+        payload={"continuation_id": "continuation-1"},
+    )
+
+
+def context_receipt() -> SessionContextReceipt:
+    return SessionContextReceipt(
+        receipt_id="context-receipt-1",
+        command_id="context-command-1",
+        session_id="session-1",
+        generation=1,
+        operation="session.tree.read",
+        status="succeeded",
+        reason_code="session-context-succeeded",
+        payload={
+            "evidence_ref": "evidence-1",
+            "result": {
+                "continuation_id": "continuation-1",
+                "nodes": [],
+                "leaf_id": None,
+            },
+        },
+    )
+
+
 class TestPrimeControlClient(unittest.IsolatedAsyncioTestCase):
+    async def test_session_context_uses_the_same_sidecar_and_validates_receipt(
+        self,
+    ) -> None:
+        fake_process = FakeProcess()
+        fake_process.response = {
+            "protocol": "asterion.prime-gateway-ipc/v1",
+            "id": "<request>",
+            "type": "session-context.receipt",
+            "receipt": context_receipt().to_mapping(),
+        }
+        client = PrimeControlPlaneClient(
+            process=fake_process,
+            private_content=FakeResolver(),
+        )
+
+        receipt = await client.execute_session_context(context_command())
+
+        self.assertEqual(receipt.receipt_id, "context-receipt-1")
+        self.assertEqual(len(fake_process.requests), 1)
+        self.assertEqual(fake_process.requests[0]["type"], "session-context.execute")
+        self.assertEqual(fake_process.requests[0]["private"], {})
+        await client.close()
+        self.assertEqual(fake_process.closed, 1)
+
+    async def test_session_context_rejects_mismatched_or_private_response(self) -> None:
+        fake_process = FakeProcess()
+        response = dict(context_receipt().to_mapping())
+        response["command_id"] = "context-command-other"
+        response["provider_payload"] = "SENTINEL_SECRET"
+        fake_process.response = {
+            "protocol": "asterion.prime-gateway-ipc/v1",
+            "id": "<request>",
+            "type": "session-context.receipt",
+            "receipt": response,
+        }
+        client = PrimeControlPlaneClient(
+            process=fake_process,
+            private_content=FakeResolver(),
+        )
+
+        with self.assertRaises(PrimeControlError) as raised:
+            await client.execute_session_context(context_command())
+
+        self.assertNotIn("SENTINEL_SECRET", str(raised.exception))
+
+    async def test_session_context_cancellation_uses_exact_command_identity(
+        self,
+    ) -> None:
+        fake_process = FakeProcess()
+        fake_process.response = {
+            "protocol": "asterion.prime-gateway-ipc/v1",
+            "id": "<request>",
+            "type": "session-context.cancel.accepted",
+        }
+        client = PrimeControlPlaneClient(
+            process=fake_process,
+            private_content=FakeResolver(),
+        )
+
+        await client.cancel_session_context("context-command-1")
+
+        self.assertEqual(
+            fake_process.requests[0]["command_id"], "context-command-1"
+        )
     async def test_remaining_budget_update_is_private_and_exact(self) -> None:
         fake_process = FakeProcess()
         client = PrimeControlPlaneClient(

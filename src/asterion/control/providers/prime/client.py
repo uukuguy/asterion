@@ -18,7 +18,11 @@ from asterion.control.host import (
     ControlPlaneManifest,
     EventCursor,
 )
-from asterion.control.protocol import ControlProtocolError
+from asterion.control.protocol import ControlProtocolError, OPAQUE_ID
+from asterion.control.session_context import (
+    SessionContextCommand,
+    SessionContextReceipt,
+)
 from asterion.control.providers.prime.process import PRIME_GATEWAY_IPC_PROTOCOL
 
 
@@ -194,6 +198,70 @@ class PrimeControlPlaneClient:
         if (
             response.get("type") != "command.accepted"
             or set(response) != {"protocol", "id", "type"}
+        ):
+            raise PrimeControlError()
+
+    async def execute_session_context(
+        self, command: SessionContextCommand
+    ) -> SessionContextReceipt:
+        """Use the selected sidecar for one admitted session-context command."""
+
+        if self._closed or not isinstance(command, SessionContextCommand):
+            raise PrimeControlError()
+        envelope: dict[str, object] = {
+            "protocol": PRIME_GATEWAY_IPC_PROTOCOL,
+            "id": _request_id(),
+            "type": "session-context.execute",
+            "command": command.to_mapping(),
+            "private": {},
+        }
+        try:
+            response = await self._process.request(envelope)
+            receipt_value = response.get("receipt")
+            if (
+                set(response) != {"protocol", "id", "type", "receipt"}
+                or response.get("protocol") != PRIME_GATEWAY_IPC_PROTOCOL
+                or response.get("id") != envelope["id"]
+                or response.get("type") != "session-context.receipt"
+                or not isinstance(receipt_value, Mapping)
+            ):
+                raise PrimeControlError()
+            receipt = SessionContextReceipt.from_mapping(receipt_value)
+            if (
+                receipt.command_id != command.command_id
+                or receipt.session_id != command.session_id
+                or receipt.generation != command.generation
+                or receipt.operation != command.operation
+            ):
+                raise PrimeControlError()
+            return receipt
+        except (KeyError, TypeError, ValueError, RuntimeError):
+            raise PrimeControlError() from None
+
+    async def cancel_session_context(self, command_id: str) -> None:
+        """Request cancellation through the same selected sidecar."""
+
+        if (
+            self._closed
+            or not isinstance(command_id, str)
+            or OPAQUE_ID.fullmatch(command_id) is None
+        ):
+            raise PrimeControlError()
+        envelope: dict[str, object] = {
+            "protocol": PRIME_GATEWAY_IPC_PROTOCOL,
+            "id": _request_id(),
+            "type": "session-context.cancel",
+            "command_id": command_id,
+        }
+        try:
+            response = await self._process.request(envelope)
+        except (KeyError, TypeError, ValueError, RuntimeError):
+            raise PrimeControlError() from None
+        if (
+            set(response) != {"protocol", "id", "type"}
+            or response.get("protocol") != PRIME_GATEWAY_IPC_PROTOCOL
+            or response.get("id") != envelope["id"]
+            or response.get("type") != "session-context.cancel.accepted"
         ):
             raise PrimeControlError()
 

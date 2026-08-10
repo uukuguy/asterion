@@ -5,6 +5,8 @@ from asterion.control.factory import (
     ControlPlaneFactoryContext,
     ControlPlaneFactoryError,
     ControlPlaneFactoryRegistry,
+    SESSION_CONTEXT_CAPABILITY,
+    bind_selected_session_context_client,
 )
 from asterion.control.evidence import (
     CONTROL_PATHLIGHT_GAP,
@@ -222,12 +224,14 @@ __all__ = [
     "RecoveredControlState",
     "SESSION_CONTEXT_OPERATIONS",
     "SESSION_CONTEXT_PROTOCOL",
+    "SESSION_CONTEXT_CAPABILITY",
     "SessionContextClient",
     "SessionContextCommand",
     "SessionContextProtocolError",
     "SessionContextReceipt",
     "ConformanceReport",
     "action_proposal_digest",
+    "bind_selected_session_context_client",
     "derive_child_authority",
     "apply_action_admission",
     "apply_action_resolution",

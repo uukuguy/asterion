@@ -367,8 +367,8 @@ git commit -m "test: register prime parity scenarios"
 ### Task 4: Deliver session and context parity
 
 **Status:** In progress. The approved code-level subplan and closed
-`asterion.session-context/v1` contract are complete; Task 4.2 selected-provider
-binding is next.
+`asterion.session-context/v1` contract plus selected-provider binding are
+complete; Task 4.3 host authority, journal and recovery management is next.
 
 **Files:**
 - Create before implementation: `docs/superpowers/plans/2026-08-10-asterion-prime-session-context-parity.md`

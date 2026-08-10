@@ -4,13 +4,17 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
 
 
 from asterion.control.factory import (
+    ControlPlaneFactory,
     ControlPlaneFactoryBinding,
     ControlPlaneFactoryContext,
     ControlPlaneFactoryError,
     ControlPlaneFactoryRegistry,
+    bind_selected_session_context_client,
 )
 from asterion.control.host import (
     ControlCommand,
@@ -75,7 +79,10 @@ class TestControlProvider(unittest.TestCase):
             continuation_media_type="application/vnd.asterion.control-capsule",
             checkpoint_version="1.0.0",
             compatibility_ids=("asterion.agent-control/v1", "fake-control/v1"),
-            factory=factory if factory is not None else (lambda context: context),
+            factory=cast(
+                ControlPlaneFactory,
+                factory if factory is not None else (lambda context: context),
+            ),
         )
 
     def test_host_values_validate_round_trip_and_copy_payloads(self) -> None:
@@ -114,14 +121,69 @@ class TestControlProvider(unittest.TestCase):
                 EventCursor(generation=generation, sequence=sequence)
 
     def test_factory_registry_selects_exact_id_and_version(self) -> None:
-        binding_v1 = self._binding(version="1.0.0")
-        binding_v2 = self._binding(version="2.0.0")
+        constructed: list[object] = []
+
+        def construct(context: object) -> object:
+            constructed.append(context)
+            return context
+
+        binding_v1 = self._binding(version="1.0.0", factory=construct)
+        binding_v2 = self._binding(version="2.0.0", factory=construct)
         registry = ControlPlaneFactoryRegistry((binding_v2, binding_v1))
 
         self.assertIs(registry.select("fake.control", "1.0.0"), binding_v1)
         self.assertIs(registry.select("fake.control", "2.0.0"), binding_v2)
+        self.assertEqual(constructed, [])
         with self.assertRaises(ControlPlaneFactoryError):
             registry.select("fake.control", "1.1.0")
+
+    def test_session_context_extension_requires_manifest_and_implementation_agreement(
+        self,
+    ) -> None:
+        plain_manifest = self._binding().manifest
+        extension_manifest = ControlPlaneManifest(
+            **{
+                **plain_manifest.__dict__,
+                "capabilities": (*plain_manifest.capabilities, "session.context-v1"),
+                "compatibility_ids": (
+                    "asterion.agent-control/v1",
+                    "asterion.session-context/v1",
+                    "fake-control/v1",
+                ),
+            }
+        )
+
+        async def execute_session_context(command):
+            return command
+
+        async def cancel_session_context(command_id):
+            return command_id
+
+        implementation = SimpleNamespace(
+            manifest=extension_manifest,
+            execute_session_context=execute_session_context,
+            cancel_session_context=cancel_session_context,
+        )
+        plain = SimpleNamespace(manifest=plain_manifest)
+        declared_without_implementation = SimpleNamespace(manifest=extension_manifest)
+        implementation_without_declaration = SimpleNamespace(
+            manifest=plain_manifest,
+            execute_session_context=execute_session_context,
+            cancel_session_context=cancel_session_context,
+        )
+
+        self.assertIs(
+            bind_selected_session_context_client(implementation), implementation
+        )
+        self.assertIsNone(bind_selected_session_context_client(plain))
+        for client in (
+            declared_without_implementation,
+            implementation_without_declaration,
+        ):
+            with self.subTest(client=client), self.assertRaises(
+                ControlPlaneFactoryError
+            ):
+                bind_selected_session_context_client(client)
 
     def test_factory_registry_rejects_duplicates_and_invalid_bindings(self) -> None:
         binding = self._binding()

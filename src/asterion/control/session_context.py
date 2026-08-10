@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from asterion.control.protocol import IDENTIFIER, MEDIA_TYPE, OPAQUE_ID
 
@@ -231,6 +231,7 @@ class SessionContextReceipt:
         )
 
 
+@runtime_checkable
 class SessionContextClient(Protocol):
     """Selected provider extension for closed session-context operations."""
 

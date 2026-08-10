@@ -1,6 +1,6 @@
 # Asterion Prime Session/Context Parity Implementation Plan
 
-> Status: Task 4.1 verified; Task 4.2 selected-provider binding is next.
+> Status: Tasks 4.1-4.2 verified; Task 4.3 host authority and recovery is next.
 >
 > Program parent: `2026-08-10-asterion-prime-system-parity.md`, Task 4.
 >
@@ -375,6 +375,10 @@ Expected: PASS, zero Pyright errors/warnings.
 Commit: `feat: add closed session context protocol`.
 
 ### Task 4.2: Bind the extension to exactly one selected provider
+
+**Status:** Complete. Exact capability/implementation agreement, explicit
+selection, single-process lifetime, response correlation, promotion and
+independent review pass.
 
 **Modify:**
 
