@@ -463,9 +463,7 @@ class ChildSessionService:
                 entry = _ActiveChild(expected, digest, root, task)
                 self._entries[child_id] = entry
                 self._statuses[child_id] = ChildSessionStatus(child_id, "starting", expected.action_id)
-        waiter = asyncio.shield(task)
-        waiter.add_done_callback(_consume_child_task_exception)
-        return await waiter
+        return await _await_without_cancelling(task)
 
     async def _run_spawn(
         self,
@@ -1034,6 +1032,16 @@ def _consume_child_task_exception(
         task.exception()
     except asyncio.CancelledError:
         pass
+
+
+async def _await_without_cancelling(
+    task: asyncio.Task[ActionExecutionReceipt],
+) -> ActionExecutionReceipt:
+    """Await a shared child task without letting waiter cancellation cancel it."""
+
+    if not task.done():
+        await asyncio.wait((task,), return_when=asyncio.FIRST_COMPLETED)
+    return task.result()
 
 
 def _child_id(proposal: ControlEvent, kind: str) -> str:

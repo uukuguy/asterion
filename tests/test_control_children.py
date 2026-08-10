@@ -335,6 +335,246 @@ def _registry(
     )
 
 
+class RecursiveChildClient:
+    def __init__(
+        self,
+        manifest: ControlPlaneManifest,
+        audit: list[str],
+        label: str,
+        *,
+        mode: str,
+    ) -> None:
+        self._manifest = manifest
+        self.audit = audit
+        self.label = label
+        self.mode = mode
+        self.sent: list[ControlCommand] = []
+        self.cancelled = False
+        self.closed = False
+        self._session_id: str | None = None
+        self._goal_id: str | None = None
+        self._events: list[ControlEvent] = []
+
+    @property
+    def manifest(self) -> ControlPlaneManifest:
+        return self._manifest
+
+    async def send(self, command: ControlCommand) -> None:
+        self.audit.append(f"{self.label}.command.{command.type}")
+        self.sent.append(command)
+        if command.type == "session.create":
+            self._session_id = command.session_id
+            self._goal_id = str(command.payload["goal_id"])
+            self._emit(
+                "session.created",
+                {
+                    "goal_id": command.payload["goal_id"],
+                    "authority_id": f"child:{self.label}",
+                    "authority_revision": 1,
+                },
+            )
+            self._emit("session.running", {"reason_code": "started"})
+            if self.mode == "spawn-grandchild":
+                self._emit_grandchild_spawn()
+            elif self.mode == "work":
+                self._emit_application_work()
+        elif command.type == "action.resolve":
+            resolution = command.payload["resolution"]
+            if resolution == "succeeded":
+                self._emit("goal.updated", {"goal_id": self._goal_id, "status": "completed"})
+                self._emit("session.completed", {"reason_code": "done"})
+            elif resolution == "cancelled":
+                self._emit("session.cancelled", {"reason_code": "action-cancelled"})
+            elif resolution in {"failed", "rejected", "uncertain"}:
+                self._emit("session.failed", {"reason_code": f"action-{resolution}"})
+        elif command.type == "session.cancel":
+            self.cancelled = True
+            self._emit("session.cancelled", {"reason_code": command.payload["reason_code"]})
+
+    def events(self, cursor: EventCursor | None = None) -> AsyncIterator[ControlEvent]:
+        start = cursor.sequence if cursor is not None else 0
+        return self._iterate(start)
+
+    async def _iterate(self, start: int) -> AsyncIterator[ControlEvent]:
+        index = start
+        while True:
+            while index < len(self._events):
+                event = self._events[index]
+                index += 1
+                yield event
+                if event.type in {
+                    "session.budget-limited",
+                    "session.cancelled",
+                    "session.completed",
+                    "session.failed",
+                }:
+                    return
+            await asyncio.sleep(0)
+
+    async def close(self) -> None:
+        self.audit.append(f"{self.label}.close")
+        self.closed = True
+
+    def _emit_grandchild_spawn(self) -> None:
+        self._emit(
+            "action.proposed",
+            _grandchild_spawn_payload(
+                action_id="grandchild-spawn-action-1",
+                child_id="grandchild-1",
+            ),
+        )
+
+    def _emit_application_work(self) -> None:
+        self._emit(
+            "action.proposed",
+            {
+                "action_id": f"{self.label}-work-action-1",
+                "authority_revision": 1,
+                "idempotency_key": f"{self.label}-work-idempotency-1",
+                "kind": "application.invoke",
+                "target": {
+                    "kind": "application",
+                    "provider_id": "example.provider",
+                    "application_id": "alpha",
+                    "version": "1.0.0",
+                    "runtime_id": "fake.runtime",
+                },
+                "input_ref": "grandchild-work-ref",
+                "expected_artifacts": (),
+                "budget": {
+                    "controller_tokens": 0,
+                    "application_tokens": 7,
+                    "child_tokens": 0,
+                    "aggregate_tokens": 7,
+                    "cost_micros": 2,
+                    "deadline_ms": 500,
+                },
+                "causal_parent_ids": ("goal-1",),
+            },
+        )
+
+    def _emit(self, event_type: str, payload: Mapping[str, object]) -> None:
+        if self._session_id is None:
+            raise AssertionError("recursive session missing")
+        sequence = len(self._events) + 1
+        self._events.append(
+            ControlEvent(
+                event_id=f"{self.label}-event-{sequence}",
+                session_id=self._session_id,
+                generation=1,
+                sequence=sequence,
+                emitted_at=f"2026-08-10T04:00:{sequence:02d}Z",
+                type=event_type,
+                payload=payload,
+            )
+        )
+
+
+def _grandchild_spawn_payload(*, action_id: str, child_id: str) -> Mapping[str, object]:
+    return {
+        "action_id": action_id,
+        "authority_revision": 1,
+        "idempotency_key": f"idem-{action_id}",
+        "kind": "child.spawn",
+        "target": {"kind": "child", "child_id": child_id},
+        "input_ref": "grandchild-goal-ref",
+        "expected_artifacts": (),
+        "budget": {
+            "controller_tokens": 0,
+            "application_tokens": 7,
+            "child_tokens": 20,
+            "aggregate_tokens": 20,
+            "cost_micros": 5,
+            "deadline_ms": 500,
+        },
+        "causal_parent_ids": ("goal-1",),
+    }
+
+
+def _grandchild_proposal(*, action_id: str, child_id: str) -> ControlEvent:
+    return ControlEvent(
+        event_id=f"event-{action_id}",
+        session_id="child-session-child-1",
+        generation=1,
+        sequence=3,
+        emitted_at="2026-08-10T04:00:00Z",
+        type="action.proposed",
+        payload=_grandchild_spawn_payload(action_id=action_id, child_id=child_id),
+    )
+
+
+def _recursive_registry(
+    audit: list[str],
+    clients: dict[str, RecursiveChildClient],
+) -> ControlPlaneFactoryRegistry:
+    manifest = _control_factories([]).select("fake.control", "1.0.0").manifest
+
+    def factory(context: ControlPlaneFactoryContext) -> RecursiveChildClient:
+        label = context.private_root.name
+        audit.append(f"{label}.provider.create")
+        mode = "spawn-grandchild" if label == "child-1" else "work"
+        client = RecursiveChildClient(manifest, audit, label, mode=mode)
+        clients[label] = client
+        return client
+
+    binding = _control_factories([]).select("fake.control", "1.0.0")
+    return ControlPlaneFactoryRegistry(
+        (
+            ControlPlaneFactoryBinding(
+                control_plane_id="fake.control",
+                version="1.0.0",
+                commands=binding.commands,
+                events=binding.events,
+                capabilities=("action-proposals",),
+                continuation_media_type="application/vnd.asterion.control-capsule",
+                checkpoint_version="1.0.0",
+                compatibility_ids=("asterion.agent-control/v1",),
+                factory=factory,
+            ),
+        )
+    )
+
+
+class RecursiveRouterExecutor:
+    def __init__(
+        self,
+        audit: list[str],
+        children: ChildSessionService,
+        *,
+        application_started: asyncio.Event | None = None,
+        release_application: asyncio.Event | None = None,
+    ) -> None:
+        self.audit = audit
+        self.children = children
+        self.application_started = application_started
+        self.release_application = release_application
+
+    async def execute(
+        self, proposal: ControlEvent, signal: CancellationSignal
+    ) -> ActionExecutionReceipt:
+        kind = str(proposal.payload["kind"])
+        self.audit.append(f"recursive.executor.{kind}")
+        if kind == "child.spawn":
+            return await self.children.spawn(proposal, signal)
+        if kind == "application.invoke":
+            if self.application_started is not None:
+                self.application_started.set()
+            if self.release_application is not None:
+                await self.release_application.wait()
+            return ActionExecutionReceipt(
+                action_id=str(proposal.payload["action_id"]),
+                receipt_ref=f"recursive-receipt-{proposal.payload['action_id']}",
+                usage=BudgetUsage(
+                    controller_tokens=0,
+                    application_tokens=7,
+                    child_tokens=0,
+                    aggregate_tokens=7,
+                    cost_micros=2,
+                ),
+            )
+        raise ActionExecutionFailure("failed", "unsupported-recursive-action", None)
+
+
 class TestChildAuthority(unittest.TestCase):
     def test_derive_child_authority_is_strict_subset_of_parent_reservation(self) -> None:
         parent = _child_envelope()
@@ -443,6 +683,165 @@ class TestChildSessionService(unittest.IsolatedAsyncioTestCase):
             await service.spawn(_child_proposal(), MutableSignal())
             self.assertEqual(len(received), 1)
             self.assertEqual(received[0].active_ids, ())
+
+    async def test_child_host_spawn_reaches_nested_service_and_grandchild_completes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audit: list[str] = []
+            clients: dict[str, RecursiveChildClient] = {}
+            authorities: dict[str, AuthorityEnvelope] = {}
+            nested_by_authority: dict[str, ChildSessionService] = {}
+
+            def factory(
+                authority: AuthorityEnvelope, children: ChildSessionService
+            ) -> RecursiveRouterExecutor:
+                authorities[authority.authority_id] = authority
+                nested_by_authority[authority.authority_id] = children
+                return RecursiveRouterExecutor(audit, children)
+
+            service = ChildSessionService(
+                plan=_plan(root),
+                authority=replace(_child_envelope(), max_recursion_depth=2),
+                control_factories=_recursive_registry(audit, clients),
+                private_root=root,
+                content=RecordingResolver(),
+                child_action_executor_factory=factory,
+                clock_ms=lambda: 1_000,
+            )
+
+            receipt = await asyncio.wait_for(
+                service.spawn(_child_proposal(), MutableSignal()), timeout=1
+            )
+
+            self.assertEqual(receipt.usage, BudgetUsage(0, 0, 7, 7, 2))
+            self.assertEqual(service.active_ids, ())
+            self.assertIn("child:child-1", nested_by_authority)
+            self.assertIn("child:grandchild-1", nested_by_authority)
+            self.assertEqual(authorities["child:child-1"].max_recursion_depth, 1)
+            self.assertEqual(authorities["child:grandchild-1"].max_recursion_depth, 0)
+            self.assertEqual(
+                authorities["child:child-1"].budget_limit,
+                BudgetLimit(50, 17, 50, 50, 10),
+            )
+            self.assertEqual(
+                authorities["child:grandchild-1"].budget_limit,
+                BudgetLimit(20, 7, 20, 20, 5),
+            )
+            self.assertEqual(
+                [entry for entry in audit if entry.endswith(".provider.create")],
+                ["child-1.provider.create", "grandchild-1.provider.create"],
+            )
+            self.assertTrue(
+                (root / "children" / "child-1" / "children" / "grandchild-1").is_dir()
+            )
+            self.assertTrue(clients["child-1"].closed)
+            self.assertTrue(clients["grandchild-1"].closed)
+
+    async def test_nested_concurrency_rejects_second_grandchild_before_provider_create(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audit: list[str] = []
+            clients: dict[str, RecursiveChildClient] = {}
+            nested_by_authority: dict[str, ChildSessionService] = {}
+            application_started = asyncio.Event()
+            release_application = asyncio.Event()
+
+            def factory(
+                authority: AuthorityEnvelope, children: ChildSessionService
+            ) -> RecursiveRouterExecutor:
+                nested_by_authority[authority.authority_id] = children
+                return RecursiveRouterExecutor(
+                    audit,
+                    children,
+                    application_started=application_started,
+                    release_application=release_application,
+                )
+
+            service = ChildSessionService(
+                plan=_plan(root),
+                authority=replace(_child_envelope(), max_recursion_depth=2),
+                control_factories=_recursive_registry(audit, clients),
+                private_root=root,
+                content=RecordingResolver(),
+                child_action_executor_factory=factory,
+                clock_ms=lambda: 1_000,
+            )
+            spawn = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
+            await asyncio.wait_for(application_started.wait(), timeout=1)
+            nested = nested_by_authority["child:child-1"]
+
+            with self.assertRaises(ChildSessionError):
+                await nested.spawn(
+                    _grandchild_proposal(
+                        action_id="grandchild-spawn-action-2",
+                        child_id="grandchild-2",
+                    ),
+                    MutableSignal(),
+                )
+
+            self.assertEqual(nested.active_ids, ("grandchild-1",))
+            self.assertNotIn("grandchild-2.provider.create", audit)
+            self.assertEqual(
+                [entry for entry in audit if entry.endswith(".provider.create")],
+                ["child-1.provider.create", "grandchild-1.provider.create"],
+            )
+            release_application.set()
+            receipt = await asyncio.wait_for(spawn, timeout=1)
+            self.assertEqual(receipt.usage, BudgetUsage(0, 0, 7, 7, 2))
+            self.assertEqual(service.active_ids, ())
+
+    async def test_root_close_cascades_to_active_grandchild_before_client_close(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            audit: list[str] = []
+            clients: dict[str, RecursiveChildClient] = {}
+            application_started = asyncio.Event()
+            release_application = asyncio.Event()
+
+            def factory(
+                authority: AuthorityEnvelope, children: ChildSessionService
+            ) -> RecursiveRouterExecutor:
+                del authority
+                return RecursiveRouterExecutor(
+                    audit,
+                    children,
+                    application_started=application_started,
+                    release_application=release_application,
+                )
+
+            service = ChildSessionService(
+                plan=_plan(root),
+                authority=replace(_child_envelope(), max_recursion_depth=2),
+                control_factories=_recursive_registry(audit, clients),
+                private_root=root,
+                content=RecordingResolver(),
+                child_action_executor_factory=factory,
+                clock_ms=lambda: 1_000,
+            )
+            spawn = asyncio.create_task(service.spawn(_child_proposal(), MutableSignal()))
+            await asyncio.wait_for(application_started.wait(), timeout=1)
+
+            await service.close()
+            result = await asyncio.gather(spawn, return_exceptions=True)
+
+            self.assertIsInstance(result[0], (asyncio.CancelledError, ActionExecutionFailure))
+            self.assertTrue(clients["child-1"].cancelled)
+            self.assertTrue(clients["grandchild-1"].cancelled)
+            self.assertTrue(clients["child-1"].closed)
+            self.assertTrue(clients["grandchild-1"].closed)
+            self.assertEqual(service.active_ids, ())
+            self.assertLess(
+                audit.index("child-1.command.session.cancel"),
+                audit.index("grandchild-1.command.session.cancel"),
+            )
+            self.assertLess(
+                audit.index("grandchild-1.command.session.cancel"),
+                audit.index("grandchild-1.close"),
+            )
+            self.assertLess(
+                audit.index("grandchild-1.close"),
+                audit.index("child-1.close"),
+            )
 
     async def test_message_transport_fault_is_uncertain_and_retained(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
