@@ -24,9 +24,51 @@ test("admits a native RLM child before creating it exactly once", async () => {
     },
   };
 
-  const wrapped = wrapSubagentRuntimeHost(nativeHost, client);
+  const wrapped = wrapSubagentRuntimeHost(nativeHost, client, hostContext());
   assert.equal(await wrapped.createRlmSubagentRuntime({ id: "child-1", prompt: "private", rlmDepth: 1 }), runtime);
   assert.deepEqual(order, ["propose:child-1", "native:child-1"]);
+});
+
+test("derives the complete host-owned proposal before the native child effect", async () => {
+  let proposal;
+  const wrapped = wrapSubagentRuntimeHost({
+    async createRlmSubagentRuntime(options) {
+      return options;
+    },
+    async deleteRlmSubagentRuntime() {},
+  }, {
+    async proposeSpawn(value) {
+      proposal = value;
+      return { resolution: "admitted", child_id: value.child_id };
+    },
+  }, {
+    idempotency_namespace: "session-1",
+    budget: {
+      controller_tokens: 1,
+      application_tokens: 2,
+      child_tokens: 3,
+      aggregate_tokens: 4,
+      cost_micros: 5,
+      deadline_ms: 6,
+    },
+  });
+
+  await wrapped.createRlmSubagentRuntime({ id: "child-1", prompt: "private", rlmDepth: 1 });
+
+  assert.deepEqual(proposal, {
+    child_id: "child-1",
+    goal_text: "private",
+    rlm_depth: 1,
+    idempotency_key: "rlm-85ccb1e94a2d3627fc1055ff552eff1fe8ab5034",
+    budget: {
+      controller_tokens: 1,
+      application_tokens: 2,
+      child_tokens: 3,
+      aggregate_tokens: 4,
+      cost_micros: 5,
+      deadline_ms: 6,
+    },
+  });
 });
 
 test("rejects an RLM child before its native host has an effect", async () => {
@@ -41,7 +83,7 @@ test("rejects an RLM child before its native host has an effect", async () => {
     async proposeSpawn(proposal) {
       return { resolution: "rejected", child_id: proposal.child_id };
     },
-  });
+  }, hostContext());
 
   await assert.rejects(
     () => wrapped.createRlmSubagentRuntime({ id: "child-1", prompt: "private", rlmDepth: 1 }),
@@ -49,6 +91,20 @@ test("rejects an RLM child before its native host has an effect", async () => {
   );
   assert.equal(nativeCalls, 0);
 });
+
+function hostContext() {
+  return {
+    idempotency_namespace: "session-1",
+    budget: {
+      controller_tokens: 1,
+      application_tokens: 2,
+      child_tokens: 3,
+      aggregate_tokens: 4,
+      cost_micros: 5,
+      deadline_ms: 6,
+    },
+  };
+}
 
 test("reads one exact private discovery record and authenticates its spawn", async () => {
   const root = await mkdtemp(join(tmpdir(), "asterion-rlm-shim-"));

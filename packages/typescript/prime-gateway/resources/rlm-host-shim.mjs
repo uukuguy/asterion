@@ -20,6 +20,25 @@ function canonicalSpawn(options) {
   });
 }
 
+function canonicalHostContext(value) {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ["idempotency_namespace", "budget"]) ||
+    !validChildId(value.idempotency_namespace) ||
+    !validBudget(value.budget)
+  ) {
+    throw new TypeError("Prime RLM host context is invalid");
+  }
+  return Object.freeze({
+    idempotency_namespace: value.idempotency_namespace,
+    budget: Object.freeze({ ...value.budget }),
+  });
+}
+
+function idempotencyKey(namespace, childId) {
+  return `rlm-${createHash("sha256").update(namespace).update("\0").update(childId).digest("hex").slice(0, 40)}`;
+}
+
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -68,7 +87,7 @@ export async function createRlmHostClient(discoveryPath) {
   });
 }
 
-export function wrapSubagentRuntimeHost(delegate, client) {
+export function wrapSubagentRuntimeHost(delegate, client, hostContext) {
   if (
     typeof delegate !== "object" ||
     delegate === null ||
@@ -80,10 +99,19 @@ export function wrapSubagentRuntimeHost(delegate, client) {
   ) {
     throw new TypeError("Prime RLM host shim is invalid");
   }
+  const context = canonicalHostContext(hostContext);
   return Object.freeze({
     ...delegate,
     async createRlmSubagentRuntime(options) {
-      const admission = await client.proposeSpawn(canonicalSpawn(options));
+      const spawn = canonicalSpawn(options);
+      const admission = await client.proposeSpawn(Object.freeze({
+        ...spawn,
+        idempotency_key: idempotencyKey(
+          context.idempotency_namespace,
+          spawn.child_id,
+        ),
+        budget: context.budget,
+      }));
       if (
         typeof admission !== "object" ||
         admission === null ||
