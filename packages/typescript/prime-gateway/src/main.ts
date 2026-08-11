@@ -1,6 +1,7 @@
 import { constants, readFileSync } from "node:fs";
 import {
   open,
+  readFile,
   rename,
   rm,
   unlink,
@@ -80,6 +81,7 @@ export const PRIME_GATEWAY_SKILL_DISCOVERY = "asterion.skill-control-discovery/v
 export const PRIME_GATEWAY_SKILL_DISCOVERY_FILE = "asterion-control.json";
 export const PRIME_GATEWAY_RLM_HOST_DISCOVERY = "asterion.prime-rlm-host-discovery/v1";
 export const PRIME_GATEWAY_RLM_HOST_DISCOVERY_FILE = "asterion-rlm-host.json";
+export const PRIME_GATEWAY_RLM_HOST_SHIM_FILE = "asterion-rlm-host-shim.mjs";
 
 type SidecarEnvelopeType =
   | "authority.update"
@@ -948,6 +950,21 @@ async function writeRlmHostDiscovery(
   );
 }
 
+async function writeRlmHostShim(descriptor: PrimeSidecarDescriptor): Promise<void> {
+  let shim: Buffer;
+  try {
+    shim = await readFile(new URL("../../resources/rlm-host-shim.mjs", import.meta.url));
+  } catch {
+    throw new PrimeGatewayError();
+  }
+  await ensurePrivateDirectory(descriptor.agentDir);
+  await atomicReplacePrivateFile(
+    descriptor.agentDir,
+    PRIME_GATEWAY_RLM_HOST_SHIM_FILE,
+    shim,
+  );
+}
+
 async function atomicReplacePrivateFile(
   directory: string,
   targetName: string,
@@ -991,7 +1008,10 @@ async function removeSkillDiscovery(descriptor: PrimeSidecarDescriptor): Promise
 
 async function removeRlmHostDiscovery(descriptor: PrimeSidecarDescriptor): Promise<void> {
   try {
-    await unlink(join(descriptor.agentDir, PRIME_GATEWAY_RLM_HOST_DISCOVERY_FILE));
+    await Promise.all([
+      unlink(join(descriptor.agentDir, PRIME_GATEWAY_RLM_HOST_DISCOVERY_FILE)),
+      unlink(join(descriptor.agentDir, PRIME_GATEWAY_RLM_HOST_SHIM_FILE)),
+    ]);
     await syncPrivateDirectory(descriptor.agentDir);
   } catch {
     // Nothing was published, or cleanup is already in progress.
@@ -1113,6 +1133,7 @@ async function createSidecarFromDescriptor(
   ) => {
     const token = generateSkillBridgeToken();
     await ensurePrivateDirectory(descriptor.agentDir);
+    await writeRlmHostShim(descriptor);
     const socketPath = join(descriptor.agentDir, "r.sock");
     const bridge = new RlmHostBridge({
       sessionId: descriptor.sessionId,

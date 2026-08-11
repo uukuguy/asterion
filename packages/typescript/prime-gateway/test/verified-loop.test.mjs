@@ -47,6 +47,7 @@ const sentinels = Object.freeze([
 ]);
 const discoveryFileName = "asterion-control.json";
 const rlmDiscoveryFileName = "asterion-rlm-host.json";
+const rlmShimFileName = "asterion-rlm-host-shim.mjs";
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -517,6 +518,9 @@ async function runScenario(scenario) {
       deadline_ms: 10000,
     });
     assert.equal((await stat(rlmDiscoveryPath)).mode & 0o777, 0o600);
+    const rlmShimPath = join(gateway.agentDir, rlmShimFileName);
+    assert.equal((await stat(rlmShimPath)).mode & 0o777, 0o600);
+    assert.match(await readFile(rlmShimPath, "utf8"), /wrapSubagentRuntimeHost/u);
     if (scenario.scenario_id === "prime-loop-gateway-crash") {
       gateway.child.kill("SIGTERM");
       await waitForExit(gateway.child, `${scenario.scenario_id} gateway crash`);
