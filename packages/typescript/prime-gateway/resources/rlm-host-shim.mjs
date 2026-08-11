@@ -76,8 +76,13 @@ function requestResponse(socketPath, discovery, proposal) {
 export async function createRlmHostClient(discoveryPath) {
   let discovery;
   try { discovery = JSON.parse(await readFile(discoveryPath, "utf8")); } catch { throw new Error("Prime RLM host discovery is unavailable"); }
-  if (!isRecord(discovery) || !hasExactKeys(discovery, ["protocol", "socket_path", "token", "session_id"]) || discovery.protocol !== DISCOVERY_PROTOCOL || typeof discovery.socket_path !== "string" || discovery.socket_path.length === 0 || typeof discovery.session_id !== "string" || !validChildId(discovery.session_id) || typeof discovery.token !== "string" || !/^[0-9a-f]{64}$/u.test(discovery.token)) throw new Error("Prime RLM host discovery is invalid");
+  if (!isRecord(discovery) || !hasExactKeys(discovery, ["protocol", "socket_path", "token", "session_id", "budget"]) || discovery.protocol !== DISCOVERY_PROTOCOL || typeof discovery.socket_path !== "string" || discovery.socket_path.length === 0 || typeof discovery.session_id !== "string" || !validChildId(discovery.session_id) || typeof discovery.token !== "string" || !/^[0-9a-f]{64}$/u.test(discovery.token) || !validBudget(discovery.budget)) throw new Error("Prime RLM host discovery is invalid");
+  const hostContext = canonicalHostContext({
+    idempotency_namespace: discovery.session_id,
+    budget: discovery.budget,
+  });
   return Object.freeze({
+    hostContext,
     async proposeSpawn(proposal) {
       if (!isRecord(proposal) || !hasExactKeys(proposal, ["child_id", "goal_text", "rlm_depth", "idempotency_key", "budget"]) || !validChildId(proposal.child_id) || typeof proposal.goal_text !== "string" || !validChildId(proposal.idempotency_key) || !Number.isSafeInteger(proposal.rlm_depth) || proposal.rlm_depth < 0 || !validBudget(proposal.budget)) throw new Error("Prime RLM spawn is invalid");
       const response = await requestResponse(discovery.socket_path, discovery, proposal);

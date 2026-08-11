@@ -508,6 +508,14 @@ async function runScenario(scenario) {
     assert.equal(rlmDiscovery.protocol, "asterion.prime-rlm-host-discovery/v1");
     assert.equal(rlmDiscovery.session_id, "session-1");
     assert.match(rlmDiscovery.token, /^[0-9a-f]{64}$/u);
+    assert.deepEqual(rlmDiscovery.budget, {
+      controller_tokens: 0,
+      application_tokens: 100,
+      child_tokens: 100,
+      aggregate_tokens: 200,
+      cost_micros: 0,
+      deadline_ms: 10000,
+    });
     assert.equal((await stat(rlmDiscoveryPath)).mode & 0o777, 0o600);
     if (scenario.scenario_id === "prime-loop-gateway-crash") {
       gateway.child.kill("SIGTERM");

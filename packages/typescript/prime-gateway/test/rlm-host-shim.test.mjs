@@ -121,8 +121,10 @@ test("reads one exact private discovery record and authenticates its spawn", asy
       socket_path: socketPath,
       token,
       session_id: "session-1",
+      budget: hostContext().budget,
     }));
     const client = await createRlmHostClient(discoveryPath);
+    assert.deepEqual(client.hostContext, hostContext());
     assert.deepEqual(await client.proposeSpawn({
       child_id: "child-1",
       goal_text: "private",

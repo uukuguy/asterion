@@ -943,6 +943,7 @@ async function writeRlmHostDiscovery(
       socket_path: socketPath,
       token,
       session_id: descriptor.sessionId,
+      budget: descriptor.remainingBudget,
     }), Buffer.from("\n")]),
   );
 }
