@@ -7,6 +7,22 @@ import test from "node:test";
 
 import { RlmHostBridge, authenticateRlmHostFrame, listenRlmHostBridge } from "../dist/src/index.js";
 
+const proposal = (overrides = {}) => ({
+  requestId: "request-1",
+  childId: "child-1",
+  idempotencyKey: "spawn-1",
+  goalText: "private goal",
+  budget: {
+    controller_tokens: 0,
+    application_tokens: 0,
+    child_tokens: 1,
+    aggregate_tokens: 1,
+    cost_micros: 0,
+    deadline_ms: 1,
+  },
+  ...overrides,
+});
+
 test("accepts only the exact authenticated RLM host frame", () => {
   assert.equal(authenticateRlmHostFrame(Buffer.from(JSON.stringify({
     protocol: "asterion.prime-rlm-host/v1", type: "authenticate", token: "11".repeat(32), session_id: "session-1",
@@ -22,11 +38,10 @@ test("returns an admitted RLM spawn before its terminal lifecycle event", async 
       proposed += 1;
       return { resolution: "admitted", childId: proposal.childId };
     },
-    waitForTerminal: async () => new Promise(() => undefined),
   });
 
   const result = await Promise.race([
-    bridge.proposeSpawn({ childId: "child-1", requestId: "request-1" }),
+    bridge.proposeSpawn(proposal()),
     new Promise((_, reject) => setTimeout(() => reject(new Error("waited terminal")), 100)),
   ]);
 
@@ -42,27 +57,42 @@ test("replays one RLM request identity and rejects a conflicting child", async (
       proposed += 1;
       return { resolution: "admitted", childId: proposal.childId };
     },
-    waitForTerminal: async () => undefined,
   });
-  const proposal = { childId: "child-1", requestId: "request-1" };
-  assert.deepEqual(await bridge.proposeSpawn(proposal), await bridge.proposeSpawn(proposal));
+  const request = proposal();
+  assert.deepEqual(await bridge.proposeSpawn(request), await bridge.proposeSpawn(request));
   assert.equal(proposed, 1);
   await assert.rejects(
-    () => bridge.proposeSpawn({ childId: "child-2", requestId: "request-1" }),
+    () => bridge.proposeSpawn(proposal({ childId: "child-2" })),
     /conflicts/,
   );
+});
+
+test("rejects an RLM spawn with an incomplete private effect payload", async () => {
+  let proposed = 0;
+  const bridge = new RlmHostBridge({
+    sessionId: "session-1",
+    admitSpawn: async (request) => {
+      proposed += 1;
+      return { resolution: "admitted", childId: request.childId };
+    },
+  });
+  await assert.rejects(
+    () => bridge.proposeSpawn(proposal({ budget: { ...proposal().budget, deadline_ms: 0 } })),
+    /invalid/,
+  );
+  assert.equal(proposed, 0);
 });
 
 test("serves an authenticated RLM spawn over its private socket", async () => {
   const root = await mkdtemp(join(tmpdir(), "asterion-rlm-"));
   const path = join(root, "r.sock");
-  const bridge = new RlmHostBridge({ sessionId: "session-1", admitSpawn: async (p) => ({ resolution: "admitted", childId: p.childId }), waitForTerminal: async () => undefined });
+  const bridge = new RlmHostBridge({ sessionId: "session-1", admitSpawn: async (p) => ({ resolution: "admitted", childId: p.childId }) });
   const listener = await listenRlmHostBridge(path, "session-1", "11".repeat(32), bridge);
   try {
     const response = await new Promise((resolve, reject) => {
       const socket = createConnection(path);
       let body = "";
-      socket.on("connect", () => socket.write(`${JSON.stringify({ protocol: "asterion.prime-rlm-host/v1", type: "authenticate", token: "11".repeat(32), session_id: "session-1" })}\n${JSON.stringify({ type: "rlm.spawn.propose", request_id: "r1", child_id: "c1" })}\n`));
+      socket.on("connect", () => socket.write(`${JSON.stringify({ protocol: "asterion.prime-rlm-host/v1", type: "authenticate", token: "11".repeat(32), session_id: "session-1" })}\n${JSON.stringify({ type: "rlm.spawn.propose", request_id: "r1", child_id: "c1", idempotency_key: "spawn-1", goal_text: "private goal", budget: proposal().budget })}\n`));
       socket.on("data", (chunk) => { body += chunk; }); socket.on("end", () => resolve(JSON.parse(body))); socket.on("error", reject);
     });
     assert.deepEqual(response, { resolution: "admitted", childId: "c1" });

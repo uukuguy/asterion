@@ -60,16 +60,26 @@ import type {
 } from "./private-store.js";
 import {
   AsterionSkillBridge,
+  deriveControlActionId,
   generateSkillBridgeToken,
 } from "./skill-bridge.js";
 import type {
   SkillApplicationTarget,
   SkillBudget,
 } from "./skill-bridge.js";
+import {
+  listenRlmHostBridge,
+  RlmHostBridge,
+} from "./rlm-host-bridge.js";
+import type {
+  RlmSpawnProposal,
+} from "./rlm-host-bridge.js";
 
 export const PRIME_GATEWAY_IPC_PROTOCOL = "asterion.prime-gateway-ipc/v1";
 export const PRIME_GATEWAY_SKILL_DISCOVERY = "asterion.skill-control-discovery/v1";
 export const PRIME_GATEWAY_SKILL_DISCOVERY_FILE = "asterion-control.json";
+export const PRIME_GATEWAY_RLM_HOST_DISCOVERY = "asterion.prime-rlm-host-discovery/v1";
+export const PRIME_GATEWAY_RLM_HOST_DISCOVERY_FILE = "asterion-rlm-host.json";
 
 type SidecarEnvelopeType =
   | "authority.update"
@@ -916,6 +926,27 @@ async function writeSkillDiscovery(
   );
 }
 
+async function writeRlmHostDiscovery(
+  descriptor: PrimeSidecarDescriptor,
+  socketPath: string,
+  token: string,
+): Promise<void> {
+  if (!TOKEN_PATTERN.test(token)) {
+    throw new PrimeGatewayError();
+  }
+  await ensurePrivateDirectory(descriptor.agentDir);
+  await atomicReplacePrivateFile(
+    descriptor.agentDir,
+    PRIME_GATEWAY_RLM_HOST_DISCOVERY_FILE,
+    Buffer.concat([canonicalJsonBytes({
+      protocol: PRIME_GATEWAY_RLM_HOST_DISCOVERY,
+      socket_path: socketPath,
+      token,
+      session_id: descriptor.sessionId,
+    }), Buffer.from("\n")]),
+  );
+}
+
 async function atomicReplacePrivateFile(
   directory: string,
   targetName: string,
@@ -955,6 +986,15 @@ async function removeSkillDiscovery(descriptor: PrimeSidecarDescriptor): Promise
   await unlink(join(descriptor.agentDir, PRIME_GATEWAY_SKILL_DISCOVERY_FILE))
     .catch(() => undefined);
   await syncPrivateDirectory(descriptor.agentDir).catch(() => undefined);
+}
+
+async function removeRlmHostDiscovery(descriptor: PrimeSidecarDescriptor): Promise<void> {
+  try {
+    await unlink(join(descriptor.agentDir, PRIME_GATEWAY_RLM_HOST_DISCOVERY_FILE));
+    await syncPrivateDirectory(descriptor.agentDir);
+  } catch {
+    // Nothing was published, or cleanup is already in progress.
+  }
 }
 
 function restoredBridgeContext(
@@ -1023,16 +1063,33 @@ async function createSidecarFromDescriptor(
     continuationRoot: descriptor.sessionDir,
   });
   const boundPrivateInputs = new PrimeBoundPrivateInputs(privateValues);
-  const lock = await loadPrimeArtifactLock(pathToFileURL(descriptor.artifactLockPath));
-  const artifactEvidence = await verifyPrimeArtifact(descriptor.primeSourceRoot, lock);
+  let artifactEvidence: Awaited<ReturnType<typeof verifyPrimeArtifact>>;
+  try {
+    const lock = await loadPrimeArtifactLock(pathToFileURL(descriptor.artifactLockPath));
+    artifactEvidence = await verifyPrimeArtifact(descriptor.primeSourceRoot, lock);
+  } catch (error) {
+    transport.close();
+    throw error;
+  }
   let checkpointManager: PrimeCheckpointManager | undefined;
   let gateway: PrimeGateway;
   let skillBridge: AsterionSkillBridge | undefined;
   let skillBridgeRoot: string | undefined;
+  let rlmHostClose: (() => Promise<void>) | undefined;
   let sessionReady: (() => void) | undefined;
   let currentRemainingBudget = descriptor.remainingBudget;
 
+  const closeRlmHostBridge = async () => {
+    const close = rlmHostClose;
+    rlmHostClose = undefined;
+    if (close !== undefined) {
+      await close();
+    }
+    await removeRlmHostDiscovery(descriptor);
+  };
+
   const closeSkillBridge = async () => {
+    await closeRlmHostBridge();
     const current = skillBridge;
     skillBridge = undefined;
     if (current !== undefined) {
@@ -1043,6 +1100,74 @@ async function createSidecarFromDescriptor(
       skillBridgeRoot = undefined;
     }
     await removeSkillDiscovery(descriptor);
+  };
+
+  const startRlmHostBridge = async (
+    context: Readonly<{
+      goalId: string;
+      authorityRevision: number;
+      causalParentIds: readonly string[];
+    }>,
+    ready: Promise<void>,
+  ) => {
+    const token = generateSkillBridgeToken();
+    await ensurePrivateDirectory(descriptor.agentDir);
+    const socketPath = join(descriptor.agentDir, "r.sock");
+    const bridge = new RlmHostBridge({
+      sessionId: descriptor.sessionId,
+      admitSpawn: async (proposal: RlmSpawnProposal) => {
+        try {
+          await ready;
+          const inputRef = await privateValues.putInput(proposal.goalText);
+          const identity = gateway.nextEventIdentity();
+          const actionId = deriveControlActionId(
+            descriptor.sessionId,
+            proposal.idempotencyKey,
+          );
+          const event = validateControlEvent({
+            protocol: "asterion.agent-control/v1",
+            event_id: identity.eventId,
+            session_id: descriptor.sessionId,
+            generation: descriptor.generation,
+            sequence: identity.sequence,
+            emitted_at: identity.emittedAt,
+            type: "action.proposed",
+            payload: {
+              action_id: actionId,
+              authority_revision: context.authorityRevision,
+              idempotency_key: proposal.idempotencyKey,
+              kind: "child.spawn",
+              target: { kind: "child", child_id: proposal.childId },
+              input_ref: inputRef,
+              expected_artifacts: [],
+              budget: proposal.budget,
+              causal_parent_ids: context.causalParentIds,
+            },
+          });
+          await gateway.emitActionProposal(event);
+          const admission = await gateway.waitForAdmission(actionId);
+          return Object.freeze({
+            resolution: admission.resolution,
+            childId: proposal.childId,
+          });
+        } catch {
+          return Object.freeze({ resolution: "uncertain" as const, childId: proposal.childId });
+        }
+      },
+    });
+    const listener = await listenRlmHostBridge(
+      socketPath,
+      descriptor.sessionId,
+      token,
+      bridge,
+    );
+    rlmHostClose = listener.close;
+    try {
+      await writeRlmHostDiscovery(descriptor, socketPath, token);
+    } catch (error) {
+      await closeRlmHostBridge();
+      throw error;
+    }
   };
 
   const startSkillBridge = async (
@@ -1081,6 +1206,12 @@ async function createSidecarFromDescriptor(
       actionStatus: (actionId) => gateway.actionStatus(actionId),
     });
     await writeSkillDiscovery(descriptor, skillBridge, token);
+    try {
+      await startRlmHostBridge(context, ready);
+    } catch (error) {
+      await closeSkillBridge();
+      throw error;
+    }
   };
 
   gateway = await PrimeGateway.open({

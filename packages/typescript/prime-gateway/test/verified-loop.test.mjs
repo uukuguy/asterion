@@ -46,6 +46,7 @@ const sentinels = Object.freeze([
   "SENTINEL_OUTPUT",
 ]);
 const discoveryFileName = "asterion-control.json";
+const rlmDiscoveryFileName = "asterion-rlm-host.json";
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -119,6 +120,19 @@ async function createPrimeSource(root) {
     files: Object.fromEntries(
       Object.entries(contents).map(([name, value]) => [name, sha256(value)]),
     ),
+    rlm_runtime: {
+      entry: "packages/coding-agent/src/modes/daemon/daemon-client.ts",
+      binding_chunk: "packages/coding-agent/src/modes/daemon/daemon-protocol.ts",
+      patch_sha256: sha256("fixture-rlm-patch"),
+      closure: {
+        "packages/coding-agent/src/modes/daemon/daemon-client.ts": sha256(contents["packages/coding-agent/src/modes/daemon/daemon-client.ts"]),
+        "packages/coding-agent/src/modes/daemon/daemon-protocol.ts": sha256(contents["packages/coding-agent/src/modes/daemon/daemon-protocol.ts"]),
+      },
+      derived_closure: {
+        "packages/coding-agent/src/modes/daemon/daemon-client.ts": sha256(contents["packages/coding-agent/src/modes/daemon/daemon-client.ts"]),
+        "packages/coding-agent/src/modes/daemon/daemon-protocol.ts": sha256("fixture-derived-rlm-binding"),
+      },
+    },
   };
   return lock;
 }
@@ -489,6 +503,12 @@ async function runScenario(scenario) {
     assert.equal(discovery.session_id, "session-1");
     assert.match(discovery.token, /^[0-9a-f]{64}$/u);
     assert.equal((await stat(discoveryPath)).mode & 0o777, 0o600);
+    const rlmDiscoveryPath = join(gateway.agentDir, rlmDiscoveryFileName);
+    const rlmDiscovery = JSON.parse(await readFile(rlmDiscoveryPath, "utf8"));
+    assert.equal(rlmDiscovery.protocol, "asterion.prime-rlm-host-discovery/v1");
+    assert.equal(rlmDiscovery.session_id, "session-1");
+    assert.match(rlmDiscovery.token, /^[0-9a-f]{64}$/u);
+    assert.equal((await stat(rlmDiscoveryPath)).mode & 0o777, 0o600);
     if (scenario.scenario_id === "prime-loop-gateway-crash") {
       gateway.child.kill("SIGTERM");
       await waitForExit(gateway.child, `${scenario.scenario_id} gateway crash`);

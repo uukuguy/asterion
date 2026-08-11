@@ -398,7 +398,7 @@ function parseJson(line: Buffer): unknown {
   }
 }
 
-function actionId(sessionId: string, idempotencyKey: string): string {
+export function deriveControlActionId(sessionId: string, idempotencyKey: string): string {
   const digest = createHash("sha256")
     .update(sessionId)
     .update("\0")
@@ -724,7 +724,7 @@ export class AsterionSkillBridge {
       return Promise.reject(new SkillBridgeConfigurationError());
     }
     const idempotencyKey = String(request.payload.idempotency_key);
-    const derivedActionId = actionId(this.options.sessionId, idempotencyKey);
+    const derivedActionId = deriveControlActionId(this.options.sessionId, idempotencyKey);
     const digest = requestDigest(request);
     const existing = this.effects.get(derivedActionId);
     if (existing !== undefined) {

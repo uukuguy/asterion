@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { chmod, unlink } from "node:fs/promises";
 import { createServer, type Server } from "node:net";
 
@@ -25,6 +25,18 @@ export function authenticateRlmHostFrame(
 export interface RlmSpawnProposal {
   readonly requestId: string;
   readonly childId: string;
+  readonly idempotencyKey: string;
+  readonly goalText: string;
+  readonly budget: RlmSpawnBudget;
+}
+
+export interface RlmSpawnBudget {
+  readonly controller_tokens: number;
+  readonly application_tokens: number;
+  readonly child_tokens: number;
+  readonly aggregate_tokens: number;
+  readonly cost_micros: number;
+  readonly deadline_ms: number;
 }
 
 export interface RlmSpawnResolution {
@@ -35,33 +47,70 @@ export interface RlmSpawnResolution {
 export interface RlmHostBridgeOptions {
   readonly sessionId: string;
   readonly admitSpawn: (proposal: RlmSpawnProposal) => Promise<RlmSpawnResolution>;
-  readonly waitForTerminal: (childId: string) => Promise<unknown>;
+}
+
+const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  const sorted = [...expected].sort();
+  return actual.length === sorted.length && actual.every((key, index) => key === sorted[index]);
+}
+
+function validBudget(value: unknown): value is RlmSpawnBudget {
+  if (!isRecord(value) || !hasExactKeys(value, ["controller_tokens", "application_tokens", "child_tokens", "aggregate_tokens", "cost_micros", "deadline_ms"])) return false;
+  return [value.controller_tokens, value.application_tokens, value.child_tokens, value.aggregate_tokens, value.cost_micros].every((item) => Number.isSafeInteger(item) && Number(item) >= 0) && Number.isSafeInteger(value.deadline_ms) && Number(value.deadline_ms) > 0;
+}
+
+function proposalDigest(proposal: RlmSpawnProposal): string {
+  return createHash("sha256").update(JSON.stringify({
+    child_id: proposal.childId,
+    idempotency_key: proposal.idempotencyKey,
+    goal_text: proposal.goalText,
+    budget: proposal.budget,
+  })).digest("hex");
 }
 
 export class RlmHostBridge {
-  private readonly spawns = new Map<string, { readonly childId: string; readonly promise: Promise<RlmSpawnResolution> }>();
+  private readonly spawns = new Map<string, { readonly digest: string; readonly promise: Promise<RlmSpawnResolution> }>();
 
   constructor(private readonly options: RlmHostBridgeOptions) {
     if (options.sessionId.length === 0) throw new TypeError("RLM bridge is invalid");
   }
 
   async proposeSpawn(proposal: RlmSpawnProposal): Promise<RlmSpawnResolution> {
-    if (proposal.requestId.length === 0 || proposal.childId.length === 0) {
+    if (
+      !OPAQUE_ID.test(proposal.requestId) ||
+      !OPAQUE_ID.test(proposal.childId) ||
+      !OPAQUE_ID.test(proposal.idempotencyKey) ||
+      Buffer.byteLength(proposal.goalText, "utf8") > 1024 * 1024 ||
+      !validBudget(proposal.budget)
+    ) {
       throw new TypeError("RLM proposal is invalid");
     }
+    const digest = proposalDigest(proposal);
     const existing = this.spawns.get(proposal.requestId);
     if (existing !== undefined) {
-      if (existing.childId !== proposal.childId) throw new TypeError("RLM proposal conflicts");
+      if (existing.digest !== digest) throw new TypeError("RLM proposal conflicts");
       return existing.promise;
     }
     const promise = this.admit(proposal);
-    this.spawns.set(proposal.requestId, { childId: proposal.childId, promise });
+    this.spawns.set(proposal.requestId, { digest, promise });
     return promise;
   }
 
   private async admit(proposal: RlmSpawnProposal): Promise<RlmSpawnResolution> {
     const resolution = await this.options.admitSpawn(Object.freeze({ ...proposal }));
-    if (resolution.childId !== proposal.childId) throw new TypeError("RLM admission is invalid");
+    if (
+      resolution.childId !== proposal.childId ||
+      !["admitted", "rejected", "uncertain"].includes(resolution.resolution)
+    ) {
+      throw new TypeError("RLM admission is invalid");
+    }
     return Object.freeze({ ...resolution });
   }
 }
@@ -90,9 +139,9 @@ export async function listenRlmHostBridge(
           continue;
         }
         try {
-        const value = JSON.parse(line.toString("utf8")) as { request_id?: unknown; child_id?: unknown; type?: unknown };
-        if (value.type !== "rlm.spawn.propose" || typeof value.request_id !== "string" || typeof value.child_id !== "string") throw new TypeError();
-        void bridge.proposeSpawn({ requestId: value.request_id, childId: value.child_id }).then((result) => socket.end(`${JSON.stringify(result)}\n`), () => socket.destroy());
+        const value: unknown = JSON.parse(line.toString("utf8"));
+        if (!isRecord(value) || !hasExactKeys(value, ["type", "request_id", "child_id", "idempotency_key", "goal_text", "budget"]) || value.type !== "rlm.spawn.propose" || typeof value.request_id !== "string" || typeof value.child_id !== "string" || typeof value.idempotency_key !== "string" || typeof value.goal_text !== "string" || !validBudget(value.budget)) throw new TypeError();
+        void bridge.proposeSpawn({ requestId: value.request_id, childId: value.child_id, idempotencyKey: value.idempotency_key, goalText: value.goal_text, budget: value.budget }).then((result) => socket.end(`${JSON.stringify(result)}\n`), () => socket.destroy());
         } catch { socket.destroy(); }
         return;
       }

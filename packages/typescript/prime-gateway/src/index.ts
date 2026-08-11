@@ -88,11 +88,13 @@ export {
   SKILL_CONTROL_PROTOCOL,
   SkillBridgeConfigurationError,
   SkillBridgeConflictError,
+  deriveControlActionId,
   generateSkillBridgeToken,
 } from "./skill-bridge.js";
 export { authenticateRlmHostFrame, listenRlmHostBridge, RlmHostBridge, RLM_HOST_PROTOCOL } from "./rlm-host-bridge.js";
 export type {
   RlmHostBridgeOptions,
+  RlmSpawnBudget,
   RlmSpawnProposal,
   RlmSpawnResolution,
 } from "./rlm-host-bridge.js";
