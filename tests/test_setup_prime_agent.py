@@ -303,6 +303,19 @@ class TestSetupPrimeAgent(unittest.TestCase):
                 any(call[0][:2] == ("git", "status") for call in runner.calls)
             )
 
+    def test_shipped_rlm_hunk_loads_the_private_host_shim_before_binding(self) -> None:
+        replacement = json.loads(
+            (PROJECT / "packages/typescript/prime-gateway/resources/prime-rlm-host-shim.json").read_text()
+        )["replacement"]
+
+        self.assertIn("asterion-rlm-host-shim.mjs", replacement)
+        self.assertIn("createRlmHostClient", replacement)
+        self.assertIn("wrapSubagentRuntimeHost", replacement)
+        self.assertLess(
+            replacement.index("createRlmHostClient"),
+            replacement.index("setSubagentRuntimeHost"),
+        )
+
     def test_derivation_rejects_runtime_anchor_drift_without_private_output(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             source, lock_path, shim_path = _rlm_runtime_fixture(Path(directory))
