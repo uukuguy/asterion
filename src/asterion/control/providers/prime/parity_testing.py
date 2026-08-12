@@ -599,6 +599,129 @@ def build_prime_rlm_observation(
         raise ParityScenarioRegistryError("Prime RLM observation is invalid") from None
 
 
+def register_prime_rlm_scenarios(
+    registry: ParityScenarioRegistry,
+    observations: Sequence[PrimeRlmScenarioObservation],
+    *,
+    provider_factory: Callable[[], object],
+) -> None:
+    """Register exact RLM scenarios without promoting model-only paths."""
+
+    try:
+        if (
+            registry.provider_id != "asterion.prime-gateway"
+            or type(observations) not in {list, tuple}
+            or not callable(provider_factory)
+            or any(
+                scenario_id in registry.registered_scenario_ids
+                for scenario_id in PRIME_RLM_SCENARIO_IDS
+            )
+        ):
+            raise ValueError
+        items = tuple(observations)
+        if tuple(item.scenario_id for item in items) != PRIME_RLM_SCENARIO_IDS:
+            raise ValueError
+        runners: list[tuple[str, ParityScenarioRunner]] = []
+        for observation in items:
+            _validate_prime_rlm_observation(observation)
+            contract = PRIME_RLM_SCENARIO_MATRIX[observation.scenario_id]
+            result_status = (
+                "pass" if observation.status == "PASS" else "external-limited"
+            )
+            reason_code = (
+                "real-prime-provider-free-verified"
+                if result_status == "pass"
+                else "bounded-provider-authorization-required"
+            )
+
+            async def executor(
+                factory,
+                clock,
+                private_fixture_store,
+                fault_injector,
+                *,
+                scenario_id: str = observation.scenario_id,
+                status: str = result_status,
+                evidence_id: str | None = observation.evidence_id,
+                reason: str = reason_code,
+            ) -> ParityScenarioResult:
+                del clock, private_fixture_store, fault_injector
+                factory()
+                return ParityScenarioResult(
+                    scenario_id=scenario_id,
+                    provider_id="asterion.prime-gateway",
+                    status=status,
+                    evidence_id=evidence_id,
+                    reason_code=reason,
+                )
+
+            runners.append(
+                (
+                    observation.scenario_id,
+                    ParityScenarioRunner(
+                        scenario_id=observation.scenario_id,
+                        provider_id="asterion.prime-gateway",
+                        boundary=str(contract["boundary"]),
+                        feature_ids=tuple(contract["feature_ids"]),
+                        assertion_ids=tuple(contract["assertion_ids"]),
+                        fault_ids=tuple(contract["fault_ids"]),
+                        provider_factory=provider_factory,
+                        clock=_DeterministicClock(),
+                        private_fixture_store=_CredentialFreeFixtureStore(),
+                        fault_injector=_DeterministicFaultInjector(),
+                        executor=executor,
+                    ),
+                )
+            )
+    except (AttributeError, KeyError, TypeError, ValueError):
+        raise ParityScenarioRegistryError("Prime RLM evidence adapter is invalid") from None
+
+    for scenario_id, runner in runners:
+        registry.register(scenario_id, runner)
+
+
+def _validate_prime_rlm_observation(observation: PrimeRlmScenarioObservation) -> None:
+    try:
+        if type(observation) is not PrimeRlmScenarioObservation:
+            raise ValueError
+        rebuilt = build_prime_rlm_observation(
+            scenario_id=observation.scenario_id,
+            status=observation.status,
+            checks=observation.checks,
+            real_prime_runtime=observation.real_prime_runtime,
+            fake_daemon=observation.fake_daemon,
+            provider_operations=observation.provider_operations,
+            model_credential_reads=observation.model_credential_reads,
+        )
+        if (
+            observation.real_prime_runtime is not True
+            or observation.fake_daemon is not False
+            or observation.provider_operations != 0
+            or observation.model_credential_reads != 0
+            or observation.source_commit != PRIME_SESSION_CONTEXT_SOURCE_COMMIT
+            or observation.artifact_lock != PRIME_SESSION_CONTEXT_ARTIFACT_LOCK
+            or observation.command_id != PRIME_RLM_VERIFICATION_COMMAND_ID
+            or observation.serialized_observations
+            != rebuilt.serialized_observations
+            or observation.evidence_id != rebuilt.evidence_id
+            or (
+                observation.scenario_id in PRIME_RLM_PROVIDER_FREE_SCENARIO_IDS
+                and observation.evidence_id is None
+            )
+            or (
+                observation.scenario_id in PRIME_RLM_BOUNDED_SCENARIO_IDS
+                and observation.evidence_id is not None
+            )
+            or any(
+                sentinel in observation.serialized_observations
+                for sentinel in _SESSION_CONTEXT_SENTINELS
+            )
+        ):
+            raise ValueError
+    except (KeyError, TypeError, ValueError):
+        raise ParityScenarioRegistryError("Prime RLM evidence adapter is invalid") from None
+
+
 def build_prime_session_context_observation(
     *,
     scenario_id: str,
