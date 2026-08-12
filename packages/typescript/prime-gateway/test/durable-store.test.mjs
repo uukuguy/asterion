@@ -1024,8 +1024,24 @@ test("durable store reopens maximum-length protocol identities", async () => {
 
 test("durable store records a closed RLM child lifecycle across reopen", async () => {
   const fixtureRoot = await temporaryStoreRoot();
+  const binding = {
+    action_id: "action-1",
+    child_id: "child-1",
+    authority_revision: 1,
+    depth: 1,
+    model_selector_digest: "a".repeat(64),
+  };
   try {
     const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    await assert.rejects(
+      store.recordRlmLifecycle({
+        type: "rlm.child.started",
+        child_id: "child-unknown",
+        native_identity_digest: "a".repeat(64),
+      }),
+      GatewayStoreConflictError,
+    );
+    await store.recordRlmBinding(binding);
     await store.recordRlmLifecycle({
       type: "rlm.child.started",
       child_id: "child-1",

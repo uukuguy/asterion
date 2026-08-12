@@ -1608,6 +1608,7 @@ export class GatewayDurableStore {
   ): Promise<GatewayRecordReceipt> {
     const validated = validateRlmLifecycleObservation(observation);
     if (
+      !this.rlmActionsByChildId.has(validated.child_id) ||
       (validated.type === "rlm.child.started" &&
         (this.activeRlmChildIds.has(validated.child_id) ||
           this.closedRlmChildIds.has(validated.child_id))) ||
@@ -2327,6 +2328,9 @@ export class GatewayDurableStore {
       this.primeCursor = cursor;
     } else if (record.stored.kind === "rlm.lifecycle") {
       const observation = validateRlmLifecycleObservation(record.payload);
+      if (!this.rlmActionsByChildId.has(observation.child_id)) {
+        throw new GatewayStoreCorruptionError();
+      }
       if (observation.type === "rlm.child.started") {
         if (this.activeRlmChildIds.has(observation.child_id)) {
           throw new GatewayStoreCorruptionError();
