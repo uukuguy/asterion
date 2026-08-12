@@ -22,7 +22,7 @@ ASTERION_PRIME_MAX_COST_MICROS ?=
 .PHONY: test-typescript test-rust check-rust
 .PHONY: prime-check prime-setup prime-verify-provider-free prime-verify-bounded
 .PHONY: prime-parity-inventory prime-verify-system-parity
-.PHONY: test.prime-session-context-parity.provider-free
+.PHONY: test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free
 
 help:
 	@echo "provider-free setup (network/disk; Agent operations 0; Judge operations 0): setup setup-pi setup-resources-basic setup-resources-benchmark"
@@ -33,7 +33,7 @@ help:
 	@echo "DCI adapter: dci-list dci-describe dci-preflight dci-basic dci-complete dci-run dci-benchmark"
 	@echo "DCI bounded examples: dci-basic-example dci-runtime-context-example"
 	@echo "Cross-language provider-free: test-typescript test-rust check-rust"
-	@echo "Prime Gateway: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-parity-inventory prime-verify-system-parity test.prime-session-context-parity.provider-free"
+	@echo "Prime Gateway: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-parity-inventory prime-verify-system-parity test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free"
 	@echo "Cost boundary: full execution requires separate authorization"
 	@echo "Arguments: ASTERION_ARGS='...' or DCI_ARGS='...'"
 
@@ -155,6 +155,13 @@ test.prime-session-context-parity.provider-free:
 		tests.test_prime_parity_conformance
 	npm --prefix packages/typescript/asterion-runtime test
 	npm --prefix packages/typescript/prime-gateway test
+
+test.prime-rlm-spawn-admission.provider-free:
+	npm --prefix packages/typescript/prime-gateway test -- \
+		test/daemon-wire.test.mjs \
+		test/rlm-host-shim.test.mjs
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_prime_rlm_messaging_parity
 
 prime-verify-bounded:
 	$(UV_BIN) run python tools/verify_prime_loop.py --level bounded --source-root "$(ASTERION_PRIME_SOURCE_ROOT)" --authority "$(ASTERION_PRIME_AUTHORITY)" --max-cost-micros "$(ASTERION_PRIME_MAX_COST_MICROS)"
