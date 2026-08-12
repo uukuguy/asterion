@@ -96,6 +96,14 @@ class SpyExecutor:
         raise AssertionError("Phase 0 host must not execute applications")
 
 
+class AdmissionPreparer:
+    def __init__(self, audit: list[str]) -> None:
+        self.audit = audit
+
+    async def prepare(self, proposal: ControlEvent) -> None:
+        self.audit.append(f"prepare:{proposal.payload['action_id']}")
+
+
 def _session_events(proposal: ControlEvent) -> tuple[ControlEvent, ...]:
     created = ControlEvent.from_mapping(
         {
@@ -144,6 +152,29 @@ def _create_command() -> ControlCommand:
 
 
 class TestControlHost(unittest.IsolatedAsyncioTestCase):
+    async def test_admitted_action_preparer_runs_before_admission_delivery(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            audit: list[str] = []
+            plan = resolve_agent_system(
+                _manifest(), application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]), host_capabilities=("clock.monotonic", "storage.private"),
+            )
+            client = ScriptedClient(plan.control_binding.manifest, audit=audit)
+            host = ControlHost(
+                session_id="session-1", generation=1, plan=plan,
+                authority=AuthorityLedger(_envelope()), journal=MemoryCanonicalJournal("session-1"),
+                client=client, action_executor=SpyExecutor(), clock_ms=lambda: 1_000,
+                admitted_action_preparer=AdmissionPreparer(audit),
+            )
+            proposal = ControlEvent.from_mapping(
+                {**_proposal().to_mapping(), "sequence": 3}
+            )
+            created, running, _ = _session_events(proposal)
+            await host._accept_event(created)
+            await host._accept_event(running)
+            await host._accept_event(proposal)
+
+        self.assertLess(audit.index(f"prepare:{proposal.payload['action_id']}"), audit.index("provider.send"))
     async def test_exact_stale_budget_report_replay_preserves_current_usage(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             plan = resolve_agent_system(

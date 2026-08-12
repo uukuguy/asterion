@@ -79,6 +79,7 @@ from asterion.control.recovery import (
 )
 from asterion.control.manager import (
     ActionExecutor,
+    AdmittedActionPreparer,
     ChildLifecycleService,
     ControlHost,
     ControlHostError,
@@ -165,6 +166,7 @@ __all__ = [
     "ActionExecutionFailure",
     "ActionExecutionReceipt",
     "ActionExecutor",
+    "AdmittedActionPreparer",
     "ActionState",
     "AdmissionDecision",
     "AgentSystemError",

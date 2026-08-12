@@ -74,6 +74,13 @@ class ActionExecutor(Protocol):
         ...
 
 
+class AdmittedActionPreparer(Protocol):
+    """Persist provider-specific binding before an admitted action is delivered."""
+
+    async def prepare(self, proposal: ControlEvent) -> None:
+        ...
+
+
 class ActionResultBinder(Protocol):
     def bind_action_result(self, receipt: ActionExecutionReceipt) -> None:
         """Bind one public-safe execution projection before terminal delivery."""
@@ -150,6 +157,7 @@ class ControlHost:
         pathlight: PathlightRecorder = NOOP_PATHLIGHT_RECORDER,
         child_service: ChildLifecycleService | None = None,
         session_context_client: SessionContextClient | None = None,
+        admitted_action_preparer: AdmittedActionPreparer | None = None,
     ) -> None:
         if (
             not isinstance(plan, AgentSystemPlan)
@@ -169,6 +177,10 @@ class ControlHost:
             or authority.reserved_session_context_ids
             or authority.session_context_settlements
             or not _valid_child_service(child_service)
+            or (
+                admitted_action_preparer is not None
+                and not callable(getattr(admitted_action_preparer, "prepare", None))
+            )
             or (
                 session_context_client is not None
                 and (
@@ -198,6 +210,7 @@ class ControlHost:
         self._client = client
         self._action_executor = action_executor
         self._child_service = child_service
+        self._admitted_action_preparer = admitted_action_preparer
         self._children_closed = False
         self._cancellation_signal = cancellation_signal or _NeverCancelled()
         self._clock_ms = clock_ms
@@ -520,6 +533,8 @@ class ControlHost:
                 journal_position=entry.position,
                 timestamp_ns=self._clock_ms() * 1_000_000,
             )
+            if decision.status == "admitted" and self._admitted_action_preparer is not None:
+                await self._admitted_action_preparer.prepare(proposal)
         except (JournalConflictError, ControlStateError, TypeError, ValueError):
             raise ControlHostError("control action admission failed") from None
         command = ControlCommand(
