@@ -91,7 +91,7 @@ class RlmChildStatus:
 @dataclass
 class _ChildEntry:
     binding: RlmChildBinding
-    native_identity: str
+    native_identity: str | None
     status: RlmChildStatus
 
 
@@ -111,8 +111,8 @@ class RlmChildService:
         if private_root is not None:
             self._load()
 
-    def admit(self, binding: RlmChildBinding, *, native_identity: str) -> RlmChildStatus:
-        if not isinstance(binding, RlmChildBinding) or not _native_identity(native_identity):
+    def admit(self, binding: RlmChildBinding) -> RlmChildStatus:
+        if not isinstance(binding, RlmChildBinding):
             raise RlmError("RLM child admission is invalid")
         if binding.authority_revision != self._authority.revision:
             raise RlmError("RLM child authority is invalid")
@@ -126,24 +126,30 @@ class RlmChildService:
                 raise RlmError("RLM child is fenced")
             if current.status.status in _TERMINAL:
                 raise RlmError("RLM child is terminal")
-            if current.binding != binding or current.native_identity != native_identity:
+            if current.binding != binding:
                 raise RlmError("RLM child identity conflicts")
             return current.status
         if sum(entry.status.status in {"admitted", "started"} for entry in self._entries.values()) >= self._authority.max_concurrent_children:
             raise RlmError("RLM child concurrency is unavailable")
         status = RlmChildStatus(binding.child_id, "admitted")
-        self._entries[binding.child_id] = _ChildEntry(binding, native_identity, status)
+        self._entries[binding.child_id] = _ChildEntry(binding, None, status)
         self._persist()
         return status
 
     def record_started(
         self, binding: RlmChildBinding, *, native_identity: str
     ) -> RlmChildStatus:
-        entry = self._require(binding, native_identity)
+        if not _native_identity(native_identity):
+            raise RlmError("RLM child identity conflicts")
+        entry = self._require(binding, None)
         if entry.status.status == "uncertain":
             raise RlmError("RLM child is fenced")
         if entry.status.status in _TERMINAL:
             raise RlmError("RLM child is terminal")
+        if entry.native_identity is None:
+            entry.native_identity = native_identity
+        elif entry.native_identity != native_identity:
+            raise RlmError("RLM child identity conflicts")
         entry.status = RlmChildStatus(binding.child_id, "started")
         self._persist()
         return entry.status
@@ -218,7 +224,12 @@ class RlmChildService:
                 binding = RlmChildBinding(**item["binding"])
                 native_identity = item["native_identity"]
                 status = RlmChildStatus(**item["status"])
-                if not _native_identity(native_identity) or status.child_id != binding.child_id:
+                if (
+                    native_identity is not None
+                    and not _native_identity(native_identity)
+                ) or status.child_id != binding.child_id or (
+                    status.status != "admitted" and native_identity is None
+                ):
                     raise ValueError
                 if status.status in {"admitted", "started"}:
                     status = RlmChildStatus(binding.child_id, "uncertain")

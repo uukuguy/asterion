@@ -58,19 +58,19 @@ class TestRlmChildService(unittest.TestCase):
         service = RlmChildService(_authority())
         binding = _binding()
 
-        service.admit(binding, native_identity="private-native-session")
+        service.admit(binding)
         service.record_started(binding, native_identity="private-native-session")
         service.record_uncertain(binding)
 
         self.assertEqual(service.status("child-1").status, "uncertain")
         with self.assertRaisesRegex(RlmError, "RLM child is fenced"):
-            service.admit(binding, native_identity="private-native-session")
+            service.admit(binding)
         self.assertNotIn("private-native-session", repr(service.public_registry()))
 
     def test_terminal_cannot_regress_or_change_private_identity(self) -> None:
         service = RlmChildService(_authority())
         binding = _binding()
-        service.admit(binding, native_identity="private-native-session")
+        service.admit(binding)
         service.record_started(binding, native_identity="private-native-session")
         service.record_terminal(binding, status="completed")
 
@@ -88,11 +88,11 @@ class TestRlmChildService(unittest.TestCase):
             root = Path(directory)
             binding = _binding()
             service = RlmChildService(_authority(), private_root=root)
-            service.admit(binding, native_identity="private-native-session")
+            service.admit(binding)
             service.record_started(binding, native_identity="private-native-session")
 
             reopened = RlmChildService(_authority(), private_root=root)
 
         self.assertEqual(reopened.status("child-1").status, "uncertain")
         with self.assertRaisesRegex(RlmError, "RLM child is fenced"):
-            reopened.admit(binding, native_identity="private-native-session")
+            reopened.admit(binding)
