@@ -47,7 +47,16 @@ export interface RlmSpawnResolution {
 export interface RlmHostBridgeOptions {
   readonly sessionId: string;
   readonly admitSpawn: (proposal: RlmSpawnProposal) => Promise<RlmSpawnResolution>;
+  readonly recordLifecycle?: (event: RlmHostLifecycleEvent) => Promise<void>;
 }
+
+export type RlmHostLifecycleEvent =
+  | Readonly<{ readonly type: "rlm.child.started"; readonly childId: string }>
+  | Readonly<{
+      readonly type: "rlm.child.terminal";
+      readonly childId: string;
+      readonly status: "completed" | "failed" | "cancelled";
+    }>;
 
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 
@@ -101,6 +110,20 @@ export class RlmHostBridge {
     const promise = this.admit(proposal);
     this.spawns.set(proposal.requestId, { digest, promise });
     return promise;
+  }
+
+  async recordLifecycle(event: RlmHostLifecycleEvent): Promise<void> {
+    if (
+      !isRecord(event)
+      || !OPAQUE_ID.test(event.childId)
+      || (event.type !== "rlm.child.started"
+        && (event.type !== "rlm.child.terminal"
+          || !["completed", "failed", "cancelled"].includes(event.status)))
+    ) {
+      throw new TypeError("RLM lifecycle is invalid");
+    }
+    if (this.options.recordLifecycle === undefined) return;
+    await this.options.recordLifecycle(Object.freeze({ ...event }));
   }
 
   private async admit(proposal: RlmSpawnProposal): Promise<RlmSpawnResolution> {

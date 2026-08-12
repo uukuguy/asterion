@@ -31,6 +31,7 @@ from asterion.control.children import (
     ChildTerminalReceipt,
     derive_child_authority,
 )
+from asterion.control.rlm import RlmChildBinding, RlmChildService, RlmChildStatus, RlmError
 from asterion.control.authority import (
     ActionReceipt,
     AdmissionDecision,
@@ -194,6 +195,10 @@ __all__ = [
     "ChildSessionService",
     "ChildSessionStatus",
     "ChildTerminalReceipt",
+    "RlmChildBinding",
+    "RlmChildService",
+    "RlmChildStatus",
+    "RlmError",
     "ControlHostError",
     "ControlHostSnapshot",
     "ControlHostTransportError",

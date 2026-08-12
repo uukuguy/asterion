@@ -98,3 +98,24 @@ test("serves an authenticated RLM spawn over its private socket", async () => {
     assert.deepEqual(response, { resolution: "admitted", childId: "c1" });
   } finally { await listener.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+test("records one closed native child lifecycle after admission", async () => {
+  const lifecycle = [];
+  const bridge = new RlmHostBridge({
+    sessionId: "session-1",
+    admitSpawn: async (proposal) => ({ resolution: "admitted", childId: proposal.childId }),
+    recordLifecycle: async (event) => { lifecycle.push(event); },
+  });
+
+  await bridge.recordLifecycle({ type: "rlm.child.started", childId: "child-1" });
+  await bridge.recordLifecycle({ type: "rlm.child.terminal", childId: "child-1", status: "completed" });
+
+  assert.deepEqual(lifecycle, [
+    { type: "rlm.child.started", childId: "child-1" },
+    { type: "rlm.child.terminal", childId: "child-1", status: "completed" },
+  ]);
+  await assert.rejects(
+    () => bridge.recordLifecycle({ type: "rlm.child.terminal", childId: "child-1", status: "private-path" }),
+    /invalid/u,
+  );
+});

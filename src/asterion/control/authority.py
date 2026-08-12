@@ -20,6 +20,9 @@ from asterion.control.session_context import (
     SESSION_CONTEXT_OPERATIONS,
     SessionContextCommand,
 )
+
+
+RLM_OPERATIONS = frozenset({"rlm.child.delete", "rlm.child.message", "rlm.child.spawn"})
 from asterion.protocol_ordering import is_sorted_unique_scalar_strings
 
 
@@ -156,7 +159,7 @@ class AuthorityEnvelope:
             raise AuthorityError("authority portfolio is invalid")
         operations = tuple(self.allowed_operations)
         if any(
-            operation not in ACTION_KINDS | SESSION_CONTEXT_OPERATIONS
+            operation not in ACTION_KINDS | SESSION_CONTEXT_OPERATIONS | RLM_OPERATIONS
             for operation in operations
         ) or not is_sorted_unique_scalar_strings(list(operations)):
             raise AuthorityError("authority operations are invalid")
