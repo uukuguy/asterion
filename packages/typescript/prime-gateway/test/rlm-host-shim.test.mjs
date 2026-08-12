@@ -43,6 +43,33 @@ test("admits a native RLM child before creating it exactly once", async () => {
   ]);
 });
 
+test("preserves Prime's synchronous completion while recording the completed observation", async () => {
+  const order = [];
+  const childSession = Object.freeze({ sessionId: "native-session-1" });
+  const wrapped = wrapSubagentRuntimeHost({
+    async createRlmSubagentRuntime() { return { session: childSession }; },
+    async deleteRlmSubagentRuntime() {},
+    completeRlmSubagentRuntime(childId, session) {
+      order.push(`native-complete:${childId}:${session.sessionId}`);
+      return true;
+    },
+  }, {
+    async proposeSpawn() { return { resolution: "admitted", child_id: "child-1" }; },
+    async recordLifecycle(event) { order.push(`lifecycle:${event.type}:${event.child_id}:${event.status ?? ""}`); },
+  }, hostContext());
+
+  assert.equal(wrapped.completeRlmSubagentRuntime("child-1", childSession), true);
+  assert.deepEqual(order, [
+    "native-complete:child-1:native-session-1",
+    "lifecycle:rlm.child.terminal:child-1:completed",
+  ]);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(order, [
+    "native-complete:child-1:native-session-1",
+    "lifecycle:rlm.child.terminal:child-1:completed",
+  ]);
+});
+
 test("derives the complete host-owned proposal before the native child effect", async () => {
   let proposal;
   const wrapped = wrapSubagentRuntimeHost({
