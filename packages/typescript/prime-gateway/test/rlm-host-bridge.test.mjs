@@ -210,3 +210,37 @@ test("records delivery only after an admitted family message", async () => {
   await bridge.recordMessageDelivered({ messageId: "message-1" });
   assert.deepEqual(delivered, [{ messageId: "message-1" }]);
 });
+
+test("serves one authenticated private message proposal and delivery frame", async () => {
+  const root = await mkdtemp(join(tmpdir(), "asterion-rlm-message-"));
+  const path = join(root, "r.sock");
+  const delivered = [];
+  const listener = await listenRlmHostBridge(path, "session-1", "44".repeat(32), new RlmHostBridge({
+    sessionId: "session-1",
+    admitSpawn: async (request) => ({ resolution: "admitted", childId: request.childId }),
+    admitMessage: async (request) => ({ resolution: "admitted", messageId: request.messageId }),
+    recordMessageDelivered: async (event) => { delivered.push(event); },
+  }));
+  const request = (frame) => new Promise((resolve, reject) => {
+    const socket = createConnection(path);
+    let body = "";
+    socket.setEncoding("utf8");
+    socket.once("connect", () => socket.write(`${JSON.stringify({ protocol: RLM_HOST_PROTOCOL, type: "authenticate", session_id: "session-1", token: "44".repeat(32) })}\n${JSON.stringify(frame)}\n`));
+    socket.on("data", (chunk) => { body += chunk; });
+    socket.once("error", reject);
+    socket.once("end", () => resolve(JSON.parse(body)));
+  });
+  try {
+    assert.deepEqual(await request({
+      type: "rlm.message.propose", request_id: "message-request-1", message_id: "message-1",
+      sender_id: "session-1", recipient_id: "child-1", body_text: "SENTINEL_PRIVATE_MESSAGE",
+    }), { resolution: "admitted", messageId: "message-1" });
+    assert.deepEqual(await request({ type: "rlm.message.delivered", message_id: "message-1" }), {
+      resolution: "recorded", messageId: "message-1",
+    });
+    assert.deepEqual(delivered, [{ messageId: "message-1" }]);
+  } finally {
+    await listener.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});

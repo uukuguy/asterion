@@ -169,6 +169,8 @@ test("reads one exact private discovery record and authenticates its spawn", asy
   const listener = await listenRlmHostBridge(socketPath, "session-1", token, new RlmHostBridge({
     sessionId: "session-1",
     admitSpawn: async (proposal) => ({ resolution: "admitted", childId: proposal.childId }),
+    admitMessage: async (proposal) => ({ resolution: "admitted", messageId: proposal.messageId }),
+    recordMessageDelivered: async () => undefined,
   }));
   try {
     const discoveryPath = join(root, "asterion-rlm-host.json");
@@ -189,6 +191,16 @@ test("reads one exact private discovery record and authenticates its spawn", asy
       idempotency_key: "spawn-1",
       budget: { controller_tokens: 0, application_tokens: 0, child_tokens: 1, aggregate_tokens: 1, cost_micros: 0, deadline_ms: 1 },
     }), { resolution: "admitted", child_id: "child-1" });
+    assert.deepEqual(await client.proposeMessage({
+      request_id: "message-request-1",
+      message_id: "message-1",
+      sender_id: "session-1",
+      recipient_id: "child-1",
+      body_text: "SENTINEL_PRIVATE_MESSAGE",
+    }), { resolution: "admitted", message_id: "message-1" });
+    assert.deepEqual(await client.recordMessageDelivered({ message_id: "message-1" }), {
+      message_id: "message-1",
+    });
   } finally {
     await listener.close();
     await rm(root, { recursive: true, force: true });

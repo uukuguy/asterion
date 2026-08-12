@@ -250,15 +250,21 @@ export async function listenRlmHostBridge(
         }
         try {
         const value: unknown = JSON.parse(line.toString("utf8"));
-        if (!isRecord(value) || typeof value.type !== "string" || typeof value.child_id !== "string") throw new TypeError();
+        if (!isRecord(value) || typeof value.type !== "string") throw new TypeError();
         if (value.type === "rlm.spawn.propose") {
-          if (!hasExactKeys(value, ["type", "request_id", "child_id", "idempotency_key", "goal_text", "rlm_depth", "model_selector_digest", "budget"]) || typeof value.request_id !== "string" || typeof value.idempotency_key !== "string" || typeof value.goal_text !== "string" || !Number.isSafeInteger(value.rlm_depth) || Number(value.rlm_depth) < 0 || !validDigest(value.model_selector_digest) || !validBudget(value.budget)) throw new TypeError();
+          if (!hasExactKeys(value, ["type", "request_id", "child_id", "idempotency_key", "goal_text", "rlm_depth", "model_selector_digest", "budget"]) || typeof value.request_id !== "string" || typeof value.child_id !== "string" || typeof value.idempotency_key !== "string" || typeof value.goal_text !== "string" || !Number.isSafeInteger(value.rlm_depth) || Number(value.rlm_depth) < 0 || !validDigest(value.model_selector_digest) || !validBudget(value.budget)) throw new TypeError();
           void bridge.proposeSpawn({ requestId: value.request_id, childId: value.child_id, idempotencyKey: value.idempotency_key, goalText: value.goal_text, rlmDepth: Number(value.rlm_depth), modelSelectorDigest: value.model_selector_digest, budget: value.budget }).then((result) => socket.end(`${JSON.stringify(result)}\n`), () => socket.destroy());
+        } else if (value.type === "rlm.message.propose") {
+          if (!hasExactKeys(value, ["type", "request_id", "message_id", "sender_id", "recipient_id", "body_text"]) || typeof value.request_id !== "string" || typeof value.message_id !== "string" || typeof value.sender_id !== "string" || typeof value.recipient_id !== "string" || typeof value.body_text !== "string") throw new TypeError();
+          void bridge.proposeMessage({ requestId: value.request_id, messageId: value.message_id, senderId: value.sender_id, recipientId: value.recipient_id, bodyText: value.body_text }).then((result) => socket.end(`${JSON.stringify(result)}\n`), () => socket.destroy());
+        } else if (value.type === "rlm.message.delivered") {
+          if (!hasExactKeys(value, ["type", "message_id"]) || typeof value.message_id !== "string") throw new TypeError();
+          void bridge.recordMessageDelivered({ messageId: value.message_id }).then(() => socket.end(`${JSON.stringify({ resolution: "recorded", messageId: value.message_id })}\n`), () => socket.destroy());
         } else if (value.type === "rlm.child.started") {
-          if (!hasExactKeys(value, ["type", "child_id", "native_identity_digest"]) || !validDigest(value.native_identity_digest)) throw new TypeError();
+          if (!hasExactKeys(value, ["type", "child_id", "native_identity_digest"]) || typeof value.child_id !== "string" || !validDigest(value.native_identity_digest)) throw new TypeError();
           void bridge.recordLifecycle({ type: "rlm.child.started", childId: value.child_id, nativeIdentityDigest: value.native_identity_digest }).then(() => socket.end(`${JSON.stringify({ resolution: "recorded", childId: value.child_id })}\n`), () => socket.destroy());
         } else if (value.type === "rlm.child.terminal") {
-          if (!hasExactKeys(value, ["type", "child_id", "status"]) || typeof value.status !== "string" || !["completed", "failed", "cancelled"].includes(value.status)) throw new TypeError();
+          if (!hasExactKeys(value, ["type", "child_id", "status"]) || typeof value.child_id !== "string" || typeof value.status !== "string" || !["completed", "failed", "cancelled"].includes(value.status)) throw new TypeError();
           void bridge.recordLifecycle({ type: "rlm.child.terminal", childId: value.child_id, status: value.status as "completed" | "failed" | "cancelled" }).then(() => socket.end(`${JSON.stringify({ resolution: "recorded", childId: value.child_id })}\n`), () => socket.destroy());
         } else {
           throw new TypeError();

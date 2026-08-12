@@ -95,6 +95,10 @@ function lifecycleResponse(socketPath, discovery, event) {
   });
 }
 
+function messageResponse(socketPath, discovery, frame) {
+  return lifecycleResponse(socketPath, discovery, frame);
+}
+
 function nativeIdentityDigest(runtime) {
   const session = runtime?.session;
   const identity = session?.sessionId;
@@ -129,6 +133,25 @@ export async function createRlmHostClient(discoveryPath) {
       const response = await lifecycleResponse(discovery.socket_path, discovery, event);
       if (!isRecord(response) || !hasExactKeys(response, ["resolution", "childId"]) || response.resolution !== "recorded" || response.childId !== event.child_id) throw new Error("Prime RLM host response is invalid");
       return Object.freeze({ child_id: response.childId });
+    },
+    async proposeMessage(proposal) {
+      if (!isRecord(proposal) || !hasExactKeys(proposal, ["request_id", "message_id", "sender_id", "recipient_id", "body_text"]) || !validChildId(proposal.request_id) || !validChildId(proposal.message_id) || !validChildId(proposal.sender_id) || !validChildId(proposal.recipient_id) || proposal.sender_id === proposal.recipient_id || typeof proposal.body_text !== "string" || Buffer.byteLength(proposal.body_text, "utf8") > 1024 * 1024) throw new Error("Prime RLM message is invalid");
+      const response = await messageResponse(discovery.socket_path, discovery, {
+        type: "rlm.message.propose",
+        request_id: proposal.request_id,
+        message_id: proposal.message_id,
+        sender_id: proposal.sender_id,
+        recipient_id: proposal.recipient_id,
+        body_text: proposal.body_text,
+      });
+      if (!isRecord(response) || !hasExactKeys(response, ["resolution", "messageId"]) || response.messageId !== proposal.message_id || !["admitted", "rejected", "uncertain"].includes(response.resolution)) throw new Error("Prime RLM host response is invalid");
+      return Object.freeze({ resolution: response.resolution, message_id: response.messageId });
+    },
+    async recordMessageDelivered(event) {
+      if (!isRecord(event) || !hasExactKeys(event, ["message_id"]) || !validChildId(event.message_id)) throw new Error("Prime RLM message is invalid");
+      const response = await messageResponse(discovery.socket_path, discovery, { type: "rlm.message.delivered", message_id: event.message_id });
+      if (!isRecord(response) || !hasExactKeys(response, ["resolution", "messageId"]) || response.resolution !== "recorded" || response.messageId !== event.message_id) throw new Error("Prime RLM host response is invalid");
+      return Object.freeze({ message_id: response.messageId });
     },
   });
 }

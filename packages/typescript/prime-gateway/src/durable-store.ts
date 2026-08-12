@@ -53,6 +53,8 @@ const RECORD_KINDS = new Set([
   "prime.cursor",
   "rlm.binding",
   "rlm.lifecycle",
+  "rlm.message.binding",
+  "rlm.message.delivered",
 ]);
 
 export interface GatewayRlmBinding {
@@ -61,6 +63,15 @@ export interface GatewayRlmBinding {
   readonly authority_revision: number;
   readonly depth: number;
   readonly model_selector_digest: string;
+}
+
+export interface GatewayRlmMessageBinding {
+  readonly action_id: string;
+  readonly message_id: string;
+  readonly sender_id: string;
+  readonly recipient_id: string;
+  readonly authority_revision: number;
+  readonly body_digest: string;
 }
 
 export type GatewayRlmLifecycleObservation =
@@ -544,6 +555,37 @@ function validateRlmBinding(value: unknown): GatewayRlmBinding {
     authority_revision: value.authority_revision,
     depth: value.depth,
     model_selector_digest: value.model_selector_digest as string,
+  });
+}
+
+function validateRlmMessageBinding(value: unknown): GatewayRlmMessageBinding {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "action_id",
+      "authority_revision",
+      "body_digest",
+      "message_id",
+      "recipient_id",
+      "sender_id",
+    ]) ||
+    !nonEmptyIdentifier(value.action_id) ||
+    !nonEmptyIdentifier(value.message_id) ||
+    !nonEmptyIdentifier(value.sender_id) ||
+    !nonEmptyIdentifier(value.recipient_id) ||
+    value.sender_id === value.recipient_id ||
+    !positiveInteger(value.authority_revision) ||
+    !DIGEST_PATTERN.test(String(value.body_digest))
+  ) {
+    throw new GatewayStoreConflictError();
+  }
+  return Object.freeze({
+    action_id: value.action_id,
+    message_id: value.message_id,
+    sender_id: value.sender_id,
+    recipient_id: value.recipient_id,
+    authority_revision: value.authority_revision,
+    body_digest: value.body_digest as string,
   });
 }
 
@@ -1054,6 +1096,9 @@ export class GatewayDurableStore {
   private primeCursor?: PrimeDaemonCursor;
   private readonly rlmLifecycleValues: GatewayRlmLifecycleObservation[] = [];
   private readonly rlmBindings = new Map<string, GatewayRlmBinding>();
+  private readonly rlmMessageBindings = new Map<string, GatewayRlmMessageBinding>();
+  private readonly rlmMessageActionsById = new Map<string, string>();
+  private readonly deliveredRlmMessageIds = new Set<string>();
   private readonly activeRlmChildIds = new Set<string>();
   private readonly closedRlmChildIds = new Set<string>();
 
@@ -1586,11 +1631,52 @@ export class GatewayDurableStore {
     );
   }
 
+  async recordRlmMessageBinding(
+    binding: GatewayRlmMessageBinding,
+  ): Promise<GatewayRecordReceipt> {
+    const validated = validateRlmMessageBinding(binding);
+    const existingAction = this.rlmMessageActionsById.get(validated.message_id);
+    if (existingAction !== undefined && existingAction !== validated.action_id) {
+      throw new GatewayStoreConflictError();
+    }
+    return this.appendRecord(
+      "rlm.message.binding",
+      `rlm-message-binding:${validated.action_id}`,
+      validated as unknown as Record<string, unknown>,
+    );
+  }
+
+  async recordRlmMessageDelivered(messageId: string): Promise<GatewayRecordReceipt> {
+    if (
+      !nonEmptyIdentifier(messageId) ||
+      !this.rlmMessageActionsById.has(messageId) ||
+      this.deliveredRlmMessageIds.has(messageId)
+    ) {
+      throw new GatewayStoreConflictError();
+    }
+    return this.appendRecord(
+      "rlm.message.delivered",
+      `rlm-message-delivered:${messageId}`,
+      { message_id: messageId },
+    );
+  }
+
   rlmBinding(actionId: string): GatewayRlmBinding | undefined {
     if (!nonEmptyIdentifier(actionId)) {
       throw new GatewayStoreConflictError();
     }
     return this.rlmBindings.get(actionId);
+  }
+
+  rlmMessageBinding(actionId: string): GatewayRlmMessageBinding | undefined {
+    if (!nonEmptyIdentifier(actionId)) {
+      throw new GatewayStoreConflictError();
+    }
+    return this.rlmMessageBindings.get(actionId);
+  }
+
+  rlmMessageDelivered(): readonly string[] {
+    return Object.freeze([...this.deliveredRlmMessageIds].sort());
   }
 
   rlmLifecycle(): readonly GatewayRlmLifecycleObservation[] {
@@ -2043,6 +2129,22 @@ export class GatewayDurableStore {
         }
         return binding as unknown as Record<string, unknown>;
       }
+      if (kind === "rlm.message.binding") {
+        const binding = validateRlmMessageBinding(payload);
+        if (recordId !== `rlm-message-binding:${binding.action_id}`) {
+          throw new GatewayStoreCorruptionError();
+        }
+        return binding as unknown as Record<string, unknown>;
+      }
+      if (kind === "rlm.message.delivered") {
+        if (!hasExactKeys(payload, ["message_id"]) || !nonEmptyIdentifier(payload.message_id)) {
+          throw new GatewayStoreCorruptionError();
+        }
+        if (recordId !== `rlm-message-delivered:${payload.message_id}`) {
+          throw new GatewayStoreCorruptionError();
+        }
+        return { message_id: payload.message_id };
+      }
       const cursor = validateCursorPayload(payload);
       if (recordId !== `prime-cursor:${cursor.generation}:${cursor.sequence}`) {
         throw new GatewayStoreCorruptionError();
@@ -2243,6 +2345,30 @@ export class GatewayDurableStore {
       if (existing === undefined) {
         this.rlmBindings.set(binding.action_id, binding);
       }
+    } else if (record.stored.kind === "rlm.message.binding") {
+      const binding = validateRlmMessageBinding(record.payload);
+      const existing = this.rlmMessageBindings.get(binding.action_id);
+      const existingAction = this.rlmMessageActionsById.get(binding.message_id);
+      if (
+        (existing !== undefined && canonicalJsonBytes(existing).compare(canonicalJsonBytes(binding)) !== 0) ||
+        (existingAction !== undefined && existingAction !== binding.action_id)
+      ) {
+        throw new GatewayStoreCorruptionError();
+      }
+      if (existing === undefined) {
+        this.rlmMessageBindings.set(binding.action_id, binding);
+        this.rlmMessageActionsById.set(binding.message_id, binding.action_id);
+      }
+    } else if (record.stored.kind === "rlm.message.delivered") {
+      const messageId = record.payload.message_id;
+      if (
+        !nonEmptyIdentifier(messageId) ||
+        !this.rlmMessageActionsById.has(messageId) ||
+        this.deliveredRlmMessageIds.has(messageId)
+      ) {
+        throw new GatewayStoreCorruptionError();
+      }
+      this.deliveredRlmMessageIds.add(messageId);
     }
   }
 

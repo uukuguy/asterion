@@ -64,6 +64,9 @@ export type {
   GatewayInputAttachment,
   GatewayInputDelivery,
   GatewayRecordReceipt,
+  GatewayRlmBinding,
+  GatewayRlmLifecycleObservation,
+  GatewayRlmMessageBinding,
   PrimeIdentityBinding,
   StorageFaultInjector,
   StorageFaultStage,
@@ -94,6 +97,9 @@ export {
 export { authenticateRlmHostFrame, listenRlmHostBridge, RlmHostBridge, RLM_HOST_PROTOCOL } from "./rlm-host-bridge.js";
 export type {
   RlmHostBridgeOptions,
+  RlmMessageDelivery,
+  RlmMessageProposal,
+  RlmMessageResolution,
   RlmSpawnBudget,
   RlmSpawnProposal,
   RlmSpawnResolution,

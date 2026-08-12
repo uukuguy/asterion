@@ -74,6 +74,8 @@ import {
   RlmHostBridge,
 } from "./rlm-host-bridge.js";
 import type {
+  RlmMessageDelivery,
+  RlmMessageProposal,
   RlmSpawnProposal,
 } from "./rlm-host-bridge.js";
 
@@ -1283,6 +1285,58 @@ async function createSidecarFromDescriptor(
         } catch {
           return Object.freeze({ resolution: "uncertain" as const, childId: proposal.childId });
         }
+      },
+      admitMessage: async (proposal: RlmMessageProposal) => {
+        try {
+          await ready;
+          const inputRef = await privateValues.putInput(proposal.bodyText);
+          const identity = gateway.nextEventIdentity();
+          const actionId = deriveControlActionId(
+            descriptor.sessionId,
+            proposal.requestId,
+          );
+          await store.recordRlmMessageBinding({
+            action_id: actionId,
+            message_id: proposal.messageId,
+            sender_id: proposal.senderId,
+            recipient_id: proposal.recipientId,
+            authority_revision: context.authorityRevision,
+            body_digest: createHash("sha256").update(proposal.bodyText).digest("hex"),
+          });
+          const event = validateControlEvent({
+            protocol: "asterion.agent-control/v1",
+            event_id: identity.eventId,
+            session_id: descriptor.sessionId,
+            generation: descriptor.generation,
+            sequence: identity.sequence,
+            emitted_at: identity.emittedAt,
+            type: "action.proposed",
+            payload: {
+              action_id: actionId,
+              authority_revision: context.authorityRevision,
+              idempotency_key: proposal.requestId,
+              kind: "child.message",
+              target: { kind: "child", child_id: proposal.recipientId },
+              input_ref: inputRef,
+              expected_artifacts: [],
+              budget: {
+                ...currentRemainingBudget,
+              },
+              causal_parent_ids: context.causalParentIds,
+            },
+          });
+          await gateway.emitActionProposal(event);
+          const admission = await gateway.waitForAdmission(actionId);
+          return Object.freeze({
+            resolution: admission.resolution,
+            messageId: proposal.messageId,
+          });
+        } catch {
+          return Object.freeze({ resolution: "uncertain" as const, messageId: proposal.messageId });
+        }
+      },
+      recordMessageDelivered: async (event: RlmMessageDelivery) => {
+        await store.recordRlmMessageDelivered(event.messageId);
       },
       recordLifecycle: async (event) => {
         if (event.type === "rlm.child.started") {

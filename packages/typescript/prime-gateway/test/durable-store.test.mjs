@@ -1084,6 +1084,38 @@ test("durable store reopens one exact safe RLM admission binding", async () => {
   }
 });
 
+test("durable store reopens one exact body-free RLM message binding and delivery", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  const binding = {
+    action_id: "message-action-1",
+    message_id: "message-1",
+    sender_id: "session-1",
+    recipient_id: "child-1",
+    authority_revision: 1,
+    body_digest: "b".repeat(64),
+  };
+  try {
+    const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    await store.recordRlmMessageBinding(binding);
+    assert.deepEqual(store.rlmMessageBinding("message-action-1"), binding);
+    await store.recordRlmMessageDelivered("message-1");
+
+    const reopened = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    assert.deepEqual(reopened.rlmMessageBinding("message-action-1"), binding);
+    assert.deepEqual(reopened.rlmMessageDelivered(), ["message-1"]);
+    await assert.rejects(
+      reopened.recordRlmMessageBinding({ ...binding, recipient_id: "child-2" }),
+      GatewayStoreConflictError,
+    );
+    await assert.rejects(
+      reopened.recordRlmMessageDelivered("message-1"),
+      GatewayStoreConflictError,
+    );
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
 test("durable store rejects corrupted or weak-permission public records safely", async () => {
   for (const mutation of ["corrupt", "mode", "noncanonical"]) {
     const fixtureRoot = await temporaryStoreRoot();
