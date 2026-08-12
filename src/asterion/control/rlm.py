@@ -92,11 +92,80 @@ class RlmChildStatus:
             raise RlmError("RLM child status is invalid")
 
 
+@dataclass(frozen=True, repr=False)
+class RlmMessageBinding:
+    """Public-safe directed family message identity and body commitment."""
+
+    message_id: str
+    sender_id: str
+    recipient_id: str
+    body_digest: str
+    authority_revision: int
+
+    def __post_init__(self) -> None:
+        if (
+            any(
+                not isinstance(value, str) or OPAQUE_ID.fullmatch(value) is None
+                for value in (self.message_id, self.sender_id, self.recipient_id)
+            )
+            or self.sender_id == self.recipient_id
+            or not _digest(self.body_digest)
+            or isinstance(self.authority_revision, bool)
+            or not isinstance(self.authority_revision, int)
+            or self.authority_revision < 1
+        ):
+            raise RlmError("RLM message binding is invalid")
+
+
+@dataclass(frozen=True, repr=False)
+class RlmMessageStatus:
+    """Closed message lifecycle exposed without message content."""
+
+    message_id: str
+    sender_id: str
+    recipient_id: str
+    body_digest: str
+    authority_revision: int
+    status: Literal["admitted", "delivered", "uncertain"]
+
+    def __post_init__(self) -> None:
+        try:
+            RlmMessageBinding(
+                self.message_id,
+                self.sender_id,
+                self.recipient_id,
+                self.body_digest,
+                self.authority_revision,
+            )
+        except RlmError:
+            raise RlmError("RLM message status is invalid") from None
+        if self.status not in {"admitted", "delivered", "uncertain"}:
+            raise RlmError("RLM message status is invalid")
+
+    def to_mapping(self) -> Mapping[str, object]:
+        return MappingProxyType(
+            {
+                "message_id": self.message_id,
+                "sender_id": self.sender_id,
+                "recipient_id": self.recipient_id,
+                "body_digest": self.body_digest,
+                "authority_revision": self.authority_revision,
+                "status": self.status,
+            }
+        )
+
+
 @dataclass
 class _ChildEntry:
     binding: RlmChildBinding
     native_identity: str | None
     status: RlmChildStatus
+
+
+@dataclass
+class _MessageEntry:
+    binding: RlmMessageBinding
+    status: RlmMessageStatus
 
 
 class RlmChildService:
@@ -111,6 +180,7 @@ class RlmChildService:
             raise RlmError("RLM authority is invalid")
         self._authority = authority
         self._entries: dict[str, _ChildEntry] = {}
+        self._messages: dict[str, _MessageEntry] = {}
         self._private_root = private_root
         if private_root is not None:
             self._load()
@@ -199,6 +269,72 @@ class RlmChildService:
     def public_registry(self) -> tuple[RlmChildStatus, ...]:
         return tuple(self._entries[child_id].status for child_id in sorted(self._entries))
 
+    def admit_message(self, binding: RlmMessageBinding) -> RlmMessageStatus:
+        if not isinstance(binding, RlmMessageBinding):
+            raise RlmError("RLM message binding is invalid")
+        if (
+            binding.authority_revision != self._authority.revision
+            or "rlm.child.message" not in self._authority.allowed_operations
+        ):
+            raise RlmError("RLM message target is unavailable")
+        current = self._messages.get(binding.message_id)
+        if current is not None:
+            if current.status.status == "uncertain":
+                raise RlmError("RLM message is fenced")
+            if current.binding != binding:
+                raise RlmError("RLM message identity conflicts")
+            return current.status
+        self._require_message_party(binding.sender_id)
+        self._require_message_party(binding.recipient_id)
+        status = self._message_status(binding, "admitted")
+        self._messages[binding.message_id] = _MessageEntry(binding, status)
+        self._persist()
+        return status
+
+    def record_message_delivered(self, binding: RlmMessageBinding) -> RlmMessageStatus:
+        if not isinstance(binding, RlmMessageBinding):
+            raise RlmError("RLM message binding is invalid")
+        try:
+            entry = self._messages[binding.message_id]
+        except KeyError:
+            raise RlmError("RLM message is unknown") from None
+        if entry.binding != binding:
+            raise RlmError("RLM message identity conflicts")
+        if entry.status.status == "uncertain":
+            raise RlmError("RLM message is fenced")
+        if entry.status.status == "delivered":
+            return entry.status
+        entry.status = self._message_status(binding, "delivered")
+        self._persist()
+        return entry.status
+
+    def public_messages(self) -> tuple[RlmMessageStatus, ...]:
+        return tuple(self._messages[message_id].status for message_id in sorted(self._messages))
+
+    def _require_message_party(self, identity: str) -> None:
+        parent_ids = {entry.binding.parent_session_id for entry in self._entries.values()}
+        if identity in parent_ids:
+            return
+        try:
+            status = self._entries[identity].status.status
+        except KeyError:
+            raise RlmError("RLM message target is unavailable") from None
+        if status not in {"admitted", "started"}:
+            raise RlmError("RLM message target is unavailable")
+
+    @staticmethod
+    def _message_status(
+        binding: RlmMessageBinding, status: Literal["admitted", "delivered", "uncertain"]
+    ) -> RlmMessageStatus:
+        return RlmMessageStatus(
+            binding.message_id,
+            binding.sender_id,
+            binding.recipient_id,
+            binding.body_digest,
+            binding.authority_revision,
+            status,
+        )
+
     def _require(
         self, binding: RlmChildBinding, native_identity: str | None
     ) -> _ChildEntry:
@@ -221,10 +357,11 @@ class RlmChildService:
             if not path.exists():
                 return
             value = json.loads(path.read_text())
-            if not isinstance(value, dict) or set(value) != {"children"}:
+            if not isinstance(value, dict) or set(value) != {"children", "messages"}:
                 raise ValueError
             children = value["children"]
-            if not isinstance(children, list):
+            messages = value["messages"]
+            if not isinstance(children, list) or not isinstance(messages, list):
                 raise ValueError
             for item in children:
                 if not isinstance(item, dict) or set(item) != {
@@ -246,6 +383,19 @@ class RlmChildService:
                 self._entries[binding.child_id] = _ChildEntry(
                     binding, native_identity, status
                 )
+            for item in messages:
+                if not isinstance(item, dict) or set(item) != {"binding", "status"}:
+                    raise ValueError
+                binding = RlmMessageBinding(**item["binding"])
+                status = RlmMessageStatus(**item["status"])
+                if status.message_id != binding.message_id or any(
+                    getattr(status, field) != getattr(binding, field)
+                    for field in ("sender_id", "recipient_id", "body_digest", "authority_revision")
+                ):
+                    raise ValueError
+                if status.status == "admitted":
+                    status = self._message_status(binding, "uncertain")
+                self._messages[binding.message_id] = _MessageEntry(binding, status)
         except (OSError, TypeError, ValueError, json.JSONDecodeError):
             raise RlmError("RLM child recovery is invalid") from None
 
@@ -264,11 +414,24 @@ class RlmChildService:
                 }
                 for _, entry in sorted(self._entries.items())
             ]
+            messages = [
+                {
+                    "binding": {
+                        "message_id": entry.binding.message_id,
+                        "sender_id": entry.binding.sender_id,
+                        "recipient_id": entry.binding.recipient_id,
+                        "body_digest": entry.binding.body_digest,
+                        "authority_revision": entry.binding.authority_revision,
+                    },
+                    "status": dict(entry.status.to_mapping()),
+                }
+                for _, entry in sorted(self._messages.items())
+            ]
             temporary = tempfile.NamedTemporaryFile(
                 dir=self._private_root, delete=False, mode="w", encoding="utf-8"
             )
             try:
-                json.dump({"children": children}, temporary, sort_keys=True, separators=(",", ":"))
+                json.dump({"children": children, "messages": messages}, temporary, sort_keys=True, separators=(",", ":"))
                 temporary.flush()
                 os.fsync(temporary.fileno())
                 temporary.close()

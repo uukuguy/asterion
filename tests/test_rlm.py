@@ -5,7 +5,12 @@ import tempfile
 from pathlib import Path
 
 from asterion.control.authority import AuthorityEnvelope, BudgetLimit, PortfolioGrant
-from asterion.control.rlm import RlmChildBinding, RlmChildService, RlmError
+from asterion.control.rlm import (
+    RlmChildBinding,
+    RlmChildService,
+    RlmError,
+    RlmMessageBinding,
+)
 
 
 def _authority() -> AuthorityEnvelope:
@@ -36,6 +41,18 @@ def _binding(**changes: object) -> RlmChildBinding:
     }
     values.update(changes)
     return RlmChildBinding(**values)  # type: ignore[arg-type]
+
+
+def _message(**changes: object) -> RlmMessageBinding:
+    values = {
+        "message_id": "message-1",
+        "sender_id": "session-1",
+        "recipient_id": "child-1",
+        "body_digest": "c" * 64,
+        "authority_revision": 1,
+    }
+    values.update(changes)
+    return RlmMessageBinding(**values)  # type: ignore[arg-type]
 
 
 class TestRlmChildService(unittest.TestCase):
@@ -98,3 +115,51 @@ class TestRlmChildService(unittest.TestCase):
         self.assertEqual(reopened.status("child-1").status, "uncertain")
         with self.assertRaisesRegex(RlmError, "RLM child is fenced"):
             reopened.admit(binding)
+
+    def test_message_admission_accepts_only_one_direct_family_edge(self) -> None:
+        service = RlmChildService(_authority())
+        binding = _binding()
+        service.admit(binding)
+        service.record_started(binding, native_identity="private-native-session")
+
+        admitted = service.admit_message(_message())
+        delivered = service.record_message_delivered(_message())
+
+        self.assertEqual(admitted.status, "admitted")
+        self.assertEqual(delivered.status, "delivered")
+        self.assertEqual(service.public_messages()[0].to_mapping(), {
+            "message_id": "message-1",
+            "sender_id": "session-1",
+            "recipient_id": "child-1",
+            "body_digest": "c" * 64,
+            "authority_revision": 1,
+            "status": "delivered",
+        })
+
+    def test_message_rejects_nonfamily_or_terminal_parties_without_body(self) -> None:
+        service = RlmChildService(_authority())
+        binding = _binding()
+        service.admit(binding)
+        service.record_started(binding, native_identity="private-native-session")
+
+        with self.assertRaisesRegex(RlmError, "RLM message target is unavailable"):
+            service.admit_message(_message(recipient_id="outside-agent"))
+        service.record_terminal(binding, status="completed")
+        with self.assertRaisesRegex(RlmError, "RLM message target is unavailable"):
+            service.admit_message(_message(sender_id="child-1", recipient_id="session-1"))
+        self.assertNotIn("outside-agent", repr(service.public_messages()))
+
+    def test_reopen_fences_admitted_message_without_delivery(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binding = _binding()
+            service = RlmChildService(_authority(), private_root=root)
+            service.admit(binding)
+            service.record_started(binding, native_identity="private-native-session")
+            service.admit_message(_message())
+
+            reopened = RlmChildService(_authority(), private_root=root)
+
+        self.assertEqual(reopened.public_messages()[0].status, "uncertain")
+        with self.assertRaisesRegex(RlmError, "RLM message is fenced"):
+            reopened.admit_message(_message())
