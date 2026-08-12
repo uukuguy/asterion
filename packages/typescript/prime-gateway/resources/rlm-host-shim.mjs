@@ -119,7 +119,13 @@ export async function createRlmHostClient(discoveryPath) {
       return Object.freeze({ resolution: response.resolution, child_id: response.childId });
     },
     async recordLifecycle(event) {
-      if (!isRecord(event) || !validChildId(event.child_id) || event.type !== "rlm.child.started" || typeof event.native_identity_digest !== "string" || !/^[0-9a-f]{64}$/u.test(event.native_identity_digest)) throw new Error("Prime RLM lifecycle is invalid");
+      if (!isRecord(event) || !validChildId(event.child_id) || (
+        event.type === "rlm.child.started" &&
+        (!hasExactKeys(event, ["type", "child_id", "native_identity_digest"]) || typeof event.native_identity_digest !== "string" || !/^[0-9a-f]{64}$/u.test(event.native_identity_digest))
+      ) || (
+        event.type === "rlm.child.terminal" &&
+        (!hasExactKeys(event, ["type", "child_id", "status"]) || !["completed", "failed", "cancelled"].includes(event.status))
+      ) || (event.type !== "rlm.child.started" && event.type !== "rlm.child.terminal")) throw new Error("Prime RLM lifecycle is invalid");
       const response = await lifecycleResponse(discovery.socket_path, discovery, event);
       if (!isRecord(response) || !hasExactKeys(response, ["resolution", "childId"]) || response.resolution !== "recorded" || response.childId !== event.child_id) throw new Error("Prime RLM host response is invalid");
       return Object.freeze({ child_id: response.childId });
@@ -163,6 +169,13 @@ export function wrapSubagentRuntimeHost(delegate, client, hostContext) {
       const runtime = await delegate.createRlmSubagentRuntime(options);
       await client.recordLifecycle(Object.freeze({ type: "rlm.child.started", child_id: spawn.child_id, native_identity_digest: nativeIdentityDigest(runtime) }));
       return runtime;
+    },
+    async releaseRlmSubagentRuntime(runtime, options, status) {
+      if (typeof delegate.releaseRlmSubagentRuntime !== "function" || !isRecord(options) || !validChildId(options.id)) throw new Error("Prime RLM release is invalid");
+      const terminalStatus = status === "done" ? "completed" : status === "error" ? "failed" : status === "cancelled" ? "cancelled" : null;
+      if (terminalStatus === null) throw new Error("Prime RLM release is invalid");
+      await client.recordLifecycle(Object.freeze({ type: "rlm.child.terminal", child_id: options.id, status: terminalStatus }));
+      return delegate.releaseRlmSubagentRuntime(runtime, options, status);
     },
   });
 }

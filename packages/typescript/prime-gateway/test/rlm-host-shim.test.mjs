@@ -17,6 +17,10 @@ test("admits a native RLM child before creating it exactly once", async () => {
       return runtime;
     },
     async deleteRlmSubagentRuntime() {},
+    async releaseRlmSubagentRuntime(runtime, options, status) {
+      order.push(`native-release:${options.id}:${status}`);
+      return runtime;
+    },
   };
   const client = {
     async proposeSpawn(proposal) {
@@ -29,6 +33,14 @@ test("admits a native RLM child before creating it exactly once", async () => {
   const wrapped = wrapSubagentRuntimeHost(nativeHost, client, hostContext());
   assert.equal(await wrapped.createRlmSubagentRuntime({ id: "child-1", prompt: "private", rlmDepth: 1, model: { provider: "test", id: "model-1" } }), runtime);
   assert.deepEqual(order, ["propose:child-1", "native:child-1", "lifecycle:rlm.child.started:child-1"]);
+  await wrapped.releaseRlmSubagentRuntime(runtime, { id: "child-1" }, "done");
+  assert.deepEqual(order, [
+    "propose:child-1",
+    "native:child-1",
+    "lifecycle:rlm.child.started:child-1",
+    "lifecycle:rlm.child.terminal:child-1",
+    "native-release:child-1:done",
+  ]);
 });
 
 test("derives the complete host-owned proposal before the native child effect", async () => {
