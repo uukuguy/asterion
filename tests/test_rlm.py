@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
+from pathlib import Path
 
 from asterion.control.authority import AuthorityEnvelope, BudgetLimit, PortfolioGrant
 from asterion.control.rlm import RlmChildBinding, RlmChildService, RlmError
@@ -81,3 +83,16 @@ class TestRlmChildService(unittest.TestCase):
                 native_identity="other-private-session",
             )
 
+    def test_reopen_fences_started_native_child_without_terminal(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binding = _binding()
+            service = RlmChildService(_authority(), private_root=root)
+            service.admit(binding, native_identity="private-native-session")
+            service.record_started(binding, native_identity="private-native-session")
+
+            reopened = RlmChildService(_authority(), private_root=root)
+
+        self.assertEqual(reopened.status("child-1").status, "uncertain")
+        with self.assertRaisesRegex(RlmError, "RLM child is fenced"):
+            reopened.admit(binding, native_identity="private-native-session")

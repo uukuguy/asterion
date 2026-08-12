@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import os
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from types import MappingProxyType
 from typing import Literal, Mapping
 
@@ -94,11 +98,18 @@ class _ChildEntry:
 class RlmChildService:
     """Monotonic host ledger for native provider-owned RLM child effects."""
 
-    def __init__(self, authority: AuthorityEnvelope) -> None:
-        if not isinstance(authority, AuthorityEnvelope):
+    def __init__(
+        self, authority: AuthorityEnvelope, *, private_root: Path | None = None
+    ) -> None:
+        if not isinstance(authority, AuthorityEnvelope) or (
+            private_root is not None and not isinstance(private_root, Path)
+        ):
             raise RlmError("RLM authority is invalid")
         self._authority = authority
         self._entries: dict[str, _ChildEntry] = {}
+        self._private_root = private_root
+        if private_root is not None:
+            self._load()
 
     def admit(self, binding: RlmChildBinding, *, native_identity: str) -> RlmChildStatus:
         if not isinstance(binding, RlmChildBinding) or not _native_identity(native_identity):
@@ -122,6 +133,7 @@ class RlmChildService:
             raise RlmError("RLM child concurrency is unavailable")
         status = RlmChildStatus(binding.child_id, "admitted")
         self._entries[binding.child_id] = _ChildEntry(binding, native_identity, status)
+        self._persist()
         return status
 
     def record_started(
@@ -133,6 +145,7 @@ class RlmChildService:
         if entry.status.status in _TERMINAL:
             raise RlmError("RLM child is terminal")
         entry.status = RlmChildStatus(binding.child_id, "started")
+        self._persist()
         return entry.status
 
     def record_terminal(
@@ -150,6 +163,7 @@ class RlmChildService:
                 return entry.status
             raise RlmError("RLM child is terminal")
         entry.status = RlmChildStatus(binding.child_id, status)
+        self._persist()
         return entry.status
 
     def record_uncertain(self, binding: RlmChildBinding) -> RlmChildStatus:
@@ -157,6 +171,7 @@ class RlmChildService:
         if entry.status.status in _TERMINAL:
             raise RlmError("RLM child is terminal")
         entry.status = RlmChildStatus(binding.child_id, "uncertain")
+        self._persist()
         return entry.status
 
     def status(self, child_id: str) -> RlmChildStatus:
@@ -183,7 +198,69 @@ class RlmChildService:
             raise RlmError("RLM child identity conflicts")
         return entry
 
+    def _load(self) -> None:
+        assert self._private_root is not None
+        path = self._private_root / "rlm-ledger.json"
+        try:
+            if not path.exists():
+                return
+            value = json.loads(path.read_text())
+            if not isinstance(value, dict) or set(value) != {"children"}:
+                raise ValueError
+            children = value["children"]
+            if not isinstance(children, list):
+                raise ValueError
+            for item in children:
+                if not isinstance(item, dict) or set(item) != {
+                    "binding", "native_identity", "status"
+                }:
+                    raise ValueError
+                binding = RlmChildBinding(**item["binding"])
+                native_identity = item["native_identity"]
+                status = RlmChildStatus(**item["status"])
+                if not _native_identity(native_identity) or status.child_id != binding.child_id:
+                    raise ValueError
+                if status.status in {"admitted", "started"}:
+                    status = RlmChildStatus(binding.child_id, "uncertain")
+                self._entries[binding.child_id] = _ChildEntry(
+                    binding, native_identity, status
+                )
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            raise RlmError("RLM child recovery is invalid") from None
+
+    def _persist(self) -> None:
+        if self._private_root is None:
+            return
+        try:
+            self._private_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+            if self._private_root.is_symlink():
+                raise OSError
+            children = [
+                {
+                    "binding": dict(entry.binding.to_mapping()),
+                    "native_identity": entry.native_identity,
+                    "status": {"child_id": entry.status.child_id, "status": entry.status.status},
+                }
+                for _, entry in sorted(self._entries.items())
+            ]
+            temporary = tempfile.NamedTemporaryFile(
+                dir=self._private_root, delete=False, mode="w", encoding="utf-8"
+            )
+            try:
+                json.dump({"children": children}, temporary, sort_keys=True, separators=(",", ":"))
+                temporary.flush()
+                os.fsync(temporary.fileno())
+                temporary.close()
+                os.chmod(temporary.name, 0o600)
+                os.replace(temporary.name, self._private_root / "rlm-ledger.json")
+            finally:
+                if not temporary.closed:
+                    temporary.close()
+                if os.path.exists(temporary.name):
+                    os.unlink(temporary.name)
+        except OSError:
+            raise RlmError("RLM child persistence is unavailable") from None
+
 
 def _native_identity(value: object) -> bool:
     return isinstance(value, str) and 0 < len(value.encode("utf-8")) <= 4096
-
