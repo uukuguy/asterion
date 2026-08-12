@@ -67,6 +67,10 @@ test("replays one RLM request identity and rejects a conflicting child", async (
     () => bridge.proposeSpawn(proposal({ childId: "child-2" })),
     /conflicts/,
   );
+  await assert.rejects(
+    () => bridge.proposeSpawn(proposal({ requestId: "request-2", idempotencyKey: "spawn-2" })),
+    /conflicts/,
+  );
 });
 
 test("rejects an RLM spawn with an incomplete private effect payload", async () => {

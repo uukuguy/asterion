@@ -126,6 +126,7 @@ function messageDigest(proposal: RlmMessageProposal): string {
 
 export class RlmHostBridge {
   private readonly spawns = new Map<string, { readonly digest: string; readonly promise: Promise<RlmSpawnResolution> }>();
+  private readonly spawnRequestsByChildId = new Map<string, string>();
   private readonly messages = new Map<string, { readonly digest: string; readonly messageId: string; readonly promise: Promise<RlmMessageResolution>; delivered: boolean }>();
   private readonly messageRequestsById = new Map<string, string>();
 
@@ -152,8 +153,13 @@ export class RlmHostBridge {
       if (existing.digest !== digest) throw new TypeError("RLM proposal conflicts");
       return existing.promise;
     }
+    const priorRequestId = this.spawnRequestsByChildId.get(proposal.childId);
+    if (priorRequestId !== undefined && priorRequestId !== proposal.requestId) {
+      throw new TypeError("RLM proposal conflicts");
+    }
     const promise = this.admit(proposal);
     this.spawns.set(proposal.requestId, { digest, promise });
+    this.spawnRequestsByChildId.set(proposal.childId, proposal.requestId);
     return promise;
   }
 

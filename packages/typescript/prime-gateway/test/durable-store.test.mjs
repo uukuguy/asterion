@@ -1079,6 +1079,10 @@ test("durable store reopens one exact safe RLM admission binding", async () => {
       reopened.recordRlmBinding({ ...binding, child_id: "child-2" }),
       GatewayStoreConflictError,
     );
+    await assert.rejects(
+      reopened.recordRlmBinding({ ...binding, action_id: "action-2" }),
+      GatewayStoreConflictError,
+    );
   } finally {
     await fixtureRoot.cleanup();
   }

@@ -1096,6 +1096,7 @@ export class GatewayDurableStore {
   private primeCursor?: PrimeDaemonCursor;
   private readonly rlmLifecycleValues: GatewayRlmLifecycleObservation[] = [];
   private readonly rlmBindings = new Map<string, GatewayRlmBinding>();
+  private readonly rlmActionsByChildId = new Map<string, string>();
   private readonly rlmMessageBindings = new Map<string, GatewayRlmMessageBinding>();
   private readonly rlmMessageActionsById = new Map<string, string>();
   private readonly deliveredRlmMessageIds = new Set<string>();
@@ -1624,6 +1625,10 @@ export class GatewayDurableStore {
 
   async recordRlmBinding(binding: GatewayRlmBinding): Promise<GatewayRecordReceipt> {
     const validated = validateRlmBinding(binding);
+    const existingAction = this.rlmActionsByChildId.get(validated.child_id);
+    if (existingAction !== undefined && existingAction !== validated.action_id) {
+      throw new GatewayStoreConflictError();
+    }
     return this.appendRecord(
       "rlm.binding",
       `rlm-binding:${validated.action_id}`,
@@ -2339,11 +2344,16 @@ export class GatewayDurableStore {
     } else if (record.stored.kind === "rlm.binding") {
       const binding = validateRlmBinding(record.payload);
       const existing = this.rlmBindings.get(binding.action_id);
-      if (existing !== undefined && canonicalJsonBytes(existing).compare(canonicalJsonBytes(binding)) !== 0) {
+      const existingAction = this.rlmActionsByChildId.get(binding.child_id);
+      if (
+        (existing !== undefined && canonicalJsonBytes(existing).compare(canonicalJsonBytes(binding)) !== 0) ||
+        (existingAction !== undefined && existingAction !== binding.action_id)
+      ) {
         throw new GatewayStoreCorruptionError();
       }
       if (existing === undefined) {
         this.rlmBindings.set(binding.action_id, binding);
+        this.rlmActionsByChildId.set(binding.child_id, binding.action_id);
       }
     } else if (record.stored.kind === "rlm.message.binding") {
       const binding = validateRlmMessageBinding(record.payload);
