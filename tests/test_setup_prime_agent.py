@@ -320,9 +320,11 @@ class TestSetupPrimeAgent(unittest.TestCase):
             )
 
     def test_shipped_rlm_hunk_loads_the_private_host_shim_before_binding(self) -> None:
-        patch = json.loads(
+        patches = json.loads(
             (PROJECT / "packages/typescript/prime-gateway/resources/prime-rlm-host-shim.json").read_text()
-        )["patches"][0]
+        )["patches"]
+        self.assertEqual(len(patches), 2)
+        patch = patches[0]
         replacement = patch["replacement"]
 
         self.assertIn("asterion-rlm-host-shim.mjs", replacement)
@@ -331,6 +333,18 @@ class TestSetupPrimeAgent(unittest.TestCase):
         self.assertLess(
             replacement.index("createRlmHostClient"),
             replacement.index("setSubagentRuntimeHost"),
+        )
+        message_replacement = patches[1]["replacement"]
+        self.assertIn("waitForAgentMessagePromptDelivery(payload.id)", message_replacement)
+        self.assertIn("admitNativeRlmMessage", message_replacement)
+        self.assertIn("recordNativeRlmMessageDelivered", message_replacement)
+        self.assertLess(
+            message_replacement.index("admitNativeRlmMessage"),
+            message_replacement.index("withAgentMessageTargetLock"),
+        )
+        self.assertLess(
+            message_replacement.index("admitNativeRlmMessage"),
+            message_replacement.index("waitForAgentMessagePromptDelivery"),
         )
 
     def test_derivation_rejects_runtime_anchor_drift_without_private_output(self) -> None:

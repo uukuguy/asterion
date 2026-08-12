@@ -106,34 +106,36 @@ function nativeIdentityDigest(runtime) {
   return createHash("sha256").update(identity).digest("hex");
 }
 
-function canonicalNativeMessage(payload) {
+function canonicalNativeMessage(payload, identities) {
   if (
     !isRecord(payload) ||
     !validChildId(payload.id) ||
     typeof payload.message !== "string" ||
     Buffer.byteLength(payload.message, "utf8") > 1024 * 1024 ||
-    !isRecord(payload.from) ||
-    !validChildId(payload.from.activeSessionId) ||
-    !isRecord(payload.target) ||
-    !validChildId(payload.target.activeSessionId) ||
-    payload.from.activeSessionId === payload.target.activeSessionId
+    !isRecord(identities) ||
+    !validChildId(identities.sender_id) ||
+    !validChildId(identities.recipient_id) ||
+    identities.sender_id === identities.recipient_id
   ) {
     throw new Error("Prime RLM message is invalid");
   }
   return Object.freeze({
     request_id: payload.id,
     message_id: payload.id,
-    sender_id: payload.from.activeSessionId,
-    recipient_id: payload.target.activeSessionId,
+    sender_id: identities.sender_id,
+    recipient_id: identities.recipient_id,
     body_text: payload.message,
   });
 }
 
-export async function admitNativeRlmMessage(client, payload) {
+export async function admitNativeRlmMessage(client, payload, identities = undefined) {
   if (!client || typeof client.proposeMessage !== "function") {
     throw new TypeError("Prime RLM host shim is invalid");
   }
-  const proposal = canonicalNativeMessage(payload);
+  const proposal = canonicalNativeMessage(payload, identities ?? {
+    sender_id: payload?.from?.activeSessionId,
+    recipient_id: payload?.target?.activeSessionId,
+  });
   const admission = await client.proposeMessage(proposal);
   if (
     !isRecord(admission) ||
@@ -161,6 +163,7 @@ export async function createRlmHostClient(discoveryPath) {
   });
   return Object.freeze({
     hostContext,
+    parentSessionId: discovery.session_id,
     async proposeSpawn(proposal) {
       if (!isRecord(proposal) || !hasExactKeys(proposal, ["child_id", "goal_text", "rlm_depth", "model_selector_digest", "idempotency_key", "budget"]) || !validChildId(proposal.child_id) || typeof proposal.goal_text !== "string" || !validChildId(proposal.idempotency_key) || !Number.isSafeInteger(proposal.rlm_depth) || proposal.rlm_depth < 0 || typeof proposal.model_selector_digest !== "string" || !/^[0-9a-f]{64}$/u.test(proposal.model_selector_digest) || !validBudget(proposal.budget)) throw new Error("Prime RLM spawn is invalid");
       const response = await requestResponse(discovery.socket_path, discovery, proposal);

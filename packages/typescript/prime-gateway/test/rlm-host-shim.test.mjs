@@ -178,6 +178,20 @@ test("admits a native Prime message by its generated identity before delivery", 
   ]);
 });
 
+test("maps native root and child sessions to the Asterion RLM family identities", async () => {
+  let proposal;
+  await admitNativeRlmMessage({
+    async proposeMessage(value) { proposal = value; return { resolution: "admitted", message_id: value.message_id }; },
+  }, {
+    id: "agentmsg_123", message: "SENTINEL_PRIVATE_MESSAGE",
+    from: { activeSessionId: "prime-root-active" }, target: { activeSessionId: "prime-child-active" },
+  }, { sender_id: "session-1", recipient_id: "child-1" });
+  assert.deepEqual(proposal, {
+    request_id: "agentmsg_123", message_id: "agentmsg_123", sender_id: "session-1",
+    recipient_id: "child-1", body_text: "SENTINEL_PRIVATE_MESSAGE",
+  });
+});
+
 test("rejects a native Prime message before delivery when admission is not exact", async () => {
   let calls = 0;
   await assert.rejects(
@@ -227,6 +241,7 @@ test("reads one exact private discovery record and authenticates its spawn", asy
     }));
     const client = await createRlmHostClient(discoveryPath);
     assert.deepEqual(client.hostContext, hostContext());
+    assert.equal(client.parentSessionId, "session-1");
     assert.deepEqual(await client.proposeSpawn({
       child_id: "child-1",
       goal_text: "private",
