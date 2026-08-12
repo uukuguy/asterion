@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
+import { chmod, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -20,6 +21,33 @@ const sessionManagerUrl = pathToFileURL(join(
   "packages/coding-agent/dist/core/session-manager.js",
 ));
 const { SessionManager } = await import(sessionManagerUrl.href);
+const rlmShimSource = new URL(
+  "../../../../packages/typescript/prime-gateway/resources/rlm-host-shim.mjs",
+  import.meta.url,
+);
+await writeFile(join(agentDir, "asterion-rlm-host-shim.mjs"), await readFile(rlmShimSource), {
+  mode: 0o600,
+});
+await chmod(join(agentDir, "asterion-rlm-host-shim.mjs"), 0o600);
+await writeFile(
+  join(agentDir, "asterion-rlm-host.json"),
+  JSON.stringify({
+    protocol: "asterion.prime-rlm-host-discovery/v1",
+    socket_path: join(agentDir, "r.sock"),
+    token: "0".repeat(64),
+    session_id: "session-context-parity",
+    budget: {
+      controller_tokens: 0,
+      application_tokens: 0,
+      child_tokens: 0,
+      aggregate_tokens: 0,
+      cost_micros: 0,
+      deadline_ms: 1,
+    },
+  }),
+  { mode: 0o600 },
+);
+await chmod(join(agentDir, "asterion-rlm-host.json"), 0o600);
 const client = new PrimeDaemonClient({
   clientId: "asterion-session-context-parity",
   connectTimeoutMs: 5_000,
