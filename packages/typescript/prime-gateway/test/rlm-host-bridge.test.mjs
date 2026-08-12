@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { RlmHostBridge, authenticateRlmHostFrame, listenRlmHostBridge } from "../dist/src/index.js";
+import { RLM_HOST_PROTOCOL, RlmHostBridge, authenticateRlmHostFrame, listenRlmHostBridge } from "../dist/src/index.js";
 
 const proposal = (overrides = {}) => ({
   requestId: "request-1",
@@ -97,6 +97,33 @@ test("serves an authenticated RLM spawn over its private socket", async () => {
     });
     assert.deepEqual(response, { resolution: "admitted", childId: "c1" });
   } finally { await listener.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("serves one authenticated closed child terminal lifecycle frame", async () => {
+  const root = await mkdtemp(join(tmpdir(), "asterion-rlm-lifecycle-"));
+  const path = join(root, "r.sock");
+  const observed = [];
+  const listener = await listenRlmHostBridge(path, "session-1", "33".repeat(32), new RlmHostBridge({
+    sessionId: "session-1",
+    admitSpawn: async (proposal) => ({ resolution: "admitted", childId: proposal.childId }),
+    recordLifecycle: async (event) => { observed.push(event); },
+  }));
+  try {
+    const response = await new Promise((resolve, reject) => {
+      const socket = createConnection(path);
+      let body = "";
+      socket.setEncoding("utf8");
+      socket.once("connect", () => socket.write(`${JSON.stringify({ protocol: RLM_HOST_PROTOCOL, type: "authenticate", session_id: "session-1", token: "33".repeat(32) })}\n${JSON.stringify({ type: "rlm.child.terminal", child_id: "child-1", status: "completed" })}\n`));
+      socket.on("data", (chunk) => { body += chunk; });
+      socket.once("error", reject);
+      socket.once("end", () => resolve(JSON.parse(body)));
+    });
+    assert.deepEqual(response, { resolution: "recorded", childId: "child-1" });
+    assert.deepEqual(observed, [{ type: "rlm.child.terminal", childId: "child-1", status: "completed" }]);
+  } finally {
+    await listener.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("records one closed native child lifecycle after admission", async () => {

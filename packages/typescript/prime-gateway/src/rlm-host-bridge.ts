@@ -163,8 +163,19 @@ export async function listenRlmHostBridge(
         }
         try {
         const value: unknown = JSON.parse(line.toString("utf8"));
-        if (!isRecord(value) || !hasExactKeys(value, ["type", "request_id", "child_id", "idempotency_key", "goal_text", "budget"]) || value.type !== "rlm.spawn.propose" || typeof value.request_id !== "string" || typeof value.child_id !== "string" || typeof value.idempotency_key !== "string" || typeof value.goal_text !== "string" || !validBudget(value.budget)) throw new TypeError();
-        void bridge.proposeSpawn({ requestId: value.request_id, childId: value.child_id, idempotencyKey: value.idempotency_key, goalText: value.goal_text, budget: value.budget }).then((result) => socket.end(`${JSON.stringify(result)}\n`), () => socket.destroy());
+        if (!isRecord(value) || typeof value.type !== "string" || typeof value.child_id !== "string") throw new TypeError();
+        if (value.type === "rlm.spawn.propose") {
+          if (!hasExactKeys(value, ["type", "request_id", "child_id", "idempotency_key", "goal_text", "budget"]) || typeof value.request_id !== "string" || typeof value.idempotency_key !== "string" || typeof value.goal_text !== "string" || !validBudget(value.budget)) throw new TypeError();
+          void bridge.proposeSpawn({ requestId: value.request_id, childId: value.child_id, idempotencyKey: value.idempotency_key, goalText: value.goal_text, budget: value.budget }).then((result) => socket.end(`${JSON.stringify(result)}\n`), () => socket.destroy());
+        } else if (value.type === "rlm.child.started") {
+          if (!hasExactKeys(value, ["type", "child_id"])) throw new TypeError();
+          void bridge.recordLifecycle({ type: "rlm.child.started", childId: value.child_id }).then(() => socket.end(`${JSON.stringify({ resolution: "recorded", childId: value.child_id })}\n`), () => socket.destroy());
+        } else if (value.type === "rlm.child.terminal") {
+          if (!hasExactKeys(value, ["type", "child_id", "status"]) || typeof value.status !== "string" || !["completed", "failed", "cancelled"].includes(value.status)) throw new TypeError();
+          void bridge.recordLifecycle({ type: "rlm.child.terminal", childId: value.child_id, status: value.status as "completed" | "failed" | "cancelled" }).then(() => socket.end(`${JSON.stringify({ resolution: "recorded", childId: value.child_id })}\n`), () => socket.destroy());
+        } else {
+          throw new TypeError();
+        }
         } catch { socket.destroy(); }
         return;
       }
