@@ -104,6 +104,41 @@ class RlmAdmissionBinding:
             raise PrimeControlError()
 
 
+@dataclass(frozen=True)
+class RlmMessageAdmissionBinding:
+    """Safe immutable native family-message binding and delivery observation."""
+
+    action_id: str
+    message_id: str
+    sender_id: str
+    recipient_id: str
+    authority_revision: int
+    body_digest: str
+    delivered: bool
+
+    def __post_init__(self) -> None:
+        if (
+            any(
+                not isinstance(value, str) or OPAQUE_ID.fullmatch(value) is None
+                for value in (
+                    self.action_id,
+                    self.message_id,
+                    self.sender_id,
+                    self.recipient_id,
+                )
+            )
+            or self.sender_id == self.recipient_id
+            or isinstance(self.authority_revision, bool)
+            or not isinstance(self.authority_revision, int)
+            or self.authority_revision < 1
+            or not isinstance(self.body_digest, str)
+            or len(self.body_digest) != 64
+            or any(character not in "0123456789abcdef" for character in self.body_digest)
+            or type(self.delivered) is not bool
+        ):
+            raise PrimeControlError()
+
+
 class PrimeControlError(RuntimeError):
     """Raised when Prime cannot safely accept or replay a control operation."""
 
@@ -441,6 +476,60 @@ class PrimeControlPlaneClient:
                 binding["authority_revision"],
                 binding["depth"],
                 binding["model_selector_digest"],
+            )
+        except (KeyError, TypeError, ValueError):
+            raise PrimeControlError() from None
+        if result.action_id != action_id:
+            raise PrimeControlError()
+        return result
+
+    async def rlm_message_binding(self, action_id: str) -> RlmMessageAdmissionBinding:
+        """Read one exact body-free native RLM message binding."""
+
+        if (
+            self._closed
+            or not isinstance(action_id, str)
+            or OPAQUE_ID.fullmatch(action_id) is None
+        ):
+            raise PrimeControlError()
+        envelope: dict[str, object] = {
+            "protocol": PRIME_GATEWAY_IPC_PROTOCOL,
+            "id": _request_id(),
+            "type": "rlm.message.binding.read",
+            "action_id": action_id,
+        }
+        try:
+            response = await self._process.request(envelope)
+        except (KeyError, TypeError, ValueError, RuntimeError):
+            raise PrimeControlError() from None
+        binding = response.get("binding")
+        if (
+            set(response) != {"protocol", "id", "type", "binding"}
+            or response.get("protocol") != PRIME_GATEWAY_IPC_PROTOCOL
+            or response.get("id") != envelope["id"]
+            or response.get("type") != "rlm.message.binding.value"
+            or not isinstance(binding, Mapping)
+            or set(binding)
+            != {
+                "action_id",
+                "authority_revision",
+                "body_digest",
+                "delivered",
+                "message_id",
+                "recipient_id",
+                "sender_id",
+            }
+        ):
+            raise PrimeControlError()
+        try:
+            result = RlmMessageAdmissionBinding(
+                binding["action_id"],
+                binding["message_id"],
+                binding["sender_id"],
+                binding["recipient_id"],
+                binding["authority_revision"],
+                binding["body_digest"],
+                binding["delivered"],
             )
         except (KeyError, TypeError, ValueError):
             raise PrimeControlError() from None

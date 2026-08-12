@@ -17,6 +17,7 @@ from asterion.control.providers.prime.client import (
     PrimeControlPlaneClient,
     RlmAdmissionBinding,
     RlmLifecycleObservation,
+    RlmMessageAdmissionBinding,
 )
 from asterion.control.execution import ActionExecutionReceipt
 from asterion.control.authority import BudgetUsage, RemainingBudget
@@ -271,6 +272,43 @@ def failed_context_receipt(command: SessionContextCommand) -> SessionContextRece
 
 
 class TestPrimeControlClient(unittest.IsolatedAsyncioTestCase):
+    async def test_rlm_message_binding_reads_only_safe_delivery_metadata(self) -> None:
+        fake_process = FakeProcess()
+        fake_process.response = {
+            "protocol": "asterion.prime-gateway-ipc/v1",
+            "id": "<request>",
+            "type": "rlm.message.binding.value",
+            "binding": {
+                "action_id": "message-action-1",
+                "message_id": "message-1",
+                "sender_id": "session-1",
+                "recipient_id": "child-1",
+                "authority_revision": 1,
+                "body_digest": "a" * 64,
+                "delivered": True,
+            },
+        }
+        client = PrimeControlPlaneClient(
+            process=fake_process,
+            private_content=FakeResolver(),
+        )
+
+        binding = await client.rlm_message_binding("message-action-1")
+
+        self.assertEqual(
+            binding,
+            RlmMessageAdmissionBinding(
+                "message-action-1",
+                "message-1",
+                "session-1",
+                "child-1",
+                1,
+                "a" * 64,
+                True,
+            ),
+        )
+        self.assertEqual(fake_process.requests[0]["type"], "rlm.message.binding.read")
+
     async def test_rlm_binding_reads_only_safe_admitted_metadata(self) -> None:
         fake_process = FakeProcess()
         fake_process.response = {

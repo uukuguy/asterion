@@ -4,17 +4,21 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
+from typing import Protocol
 
 from asterion.control.authority import action_proposal_digest
 from asterion.control.host import ControlEvent
 from asterion.control.manager import ProviderOwnedActionTerminal
+from asterion.control.execution import ActionExecutionReceipt
+from asterion.control.authority import BudgetUsage
 from asterion.control.providers.prime.client import (
-    PrimeControlPlaneClient,
     RlmAdmissionBinding,
     RlmLifecycleObservation,
+    RlmMessageAdmissionBinding,
 )
-from asterion.control.rlm import RlmChildBinding, RlmChildService, RlmError
+from asterion.control.rlm import RlmChildBinding, RlmChildService, RlmError, RlmMessageBinding
 
 
 @dataclass(frozen=True)
@@ -26,9 +30,19 @@ class PrimeRlmHostComponents:
     action_lifecycle: "PrimeRlmActionLifecycle"
 
 
+class _PrimeRlmClient(Protocol):
+    async def rlm_binding(self, action_id: str) -> RlmAdmissionBinding: ...
+
+    async def rlm_lifecycle(self) -> tuple[RlmLifecycleObservation, ...]: ...
+
+    async def rlm_message_binding(
+        self, action_id: str
+    ) -> RlmMessageAdmissionBinding: ...
+
+
 def build_prime_rlm_host_components(
     *,
-    client: PrimeControlPlaneClient,
+    client: _PrimeRlmClient,
     authority: object,
     parent_session_id: str,
     private_root: Path | None = None,
@@ -56,7 +70,7 @@ class PrimeRlmAdmissionPreparer:
     def __init__(
         self,
         *,
-        client: PrimeControlPlaneClient,
+        client: _PrimeRlmClient,
         children: RlmChildService,
         parent_session_id: str,
     ) -> None:
@@ -69,6 +83,7 @@ class PrimeRlmAdmissionPreparer:
         self._client = client
         self._children = children
         self._parent_session_id = parent_session_id
+        self._messages: dict[str, RlmMessageBinding] = {}
 
     async def prepare(self, proposal: ControlEvent) -> None:
         if not isinstance(proposal, ControlEvent) or proposal.type != "action.proposed":
@@ -76,6 +91,9 @@ class PrimeRlmAdmissionPreparer:
         payload = proposal.payload
         action_id = payload.get("action_id")
         target = payload.get("target")
+        if payload.get("kind") == "child.message":
+            await self._prepare_message(proposal)
+            return
         if (
             payload.get("kind") != "child.spawn"
             or payload.get("authority_revision") is None
@@ -98,6 +116,38 @@ class PrimeRlmAdmissionPreparer:
                 model_selector_digest=gateway.model_selector_digest,
             )
         )
+
+    async def _prepare_message(self, proposal: ControlEvent) -> None:
+        payload = proposal.payload
+        action_id = payload.get("action_id")
+        target = payload.get("target")
+        if (
+            payload.get("authority_revision") is None
+            or not isinstance(action_id, str)
+            or not isinstance(target, Mapping)
+            or target.get("kind") != "child"
+            or not isinstance(target.get("child_id"), str)
+        ):
+            raise RlmError("Prime RLM proposal is invalid")
+        gateway = await self._client.rlm_message_binding(action_id)
+        if (
+            gateway.action_id != action_id
+            or gateway.recipient_id != target["child_id"]
+            or gateway.authority_revision != payload["authority_revision"]
+        ):
+            raise RlmError("Prime RLM binding conflicts")
+        binding = RlmMessageBinding(
+            gateway.message_id,
+            gateway.sender_id,
+            gateway.recipient_id,
+            gateway.body_digest,
+            gateway.authority_revision,
+        )
+        self._children.admit_message(binding)
+        existing = self._messages.get(action_id)
+        if existing is not None and existing != binding:
+            raise RlmError("Prime RLM binding conflicts")
+        self._messages[action_id] = binding
 
     async def reconcile_lifecycle(self) -> None:
         """Apply the complete Gateway lifecycle history monotonically."""
@@ -133,6 +183,8 @@ class PrimeRlmAdmissionPreparer:
         payload = proposal.payload
         action_id = payload.get("action_id")
         target = payload.get("target")
+        if payload.get("kind") == "child.message":
+            return action_id in self._messages
         if (
             payload.get("kind") != "child.spawn"
             or not isinstance(action_id, str)
@@ -203,4 +255,26 @@ class PrimeRlmActionLifecycle:
                 terminal = ProviderOwnedActionTerminal(binding.action_id, status.status)
             self._delivered.add(binding.action_id)
             terminals.append(terminal)
+        for action_id, binding in tuple(self._preparer._messages.items()):
+            if action_id in self._delivered:
+                continue
+            gateway = await self._preparer._client.rlm_message_binding(action_id)
+            if (
+                gateway.message_id != binding.message_id
+                or gateway.sender_id != binding.sender_id
+                or gateway.recipient_id != binding.recipient_id
+                or gateway.authority_revision != binding.authority_revision
+                or gateway.body_digest != binding.body_digest
+            ):
+                raise RlmError("Prime RLM binding conflicts")
+            if not gateway.delivered:
+                continue
+            self._preparer._children.record_message_delivered(binding)
+            receipt = ActionExecutionReceipt(
+                action_id=action_id,
+                receipt_ref="rlm-message-" + sha256(action_id.encode()).hexdigest(),
+                usage=BudgetUsage.zero(),
+            )
+            self._delivered.add(action_id)
+            terminals.append(ProviderOwnedActionTerminal(action_id, "succeeded", receipt))
         return tuple(terminals)

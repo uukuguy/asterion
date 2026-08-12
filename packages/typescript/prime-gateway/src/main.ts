@@ -59,7 +59,10 @@ import type {
   PrivateResultProjection,
   PrivateContinuationBinding,
 } from "./private-store.js";
-import type { GatewayRlmBinding } from "./durable-store.js";
+import type {
+  GatewayRlmBinding,
+  GatewayRlmMessageBinding,
+} from "./durable-store.js";
 import {
   AsterionSkillBridge,
   deriveControlActionId,
@@ -92,6 +95,7 @@ type SidecarEnvelopeType =
   | "events.stream"
   | "private.read"
   | "rlm.binding.read"
+  | "rlm.message.binding.read"
   | "rlm.lifecycle.read"
   | "session-context.cancel"
   | "session-context.execute";
@@ -116,6 +120,8 @@ export interface PrimeGatewaySidecarOptions {
     cancelSessionContext?(commandId: string): Promise<void>;
     rlmLifecycle?(): readonly RlmLifecycleObservation[];
     rlmBinding?(actionId: string): GatewayRlmBinding | undefined;
+    rlmMessageBinding?(actionId: string): GatewayRlmMessageBinding | undefined;
+    rlmMessageDelivered?(): readonly string[];
     close(): Promise<void>;
   };
   readonly privateValues: Pick<
@@ -206,6 +212,12 @@ type SidecarResponse =
     readonly id: string;
     readonly type: "rlm.binding.value";
     readonly binding: GatewayRlmBinding;
+  }
+  | {
+    readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
+    readonly id: string;
+    readonly type: "rlm.message.binding.value";
+    readonly binding: GatewayRlmMessageBinding & Readonly<{ readonly delivered: boolean }>;
   }
   | {
     readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
@@ -437,6 +449,7 @@ function validateEnvelope(value: unknown): SidecarEnvelope {
       value.type !== "events.stream" &&
       value.type !== "private.read" &&
       value.type !== "rlm.binding.read" &&
+      value.type !== "rlm.message.binding.read" &&
       value.type !== "rlm.lifecycle.read" &&
       value.type !== "authority.update" &&
       value.type !== "session-context.cancel" &&
@@ -464,7 +477,7 @@ function validateEnvelope(value: unknown): SidecarEnvelope {
     throw new PrimeGatewayError();
   }
   if (
-    value.type === "rlm.binding.read" &&
+    (value.type === "rlm.binding.read" || value.type === "rlm.message.binding.read") &&
     (!hasExactKeys(value, ["protocol", "id", "type", "action_id"]) ||
       typeof value.action_id !== "string" ||
       !REQUEST_ID.test(value.action_id))
@@ -692,6 +705,24 @@ export class PrimeGatewaySidecar {
           id: envelope.id,
           type: "rlm.binding.value",
           binding,
+        });
+      }
+      if (envelope.type === "rlm.message.binding.read") {
+        const readBinding = this.options.gateway.rlmMessageBinding;
+        const readDelivered = this.options.gateway.rlmMessageDelivered;
+        if (readBinding === undefined || readDelivered === undefined) {
+          throw new PrimeGatewayError();
+        }
+        const binding = readBinding.call(this.options.gateway, envelope.action_id as string);
+        if (binding === undefined) {
+          throw new PrimeGatewayError();
+        }
+        const delivered = readDelivered.call(this.options.gateway).includes(binding.message_id);
+        return Object.freeze({
+          protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+          id: envelope.id,
+          type: "rlm.message.binding.value",
+          binding: Object.freeze({ ...binding, delivered }),
         });
       }
       if (envelope.type === "session-context.execute") {
@@ -1560,6 +1591,8 @@ async function createSidecarFromDescriptor(
         store.eventsAfterCursor(cursor).map((receipt) => receipt.event),
       rlmLifecycle: () => store.rlmLifecycle(),
       rlmBinding: (actionId) => store.rlmBinding(actionId),
+      rlmMessageBinding: (actionId) => store.rlmMessageBinding(actionId),
+      rlmMessageDelivered: () => store.rlmMessageDelivered(),
       executeSessionContext: (command, preparePrivate) =>
         gateway.executeSessionContext(command, preparePrivate),
       cancelSessionContext: (commandId) => gateway.cancelSessionContext(commandId),

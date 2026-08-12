@@ -453,6 +453,38 @@ test("sidecar returns one exact safe RLM admission binding", async () => {
   });
 });
 
+test("sidecar returns an exact RLM message binding with durable delivery state", async () => {
+  const binding = {
+    action_id: "message-action-1",
+    message_id: "message-1",
+    sender_id: "session-1",
+    recipient_id: "child-1",
+    authority_revision: 1,
+    body_digest: "b".repeat(64),
+  };
+  const { sidecar } = createSidecar({
+    gateway: {
+      ...new FakeGateway(),
+      rlmMessageBinding: (actionId) => actionId === binding.action_id ? binding : undefined,
+      rlmMessageDelivered: () => [binding.message_id],
+    },
+  });
+
+  const response = await sidecar.handleEnvelope({
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "rlm-message-binding-1",
+    type: "rlm.message.binding.read",
+    action_id: binding.action_id,
+  });
+
+  assert.deepEqual(response, {
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "rlm-message-binding-1",
+    type: "rlm.message.binding.value",
+    binding: { ...binding, delivered: true },
+  });
+});
+
 test("sidecar validates closed session-context execute and cancel envelopes", async () => {
   const { gateway, privateValues, sidecar } = createSidecar();
   const publicCommand = contextCommand();
