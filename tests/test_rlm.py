@@ -26,6 +26,7 @@ def _authority() -> AuthorityEnvelope:
 
 def _binding(**changes: object) -> RlmChildBinding:
     values = {
+        "action_id": "action-1",
         "child_id": "child-1",
         "parent_session_id": "session-1",
         "authority_revision": 1,
@@ -45,6 +46,7 @@ class TestRlmChildService(unittest.TestCase):
         self.assertEqual(
             _binding().to_mapping(),
             {
+                "action_id": "action-1",
                 "child_id": "child-1",
                 "parent_session_id": "session-1",
                 "authority_revision": 1,

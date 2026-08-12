@@ -6,6 +6,7 @@ from collections.abc import Mapping
 
 from asterion.control.authority import action_proposal_digest
 from asterion.control.host import ControlEvent
+from asterion.control.manager import ProviderOwnedActionTerminal
 from asterion.control.providers.prime.client import (
     PrimeControlPlaneClient,
     RlmAdmissionBinding,
@@ -53,6 +54,7 @@ class PrimeRlmAdmissionPreparer:
         self._validate_gateway_binding(proposal, gateway)
         self._children.admit(
             RlmChildBinding(
+                action_id=gateway.action_id,
                 child_id=gateway.child_id,
                 parent_session_id=self._parent_session_id,
                 authority_revision=gateway.authority_revision,
@@ -104,3 +106,42 @@ class PrimeRlmAdmissionPreparer:
             or gateway.authority_revision != payload["authority_revision"]
         ):
             raise RlmError("Prime RLM binding conflicts")
+
+
+class PrimeRlmActionLifecycle:
+    """Expose Prime-native RLM actions as provider-owned asynchronous work."""
+
+    def __init__(self, preparer: PrimeRlmAdmissionPreparer) -> None:
+        if not isinstance(preparer, PrimeRlmAdmissionPreparer):
+            raise RlmError("Prime RLM lifecycle is invalid")
+        self._preparer = preparer
+        self._delivered: set[str] = set()
+
+    def owns(self, proposal: ControlEvent) -> bool:
+        return (
+            isinstance(proposal, ControlEvent)
+            and proposal.type == "action.proposed"
+            and proposal.payload.get("kind") == "child.spawn"
+        )
+
+    async def reconcile(self) -> tuple[ProviderOwnedActionTerminal, ...]:
+        await self._preparer.reconcile_lifecycle()
+        terminals: list[ProviderOwnedActionTerminal] = []
+        for status in self._preparer._children.public_registry():
+            if status.status not in {"completed", "failed", "cancelled"}:
+                continue
+            binding = self._preparer._children.binding(status.child_id)
+            if binding.action_id in self._delivered:
+                continue
+            if status.status == "completed":
+                # The native terminal does not yet expose a verified private
+                # result reference. Do not fabricate a successful projection.
+                terminal = ProviderOwnedActionTerminal(
+                    binding.action_id,
+                    "uncertain",
+                )
+            else:
+                terminal = ProviderOwnedActionTerminal(binding.action_id, status.status)
+            self._delivered.add(binding.action_id)
+            terminals.append(terminal)
+        return tuple(terminals)

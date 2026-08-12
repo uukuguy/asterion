@@ -11,6 +11,7 @@ from asterion.control.host import ControlEvent
 from asterion.control.providers.prime.client import RlmAdmissionBinding
 from asterion.control.providers.prime.client import RlmLifecycleObservation
 from asterion.control.providers.prime.rlm import PrimeRlmAdmissionPreparer
+from asterion.control.providers.prime.rlm import PrimeRlmActionLifecycle
 from asterion.control.rlm import RlmChildService, RlmError
 
 
@@ -129,3 +130,25 @@ class TestPrimeRlmAdmissionPreparer(unittest.IsolatedAsyncioTestCase):
         await preparer.reconcile_lifecycle()
 
         self.assertEqual(service.status("child-1").status, "completed")
+
+    async def test_completed_native_child_stays_uncertain_without_verified_result(self) -> None:
+        service = RlmChildService(_authority())
+        client = _Client(
+            RlmAdmissionBinding("action-1", "child-1", 1, 1, "a" * 64)
+        )
+        client.lifecycle = ()
+        preparer = PrimeRlmAdmissionPreparer(
+            client=client, children=service, parent_session_id="session-1"
+        )
+        await preparer.prepare(_proposal())
+        client.lifecycle = (
+            RlmLifecycleObservation(
+                "rlm.child.started", "child-1", native_identity_digest="b" * 64
+            ),
+            RlmLifecycleObservation("rlm.child.terminal", "child-1", "completed"),
+        )
+
+        terminals = await PrimeRlmActionLifecycle(preparer).reconcile()
+
+        self.assertEqual(len(terminals), 1)
+        self.assertEqual(terminals[0].status, "uncertain")

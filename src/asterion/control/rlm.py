@@ -34,6 +34,7 @@ def _digest(value: object) -> bool:
 class RlmChildBinding:
     """Public child identity; native Prime identities never enter this record."""
 
+    action_id: str
     child_id: str
     parent_session_id: str
     authority_revision: int
@@ -43,7 +44,9 @@ class RlmChildBinding:
 
     def __post_init__(self) -> None:
         if (
-            not isinstance(self.child_id, str)
+            not isinstance(self.action_id, str)
+            or OPAQUE_ID.fullmatch(self.action_id) is None
+            or not isinstance(self.child_id, str)
             or OPAQUE_ID.fullmatch(self.child_id) is None
             or not isinstance(self.parent_session_id, str)
             or OPAQUE_ID.fullmatch(self.parent_session_id) is None
@@ -61,6 +64,7 @@ class RlmChildBinding:
     def to_mapping(self) -> Mapping[str, object]:
         return MappingProxyType(
             {
+                "action_id": self.action_id,
                 "child_id": self.child_id,
                 "parent_session_id": self.parent_session_id,
                 "authority_revision": self.authority_revision,

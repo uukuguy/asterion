@@ -81,6 +81,34 @@ class AdmittedActionPreparer(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class ProviderOwnedActionTerminal:
+    """One terminal result observed from a provider-owned asynchronous action."""
+
+    action_id: str
+    status: str
+    receipt: ActionExecutionReceipt | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.action_id, str)
+            or self.status not in {"succeeded", "failed", "cancelled", "uncertain"}
+            or (self.status == "succeeded") != isinstance(self.receipt, ActionExecutionReceipt)
+            or (self.receipt is not None and self.receipt.action_id != self.action_id)
+        ):
+            raise ValueError("provider-owned action terminal is invalid")
+
+
+class ProviderOwnedActionLifecycle(Protocol):
+    """Observe actions whose selected provider, rather than host executor, runs them."""
+
+    def owns(self, proposal: ControlEvent) -> bool:
+        ...
+
+    async def reconcile(self) -> tuple[ProviderOwnedActionTerminal, ...]:
+        ...
+
+
 class ActionResultBinder(Protocol):
     def bind_action_result(self, receipt: ActionExecutionReceipt) -> None:
         """Bind one public-safe execution projection before terminal delivery."""
@@ -158,6 +186,7 @@ class ControlHost:
         child_service: ChildLifecycleService | None = None,
         session_context_client: SessionContextClient | None = None,
         admitted_action_preparer: AdmittedActionPreparer | None = None,
+        provider_owned_actions: ProviderOwnedActionLifecycle | None = None,
     ) -> None:
         if (
             not isinstance(plan, AgentSystemPlan)
@@ -181,6 +210,7 @@ class ControlHost:
                 admitted_action_preparer is not None
                 and not callable(getattr(admitted_action_preparer, "prepare", None))
             )
+            or not _valid_provider_owned_actions(provider_owned_actions)
             or (
                 session_context_client is not None
                 and (
@@ -211,6 +241,7 @@ class ControlHost:
         self._action_executor = action_executor
         self._child_service = child_service
         self._admitted_action_preparer = admitted_action_preparer
+        self._provider_owned_actions = provider_owned_actions
         self._children_closed = False
         self._cancellation_signal = cancellation_signal or _NeverCancelled()
         self._clock_ms = clock_ms
@@ -370,6 +401,7 @@ class ControlHost:
 
     async def pump(self, *, until_terminal: bool = False) -> None:
         await self._sync_authority_snapshot()
+        await self._reconcile_provider_owned_actions()
         await self._resume_pending_actions()
         empty_polls = 0
         try:
@@ -385,6 +417,7 @@ class ControlHost:
                     await self._accept_event(event)
                     if until_terminal and self._state.terminal_event_id is not None:
                         break
+                await self._reconcile_provider_owned_actions()
                 if not until_terminal or self._state.terminal_event_id is not None:
                     break
                 if self._cancellation_signal.cancelled:
@@ -574,6 +607,8 @@ class ControlHost:
                 await self._deliver_pending_admission(action_id)
                 continue
             if action.status == "running":
+                if self._provider_owns(self._pending_proposals[action_id]):
+                    continue
                 self._ensure_pending_admission(action_id)
                 command = self._pending_admissions[action_id]
                 await self._send_persisted_command(command)
@@ -667,6 +702,9 @@ class ControlHost:
         ):
             raise ControlHostError("control action running fence failed") from None
 
+        if self._provider_owns(proposal):
+            return
+
         prepared_reference = await self._prepare_action_input(proposal)
         try:
             result = await self._action_executor.execute(
@@ -738,6 +776,75 @@ class ControlHost:
             status="uncertain",
             reason_code="progress-unknown",
             receipt_ref=None,
+        )
+
+    def _provider_owns(self, proposal: ControlEvent) -> bool:
+        if self._provider_owned_actions is None:
+            return False
+        try:
+            return self._provider_owned_actions.owns(proposal)
+        except Exception:
+            raise ControlHostError("provider-owned action ownership is invalid") from None
+
+    async def _reconcile_provider_owned_actions(self) -> None:
+        lifecycle = self._provider_owned_actions
+        if lifecycle is None:
+            return
+        try:
+            terminals = await lifecycle.reconcile()
+            if not isinstance(terminals, tuple):
+                raise TypeError
+            for terminal in terminals:
+                if not isinstance(terminal, ProviderOwnedActionTerminal):
+                    raise TypeError
+                action = self._state.actions.get(terminal.action_id)
+                if action is None or action.status != "running":
+                    raise TypeError
+                if terminal.status == "succeeded":
+                    assert terminal.receipt is not None
+                    await self._settle_provider_owned_receipt(terminal.receipt)
+                else:
+                    await self._complete_action(
+                        terminal.action_id,
+                        status=terminal.status,
+                        reason_code="provider-owned-terminal",
+                        receipt_ref=None,
+                    )
+        except ControlHostError:
+            raise
+        except Exception:
+            raise ControlHostError("provider-owned action lifecycle is invalid") from None
+
+    async def _settle_provider_owned_receipt(
+        self, receipt: ActionExecutionReceipt
+    ) -> None:
+        action_id = receipt.action_id
+        authority_receipt = ActionReceipt(
+            action_id=action_id,
+            receipt_ref=receipt.receipt_ref,
+            usage=receipt.usage,
+        )
+        self._authority.preview_settlement(action_id, authority_receipt)
+        entry = self._journal.append(
+            self._journal_position,
+            JournalRecord.action_receipted(
+                action_id=action_id,
+                receipt_ref=receipt.receipt_ref,
+                usage=receipt.usage,
+                artifact_ids=receipt.artifact_ids,
+                media_types=receipt.media_types,
+            ),
+        )
+        self._journal_position = max(self._journal_position, entry.position)
+        self._authority.settle(action_id, authority_receipt)
+        self._result_receipts[action_id] = receipt
+        await self._sync_authority_snapshot()
+        await self._complete_action(
+            action_id,
+            status="succeeded",
+            reason_code="provider-owned-terminal",
+            receipt_ref=receipt.receipt_ref,
+            execution_receipt=receipt,
         )
 
     async def _complete_action(
@@ -927,6 +1034,13 @@ def _valid_child_service(value: object) -> bool:
         ) and (isinstance(active_ids, property) or isinstance(active_ids, tuple))
     except Exception:
         return False
+
+
+def _valid_provider_owned_actions(value: object) -> bool:
+    return value is None or (
+        callable(getattr(value, "owns", None))
+        and callable(getattr(value, "reconcile", None))
+    )
 
 
 def _usage_payload_integer(value: object) -> int:

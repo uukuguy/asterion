@@ -5,7 +5,7 @@ import unittest
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from asterion.control.authority import AuthorityLedger
+from asterion.control.authority import AuthorityLedger, BudgetUsage
 from asterion.control.execution import ActionExecutionReceipt
 from asterion.control.host import (
     ControlCommand,
@@ -18,6 +18,7 @@ from asterion.control.manager import (
     ControlHost,
     ControlHostError,
     ControlHostTransportError,
+    ProviderOwnedActionTerminal,
 )
 from asterion.control.system import resolve_agent_system
 from asterion.runtime.host import CancellationSignal
@@ -104,6 +105,32 @@ class AdmissionPreparer:
         self.audit.append(f"prepare:{proposal.payload['action_id']}")
 
 
+class ProviderOwnedLifecycle:
+    def __init__(self) -> None:
+        self.action_id: str | None = None
+        self.delivered = False
+
+    def owns(self, proposal: ControlEvent) -> bool:
+        self.action_id = str(proposal.payload["action_id"])
+        return proposal.payload["kind"] == "child.spawn"
+
+    async def reconcile(self) -> tuple[ProviderOwnedActionTerminal, ...]:
+        if self.action_id is None or self.delivered:
+            return ()
+        self.delivered = True
+        return (
+            ProviderOwnedActionTerminal(
+                self.action_id,
+                "succeeded",
+                ActionExecutionReceipt(
+                    action_id=self.action_id,
+                    receipt_ref=f"receipt:{self.action_id}",
+                    usage=BudgetUsage.zero(),
+                ),
+            ),
+        )
+
+
 def _session_events(proposal: ControlEvent) -> tuple[ControlEvent, ...]:
     created = ControlEvent.from_mapping(
         {
@@ -152,6 +179,41 @@ def _create_command() -> ControlCommand:
 
 
 class TestControlHost(unittest.IsolatedAsyncioTestCase):
+    async def test_provider_owned_child_skips_generic_executor_and_settles_later(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            plan = resolve_agent_system(
+                _manifest(), application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]), host_capabilities=("clock.monotonic", "storage.private"),
+            )
+            executor = SpyExecutor()
+            lifecycle = ProviderOwnedLifecycle()
+            host = ControlHost(
+                session_id="session-1", generation=1, plan=plan,
+                authority=AuthorityLedger(_envelope()), journal=MemoryCanonicalJournal("session-1"),
+                client=ScriptedClient(plan.control_binding.manifest), action_executor=executor,
+                clock_ms=lambda: 1_000, provider_owned_actions=lifecycle,
+            )
+            proposal = ControlEvent.from_mapping(
+                {
+                    **_proposal().to_mapping(),
+                    "sequence": 3,
+                    "payload": {
+                        **_proposal().to_mapping()["payload"],
+                        "kind": "child.spawn",
+                        "target": {"kind": "child", "child_id": "child-1"},
+                    },
+                }
+            )
+            created, running, _ = _session_events(proposal)
+            await host._accept_event(created)
+            await host._accept_event(running)
+            await host._accept_event(proposal)
+            self.assertEqual(executor.calls, [])
+            self.assertEqual(host.snapshot().state.actions["action-1"].status, "running")
+
+            await host.pump()
+
+            self.assertEqual(host.snapshot().state.actions["action-1"].status, "succeeded")
     async def test_admitted_action_preparer_runs_before_admission_delivery(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             audit: list[str] = []
