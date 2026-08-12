@@ -9,8 +9,9 @@ import json
 import uuid
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Mapping
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from asterion.control.authority import RemainingBudget
 from asterion.control.execution import ActionExecutionReceipt
@@ -35,6 +36,31 @@ from asterion.control.providers.prime.process import PRIME_GATEWAY_IPC_PROTOCOL
 MAX_PRIVATE_TEXT_BYTES = 1024 * 1024
 MAX_PRIVATE_ATTACHMENT_BYTES = 8 * 1024 * 1024
 MAX_PREPARED_PRIVATE_INPUTS = 128
+
+
+@dataclass(frozen=True)
+class RlmLifecycleObservation:
+    """One public-safe native RLM lifecycle transition from the sidecar."""
+
+    type: Literal["rlm.child.started", "rlm.child.terminal"]
+    child_id: str
+    status: Literal["completed", "failed", "cancelled"] | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            self.type not in {"rlm.child.started", "rlm.child.terminal"}
+            or not isinstance(self.child_id, str)
+            or OPAQUE_ID.fullmatch(self.child_id) is None
+            or (
+                self.type == "rlm.child.started"
+                and self.status is not None
+            )
+            or (
+                self.type == "rlm.child.terminal"
+                and self.status not in {"completed", "failed", "cancelled"}
+            )
+        ):
+            raise PrimeControlError()
 
 
 class PrimeControlError(RuntimeError):
@@ -265,6 +291,66 @@ class PrimeControlPlaneClient:
             or response.get("type") != "session-context.cancel.accepted"
         ):
             raise PrimeControlError()
+
+    async def rlm_lifecycle(self) -> tuple[RlmLifecycleObservation, ...]:
+        """Read the closed, body-free native RLM child lifecycle."""
+
+        if self._closed:
+            raise PrimeControlError()
+        envelope: dict[str, object] = {
+            "protocol": PRIME_GATEWAY_IPC_PROTOCOL,
+            "id": _request_id(),
+            "type": "rlm.lifecycle.read",
+        }
+        try:
+            response = await self._process.request(envelope)
+        except (KeyError, TypeError, ValueError, RuntimeError):
+            raise PrimeControlError() from None
+        lifecycle = response.get("lifecycle")
+        if (
+            set(response) != {"protocol", "id", "type", "lifecycle"}
+            or response.get("protocol") != PRIME_GATEWAY_IPC_PROTOCOL
+            or response.get("id") != envelope["id"]
+            or response.get("type") != "rlm.lifecycle.batch"
+            or not isinstance(lifecycle, list)
+            or len(lifecycle) > 1024
+        ):
+            raise PrimeControlError()
+        active: set[str] = set()
+        result: list[RlmLifecycleObservation] = []
+        try:
+            for item in lifecycle:
+                if not isinstance(item, Mapping):
+                    raise PrimeControlError()
+                item_type = item.get("type")
+                child_id = item.get("child_id")
+                if not isinstance(child_id, str):
+                    raise PrimeControlError()
+                if item_type == "rlm.child.started" and set(item) == {
+                    "type",
+                    "child_id",
+                }:
+                    observation = RlmLifecycleObservation(item_type, child_id)
+                    if child_id in active:
+                        raise PrimeControlError()
+                    active.add(child_id)
+                elif item_type == "rlm.child.terminal" and set(item) == {
+                    "type",
+                    "child_id",
+                    "status",
+                }:
+                    observation = RlmLifecycleObservation(
+                        item_type, child_id, item.get("status")
+                    )
+                    if child_id not in active:
+                        raise PrimeControlError()
+                    active.remove(child_id)
+                else:
+                    raise PrimeControlError()
+                result.append(observation)
+        except (TypeError, ValueError):
+            raise PrimeControlError() from None
+        return tuple(result)
 
     def bind_action_result(self, receipt: ActionExecutionReceipt) -> None:
         """Remember the public-safe private-result projection for a terminal send."""

@@ -514,6 +514,7 @@ def _validate_response(
         "command.accept": "command.accepted",
         "events.stream": "events.batch",
         "private.read": "private.value",
+        "rlm.lifecycle.read": "rlm.lifecycle.batch",
         "session-context.cancel": "session-context.cancel.accepted",
         "session-context.execute": "session-context.receipt",
     }.get(request_type) if isinstance(request_type, str) else None
@@ -527,6 +528,7 @@ def _validate_response(
             "command.accepted",
             "events.batch",
             "private.value",
+            "rlm.lifecycle.batch",
             "session-context.cancel.accepted",
             "session-context.receipt",
         }
@@ -535,6 +537,10 @@ def _validate_response(
     expected = {"protocol", "id", "type"}
     if response.get("type") == "events.batch":
         expected = expected | {"events"}
+    if response.get("type") == "rlm.lifecycle.batch":
+        expected = expected | {"lifecycle"}
+        if not isinstance(response.get("lifecycle"), list):
+            raise PrimeSidecarProcessError()
     if response.get("type") == "private.value":
         expected = expected | {"text"}
         if not isinstance(response.get("text"), str):

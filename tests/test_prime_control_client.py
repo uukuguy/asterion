@@ -15,6 +15,7 @@ from asterion.control.providers.prime.client import (
     MAX_PRIVATE_TEXT_BYTES,
     PrimeControlError,
     PrimeControlPlaneClient,
+    RlmLifecycleObservation,
 )
 from asterion.control.execution import ActionExecutionReceipt
 from asterion.control.authority import BudgetUsage, RemainingBudget
@@ -269,6 +270,39 @@ def failed_context_receipt(command: SessionContextCommand) -> SessionContextRece
 
 
 class TestPrimeControlClient(unittest.IsolatedAsyncioTestCase):
+    async def test_rlm_lifecycle_reads_only_closed_public_observations(self) -> None:
+        fake_process = FakeProcess()
+        fake_process.response = {
+            "protocol": "asterion.prime-gateway-ipc/v1",
+            "id": "<request>",
+            "type": "rlm.lifecycle.batch",
+            "lifecycle": [
+                {"type": "rlm.child.started", "child_id": "child-1"},
+                {
+                    "type": "rlm.child.terminal",
+                    "child_id": "child-1",
+                    "status": "completed",
+                },
+            ],
+        }
+        client = PrimeControlPlaneClient(
+            process=fake_process,
+            private_content=FakeResolver(),
+        )
+
+        observed = await client.rlm_lifecycle()
+
+        self.assertEqual(
+            observed,
+            (
+                RlmLifecycleObservation("rlm.child.started", "child-1"),
+                RlmLifecycleObservation(
+                    "rlm.child.terminal", "child-1", "completed"
+                ),
+            ),
+        )
+        self.assertEqual(fake_process.requests[0]["type"], "rlm.lifecycle.read")
+
     async def test_session_context_text_values_use_only_closed_private_fields(
         self,
     ) -> None:
