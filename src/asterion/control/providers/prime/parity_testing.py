@@ -320,6 +320,37 @@ PRIME_RLM_BOUNDED_SCENARIO_IDS = tuple(
     for scenario_id, contract in PRIME_RLM_SCENARIO_MATRIX.items()
     if contract["boundary"] == "bounded-provider"
 )
+PRIME_RLM_VERIFICATION_COMMAND_ID = (
+    "test.prime-rlm-messaging-parity.provider-free"
+)
+PRIME_RLM_REQUIRED_CHECK_IDS = MappingProxyType(
+    {
+        "prime-parity.rlm.cancellation-teardown": (
+            "native-child-teardown-passed",
+            "pinned-prime-rlm-daemon-passed",
+        ),
+        "prime-parity.rlm.environment": (
+            "closed-home-no-credentials-passed",
+            "pinned-prime-rlm-daemon-passed",
+        ),
+        "prime-parity.rlm.messaging": (
+            "native-family-message-admitted-passed",
+            "native-message-delivery-recorded-passed",
+        ),
+        "prime-parity.rlm.recovery": (
+            "native-message-recovery-fenced-passed",
+            "pinned-prime-rlm-daemon-passed",
+        ),
+        "prime-parity.rlm.registry-lifecycle": (
+            "native-child-registry-delete-passed",
+            "pinned-prime-rlm-daemon-passed",
+        ),
+        "prime-parity.rlm.usage-cost": (
+            "zero-provider-usage-monotonic-passed",
+            "pinned-prime-rlm-daemon-passed",
+        ),
+    }
+)
 PRIME_SESSION_CONTEXT_REQUIRED_CHECK_IDS = MappingProxyType(
     {
         "prime-parity.session.branch-summaries-labels": (
@@ -458,6 +489,114 @@ class PrimeSessionContextScenarioObservation:
             f"scenario_id={self.scenario_id!r}, status={self.status!r}, "
             f"evidence_id={self.evidence_id!r}, observations=<redacted>)"
         )
+
+
+@dataclass(frozen=True, repr=False)
+class PrimeRlmScenarioObservation:
+    """Public-safe result of one exact native Prime RLM verification."""
+
+    scenario_id: str
+    status: str
+    checks: tuple[str, ...]
+    real_prime_runtime: bool
+    fake_daemon: bool
+    provider_operations: int
+    model_credential_reads: int
+    source_commit: str
+    artifact_lock: str
+    command_id: str
+    serialized_observations: str
+    evidence_id: str | None
+
+    def __repr__(self) -> str:
+        return (
+            "PrimeRlmScenarioObservation("
+            f"scenario_id={self.scenario_id!r}, status={self.status!r}, "
+            f"evidence_id={self.evidence_id!r}, observations=<redacted>)"
+        )
+
+
+def build_prime_rlm_observation(
+    *,
+    scenario_id: str,
+    status: str,
+    checks: Sequence[str],
+    real_prime_runtime: bool,
+    fake_daemon: bool,
+    provider_operations: int,
+    model_credential_reads: int,
+) -> PrimeRlmScenarioObservation:
+    """Build a canonical RLM observation without inventing model evidence."""
+
+    try:
+        contract = PRIME_RLM_SCENARIO_MATRIX[scenario_id]
+        check_ids = tuple(checks)
+        expected_checks = PRIME_RLM_REQUIRED_CHECK_IDS.get(scenario_id, ())
+        expected_status = (
+            "EXTERNAL-LIMITED"
+            if scenario_id in PRIME_RLM_BOUNDED_SCENARIO_IDS
+            else "PASS"
+        )
+        if (
+            status != expected_status
+            or check_ids != expected_checks
+            or any(_SAFE_ID.fullmatch(item) is None for item in check_ids)
+            or type(real_prime_runtime) is not bool
+            or type(fake_daemon) is not bool
+            or type(provider_operations) is not int
+            or provider_operations < 0
+            or type(model_credential_reads) is not int
+            or model_credential_reads < 0
+        ):
+            raise ValueError
+        payload = {
+            "artifact_lock": PRIME_SESSION_CONTEXT_ARTIFACT_LOCK,
+            "assertion_ids": list(contract["assertion_ids"]),
+            "boundary": contract["boundary"],
+            "checks": list(check_ids),
+            "command_id": PRIME_RLM_VERIFICATION_COMMAND_ID,
+            "fake_daemon": fake_daemon,
+            "fault_ids": list(contract["fault_ids"]),
+            "feature_ids": list(contract["feature_ids"]),
+            "model_credential_reads": model_credential_reads,
+            "provider_id": "asterion.prime-gateway",
+            "provider_operations": provider_operations,
+            "real_prime_runtime": real_prime_runtime,
+            "scenario_id": scenario_id,
+            "source_commit": PRIME_SESSION_CONTEXT_SOURCE_COMMIT,
+            "status": status,
+        }
+        serialized = json.dumps(
+            payload,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        evidence_id = None
+        if (
+            status == "PASS"
+            and real_prime_runtime
+            and not fake_daemon
+        ):
+            evidence_id = "evidence.rlm." + hashlib.sha256(
+                serialized.encode("utf-8")
+            ).hexdigest()
+        return PrimeRlmScenarioObservation(
+            scenario_id=scenario_id,
+            status=status,
+            checks=check_ids,
+            real_prime_runtime=real_prime_runtime,
+            fake_daemon=fake_daemon,
+            provider_operations=provider_operations,
+            model_credential_reads=model_credential_reads,
+            source_commit=PRIME_SESSION_CONTEXT_SOURCE_COMMIT,
+            artifact_lock=PRIME_SESSION_CONTEXT_ARTIFACT_LOCK,
+            command_id=PRIME_RLM_VERIFICATION_COMMAND_ID,
+            serialized_observations=serialized,
+            evidence_id=evidence_id,
+        )
+    except (KeyError, TypeError, ValueError):
+        raise ParityScenarioRegistryError("Prime RLM observation is invalid") from None
 
 
 def build_prime_session_context_observation(
