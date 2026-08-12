@@ -49,7 +49,26 @@ export interface RlmSpawnResolution {
 export interface RlmHostBridgeOptions {
   readonly sessionId: string;
   readonly admitSpawn: (proposal: RlmSpawnProposal) => Promise<RlmSpawnResolution>;
+  readonly admitMessage?: (proposal: RlmMessageProposal) => Promise<RlmMessageResolution>;
+  readonly recordMessageDelivered?: (event: RlmMessageDelivery) => Promise<void>;
   readonly recordLifecycle?: (event: RlmHostLifecycleEvent) => Promise<void>;
+}
+
+export interface RlmMessageProposal {
+  readonly requestId: string;
+  readonly messageId: string;
+  readonly senderId: string;
+  readonly recipientId: string;
+  readonly bodyText: string;
+}
+
+export interface RlmMessageResolution {
+  readonly resolution: "admitted" | "rejected" | "uncertain";
+  readonly messageId: string;
+}
+
+export interface RlmMessageDelivery {
+  readonly messageId: string;
 }
 
 export type RlmHostLifecycleEvent =
@@ -96,8 +115,19 @@ function proposalDigest(proposal: RlmSpawnProposal): string {
   })).digest("hex");
 }
 
+function messageDigest(proposal: RlmMessageProposal): string {
+  return createHash("sha256").update(JSON.stringify({
+    message_id: proposal.messageId,
+    sender_id: proposal.senderId,
+    recipient_id: proposal.recipientId,
+    body_digest: createHash("sha256").update(proposal.bodyText).digest("hex"),
+  })).digest("hex");
+}
+
 export class RlmHostBridge {
   private readonly spawns = new Map<string, { readonly digest: string; readonly promise: Promise<RlmSpawnResolution> }>();
+  private readonly messages = new Map<string, { readonly digest: string; readonly messageId: string; readonly promise: Promise<RlmMessageResolution>; delivered: boolean }>();
+  private readonly messageRequestsById = new Map<string, string>();
 
   constructor(private readonly options: RlmHostBridgeOptions) {
     if (options.sessionId.length === 0) throw new TypeError("RLM bridge is invalid");
@@ -125,6 +155,47 @@ export class RlmHostBridge {
     const promise = this.admit(proposal);
     this.spawns.set(proposal.requestId, { digest, promise });
     return promise;
+  }
+
+  async proposeMessage(proposal: RlmMessageProposal): Promise<RlmMessageResolution> {
+    if (
+      this.options.admitMessage === undefined
+      || !OPAQUE_ID.test(proposal.requestId)
+      || !OPAQUE_ID.test(proposal.messageId)
+      || !OPAQUE_ID.test(proposal.senderId)
+      || !OPAQUE_ID.test(proposal.recipientId)
+      || proposal.senderId === proposal.recipientId
+      || Buffer.byteLength(proposal.bodyText, "utf8") > 1024 * 1024
+    ) throw new TypeError("RLM message is invalid");
+    const digest = messageDigest(proposal);
+    const existing = this.messages.get(proposal.requestId);
+    if (existing !== undefined) {
+      if (existing.digest !== digest) throw new TypeError("RLM message conflicts");
+      return existing.promise;
+    }
+    const priorRequestId = this.messageRequestsById.get(proposal.messageId);
+    if (priorRequestId !== undefined && priorRequestId !== proposal.requestId) {
+      throw new TypeError("RLM message conflicts");
+    }
+    const promise = this.options.admitMessage(Object.freeze({ ...proposal })).then((resolution) => {
+      if (resolution.messageId !== proposal.messageId || !["admitted", "rejected", "uncertain"].includes(resolution.resolution)) throw new TypeError("RLM message admission is invalid");
+      return Object.freeze({ ...resolution });
+    });
+    this.messages.set(proposal.requestId, { digest, messageId: proposal.messageId, promise, delivered: false });
+    this.messageRequestsById.set(proposal.messageId, proposal.requestId);
+    return promise;
+  }
+
+  async recordMessageDelivered(event: RlmMessageDelivery): Promise<void> {
+    if (!isRecord(event) || !hasExactKeys(event, ["messageId"]) || !OPAQUE_ID.test(event.messageId)) throw new TypeError("RLM message delivery is invalid");
+    const entry = [...this.messages.values()].find((candidate) => candidate.messageId === event.messageId);
+    if (entry === undefined) throw new TypeError("RLM message is unknown");
+    const resolution = await entry.promise;
+    if (resolution.resolution !== "admitted" || resolution.messageId !== event.messageId) throw new TypeError("RLM message is unknown");
+    if (this.options.recordMessageDelivered === undefined) throw new TypeError("RLM message is unavailable");
+    if (entry.delivered) return;
+    await this.options.recordMessageDelivered(Object.freeze({ ...event }));
+    entry.delivered = true;
   }
 
   async recordLifecycle(event: RlmHostLifecycleEvent): Promise<void> {

@@ -148,3 +148,65 @@ test("records one closed native child lifecycle after admission", async () => {
     /invalid/u,
   );
 });
+
+test("admits one private family message by immutable request identity", async () => {
+  let admitted = 0;
+  const bridge = new RlmHostBridge({
+    sessionId: "session-1",
+    admitSpawn: async (request) => ({ resolution: "admitted", childId: request.childId }),
+    admitMessage: async (request) => {
+      admitted += 1;
+      return { resolution: "admitted", messageId: request.messageId };
+    },
+  });
+  const message = {
+    requestId: "message-request-1",
+    messageId: "message-1",
+    senderId: "session-1",
+    recipientId: "child-1",
+    bodyText: "SENTINEL_PRIVATE_MESSAGE",
+  };
+
+  assert.deepEqual(await bridge.proposeMessage(message), {
+    resolution: "admitted",
+    messageId: "message-1",
+  });
+  assert.deepEqual(await bridge.proposeMessage(message), {
+    resolution: "admitted",
+    messageId: "message-1",
+  });
+  assert.equal(admitted, 1);
+  await assert.rejects(
+    () => bridge.proposeMessage({ ...message, recipientId: "outside-agent" }),
+    /conflicts/u,
+  );
+  await assert.rejects(
+    () => bridge.proposeMessage({ ...message, requestId: "message-request-2" }),
+    /conflicts/u,
+  );
+});
+
+test("records delivery only after an admitted family message", async () => {
+  const delivered = [];
+  const bridge = new RlmHostBridge({
+    sessionId: "session-1",
+    admitSpawn: async (request) => ({ resolution: "admitted", childId: request.childId }),
+    admitMessage: async (request) => ({ resolution: "admitted", messageId: request.messageId }),
+    recordMessageDelivered: async (event) => { delivered.push(event); },
+  });
+  const message = {
+    requestId: "message-request-1",
+    messageId: "message-1",
+    senderId: "session-1",
+    recipientId: "child-1",
+    bodyText: "SENTINEL_PRIVATE_MESSAGE",
+  };
+
+  await assert.rejects(
+    () => bridge.recordMessageDelivered({ messageId: "message-1" }),
+    /unknown/u,
+  );
+  await bridge.proposeMessage(message);
+  await bridge.recordMessageDelivered({ messageId: "message-1" });
+  assert.deepEqual(delivered, [{ messageId: "message-1" }]);
+});
