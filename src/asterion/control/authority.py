@@ -20,10 +20,10 @@ from asterion.control.session_context import (
     SESSION_CONTEXT_OPERATIONS,
     SessionContextCommand,
 )
+from asterion.protocol_ordering import is_sorted_unique_scalar_strings
 
 
 RLM_OPERATIONS = frozenset({"rlm.child.delete", "rlm.child.message", "rlm.child.spawn"})
-from asterion.protocol_ordering import is_sorted_unique_scalar_strings
 
 
 class AuthorityError(ValueError):
