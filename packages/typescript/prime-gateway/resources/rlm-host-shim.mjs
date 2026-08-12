@@ -79,6 +79,29 @@ function requestResponse(socketPath, discovery, proposal) {
   });
 }
 
+function lifecycleResponse(socketPath, discovery, event) {
+  return new Promise((resolve, reject) => {
+    const socket = createConnection(socketPath);
+    let body = "";
+    const timeout = setTimeout(() => socket.destroy(new Error("RLM host request timed out")), 5_000);
+    socket.setEncoding("utf8");
+    socket.once("connect", () => socket.write(`${JSON.stringify({ protocol: HOST_PROTOCOL, type: "authenticate", token: discovery.token, session_id: discovery.session_id })}\n${JSON.stringify(event)}\n`));
+    socket.on("data", (chunk) => { body += chunk; });
+    socket.once("error", (error) => { clearTimeout(timeout); reject(error); });
+    socket.once("end", () => {
+      clearTimeout(timeout);
+      try { resolve(JSON.parse(body)); } catch { reject(new Error("RLM host response is invalid")); }
+    });
+  });
+}
+
+function nativeIdentityDigest(runtime) {
+  const session = runtime?.session;
+  const identity = session?.sessionId;
+  if (typeof identity !== "string" || !identity) throw new Error("Prime RLM native identity is invalid");
+  return createHash("sha256").update(identity).digest("hex");
+}
+
 export async function createRlmHostClient(discoveryPath) {
   let discovery;
   try { discovery = JSON.parse(await readFile(discoveryPath, "utf8")); } catch { throw new Error("Prime RLM host discovery is unavailable"); }
@@ -95,6 +118,12 @@ export async function createRlmHostClient(discoveryPath) {
       if (!isRecord(response) || !hasExactKeys(response, ["resolution", "childId"]) || response.childId !== proposal.child_id || !["admitted", "rejected", "uncertain"].includes(response.resolution)) throw new Error("Prime RLM host response is invalid");
       return Object.freeze({ resolution: response.resolution, child_id: response.childId });
     },
+    async recordLifecycle(event) {
+      if (!isRecord(event) || !validChildId(event.child_id) || event.type !== "rlm.child.started" || typeof event.native_identity_digest !== "string" || !/^[0-9a-f]{64}$/u.test(event.native_identity_digest)) throw new Error("Prime RLM lifecycle is invalid");
+      const response = await lifecycleResponse(discovery.socket_path, discovery, event);
+      if (!isRecord(response) || !hasExactKeys(response, ["resolution", "childId"]) || response.resolution !== "recorded" || response.childId !== event.child_id) throw new Error("Prime RLM host response is invalid");
+      return Object.freeze({ child_id: response.childId });
+    },
   });
 }
 
@@ -106,7 +135,7 @@ export function wrapSubagentRuntimeHost(delegate, client, hostContext) {
     typeof delegate.deleteRlmSubagentRuntime !== "function" ||
     typeof client !== "object" ||
     client === null ||
-    typeof client.proposeSpawn !== "function"
+    typeof client.proposeSpawn !== "function" || typeof client.recordLifecycle !== "function"
   ) {
     throw new TypeError("Prime RLM host shim is invalid");
   }
@@ -131,7 +160,9 @@ export function wrapSubagentRuntimeHost(delegate, client, hostContext) {
       ) {
         throw new Error("Prime RLM child was not admitted");
       }
-      return delegate.createRlmSubagentRuntime(options);
+      const runtime = await delegate.createRlmSubagentRuntime(options);
+      await client.recordLifecycle(Object.freeze({ type: "rlm.child.started", child_id: spawn.child_id, native_identity_digest: nativeIdentityDigest(runtime) }));
+      return runtime;
     },
   });
 }

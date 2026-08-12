@@ -404,7 +404,7 @@ test("bound private inputs resolve private-looking public refs through bindings"
 
 test("sidecar returns only closed recorded RLM lifecycle observations", async () => {
   const lifecycle = [
-    { type: "rlm.child.started", child_id: "child-1" },
+    { type: "rlm.child.started", child_id: "child-1", native_identity_digest: "a".repeat(64) },
     { type: "rlm.child.terminal", child_id: "child-1", status: "completed" },
   ];
   const { sidecar } = createSidecar({ rlmLifecycle: lifecycle });

@@ -136,11 +136,11 @@ test("records one closed native child lifecycle after admission", async () => {
     recordLifecycle: async (event) => { lifecycle.push(event); },
   });
 
-  await bridge.recordLifecycle({ type: "rlm.child.started", childId: "child-1" });
+  await bridge.recordLifecycle({ type: "rlm.child.started", childId: "child-1", nativeIdentityDigest: "a".repeat(64) });
   await bridge.recordLifecycle({ type: "rlm.child.terminal", childId: "child-1", status: "completed" });
 
   assert.deepEqual(lifecycle, [
-    { type: "rlm.child.started", childId: "child-1" },
+    { type: "rlm.child.started", childId: "child-1", nativeIdentityDigest: "a".repeat(64) },
     { type: "rlm.child.terminal", childId: "child-1", status: "completed" },
   ]);
   await assert.rejects(

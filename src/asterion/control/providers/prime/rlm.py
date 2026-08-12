@@ -9,6 +9,7 @@ from asterion.control.host import ControlEvent
 from asterion.control.providers.prime.client import (
     PrimeControlPlaneClient,
     RlmAdmissionBinding,
+    RlmLifecycleObservation,
 )
 from asterion.control.rlm import RlmChildBinding, RlmChildService, RlmError
 
@@ -60,6 +61,32 @@ class PrimeRlmAdmissionPreparer:
                 model_selector_digest=gateway.model_selector_digest,
             )
         )
+
+    async def reconcile_lifecycle(self) -> None:
+        """Apply the complete Gateway lifecycle history monotonically."""
+
+        observations = await self._client.rlm_lifecycle()
+        if not isinstance(observations, tuple):
+            raise RlmError("Prime RLM lifecycle is invalid")
+        for observation in observations:
+            if not isinstance(observation, RlmLifecycleObservation):
+                raise RlmError("Prime RLM lifecycle is invalid")
+            binding = self._children.binding(observation.child_id)
+            current = self._children.status(observation.child_id)
+            if observation.type == "rlm.child.started":
+                if current.status == "admitted":
+                    assert observation.native_identity_digest is not None
+                    self._children.record_started(
+                        binding, native_identity=observation.native_identity_digest
+                    )
+                elif current.status not in {"started", "completed", "failed", "cancelled"}:
+                    raise RlmError("Prime RLM lifecycle conflicts")
+                continue
+            if current.status == "started":
+                assert observation.status is not None
+                self._children.record_terminal(binding, status=observation.status)
+            elif current.status != observation.status:
+                raise RlmError("Prime RLM lifecycle conflicts")
 
     @staticmethod
     def _validate_gateway_binding(

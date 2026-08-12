@@ -305,7 +305,11 @@ class TestPrimeControlClient(unittest.IsolatedAsyncioTestCase):
             "id": "<request>",
             "type": "rlm.lifecycle.batch",
             "lifecycle": [
-                {"type": "rlm.child.started", "child_id": "child-1"},
+                {
+                    "type": "rlm.child.started",
+                    "child_id": "child-1",
+                    "native_identity_digest": "a" * 64,
+                },
                 {
                     "type": "rlm.child.terminal",
                     "child_id": "child-1",
@@ -323,7 +327,7 @@ class TestPrimeControlClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             observed,
             (
-                RlmLifecycleObservation("rlm.child.started", "child-1"),
+                RlmLifecycleObservation("rlm.child.started", "child-1", native_identity_digest="a" * 64),
                 RlmLifecycleObservation(
                     "rlm.child.terminal", "child-1", "completed"
                 ),

@@ -9,6 +9,7 @@ from asterion.control.authority import (
 )
 from asterion.control.host import ControlEvent
 from asterion.control.providers.prime.client import RlmAdmissionBinding
+from asterion.control.providers.prime.client import RlmLifecycleObservation
 from asterion.control.providers.prime.rlm import PrimeRlmAdmissionPreparer
 from asterion.control.rlm import RlmChildService, RlmError
 
@@ -72,6 +73,9 @@ class _Client:
         self.calls.append(action_id)
         return self.binding
 
+    async def rlm_lifecycle(self):
+        return self.lifecycle
+
 
 class TestPrimeRlmAdmissionPreparer(unittest.IsolatedAsyncioTestCase):
     async def test_prepares_exact_gateway_binding_before_prime_delivery(self) -> None:
@@ -104,3 +108,24 @@ class TestPrimeRlmAdmissionPreparer(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(RlmError):
             service.status("child-1")
 
+    async def test_reconciles_native_started_and_terminal_without_identity_leak(self) -> None:
+        service = RlmChildService(_authority())
+        client = _Client(
+            RlmAdmissionBinding("action-1", "child-1", 1, 1, "a" * 64)
+        )
+        client.lifecycle = ()
+        preparer = PrimeRlmAdmissionPreparer(
+            client=client, children=service, parent_session_id="session-1"
+        )
+        await preparer.prepare(_proposal())
+        client.lifecycle = (
+            RlmLifecycleObservation(
+                "rlm.child.started", "child-1", native_identity_digest="b" * 64
+            ),
+            RlmLifecycleObservation("rlm.child.terminal", "child-1", "completed"),
+        )
+
+        await preparer.reconcile_lifecycle()
+        await preparer.reconcile_lifecycle()
+
+        self.assertEqual(service.status("child-1").status, "completed")

@@ -10,7 +10,7 @@ import { RlmHostBridge, listenRlmHostBridge } from "../dist/src/index.js";
 
 test("admits a native RLM child before creating it exactly once", async () => {
   const order = [];
-  const runtime = Object.freeze({ session: Object.freeze({}) });
+  const runtime = Object.freeze({ session: Object.freeze({ sessionId: "native-session-1" }) });
   const nativeHost = {
     async createRlmSubagentRuntime(options) {
       order.push(`native:${options.id}`);
@@ -23,18 +23,19 @@ test("admits a native RLM child before creating it exactly once", async () => {
       order.push(`propose:${proposal.child_id}`);
       return { resolution: "admitted", child_id: proposal.child_id };
     },
+    async recordLifecycle(event) { order.push(`lifecycle:${event.type}:${event.child_id}`); },
   };
 
   const wrapped = wrapSubagentRuntimeHost(nativeHost, client, hostContext());
   assert.equal(await wrapped.createRlmSubagentRuntime({ id: "child-1", prompt: "private", rlmDepth: 1, model: { provider: "test", id: "model-1" } }), runtime);
-  assert.deepEqual(order, ["propose:child-1", "native:child-1"]);
+  assert.deepEqual(order, ["propose:child-1", "native:child-1", "lifecycle:rlm.child.started:child-1"]);
 });
 
 test("derives the complete host-owned proposal before the native child effect", async () => {
   let proposal;
   const wrapped = wrapSubagentRuntimeHost({
     async createRlmSubagentRuntime(options) {
-      return options;
+      return { session: { sessionId: "native-session-1" }, options };
     },
     async deleteRlmSubagentRuntime() {},
   }, {
@@ -42,6 +43,7 @@ test("derives the complete host-owned proposal before the native child effect", 
       proposal = value;
       return { resolution: "admitted", child_id: value.child_id };
     },
+    async recordLifecycle() {},
   }, {
     idempotency_namespace: "session-1",
     budget: {
@@ -85,6 +87,7 @@ test("rejects an RLM child before its native host has an effect", async () => {
     async proposeSpawn(proposal) {
       return { resolution: "rejected", child_id: proposal.child_id };
     },
+    async recordLifecycle() {},
   }, hostContext());
 
   await assert.rejects(

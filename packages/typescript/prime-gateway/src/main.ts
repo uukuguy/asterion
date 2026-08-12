@@ -165,7 +165,11 @@ interface SidecarEnvelope {
 }
 
 export type RlmLifecycleObservation =
-  | Readonly<{ readonly type: "rlm.child.started"; readonly child_id: string }>
+  | Readonly<{
+      readonly type: "rlm.child.started";
+      readonly child_id: string;
+      readonly native_identity_digest: string;
+    }>
   | Readonly<{
       readonly type: "rlm.child.terminal";
       readonly child_id: string;
@@ -502,10 +506,10 @@ function validateRlmLifecycle(value: unknown): readonly RlmLifecycleObservation[
     if (!isRecord(item) || typeof item.type !== "string" || typeof item.child_id !== "string" || !REQUEST_ID.test(item.child_id)) {
       throw new PrimeGatewayError();
     }
-    if (item.type === "rlm.child.started" && hasExactKeys(item, ["type", "child_id"])) {
+    if (item.type === "rlm.child.started" && hasExactKeys(item, ["type", "child_id", "native_identity_digest"]) && typeof item.native_identity_digest === "string" && /^[0-9a-f]{64}$/u.test(item.native_identity_digest)) {
       if (seen.has(item.child_id)) throw new PrimeGatewayError();
       seen.add(item.child_id);
-      result.push(Object.freeze({ type: item.type, child_id: item.child_id }));
+      result.push(Object.freeze({ type: item.type, child_id: item.child_id, native_identity_digest: item.native_identity_digest }));
       continue;
     }
     if (item.type === "rlm.child.terminal" && hasExactKeys(item, ["type", "child_id", "status"]) && typeof item.status === "string" && ["completed", "failed", "cancelled"].includes(item.status)) {
@@ -1285,6 +1289,7 @@ async function createSidecarFromDescriptor(
           await store.recordRlmLifecycle({
             type: event.type,
             child_id: event.childId,
+            native_identity_digest: event.nativeIdentityDigest,
           });
           return;
         }

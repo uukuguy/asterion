@@ -186,6 +186,12 @@ class RlmChildService:
         except KeyError:
             raise RlmError("RLM child is unknown") from None
 
+    def binding(self, child_id: str) -> RlmChildBinding:
+        try:
+            return self._entries[child_id].binding
+        except KeyError:
+            raise RlmError("RLM child is unknown") from None
+
     def public_registry(self) -> tuple[RlmChildStatus, ...]:
         return tuple(self._entries[child_id].status for child_id in sorted(self._entries))
 

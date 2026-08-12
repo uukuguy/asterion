@@ -1029,6 +1029,7 @@ test("durable store records a closed RLM child lifecycle across reopen", async (
     await store.recordRlmLifecycle({
       type: "rlm.child.started",
       child_id: "child-1",
+      native_identity_digest: "a".repeat(64),
     });
     await store.recordRlmLifecycle({
       type: "rlm.child.terminal",
@@ -1036,7 +1037,7 @@ test("durable store records a closed RLM child lifecycle across reopen", async (
       status: "completed",
     });
     assert.deepEqual(store.rlmLifecycle(), [
-      { type: "rlm.child.started", child_id: "child-1" },
+      { type: "rlm.child.started", child_id: "child-1", native_identity_digest: "a".repeat(64) },
       {
         type: "rlm.child.terminal",
         child_id: "child-1",

@@ -53,7 +53,11 @@ export interface RlmHostBridgeOptions {
 }
 
 export type RlmHostLifecycleEvent =
-  | Readonly<{ readonly type: "rlm.child.started"; readonly childId: string }>
+  | Readonly<{
+      readonly type: "rlm.child.started";
+      readonly childId: string;
+      readonly nativeIdentityDigest: string;
+    }>
   | Readonly<{
       readonly type: "rlm.child.terminal";
       readonly childId: string;
@@ -127,6 +131,7 @@ export class RlmHostBridge {
     if (
       !isRecord(event)
       || !OPAQUE_ID.test(event.childId)
+      || (event.type === "rlm.child.started" && !validDigest(event.nativeIdentityDigest))
       || (event.type !== "rlm.child.started"
         && (event.type !== "rlm.child.terminal"
           || !["completed", "failed", "cancelled"].includes(event.status)))
@@ -179,8 +184,8 @@ export async function listenRlmHostBridge(
           if (!hasExactKeys(value, ["type", "request_id", "child_id", "idempotency_key", "goal_text", "rlm_depth", "model_selector_digest", "budget"]) || typeof value.request_id !== "string" || typeof value.idempotency_key !== "string" || typeof value.goal_text !== "string" || !Number.isSafeInteger(value.rlm_depth) || Number(value.rlm_depth) < 0 || !validDigest(value.model_selector_digest) || !validBudget(value.budget)) throw new TypeError();
           void bridge.proposeSpawn({ requestId: value.request_id, childId: value.child_id, idempotencyKey: value.idempotency_key, goalText: value.goal_text, rlmDepth: Number(value.rlm_depth), modelSelectorDigest: value.model_selector_digest, budget: value.budget }).then((result) => socket.end(`${JSON.stringify(result)}\n`), () => socket.destroy());
         } else if (value.type === "rlm.child.started") {
-          if (!hasExactKeys(value, ["type", "child_id"])) throw new TypeError();
-          void bridge.recordLifecycle({ type: "rlm.child.started", childId: value.child_id }).then(() => socket.end(`${JSON.stringify({ resolution: "recorded", childId: value.child_id })}\n`), () => socket.destroy());
+          if (!hasExactKeys(value, ["type", "child_id", "native_identity_digest"]) || !validDigest(value.native_identity_digest)) throw new TypeError();
+          void bridge.recordLifecycle({ type: "rlm.child.started", childId: value.child_id, nativeIdentityDigest: value.native_identity_digest }).then(() => socket.end(`${JSON.stringify({ resolution: "recorded", childId: value.child_id })}\n`), () => socket.destroy());
         } else if (value.type === "rlm.child.terminal") {
           if (!hasExactKeys(value, ["type", "child_id", "status"]) || typeof value.status !== "string" || !["completed", "failed", "cancelled"].includes(value.status)) throw new TypeError();
           void bridge.recordLifecycle({ type: "rlm.child.terminal", childId: value.child_id, status: value.status as "completed" | "failed" | "cancelled" }).then(() => socket.end(`${JSON.stringify({ resolution: "recorded", childId: value.child_id })}\n`), () => socket.destroy());

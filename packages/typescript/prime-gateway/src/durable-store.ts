@@ -64,7 +64,11 @@ export interface GatewayRlmBinding {
 }
 
 export type GatewayRlmLifecycleObservation =
-  | Readonly<{ readonly type: "rlm.child.started"; readonly child_id: string }>
+  | Readonly<{
+      readonly type: "rlm.child.started";
+      readonly child_id: string;
+      readonly native_identity_digest: string;
+    }>
   | Readonly<{
       readonly type: "rlm.child.terminal";
       readonly child_id: string;
@@ -494,9 +498,11 @@ function validateRlmLifecycleObservation(
   }
   if (
     value.type === "rlm.child.started" &&
-    hasExactKeys(value, ["child_id", "type"])
+    hasExactKeys(value, ["child_id", "native_identity_digest", "type"]) &&
+    typeof value.native_identity_digest === "string" &&
+    DIGEST_PATTERN.test(value.native_identity_digest)
   ) {
-    return Object.freeze({ type: value.type, child_id: value.child_id });
+    return Object.freeze({ type: value.type, child_id: value.child_id, native_identity_digest: value.native_identity_digest });
   }
   if (
     value.type === "rlm.child.terminal" &&

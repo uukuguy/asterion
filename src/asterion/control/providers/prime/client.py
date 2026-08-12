@@ -45,6 +45,7 @@ class RlmLifecycleObservation:
     type: Literal["rlm.child.started", "rlm.child.terminal"]
     child_id: str
     status: Literal["completed", "failed", "cancelled"] | None = None
+    native_identity_digest: str | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -53,11 +54,22 @@ class RlmLifecycleObservation:
             or OPAQUE_ID.fullmatch(self.child_id) is None
             or (
                 self.type == "rlm.child.started"
-                and self.status is not None
+                and (
+                    self.status is not None
+                    or not isinstance(self.native_identity_digest, str)
+                    or len(self.native_identity_digest) != 64
+                    or any(
+                        character not in "0123456789abcdef"
+                        for character in self.native_identity_digest
+                    )
+                )
             )
             or (
                 self.type == "rlm.child.terminal"
-                and self.status not in {"completed", "failed", "cancelled"}
+                and (
+                    self.status not in {"completed", "failed", "cancelled"}
+                    or self.native_identity_digest is not None
+                )
             )
         ):
             raise PrimeControlError()
@@ -358,8 +370,13 @@ class PrimeControlPlaneClient:
                 if item_type == "rlm.child.started" and set(item) == {
                     "type",
                     "child_id",
+                    "native_identity_digest",
                 }:
-                    observation = RlmLifecycleObservation(item_type, child_id)
+                    observation = RlmLifecycleObservation(
+                        item_type,
+                        child_id,
+                        native_identity_digest=item.get("native_identity_digest"),
+                    )
                     if child_id in active:
                         raise PrimeControlError()
                     active.add(child_id)
