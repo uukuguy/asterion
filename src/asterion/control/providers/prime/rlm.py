@@ -76,6 +76,8 @@ class PrimeRlmAdmissionPreparer:
     ) -> None:
         if (
             not callable(getattr(client, "rlm_binding", None))
+            or not callable(getattr(client, "rlm_lifecycle", None))
+            or not callable(getattr(client, "rlm_message_binding", None))
             or not isinstance(children, RlmChildService)
             or not isinstance(parent_session_id, str)
         ):

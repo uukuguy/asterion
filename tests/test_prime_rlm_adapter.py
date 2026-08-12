@@ -100,6 +100,22 @@ class _Client:
 
 
 class TestPrimeRlmAdmissionPreparer(unittest.IsolatedAsyncioTestCase):
+    def test_requires_all_native_rlm_read_capabilities_before_host_wiring(self) -> None:
+        class _IncompleteClient:
+            async def rlm_binding(self, action_id: str) -> RlmAdmissionBinding:
+                del action_id
+                raise AssertionError("must not be called")
+
+            async def rlm_lifecycle(self) -> tuple[RlmLifecycleObservation, ...]:
+                raise AssertionError("must not be called")
+
+        with self.assertRaisesRegex(RlmError, "admission preparer is invalid"):
+            PrimeRlmAdmissionPreparer(
+                client=_IncompleteClient(),  # type: ignore[arg-type]
+                children=RlmChildService(_authority()),
+                parent_session_id="session-1",
+            )
+
     async def test_prepares_and_settles_native_message_only_after_delivery(self) -> None:
         service = RlmChildService(_authority())
         client = _Client(
