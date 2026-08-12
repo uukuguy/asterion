@@ -1188,14 +1188,10 @@ def _scenario_outcome(scenario_id: str, actions: tuple[object, ...]) -> str:
 async def _run_all_python_prime_scenarios(
     rows: Mapping[str, Mapping[str, object]],
 ) -> tuple[PrimeLoopScenarioResult, ...]:
-    return tuple(
-        await asyncio.gather(
-            *(
-                _run_python_prime_scenario(rows[scenario_id], index)
-                for index, scenario_id in enumerate(EXPECTED_IDS, start=1)
-            )
-        )
-    )
+    results: list[PrimeLoopScenarioResult] = []
+    for index, scenario_id in enumerate(EXPECTED_IDS, start=1):
+        results.append(await _run_python_prime_scenario(rows[scenario_id], index))
+    return tuple(results)
 
 
 def run_prime_loop_scenarios(
