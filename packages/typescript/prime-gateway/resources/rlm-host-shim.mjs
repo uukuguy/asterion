@@ -9,7 +9,12 @@ function canonicalSpawn(options) {
     !validChildId(options.id) ||
     typeof options.prompt !== "string" ||
     !Number.isSafeInteger(options.rlmDepth) ||
-    options.rlmDepth < 0
+    options.rlmDepth < 0 ||
+    !isRecord(options.model) ||
+    typeof options.model.provider !== "string" ||
+    typeof options.model.id !== "string" ||
+    !options.model.provider ||
+    !options.model.id
   ) {
     throw new TypeError("Prime RLM spawn is invalid");
   }
@@ -17,6 +22,7 @@ function canonicalSpawn(options) {
     child_id: options.id,
     goal_text: options.prompt,
     rlm_depth: options.rlmDepth,
+    model_selector_digest: createHash("sha256").update(options.model.provider).update("\0").update(options.model.id).digest("hex"),
   });
 }
 
@@ -63,7 +69,7 @@ function requestResponse(socketPath, discovery, proposal) {
     let body = "";
     const timeout = setTimeout(() => socket.destroy(new Error("RLM host request timed out")), 5_000);
     socket.setEncoding("utf8");
-    socket.once("connect", () => socket.write(`${JSON.stringify({ protocol: HOST_PROTOCOL, type: "authenticate", token: discovery.token, session_id: discovery.session_id })}\n${JSON.stringify({ type: "rlm.spawn.propose", request_id: requestId(discovery.session_id, proposal.idempotency_key), child_id: proposal.child_id, idempotency_key: proposal.idempotency_key, goal_text: proposal.goal_text, budget: proposal.budget })}\n`));
+    socket.once("connect", () => socket.write(`${JSON.stringify({ protocol: HOST_PROTOCOL, type: "authenticate", token: discovery.token, session_id: discovery.session_id })}\n${JSON.stringify({ type: "rlm.spawn.propose", request_id: requestId(discovery.session_id, proposal.idempotency_key), child_id: proposal.child_id, idempotency_key: proposal.idempotency_key, goal_text: proposal.goal_text, rlm_depth: proposal.rlm_depth, model_selector_digest: proposal.model_selector_digest, budget: proposal.budget })}\n`));
     socket.on("data", (chunk) => { body += chunk; });
     socket.once("error", (error) => { clearTimeout(timeout); reject(error); });
     socket.once("end", () => {
@@ -84,7 +90,7 @@ export async function createRlmHostClient(discoveryPath) {
   return Object.freeze({
     hostContext,
     async proposeSpawn(proposal) {
-      if (!isRecord(proposal) || !hasExactKeys(proposal, ["child_id", "goal_text", "rlm_depth", "idempotency_key", "budget"]) || !validChildId(proposal.child_id) || typeof proposal.goal_text !== "string" || !validChildId(proposal.idempotency_key) || !Number.isSafeInteger(proposal.rlm_depth) || proposal.rlm_depth < 0 || !validBudget(proposal.budget)) throw new Error("Prime RLM spawn is invalid");
+      if (!isRecord(proposal) || !hasExactKeys(proposal, ["child_id", "goal_text", "rlm_depth", "model_selector_digest", "idempotency_key", "budget"]) || !validChildId(proposal.child_id) || typeof proposal.goal_text !== "string" || !validChildId(proposal.idempotency_key) || !Number.isSafeInteger(proposal.rlm_depth) || proposal.rlm_depth < 0 || typeof proposal.model_selector_digest !== "string" || !/^[0-9a-f]{64}$/u.test(proposal.model_selector_digest) || !validBudget(proposal.budget)) throw new Error("Prime RLM spawn is invalid");
       const response = await requestResponse(discovery.socket_path, discovery, proposal);
       if (!isRecord(response) || !hasExactKeys(response, ["resolution", "childId"]) || response.childId !== proposal.child_id || !["admitted", "rejected", "uncertain"].includes(response.resolution)) throw new Error("Prime RLM host response is invalid");
       return Object.freeze({ resolution: response.resolution, child_id: response.childId });

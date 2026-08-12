@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,7 +26,7 @@ test("admits a native RLM child before creating it exactly once", async () => {
   };
 
   const wrapped = wrapSubagentRuntimeHost(nativeHost, client, hostContext());
-  assert.equal(await wrapped.createRlmSubagentRuntime({ id: "child-1", prompt: "private", rlmDepth: 1 }), runtime);
+  assert.equal(await wrapped.createRlmSubagentRuntime({ id: "child-1", prompt: "private", rlmDepth: 1, model: { provider: "test", id: "model-1" } }), runtime);
   assert.deepEqual(order, ["propose:child-1", "native:child-1"]);
 });
 
@@ -53,12 +54,13 @@ test("derives the complete host-owned proposal before the native child effect", 
     },
   });
 
-  await wrapped.createRlmSubagentRuntime({ id: "child-1", prompt: "private", rlmDepth: 1 });
+  await wrapped.createRlmSubagentRuntime({ id: "child-1", prompt: "private", rlmDepth: 1, model: { provider: "test", id: "model-1" } });
 
   assert.deepEqual(proposal, {
     child_id: "child-1",
     goal_text: "private",
     rlm_depth: 1,
+    model_selector_digest: createHash("sha256").update("test").update("\0").update("model-1").digest("hex"),
     idempotency_key: "rlm-85ccb1e94a2d3627fc1055ff552eff1fe8ab5034",
     budget: {
       controller_tokens: 1,
@@ -86,7 +88,7 @@ test("rejects an RLM child before its native host has an effect", async () => {
   }, hostContext());
 
   await assert.rejects(
-    () => wrapped.createRlmSubagentRuntime({ id: "child-1", prompt: "private", rlmDepth: 1 }),
+    () => wrapped.createRlmSubagentRuntime({ id: "child-1", prompt: "private", rlmDepth: 1, model: { provider: "test", id: "model-1" } }),
     /not admitted/,
   );
   assert.equal(nativeCalls, 0);
@@ -129,6 +131,7 @@ test("reads one exact private discovery record and authenticates its spawn", asy
       child_id: "child-1",
       goal_text: "private",
       rlm_depth: 1,
+      model_selector_digest: "a".repeat(64),
       idempotency_key: "spawn-1",
       budget: { controller_tokens: 0, application_tokens: 0, child_tokens: 1, aggregate_tokens: 1, cost_micros: 0, deadline_ms: 1 },
     }), { resolution: "admitted", child_id: "child-1" });

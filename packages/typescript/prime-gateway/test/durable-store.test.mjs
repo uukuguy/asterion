@@ -1059,6 +1059,30 @@ test("durable store records a closed RLM child lifecycle across reopen", async (
   }
 });
 
+test("durable store reopens one exact safe RLM admission binding", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  const binding = {
+    action_id: "action-1",
+    child_id: "child-1",
+    authority_revision: 1,
+    depth: 1,
+    model_selector_digest: "a".repeat(64),
+  };
+  try {
+    const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    await store.recordRlmBinding(binding);
+    assert.deepEqual(store.rlmBinding("action-1"), binding);
+    const reopened = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    assert.deepEqual(reopened.rlmBinding("action-1"), binding);
+    await assert.rejects(
+      reopened.recordRlmBinding({ ...binding, child_id: "child-2" }),
+      GatewayStoreConflictError,
+    );
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
 test("durable store rejects corrupted or weak-permission public records safely", async () => {
   for (const mutation of ["corrupt", "mode", "noncanonical"]) {
     const fixtureRoot = await temporaryStoreRoot();

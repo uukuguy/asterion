@@ -63,6 +63,35 @@ class RlmLifecycleObservation:
             raise PrimeControlError()
 
 
+@dataclass(frozen=True)
+class RlmAdmissionBinding:
+    """Safe immutable metadata bound by the Gateway before a native child effect."""
+
+    action_id: str
+    child_id: str
+    authority_revision: int
+    depth: int
+    model_selector_digest: str
+
+    def __post_init__(self) -> None:
+        if (
+            any(
+                not isinstance(value, str) or OPAQUE_ID.fullmatch(value) is None
+                for value in (self.action_id, self.child_id)
+            )
+            or isinstance(self.authority_revision, bool)
+            or not isinstance(self.authority_revision, int)
+            or self.authority_revision < 1
+            or isinstance(self.depth, bool)
+            or not isinstance(self.depth, int)
+            or self.depth < 0
+            or not isinstance(self.model_selector_digest, str)
+            or len(self.model_selector_digest) != 64
+            or any(character not in "0123456789abcdef" for character in self.model_selector_digest)
+        ):
+            raise PrimeControlError()
+
+
 class PrimeControlError(RuntimeError):
     """Raised when Prime cannot safely accept or replay a control operation."""
 
@@ -351,6 +380,56 @@ class PrimeControlPlaneClient:
         except (TypeError, ValueError):
             raise PrimeControlError() from None
         return tuple(result)
+
+    async def rlm_binding(self, action_id: str) -> RlmAdmissionBinding:
+        """Read one exact safe RLM binding prepared before action admission."""
+
+        if (
+            self._closed
+            or not isinstance(action_id, str)
+            or OPAQUE_ID.fullmatch(action_id) is None
+        ):
+            raise PrimeControlError()
+        envelope: dict[str, object] = {
+            "protocol": PRIME_GATEWAY_IPC_PROTOCOL,
+            "id": _request_id(),
+            "type": "rlm.binding.read",
+            "action_id": action_id,
+        }
+        try:
+            response = await self._process.request(envelope)
+        except (KeyError, TypeError, ValueError, RuntimeError):
+            raise PrimeControlError() from None
+        binding = response.get("binding")
+        if (
+            set(response) != {"protocol", "id", "type", "binding"}
+            or response.get("protocol") != PRIME_GATEWAY_IPC_PROTOCOL
+            or response.get("id") != envelope["id"]
+            or response.get("type") != "rlm.binding.value"
+            or not isinstance(binding, Mapping)
+            or set(binding)
+            != {
+                "action_id",
+                "child_id",
+                "authority_revision",
+                "depth",
+                "model_selector_digest",
+            }
+        ):
+            raise PrimeControlError()
+        try:
+            result = RlmAdmissionBinding(
+                binding["action_id"],
+                binding["child_id"],
+                binding["authority_revision"],
+                binding["depth"],
+                binding["model_selector_digest"],
+            )
+        except (KeyError, TypeError, ValueError):
+            raise PrimeControlError() from None
+        if result.action_id != action_id:
+            raise PrimeControlError()
+        return result
 
     def bind_action_result(self, receipt: ActionExecutionReceipt) -> None:
         """Remember the public-safe private-result projection for a terminal send."""

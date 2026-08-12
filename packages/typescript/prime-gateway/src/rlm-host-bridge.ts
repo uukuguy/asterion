@@ -27,6 +27,8 @@ export interface RlmSpawnProposal {
   readonly childId: string;
   readonly idempotencyKey: string;
   readonly goalText: string;
+  readonly rlmDepth: number;
+  readonly modelSelectorDigest: string;
   readonly budget: RlmSpawnBudget;
 }
 
@@ -75,11 +77,17 @@ function validBudget(value: unknown): value is RlmSpawnBudget {
   return [value.controller_tokens, value.application_tokens, value.child_tokens, value.aggregate_tokens, value.cost_micros].every((item) => Number.isSafeInteger(item) && Number(item) >= 0) && Number.isSafeInteger(value.deadline_ms) && Number(value.deadline_ms) > 0;
 }
 
+function validDigest(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{64}$/u.test(value);
+}
+
 function proposalDigest(proposal: RlmSpawnProposal): string {
   return createHash("sha256").update(JSON.stringify({
     child_id: proposal.childId,
     idempotency_key: proposal.idempotencyKey,
     goal_text: proposal.goalText,
+    rlm_depth: proposal.rlmDepth,
+    model_selector_digest: proposal.modelSelectorDigest,
     budget: proposal.budget,
   })).digest("hex");
 }
@@ -97,6 +105,9 @@ export class RlmHostBridge {
       !OPAQUE_ID.test(proposal.childId) ||
       !OPAQUE_ID.test(proposal.idempotencyKey) ||
       Buffer.byteLength(proposal.goalText, "utf8") > 1024 * 1024 ||
+      !Number.isSafeInteger(proposal.rlmDepth) ||
+      proposal.rlmDepth < 0 ||
+      !validDigest(proposal.modelSelectorDigest) ||
       !validBudget(proposal.budget)
     ) {
       throw new TypeError("RLM proposal is invalid");
@@ -165,8 +176,8 @@ export async function listenRlmHostBridge(
         const value: unknown = JSON.parse(line.toString("utf8"));
         if (!isRecord(value) || typeof value.type !== "string" || typeof value.child_id !== "string") throw new TypeError();
         if (value.type === "rlm.spawn.propose") {
-          if (!hasExactKeys(value, ["type", "request_id", "child_id", "idempotency_key", "goal_text", "budget"]) || typeof value.request_id !== "string" || typeof value.idempotency_key !== "string" || typeof value.goal_text !== "string" || !validBudget(value.budget)) throw new TypeError();
-          void bridge.proposeSpawn({ requestId: value.request_id, childId: value.child_id, idempotencyKey: value.idempotency_key, goalText: value.goal_text, budget: value.budget }).then((result) => socket.end(`${JSON.stringify(result)}\n`), () => socket.destroy());
+          if (!hasExactKeys(value, ["type", "request_id", "child_id", "idempotency_key", "goal_text", "rlm_depth", "model_selector_digest", "budget"]) || typeof value.request_id !== "string" || typeof value.idempotency_key !== "string" || typeof value.goal_text !== "string" || !Number.isSafeInteger(value.rlm_depth) || Number(value.rlm_depth) < 0 || !validDigest(value.model_selector_digest) || !validBudget(value.budget)) throw new TypeError();
+          void bridge.proposeSpawn({ requestId: value.request_id, childId: value.child_id, idempotencyKey: value.idempotency_key, goalText: value.goal_text, rlmDepth: Number(value.rlm_depth), modelSelectorDigest: value.model_selector_digest, budget: value.budget }).then((result) => socket.end(`${JSON.stringify(result)}\n`), () => socket.destroy());
         } else if (value.type === "rlm.child.started") {
           if (!hasExactKeys(value, ["type", "child_id"])) throw new TypeError();
           void bridge.recordLifecycle({ type: "rlm.child.started", childId: value.child_id }).then(() => socket.end(`${JSON.stringify({ resolution: "recorded", childId: value.child_id })}\n`), () => socket.destroy());

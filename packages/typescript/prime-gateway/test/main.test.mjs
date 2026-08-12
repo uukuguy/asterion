@@ -423,6 +423,36 @@ test("sidecar returns only closed recorded RLM lifecycle observations", async ()
   });
 });
 
+test("sidecar returns one exact safe RLM admission binding", async () => {
+  const binding = {
+    action_id: "action-1",
+    child_id: "child-1",
+    authority_revision: 1,
+    depth: 1,
+    model_selector_digest: "a".repeat(64),
+  };
+  const { sidecar } = createSidecar({
+    gateway: {
+      ...new FakeGateway(),
+      rlmBinding: (actionId) => actionId === binding.action_id ? binding : undefined,
+    },
+  });
+
+  const response = await sidecar.handleEnvelope({
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "rlm-binding-1",
+    type: "rlm.binding.read",
+    action_id: "action-1",
+  });
+
+  assert.deepEqual(response, {
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "rlm-binding-1",
+    type: "rlm.binding.value",
+    binding,
+  });
+});
+
 test("sidecar validates closed session-context execute and cancel envelopes", async () => {
   const { gateway, privateValues, sidecar } = createSidecar();
   const publicCommand = contextCommand();

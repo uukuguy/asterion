@@ -12,6 +12,8 @@ const proposal = (overrides = {}) => ({
   childId: "child-1",
   idempotencyKey: "spawn-1",
   goalText: "private goal",
+  rlmDepth: 1,
+  modelSelectorDigest: "a".repeat(64),
   budget: {
     controller_tokens: 0,
     application_tokens: 0,
@@ -92,7 +94,7 @@ test("serves an authenticated RLM spawn over its private socket", async () => {
     const response = await new Promise((resolve, reject) => {
       const socket = createConnection(path);
       let body = "";
-      socket.on("connect", () => socket.write(`${JSON.stringify({ protocol: "asterion.prime-rlm-host/v1", type: "authenticate", token: "11".repeat(32), session_id: "session-1" })}\n${JSON.stringify({ type: "rlm.spawn.propose", request_id: "r1", child_id: "c1", idempotency_key: "spawn-1", goal_text: "private goal", budget: proposal().budget })}\n`));
+      socket.on("connect", () => socket.write(`${JSON.stringify({ protocol: "asterion.prime-rlm-host/v1", type: "authenticate", token: "11".repeat(32), session_id: "session-1" })}\n${JSON.stringify({ type: "rlm.spawn.propose", request_id: "r1", child_id: "c1", idempotency_key: "spawn-1", goal_text: "private goal", rlm_depth: 1, model_selector_digest: "a".repeat(64), budget: proposal().budget })}\n`));
       socket.on("data", (chunk) => { body += chunk; }); socket.on("end", () => resolve(JSON.parse(body))); socket.on("error", reject);
     });
     assert.deepEqual(response, { resolution: "admitted", childId: "c1" });

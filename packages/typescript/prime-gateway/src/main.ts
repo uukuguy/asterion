@@ -59,6 +59,7 @@ import type {
   PrivateResultProjection,
   PrivateContinuationBinding,
 } from "./private-store.js";
+import type { GatewayRlmBinding } from "./durable-store.js";
 import {
   AsterionSkillBridge,
   deriveControlActionId,
@@ -88,6 +89,7 @@ type SidecarEnvelopeType =
   | "command.accept"
   | "events.stream"
   | "private.read"
+  | "rlm.binding.read"
   | "rlm.lifecycle.read"
   | "session-context.cancel"
   | "session-context.execute";
@@ -111,6 +113,7 @@ export interface PrimeGatewaySidecarOptions {
     ): Promise<SessionContextReceipt>;
     cancelSessionContext?(commandId: string): Promise<void>;
     rlmLifecycle?(): readonly RlmLifecycleObservation[];
+    rlmBinding?(actionId: string): GatewayRlmBinding | undefined;
     close(): Promise<void>;
   };
   readonly privateValues: Pick<
@@ -158,6 +161,7 @@ interface SidecarEnvelope {
   readonly reference?: unknown;
   readonly budget?: unknown;
   readonly command_id?: unknown;
+  readonly action_id?: unknown;
 }
 
 export type RlmLifecycleObservation =
@@ -190,6 +194,12 @@ type SidecarResponse =
     readonly id: string;
     readonly type: "rlm.lifecycle.batch";
     readonly lifecycle: readonly RlmLifecycleObservation[];
+  }
+  | {
+    readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
+    readonly id: string;
+    readonly type: "rlm.binding.value";
+    readonly binding: GatewayRlmBinding;
   }
   | {
     readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
@@ -420,6 +430,7 @@ function validateEnvelope(value: unknown): SidecarEnvelope {
       value.type !== "command.accept" &&
       value.type !== "events.stream" &&
       value.type !== "private.read" &&
+      value.type !== "rlm.binding.read" &&
       value.type !== "rlm.lifecycle.read" &&
       value.type !== "authority.update" &&
       value.type !== "session-context.cancel" &&
@@ -443,6 +454,14 @@ function validateEnvelope(value: unknown): SidecarEnvelope {
   if (
     value.type === "events.stream" &&
     !hasExactKeys(value, ["protocol", "id", "type", "cursor"])
+  ) {
+    throw new PrimeGatewayError();
+  }
+  if (
+    value.type === "rlm.binding.read" &&
+    (!hasExactKeys(value, ["protocol", "id", "type", "action_id"]) ||
+      typeof value.action_id !== "string" ||
+      !REQUEST_ID.test(value.action_id))
   ) {
     throw new PrimeGatewayError();
   }
@@ -651,6 +670,22 @@ export class PrimeGatewaySidecar {
           id: envelope.id,
           type: "rlm.lifecycle.batch",
           lifecycle: validateRlmLifecycle(lifecycle.call(this.options.gateway)),
+        });
+      }
+      if (envelope.type === "rlm.binding.read") {
+        const readBinding = this.options.gateway.rlmBinding;
+        if (readBinding === undefined) {
+          throw new PrimeGatewayError();
+        }
+        const binding = readBinding.call(this.options.gateway, envelope.action_id as string);
+        if (binding === undefined) {
+          throw new PrimeGatewayError();
+        }
+        return Object.freeze({
+          protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+          id: envelope.id,
+          type: "rlm.binding.value",
+          binding,
         });
       }
       if (envelope.type === "session-context.execute") {
@@ -1208,6 +1243,13 @@ async function createSidecarFromDescriptor(
             descriptor.sessionId,
             proposal.idempotencyKey,
           );
+          await store.recordRlmBinding({
+            action_id: actionId,
+            child_id: proposal.childId,
+            authority_revision: context.authorityRevision,
+            depth: proposal.rlmDepth,
+            model_selector_digest: proposal.modelSelectorDigest,
+          });
           const event = validateControlEvent({
             protocol: "asterion.agent-control/v1",
             event_id: identity.eventId,
@@ -1458,6 +1500,7 @@ async function createSidecarFromDescriptor(
       eventsAfterCursor: (cursor) =>
         store.eventsAfterCursor(cursor).map((receipt) => receipt.event),
       rlmLifecycle: () => store.rlmLifecycle(),
+      rlmBinding: (actionId) => store.rlmBinding(actionId),
       executeSessionContext: (command, preparePrivate) =>
         gateway.executeSessionContext(command, preparePrivate),
       cancelSessionContext: (commandId) => gateway.cancelSessionContext(commandId),
