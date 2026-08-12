@@ -105,6 +105,11 @@ class ProviderOwnedActionLifecycle(Protocol):
     def owns(self, proposal: ControlEvent) -> bool:
         ...
 
+    @property
+    def active_child_count(self) -> int:
+        """Return provider-owned children currently consuming child capacity."""
+        ...
+
     async def reconcile(self) -> tuple[ProviderOwnedActionTerminal, ...]:
         ...
 
@@ -996,16 +1001,26 @@ class ControlHost:
         self._children_closed = True
 
     def _active_child_count(self) -> int:
-        if self._child_service is None:
-            return 0
         try:
-            active_ids = self._child_service.active_ids
-            if (
-                not isinstance(active_ids, tuple)
-                or any(not isinstance(child_id, str) for child_id in active_ids)
-            ):
-                raise TypeError
-            return len(active_ids)
+            generic_children = 0
+            if self._child_service is not None:
+                active_ids = self._child_service.active_ids
+                if (
+                    not isinstance(active_ids, tuple)
+                    or any(not isinstance(child_id, str) for child_id in active_ids)
+                ):
+                    raise TypeError
+                generic_children = len(active_ids)
+            provider_children = 0
+            if self._provider_owned_actions is not None:
+                provider_children = self._provider_owned_actions.active_child_count
+                if (
+                    isinstance(provider_children, bool)
+                    or not isinstance(provider_children, int)
+                    or provider_children < 0
+                ):
+                    raise TypeError
+            return generic_children + provider_children
         except Exception:
             raise ControlHostError("control child lifecycle is unavailable") from None
 
@@ -1040,6 +1055,7 @@ def _valid_provider_owned_actions(value: object) -> bool:
     return value is None or (
         callable(getattr(value, "owns", None))
         and callable(getattr(value, "reconcile", None))
+        and isinstance(getattr(type(value), "active_child_count", None), property)
     )
 
 

@@ -114,6 +114,10 @@ class ProviderOwnedLifecycle:
         self.action_id = str(proposal.payload["action_id"])
         return proposal.payload["kind"] == "child.spawn"
 
+    @property
+    def active_child_count(self) -> int:
+        return 0
+
     async def reconcile(self) -> tuple[ProviderOwnedActionTerminal, ...]:
         if self.action_id is None or self.delivered:
             return ()

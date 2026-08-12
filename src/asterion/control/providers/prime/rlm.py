@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
+from pathlib import Path
 
 from asterion.control.authority import action_proposal_digest
 from asterion.control.host import ControlEvent
@@ -13,6 +15,39 @@ from asterion.control.providers.prime.client import (
     RlmLifecycleObservation,
 )
 from asterion.control.rlm import RlmChildBinding, RlmChildService, RlmError
+
+
+@dataclass(frozen=True)
+class PrimeRlmHostComponents:
+    """The exact Prime-native RLM services a ControlHost must receive together."""
+
+    children: RlmChildService
+    admission_preparer: "PrimeRlmAdmissionPreparer"
+    action_lifecycle: "PrimeRlmActionLifecycle"
+
+
+def build_prime_rlm_host_components(
+    *,
+    client: PrimeControlPlaneClient,
+    authority: object,
+    parent_session_id: str,
+    private_root: Path | None = None,
+) -> PrimeRlmHostComponents:
+    """Construct one linked admission ledger and provider-owned lifecycle."""
+
+    from asterion.control.authority import AuthorityEnvelope
+
+    if not isinstance(authority, AuthorityEnvelope):
+        raise RlmError("Prime RLM authority is invalid")
+    children = RlmChildService(authority, private_root=private_root)
+    preparer = PrimeRlmAdmissionPreparer(
+        client=client, children=children, parent_session_id=parent_session_id
+    )
+    return PrimeRlmHostComponents(
+        children=children,
+        admission_preparer=preparer,
+        action_lifecycle=PrimeRlmActionLifecycle(preparer),
+    )
 
 
 class PrimeRlmAdmissionPreparer:
@@ -90,6 +125,27 @@ class PrimeRlmAdmissionPreparer:
             elif current.status != observation.status:
                 raise RlmError("Prime RLM lifecycle conflicts")
 
+    def owns(self, proposal: ControlEvent) -> bool:
+        """True only after this exact action has a durable native-child binding."""
+
+        if not isinstance(proposal, ControlEvent) or proposal.type != "action.proposed":
+            return False
+        payload = proposal.payload
+        action_id = payload.get("action_id")
+        target = payload.get("target")
+        if (
+            payload.get("kind") != "child.spawn"
+            or not isinstance(action_id, str)
+            or not isinstance(target, Mapping)
+            or not isinstance(target.get("child_id"), str)
+        ):
+            return False
+        try:
+            binding = self._children.binding(target["child_id"])
+        except RlmError:
+            return False
+        return binding.action_id == action_id
+
     @staticmethod
     def _validate_gateway_binding(
         proposal: ControlEvent, gateway: RlmAdmissionBinding
@@ -118,10 +174,13 @@ class PrimeRlmActionLifecycle:
         self._delivered: set[str] = set()
 
     def owns(self, proposal: ControlEvent) -> bool:
-        return (
-            isinstance(proposal, ControlEvent)
-            and proposal.type == "action.proposed"
-            and proposal.payload.get("kind") == "child.spawn"
+        return self._preparer.owns(proposal)
+
+    @property
+    def active_child_count(self) -> int:
+        return sum(
+            status.status in {"admitted", "started"}
+            for status in self._preparer._children.public_registry()
         )
 
     async def reconcile(self) -> tuple[ProviderOwnedActionTerminal, ...]:

@@ -12,6 +12,7 @@ from asterion.control.providers.prime.client import RlmAdmissionBinding
 from asterion.control.providers.prime.client import RlmLifecycleObservation
 from asterion.control.providers.prime.rlm import PrimeRlmAdmissionPreparer
 from asterion.control.providers.prime.rlm import PrimeRlmActionLifecycle
+from asterion.control.providers.prime.rlm import build_prime_rlm_host_components
 from asterion.control.rlm import RlmChildService, RlmError
 
 
@@ -33,22 +34,24 @@ def _authority() -> AuthorityEnvelope:
     )
 
 
-def _proposal() -> ControlEvent:
+def _proposal(
+    *, action_id: str = "action-1", child_id: str = "child-1", event_id: str = "event-1"
+) -> ControlEvent:
     return ControlEvent.from_mapping(
         {
             "protocol": "asterion.agent-control/v1",
-            "event_id": "event-1",
+            "event_id": event_id,
             "session_id": "session-1",
             "generation": 1,
             "sequence": 1,
             "emitted_at": "2026-08-12T10:00:00Z",
             "type": "action.proposed",
             "payload": {
-                "action_id": "action-1",
+                "action_id": action_id,
                 "authority_revision": 1,
                 "idempotency_key": "spawn-1",
                 "kind": "child.spawn",
-                "target": {"kind": "child", "child_id": "child-1"},
+                "target": {"kind": "child", "child_id": child_id},
                 "input_ref": "input-1",
                 "expected_artifacts": [],
                 "budget": {
@@ -79,6 +82,21 @@ class _Client:
 
 
 class TestPrimeRlmAdmissionPreparer(unittest.IsolatedAsyncioTestCase):
+    async def test_builds_one_consistent_prime_rlm_host_component_set(self) -> None:
+        client = _Client(
+            RlmAdmissionBinding("action-1", "child-1", 1, 1, "a" * 64)
+        )
+        components = build_prime_rlm_host_components(
+            client=client,
+            authority=_authority(),
+            parent_session_id="session-1",
+        )
+
+        self.assertIsInstance(components.children, RlmChildService)
+        self.assertIsInstance(components.admission_preparer, PrimeRlmAdmissionPreparer)
+        self.assertIsInstance(components.action_lifecycle, PrimeRlmActionLifecycle)
+        self.assertIs(components.action_lifecycle._preparer, components.admission_preparer)
+
     async def test_prepares_exact_gateway_binding_before_prime_delivery(self) -> None:
         service = RlmChildService(_authority())
         client = _Client(
@@ -152,3 +170,26 @@ class TestPrimeRlmAdmissionPreparer(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(terminals), 1)
         self.assertEqual(terminals[0].status, "uncertain")
+
+    async def test_owns_only_bound_prime_action_and_reports_active_child(self) -> None:
+        service = RlmChildService(_authority())
+        client = _Client(
+            RlmAdmissionBinding("action-1", "child-1", 1, 1, "a" * 64)
+        )
+        preparer = PrimeRlmAdmissionPreparer(
+            client=client, children=service, parent_session_id="session-1"
+        )
+        lifecycle = PrimeRlmActionLifecycle(preparer)
+        unrelated = _proposal(
+            action_id="action-2", child_id="child-2", event_id="event-2"
+        )
+
+        self.assertFalse(lifecycle.owns(_proposal()))
+        self.assertFalse(lifecycle.owns(unrelated))
+        self.assertEqual(lifecycle.active_child_count, 0)
+
+        await preparer.prepare(_proposal())
+
+        self.assertTrue(lifecycle.owns(_proposal()))
+        self.assertFalse(lifecycle.owns(unrelated))
+        self.assertEqual(lifecycle.active_child_count, 1)
