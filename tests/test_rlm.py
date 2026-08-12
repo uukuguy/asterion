@@ -163,3 +163,20 @@ class TestRlmChildService(unittest.TestCase):
         self.assertEqual(reopened.public_messages()[0].status, "uncertain")
         with self.assertRaisesRegex(RlmError, "RLM message is fenced"):
             reopened.admit_message(_message())
+
+    def test_reopen_upgrades_pre_message_ledger_without_widening_children(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binding = _binding()
+            service = RlmChildService(_authority(), private_root=root)
+            service.admit(binding)
+            service.record_started(binding, native_identity="private-native-session")
+            stored = (root / "rlm-ledger.json").read_text()
+            (root / "rlm-ledger.json").write_text(
+                stored.replace(',"messages":[]', "")
+            )
+
+            reopened = RlmChildService(_authority(), private_root=root)
+
+        self.assertEqual(reopened.status("child-1").status, "uncertain")
+        self.assertEqual(reopened.public_messages(), ())

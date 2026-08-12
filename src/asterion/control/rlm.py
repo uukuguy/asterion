@@ -357,10 +357,13 @@ class RlmChildService:
             if not path.exists():
                 return
             value = json.loads(path.read_text())
-            if not isinstance(value, dict) or set(value) != {"children", "messages"}:
+            if not isinstance(value, dict) or set(value) not in (
+                {"children"},
+                {"children", "messages"},
+            ):
                 raise ValueError
             children = value["children"]
-            messages = value["messages"]
+            messages = value.get("messages", [])
             if not isinstance(children, list) or not isinstance(messages, list):
                 raise ValueError
             for item in children:
