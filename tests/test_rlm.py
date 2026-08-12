@@ -13,7 +13,7 @@ from asterion.control.rlm import (
 )
 
 
-def _authority() -> AuthorityEnvelope:
+def _authority(*, max_concurrent_children: int = 1) -> AuthorityEnvelope:
     return AuthorityEnvelope(
         authority_id="authority-1",
         revision=1,
@@ -23,7 +23,7 @@ def _authority() -> AuthorityEnvelope:
         expires_at_ms=10_000,
         max_action_deadline_ms=1_000,
         max_recursion_depth=2,
-        max_concurrent_children=1,
+        max_concurrent_children=max_concurrent_children,
         execution_domain="trusted-local",
         host_service_grants=("storage.private",),
     )
@@ -116,17 +116,28 @@ class TestRlmChildService(unittest.TestCase):
         with self.assertRaisesRegex(RlmError, "RLM child is fenced"):
             reopened.admit(binding)
 
-    def test_message_admission_accepts_only_one_direct_family_edge(self) -> None:
-        service = RlmChildService(_authority())
+    def test_message_admission_accepts_parent_child_and_sibling_family_edges(self) -> None:
+        service = RlmChildService(_authority(max_concurrent_children=2))
         binding = _binding()
+        sibling = _binding(action_id="action-2", child_id="child-2")
         service.admit(binding)
+        service.admit(sibling)
         service.record_started(binding, native_identity="private-native-session")
+        service.record_started(sibling, native_identity="private-native-session-2")
 
         admitted = service.admit_message(_message())
         delivered = service.record_message_delivered(_message())
+        sibling_message = service.admit_message(
+            _message(
+                message_id="message-2",
+                sender_id="child-1",
+                recipient_id="child-2",
+            )
+        )
 
         self.assertEqual(admitted.status, "admitted")
         self.assertEqual(delivered.status, "delivered")
+        self.assertEqual(sibling_message.status, "admitted")
         self.assertEqual(service.public_messages()[0].to_mapping(), {
             "message_id": "message-1",
             "sender_id": "session-1",
@@ -147,6 +158,14 @@ class TestRlmChildService(unittest.TestCase):
         service.record_terminal(binding, status="completed")
         with self.assertRaisesRegex(RlmError, "RLM message target is unavailable"):
             service.admit_message(_message(sender_id="child-1", recipient_id="session-1"))
+        with self.assertRaisesRegex(RlmError, "RLM message target is unavailable"):
+            service.admit_message(
+                _message(
+                    message_id="message-2",
+                    sender_id="child-1",
+                    recipient_id="child-2",
+                )
+            )
         self.assertNotIn("outside-agent", repr(service.public_messages()))
 
     def test_reopen_fences_admitted_message_without_delivery(self) -> None:

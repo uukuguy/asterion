@@ -284,8 +284,7 @@ class RlmChildService:
             if current.binding != binding:
                 raise RlmError("RLM message identity conflicts")
             return current.status
-        self._require_message_party(binding.sender_id)
-        self._require_message_party(binding.recipient_id)
+        self._require_message_edge(binding.sender_id, binding.recipient_id)
         status = self._message_status(binding, "admitted")
         self._messages[binding.message_id] = _MessageEntry(binding, status)
         self._persist()
@@ -311,16 +310,40 @@ class RlmChildService:
     def public_messages(self) -> tuple[RlmMessageStatus, ...]:
         return tuple(self._messages[message_id].status for message_id in sorted(self._messages))
 
-    def _require_message_party(self, identity: str) -> None:
+    def _require_message_edge(self, sender_id: str, recipient_id: str) -> None:
+        """Admit only Prime's direct parent, child, or sibling roster edges."""
+
+        sender = self._message_party(sender_id)
+        recipient = self._message_party(recipient_id)
+        if sender is None or recipient is None:
+            raise RlmError("RLM message target is unavailable")
+        sender_parent, sender_child = sender
+        recipient_parent, recipient_child = recipient
+        if (
+            (sender_child is None and recipient_child is not None and recipient_parent == sender_id)
+            or (recipient_child is None and sender_child is not None and sender_parent == recipient_id)
+            or (
+                sender_child is not None
+                and recipient_child is not None
+                and sender_parent == recipient_parent
+            )
+        ):
+            return
+        raise RlmError("RLM message target is unavailable")
+
+    def _message_party(self, identity: str) -> tuple[str, str | None] | None:
+        """Return the parent edge and child identity only for active family members."""
+
         parent_ids = {entry.binding.parent_session_id for entry in self._entries.values()}
         if identity in parent_ids:
-            return
+            return (identity, None)
         try:
-            status = self._entries[identity].status.status
+            entry = self._entries[identity]
         except KeyError:
-            raise RlmError("RLM message target is unavailable") from None
-        if status not in {"admitted", "started"}:
-            raise RlmError("RLM message target is unavailable")
+            return None
+        if entry.status.status not in {"admitted", "started"}:
+            return None
+        return (entry.binding.parent_session_id, entry.binding.child_id)
 
     @staticmethod
     def _message_status(
