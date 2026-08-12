@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { createRlmHostClient, wrapSubagentRuntimeHost } from "../resources/rlm-host-shim.mjs";
+import {
+  admitNativeRlmMessage,
+  createRlmHostClient,
+  recordNativeRlmMessageDelivered,
+  wrapSubagentRuntimeHost,
+} from "../resources/rlm-host-shim.mjs";
 import { RlmHostBridge, listenRlmHostBridge } from "../dist/src/index.js";
 
 test("admits a native RLM child before creating it exactly once", async () => {
@@ -146,6 +151,45 @@ test("rejects an RLM child before its native host has an effect", async () => {
     /not admitted/,
   );
   assert.equal(nativeCalls, 0);
+});
+
+test("admits a native Prime message by its generated identity before delivery", async () => {
+  const calls = [];
+  const client = {
+    async proposeMessage(proposal) {
+      calls.push(proposal);
+      return { resolution: "admitted", message_id: proposal.message_id };
+    },
+    async recordMessageDelivered(event) { calls.push(event); },
+  };
+  await admitNativeRlmMessage(client, {
+    id: "agentmsg_123",
+    message: "SENTINEL_PRIVATE_MESSAGE",
+    from: { activeSessionId: "child-1" },
+    target: { activeSessionId: "child-2" },
+  });
+  await recordNativeRlmMessageDelivered(client, "agentmsg_123");
+  assert.deepEqual(calls, [
+    {
+      request_id: "agentmsg_123", message_id: "agentmsg_123", sender_id: "child-1",
+      recipient_id: "child-2", body_text: "SENTINEL_PRIVATE_MESSAGE",
+    },
+    { message_id: "agentmsg_123" },
+  ]);
+});
+
+test("rejects a native Prime message before delivery when admission is not exact", async () => {
+  let calls = 0;
+  await assert.rejects(
+    () => admitNativeRlmMessage({
+      async proposeMessage() { calls += 1; return { resolution: "rejected", message_id: "agentmsg_123" }; },
+    }, {
+      id: "agentmsg_123", message: "SENTINEL_PRIVATE_MESSAGE",
+      from: { activeSessionId: "child-1" }, target: { activeSessionId: "child-2" },
+    }),
+    /not admitted/u,
+  );
+  assert.equal(calls, 1);
 });
 
 function hostContext() {

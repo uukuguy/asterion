@@ -106,6 +106,51 @@ function nativeIdentityDigest(runtime) {
   return createHash("sha256").update(identity).digest("hex");
 }
 
+function canonicalNativeMessage(payload) {
+  if (
+    !isRecord(payload) ||
+    !validChildId(payload.id) ||
+    typeof payload.message !== "string" ||
+    Buffer.byteLength(payload.message, "utf8") > 1024 * 1024 ||
+    !isRecord(payload.from) ||
+    !validChildId(payload.from.activeSessionId) ||
+    !isRecord(payload.target) ||
+    !validChildId(payload.target.activeSessionId) ||
+    payload.from.activeSessionId === payload.target.activeSessionId
+  ) {
+    throw new Error("Prime RLM message is invalid");
+  }
+  return Object.freeze({
+    request_id: payload.id,
+    message_id: payload.id,
+    sender_id: payload.from.activeSessionId,
+    recipient_id: payload.target.activeSessionId,
+    body_text: payload.message,
+  });
+}
+
+export async function admitNativeRlmMessage(client, payload) {
+  if (!client || typeof client.proposeMessage !== "function") {
+    throw new TypeError("Prime RLM host shim is invalid");
+  }
+  const proposal = canonicalNativeMessage(payload);
+  const admission = await client.proposeMessage(proposal);
+  if (
+    !isRecord(admission) ||
+    admission.resolution !== "admitted" ||
+    admission.message_id !== proposal.message_id
+  ) {
+    throw new Error("Prime RLM message was not admitted");
+  }
+}
+
+export async function recordNativeRlmMessageDelivered(client, messageId) {
+  if (!client || typeof client.recordMessageDelivered !== "function" || !validChildId(messageId)) {
+    throw new TypeError("Prime RLM host shim is invalid");
+  }
+  await client.recordMessageDelivered(Object.freeze({ message_id: messageId }));
+}
+
 export async function createRlmHostClient(discoveryPath) {
   let discovery;
   try { discovery = JSON.parse(await readFile(discoveryPath, "utf8")); } catch { throw new Error("Prime RLM host discovery is unavailable"); }
