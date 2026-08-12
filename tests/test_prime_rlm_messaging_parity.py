@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
+import tempfile
 import unittest
 from collections.abc import Mapping
 from pathlib import Path
 
+from asterion.control.authority import AuthorityLedger, BudgetUsage
+from asterion.control.execution import ActionExecutionReceipt
+from asterion.control.journal import FileCanonicalJournal
+from asterion.control.manager import ControlHost
 from asterion.control.parity import validate_parity_ledger
 from asterion.control.parity_testing import ParityScenarioRegistry
+from asterion.control.providers.prime.client import PrimeControlPlaneClient
 from asterion.control.providers.prime.parity_testing import (
     PRIME_RLM_BOUNDED_SCENARIO_IDS,
     PRIME_RLM_PROVIDER_FREE_SCENARIO_IDS,
@@ -18,6 +25,14 @@ from asterion.control.providers.prime.parity_testing import (
     build_prime_rlm_observation,
     register_prime_rlm_scenarios,
 )
+from asterion.control.providers.prime.process import (
+    PrimeSidecarLaunchOptions,
+    PrimeSidecarProcess,
+)
+from tests.test_control_authority import _envelope
+from tests.test_prime_session_context_parity import _closed_environment, _node_22
+from tests.test_prime_verified_loop import _PrivateResolver, _create_command, _prime_plan
+from tools.setup_prime_agent import derive_prime_rlm_runtime
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,9 +44,216 @@ LEDGER = (
     / "v1"
     / "prime-agent-0.7.1.json"
 )
+PINNED_SOURCE = ROOT / "3th-party" / "prime-agent"
+RLM_HARNESS = (
+    ROOT
+    / "tests"
+    / "fixtures"
+    / "prime_gateway"
+    / "v1"
+    / "real-prime-rlm-messaging.mjs"
+)
+ARTIFACT_LOCK = (
+    ROOT
+    / "packages"
+    / "typescript"
+    / "prime-gateway"
+    / "resources"
+    / "prime-artifact-lock.json"
+)
+SIDECAR_ENTRY = (
+    ROOT / "packages" / "typescript" / "prime-gateway" / "dist" / "src" / "main.js"
+)
+
+
+class _NoopExecutor:
+    async def execute(self, proposal: object, signal: object) -> ActionExecutionReceipt:
+        del proposal, signal
+        raise AssertionError("the native RLM harness must not invoke host execution")
 
 
 class TestPrimeRlmMessagingParity(unittest.TestCase):
+    @unittest.skipUnless(
+        PINNED_SOURCE.is_dir() and RLM_HARNESS.is_file() and SIDECAR_ENTRY.is_file(),
+        "external pinned Prime RLM harness is unavailable",
+    )
+    def test_real_daemon_exposes_asterion_rlm_spawn_admission(self) -> None:
+        node = _node_22()
+        if node is None:
+            self.skipTest("an offline pinned Node 22 executable is unavailable")
+        runtime_entry = derive_prime_rlm_runtime(
+            PINNED_SOURCE, lock_path=ARTIFACT_LOCK
+        )
+        self.assertTrue(runtime_entry.is_file())
+
+        async def run() -> dict[str, object]:
+            with tempfile.TemporaryDirectory(
+                prefix="asterion-prime-rlm-", dir="/tmp"
+            ) as temporary:
+                root = Path(temporary)
+                home = root / "home"
+                workspace = root / "workspace"
+                agent_dir = root / "agent"
+                session_dir = root / "sessions"
+                gateway_root = root / "gateway"
+                for directory in (
+                    home,
+                    workspace,
+                    agent_dir,
+                    session_dir,
+                    gateway_root,
+                    root / "applications",
+                ):
+                    directory.mkdir(mode=0o700)
+                socket_path = root / "prime.sock"
+                environment = _closed_environment(home)
+                daemon = await asyncio.create_subprocess_exec(
+                    str(node),
+                    str(runtime_entry),
+                    "--mode",
+                    "daemon",
+                    "--daemon-socket",
+                    str(socket_path),
+                    cwd=PINNED_SOURCE,
+                    env=environment,
+                    stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                    umask=0o077,
+                )
+                process: PrimeSidecarProcess | None = None
+                host: ControlHost | None = None
+                stderr_sink = (root / "sidecar.stderr").open("wb")
+                try:
+                    deadline = time.monotonic() + 15
+                    while not socket_path.exists():
+                        if daemon.returncode is not None:
+                            self.fail("the pinned Prime daemon did not start")
+                        if time.monotonic() >= deadline:
+                            self.fail("the pinned Prime daemon did not become ready")
+                        await asyncio.sleep(0.025)
+                    authority = _envelope(execution_domain="trusted-local")
+                    descriptor = {
+                        "agentDir": str(agent_dir),
+                        "artifactLockPath": str(ARTIFACT_LOCK),
+                        "authorityId": authority.authority_id,
+                        "authorityRevision": authority.revision,
+                        "expectedRuntimeBuildId": "beta",
+                        "gatewayRoot": str(gateway_root),
+                        "generation": 1,
+                        "maxContinuations": 1,
+                        "maxControllerTokens": 100,
+                        "maxTurns": 1,
+                        "model": "claude-sonnet-4-5",
+                        "portfolio": [
+                            {
+                                "kind": "application",
+                                "provider_id": grant.provider_id,
+                                "application_id": grant.application_id,
+                                "version": grant.version,
+                                "runtime_id": grant.runtime_id,
+                            }
+                            for grant in authority.allowed_portfolio
+                        ],
+                        "primeSocketPath": str(socket_path),
+                        "primeSourceRoot": str(PINNED_SOURCE),
+                        "provider": "anthropic",
+                        "remainingBudget": {
+                            "controller_tokens": authority.budget_limit.controller_tokens,
+                            "application_tokens": authority.budget_limit.application_tokens,
+                            "child_tokens": authority.budget_limit.child_tokens,
+                            "aggregate_tokens": authority.budget_limit.aggregate_tokens,
+                            "cost_micros": authority.budget_limit.cost_micros,
+                            "deadline_ms": authority.max_action_deadline_ms,
+                        },
+                        "sessionDir": str(session_dir),
+                        "sessionId": "session-1",
+                        "skillPath": str(
+                            ROOT
+                            / "src"
+                            / "asterion"
+                            / "control"
+                            / "providers"
+                            / "prime"
+                            / "resources"
+                            / "skills"
+                            / "asterion-control"
+                        ),
+                        "timeoutMs": 5_000,
+                        "workspace": str(workspace),
+                    }
+                    process = await PrimeSidecarProcess.start(
+                        PrimeSidecarLaunchOptions(
+                            node_executable=node,
+                            sidecar_entry=SIDECAR_ENTRY,
+                            private_descriptor=descriptor,
+                            environ=environment,
+                            request_timeout=10,
+                            private_stderr_sink=stderr_sink,
+                        )
+                    )
+                    resolver = _PrivateResolver()
+                    client = PrimeControlPlaneClient(
+                        process=process,
+                        private_content=resolver,
+                        private_attachments=resolver,
+                    )
+                    host = ControlHost(
+                        session_id="session-1",
+                        generation=1,
+                        plan=_prime_plan(root),
+                        authority=AuthorityLedger(authority),
+                        journal=FileCanonicalJournal.open(root / "journal", "session-1"),
+                        client=client,
+                        action_executor=_NoopExecutor(),
+                        clock_ms=lambda: 1_000,
+                    )
+                    await host.dispatch(_create_command())
+                    await host.pump()
+                    fixture = await asyncio.create_subprocess_exec(
+                        str(node),
+                        str(RLM_HARNESS),
+                        str(socket_path),
+                        str(agent_dir),
+                        cwd=ROOT,
+                        env=environment,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    while fixture.returncode is None:
+                        await host.pump()
+                        await asyncio.sleep(0.01)
+                    stdout, stderr = await fixture.communicate()
+                    self.assertEqual(
+                        fixture.returncode,
+                        0,
+                        stderr.decode("utf-8", errors="replace"),
+                    )
+                    payload = json.loads(stdout)
+                    self.assertNotIn("PRIVATE_RLM_CHILD_GOAL", stdout.decode())
+                    return payload
+                finally:
+                    if host is not None:
+                        await host.close()
+                    elif process is not None:
+                        await process.close()
+                    if daemon.returncode is None:
+                        daemon.terminate()
+                        await asyncio.wait_for(daemon.wait(), timeout=5)
+                    stderr_sink.close()
+
+        self.assertEqual(
+            asyncio.run(run()),
+            {
+                "format": "asterion.prime-rlm-observation/v1",
+                "fake_daemon": False,
+                "model_credential_reads": 0,
+                "provider_operations": 0,
+                "spawn_admitted": True,
+                "message_delivered": False,
+            },
+        )
+
     def test_rlm_adapter_registers_only_provider_free_evidence_as_pass(self) -> None:
         observations = tuple(
             build_prime_rlm_observation(

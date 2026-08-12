@@ -159,6 +159,19 @@ test("daemon wire emits a stable v7 mutation envelope", () => {
   assert.equal(line.endsWith("\n"), true);
 });
 
+test("daemon wire admits metadata-only daemon list reads", () => {
+  const line = encodePrimeDaemonCommand(
+    { type: "list", all: true },
+    "asterion-list-1",
+    "asterion-client-1",
+  );
+  assert.deepEqual(JSON.parse(line).command, {
+    id: "asterion-list-1",
+    type: "list",
+    all: true,
+  });
+});
+
 test("daemon wire admits only the pinned session command shapes", () => {
   const commands = [
     { type: "abort_branch_summary", activeSessionId: "prime-root" },

@@ -41,6 +41,7 @@ const CLIENT_CAPABILITIES = new Set([
 ]);
 
 const COMMAND_FIELDS = Object.freeze({
+  list: ["type", "all", "cwd", "sessionDir", "includeClientOwned"],
   create: [
     "type",
     "sessionPath",
@@ -791,6 +792,7 @@ function validateCommand(command: PrimeDaemonCommand): void {
     protocolViolation();
   }
   const needsActiveSession = ![
+    "list",
     "create",
     "detach",
     "rename_saved_session",
