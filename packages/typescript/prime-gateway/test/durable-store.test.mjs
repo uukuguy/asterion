@@ -1022,6 +1022,43 @@ test("durable store reopens maximum-length protocol identities", async () => {
   }
 });
 
+test("durable store records a closed RLM child lifecycle across reopen", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    await store.recordRlmLifecycle({
+      type: "rlm.child.started",
+      child_id: "child-1",
+    });
+    await store.recordRlmLifecycle({
+      type: "rlm.child.terminal",
+      child_id: "child-1",
+      status: "completed",
+    });
+    assert.deepEqual(store.rlmLifecycle(), [
+      { type: "rlm.child.started", child_id: "child-1" },
+      {
+        type: "rlm.child.terminal",
+        child_id: "child-1",
+        status: "completed",
+      },
+    ]);
+
+    const reopened = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    assert.deepEqual(reopened.rlmLifecycle(), store.rlmLifecycle());
+    await assert.rejects(
+      reopened.recordRlmLifecycle({
+        type: "rlm.child.terminal",
+        child_id: "child-1",
+        status: "failed",
+      }),
+      GatewayStoreConflictError,
+    );
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
 test("durable store rejects corrupted or weak-permission public records safely", async () => {
   for (const mutation of ["corrupt", "mode", "noncanonical"]) {
     const fixtureRoot = await temporaryStoreRoot();

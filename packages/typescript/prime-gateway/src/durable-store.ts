@@ -51,7 +51,16 @@ const RECORD_KINDS = new Set([
   "prime.identity",
   "prime.identity.rebound",
   "prime.cursor",
+  "rlm.lifecycle",
 ]);
+
+export type GatewayRlmLifecycleObservation =
+  | Readonly<{ readonly type: "rlm.child.started"; readonly child_id: string }>
+  | Readonly<{
+      readonly type: "rlm.child.terminal";
+      readonly child_id: string;
+      readonly status: "completed" | "failed" | "cancelled";
+    }>;
 
 export type StorageFaultStage =
   | "before_write"
@@ -466,6 +475,34 @@ function validateCursorPayload(value: unknown): PrimeDaemonCursor {
     throw new GatewayStoreConflictError();
   }
   return Object.freeze({ generation: value.generation, sequence: value.sequence });
+}
+
+function validateRlmLifecycleObservation(
+  value: unknown,
+): GatewayRlmLifecycleObservation {
+  if (!isRecord(value) || !nonEmptyIdentifier(value.child_id)) {
+    throw new GatewayStoreConflictError();
+  }
+  if (
+    value.type === "rlm.child.started" &&
+    hasExactKeys(value, ["child_id", "type"])
+  ) {
+    return Object.freeze({ type: value.type, child_id: value.child_id });
+  }
+  if (
+    value.type === "rlm.child.terminal" &&
+    hasExactKeys(value, ["child_id", "status", "type"]) &&
+    (value.status === "completed" ||
+      value.status === "failed" ||
+      value.status === "cancelled")
+  ) {
+    return Object.freeze({
+      type: value.type,
+      child_id: value.child_id,
+      status: value.status,
+    });
+  }
+  throw new GatewayStoreConflictError();
 }
 
 function validateInputDeliveryPayload(
@@ -973,6 +1010,9 @@ export class GatewayDurableStore {
   private inputDeliveryProtocolRecordPosition?: number;
   private primeIdentity?: PrimeIdentityBinding;
   private primeCursor?: PrimeDaemonCursor;
+  private readonly rlmLifecycleValues: GatewayRlmLifecycleObservation[] = [];
+  private readonly activeRlmChildIds = new Set<string>();
+  private readonly closedRlmChildIds = new Set<string>();
 
   private constructor(
     private readonly root: string,
@@ -1474,6 +1514,30 @@ export class GatewayDurableStore {
     );
   }
 
+  async recordRlmLifecycle(
+    observation: GatewayRlmLifecycleObservation,
+  ): Promise<GatewayRecordReceipt> {
+    const validated = validateRlmLifecycleObservation(observation);
+    if (
+      (validated.type === "rlm.child.started" &&
+        (this.activeRlmChildIds.has(validated.child_id) ||
+          this.closedRlmChildIds.has(validated.child_id))) ||
+      (validated.type === "rlm.child.terminal" &&
+        !this.activeRlmChildIds.has(validated.child_id))
+    ) {
+      throw new GatewayStoreConflictError();
+    }
+    return this.appendRecord(
+      "rlm.lifecycle",
+      `rlm-lifecycle:${this.rlmLifecycleValues.length}:${validated.child_id}:${validated.type}`,
+      validated as unknown as Record<string, unknown>,
+    );
+  }
+
+  rlmLifecycle(): readonly GatewayRlmLifecycleObservation[] {
+    return Object.freeze([...this.rlmLifecycleValues]);
+  }
+
   eventsAfter(position: number): readonly GatewayEventReceipt[] {
     if (!nonNegativeInteger(position) || position > this.records.length) {
       throw new GatewayStoreConflictError();
@@ -1905,6 +1969,14 @@ export class GatewayDurableStore {
         }
         return identity as unknown as Record<string, unknown>;
       }
+      if (kind === "rlm.lifecycle") {
+        const observation = validateRlmLifecycleObservation(payload);
+        const expectedRecordId = `rlm-lifecycle:${this.rlmLifecycleValues.length}:${observation.child_id}:${observation.type}`;
+        if (recordId !== expectedRecordId) {
+          throw new GatewayStoreCorruptionError();
+        }
+        return observation as unknown as Record<string, unknown>;
+      }
       const cursor = validateCursorPayload(payload);
       if (recordId !== `prime-cursor:${cursor.generation}:${cursor.sequence}`) {
         throw new GatewayStoreCorruptionError();
@@ -2080,6 +2152,22 @@ export class GatewayDurableStore {
         throw new GatewayStoreCorruptionError();
       }
       this.primeCursor = cursor;
+    } else if (record.stored.kind === "rlm.lifecycle") {
+      const observation = validateRlmLifecycleObservation(record.payload);
+      if (observation.type === "rlm.child.started") {
+        if (this.activeRlmChildIds.has(observation.child_id)) {
+          throw new GatewayStoreCorruptionError();
+        }
+        if (this.closedRlmChildIds.has(observation.child_id)) {
+          throw new GatewayStoreCorruptionError();
+        }
+        this.activeRlmChildIds.add(observation.child_id);
+      } else if (!this.activeRlmChildIds.delete(observation.child_id)) {
+        throw new GatewayStoreCorruptionError();
+      } else {
+        this.closedRlmChildIds.add(observation.child_id);
+      }
+      this.rlmLifecycleValues.push(observation);
     }
   }
 

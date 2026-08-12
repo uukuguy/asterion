@@ -266,6 +266,9 @@ class FakePrimeSession {
 
 function createSidecar(options = {}) {
   const gateway = options.gateway ?? new FakeGateway(options.gatewayOptions);
+  if (options.rlmLifecycle !== undefined) {
+    gateway.rlmLifecycle = () => options.rlmLifecycle;
+  }
   const privateValues = options.privateValues ?? new FakePrivateValues();
   return {
     gateway,
@@ -397,6 +400,27 @@ test("bound private inputs resolve private-looking public refs through bindings"
   } finally {
     await fixtureRoot.cleanup();
   }
+});
+
+test("sidecar returns only closed recorded RLM lifecycle observations", async () => {
+  const lifecycle = [
+    { type: "rlm.child.started", child_id: "child-1" },
+    { type: "rlm.child.terminal", child_id: "child-1", status: "completed" },
+  ];
+  const { sidecar } = createSidecar({ rlmLifecycle: lifecycle });
+
+  const response = await sidecar.handleEnvelope({
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "rlm-lifecycle-1",
+    type: "rlm.lifecycle.read",
+  });
+
+  assert.deepEqual(response, {
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+    id: "rlm-lifecycle-1",
+    type: "rlm.lifecycle.batch",
+    lifecycle,
+  });
 });
 
 test("sidecar validates closed session-context execute and cancel envelopes", async () => {

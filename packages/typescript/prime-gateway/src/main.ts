@@ -88,6 +88,7 @@ type SidecarEnvelopeType =
   | "command.accept"
   | "events.stream"
   | "private.read"
+  | "rlm.lifecycle.read"
   | "session-context.cancel"
   | "session-context.execute";
 
@@ -109,6 +110,7 @@ export interface PrimeGatewaySidecarOptions {
       preparePrivate: () => Promise<void>,
     ): Promise<SessionContextReceipt>;
     cancelSessionContext?(commandId: string): Promise<void>;
+    rlmLifecycle?(): readonly RlmLifecycleObservation[];
     close(): Promise<void>;
   };
   readonly privateValues: Pick<
@@ -158,6 +160,14 @@ interface SidecarEnvelope {
   readonly command_id?: unknown;
 }
 
+export type RlmLifecycleObservation =
+  | Readonly<{ readonly type: "rlm.child.started"; readonly child_id: string }>
+  | Readonly<{
+      readonly type: "rlm.child.terminal";
+      readonly child_id: string;
+      readonly status: "completed" | "failed" | "cancelled";
+    }>;
+
 type SidecarResponse =
   | {
     readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
@@ -174,6 +184,12 @@ type SidecarResponse =
     readonly id: string;
     readonly type: "events.batch";
     readonly events: readonly ControlEvent[];
+  }
+  | {
+    readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
+    readonly id: string;
+    readonly type: "rlm.lifecycle.batch";
+    readonly lifecycle: readonly RlmLifecycleObservation[];
   }
   | {
     readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
@@ -404,6 +420,7 @@ function validateEnvelope(value: unknown): SidecarEnvelope {
       value.type !== "command.accept" &&
       value.type !== "events.stream" &&
       value.type !== "private.read" &&
+      value.type !== "rlm.lifecycle.read" &&
       value.type !== "authority.update" &&
       value.type !== "session-context.cancel" &&
       value.type !== "session-context.execute"
@@ -430,6 +447,12 @@ function validateEnvelope(value: unknown): SidecarEnvelope {
     throw new PrimeGatewayError();
   }
   if (
+    value.type === "rlm.lifecycle.read" &&
+    !hasExactKeys(value, ["protocol", "id", "type"])
+  ) {
+    throw new PrimeGatewayError();
+  }
+  if (
     value.type === "private.read" &&
     !hasExactKeys(value, ["protocol", "id", "type", "reference"])
   ) {
@@ -448,6 +471,33 @@ function validateEnvelope(value: unknown): SidecarEnvelope {
     throw new PrimeGatewayError();
   }
   return value as unknown as SidecarEnvelope;
+}
+
+function validateRlmLifecycle(value: unknown): readonly RlmLifecycleObservation[] {
+  if (!Array.isArray(value) || value.length > 1024) {
+    throw new PrimeGatewayError();
+  }
+  const seen = new Set<string>();
+  const result: RlmLifecycleObservation[] = [];
+  for (const item of value) {
+    if (!isRecord(item) || typeof item.type !== "string" || typeof item.child_id !== "string" || !REQUEST_ID.test(item.child_id)) {
+      throw new PrimeGatewayError();
+    }
+    if (item.type === "rlm.child.started" && hasExactKeys(item, ["type", "child_id"])) {
+      if (seen.has(item.child_id)) throw new PrimeGatewayError();
+      seen.add(item.child_id);
+      result.push(Object.freeze({ type: item.type, child_id: item.child_id }));
+      continue;
+    }
+    if (item.type === "rlm.child.terminal" && hasExactKeys(item, ["type", "child_id", "status"]) && typeof item.status === "string" && ["completed", "failed", "cancelled"].includes(item.status)) {
+      if (!seen.has(item.child_id)) throw new PrimeGatewayError();
+      seen.delete(item.child_id);
+      result.push(Object.freeze({ type: item.type, child_id: item.child_id, status: item.status as "completed" | "failed" | "cancelled" }));
+      continue;
+    }
+    throw new PrimeGatewayError();
+  }
+  return Object.freeze(result);
 }
 
 function validateSessionContextPrivateValues(
@@ -589,6 +639,18 @@ export class PrimeGatewaySidecar {
           id: envelope.id,
           type: "private.value",
           text: await this.readPrivate(envelope),
+        });
+      }
+      if (envelope.type === "rlm.lifecycle.read") {
+        const lifecycle = this.options.gateway.rlmLifecycle;
+        if (lifecycle === undefined) {
+          throw new PrimeGatewayError();
+        }
+        return Object.freeze({
+          protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+          id: envelope.id,
+          type: "rlm.lifecycle.batch",
+          lifecycle: validateRlmLifecycle(lifecycle.call(this.options.gateway)),
         });
       }
       if (envelope.type === "session-context.execute") {
@@ -1176,6 +1238,20 @@ async function createSidecarFromDescriptor(
           return Object.freeze({ resolution: "uncertain" as const, childId: proposal.childId });
         }
       },
+      recordLifecycle: async (event) => {
+        if (event.type === "rlm.child.started") {
+          await store.recordRlmLifecycle({
+            type: event.type,
+            child_id: event.childId,
+          });
+          return;
+        }
+        await store.recordRlmLifecycle({
+          type: event.type,
+          child_id: event.childId,
+          status: event.status,
+        });
+      },
     });
     const listener = await listenRlmHostBridge(
       socketPath,
@@ -1381,6 +1457,7 @@ async function createSidecarFromDescriptor(
       },
       eventsAfterCursor: (cursor) =>
         store.eventsAfterCursor(cursor).map((receipt) => receipt.event),
+      rlmLifecycle: () => store.rlmLifecycle(),
       executeSessionContext: (command, preparePrivate) =>
         gateway.executeSessionContext(command, preparePrivate),
       cancelSessionContext: (commandId) => gateway.cancelSessionContext(commandId),
