@@ -8,7 +8,7 @@ import unittest
 from collections.abc import Mapping
 from pathlib import Path
 
-from asterion.control.authority import AuthorityLedger, BudgetUsage
+from asterion.control.authority import AuthorityLedger
 from asterion.control.execution import ActionExecutionReceipt
 from asterion.control.journal import FileCanonicalJournal
 from asterion.control.manager import ControlHost
