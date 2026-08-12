@@ -59,15 +59,27 @@ test("preserves Prime's synchronous completion while recording the completed obs
   }, hostContext());
 
   assert.equal(wrapped.completeRlmSubagentRuntime("child-1", childSession), true);
-  assert.deepEqual(order, [
-    "native-complete:child-1:native-session-1",
-    "lifecycle:rlm.child.terminal:child-1:completed",
-  ]);
+  assert.deepEqual(order, ["native-complete:child-1:native-session-1"]);
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(order, [
     "native-complete:child-1:native-session-1",
     "lifecycle:rlm.child.terminal:child-1:completed",
   ]);
+});
+
+test("does not let a completed-observation failure alter Prime's synchronous result", async () => {
+  const childSession = Object.freeze({ sessionId: "native-session-1" });
+  const wrapped = wrapSubagentRuntimeHost({
+    async createRlmSubagentRuntime() { return { session: childSession }; },
+    async deleteRlmSubagentRuntime() {},
+    completeRlmSubagentRuntime() { return true; },
+  }, {
+    async proposeSpawn() { return { resolution: "admitted", child_id: "child-1" }; },
+    recordLifecycle() { throw new Error("private transport failed"); },
+  }, hostContext());
+
+  assert.equal(wrapped.completeRlmSubagentRuntime("child-1", childSession), true);
+  await new Promise((resolve) => setImmediate(resolve));
 });
 
 test("derives the complete host-owned proposal before the native child effect", async () => {

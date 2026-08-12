@@ -181,7 +181,11 @@ export function wrapSubagentRuntimeHost(delegate, client, hostContext) {
       if (typeof delegate.completeRlmSubagentRuntime !== "function") return undefined;
       const completed = delegate.completeRlmSubagentRuntime(childId, session);
       if (completed === true && validChildId(childId)) {
-        void client.recordLifecycle(Object.freeze({ type: "rlm.child.terminal", child_id: childId, status: "completed" })).catch(() => undefined);
+        queueMicrotask(() => {
+          Promise.resolve()
+            .then(() => client.recordLifecycle(Object.freeze({ type: "rlm.child.terminal", child_id: childId, status: "completed" })))
+            .catch(() => undefined);
+        });
       }
       return completed;
     },
