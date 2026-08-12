@@ -394,11 +394,19 @@ def derive_prime_rlm_runtime(
         return root / runtime.entry
     if digests != dict(runtime.closure):
         raise PrimeSetupError("Prime RLM shim is incompatible")
-    target, anchor, replacement = _parse_rlm_shim(shim, runtime)
+    target, patches = _parse_rlm_shim(shim, runtime)
     original = _read_regular_file_beneath(root, target)
-    if original.count(anchor) != 1 or replacement in original:
-        raise PrimeSetupError("Prime RLM shim is incompatible")
-    _atomic_replace_regular_file(root / target, original.replace(anchor, replacement))
+    derived = original
+    for anchor, replacement in patches:
+        if (
+            original.count(anchor) != 1
+            or replacement in original
+            or anchor in replacement
+            or replacement in derived
+        ):
+            raise PrimeSetupError("Prime RLM shim is incompatible")
+        derived = derived.replace(anchor, replacement)
+    _atomic_replace_regular_file(root / target, derived)
     if _closure_digests(root, closure) != dict(runtime.derived_closure):
         raise PrimeSetupError("Prime RLM shim is incompatible")
     verify_prime_checkout(root, lock_path=lock_path, runner=runner)
@@ -498,30 +506,46 @@ def _closure_digests(root: Path, closure: Sequence[str]) -> dict[str, str]:
 
 def _parse_rlm_shim(
     bytes_value: bytes, runtime: PrimeRlmRuntimeLock
-) -> tuple[str, bytes, bytes]:
+) -> tuple[str, tuple[tuple[bytes, bytes], ...]]:
     try:
         value = json.loads(bytes_value)
         if not isinstance(value, dict) or set(value) != {
             "format",
             "target",
-            "anchor",
-            "replacement",
+            "patches",
         }:
             raise TypeError
         target = value["target"]
-        anchor = value["anchor"]
-        replacement = value["replacement"]
+        patches = value["patches"]
         if (
             value["format"] != "asterion.prime-rlm-host-shim/v1"
             or target != runtime.binding_chunk
-            or not isinstance(anchor, str)
-            or not isinstance(replacement, str)
-            or not anchor
-            or not replacement
-            or anchor == replacement
+            or not isinstance(patches, list)
+            or not patches
         ):
             raise TypeError
-        return target, anchor.encode("utf-8"), replacement.encode("utf-8")
+        parsed: list[tuple[bytes, bytes]] = []
+        seen_anchors: set[str] = set()
+        seen_replacements: set[str] = set()
+        for patch in patches:
+            if not isinstance(patch, dict) or set(patch) != {"anchor", "replacement"}:
+                raise TypeError
+            anchor = patch["anchor"]
+            replacement = patch["replacement"]
+            if (
+                not isinstance(anchor, str)
+                or not isinstance(replacement, str)
+                or not anchor
+                or not replacement
+                or anchor == replacement
+                or anchor in seen_anchors
+                or replacement in seen_replacements
+            ):
+                raise TypeError
+            seen_anchors.add(anchor)
+            seen_replacements.add(replacement)
+            parsed.append((anchor.encode("utf-8"), replacement.encode("utf-8")))
+        return target, tuple(parsed)
     except (TypeError, ValueError, json.JSONDecodeError):
         raise PrimeSetupError("Prime RLM shim is incompatible") from None
 

@@ -1,6 +1,10 @@
 {
-  "anchor": "  state.runtime.setSubagentRuntimeHost(callbacks.subagentRuntimeHost);",
   "format": "asterion.prime-rlm-host-shim/v1",
-  "replacement": "  const asterionPrimeRlmHostBinding = callbacks.subagentRuntimeHost;\n  const asterionPrimeRlmHostPath = require(\"node:path\").join(state.runtime.services.agentDir, \"asterion-rlm-host-shim.mjs\");\n  const asterionPrimeRlmHostDiscoveryPath = require(\"node:path\").join(state.runtime.services.agentDir, \"asterion-rlm-host.json\");\n  const { createRlmHostClient: asterionCreateRlmHostClient, wrapSubagentRuntimeHost: asterionWrapSubagentRuntimeHost } = await import(require(\"node:url\").pathToFileURL(asterionPrimeRlmHostPath).href);\n  const asterionPrimeRlmHostClient = await asterionCreateRlmHostClient(asterionPrimeRlmHostDiscoveryPath);\n  state.runtime.setSubagentRuntimeHost(asterionWrapSubagentRuntimeHost(asterionPrimeRlmHostBinding, asterionPrimeRlmHostClient, asterionPrimeRlmHostClient.hostContext));",
+  "patches": [
+    {
+      "anchor": "  state.runtime.setSubagentRuntimeHost(callbacks.subagentRuntimeHost);",
+      "replacement": "  const asterionPrimeRlmHostBinding = callbacks.subagentRuntimeHost;\n  const asterionPrimeRlmHostPath = require(\"node:path\").join(state.runtime.services.agentDir, \"asterion-rlm-host-shim.mjs\");\n  const asterionPrimeRlmHostDiscoveryPath = require(\"node:path\").join(state.runtime.services.agentDir, \"asterion-rlm-host.json\");\n  const { createRlmHostClient: asterionCreateRlmHostClient, wrapSubagentRuntimeHost: asterionWrapSubagentRuntimeHost } = await import(require(\"node:url\").pathToFileURL(asterionPrimeRlmHostPath).href);\n  const asterionPrimeRlmHostClient = await asterionCreateRlmHostClient(asterionPrimeRlmHostDiscoveryPath);\n  state.runtime.setSubagentRuntimeHost(asterionWrapSubagentRuntimeHost(asterionPrimeRlmHostBinding, asterionPrimeRlmHostClient, asterionPrimeRlmHostClient.hostContext));"
+    }
+  ],
   "target": "packages/coding-agent/dist/bundle/chunk-UGFTGOX2.js"
 }

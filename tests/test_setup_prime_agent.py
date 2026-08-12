@@ -82,15 +82,23 @@ def _rlm_runtime_fixture(root: Path) -> tuple[Path, Path, Path]:
     binding = source / "packages/coding-agent/dist/bundle/chunk-binding.js"
     entry.parent.mkdir(parents=True, exist_ok=True)
     entry.write_text('import "./chunk-binding.js";\n')
-    binding.write_text('const binding = "native-host";\n')
+    binding.write_text('const binding = "native-host";\nconst delivery = "native-delivery";\n')
     shim_path = root / "prime-rlm-host-shim.json"
     shim_path.write_text(
         json.dumps(
             {
                 "format": "asterion.prime-rlm-host-shim/v1",
+                "patches": [
+                    {
+                        "anchor": 'const binding = "native-host";',
+                        "replacement": 'const binding = "asterion-host";',
+                    },
+                    {
+                        "anchor": 'const delivery = "native-delivery";',
+                        "replacement": 'const delivery = "asterion-delivery";',
+                    },
+                ],
                 "target": "packages/coding-agent/dist/bundle/chunk-binding.js",
-                "anchor": 'const binding = "native-host";',
-                "replacement": 'const binding = "asterion-host";',
             },
             sort_keys=True,
         )
@@ -104,7 +112,11 @@ def _rlm_runtime_fixture(root: Path) -> tuple[Path, Path, Path]:
             entry.read_bytes()
         ).hexdigest(),
     }
-    derived_binding = binding.read_text().replace("native-host", "asterion-host")
+    derived_binding = (
+        binding.read_text()
+        .replace("native-host", "asterion-host")
+        .replace("native-delivery", "asterion-delivery")
+    )
     lock["rlm_runtime"] = {
         "entry": "packages/coding-agent/dist/bundle/cli.js",
         "binding_chunk": "packages/coding-agent/dist/bundle/chunk-binding.js",
@@ -299,14 +311,19 @@ class TestSetupPrimeAgent(unittest.TestCase):
                 "asterion-host",
                 (source / "packages/coding-agent/dist/bundle/chunk-binding.js").read_text(),
             )
+            self.assertIn(
+                "asterion-delivery",
+                (source / "packages/coding-agent/dist/bundle/chunk-binding.js").read_text(),
+            )
             self.assertTrue(
                 any(call[0][:2] == ("git", "status") for call in runner.calls)
             )
 
     def test_shipped_rlm_hunk_loads_the_private_host_shim_before_binding(self) -> None:
-        replacement = json.loads(
+        patch = json.loads(
             (PROJECT / "packages/typescript/prime-gateway/resources/prime-rlm-host-shim.json").read_text()
-        )["replacement"]
+        )["patches"][0]
+        replacement = patch["replacement"]
 
         self.assertIn("asterion-rlm-host-shim.mjs", replacement)
         self.assertIn("createRlmHostClient", replacement)
