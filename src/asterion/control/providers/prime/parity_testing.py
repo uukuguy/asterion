@@ -240,6 +240,86 @@ PRIME_SESSION_CONTEXT_BOUNDED_SCENARIO_IDS = tuple(
     for scenario_id, contract in PRIME_SESSION_CONTEXT_SCENARIO_MATRIX.items()
     if contract["boundary"] == "bounded-provider"
 )
+
+_RLM_PRIMARY_ASSERTIONS = (
+    "authority-preserved",
+    "feature-reachable",
+    "identity-stable",
+    "public-redacted",
+)
+_RLM_PRIMARY_FAULTS = ("restart-after-admission",)
+
+PRIME_RLM_SCENARIO_MATRIX: Mapping[str, _SessionContextScenarioContract] = (
+    MappingProxyType(
+        {
+            "prime-parity.rlm.cancellation-teardown": _contract(
+                "real-prime-provider-free",
+                "rlm.cancellation-teardown",
+                _RLM_PRIMARY_ASSERTIONS,
+                _RLM_PRIMARY_FAULTS,
+            ),
+            "prime-parity.rlm.child-model": _contract(
+                "bounded-provider",
+                "rlm.child-model",
+                _RLM_PRIMARY_ASSERTIONS,
+                _RLM_PRIMARY_FAULTS,
+            ),
+            "prime-parity.rlm.environment": _contract(
+                "real-prime-provider-free",
+                "rlm.environment",
+                _RLM_PRIMARY_ASSERTIONS,
+                _RLM_PRIMARY_FAULTS,
+            ),
+            "prime-parity.rlm.generated-program": _contract(
+                "bounded-provider",
+                "rlm.generated-program",
+                _RLM_PRIMARY_ASSERTIONS,
+                _RLM_PRIMARY_FAULTS,
+            ),
+            "prime-parity.rlm.messaging": _contract(
+                "real-prime-provider-free",
+                "rlm.messaging",
+                _RLM_PRIMARY_ASSERTIONS,
+                _RLM_PRIMARY_FAULTS,
+            ),
+            "prime-parity.rlm.recovery": _contract(
+                "real-prime-provider-free",
+                "rlm.recovery",
+                _RLM_PRIMARY_ASSERTIONS,
+                _RLM_PRIMARY_FAULTS,
+            ),
+            "prime-parity.rlm.recursion-depth": _contract(
+                "bounded-provider",
+                "rlm.recursion-depth",
+                _RLM_PRIMARY_ASSERTIONS,
+                _RLM_PRIMARY_FAULTS,
+            ),
+            "prime-parity.rlm.registry-lifecycle": _contract(
+                "real-prime-provider-free",
+                "rlm.registry-lifecycle",
+                _RLM_PRIMARY_ASSERTIONS,
+                _RLM_PRIMARY_FAULTS,
+            ),
+            "prime-parity.rlm.usage-cost": _contract(
+                "real-prime-provider-free",
+                "rlm.usage-cost",
+                _RLM_PRIMARY_ASSERTIONS,
+                _RLM_PRIMARY_FAULTS,
+            ),
+        }
+    )
+)
+PRIME_RLM_SCENARIO_IDS = tuple(PRIME_RLM_SCENARIO_MATRIX)
+PRIME_RLM_PROVIDER_FREE_SCENARIO_IDS = tuple(
+    scenario_id
+    for scenario_id, contract in PRIME_RLM_SCENARIO_MATRIX.items()
+    if contract["boundary"] == "real-prime-provider-free"
+)
+PRIME_RLM_BOUNDED_SCENARIO_IDS = tuple(
+    scenario_id
+    for scenario_id, contract in PRIME_RLM_SCENARIO_MATRIX.items()
+    if contract["boundary"] == "bounded-provider"
+)
 PRIME_SESSION_CONTEXT_REQUIRED_CHECK_IDS = MappingProxyType(
     {
         "prime-parity.session.branch-summaries-labels": (
