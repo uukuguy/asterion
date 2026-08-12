@@ -96,9 +96,10 @@ class PrimeRlmAdmissionPreparer:
         if payload.get("kind") == "child.message":
             await self._prepare_message(proposal)
             return
+        if payload.get("kind") != "child.spawn":
+            return
         if (
-            payload.get("kind") != "child.spawn"
-            or payload.get("authority_revision") is None
+            payload.get("authority_revision") is None
             or not isinstance(action_id, str)
             or not isinstance(target, Mapping)
             or target.get("kind") != "child"

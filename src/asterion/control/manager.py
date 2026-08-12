@@ -247,6 +247,7 @@ class ControlHost:
         self._child_service = child_service
         self._admitted_action_preparer = admitted_action_preparer
         self._provider_owned_actions = provider_owned_actions
+        self._provider_bindings_rebuilt = False
         self._children_closed = False
         self._cancellation_signal = cancellation_signal or _NeverCancelled()
         self._clock_ms = clock_ms
@@ -337,6 +338,7 @@ class ControlHost:
         except (JournalConflictError, TypeError, ValueError):
             raise ControlHostError("control host recovery failed") from None
         self._journal_position = authority_entry.position
+        self._provider_bindings_rebuilt = position == 0
         try:
             self._session_context_manager = (
                 None
@@ -406,6 +408,7 @@ class ControlHost:
 
     async def pump(self, *, until_terminal: bool = False) -> None:
         await self._sync_authority_snapshot()
+        await self._rebuild_admitted_provider_bindings()
         await self._reconcile_provider_owned_actions()
         await self._resume_pending_actions()
         empty_polls = 0
@@ -638,6 +641,26 @@ class ControlHost:
                     )
                 continue
             self._clear_pending_action(action_id)
+
+    async def _rebuild_admitted_provider_bindings(self) -> None:
+        """Idempotently restore provider-private bindings before recovery ownership."""
+
+        if self._provider_bindings_rebuilt:
+            return
+        preparer = self._admitted_action_preparer
+        if preparer is not None:
+            try:
+                for action_id in sorted(self._pending_proposals):
+                    action = self._state.actions.get(action_id)
+                    if action is None:
+                        raise TypeError
+                    if action.status in {"admitted", "running"}:
+                        await preparer.prepare(self._pending_proposals[action_id])
+            except Exception:
+                raise ControlHostError(
+                    "control provider binding recovery failed"
+                ) from None
+        self._provider_bindings_rebuilt = True
 
     def _ensure_pending_admission(self, action_id: str) -> None:
         if action_id not in self._pending_admissions:

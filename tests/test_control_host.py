@@ -197,12 +197,14 @@ class TestControlHost(unittest.IsolatedAsyncioTestCase):
                 client=ScriptedClient(plan.control_binding.manifest), action_executor=executor,
                 clock_ms=lambda: 1_000, provider_owned_actions=lifecycle,
             )
+            child_payload = _proposal().to_mapping()["payload"]
+            assert isinstance(child_payload, dict)
             proposal = ControlEvent.from_mapping(
                 {
                     **_proposal().to_mapping(),
                     "sequence": 3,
                     "payload": {
-                        **_proposal().to_mapping()["payload"],
+                        **child_payload,
                         "kind": "child.spawn",
                         "target": {"kind": "child", "child_id": "child-1"},
                     },
@@ -233,7 +235,13 @@ class TestControlHost(unittest.IsolatedAsyncioTestCase):
                 admitted_action_preparer=AdmissionPreparer(audit),
             )
             proposal = ControlEvent.from_mapping(
-                {**_proposal().to_mapping(), "sequence": 3}
+                {
+                    **_proposal(
+                        kind="child.spawn",
+                        target={"kind": "child", "child_id": "child-1"},
+                    ).to_mapping(),
+                    "sequence": 3,
+                }
             )
             created, running, _ = _session_events(proposal)
             await host._accept_event(created)
@@ -241,6 +249,68 @@ class TestControlHost(unittest.IsolatedAsyncioTestCase):
             await host._accept_event(proposal)
 
         self.assertLess(audit.index(f"prepare:{proposal.payload['action_id']}"), audit.index("provider.send"))
+
+    async def test_recovery_rebuilds_admitted_provider_binding_before_ownership(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            audit: list[str] = []
+
+            class RecoveryLifecycle:
+                def owns(self, proposal: ControlEvent) -> bool:
+                    audit.append(f"owns:{proposal.payload['action_id']}")
+                    return proposal.payload["kind"] == "child.spawn"
+
+                @property
+                def active_child_count(self) -> int:
+                    return 0
+
+                async def reconcile(self) -> tuple[ProviderOwnedActionTerminal, ...]:
+                    return ()
+
+            plan = resolve_agent_system(
+                _manifest(),
+                application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
+            )
+            journal = MemoryCanonicalJournal("session-1")
+            first = ControlHost(
+                session_id="session-1", generation=1, plan=plan,
+                authority=AuthorityLedger(_envelope()), journal=journal,
+                client=ScriptedClient(plan.control_binding.manifest),
+                action_executor=SpyExecutor(), clock_ms=lambda: 1_000,
+                admitted_action_preparer=AdmissionPreparer(audit),
+                provider_owned_actions=RecoveryLifecycle(),
+            )
+            proposal = ControlEvent.from_mapping(
+                {
+                    **_proposal(
+                        kind="child.spawn",
+                        target={"kind": "child", "child_id": "child-1"},
+                    ).to_mapping(),
+                    "sequence": 3,
+                }
+            )
+            created, running, _ = _session_events(proposal)
+            await first._accept_event(created)
+            await first._accept_event(running)
+            await first._accept_event(proposal)
+
+            audit.clear()
+            recovered = ControlHost(
+                session_id="session-1", generation=1, plan=plan,
+                authority=AuthorityLedger(_envelope()), journal=journal,
+                client=ScriptedClient(plan.control_binding.manifest),
+                action_executor=SpyExecutor(), clock_ms=lambda: 1_000,
+                admitted_action_preparer=AdmissionPreparer(audit),
+                provider_owned_actions=RecoveryLifecycle(),
+            )
+            await recovered.pump()
+
+        self.assertEqual(
+            audit,
+            [f"prepare:{proposal.payload['action_id']}", f"owns:{proposal.payload['action_id']}"]
+        )
+
     async def test_exact_stale_budget_report_replay_preserves_current_usage(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             plan = resolve_agent_system(
