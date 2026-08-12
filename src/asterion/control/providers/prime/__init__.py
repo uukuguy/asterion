@@ -30,6 +30,7 @@ from asterion.control.providers.prime.system_actions import PrimeSystemActionSer
 from asterion.control.providers.prime.rlm import (
     PrimeRlmActionLifecycle,
     PrimeRlmAdmissionPreparer,
+    build_prime_rlm_control_host,
 )
 
 __all__ = (
@@ -47,6 +48,7 @@ __all__ = (
     "PrimeSystemActionService",
     "PrimeRlmAdmissionPreparer",
     "PrimeRlmActionLifecycle",
+    "build_prime_rlm_control_host",
     "PrivateContentResolver",
     "build_prime_control_plane_client",
     "derive_prime_child_control_options",

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import unittest
 from hashlib import sha256
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from asterion.control.authority import (
     AuthorityEnvelope,
@@ -9,6 +11,7 @@ from asterion.control.authority import (
     PortfolioGrant,
 )
 from asterion.control.host import ControlEvent
+from asterion.control.host import ControlPlaneManifest, EventCursor
 from asterion.control.providers.prime.client import RlmAdmissionBinding
 from asterion.control.providers.prime.client import RlmLifecycleObservation
 from asterion.control.providers.prime.client import RlmMessageAdmissionBinding
@@ -17,6 +20,13 @@ from asterion.control.providers.prime.rlm import PrimeRlmActionLifecycle
 from asterion.control.providers.prime.rlm import build_prime_rlm_host_components
 from asterion.control.rlm import RlmChildService, RlmError
 from asterion.control.authority import BudgetUsage
+from asterion.control.authority import AuthorityLedger
+from asterion.control.execution import ActionExecutionReceipt
+from asterion.control.journal import MemoryCanonicalJournal
+from asterion.control.manager import ControlHost
+from asterion.control.providers.prime.rlm import build_prime_rlm_control_host
+from asterion.control.system import resolve_agent_system
+from tests.test_control_system import _control_factories, _manifest, _provider
 
 
 def _authority() -> AuthorityEnvelope:
@@ -100,6 +110,71 @@ class _Client:
 
 
 class TestPrimeRlmAdmissionPreparer(unittest.IsolatedAsyncioTestCase):
+    async def test_builds_host_with_all_prime_rlm_components_as_one_unit(self) -> None:
+        class _HostClient(_Client):
+            def __init__(
+                self, binding: RlmAdmissionBinding, manifest: ControlPlaneManifest
+            ) -> None:
+                super().__init__(binding)
+                self._manifest = manifest
+
+            @property
+            def manifest(self) -> ControlPlaneManifest:
+                return self._manifest
+
+            async def send(self, command: object) -> None:
+                del command
+
+            def events(self, cursor: EventCursor | None = None):
+                del cursor
+
+                async def _empty():
+                    if False:
+                        yield None
+
+                return _empty()
+
+            async def close(self) -> None:
+                return None
+
+        class _Executor:
+            async def execute(self, proposal: ControlEvent, signal: object) -> ActionExecutionReceipt:
+                del proposal, signal
+                raise AssertionError("Prime-owned RLM action must not use generic execution")
+
+        with TemporaryDirectory() as directory:
+            plan = resolve_agent_system(
+                _manifest(),
+                application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
+            )
+            client = _HostClient(
+                RlmAdmissionBinding("action-1", "child-1", 1, 1, "a" * 64),
+                plan.control_binding.manifest,
+            )
+
+            host = build_prime_rlm_control_host(
+                session_id="session-1",
+                generation=1,
+                plan=plan,
+                authority=AuthorityLedger(_authority()),
+                journal=MemoryCanonicalJournal("session-1"),
+                client=client,
+                action_executor=_Executor(),
+                clock_ms=lambda: 1_000,
+            )
+
+        self.assertIsInstance(host, ControlHost)
+        self.assertIsInstance(host._admitted_action_preparer, PrimeRlmAdmissionPreparer)
+        lifecycle = host._provider_owned_actions
+        self.assertIsInstance(lifecycle, PrimeRlmActionLifecycle)
+        assert isinstance(lifecycle, PrimeRlmActionLifecycle)
+        self.assertIs(
+            lifecycle._preparer,
+            host._admitted_action_preparer,
+        )
+
     def test_requires_all_native_rlm_read_capabilities_before_host_wiring(self) -> None:
         class _IncompleteClient:
             async def rlm_binding(self, action_id: str) -> RlmAdmissionBinding:

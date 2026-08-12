@@ -2,16 +2,24 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
-from asterion.control.authority import action_proposal_digest
-from asterion.control.host import ControlEvent
-from asterion.control.manager import ProviderOwnedActionTerminal
+from asterion.control.authority import AuthorityLedger, action_proposal_digest
+from asterion.control.host import ControlEvent, ControlPlaneClient
+from asterion.control.journal import CanonicalJournal
+from asterion.control.manager import (
+    ActionExecutor,
+    ControlHost,
+    ProviderOwnedActionTerminal,
+)
 from asterion.control.execution import ActionExecutionReceipt
+from asterion.control.system import AgentSystemPlan
+from asterion.pathlight.recorder import NOOP_PATHLIGHT_RECORDER, PathlightRecorder
+from asterion.runtime.host import CancellationSignal
 from asterion.control.authority import BudgetUsage
 from asterion.control.providers.prime.client import (
     RlmAdmissionBinding,
@@ -64,6 +72,53 @@ def build_prime_rlm_host_components(
     )
 
 
+def build_prime_rlm_control_host(
+    *,
+    session_id: str,
+    generation: int,
+    plan: AgentSystemPlan,
+    authority: AuthorityLedger,
+    journal: CanonicalJournal,
+    client: ControlPlaneClient,
+    action_executor: ActionExecutor,
+    clock_ms: Callable[[], int],
+    cancellation_signal: CancellationSignal | None = None,
+    pathlight: PathlightRecorder = NOOP_PATHLIGHT_RECORDER,
+    private_root: Path | None = None,
+) -> ControlHost:
+    """Build one Prime host with its inseparable native-RLM dependencies.
+
+    This provider-specific assembly is intentionally explicit.  It does not
+    discover a provider or alter native depth; it only prevents callers from
+    attaching one RLM component without the matching admission and lifecycle.
+    """
+
+    if (
+        not isinstance(authority, AuthorityLedger)
+        or not isinstance(session_id, str)
+        or not callable(clock_ms)
+    ):
+        raise RlmError("Prime RLM host assembly is invalid")
+    components = build_prime_rlm_host_components(
+        client=cast(_PrimeRlmClient, client),
+        authority=authority.envelope,
+        parent_session_id=session_id,
+        private_root=private_root,
+    )
+    return ControlHost(
+        session_id=session_id,
+        generation=generation,
+        plan=plan,
+        authority=authority,
+        journal=journal,
+        client=client,
+        action_executor=action_executor,
+        clock_ms=clock_ms,
+        cancellation_signal=cancellation_signal,
+        pathlight=pathlight,
+        admitted_action_preparer=components.admission_preparer,
+        provider_owned_actions=components.action_lifecycle,
+    )
 class PrimeRlmAdmissionPreparer:
     """Persist the exact Prime-native child binding before admitted delivery."""
 
