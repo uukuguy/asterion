@@ -324,7 +324,7 @@ class TestPrimeRlmMessagingParity(unittest.TestCase):
     def test_provider_free_rlm_evidence_contract_distinguishes_native_paths(self) -> None:
         self.assertEqual(
             PRIME_RLM_VERIFICATION_COMMAND_ID,
-            "test.prime-rlm-messaging-parity.provider-free",
+            "test.prime-rlm-spawn-admission.provider-free",
         )
         self.assertEqual(
             {

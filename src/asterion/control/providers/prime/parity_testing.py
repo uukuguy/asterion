@@ -321,7 +321,7 @@ PRIME_RLM_BOUNDED_SCENARIO_IDS = tuple(
     if contract["boundary"] == "bounded-provider"
 )
 PRIME_RLM_VERIFICATION_COMMAND_ID = (
-    "test.prime-rlm-messaging-parity.provider-free"
+    "test.prime-rlm-spawn-admission.provider-free"
 )
 PRIME_RLM_REQUIRED_CHECK_IDS = MappingProxyType(
     {
