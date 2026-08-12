@@ -364,6 +364,19 @@ def _write_prime_source(root: Path) -> Mapping[str, object]:
         "daemon_schema_revision": 14,
         "daemon_schema_id": "protocol-7-schema-14-816309b1cd50",
         "files": {relative: _sha256(text) for relative, text in contents.items()},
+        "rlm_runtime": {
+            "entry": "packages/coding-agent/dist/bundle/cli.js",
+            "binding_chunk": "packages/coding-agent/dist/bundle/chunk-binding.js",
+            "patch_sha256": "a" * 64,
+            "closure": {
+                "packages/coding-agent/dist/bundle/chunk-binding.js": "b" * 64,
+                "packages/coding-agent/dist/bundle/cli.js": "c" * 64,
+            },
+            "derived_closure": {
+                "packages/coding-agent/dist/bundle/chunk-binding.js": "d" * 64,
+                "packages/coding-agent/dist/bundle/cli.js": "c" * 64,
+            },
+        },
     }
 
 
