@@ -24,7 +24,7 @@
 
 **Files:**
 
-- Create: `src/asterion/control/providers/prime/rlm_experiment.py`
+- Create: `tools/prime_native_rlm_experiment.py`
 - Create: `tests/test_prime_rlm_experiment.py`
 
 **Interfaces:**
@@ -76,7 +76,7 @@
 
   ```bash
   uv run python -m unittest -v tests.test_prime_rlm_experiment
-  git add src/asterion/control/providers/prime/rlm_experiment.py tests/test_prime_rlm_experiment.py
+  git add tools/prime_native_rlm_experiment.py tests/test_prime_rlm_experiment.py
   git commit -m "feat: prepare bounded native rlm experiment"
   ```
 
@@ -86,7 +86,7 @@
 
 **Files:**
 
-- Modify: `src/asterion/control/providers/prime/rlm_experiment.py`
+- Modify: `tools/prime_native_rlm_experiment.py`
 - Modify: `tests/test_prime_rlm_experiment.py`
 
 **Interfaces:**
@@ -114,7 +114,7 @@
 
   ```bash
   uv run python -m unittest -v tests.test_prime_rlm_experiment
-  git add src/asterion/control/providers/prime/rlm_experiment.py tests/test_prime_rlm_experiment.py
+  git add tools/prime_native_rlm_experiment.py tests/test_prime_rlm_experiment.py
   git commit -m "feat: record bounded native rlm evidence"
   ```
 
@@ -173,7 +173,7 @@
 **Files:**
 
 - Create: `tests/fixtures/prime_gateway/v1/native-rlm-model-probe.mjs`
-- Modify: `src/asterion/control/providers/prime/rlm_experiment.py`
+- Modify: `tools/prime_native_rlm_experiment.py`
 - Modify: `tests/test_prime_rlm_experiment.py`
 - Modify: `tests/test_prime_rlm_messaging_parity.py`
 
@@ -206,7 +206,7 @@
   uv run ruff check src tests tools
   make test.prime-rlm-spawn-admission.provider-free
   make check
-  git add src/asterion/control/providers/prime/rlm_experiment.py tests/test_prime_rlm_experiment.py tests/fixtures/prime_gateway/v1/native-rlm-model-probe.mjs tests/test_prime_rlm_messaging_parity.py
+  git add tools/prime_native_rlm_experiment.py tests/test_prime_rlm_experiment.py tests/fixtures/prime_gateway/v1/native-rlm-model-probe.mjs tests/test_prime_rlm_messaging_parity.py
   git commit -m "feat: run bounded native rlm probe"
   ```
 
