@@ -131,6 +131,11 @@ make prime-verify-native-rlm-bounded \
   ASTERION_PRIME_EVIDENCE_ROOT=/private/prime-rlm-evidence
 ```
 
+Set `ASTERION_PRIME_EXPERIMENT_MODEL` only in the private operator
+environment (for example, `deepseek-v4-flash` when the corresponding
+provider credential is present). It is digested for evidence but never printed
+or placed in the authority document.
+
 Until the native probe runner is installed, this command reports
 `External-limited` after the exact preflight and authorization checks; it does
 not invoke a model.
