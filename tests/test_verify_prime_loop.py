@@ -14,6 +14,7 @@ import tools.verify_prime_loop as prime_loop
 from tools.verify_prime_loop import (
     PrimeVerificationError,
     load_bounded_authority,
+    load_bounded_rlm_authority,
     verify_preflight,
     verify_provider_free,
 )
@@ -170,6 +171,61 @@ class TestVerifyPrimeLoop(unittest.TestCase):
                 load_bounded_authority(path, max_cost_micros=1, now_ms=1)
             self.assertNotIn("SENTINEL_SECRET", str(raised.exception))
             self.assertNotIn(str(path), str(raised.exception))
+
+    def test_native_rlm_authority_requires_exact_capabilities_and_limits(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            rlm_operations = (
+                "rlm.child.delete",
+                "rlm.child.message",
+                "rlm.child.spawn",
+            )
+            valid_operations = [
+                *_authorization()["authority"]["allowed_operations"],
+                *rlm_operations,
+            ]
+            valid = _write(
+                root / "valid-rlm.json",
+                _authorization(allowed_operations=valid_operations),
+            )
+
+            envelope = load_bounded_rlm_authority(
+                valid, max_cost_micros=1_000, now_ms=1_000
+            )
+
+            self.assertEqual(envelope.max_recursion_depth, 1)
+            self.assertEqual(envelope.max_concurrent_children, 1)
+
+            for missing in rlm_operations:
+                operations = [item for item in valid_operations if item != missing]
+                with self.subTest(missing=missing), self.assertRaises(
+                    PrimeVerificationError
+                ):
+                    load_bounded_rlm_authority(
+                        _write(
+                            root / f"missing-{missing}.json",
+                            _authorization(allowed_operations=operations),
+                        ),
+                        max_cost_micros=1_000,
+                        now_ms=1_000,
+                    )
+
+            for name, changes in (
+                ("zero-depth", {"max_recursion_depth": 0}),
+                ("deep", {"max_recursion_depth": 2}),
+                ("zero-children", {"max_concurrent_children": 0}),
+                ("many-children", {"max_concurrent_children": 2}),
+            ):
+                with self.subTest(name=name), self.assertRaises(
+                    PrimeVerificationError
+                ):
+                    load_bounded_rlm_authority(
+                        _write(root / f"{name}.json", _authorization(**changes)),
+                        max_cost_micros=1_000,
+                        now_ms=1_000,
+                    )
 
     def test_preflight_owns_one_foreground_daemon_without_removed_cli_commands(
         self,
