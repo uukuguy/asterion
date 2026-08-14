@@ -14,6 +14,7 @@ from types import MappingProxyType
 from typing import Awaitable, Callable
 
 from asterion.control.authority import AuthorityEnvelope, BudgetUsage
+from asterion.immutable import RedactedImmutableMapping
 from tools.verify_prime_loop import PrimeVerificationError, load_bounded_rlm_authority
 
 
@@ -55,6 +56,31 @@ class NativeRlmProbeResult:
 
 
 ProbeRunner = Callable[[NativeRlmExperimentReservation], Awaitable[NativeRlmProbeResult]]
+
+
+def build_native_rlm_daemon_environment(
+    environ: Mapping[str, str], *, credential_env: str
+) -> Mapping[str, str]:
+    """Forward the sole selected credential to the owned Prime daemon."""
+    try:
+        if (
+            not isinstance(environ, Mapping)
+            or not isinstance(credential_env, str)
+            or not credential_env
+            or any(not isinstance(key, str) or not isinstance(value, str) for key, value in environ.items())
+            or credential_env not in environ
+        ):
+            raise ValueError
+        values = {
+            key: environ[key]
+            for key in ("HOME", "PATH", credential_env)
+            if key in environ
+        }
+        if "HOME" not in values or "PATH" not in values:
+            raise ValueError
+        return RedactedImmutableMapping(values)
+    except (TypeError, ValueError):
+        raise PrimeRlmExperimentError("Native RLM daemon environment is invalid") from None
 
 
 def prepare_native_rlm_experiment(
