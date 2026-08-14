@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
 
+from asterion.control.authority import BudgetUsage
 from tools.prime_native_rlm_experiment import (
     PrimeRlmExperimentError,
     prepare_native_rlm_experiment,
+    write_native_rlm_experiment_receipt,
 )
 
 
@@ -106,3 +109,52 @@ class TestNativeRlmExperiment(unittest.TestCase):
             ).consume()
             with self.assertRaises(PrimeRlmExperimentError):
                 reservation.consume()
+
+    def test_receipt_requires_complete_bounded_lifecycle(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            authority = root / "authority.json"
+            authority.write_text(json.dumps(_authority()), encoding="utf-8")
+            reservation = prepare_native_rlm_experiment(
+                authority,
+                max_cost_micros=500_000,
+                deadline_ms=600_000,
+                environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "private-model"},
+                now_ms=1_000,
+            ).consume()
+
+            report = write_native_rlm_experiment_receipt(
+                root,
+                reservation,
+                terminal="completed",
+                child_started=True,
+                message_delivered=True,
+                child_deleted=True,
+                usage=BudgetUsage(1, 1, 1, 3, 3),
+            )
+
+            self.assertEqual(report["status"], "PASS")
+            self.assertNotIn("private-model", repr(report))
+            receipt = root / "native-rlm-experiment-receipt.json"
+            self.assertEqual(os.stat(receipt).st_mode & 0o777, 0o600)
+            self.assertNotIn("private-model", receipt.read_text(encoding="utf-8"))
+            for changes in (
+                {"child_deleted": False},
+                {"terminal": "uncertain"},
+                {"usage": BudgetUsage(1, 1, 1, 3, 500_001)},
+            ):
+                with self.subTest(changes=changes):
+                    arguments = {
+                        "child_started": True,
+                        "message_delivered": True,
+                        "child_deleted": True,
+                        "terminal": "completed",
+                        "usage": BudgetUsage(1, 1, 1, 3, 3),
+                    }
+                    arguments.update(changes)
+                    self.assertNotEqual(
+                        write_native_rlm_experiment_receipt(
+                            root, reservation, **arguments,
+                        )["status"],
+                        "PASS",
+                    )

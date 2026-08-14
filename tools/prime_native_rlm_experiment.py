@@ -5,9 +5,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from hashlib import sha256
+import json
+import os
 from pathlib import Path
+import tempfile
+from types import MappingProxyType
 
-from asterion.control.authority import AuthorityEnvelope
+from asterion.control.authority import AuthorityEnvelope, BudgetUsage
 from tools.verify_prime_loop import PrimeVerificationError, load_bounded_rlm_authority
 
 
@@ -79,3 +83,62 @@ def prepare_native_rlm_experiment(
         )
     except (PrimeVerificationError, TypeError, ValueError):
         raise PrimeRlmExperimentError("Native RLM experiment authorization is invalid") from None
+
+
+def write_native_rlm_experiment_receipt(
+    root: Path,
+    reservation: NativeRlmExperimentReservation,
+    *,
+    terminal: str,
+    child_started: bool,
+    message_delivered: bool,
+    child_deleted: bool,
+    usage: BudgetUsage,
+) -> Mapping[str, object]:
+    """Atomically write a private, public-safe observation for one reservation."""
+    if (
+        not isinstance(root, Path)
+        or not root.is_dir()
+        or not isinstance(reservation, NativeRlmExperimentReservation)
+        or not reservation.consumed
+        or terminal not in {"completed", "failed", "cancelled", "uncertain"}
+        or not all(isinstance(value, bool) for value in (child_started, message_delivered, child_deleted))
+        or not isinstance(usage, BudgetUsage)
+    ):
+        raise PrimeRlmExperimentError("Native RLM experiment receipt is invalid")
+    complete = child_started and message_delivered and child_deleted
+    in_budget = usage.cost_micros <= reservation.limits.cost_micros
+    status = "PASS" if terminal == "completed" and complete and in_budget else "uncertain"
+    payload = {
+        "format": "asterion.prime-native-rlm-receipt/v1",
+        "authority_id": reservation.authority.authority_id,
+        "authority_revision": reservation.authority.revision,
+        "configuration_digest": reservation.configuration_digest,
+        "terminal": terminal,
+        "child_started": child_started,
+        "message_delivered": message_delivered,
+        "child_deleted": child_deleted,
+        "usage": vars(usage),
+        "status": status,
+    }
+    descriptor, temporary = tempfile.mkstemp(prefix=".native-rlm-", dir=root)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            os.fchmod(handle.fileno(), 0o600)
+            json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
+        os.replace(temporary, root / "native-rlm-experiment-receipt.json")
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    return MappingProxyType(
+        {
+            "format": payload["format"],
+            "configuration_digest": reservation.configuration_digest,
+            "status": status,
+            "terminal": terminal,
+            "child_started": child_started,
+            "message_delivered": message_delivered,
+            "child_deleted": child_deleted,
+            "usage": MappingProxyType(dict(vars(usage))),
+        }
+    )
