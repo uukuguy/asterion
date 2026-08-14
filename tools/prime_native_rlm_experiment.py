@@ -5,11 +5,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from hashlib import sha256
+import asyncio
 import json
 import os
 from pathlib import Path
 import tempfile
 from types import MappingProxyType
+from typing import Awaitable, Callable
 
 from asterion.control.authority import AuthorityEnvelope, BudgetUsage
 from tools.verify_prime_loop import PrimeVerificationError, load_bounded_rlm_authority
@@ -41,6 +43,18 @@ class NativeRlmExperimentReservation:
         if self.consumed:
             raise PrimeRlmExperimentError("Native RLM experiment reservation is inactive")
         return replace(self, consumed=True)
+
+
+@dataclass(frozen=True, repr=False)
+class NativeRlmProbeResult:
+    terminal: str
+    child_started: bool
+    message_delivered: bool
+    child_deleted: bool
+    usage: BudgetUsage
+
+
+ProbeRunner = Callable[[NativeRlmExperimentReservation], Awaitable[NativeRlmProbeResult]]
 
 
 def prepare_native_rlm_experiment(
@@ -142,3 +156,24 @@ def write_native_rlm_experiment_receipt(
             "usage": MappingProxyType(dict(vars(usage))),
         }
     )
+
+
+async def run_native_rlm_experiment(
+    reservation: NativeRlmExperimentReservation,
+    runner: ProbeRunner,
+) -> Mapping[str, object]:
+    """Consume a reservation once and classify an injected native probe result."""
+    if not isinstance(reservation, NativeRlmExperimentReservation) or not callable(runner):
+        raise PrimeRlmExperimentError("Native RLM experiment runner is invalid")
+    consumed = reservation.consume()
+    try:
+        async with asyncio.timeout(consumed.limits.deadline_ms / 1000):
+            result = await runner(consumed)
+    except TimeoutError:
+        return MappingProxyType({"status": "uncertain", "terminal": "uncertain"})
+    if not isinstance(result, NativeRlmProbeResult) or not isinstance(result.usage, BudgetUsage):
+        raise PrimeRlmExperimentError("Native RLM experiment result is invalid")
+    complete = result.child_started and result.message_delivered and result.child_deleted
+    in_budget = result.usage.cost_micros <= consumed.limits.cost_micros
+    status = "PASS" if result.terminal == "completed" and complete and in_budget else "External-limited"
+    return MappingProxyType({"status": status, "terminal": result.terminal})

@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import json
 import os
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
 
 from asterion.control.authority import BudgetUsage
 from tools.prime_native_rlm_experiment import (
+    NativeRlmProbeResult,
     PrimeRlmExperimentError,
     prepare_native_rlm_experiment,
+    run_native_rlm_experiment,
     write_native_rlm_experiment_receipt,
 )
 
@@ -158,3 +161,19 @@ class TestNativeRlmExperiment(unittest.TestCase):
                         )["status"],
                         "PASS",
                     )
+
+    def test_runner_consumes_once_and_classifies_incomplete_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            authority = Path(directory) / "authority.json"
+            authority.write_text(json.dumps(_authority()), encoding="utf-8")
+            reservation = prepare_native_rlm_experiment(
+                authority, max_cost_micros=500_000, deadline_ms=600_000,
+                environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "private-model"}, now_ms=1_000,
+            )
+
+            async def incomplete(_reservation):
+                return NativeRlmProbeResult("completed", True, True, False, BudgetUsage(1, 1, 1, 3, 3))
+
+            report = asyncio.run(run_native_rlm_experiment(reservation, incomplete))
+            self.assertEqual(report["status"], "External-limited")
+            self.assertNotIn("private-model", repr(report))
