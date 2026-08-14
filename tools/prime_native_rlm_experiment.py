@@ -34,6 +34,13 @@ class NativeRlmExperimentLimits:
 
 
 @dataclass(frozen=True, repr=False)
+class NativeRlmModelSelection:
+    provider: str
+    model: str
+    credential_env: str
+
+
+@dataclass(frozen=True, repr=False)
 class NativeRlmExperimentReservation:
     authority: AuthorityEnvelope
     limits: NativeRlmExperimentLimits
@@ -56,6 +63,13 @@ class NativeRlmProbeResult:
 
 
 ProbeRunner = Callable[[NativeRlmExperimentReservation], Awaitable[NativeRlmProbeResult]]
+
+
+def resolve_native_rlm_model(environ: Mapping[str, str]) -> NativeRlmModelSelection:
+    """Resolve the sole model/provider pairing authorized for this first probe."""
+    if not isinstance(environ, Mapping) or environ.get(_MODEL_KEY) != "deepseek-v4-flash":
+        raise PrimeRlmExperimentError("Native RLM experiment model is invalid")
+    return NativeRlmModelSelection("deepseek", "deepseek-v4-flash", "DEEPSEEK_API_KEY")
 
 
 def build_native_rlm_daemon_environment(
