@@ -120,6 +120,21 @@ handshake, authority, and cost, then honestly reports `External-limited` until
 that private run configuration is injected through an approved host boundary.
 Promotion never invokes `bounded`.
 
+The separately authorized native-RLM experiment is also default-off. It uses
+one explicit $0.50 ceiling and private evidence root; it is never part of
+`make test`, `make check`, or promotion:
+
+```bash
+make prime-verify-native-rlm-bounded \
+  ASTERION_PRIME_SOURCE_ROOT=3th-party/prime-agent \
+  ASTERION_PRIME_AUTHORITY=/private/prime-rlm-authority.json \
+  ASTERION_PRIME_EVIDENCE_ROOT=/private/prime-rlm-evidence
+```
+
+Until the native probe runner is installed, this command reports
+`External-limited` after the exact preflight and authorization checks; it does
+not invoke a model.
+
 ## Cost and risk comparison
 
 The hosted gateway is the lower-cost path to long-horizon control because it

@@ -457,14 +457,37 @@ def _bounded_external_limit(
     )
 
 
+def _native_rlm_bounded_external_limit(
+    source_root: Path,
+    authority_path: Path,
+    max_cost_micros: int,
+    private_evidence_root: Path,
+) -> Mapping[str, object]:
+    from tools.prime_native_rlm_experiment import prepare_native_rlm_experiment
+
+    if not private_evidence_root.is_dir():
+        raise PrimeVerificationError("Prime native RLM evidence root is invalid")
+    verify_preflight(source_root)
+    prepare_native_rlm_experiment(
+        authority_path,
+        max_cost_micros=max_cost_micros,
+        deadline_ms=600_000,
+        environ=os.environ,
+    )
+    raise PrimeExternalLimit("Prime native RLM probe runner is unavailable")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--level", required=True, choices=("provider-free", "preflight", "bounded")
+        "--level", required=True,
+        choices=("provider-free", "preflight", "bounded", "native-rlm-bounded"),
     )
     parser.add_argument("--source-root", type=Path)
     parser.add_argument("--authority", type=Path)
     parser.add_argument("--max-cost-micros", type=int)
+    parser.add_argument("--private-evidence-root", type=Path)
+    parser.add_argument("--native-rlm-experiment", action="store_true")
     arguments = parser.parse_args(argv)
     try:
         if arguments.level == "provider-free":
@@ -474,6 +497,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     arguments.source_root,
                     arguments.authority,
                     arguments.max_cost_micros,
+                    arguments.private_evidence_root,
                 )
             ):
                 raise PrimeVerificationError(
@@ -485,10 +509,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 arguments.source_root is None
                 or arguments.authority is not None
                 or arguments.max_cost_micros is not None
+                or arguments.private_evidence_root is not None
+                or arguments.native_rlm_experiment
             ):
                 raise PrimeVerificationError("Prime preflight arguments are invalid")
             report = verify_preflight(arguments.source_root)
-        else:
+        elif arguments.level == "bounded":
             if (
                 arguments.source_root is None
                 or arguments.authority is None
@@ -501,6 +527,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                 arguments.source_root,
                 arguments.authority,
                 arguments.max_cost_micros,
+            )
+        else:
+            if (
+                arguments.source_root is None
+                or arguments.authority is None
+                or arguments.max_cost_micros is None
+                or arguments.private_evidence_root is None
+                or not arguments.native_rlm_experiment
+            ):
+                raise PrimeVerificationError(
+                    "Prime native RLM verification requires exact explicit authorization"
+                )
+            report = _native_rlm_bounded_external_limit(
+                arguments.source_root,
+                arguments.authority,
+                arguments.max_cost_micros,
+                arguments.private_evidence_root,
             )
     except PrimeExternalLimit as error:
         print(

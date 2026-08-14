@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import io
 import os
 import subprocess
 import tempfile
 import unittest
+from contextlib import redirect_stderr
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -86,6 +88,26 @@ def _authorization(**authority_changes: object) -> dict[str, object]:
 
 
 class TestVerifyPrimeLoop(unittest.TestCase):
+    def test_native_rlm_bounded_requires_exact_opt_in_before_preflight(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stderr = io.StringIO()
+            with (
+                mock.patch.object(prime_loop, "verify_preflight") as preflight,
+                redirect_stderr(stderr),
+            ):
+                result = prime_loop.main(
+                    [
+                        "--level", "native-rlm-bounded",
+                        "--source-root", str(root),
+                        "--authority", str(root / "authority.json"),
+                        "--max-cost-micros", "500000",
+                        "--private-evidence-root", str(root / "evidence"),
+                    ]
+                )
+            self.assertEqual(result, 1)
+            preflight.assert_not_called()
+
     def test_provider_free_report_requires_all_exact_zero_provider_scenarios(
         self,
     ) -> None:

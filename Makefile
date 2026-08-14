@@ -20,7 +20,7 @@ ASTERION_PRIME_MAX_COST_MICROS ?=
 .PHONY: dci-run dci-benchmark
 .PHONY: dci-basic-example dci-runtime-context-example
 .PHONY: test-typescript test-rust check-rust
-.PHONY: prime-check prime-setup prime-verify-provider-free prime-verify-bounded
+.PHONY: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-verify-native-rlm-bounded
 .PHONY: prime-parity-inventory prime-verify-system-parity
 .PHONY: test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free
 
@@ -165,6 +165,9 @@ test.prime-rlm-spawn-admission.provider-free:
 
 prime-verify-bounded:
 	$(UV_BIN) run python tools/verify_prime_loop.py --level bounded --source-root "$(ASTERION_PRIME_SOURCE_ROOT)" --authority "$(ASTERION_PRIME_AUTHORITY)" --max-cost-micros "$(ASTERION_PRIME_MAX_COST_MICROS)"
+
+prime-verify-native-rlm-bounded:
+	$(UV_BIN) run python tools/verify_prime_loop.py --level native-rlm-bounded --native-rlm-experiment --source-root "$(ASTERION_PRIME_SOURCE_ROOT)" --authority "$(ASTERION_PRIME_AUTHORITY)" --max-cost-micros "500000" --private-evidence-root "$(ASTERION_PRIME_EVIDENCE_ROOT)"
 
 prime-parity-inventory:
 	$(UV_BIN) run python tools/check_prime_parity.py --claim inventory
