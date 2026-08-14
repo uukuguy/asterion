@@ -55,6 +55,9 @@ REQUIRED_BOUNDED_OPERATIONS = frozenset(
         "goal.fail",
     }
 )
+REQUIRED_BOUNDED_RLM_OPERATIONS = frozenset(
+    {"rlm.child.delete", "rlm.child.message", "rlm.child.spawn"}
+)
 
 
 class PrimeVerificationError(RuntimeError):
@@ -208,6 +211,34 @@ def load_bounded_authority(
         ValueError,
         AuthorityError,
     ):
+        raise PrimeVerificationError(
+            "Prime bounded authorization is invalid or inconsistent"
+        ) from None
+
+
+def load_bounded_rlm_authority(
+    path: Path,
+    *,
+    max_cost_micros: int,
+    now_ms: int | None = None,
+) -> AuthorityEnvelope:
+    """Load only the one-child, one-depth native RLM authorization subset."""
+    try:
+        envelope = load_bounded_authority(
+            path, max_cost_micros=max_cost_micros, now_ms=now_ms
+        )
+        if (
+            not REQUIRED_BOUNDED_RLM_OPERATIONS.issubset(
+                envelope.allowed_operations
+            )
+            or envelope.max_recursion_depth != 1
+            or envelope.max_concurrent_children != 1
+        ):
+            raise ValueError
+        return envelope
+    except PrimeVerificationError:
+        raise
+    except (TypeError, ValueError):
         raise PrimeVerificationError(
             "Prime bounded authorization is invalid or inconsistent"
         ) from None
