@@ -935,7 +935,11 @@ async def run_native_rlm_controlled_probe(
             if session_created and not session_terminal:
                 await host.dispatch(native_rlm_session_cancel_command(reservation))
         finally:
-            await host.close()
+            try:
+                await host.close()
+            except Exception:
+                if not session_terminal:
+                    raise
 
 
 def _write_native_rlm_progress(

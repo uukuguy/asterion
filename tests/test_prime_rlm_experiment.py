@@ -199,7 +199,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
                 )()
 
             async def close(self) -> None:
-                return None
+                raise RuntimeError("transport already closed")
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
