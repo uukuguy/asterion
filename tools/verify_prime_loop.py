@@ -631,6 +631,13 @@ def _native_rlm_environment() -> dict[str, str]:
         ):
             if key in values:
                 environment[key] = values[key]
+        if (
+            "PRIME_AGENT_KERNEL_PYTHON" not in environment
+            and "PRIME_AGENT_KERNEL_VENV" not in environment
+        ):
+            default_kernel = Path.home() / ".prime" / "agent" / "kernel-venv" / "bin" / "python"
+            if default_kernel.is_file() and os.access(default_kernel, os.X_OK):
+                environment["PRIME_AGENT_KERNEL_PYTHON"] = str(default_kernel)
         return environment
     except OSError:
         raise PrimeVerificationError("Prime native RLM environment is invalid") from None
