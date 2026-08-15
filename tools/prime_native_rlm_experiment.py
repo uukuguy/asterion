@@ -683,13 +683,7 @@ async def execute_native_rlm_sidecar_probe(
             raise PrimeRlmExperimentError("Native RLM probe result is invalid")
         return result
     except PrimeRlmExperimentError:
-        terminal = _terminal_native_rlm_probe_result(host, latest)
-        if terminal is None:
-            raise
-        session_terminal = True
-        latest = terminal
-        checkpoint()
-        return latest
+        raise
     except Exception:
         raise PrimeRlmExperimentError("Native RLM probe did not complete") from None
     finally:
