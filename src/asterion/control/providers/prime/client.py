@@ -42,14 +42,15 @@ MAX_PREPARED_PRIVATE_INPUTS = 128
 class RlmLifecycleObservation:
     """One public-safe native RLM lifecycle transition from the sidecar."""
 
-    type: Literal["rlm.child.started", "rlm.child.terminal"]
+    type: Literal["rlm.child.started", "rlm.child.terminal", "rlm.child.deleted"]
     child_id: str
     status: Literal["completed", "failed", "cancelled"] | None = None
     native_identity_digest: str | None = None
 
     def __post_init__(self) -> None:
         if (
-            self.type not in {"rlm.child.started", "rlm.child.terminal"}
+            self.type
+            not in {"rlm.child.started", "rlm.child.terminal", "rlm.child.deleted"}
             or not isinstance(self.child_id, str)
             or OPAQUE_ID.fullmatch(self.child_id) is None
             or (
@@ -70,6 +71,10 @@ class RlmLifecycleObservation:
                     self.status not in {"completed", "failed", "cancelled"}
                     or self.native_identity_digest is not None
                 )
+            )
+            or (
+                self.type == "rlm.child.deleted"
+                and (self.status is not None or self.native_identity_digest is not None)
             )
         ):
             raise PrimeControlError()
@@ -393,6 +398,7 @@ class PrimeControlPlaneClient:
         ):
             raise PrimeControlError()
         active: set[str] = set()
+        closed: set[str] = set()
         result: list[RlmLifecycleObservation] = []
         try:
             for item in lifecycle:
@@ -426,6 +432,15 @@ class PrimeControlPlaneClient:
                     if child_id not in active:
                         raise PrimeControlError()
                     active.remove(child_id)
+                    closed.add(child_id)
+                elif item_type == "rlm.child.deleted" and set(item) == {
+                    "type",
+                    "child_id",
+                }:
+                    observation = RlmLifecycleObservation(item_type, child_id)
+                    if child_id not in closed:
+                        raise PrimeControlError()
+                    closed.remove(child_id)
                 else:
                     raise PrimeControlError()
                 result.append(observation)

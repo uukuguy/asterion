@@ -235,6 +235,9 @@ class TestPrimeRlmMessagingParity(unittest.TestCase):
                     )
                     payload = json.loads(stdout)
                     self.assertNotIn("PRIVATE_RLM_CHILD_GOAL", stdout.decode())
+                    payload["lifecycle_types"] = [
+                        observation.type for observation in await client.rlm_lifecycle()
+                    ]
                     return payload
                 finally:
                     if host is not None:
@@ -283,6 +286,11 @@ class TestPrimeRlmMessagingParity(unittest.TestCase):
                 "provider_operations": 0,
                 "spawn_admitted": True,
                 "lifecycle_recorded": True,
+                "lifecycle_types": [
+                    "rlm.child.started",
+                    "rlm.child.terminal",
+                    "rlm.child.deleted",
+                ],
                 "message_delivered": False,
                 "teardown_recorded": True,
             },
