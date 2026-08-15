@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
 from types import MappingProxyType
 from typing import Awaitable, Callable
 
@@ -44,6 +45,7 @@ class NativeRlmModelSelection:
 class NativeRlmDaemonPlan:
     argv: tuple[str, ...]
     environ: Mapping[str, str]
+    socket_path: Path
 
     def __repr__(self) -> str:
         return "NativeRlmDaemonPlan(argv=<redacted>, environ=<redacted>)"
@@ -103,7 +105,26 @@ def build_native_rlm_daemon_plan(
             str(socket_path), "--provider", selection.provider, "--model", selection.model,
         ),
         environment,
+        socket_path,
     )
+
+
+async def start_native_rlm_daemon(
+    plan: NativeRlmDaemonPlan,
+    *,
+    launcher: Callable[[NativeRlmDaemonPlan], Awaitable[object]],
+    timeout_seconds: float,
+) -> object:
+    """Start one owned daemon and wait only for its designated socket."""
+    if not isinstance(plan, NativeRlmDaemonPlan) or not callable(launcher) or timeout_seconds <= 0:
+        raise PrimeRlmExperimentError("Native RLM daemon launch is invalid")
+    process = await launcher(plan)
+    deadline = time.monotonic() + timeout_seconds
+    while not plan.socket_path.exists():
+        if getattr(process, "returncode", None) is not None or time.monotonic() >= deadline:
+            raise PrimeRlmExperimentError("Native RLM daemon did not become ready")
+        await asyncio.sleep(0.01)
+    return process
 
 
 def build_native_rlm_daemon_environment(

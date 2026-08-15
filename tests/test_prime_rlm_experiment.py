@@ -11,6 +11,7 @@ from asterion.control.authority import BudgetUsage
 from tools.prime_native_rlm_experiment import (
     build_native_rlm_daemon_environment,
     build_native_rlm_daemon_plan,
+    start_native_rlm_daemon,
     resolve_native_rlm_model,
     NativeRlmProbeResult,
     PrimeRlmExperimentError,
@@ -64,6 +65,23 @@ def _authority(**changes: object) -> dict[str, object]:
 
 
 class TestNativeRlmExperiment(unittest.TestCase):
+    def test_daemon_start_waits_for_owned_socket(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            socket = root / "prime.sock"
+            selection = resolve_native_rlm_model({"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"})
+            plan = build_native_rlm_daemon_plan(Path("node"), Path("cli.js"), socket, selection, {"HOME": str(root), "PATH": "/bin", "DEEPSEEK_API_KEY": "secret"})
+
+            class Process:
+                returncode = None
+
+            async def launcher(_plan):
+                socket.touch()
+                return Process()
+
+            process = asyncio.run(start_native_rlm_daemon(plan, launcher=launcher, timeout_seconds=1))
+            self.assertIsInstance(process, Process)
+
     def test_daemon_plan_uses_direct_pinned_runtime_and_selected_model(self) -> None:
         selection = resolve_native_rlm_model(
             {"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}
