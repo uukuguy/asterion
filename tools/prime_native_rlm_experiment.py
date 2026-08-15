@@ -429,6 +429,7 @@ def classify_native_rlm_probe_observation(
         raise PrimeRlmExperimentError("Native RLM probe observation is invalid")
     active: set[str] = set()
     completed: set[str] = set()
+    deleted: set[str] = set()
     try:
         for event in lifecycle:
             if not isinstance(event, Mapping):
@@ -450,12 +451,19 @@ def classify_native_rlm_probe_observation(
                 active.remove(child_id)
                 if event["status"] == "completed":
                     completed.add(child_id)
+            elif (
+                event_type == "rlm.child.deleted"
+                and set(event) == {"type", "child_id"}
+                and child_id in completed
+                and child_id not in deleted
+            ):
+                deleted.add(child_id)
             else:
                 raise ValueError
     except (TypeError, ValueError):
         raise PrimeRlmExperimentError("Native RLM probe observation is invalid") from None
     child_started = bool(completed)
-    child_deleted = child_started and not active
+    child_deleted = child_started and bool(deleted) and not active
     terminal = "completed" if child_deleted and message_delivered else "uncertain"
     return NativeRlmProbeResult(
         terminal=terminal,
@@ -497,6 +505,8 @@ async def observe_native_rlm_probe(
                 records.append(
                     {"type": event_type, "child_id": child_id, "status": status}
                 )
+            elif event_type == "rlm.child.deleted":
+                records.append({"type": event_type, "child_id": child_id})
             else:
                 raise ValueError
         delivered = False

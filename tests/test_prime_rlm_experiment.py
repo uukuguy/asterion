@@ -215,7 +215,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
                 yield Event()
 
             async def rlm_lifecycle(self):
-                return (Lifecycle("rlm.child.started", "child-1"), Lifecycle("rlm.child.terminal", "child-1", "completed"))
+                return (Lifecycle("rlm.child.started", "child-1"), Lifecycle("rlm.child.terminal", "child-1", "completed"), Lifecycle("rlm.child.deleted", "child-1"))
 
             async def rlm_message_binding(self, _action_id):
                 return Binding()
@@ -258,6 +258,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
                 return (
                     Lifecycle("rlm.child.started", "child-1"),
                     Lifecycle("rlm.child.terminal", "child-1", "completed"),
+                    Lifecycle("rlm.child.deleted", "child-1"),
                 )
 
             async def rlm_message_binding(self, action_id):
@@ -277,6 +278,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
             (
                 {"type": "rlm.child.started", "child_id": "child-1"},
                 {"type": "rlm.child.terminal", "child_id": "child-1", "status": "completed"},
+                {"type": "rlm.child.deleted", "child_id": "child-1"},
             ),
             message_delivered=True,
             usage=BudgetUsage(1, 1, 1, 3, 3),
@@ -285,6 +287,17 @@ class TestNativeRlmExperiment(unittest.TestCase):
         self.assertTrue(complete.child_started)
         self.assertTrue(complete.message_delivered)
         self.assertTrue(complete.child_deleted)
+
+        not_deleted = classify_native_rlm_probe_observation(
+            (
+                {"type": "rlm.child.started", "child_id": "child-1"},
+                {"type": "rlm.child.terminal", "child_id": "child-1", "status": "completed"},
+            ),
+            message_delivered=True,
+            usage=BudgetUsage(1, 1, 1, 3, 3),
+        )
+        self.assertEqual(not_deleted.terminal, "uncertain")
+        self.assertFalse(not_deleted.child_deleted)
 
         incomplete = classify_native_rlm_probe_observation(
             ({"type": "rlm.child.started", "child_id": "child-1"},),
