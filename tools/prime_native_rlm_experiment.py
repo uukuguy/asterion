@@ -804,7 +804,10 @@ async def run_native_rlm_controlled_probe(
             if latest.terminal == "completed":
                 return latest
             if snapshot.state.terminal_event_id is not None:
-                return latest
+                terminal = snapshot.state.session_status
+                if terminal not in {"cancelled", "completed", "failed", "budget_limited"}:
+                    raise PrimeRlmExperimentError("Native RLM terminal state is invalid")
+                return replace(latest, terminal=terminal)
             await asyncio.sleep(0.025)
         return latest
     except PrimeRlmExperimentError:

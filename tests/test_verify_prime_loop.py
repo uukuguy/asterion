@@ -88,6 +88,33 @@ def _authorization(**authority_changes: object) -> dict[str, object]:
 
 
 class TestVerifyPrimeLoop(unittest.TestCase):
+    def test_native_rlm_environment_prefers_explicit_dotenv_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".env").write_text(
+                "ASTERION_PRIME_EXPERIMENT_MODEL=deepseek-v4-flash\n"
+                "DEEPSEEK_API_KEY=current-private-key\n",
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(prime_loop.Path, "cwd", return_value=root),
+                mock.patch.dict(
+                    os.environ,
+                    {
+                        "HOME": "/private/home",
+                        "PATH": "/private/bin",
+                        "DEEPSEEK_API_KEY": "stale-inherited-key",
+                    },
+                    clear=True,
+                ),
+            ):
+                environment = prime_loop._native_rlm_environment()
+
+        self.assertEqual(environment["DEEPSEEK_API_KEY"], "current-private-key")
+        self.assertEqual(environment["ASTERION_PRIME_EXPERIMENT_MODEL"], "deepseek-v4-flash")
+        self.assertEqual(environment["HOME"], "/private/home")
+        self.assertEqual(environment["PATH"], "/private/bin")
+
     def test_native_rlm_bounded_uses_defaults_after_explicit_opt_in(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

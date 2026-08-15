@@ -620,7 +620,11 @@ def _native_rlm_environment() -> dict[str, str]:
             for key, value in dotenv_values(Path.cwd() / ".env").items()
             if isinstance(key, str) and isinstance(value, str)
         }
-        return {**values, **os.environ}
+        environment = dict(os.environ)
+        for key in ("ASTERION_PRIME_EXPERIMENT_MODEL", "DEEPSEEK_API_KEY"):
+            if key in values:
+                environment[key] = values[key]
+        return environment
     except OSError:
         raise PrimeVerificationError("Prime native RLM environment is invalid") from None
 
