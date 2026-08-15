@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import secrets
 import tempfile
+import textwrap
 import time
 from types import MappingProxyType
 from typing import Awaitable, Callable, IO
@@ -182,6 +183,7 @@ SidecarLauncher = Callable[
 ]
 SidecarProbe = Callable[[object], Awaitable[NativeRlmProbeResult]]
 OwnedWorkerCleanup = Callable[[], Awaitable[None]]
+OwnedDaemonShutdown = Callable[[NativeRlmDaemonPlan, NativeRlmRuntimeResources], Awaitable[None]]
 
 
 class _NativeRlmActionExecutor:
@@ -625,6 +627,7 @@ async def execute_native_rlm_sidecar_probe(
     sidecar_launcher: SidecarLauncher,
     probe: SidecarProbe,
     owned_worker_cleanup: OwnedWorkerCleanup | None = None,
+    owned_daemon_shutdown: OwnedDaemonShutdown | None = None,
 ) -> NativeRlmProbeResult:
     """Run one injected probe and always release the processes it owns."""
     if (
@@ -636,6 +639,7 @@ async def execute_native_rlm_sidecar_probe(
         or any(not isinstance(key, str) or not isinstance(value, str) for key, value in environ.items())
         or not all(callable(value) for value in (daemon_launcher, sidecar_launcher, probe))
         or owned_worker_cleanup is not None and not callable(owned_worker_cleanup)
+        or owned_daemon_shutdown is not None and not callable(owned_daemon_shutdown)
     ):
         raise PrimeRlmExperimentError("Native RLM sidecar probe is invalid")
     prepare_native_rlm_workspace(root)
@@ -673,7 +677,10 @@ async def execute_native_rlm_sidecar_probe(
             if sidecar is not None and owned_worker_cleanup is not None:
                 await owned_worker_cleanup()
         finally:
-            await _reap_owned_daemon(daemon)
+            await _reap_owned_daemon(
+                daemon, plan, resources,
+                shutdown=owned_daemon_shutdown,
+            )
         if sidecar_cleanup_error is not None:
             raise sidecar_cleanup_error
 
@@ -763,6 +770,7 @@ async def run_owned_native_rlm_sidecar_probe(
     daemon_spawn: Callable[..., Awaitable[object]] | None = None,
     sidecar_starter: Callable[[object], Awaitable[object]] | None = None,
     owned_worker_cleanup: OwnedWorkerCleanup | None = None,
+    owned_daemon_shutdown: OwnedDaemonShutdown | None = None,
     private_stderr_sink: IO[bytes] | None = None,
 ) -> NativeRlmProbeResult:
     """Compose the real owned process launchers for one explicitly admitted probe."""
@@ -796,6 +804,7 @@ async def run_owned_native_rlm_sidecar_probe(
         sidecar_launcher=launch_sidecar,
         probe=probe,
         owned_worker_cleanup=cleanup,
+        owned_daemon_shutdown=owned_daemon_shutdown,
     )
 
 
@@ -893,16 +902,43 @@ async def _close_owned_sidecar(sidecar: object | None) -> None:
         raise PrimeRlmExperimentError("Native RLM sidecar cleanup failed") from None
 
 
-async def _reap_owned_daemon(daemon: object) -> None:
+async def _reap_owned_daemon(
+    daemon: object,
+    plan: NativeRlmDaemonPlan,
+    resources: NativeRlmRuntimeResources,
+    *,
+    shutdown: OwnedDaemonShutdown | None = None,
+) -> None:
+    """Use Prime's daemon protocol; SIGTERM leaves detached workers behind."""
     if getattr(daemon, "returncode", None) is not None:
         return
-    terminate = getattr(daemon, "terminate", None)
     wait = getattr(daemon, "wait", None)
-    if not callable(terminate) or not callable(wait):
+    if not callable(wait):
         raise PrimeRlmExperimentError("Native RLM daemon cleanup failed")
     try:
-        terminate()
-        await asyncio.wait_for(wait(), timeout=2)
+        if shutdown is not None:
+            await shutdown(plan, resources)
+            await asyncio.wait_for(wait(), timeout=5)
+            return
+        client_entry = resources.sidecar_entry.parent / "index.js"
+        script = textwrap.dedent(
+            f'''\
+            import {{ PrimeDaemonClient }} from {client_entry.as_uri()!r};
+            const client = new PrimeDaemonClient({{clientId: "asterion-owned-cleanup", connectTimeoutMs: 3000, requestTimeoutMs: 3000}});
+            await client.connect({str(plan.socket_path)!r});
+            await client.request({{type: "shutdown", force: true}}, "asterion-owned-cleanup", 3000);
+            client.close();
+            '''
+        )
+        shutdown = await asyncio.create_subprocess_exec(
+            str(resources.node_executable), "--input-type=module", "-e", script,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        if await asyncio.wait_for(shutdown.wait(), timeout=5) != 0:
+            raise RuntimeError()
+        await asyncio.wait_for(wait(), timeout=5)
     except (TimeoutError, OSError, RuntimeError, TypeError, ValueError):
         raise PrimeRlmExperimentError("Native RLM daemon cleanup failed") from None
 

@@ -318,9 +318,11 @@ class TestNativeRlmExperiment(unittest.TestCase):
                 async def close(self):
                     return None
 
+            daemon = Daemon()
+
             async def spawn(*_args, **_kwargs):
                 (root / "prime.sock").touch()
-                return Daemon()
+                return daemon
 
             async def start_sidecar(options):
                 self.assertEqual(set(options.environ), {"HOME", "PATH"})
@@ -332,6 +334,9 @@ class TestNativeRlmExperiment(unittest.TestCase):
             async def await_cleanup():
                 return None
 
+            async def shutdown(_plan, _resources):
+                daemon.returncode = 0
+
             result = asyncio.run(run_owned_native_rlm_sidecar_probe(
                 reservation,
                 resolve_native_rlm_model({"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}),
@@ -342,6 +347,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
                 daemon_spawn=spawn,
                 sidecar_starter=start_sidecar,
                 owned_worker_cleanup=await_cleanup,
+                owned_daemon_shutdown=shutdown,
             ))
             self.assertEqual(result.terminal, "completed")
 
@@ -467,6 +473,9 @@ class TestNativeRlmExperiment(unittest.TestCase):
                 self.assertTrue(sidecar.closed)
                 cleanup_observed.append(True)
 
+            async def shutdown(_plan, _resources):
+                daemon.returncode = 0
+
             result = asyncio.run(
                 execute_native_rlm_sidecar_probe(
                     reservation,
@@ -484,13 +493,14 @@ class TestNativeRlmExperiment(unittest.TestCase):
                     sidecar_launcher=launch_sidecar,
                     probe=probe,
                     owned_worker_cleanup=await_owned_worker_cleanup,
+                    owned_daemon_shutdown=shutdown,
                 )
             )
 
             self.assertEqual(result.terminal, "completed")
             self.assertTrue(sidecar.closed)
             self.assertEqual(cleanup_observed, [True])
-            self.assertTrue(daemon.terminated)
+            self.assertFalse(daemon.terminated)
 
     def test_sidecar_probe_redacts_failure_and_reaps_owned_daemon(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -536,6 +546,9 @@ class TestNativeRlmExperiment(unittest.TestCase):
             async def await_owned_worker_cleanup():
                 cleanup_observed.append(True)
 
+            async def shutdown(_plan, _resources):
+                daemon.returncode = 0
+
             with self.assertRaises(PrimeRlmExperimentError) as raised:
                 asyncio.run(execute_native_rlm_sidecar_probe(
                     reservation,
@@ -547,10 +560,11 @@ class TestNativeRlmExperiment(unittest.TestCase):
                     sidecar_launcher=launch_sidecar,
                     probe=fail_probe,
                     owned_worker_cleanup=await_owned_worker_cleanup,
+                    owned_daemon_shutdown=shutdown,
                 ))
             self.assertNotIn("SENTINEL_PRIVATE_PROBE", str(raised.exception))
             self.assertEqual(cleanup_observed, [True])
-            self.assertTrue(daemon.terminated)
+            self.assertFalse(daemon.terminated)
 
     def test_preparation_uses_private_default_authority(self) -> None:
         reservation = prepare_native_rlm_experiment(
