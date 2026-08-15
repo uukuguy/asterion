@@ -524,6 +524,27 @@ def build_native_rlm_sidecar_descriptor(
         "remainingBudget": {"controller_tokens": budget.controller_tokens, "application_tokens": budget.application_tokens, "child_tokens": budget.child_tokens, "aggregate_tokens": budget.aggregate_tokens, "cost_micros": budget.cost_micros, "deadline_ms": reservation.limits.deadline_ms},
         "sessionDir": str(root / "sessions"), "sessionId": "native-rlm-root", "skillPath": str(resources.skill_path), "timeoutMs": reservation.limits.deadline_ms, "workspace": str(root / "workspace"),
     })
+
+
+def prepare_native_rlm_workspace(root: Path) -> None:
+    """Create the closed private directories required by Prime session creation."""
+    if not isinstance(root, Path) or not root.is_dir() or root.is_symlink():
+        raise PrimeRlmExperimentError("Native RLM workspace is invalid")
+    try:
+        for name in ("agent", "gateway", "sessions", "workspace"):
+            directory = root / name
+            directory.mkdir(mode=0o700, exist_ok=True)
+            directory.chmod(0o700)
+            if (
+                not directory.is_dir()
+                or directory.is_symlink()
+                or directory.stat().st_mode & 0o777 != 0o700
+            ):
+                raise OSError
+    except OSError:
+        raise PrimeRlmExperimentError("Native RLM workspace is invalid") from None
+
+
 async def start_native_rlm_daemon(
     plan: NativeRlmDaemonPlan,
     *,
@@ -573,6 +594,7 @@ async def execute_native_rlm_sidecar_probe(
         or not all(callable(value) for value in (daemon_launcher, sidecar_launcher, probe))
     ):
         raise PrimeRlmExperimentError("Native RLM sidecar probe is invalid")
+    prepare_native_rlm_workspace(root)
     plan = build_native_rlm_daemon_plan(
         resources.node_executable,
         resources.daemon_entry,

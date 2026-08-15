@@ -29,6 +29,7 @@ from tools.prime_native_rlm_experiment import (
     NativeRlmRuntimeResources,
     PrimeRlmExperimentError,
     prepare_native_rlm_experiment,
+    prepare_native_rlm_workspace,
     native_rlm_session_create_command,
     run_native_rlm_experiment,
     write_native_rlm_experiment_receipt,
@@ -79,6 +80,22 @@ def _authority(**changes: object) -> dict[str, object]:
 
 
 class TestNativeRlmExperiment(unittest.TestCase):
+    def test_workspace_preparation_creates_only_private_session_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prepare_native_rlm_workspace(root)
+
+            self.assertEqual(
+                sorted(path.name for path in root.iterdir()),
+                ["agent", "gateway", "sessions", "workspace"],
+            )
+            self.assertTrue(
+                all(
+                    (root / name).stat().st_mode & 0o777 == 0o700
+                    for name in ("agent", "gateway", "sessions", "workspace")
+                )
+            )
+
     def test_control_only_system_matches_the_default_one_shot_authority(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
