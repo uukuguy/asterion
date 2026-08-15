@@ -48,6 +48,7 @@ export interface RlmSpawnResolution {
 
 export interface RlmHostBridgeOptions {
   readonly sessionId: string;
+  readonly maxSpawnCount?: number;
   readonly admitSpawn: (proposal: RlmSpawnProposal) => Promise<RlmSpawnResolution>;
   readonly admitMessage?: (proposal: RlmMessageProposal) => Promise<RlmMessageResolution>;
   readonly recordMessageDelivered?: (event: RlmMessageDelivery) => Promise<void>;
@@ -131,7 +132,11 @@ export class RlmHostBridge {
   private readonly messageRequestsById = new Map<string, string>();
 
   constructor(private readonly options: RlmHostBridgeOptions) {
-    if (options.sessionId.length === 0) throw new TypeError("RLM bridge is invalid");
+    if (
+      options.sessionId.length === 0
+      || (options.maxSpawnCount !== undefined
+        && (!Number.isSafeInteger(options.maxSpawnCount) || options.maxSpawnCount < 0))
+    ) throw new TypeError("RLM bridge is invalid");
   }
 
   async proposeSpawn(proposal: RlmSpawnProposal): Promise<RlmSpawnResolution> {
@@ -156,6 +161,15 @@ export class RlmHostBridge {
     const priorRequestId = this.spawnRequestsByChildId.get(proposal.childId);
     if (priorRequestId !== undefined && priorRequestId !== proposal.requestId) {
       throw new TypeError("RLM proposal conflicts");
+    }
+    if (
+      this.options.maxSpawnCount !== undefined
+      && this.spawnRequestsByChildId.size >= this.options.maxSpawnCount
+    ) {
+      const promise = Promise.resolve(Object.freeze({ resolution: "rejected" as const, childId: proposal.childId }));
+      this.spawns.set(proposal.requestId, { digest, promise });
+      this.spawnRequestsByChildId.set(proposal.childId, proposal.requestId);
+      return promise;
     }
     const promise = this.admit(proposal);
     this.spawns.set(proposal.requestId, { digest, promise });

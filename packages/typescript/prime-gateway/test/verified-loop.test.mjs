@@ -278,6 +278,7 @@ async function startGateway(root, scenario, socketPath, descriptorPatch = {}) {
     maxContinuations: 1,
     maxControllerTokens: 100,
     maxTurns: 1,
+    rlmMaxChildren: 0,
     rlmMaxDepth: 0,
     model: "provider-free-model",
     portfolio: [{

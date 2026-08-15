@@ -163,6 +163,7 @@ interface PrimeSidecarDescriptor {
   readonly primeSocketPath: string;
   readonly primeSourceRoot: string;
   readonly provider: string;
+  readonly rlmMaxChildren: number;
   readonly rlmMaxDepth: 0 | 1;
   readonly remainingBudget: SkillBudget;
   readonly sessionDir: string;
@@ -407,6 +408,7 @@ function validateDescriptor(value: unknown): PrimeSidecarDescriptor {
       "primeSocketPath",
       "primeSourceRoot",
       "provider",
+      "rlmMaxChildren",
       "rlmMaxDepth",
       "remainingBudget",
       "sessionDir",
@@ -435,6 +437,7 @@ function validateDescriptor(value: unknown): PrimeSidecarDescriptor {
     !positiveInteger(value.maxContinuations) ||
     !positiveInteger(value.maxControllerTokens) ||
     !positiveInteger(value.maxTurns) ||
+    !nonNegativeInteger(value.rlmMaxChildren) ||
     (value.rlmMaxDepth !== 0 && value.rlmMaxDepth !== 1) ||
     !positiveInteger(value.timeoutMs)
   ) {
@@ -447,6 +450,7 @@ function validateDescriptor(value: unknown): PrimeSidecarDescriptor {
     maxContinuations: Number(value.maxContinuations),
     maxControllerTokens: Number(value.maxControllerTokens),
     maxTurns: Number(value.maxTurns),
+    rlmMaxChildren: Number(value.rlmMaxChildren),
     rlmMaxDepth: value.rlmMaxDepth as 0 | 1,
     portfolio: validatePortfolio(value.portfolio),
     remainingBudget: validateBudget(value.remainingBudget),
@@ -1301,6 +1305,7 @@ async function createSidecarFromDescriptor(
     const socketPath = join(descriptor.agentDir, "r.sock");
     const bridge = new RlmHostBridge({
       sessionId: descriptor.sessionId,
+      maxSpawnCount: descriptor.rlmMaxChildren,
       admitSpawn: async (proposal: RlmSpawnProposal) => {
         try {
           await ready;

@@ -73,6 +73,33 @@ test("replays one RLM request identity and rejects a conflicting child", async (
   );
 });
 
+test("rejects a second distinct RLM child when the private child cap is reached", async () => {
+  let proposed = 0;
+  const bridge = new RlmHostBridge({
+    sessionId: "session-1",
+    maxSpawnCount: 1,
+    admitSpawn: async (request) => {
+      proposed += 1;
+      return { resolution: "admitted", childId: request.childId };
+    },
+  });
+
+  assert.deepEqual(await bridge.proposeSpawn(proposal()), { resolution: "admitted", childId: "child-1" });
+  assert.deepEqual(
+    await bridge.proposeSpawn(proposal({ requestId: "request-2", childId: "child-2", idempotencyKey: "spawn-2" })),
+    { resolution: "rejected", childId: "child-2" },
+  );
+  assert.deepEqual(
+    await bridge.proposeSpawn(proposal({ requestId: "request-2", childId: "child-2", idempotencyKey: "spawn-2" })),
+    { resolution: "rejected", childId: "child-2" },
+  );
+  await assert.rejects(
+    () => bridge.proposeSpawn(proposal({ requestId: "request-3", childId: "child-2", idempotencyKey: "spawn-3" })),
+    /conflicts/,
+  );
+  assert.equal(proposed, 1);
+});
+
 test("rejects an RLM spawn with an incomplete private effect payload", async () => {
   let proposed = 0;
   const bridge = new RlmHostBridge({
