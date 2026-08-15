@@ -54,6 +54,13 @@ test("daemon wire exposes the exact required capability set", () => {
   assert.ok(Object.isFrozen(REQUIRED_SERVER_CAPABILITIES));
 });
 
+test("daemon wire rejects malformed create configuration before encoding", () => {
+  assertFixedProtocolError(() => encodePrimeDaemonCommand({
+    type: "create",
+    config: "SENTINEL_PRIVATE_CONFIGURATION",
+  }, "create-invalid", "asterion-client-1"));
+});
+
 test("daemon wire decodes and sanitizes the pinned hello", () => {
   const decoded = decodePrimeDaemonLine(JSON.stringify(hello()));
   assert.deepEqual(decoded, {

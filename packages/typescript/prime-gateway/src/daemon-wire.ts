@@ -812,6 +812,12 @@ function validateCommand(command: PrimeDaemonCommand): void {
     (command.type === "prompt" &&
       command.images !== undefined &&
       !validPromptImages(command.images)) ||
+    (command.type === "create" &&
+      command.config !== undefined &&
+      !isRecord(command.config)) ||
+    (command.type === "create" &&
+      command.runtimeMetadata !== undefined &&
+      !isRecord(command.runtimeMetadata)) ||
     (command.type === "cancel_prompt_admission" &&
       !nonEmptyString(command.admissionId)) ||
     (command.type === "set_rlm_max_depth" &&
