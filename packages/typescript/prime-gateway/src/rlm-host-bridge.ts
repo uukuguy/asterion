@@ -280,7 +280,10 @@ export async function listenRlmHostBridge(
   bridge: RlmHostBridge,
 ): Promise<{ readonly close: () => Promise<void> }> {
   await unlink(path).catch(() => undefined);
+  const sockets = new Set<import("node:net").Socket>();
   const server: Server = createServer((socket) => {
+    sockets.add(socket);
+    socket.once("close", () => sockets.delete(socket));
     let authenticated = false;
     let buffer = Buffer.alloc(0);
     socket.on("data", (chunk: Buffer) => {
@@ -330,5 +333,9 @@ export async function listenRlmHostBridge(
   });
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(path, resolve); });
   await chmod(path, 0o600);
-  return Object.freeze({ close: async () => { await new Promise<void>((resolve) => server.close(() => resolve())); await unlink(path).catch(() => undefined); } });
+  return Object.freeze({ close: async () => {
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await unlink(path).catch(() => undefined);
+  } });
 }

@@ -132,6 +132,32 @@ test("serves an authenticated RLM spawn over its private socket", async () => {
   } finally { await listener.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test("closes an RLM listener with an authenticated idle connection", async () => {
+  const root = await mkdtemp(join(tmpdir(), "asterion-rlm-close-"));
+  const path = join(root, "r.sock");
+  const token = "55".repeat(32);
+  const listener = await listenRlmHostBridge(path, "session-1", token, new RlmHostBridge({
+    sessionId: "session-1",
+    admitSpawn: async (p) => ({ resolution: "admitted", childId: p.childId }),
+  }));
+  const socket = createConnection(path);
+  try {
+    await new Promise((resolve, reject) => {
+      socket.once("connect", resolve);
+      socket.once("error", reject);
+    });
+    socket.write(`${JSON.stringify({ protocol: RLM_HOST_PROTOCOL, type: "authenticate", token, session_id: "session-1" })}\n`);
+    await Promise.race([
+      listener.close(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("listener close timed out")), 250)),
+    ]);
+    await assert.rejects(() => import("node:fs/promises").then(({ access }) => access(path)));
+  } finally {
+    socket.destroy();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("serves an authenticated admitted RLM deletion over its private socket", async () => {
   const root = await mkdtemp(join(tmpdir(), "asterion-rlm-delete-"));
   const path = join(root, "r.sock");

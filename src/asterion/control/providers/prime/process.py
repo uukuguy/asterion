@@ -324,15 +324,21 @@ class PrimeSidecarProcess:
             except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
             if process.returncode is None:
-                process.terminate()
                 try:
-                    timeout = _phase_timeout(deadline, self._options.close_timeout)
+                    timeout = _graceful_shutdown_timeout(
+                        deadline, self._options.close_timeout
+                    )
                     await asyncio.wait_for(process.wait(), timeout=timeout)
                 except TimeoutError:
                     if process.returncode is None:
-                        process.kill()
-                    timeout = _remaining(deadline)
-                    await asyncio.wait_for(process.wait(), timeout=timeout)
+                        process.terminate()
+                    try:
+                        timeout = _phase_timeout(deadline, self._options.close_timeout)
+                        await asyncio.wait_for(process.wait(), timeout=timeout)
+                    except TimeoutError:
+                        if process.returncode is None:
+                            process.kill()
+                        await asyncio.wait_for(process.wait(), timeout=0.01)
             stopped = process.returncode is not None
             if not stopped:
                 self._closed = False
@@ -429,6 +435,10 @@ def _remaining(deadline: float) -> float:
 
 def _phase_timeout(deadline: float, total: float) -> float:
     return min(_remaining(deadline), max(total / 3, 0.001))
+
+
+def _graceful_shutdown_timeout(deadline: float, total: float) -> float:
+    return min(_remaining(deadline), max(total * 2 / 3, 0.001))
 
 
 def _regular_existing_path(path: Path, *, executable: bool) -> Path:
