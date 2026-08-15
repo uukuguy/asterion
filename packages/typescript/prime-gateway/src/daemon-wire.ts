@@ -135,6 +135,11 @@ const COMMAND_FIELDS = Object.freeze({
   ack_result: ["type", "commandId"],
 } satisfies Record<string, readonly string[]>);
 
+const CREATE_CONFIG_FIELDS = Object.freeze([
+  "cwd", "agentDir", "sessionDir", "provider", "model", "skills",
+  "autonomous", "telemetryDisabled",
+]);
+
 const EVENT_FIELDS = Object.freeze({
   daemon_closing: ["type", "reason"],
   heartbeats_changed: ["type"],
@@ -815,6 +820,9 @@ function validateCommand(command: PrimeDaemonCommand): void {
     (command.type === "create" &&
       command.config !== undefined &&
       !isRecord(command.config)) ||
+    (command.type === "create" &&
+      isRecord(command.config) &&
+      !hasOnlyKeys(command.config, CREATE_CONFIG_FIELDS)) ||
     (command.type === "create" &&
       command.runtimeMetadata !== undefined &&
       !isRecord(command.runtimeMetadata)) ||

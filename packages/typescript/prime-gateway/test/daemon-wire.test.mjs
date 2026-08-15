@@ -61,6 +61,13 @@ test("daemon wire rejects malformed create configuration before encoding", () =>
   }, "create-invalid", "asterion-client-1"));
 });
 
+test("daemon wire rejects unbounded create configuration fields", () => {
+  assertFixedProtocolError(() => encodePrimeDaemonCommand({
+    type: "create",
+    config: { cwd: "/private/workspace", injected: "SENTINEL" },
+  }, "create-extra", "asterion-client-1"));
+});
+
 test("daemon wire decodes and sanitizes the pinned hello", () => {
   const decoded = decodePrimeDaemonLine(JSON.stringify(hello()));
   assert.deepEqual(decoded, {
