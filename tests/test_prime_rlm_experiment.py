@@ -31,6 +31,7 @@ from tools.prime_native_rlm_experiment import (
     prepare_native_rlm_experiment,
     prepare_native_rlm_workspace,
     native_rlm_session_create_command,
+    native_rlm_start_command,
     run_native_rlm_experiment,
     write_native_rlm_experiment_receipt,
 )
@@ -123,12 +124,20 @@ class TestNativeRlmExperiment(unittest.TestCase):
             command = native_rlm_session_create_command(reservation)
             self.assertEqual(command.payload["system_id"], system.system_id)
             self.assertNotIn("spawn", repr(command))
+            start = native_rlm_start_command(reservation)
+            self.assertEqual(start.type, "input.submit")
+            self.assertEqual(start.payload["delivery"], "direct")
+            self.assertEqual(start.payload["content_ref"], "native-rlm-start-input")
 
     def test_private_goal_resolves_only_the_root_reference(self) -> None:
         goal = NativeRlmPrivateGoal("private native instruction")
 
         self.assertEqual(
             goal.resolve_text("native-rlm-goal", max_bytes=100),
+            "private native instruction",
+        )
+        self.assertEqual(
+            goal.resolve_text("native-rlm-start-input", max_bytes=100),
             "private native instruction",
         )
         with self.assertRaises(KeyError):

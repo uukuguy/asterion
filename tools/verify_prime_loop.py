@@ -604,7 +604,9 @@ def _native_rlm_bounded_external_limit(
             "application_operations": 0,
             "full_dataset_ran": False,
         }
-    except (OSError, PrimeRlmExperimentError, RuntimeError, TypeError, ValueError):
+    except PrimeRlmExperimentError as error:
+        raise PrimeExternalLimit(str(error)) from None
+    except (OSError, RuntimeError, TypeError, ValueError):
         raise PrimeExternalLimit(
             f"Prime native RLM probe {stage} did not complete"
         ) from None

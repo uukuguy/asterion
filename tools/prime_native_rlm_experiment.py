@@ -51,6 +51,7 @@ _MAX_DEADLINE_MS = 600_000
 _MODEL_KEY = "ASTERION_PRIME_EXPERIMENT_MODEL"
 _SESSION_ID = "native-rlm-root"
 _GOAL_REFERENCE = "native-rlm-goal"
+_START_REFERENCE = "native-rlm-start-input"
 _PROBE_GOAL = (
     "Run one bounded native RLM verification. Create exactly one native RLM child, "
     "send it one short message, wait for its response, then delete the child. "
@@ -162,7 +163,7 @@ class NativeRlmPrivateGoal:
 
     def resolve_text(self, reference: str, *, max_bytes: int) -> str:
         if (
-            reference != _GOAL_REFERENCE
+            reference not in {_GOAL_REFERENCE, _START_REFERENCE}
             or not isinstance(max_bytes, int)
             or max_bytes < len(self.text.encode("utf-8"))
         ):
@@ -326,6 +327,28 @@ def native_rlm_session_create_command(
         )
     except (TypeError, ValueError):
         raise PrimeRlmExperimentError("Native RLM session command is invalid") from None
+
+
+def native_rlm_start_command(
+    reservation: NativeRlmExperimentReservation,
+) -> ControlCommand:
+    """Submit the one private root instruction after session creation."""
+    if not isinstance(reservation, NativeRlmExperimentReservation):
+        raise PrimeRlmExperimentError("Native RLM start command is invalid")
+    try:
+        return ControlCommand(
+            command_id="native-rlm-start",
+            session_id=_SESSION_ID,
+            authority_revision=reservation.authority.revision,
+            type="input.submit",
+            payload={
+                "input_id": "native-rlm-start",
+                "delivery": "direct",
+                "content_ref": _START_REFERENCE,
+            },
+        )
+    except (TypeError, ValueError):
+        raise PrimeRlmExperimentError("Native RLM start command is invalid") from None
 
 
 def resolve_native_rlm_model(environ: Mapping[str, str]) -> NativeRlmModelSelection:
@@ -764,8 +787,14 @@ async def run_native_rlm_controlled_probe(
         usage=BudgetUsage.zero(),
     )
     deadline = time.monotonic() + reservation.limits.deadline_ms / 1_000
+    stage = "create"
     try:
         await host.dispatch(native_rlm_session_create_command(reservation))
+        stage = "created"
+        await host.pump()
+        stage = "start"
+        await host.dispatch(native_rlm_start_command(reservation))
+        stage = "running"
         while time.monotonic() < deadline:
             await host.pump()
             snapshot = host.snapshot()
@@ -781,7 +810,9 @@ async def run_native_rlm_controlled_probe(
     except PrimeRlmExperimentError:
         raise
     except Exception:
-        return latest
+        raise PrimeRlmExperimentError(
+            f"Native RLM controlled probe {stage} did not complete"
+        ) from None
     finally:
         await host.close()
 
