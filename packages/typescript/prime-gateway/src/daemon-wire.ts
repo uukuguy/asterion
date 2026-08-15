@@ -137,7 +137,7 @@ const COMMAND_FIELDS = Object.freeze({
 
 const CREATE_CONFIG_FIELDS = Object.freeze([
   "cwd", "agentDir", "sessionDir", "provider", "model", "skills",
-  "autonomous", "telemetryDisabled",
+  "autonomous", "telemetryDisabled", "initialGoal",
 ]);
 
 const RUNTIME_METADATA_FIELDS = Object.freeze([
@@ -391,6 +391,10 @@ function nonNegativeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) >= 0;
 }
 
+function positiveInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && Number(value) > 0;
+}
+
 function validRuntimeMetadata(value: unknown): boolean {
   if (
     !isRecord(value) ||
@@ -417,6 +421,58 @@ function validRuntimeMetadata(value: unknown): boolean {
   return (
     value.rehydratedCompleted === undefined ||
     typeof value.rehydratedCompleted === "boolean"
+  );
+}
+
+function validAutonomousConfig(value: unknown): boolean {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, [
+      "enabled", "maxContinuations", "maxTurns", "maxTokens", "timeoutMs", "gates",
+    ]) ||
+    value.enabled !== true ||
+    !positiveInteger(value.maxContinuations) ||
+    !positiveInteger(value.maxTurns) ||
+    !positiveInteger(value.maxTokens) ||
+    !positiveInteger(value.timeoutMs) ||
+    !isRecord(value.gates) ||
+    !hasOnlyKeys(value.gates, ["commands", "maxRetries", "timeoutMs"]) ||
+    !Array.isArray(value.gates.commands) ||
+    value.gates.commands.some((command) => typeof command !== "string") ||
+    !nonNegativeInteger(value.gates.maxRetries) ||
+    !positiveInteger(value.gates.timeoutMs)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function validInitialGoal(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    hasOnlyKeys(value, ["objective", "tokenBudget"]) &&
+    typeof value.objective === "string" &&
+    positiveInteger(value.tokenBudget)
+  );
+}
+
+function validCreateConfig(value: unknown): boolean {
+  if (!isRecord(value) || !hasOnlyKeys(value, CREATE_CONFIG_FIELDS)) {
+    return false;
+  }
+  for (const field of ["cwd", "agentDir", "sessionDir", "provider", "model"]) {
+    if (value[field] !== undefined && !nonEmptyString(value[field])) {
+      return false;
+    }
+  }
+  return (
+    (value.skills === undefined ||
+      (Array.isArray(value.skills) &&
+        value.skills.every((skill) => nonEmptyString(skill)))) &&
+    (value.autonomous === undefined || validAutonomousConfig(value.autonomous)) &&
+    (value.telemetryDisabled === undefined ||
+      typeof value.telemetryDisabled === "boolean") &&
+    (value.initialGoal === undefined || validInitialGoal(value.initialGoal))
   );
 }
 
@@ -857,7 +913,7 @@ function validateCommand(command: PrimeDaemonCommand): void {
       !isRecord(command.config)) ||
     (command.type === "create" &&
       isRecord(command.config) &&
-      !hasOnlyKeys(command.config, CREATE_CONFIG_FIELDS)) ||
+      !validCreateConfig(command.config)) ||
     (command.type === "create" &&
       command.runtimeMetadata !== undefined &&
       !validRuntimeMetadata(command.runtimeMetadata)) ||

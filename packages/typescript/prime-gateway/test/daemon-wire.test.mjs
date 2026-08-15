@@ -68,6 +68,31 @@ test("daemon wire rejects unbounded create configuration fields", () => {
   }, "create-extra", "asterion-client-1"));
 });
 
+test("daemon wire admits the bounded root create configuration", () => {
+  const line = encodePrimeDaemonCommand({
+    type: "create",
+    config: {
+      cwd: "/private/workspace",
+      agentDir: "/private/agent",
+      sessionDir: "/private/sessions",
+      provider: "deepseek",
+      model: "deepseek-v4-flash-0731",
+      skills: ["/private/skill"],
+      autonomous: {
+        enabled: true,
+        maxContinuations: 3,
+        maxTurns: 12,
+        maxTokens: 4096,
+        timeoutMs: 60000,
+        gates: { commands: [], maxRetries: 1, timeoutMs: 60000 },
+      },
+      telemetryDisabled: true,
+      initialGoal: { objective: "private root goal", tokenBudget: 4096 },
+    },
+  }, "create-root", "asterion-client-1");
+  assert.equal(JSON.parse(line).command.type, "create");
+});
+
 test("daemon wire rejects unbounded create runtime metadata", () => {
   assertFixedProtocolError(() => encodePrimeDaemonCommand({
     type: "create",
