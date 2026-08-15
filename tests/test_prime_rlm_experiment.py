@@ -6,8 +6,10 @@ import asyncio
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from asterion.control.authority import BudgetUsage
+import tools.prime_native_rlm_experiment as native_rlm
 from tools.prime_native_rlm_experiment import (
     build_native_rlm_daemon_environment,
     build_native_rlm_daemon_plan,
@@ -18,6 +20,7 @@ from tools.prime_native_rlm_experiment import (
     start_native_rlm_sidecar,
     launch_owned_native_rlm_daemon,
     run_owned_native_rlm_sidecar_probe,
+    run_native_rlm_controlled_probe,
     classify_native_rlm_probe_observation,
     observe_native_rlm_probe,
     collect_native_rlm_message_action_ids,
@@ -81,6 +84,42 @@ def _authority(**changes: object) -> dict[str, object]:
 
 
 class TestNativeRlmExperiment(unittest.TestCase):
+    def test_controlled_probe_cancels_created_root_before_closing_after_failure(self) -> None:
+        class Host:
+            def __init__(self) -> None:
+                self.commands = []
+                self.closed = False
+
+            async def dispatch(self, command) -> None:
+                self.commands.append(command)
+
+            async def pump(self) -> None:
+                if len(self.commands) > 1:
+                    raise RuntimeError("injected")
+
+            async def close(self) -> None:
+                self.closed = True
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            reservation = prepare_native_rlm_experiment(
+                None,
+                max_cost_micros=500_000,
+                deadline_ms=600_000,
+                environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"},
+                now_ms=1_000,
+            )
+            host = Host()
+            with mock.patch.object(native_rlm, "build_native_rlm_control_host", return_value=host):
+                with self.assertRaises(PrimeRlmExperimentError):
+                    asyncio.run(run_native_rlm_controlled_probe(object(), reservation, root))
+
+        self.assertEqual([command.type for command in host.commands], [
+            "session.create", "input.submit", "session.cancel",
+        ])
+        self.assertEqual(host.commands[-1].payload, {"reason_code": "probe-cleanup"})
+        self.assertTrue(host.closed)
+
     def test_workspace_preparation_creates_only_private_session_directories(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

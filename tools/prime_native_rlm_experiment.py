@@ -351,6 +351,24 @@ def native_rlm_start_command(
         raise PrimeRlmExperimentError("Native RLM start command is invalid") from None
 
 
+def native_rlm_session_cancel_command(
+    reservation: NativeRlmExperimentReservation,
+) -> ControlCommand:
+    """Stop the owned root session before its daemon is reaped."""
+    if not isinstance(reservation, NativeRlmExperimentReservation):
+        raise PrimeRlmExperimentError("Native RLM cancellation command is invalid")
+    try:
+        return ControlCommand(
+            command_id="native-rlm-cleanup",
+            session_id=_SESSION_ID,
+            authority_revision=reservation.authority.revision,
+            type="session.cancel",
+            payload={"reason_code": "probe-cleanup"},
+        )
+    except (TypeError, ValueError):
+        raise PrimeRlmExperimentError("Native RLM cancellation command is invalid") from None
+
+
 def resolve_native_rlm_model(environ: Mapping[str, str]) -> NativeRlmModelSelection:
     """Resolve the sole model/provider pairing authorized for this first probe."""
     if not isinstance(environ, Mapping) or environ.get(_MODEL_KEY) != "deepseek-v4-flash":
@@ -788,8 +806,11 @@ async def run_native_rlm_controlled_probe(
     )
     deadline = time.monotonic() + reservation.limits.deadline_ms / 1_000
     stage = "create"
+    session_created = False
+    session_terminal = False
     try:
         await host.dispatch(native_rlm_session_create_command(reservation))
+        session_created = True
         stage = "created"
         await host.pump()
         stage = "start"
@@ -802,11 +823,13 @@ async def run_native_rlm_controlled_probe(
                 observer, usage=snapshot.authority_usage
             )
             if latest.terminal == "completed":
+                session_terminal = True
                 return latest
             if snapshot.state.terminal_event_id is not None:
                 terminal = snapshot.state.session_status
                 if terminal not in {"cancelled", "completed", "failed", "budget_limited"}:
                     raise PrimeRlmExperimentError("Native RLM terminal state is invalid")
+                session_terminal = True
                 return replace(latest, terminal=terminal)
             await asyncio.sleep(0.025)
         return latest
@@ -817,7 +840,11 @@ async def run_native_rlm_controlled_probe(
             f"Native RLM controlled probe {stage} did not complete"
         ) from None
     finally:
-        await host.close()
+        try:
+            if session_created and not session_terminal:
+                await host.dispatch(native_rlm_session_cancel_command(reservation))
+        finally:
+            await host.close()
 
 
 async def _close_owned_sidecar(sidecar: object | None) -> None:
