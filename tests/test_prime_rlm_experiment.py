@@ -680,6 +680,92 @@ class TestNativeRlmExperiment(unittest.TestCase):
             self.assertEqual(cleanup_observed, [True])
             self.assertFalse(daemon.terminated)
 
+    def test_sidecar_probe_recovers_only_the_owned_inactive_root(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            reservation = prepare_native_rlm_experiment(
+                None, max_cost_micros=None, deadline_ms=None,
+                environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}, now_ms=1_000,
+            )
+            resources = NativeRlmRuntimeResources(
+                root / "node", root / "daemon.mjs", root / "gateway.mjs", root / "lock.json",
+                root / "source", root / "skill", "build-1",
+            )
+
+            class Daemon:
+                returncode = None
+
+                async def wait(self):
+                    return 0
+
+            class Sidecar:
+                async def close(self):
+                    return None
+
+            daemon = Daemon()
+
+            async def launch_daemon(plan):
+                plan.socket_path.touch()
+                return daemon
+
+            async def launch_sidecar(_descriptor, _resources):
+                return Sidecar()
+
+            async def fail_probe(_sidecar):
+                raise RuntimeError("SENTINEL_PRIVATE_PROBE")
+
+            async def shutdown(_plan, _resources):
+                daemon.returncode = 0
+
+            with mock.patch.object(
+                native_rlm, "_owned_native_rlm_root_is_inactive", return_value=True
+            ) as inactive:
+                result = asyncio.run(execute_native_rlm_sidecar_probe(
+                    reservation,
+                    resolve_native_rlm_model({"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}),
+                    root,
+                    resources,
+                    environ={"HOME": str(root), "PATH": "/bin", "DEEPSEEK_API_KEY": "secret"},
+                    daemon_launcher=launch_daemon,
+                    sidecar_launcher=launch_sidecar,
+                    probe=fail_probe,
+                    owned_daemon_shutdown=shutdown,
+                ))
+
+            self.assertTrue(inactive.awaited)
+            self.assertEqual(result.terminal, "failed")
+            self.assertFalse(result.child_started)
+            self.assertEqual(result.usage, BudgetUsage.zero())
+
+    def test_inactive_root_probe_uses_root_sidecar_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            resources = NativeRlmRuntimeResources(
+                root / "node", root / "daemon.mjs", root / "gateway.mjs", root / "lock.json",
+                root / "source", root / "skill", "build-1",
+            )
+            plan = build_native_rlm_daemon_plan(
+                resources.node_executable, resources.daemon_entry, root / "prime.sock",
+                resolve_native_rlm_model({"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}),
+                {"HOME": str(root), "PATH": "/bin", "DEEPSEEK_API_KEY": "secret"},
+            )
+            captured = []
+
+            class Process:
+                async def wait(self):
+                    return 0
+
+            async def spawn(*args, **kwargs):
+                captured.append(args)
+                return Process()
+
+            with mock.patch.object(asyncio, "create_subprocess_exec", side_effect=spawn):
+                result = asyncio.run(native_rlm._owned_native_rlm_root_is_inactive(plan, resources))
+
+            self.assertTrue(result)
+            self.assertIn('clientId: "asterion-native-rlm-root"', captured[0][-1])
+            self.assertNotIn("DEEPSEEK_API_KEY", captured[0][-1])
+
     def test_preparation_uses_private_default_authority(self) -> None:
         reservation = prepare_native_rlm_experiment(
             None,

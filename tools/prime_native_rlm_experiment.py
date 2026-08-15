@@ -1026,7 +1026,10 @@ async def _owned_native_rlm_root_is_inactive(
     script = textwrap.dedent(
         f'''\
         import {{ PrimeDaemonClient }} from {client_entry.as_uri()!r};
-        const client = new PrimeDaemonClient({{clientId: "asterion-owned-state", connectTimeoutMs: 3000, requestTimeoutMs: 3000}});
+        // Client-owned Prime workers are intentionally invisible to every other
+        // client. Reuse the root sidecar's stable identity for this read-only
+        // recovery query; it grants no new authority and does not attach.
+        const client = new PrimeDaemonClient({{clientId: "asterion-{_SESSION_ID}", connectTimeoutMs: 3000, requestTimeoutMs: 3000}});
         await client.connect({str(plan.socket_path)!r});
         const listed = await client.request({{type: "list", includeClientOwned: true}}, "asterion-owned-state-list", 3000);
         const sessions = listed.success && listed.command === "list" && Array.isArray(listed.data?.sessions) ? listed.data.sessions : [];
