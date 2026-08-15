@@ -75,6 +75,8 @@ const CAPSULE_LIMIT_BYTES = 8 * 1024 * 1024;
 const ATTACHMENT_LIMIT_BYTES = 8 * 1024 * 1024;
 const CONTINUATION_LIMIT_BYTES = 16 * 1024;
 const TRANSCRIPT_LIMIT_BYTES = 64 * 1024 * 1024;
+const CONTINUATION_READY_ATTEMPTS = 40;
+const CONTINUATION_READY_DELAY_MS = 25;
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 
 type PrivateValueKind = "input" | "result" | "capsule" | "attachment" | "continuation";
@@ -804,7 +806,7 @@ export class PrivateValueStore {
     value: PrivateContinuationLocator,
   ): Promise<PrivateContinuationBinding> {
     const locator = validateContinuationLocator(value);
-    const transcript = await this.inspectContinuation(locator.sessionPath);
+    const transcript = await this.inspectReadyContinuation(locator.sessionPath);
     const stored: StoredContinuationLocator = {
       format: PRIVATE_CONTINUATION_FORMAT_V2,
       continuationId: locator.continuationId,
@@ -824,6 +826,33 @@ export class PrivateValueStore {
       privateRef,
       bindingDigest: sha256(body),
     });
+  }
+
+  private async inspectReadyContinuation(
+    sessionPath: string,
+  ): Promise<Readonly<{
+    fileName: string;
+    device: number;
+    inode: number;
+    size: number;
+    digest: string;
+  }>> {
+    for (let attempt = 0; attempt < CONTINUATION_READY_ATTEMPTS; attempt += 1) {
+      try {
+        return await this.inspectContinuation(sessionPath);
+      } catch (error) {
+        if (
+          !(error instanceof PrivateValueInvalidError) ||
+          attempt + 1 === CONTINUATION_READY_ATTEMPTS
+        ) {
+          throw error;
+        }
+        await new Promise<void>((resolveDelay) => {
+          setTimeout(resolveDelay, CONTINUATION_READY_DELAY_MS);
+        });
+      }
+    }
+    throw new PrivateValueInvalidError();
   }
 
   async ensurePreparedContinuationLocator(
