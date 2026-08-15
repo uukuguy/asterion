@@ -15,6 +15,7 @@ from tools.prime_native_rlm_experiment import (
     execute_native_rlm_sidecar_probe,
     start_native_rlm_sidecar,
     launch_owned_native_rlm_daemon,
+    run_owned_native_rlm_sidecar_probe,
     start_native_rlm_daemon,
     resolve_native_rlm_model,
     NativeRlmProbeResult,
@@ -70,6 +71,54 @@ def _authority(**changes: object) -> dict[str, object]:
 
 
 class TestNativeRlmExperiment(unittest.TestCase):
+    def test_owned_probe_composes_daemon_and_credential_free_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            reservation = prepare_native_rlm_experiment(
+                None, max_cost_micros=None, deadline_ms=None,
+                environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}, now_ms=1_000,
+            )
+            resources = NativeRlmRuntimeResources(
+                root / "node", root / "daemon.mjs", root / "gateway.mjs", root / "lock.json",
+                root / "source", root / "skill", "build-1",
+            )
+
+            class Daemon:
+                returncode = None
+
+                def terminate(self):
+                    self.returncode = 0
+
+                async def wait(self):
+                    return 0
+
+            class Sidecar:
+                async def close(self):
+                    return None
+
+            async def spawn(*_args, **_kwargs):
+                (root / "prime.sock").touch()
+                return Daemon()
+
+            async def start_sidecar(options):
+                self.assertEqual(set(options.environ), {"HOME", "PATH"})
+                return Sidecar()
+
+            async def probe(_sidecar):
+                return NativeRlmProbeResult("completed", True, True, True, BudgetUsage(1, 1, 1, 3, 3))
+
+            result = asyncio.run(run_owned_native_rlm_sidecar_probe(
+                reservation,
+                resolve_native_rlm_model({"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}),
+                root,
+                resources,
+                environ={"HOME": str(root), "PATH": "/bin", "DEEPSEEK_API_KEY": "secret"},
+                probe=probe,
+                daemon_spawn=spawn,
+                sidecar_starter=start_sidecar,
+            ))
+            self.assertEqual(result.terminal, "completed")
+
     def test_owned_daemon_launch_uses_direct_arguments_and_locked_source_root(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

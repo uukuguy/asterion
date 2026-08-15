@@ -336,6 +336,43 @@ async def launch_owned_native_rlm_daemon(
         raise PrimeRlmExperimentError("Native RLM daemon could not start") from None
 
 
+async def run_owned_native_rlm_sidecar_probe(
+    reservation: NativeRlmExperimentReservation,
+    selection: NativeRlmModelSelection,
+    root: Path,
+    resources: NativeRlmRuntimeResources,
+    *,
+    environ: Mapping[str, str],
+    probe: SidecarProbe,
+    daemon_spawn: Callable[..., Awaitable[object]] | None = None,
+    sidecar_starter: Callable[[object], Awaitable[object]] | None = None,
+) -> NativeRlmProbeResult:
+    """Compose the real owned process launchers for one explicitly admitted probe."""
+
+    async def launch_daemon(plan: NativeRlmDaemonPlan) -> object:
+        return await launch_owned_native_rlm_daemon(
+            plan, resources, spawn=daemon_spawn
+        )
+
+    async def launch_sidecar(
+        descriptor: Mapping[str, object], _: NativeRlmRuntimeResources
+    ) -> object:
+        return await start_native_rlm_sidecar(
+            descriptor, resources, environ=environ, starter=sidecar_starter
+        )
+
+    return await execute_native_rlm_sidecar_probe(
+        reservation,
+        selection,
+        root,
+        resources,
+        environ=environ,
+        daemon_launcher=launch_daemon,
+        sidecar_launcher=launch_sidecar,
+        probe=probe,
+    )
+
+
 async def _close_owned_sidecar(sidecar: object | None) -> None:
     if sidecar is None:
         return
