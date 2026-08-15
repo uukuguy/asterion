@@ -17,6 +17,7 @@ from tools.prime_native_rlm_experiment import (
     launch_owned_native_rlm_daemon,
     run_owned_native_rlm_sidecar_probe,
     classify_native_rlm_probe_observation,
+    observe_native_rlm_probe,
     start_native_rlm_daemon,
     resolve_native_rlm_model,
     NativeRlmProbeResult,
@@ -72,6 +73,35 @@ def _authority(**changes: object) -> dict[str, object]:
 
 
 class TestNativeRlmExperiment(unittest.TestCase):
+    def test_probe_observer_reads_only_closed_gateway_evidence(self) -> None:
+        class Lifecycle:
+            def __init__(self, type, child_id, status=None):
+                self.type = type
+                self.child_id = child_id
+                self.status = status
+
+        class Binding:
+            delivered = True
+
+        class Client:
+            async def rlm_lifecycle(self):
+                return (
+                    Lifecycle("rlm.child.started", "child-1"),
+                    Lifecycle("rlm.child.terminal", "child-1", "completed"),
+                )
+
+            async def rlm_message_binding(self, action_id):
+                self.action_id = action_id
+                return Binding()
+
+        client = Client()
+        result = asyncio.run(observe_native_rlm_probe(
+            client, message_action_ids=("action-1",), usage=BudgetUsage(1, 1, 1, 3, 3)
+        ))
+
+        self.assertEqual(result.terminal, "completed")
+        self.assertEqual(client.action_id, "action-1")
+
     def test_probe_observation_requires_started_completed_child_and_delivered_message(self) -> None:
         complete = classify_native_rlm_probe_observation(
             (

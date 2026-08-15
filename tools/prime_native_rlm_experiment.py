@@ -220,6 +220,53 @@ def classify_native_rlm_probe_observation(
     )
 
 
+async def observe_native_rlm_probe(
+    client: object,
+    *,
+    message_action_ids: Sequence[str],
+    usage: BudgetUsage,
+) -> NativeRlmProbeResult:
+    """Read only closed Gateway RLM observations for the admitted probe actions."""
+    lifecycle_reader = getattr(client, "rlm_lifecycle", None)
+    binding_reader = getattr(client, "rlm_message_binding", None)
+    if (
+        not callable(lifecycle_reader)
+        or not callable(binding_reader)
+        or not isinstance(message_action_ids, Sequence)
+        or isinstance(message_action_ids, (str, bytes))
+        or any(not isinstance(action_id, str) or not action_id for action_id in message_action_ids)
+        or not isinstance(usage, BudgetUsage)
+    ):
+        raise PrimeRlmExperimentError("Native RLM probe observation is invalid")
+    try:
+        lifecycle = await lifecycle_reader()
+        records: list[Mapping[str, str]] = []
+        for event in lifecycle:
+            event_type = getattr(event, "type", None)
+            child_id = getattr(event, "child_id", None)
+            status = getattr(event, "status", None)
+            if event_type == "rlm.child.started":
+                records.append({"type": event_type, "child_id": child_id})
+            elif event_type == "rlm.child.terminal":
+                records.append(
+                    {"type": event_type, "child_id": child_id, "status": status}
+                )
+            else:
+                raise ValueError
+        delivered = False
+        for action_id in message_action_ids:
+            binding = await binding_reader(action_id)
+            if getattr(binding, "delivered", None) is True:
+                delivered = True
+        return classify_native_rlm_probe_observation(
+            tuple(records), message_delivered=delivered, usage=usage
+        )
+    except PrimeRlmExperimentError:
+        raise
+    except Exception:
+        raise PrimeRlmExperimentError("Native RLM probe observation is invalid") from None
+
+
 def build_native_rlm_sidecar_descriptor(
     reservation: NativeRlmExperimentReservation,
     selection: NativeRlmModelSelection,
