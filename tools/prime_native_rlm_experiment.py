@@ -109,6 +109,26 @@ def build_native_rlm_daemon_plan(
     )
 
 
+def build_native_rlm_sidecar_descriptor(
+    reservation: NativeRlmExperimentReservation,
+    selection: NativeRlmModelSelection,
+    root: Path,
+) -> Mapping[str, object]:
+    """Build the closed private descriptor for the single native probe session."""
+    if not isinstance(reservation, NativeRlmExperimentReservation) or not isinstance(selection, NativeRlmModelSelection) or not isinstance(root, Path):
+        raise PrimeRlmExperimentError("Native RLM sidecar descriptor is invalid")
+    budget = reservation.authority.budget_limit
+    return RedactedImmutableMapping({
+        "agentDir": str(root / "agent"), "artifactLockPath": str(root / "prime-lock.json"),
+        "authorityId": reservation.authority.authority_id, "authorityRevision": reservation.authority.revision,
+        "expectedRuntimeBuildId": "beta", "gatewayRoot": str(root / "gateway"), "generation": 1,
+        "maxContinuations": 1, "maxControllerTokens": budget.controller_tokens, "maxTurns": 1,
+        "model": selection.model,
+        "portfolio": [{"kind": "application", "provider_id": grant.provider_id, "application_id": grant.application_id, "version": grant.version, "runtime_id": grant.runtime_id} for grant in reservation.authority.allowed_portfolio],
+        "primeSocketPath": str(root / "prime.sock"), "primeSourceRoot": str(root / "source"), "provider": selection.provider,
+        "remainingBudget": {"controller_tokens": budget.controller_tokens, "application_tokens": budget.application_tokens, "child_tokens": budget.child_tokens, "aggregate_tokens": budget.aggregate_tokens, "cost_micros": budget.cost_micros, "deadline_ms": reservation.limits.deadline_ms},
+        "sessionDir": str(root / "sessions"), "sessionId": "native-rlm-root", "skillPath": str(root / "skill"), "timeoutMs": reservation.limits.deadline_ms, "workspace": str(root / "workspace"),
+    })
 async def start_native_rlm_daemon(
     plan: NativeRlmDaemonPlan,
     *,

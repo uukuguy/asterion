@@ -11,6 +11,7 @@ from asterion.control.authority import BudgetUsage
 from tools.prime_native_rlm_experiment import (
     build_native_rlm_daemon_environment,
     build_native_rlm_daemon_plan,
+    build_native_rlm_sidecar_descriptor,
     start_native_rlm_daemon,
     resolve_native_rlm_model,
     NativeRlmProbeResult,
@@ -65,6 +66,17 @@ def _authority(**changes: object) -> dict[str, object]:
 
 
 class TestNativeRlmExperiment(unittest.TestCase):
+    def test_sidecar_descriptor_binds_authority_budget_and_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            authority = root / "authority.json"
+            authority.write_text(json.dumps(_authority()), encoding="utf-8")
+            reservation = prepare_native_rlm_experiment(authority, max_cost_micros=500_000, deadline_ms=600_000, environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}, now_ms=1_000)
+            descriptor = build_native_rlm_sidecar_descriptor(reservation, resolve_native_rlm_model({"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}), root)
+            self.assertEqual(descriptor["provider"], "deepseek")
+            self.assertEqual(descriptor["model"], "deepseek-v4-flash")
+            self.assertEqual(descriptor["remainingBudget"]["cost_micros"], 500_000)
+
     def test_daemon_start_waits_for_owned_socket(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
