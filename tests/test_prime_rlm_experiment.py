@@ -11,6 +11,8 @@ from asterion.control.authority import BudgetUsage
 from tools.prime_native_rlm_experiment import (
     build_native_rlm_daemon_environment,
     build_native_rlm_daemon_plan,
+    build_native_rlm_experiment_system,
+    build_native_rlm_control_host,
     build_native_rlm_sidecar_descriptor,
     execute_native_rlm_sidecar_probe,
     start_native_rlm_sidecar,
@@ -23,9 +25,11 @@ from tools.prime_native_rlm_experiment import (
     start_native_rlm_daemon,
     resolve_native_rlm_model,
     NativeRlmProbeResult,
+    NativeRlmPrivateGoal,
     NativeRlmRuntimeResources,
     PrimeRlmExperimentError,
     prepare_native_rlm_experiment,
+    native_rlm_session_create_command,
     run_native_rlm_experiment,
     write_native_rlm_experiment_receipt,
 )
@@ -75,6 +79,60 @@ def _authority(**changes: object) -> dict[str, object]:
 
 
 class TestNativeRlmExperiment(unittest.TestCase):
+    def test_control_only_system_matches_the_default_one_shot_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            system = build_native_rlm_experiment_system(root)
+            reservation = prepare_native_rlm_experiment(
+                None,
+                max_cost_micros=None,
+                deadline_ms=None,
+                environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"},
+                now_ms=1_000,
+            )
+
+            self.assertEqual(system.system_id, "native-rlm-probe")
+            self.assertEqual(
+                set(system.portfolio_by_identity),
+                {
+                    (
+                        "asterion.prime-gateway",
+                        "native-rlm-probe",
+                        "0.1.0",
+                        "prime.gateway",
+                    )
+                },
+            )
+            command = native_rlm_session_create_command(reservation)
+            self.assertEqual(command.payload["system_id"], system.system_id)
+            self.assertNotIn("spawn", repr(command))
+
+    def test_private_goal_resolves_only_the_root_reference(self) -> None:
+        goal = NativeRlmPrivateGoal("private native instruction")
+
+        self.assertEqual(
+            goal.resolve_text("native-rlm-goal", max_bytes=100),
+            "private native instruction",
+        )
+        with self.assertRaises(KeyError):
+            goal.resolve_text("other", max_bytes=100)
+        self.assertNotIn("private native instruction", repr(goal))
+
+    def test_control_host_rejects_a_non_sidecar_before_opening_private_state(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            reservation = prepare_native_rlm_experiment(
+                None,
+                max_cost_micros=None,
+                deadline_ms=None,
+                environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"},
+                now_ms=1_000,
+            )
+            with self.assertRaisesRegex(PrimeRlmExperimentError, "control host"):
+                build_native_rlm_control_host(
+                    object(), reservation, root, goal=NativeRlmPrivateGoal("private")
+                )
+
     def test_gateway_probe_observer_composes_message_collection_and_lifecycle(self) -> None:
         class Event:
             type = "action.proposed"
@@ -505,7 +563,17 @@ class TestNativeRlmExperiment(unittest.TestCase):
             Path("/private/node"), Path("/private/prime-cli.js"), Path("/private/prime.sock"),
             selection, {"HOME": "/private/home", "PATH": "/bin", "DEEPSEEK_API_KEY": "secret"},
         )
-        self.assertEqual(plan.argv, ("/private/node", "/private/prime-cli.js", "--mode", "daemon", "--daemon-socket", "/private/prime.sock", "--provider", "deepseek", "--model", "deepseek-v4-flash"))
+        self.assertEqual(
+            plan.argv,
+            (
+                "/private/node",
+                "/private/prime-cli.js",
+                "--mode",
+                "daemon",
+                "--daemon-socket",
+                "/private/prime.sock",
+            ),
+        )
         self.assertNotIn("secret", repr(plan))
 
     def test_resolves_only_the_pinned_deepseek_experiment_model(self) -> None:

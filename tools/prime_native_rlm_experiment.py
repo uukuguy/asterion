@@ -17,17 +17,45 @@ from typing import Awaitable, Callable
 
 from asterion.control.authority import (
     AuthorityEnvelope,
+    AuthorityLedger,
     BudgetLimit,
     BudgetUsage,
     PortfolioGrant,
 )
+from asterion.control.execution import ActionExecutionReceipt
+from asterion.control.factory import ControlPlaneFactoryRegistry
+from asterion.control.host import ControlCommand, ControlEvent
+from asterion.control.journal import FileCanonicalJournal
+from asterion.control.manager import ControlHost
+from asterion.control.providers.prime.client import PrimeControlPlaneClient
+from asterion.control.providers.prime.factory import prime_control_plane_binding
+from asterion.control.providers.prime.rlm import build_prime_rlm_control_host
+from asterion.control.system import AgentSystemPlan, resolve_agent_system
+from asterion.applications.provider import (
+    APPLICATION_PROVIDER_PROTOCOL,
+    InstalledApplication,
+    InstalledApplicationProvider,
+    InstalledAssembly,
+)
+from asterion.assembly.protocol import AssemblyPlan
+from asterion.capabilities.composition import CapabilityComposition
 from asterion.immutable import RedactedImmutableMapping
-from tools.verify_prime_loop import PrimeVerificationError, load_bounded_rlm_authority
+try:
+    from tools.verify_prime_loop import PrimeVerificationError, load_bounded_rlm_authority
+except ModuleNotFoundError:  # Direct ``python tools/verify_prime_loop.py`` execution.
+    from verify_prime_loop import PrimeVerificationError, load_bounded_rlm_authority
 
 
 _MAX_COST_MICROS = 500_000
 _MAX_DEADLINE_MS = 600_000
 _MODEL_KEY = "ASTERION_PRIME_EXPERIMENT_MODEL"
+_SESSION_ID = "native-rlm-root"
+_GOAL_REFERENCE = "native-rlm-goal"
+_PROBE_GOAL = (
+    "Run one bounded native RLM verification. Create exactly one native RLM child, "
+    "send it one short message, wait for its response, then delete the child. "
+    "Do not invoke shell commands, write files, or perform unrelated work."
+)
 _DEFAULT_OPERATIONS = tuple(
     sorted(
         {
@@ -126,12 +154,178 @@ class NativeRlmProbeResult:
     usage: BudgetUsage
 
 
+@dataclass(frozen=True, repr=False)
+class NativeRlmPrivateGoal:
+    """One private root instruction; its text never enters public evidence."""
+
+    text: str
+
+    def resolve_text(self, reference: str, *, max_bytes: int) -> str:
+        if (
+            reference != _GOAL_REFERENCE
+            or not isinstance(max_bytes, int)
+            or max_bytes < len(self.text.encode("utf-8"))
+        ):
+            raise KeyError("private native RLM input is unavailable")
+        return self.text
+
+    def resolve_bytes(self, *args: object, **kwargs: object) -> bytes:
+        del args, kwargs
+        raise KeyError("private native RLM attachment is unavailable")
+
+
 ProbeRunner = Callable[[NativeRlmExperimentReservation], Awaitable[NativeRlmProbeResult]]
 DaemonLauncher = Callable[[NativeRlmDaemonPlan], Awaitable[object]]
 SidecarLauncher = Callable[
     [Mapping[str, object], NativeRlmRuntimeResources], Awaitable[object]
 ]
 SidecarProbe = Callable[[object], Awaitable[NativeRlmProbeResult]]
+
+
+class _NativeRlmActionExecutor:
+    """Defensive fence: admitted native RLM work must remain provider-owned."""
+
+    async def execute(
+        self, proposal: ControlEvent, signal: object
+    ) -> ActionExecutionReceipt:
+        del proposal, signal
+        raise RuntimeError("native RLM action escaped provider ownership")
+
+
+def build_native_rlm_experiment_system(root: Path) -> AgentSystemPlan:
+    """Resolve the exact control-only portfolio required by the one-shot probe.
+
+    This virtual application is a static authority anchor only.  Native RLM
+    actions are reconciled by the Prime provider and never invoke it.
+    """
+    if not isinstance(root, Path) or not root.is_dir():
+        raise PrimeRlmExperimentError("Native RLM experiment system is invalid")
+    try:
+        plan = AssemblyPlan(
+            application_id="native-rlm-probe",
+            version="0.1.0",
+            runtime_id="prime.gateway",
+            capability_package_refs=(),
+            capability_refs=(),
+            capability_manifests=(),
+            composition=CapabilityComposition((), (), (), ()),
+            runtime_capabilities=(),
+            host_capabilities=(),
+            host_events=(),
+            host_artifacts=(),
+        )
+        assembly = InstalledAssembly(
+            runtime_id="prime.gateway", path=root / "control-anchor.json", plan=plan
+        )
+        application = InstalledApplication(
+            application_id="native-rlm-probe",
+            version="0.1.0",
+            assembly_paths=(assembly.path,),
+            capability_packages=(),
+            runtime_ids=("prime.gateway",),
+            assemblies=(assembly,),
+        )
+        provider = InstalledApplicationProvider(
+            protocol=APPLICATION_PROVIDER_PROTOCOL,
+            provider_id="asterion.prime-gateway",
+            resource_root=root,
+            applications=(application,),
+        )
+        return resolve_agent_system(
+            {
+                "protocol": "asterion.agent-system/v1",
+                "system_id": "native-rlm-probe",
+                "version": "0.1.0",
+                "control_plane": {
+                    "control_plane_id": "prime.gateway",
+                    "version": "0.1.0",
+                },
+                "applications": [
+                    {
+                        "provider_id": "asterion.prime-gateway",
+                        "application_id": "native-rlm-probe",
+                        "version": "0.1.0",
+                        "runtime_id": "prime.gateway",
+                    }
+                ],
+                "policies": [],
+                "host_capabilities": ["clock.monotonic", "storage.private"],
+                "control_capabilities": [
+                    "action-proposals",
+                    "checkpointing",
+                    "event-replay",
+                    "session-lifecycle",
+                ],
+            },
+            application_providers=(provider,),
+            control_factories=ControlPlaneFactoryRegistry((prime_control_plane_binding(),)),
+            host_capabilities=("clock.monotonic", "storage.private"),
+        )
+    except (TypeError, ValueError):
+        raise PrimeRlmExperimentError("Native RLM experiment system is invalid") from None
+
+
+def build_native_rlm_control_host(
+    sidecar: object,
+    reservation: NativeRlmExperimentReservation,
+    root: Path,
+    *,
+    goal: NativeRlmPrivateGoal,
+    clock_ms: Callable[[], int] | None = None,
+) -> ControlHost:
+    """Wire the real Prime client to provider-owned native RLM lifecycle state."""
+    if (
+        not isinstance(reservation, NativeRlmExperimentReservation)
+        or not isinstance(root, Path)
+        or not root.is_dir()
+        or not isinstance(goal, NativeRlmPrivateGoal)
+        or not callable(getattr(sidecar, "request", None))
+        or not callable(getattr(sidecar, "events", None))
+        or not callable(getattr(sidecar, "close", None))
+    ):
+        raise PrimeRlmExperimentError("Native RLM control host is invalid")
+    try:
+        client = PrimeControlPlaneClient(
+            process=sidecar,
+            private_content=goal,
+            private_attachments=goal,
+        )
+        return build_prime_rlm_control_host(
+            session_id=_SESSION_ID,
+            generation=1,
+            plan=build_native_rlm_experiment_system(root),
+            authority=AuthorityLedger(reservation.authority),
+            journal=FileCanonicalJournal.open(root / "journal", _SESSION_ID),
+            client=client,
+            action_executor=_NativeRlmActionExecutor(),
+            clock_ms=(lambda: int(time.time() * 1000)) if clock_ms is None else clock_ms,
+            private_root=root / "rlm-private",
+        )
+    except (OSError, TypeError, ValueError, RuntimeError):
+        raise PrimeRlmExperimentError("Native RLM control host is invalid") from None
+
+
+def native_rlm_session_create_command(
+    reservation: NativeRlmExperimentReservation,
+) -> ControlCommand:
+    """Build the sole root-session command without exposing its private goal."""
+    if not isinstance(reservation, NativeRlmExperimentReservation):
+        raise PrimeRlmExperimentError("Native RLM session command is invalid")
+    try:
+        return ControlCommand(
+            command_id="native-rlm-create",
+            session_id=_SESSION_ID,
+            authority_revision=reservation.authority.revision,
+            type="session.create",
+            payload={
+                "system_id": "native-rlm-probe",
+                "system_version": "0.1.0",
+                "goal_id": "native-rlm-goal",
+                "goal_ref": _GOAL_REFERENCE,
+            },
+        )
+    except (TypeError, ValueError):
+        raise PrimeRlmExperimentError("Native RLM session command is invalid") from None
 
 
 def resolve_native_rlm_model(environ: Mapping[str, str]) -> NativeRlmModelSelection:
@@ -160,7 +354,7 @@ def build_native_rlm_daemon_plan(
     return NativeRlmDaemonPlan(
         (
             str(node_executable), str(runtime_entry), "--mode", "daemon", "--daemon-socket",
-            str(socket_path), "--provider", selection.provider, "--model", selection.model,
+            str(socket_path),
         ),
         environment,
         socket_path,
@@ -508,6 +702,66 @@ async def run_owned_native_rlm_sidecar_probe(
         sidecar_launcher=launch_sidecar,
         probe=probe,
     )
+
+
+async def run_native_rlm_controlled_probe(
+    sidecar: object,
+    reservation: NativeRlmExperimentReservation,
+    root: Path,
+    *,
+    goal: NativeRlmPrivateGoal | None = None,
+) -> NativeRlmProbeResult:
+    """Drive one root session until the closed native RLM proof is complete.
+
+    The root instruction is held by the private client.  The public result is
+    derived solely from Gateway lifecycle/message observations and metered use.
+    """
+    if (
+        not isinstance(reservation, NativeRlmExperimentReservation)
+        or not isinstance(root, Path)
+        or not root.is_dir()
+        or goal is not None and not isinstance(goal, NativeRlmPrivateGoal)
+    ):
+        raise PrimeRlmExperimentError("Native RLM controlled probe is invalid")
+    host = build_native_rlm_control_host(
+        sidecar,
+        reservation,
+        root,
+        goal=NativeRlmPrivateGoal(_PROBE_GOAL) if goal is None else goal,
+    )
+    observer = PrimeControlPlaneClient(
+        process=sidecar,
+        private_content=NativeRlmPrivateGoal(_PROBE_GOAL),
+        private_attachments=NativeRlmPrivateGoal(_PROBE_GOAL),
+    )
+    latest = NativeRlmProbeResult(
+        terminal="uncertain",
+        child_started=False,
+        message_delivered=False,
+        child_deleted=False,
+        usage=BudgetUsage.zero(),
+    )
+    deadline = time.monotonic() + reservation.limits.deadline_ms / 1_000
+    try:
+        await host.dispatch(native_rlm_session_create_command(reservation))
+        while time.monotonic() < deadline:
+            await host.pump()
+            snapshot = host.snapshot()
+            latest = await observe_native_rlm_gateway_probe(
+                observer, usage=snapshot.authority_usage
+            )
+            if latest.terminal == "completed":
+                return latest
+            if snapshot.state.terminal_event_id is not None:
+                return latest
+            await asyncio.sleep(0.025)
+        return latest
+    except PrimeRlmExperimentError:
+        raise
+    except Exception:
+        return latest
+    finally:
+        await host.close()
 
 
 async def _close_owned_sidecar(sidecar: object | None) -> None:

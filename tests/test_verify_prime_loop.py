@@ -354,6 +354,9 @@ class TestVerifyPrimeLoop(unittest.TestCase):
                 mock.patch.object(
                     prime_loop, "derive_prime_rlm_runtime", return_value=bundle.resolve()
                 ),
+                mock.patch.object(
+                    prime_loop, "_prime_node_executable", return_value=Path("node")
+                ),
                 mock.patch.object(prime_loop, "_command", side_effect=command_runner),
                 mock.patch.object(
                     prime_loop.subprocess, "Popen", side_effect=popen_runner

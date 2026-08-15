@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import importlib
 import json
 import os
@@ -13,6 +14,8 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Protocol
+
+from dotenv import dotenv_values
 
 from asterion.control.authority import (
     AuthorityEnvelope,
@@ -273,8 +276,9 @@ try {
 
 
 def verify_preflight(source_root: Path) -> Mapping[str, object]:
+    node = _prime_node_executable()
     try:
-        source_report = verify_prime_source(source_root)
+        source_report = verify_prime_source(source_root, node_executable=str(node))
     except PrimeSetupError as error:
         raise PrimeExternalLimit(str(error)) from None
     source = source_root.resolve()
@@ -299,7 +303,7 @@ def verify_preflight(source_root: Path) -> Mapping[str, object]:
         environment = _safe_environment(private_home=private_root / "home")
         daemon = _start_prime_daemon(
             (
-                "node",
+                str(node),
                 str(daemon_entry),
                 "--mode",
                 "daemon",
@@ -313,7 +317,7 @@ def verify_preflight(source_root: Path) -> Mapping[str, object]:
             _wait_for_prime_daemon(socket_path, daemon)
             handshake = _command(
                 (
-                    "node",
+                    str(node),
                     "--input-type=module",
                     "-e",
                     _HANDSHAKE_SCRIPT,
@@ -373,6 +377,53 @@ def _safe_environment(private_home: Path | None = None) -> dict[str, str]:
         private_home.mkdir(mode=0o700, parents=True, exist_ok=True)
         environment["HOME"] = str(private_home)
     return environment
+
+
+def _prime_node_executable() -> Path:
+    """Select an already-installed Node 22 without changing global Node state."""
+    configured = os.environ.get("ASTERION_PRIME_NODE")
+    candidates = [] if not configured else [Path(configured)]
+    try:
+        npm_environment = _safe_environment()
+        home = os.environ.get("HOME")
+        if home:
+            npm_environment["HOME"] = home
+        resolved = subprocess.run(
+            (
+                "npm",
+                "exec",
+                "--offline",
+                "--yes",
+                "--package=node@22",
+                "--",
+                "which",
+                "node",
+            ),
+            cwd=Path(__file__).resolve().parents[1],
+            env=npm_environment,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if resolved.returncode == 0 and resolved.stdout.strip():
+            candidates.append(Path(resolved.stdout.strip()))
+    except (OSError, subprocess.SubprocessError):
+        pass
+    for candidate in candidates:
+        try:
+            version = subprocess.run(
+                (str(candidate), "--version"),
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if version.returncode == 0 and version.stdout.startswith("v22."):
+                return candidate.resolve()
+        except (OSError, subprocess.SubprocessError):
+            continue
+    raise PrimeExternalLimit("Prime setup requires compatible Node.js 22.8.0 through 22.x")
 
 
 def _start_prime_daemon(
@@ -463,18 +514,146 @@ def _native_rlm_bounded_external_limit(
     max_cost_micros: int | None,
     private_evidence_root: Path,
 ) -> Mapping[str, object]:
-    from tools.prime_native_rlm_experiment import prepare_native_rlm_experiment
+    project_root = str(Path(__file__).resolve().parents[1])
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+    try:
+        from tools.prime_native_rlm_experiment import (
+            PrimeRlmExperimentError,
+            prepare_native_rlm_experiment,
+            resolve_native_rlm_model,
+            run_native_rlm_controlled_probe,
+            run_native_rlm_experiment,
+            run_owned_native_rlm_sidecar_probe,
+            write_native_rlm_experiment_receipt,
+        )
+    except ModuleNotFoundError:
+        from prime_native_rlm_experiment import (
+            PrimeRlmExperimentError,
+            prepare_native_rlm_experiment,
+            resolve_native_rlm_model,
+            run_native_rlm_controlled_probe,
+            run_native_rlm_experiment,
+            run_owned_native_rlm_sidecar_probe,
+            write_native_rlm_experiment_receipt,
+        )
 
     if not private_evidence_root.is_dir():
         raise PrimeVerificationError("Prime native RLM evidence root is invalid")
-    verify_preflight(source_root)
-    prepare_native_rlm_experiment(
-        authority_path,
-        max_cost_micros=max_cost_micros,
-        deadline_ms=600_000,
-        environ=os.environ,
-    )
-    raise PrimeExternalLimit("Prime native RLM probe runner is unavailable")
+    stage = "preflight"
+    preflight = verify_preflight(source_root)
+    stage = "environment"
+    environment = _native_rlm_environment()
+    try:
+        stage = "authorization"
+        reservation = prepare_native_rlm_experiment(
+            authority_path,
+            max_cost_micros=max_cost_micros,
+            deadline_ms=600_000,
+            environ=environment,
+        )
+        selection = resolve_native_rlm_model(environment)
+        stage = "runtime"
+        resources = _native_rlm_runtime_resources(source_root, preflight)
+        stage = "workspace"
+        run_root = Path(
+            tempfile.mkdtemp(prefix="native-rlm-", dir=private_evidence_root)
+        )
+        run_root.chmod(0o700)
+        consumed: object | None = None
+        observation: object | None = None
+
+        async def runner(active: object) -> object:
+            nonlocal consumed, observation
+            consumed = active
+            observation = await run_owned_native_rlm_sidecar_probe(
+                active,  # type: ignore[arg-type]
+                selection,
+                run_root,
+                resources,
+                environ=environment,
+                probe=lambda sidecar: run_native_rlm_controlled_probe(
+                    sidecar, active, run_root  # type: ignore[arg-type]
+                ),
+            )
+            return observation
+
+        stage = "execution"
+        report = asyncio.run(run_native_rlm_experiment(reservation, runner))
+        if consumed is None or observation is None:
+            raise ValueError
+        stage = "receipt"
+        receipt = write_native_rlm_experiment_receipt(
+            run_root,
+            consumed,  # type: ignore[arg-type]
+            terminal=observation.terminal,
+            child_started=observation.child_started,
+            message_delivered=observation.message_delivered,
+            child_deleted=observation.child_deleted,
+            usage=observation.usage,
+        )
+        return {
+            "status": report["status"],
+            "level": "native-rlm-bounded",
+            "terminal": report["terminal"],
+            "child_started": receipt["child_started"],
+            "message_delivered": receipt["message_delivered"],
+            "child_deleted": receipt["child_deleted"],
+            "provider_operations": 1,
+            "application_operations": 0,
+            "full_dataset_ran": False,
+        }
+    except (OSError, PrimeRlmExperimentError, RuntimeError, TypeError, ValueError):
+        raise PrimeExternalLimit(
+            f"Prime native RLM probe {stage} did not complete"
+        ) from None
+
+
+def _native_rlm_environment() -> dict[str, str]:
+    """Load private experiment credentials only after explicit CLI opt-in."""
+    try:
+        values = {
+            key: value
+            for key, value in dotenv_values(Path.cwd() / ".env").items()
+            if isinstance(key, str) and isinstance(value, str)
+        }
+        return {**values, **os.environ}
+    except OSError:
+        raise PrimeVerificationError("Prime native RLM environment is invalid") from None
+
+
+def _native_rlm_runtime_resources(
+    source_root: Path, preflight: Mapping[str, object]
+) -> object:
+    """Resolve the preflighted, locked launch closure without source discovery."""
+    try:
+        node = _prime_node_executable()
+        runtime_build_id = preflight["runtime_build_id"]
+        if not isinstance(node, Path) or not isinstance(runtime_build_id, str):
+            raise ValueError
+        project_root = Path(__file__).resolve().parents[1]
+        try:
+            from tools.prime_native_rlm_experiment import NativeRlmRuntimeResources
+        except ModuleNotFoundError:
+            from prime_native_rlm_experiment import NativeRlmRuntimeResources
+
+        return NativeRlmRuntimeResources(
+            node_executable=node,
+            daemon_entry=derive_prime_rlm_runtime(source_root),
+            sidecar_entry=(
+                project_root / "packages" / "typescript" / "prime-gateway" / "dist" / "src" / "main.js"
+            ),
+            artifact_lock_path=(
+                project_root / "packages" / "typescript" / "prime-gateway" / "resources" / "prime-artifact-lock.json"
+            ),
+            prime_source_root=source_root.resolve(),
+            skill_path=(
+                project_root / "src" / "asterion" / "control" / "providers" / "prime" / "resources" / "skills" / "asterion-control"
+            ),
+            expected_runtime_build_id=runtime_build_id,
+        )
+    except (OSError, PrimeSetupError, TypeError, ValueError):
+        raise PrimeExternalLimit("Prime native RLM runtime is unavailable") from None
 
 
 def _default_native_rlm_evidence_root() -> Path:
