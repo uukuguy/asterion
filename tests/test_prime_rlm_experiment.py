@@ -504,6 +504,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
         self.assertEqual(reservation.authority.allowed_portfolio[0].provider_id, "asterion.prime-gateway")
         self.assertEqual(reservation.authority.max_recursion_depth, 1)
         self.assertEqual(reservation.authority.max_concurrent_children, 1)
+        self.assertEqual(reservation.authority.budget_limit.controller_tokens, 50_000)
         self.assertEqual(reservation.limits.cost_micros, 500_000)
         self.assertEqual(reservation.limits.deadline_ms, 600_000)
         self.assertEqual(len(reservation.configuration_digest), 64)
