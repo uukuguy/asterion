@@ -158,6 +158,7 @@ class TestPrimeRlmMessagingParity(unittest.TestCase):
                         "primeSocketPath": str(socket_path),
                         "primeSourceRoot": str(PINNED_SOURCE),
                         "provider": "anthropic",
+                        "rlmMaxDepth": 0,
                         "remainingBudget": {
                             "controller_tokens": authority.budget_limit.controller_tokens,
                             "application_tokens": authority.budget_limit.application_tokens,

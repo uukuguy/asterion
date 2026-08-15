@@ -598,6 +598,7 @@ async def _run_python_prime_scenario(
                 "primeSocketPath": str(socket_path),
                 "primeSourceRoot": str(root / "prime-source"),
                 "provider": "provider-free",
+                "rlmMaxDepth": 0,
                 "remainingBudget": {
                     "controller_tokens": authority.budget_limit.controller_tokens,
                     "application_tokens": authority.budget_limit.application_tokens,
