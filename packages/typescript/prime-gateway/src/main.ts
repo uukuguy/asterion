@@ -1509,6 +1509,28 @@ async function createSidecarFromDescriptor(
             .update(`${child.activeSessionId}:${child.transcriptSessionId}`, "utf8")
             .digest("hex"),
         });
+        let status: "completed" | "failed" = "completed";
+        try {
+          await root.waitForNativeRlmChild(
+            `wait-${String(event.payload.action_id)}`,
+            target.child_id,
+          );
+        } catch {
+          status = "failed";
+        }
+        try {
+          await root.terminateNativeRlmChild(
+            `reap-${String(event.payload.action_id)}`,
+            target.child_id,
+          );
+        } catch {
+          status = "failed";
+        }
+        await store.recordRlmLifecycle({
+          type: "rlm.child.terminal",
+          child_id: target.child_id,
+          status,
+        });
       },
       waitForTerminal: (actionId) => gateway.waitForTerminal(actionId),
       actionStatus: (actionId) => gateway.actionStatus(actionId),

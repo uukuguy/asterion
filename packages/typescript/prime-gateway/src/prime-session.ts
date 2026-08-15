@@ -1031,6 +1031,18 @@ export class PrimeSession {
             provider: privateConfig.provider,
             model: privateConfig.model,
             skills: Object.freeze([privateConfig.skillPath]),
+            autonomous: Object.freeze({
+              enabled: true,
+              maxContinuations: privateConfig.maxContinuations,
+              maxTurns: privateConfig.maxTurns,
+              maxTokens: privateConfig.maxControllerTokens,
+              timeoutMs: privateConfig.timeoutMs,
+              gates: Object.freeze({
+                commands: Object.freeze([]),
+                maxRetries: 1,
+                timeoutMs: privateConfig.timeoutMs,
+              }),
+            }),
             telemetryDisabled: true,
           }),
           runtimeMetadata: Object.freeze({
@@ -1083,6 +1095,32 @@ export class PrimeSession {
         `${commandId}-kill`,
       );
       this.nativeChildren.delete(childId);
+    } catch (error) {
+      if (error instanceof PrimeSessionError) {
+        throw error;
+      }
+      throw new PrimeSessionError();
+    }
+  }
+
+  async waitForNativeRlmChild(commandId: string, childId: string): Promise<void> {
+    try {
+      if (!OPAQUE_ID.test(commandId) || !OPAQUE_ID.test(childId)) {
+        throw new PrimeSessionError();
+      }
+      const child = this.nativeChildren.get(childId);
+      const timeoutMs = this.nativeChildConfig?.timeoutMs;
+      if (child === undefined || timeoutMs === undefined) {
+        throw new PrimeSessionError();
+      }
+      const response = await this.transport.request(
+        { type: "wait_for_headless_completion", activeSessionId: child.activeSessionId },
+        `${commandId}-wait`,
+        timeoutMs,
+      );
+      if (!response.success || response.command !== "wait_for_headless_completion") {
+        throw new PrimeSessionError();
+      }
     } catch (error) {
       if (error instanceof PrimeSessionError) {
         throw error;

@@ -573,6 +573,14 @@ test("native RLM child uses the pinned daemon create and prompt protocol", async
     provider: "example-provider",
     model: "example-model",
     skills: ["/private/skills/asterion-control"],
+    autonomous: {
+      enabled: true,
+      maxContinuations: 4,
+      maxTurns: 9,
+      maxTokens: 2_000,
+      timeoutMs: 60_000,
+      gates: { commands: [], maxRetries: 1, timeoutMs: 60_000 },
+    },
     telemetryDisabled: true,
   });
   assert.deepEqual({
@@ -604,6 +612,7 @@ test("native RLM children are killed before their owning root is cancelled", asy
     async bindIdentity() {},
   });
   await session.spawnNativeRlmChild("native-child-1", "child-1", "private goal");
+  await session.waitForNativeRlmChild("wait-child-1", "child-1");
 
   await session.cancel("cancel-children-1");
 
