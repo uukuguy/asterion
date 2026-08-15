@@ -118,7 +118,8 @@ export class PrimeEventMapper {
         activeSessionId !== undefined &&
         activeSessionId !== this.options.activeSessionId
       ) {
-        throw new PrimeEventMappingError("session-mismatch");
+        this.advanceCursor(outbound);
+        return Object.freeze([]);
       }
       this.advanceCursor(outbound);
       if (this.sessionStatus === "terminal") {

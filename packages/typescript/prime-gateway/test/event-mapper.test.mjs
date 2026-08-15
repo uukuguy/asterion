@@ -119,13 +119,9 @@ test("mapping ignores bodies and projects only fixed recoverable faults", () => 
   assert.equal(JSON.stringify([...auth, ...extension]).includes("SENTINEL"), false);
 });
 
-test("mapping rejects cursor gaps and cross-session events safely", () => {
+test("mapping rejects cursor gaps safely", () => {
   for (const [outbound, kind] of [
     [primeEvent({ type: "message_update", text: "private" }, 2), "cursor-gap"],
-    [{
-      ...primeEvent({ type: "message_update", text: "private" }, 1),
-      activeSessionId: "prime-root-2",
-    }, "session-mismatch"],
   ]) {
     const mapper = mapperFixture();
     assert.throws(
@@ -139,6 +135,15 @@ test("mapping rejects cursor gaps and cross-session events safely", () => {
       },
     );
   }
+});
+
+test("mapping ignores a foreign session while preserving its cursor", () => {
+  const mapper = mapperFixture();
+  assert.deepEqual(mapper.map({
+    ...primeEvent({ type: "message_update", text: "private" }, 1),
+    activeSessionId: "prime-child-1",
+  }), []);
+  assert.deepEqual(mapper.map(primeEvent({ type: "message_update" }, 2)), []);
 });
 
 test("mapping converts a Prime goal budget limit into a closed terminal", () => {
