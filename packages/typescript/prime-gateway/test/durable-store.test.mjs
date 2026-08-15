@@ -1071,6 +1071,10 @@ test("durable store records a closed RLM child lifecycle across reopen", async (
       child_id: "child-1",
       status: "completed",
     });
+    await store.recordRlmLifecycle({
+      type: "rlm.child.deleted",
+      child_id: "child-1",
+    });
     assert.deepEqual(store.rlmLifecycle(), [
       { type: "rlm.child.started", child_id: "child-1", native_identity_digest: "a".repeat(64) },
       {
@@ -1078,6 +1082,7 @@ test("durable store records a closed RLM child lifecycle across reopen", async (
         child_id: "child-1",
         status: "completed",
       },
+      { type: "rlm.child.deleted", child_id: "child-1" },
     ]);
 
     const reopened = await GatewayDurableStore.open(fixtureRoot.root, "session-1");

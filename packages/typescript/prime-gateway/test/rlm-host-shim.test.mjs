@@ -167,11 +167,11 @@ test("admits native RLM deletion before invoking the Prime host", async () => {
       calls.push(`propose:${proposal.child_id}`);
       return { resolution: "admitted", child_id: proposal.child_id };
     },
-    async recordLifecycle() {},
+    async recordLifecycle(event) { calls.push(`lifecycle:${event.type}:${event.child_id}`); },
   }, hostContext());
 
   await wrapped.deleteRlmSubagentRuntime("child-1", { sessionId: "native-session-1" });
-  assert.deepEqual(calls, ["propose:child-1", "native:child-1:native-session-1"]);
+  assert.deepEqual(calls, ["propose:child-1", "native:child-1:native-session-1", "lifecycle:rlm.child.deleted:child-1"]);
 });
 
 test("does not invoke native RLM deletion when admission rejects it", async () => {

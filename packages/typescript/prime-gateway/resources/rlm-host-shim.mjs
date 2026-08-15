@@ -181,7 +181,14 @@ export async function createRlmHostClient(discoveryPath) {
       ) || (
         event.type === "rlm.child.terminal" &&
         (!hasExactKeys(event, ["type", "child_id", "status"]) || !["completed", "failed", "cancelled"].includes(event.status))
-      ) || (event.type !== "rlm.child.started" && event.type !== "rlm.child.terminal")) throw new Error("Prime RLM lifecycle is invalid");
+      ) || (
+        event.type === "rlm.child.deleted" &&
+        !hasExactKeys(event, ["type", "child_id"])
+      ) || (
+        event.type !== "rlm.child.started" &&
+        event.type !== "rlm.child.terminal" &&
+        event.type !== "rlm.child.deleted"
+      )) throw new Error("Prime RLM lifecycle is invalid");
       const response = await lifecycleResponse(discovery.socket_path, discovery, event);
       if (!isRecord(response) || !hasExactKeys(response, ["resolution", "childId"]) || response.resolution !== "recorded" || response.childId !== event.child_id) throw new Error("Prime RLM host response is invalid");
       return Object.freeze({ child_id: response.childId });

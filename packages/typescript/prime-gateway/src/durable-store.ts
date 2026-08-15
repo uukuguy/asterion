@@ -2346,6 +2346,15 @@ export class GatewayDurableStore {
           throw new GatewayStoreCorruptionError();
         }
         this.activeRlmChildIds.add(observation.child_id);
+      } else if (observation.type === "rlm.child.deleted") {
+        if (
+          !this.closedRlmChildIds.has(observation.child_id) ||
+          this.rlmLifecycleValues.some(
+            (item) => item.type === "rlm.child.deleted" && item.child_id === observation.child_id,
+          )
+        ) {
+          throw new GatewayStoreCorruptionError();
+        }
       } else if (!this.activeRlmChildIds.delete(observation.child_id)) {
         throw new GatewayStoreCorruptionError();
       } else {

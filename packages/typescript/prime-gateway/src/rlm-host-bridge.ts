@@ -317,6 +317,9 @@ export async function listenRlmHostBridge(
         } else if (value.type === "rlm.child.terminal") {
           if (!hasExactKeys(value, ["type", "child_id", "status"]) || typeof value.child_id !== "string" || typeof value.status !== "string" || !["completed", "failed", "cancelled"].includes(value.status)) throw new TypeError();
           void bridge.recordLifecycle({ type: "rlm.child.terminal", childId: value.child_id, status: value.status as "completed" | "failed" | "cancelled" }).then(() => socket.end(`${JSON.stringify({ resolution: "recorded", childId: value.child_id })}\n`), () => socket.destroy());
+        } else if (value.type === "rlm.child.deleted") {
+          if (!hasExactKeys(value, ["type", "child_id"]) || typeof value.child_id !== "string") throw new TypeError();
+          void bridge.recordLifecycle({ type: "rlm.child.deleted", childId: value.child_id }).then(() => socket.end(`${JSON.stringify({ resolution: "recorded", childId: value.child_id })}\n`), () => socket.destroy());
         } else {
           throw new TypeError();
         }
