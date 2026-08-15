@@ -16,6 +16,8 @@ import {
 } from "./session-tree.js";
 import type { PrimeSessionTreeProjection } from "./session-tree.js";
 
+const MATERIALIZED_SESSION_NAME = "asterion-controlled";
+
 export interface PrimeDaemonTransport {
   readonly hello: PrimeDaemonHello | undefined;
   readonly isConnected?: boolean;
@@ -880,6 +882,25 @@ export class PrimeSession {
         transcriptSessionId,
         privateConfig.workspace,
       );
+      // Prime allocates a root transcript path at create time but intentionally
+      // defers writing it until the first assistant response.  Asterion must
+      // pin the transcript identity before acknowledging creation, so request
+      // Prime's metadata-only naming operation to materialize the JSONL first.
+      const materialized = await options.transport.requestDeferred(
+        {
+          type: "set_session_name",
+          activeSessionId,
+          name: MATERIALIZED_SESSION_NAME,
+        },
+        `${options.sessionId}-create-materialize`,
+        privateConfig.timeoutMs,
+      );
+      if (
+        !materialized.response.success ||
+        materialized.response.command !== "set_session_name"
+      ) {
+        throw new PrimeSessionError();
+      }
       const continuationId = continuationIdFor(options.sessionId);
       await options.bindIdentity(Object.freeze({
         activeSessionId,
@@ -888,6 +909,9 @@ export class PrimeSession {
         continuationId,
         sessionPath,
       }));
+      if (!materialized.acknowledge()) {
+        throw new PrimeSessionError();
+      }
       if (!deferredCreate.acknowledge()) {
         throw new PrimeSessionError();
       }

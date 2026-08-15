@@ -472,10 +472,14 @@ test("lifecycle create binds exact resident config and disables native RLM", asy
     continuationId: session.continuationId,
     sessionPath: "/private/sessions/transcript-1.jsonl",
   }]);
-  assert.deepEqual(transport.acknowledgements, ["session-1-create"]);
+  assert.deepEqual(transport.acknowledgements, [
+    "session-1-create-materialize",
+    "session-1-create",
+  ]);
   assert.deepEqual(transport.commands.map(({ command }) => command.type), [
     "create",
     "get_session_header",
+    "set_session_name",
     "set_auto_compaction",
     "set_rlm_max_depth",
     "attach",
@@ -506,9 +510,10 @@ test("lifecycle create binds exact resident config and disables native RLM", asy
     },
   });
   assert.equal(transport.commands[1].command.activeSessionId, "prime-root-1");
-  assert.equal(transport.commands[2].command.enabled, false);
-  assert.equal(transport.commands[3].command.maxDepth, 0);
-  assert.deepEqual(transport.commands[4].command.capabilities, [
+  assert.equal(transport.commands[2].command.name, "asterion-controlled");
+  assert.equal(transport.commands[3].command.enabled, false);
+  assert.equal(transport.commands[4].command.maxDepth, 0);
+  assert.deepEqual(transport.commands[5].command.capabilities, [
     "attach_snapshot",
     "chunked_snapshot",
     "event_sequence",
@@ -540,6 +545,28 @@ test("lifecycle enables one native RLM level only when private config requests i
     maxDepth: 1,
     global: false,
   });
+});
+
+test("lifecycle materializes the resident transcript before durability binding", async () => {
+  const transport = new FakeTransport();
+  await PrimeSession.create({
+    transport,
+    sessionId: "session-1",
+    privateConfig: PRIVATE_CONFIG,
+    async bindIdentity() {
+      assert.deepEqual(transport.commands.map(({ command }) => command.type), [
+        "create",
+        "get_session_header",
+        "set_session_name",
+      ]);
+      assert.deepEqual(transport.acknowledgements, []);
+    },
+  });
+
+  assert.deepEqual(transport.acknowledgements.slice(0, 2), [
+    "session-1-create-materialize",
+    "session-1-create",
+  ]);
 });
 
 test("lifecycle rejects a missing path or mismatched pinned header before durability acknowledgement", async () => {

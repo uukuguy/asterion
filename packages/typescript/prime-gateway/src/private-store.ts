@@ -1346,6 +1346,10 @@ export class PrivateValueStore {
         sessionPath,
         constants.O_RDONLY | constants.O_NOFOLLOW,
       );
+      // Prime materializes a newly created transcript with the process default
+      // mode.  The private store owns the pinned continuation and tightens that
+      // already-open, no-follow file descriptor before accepting its identity.
+      await descriptor.chmod(0o600);
       const metadata = await descriptor.stat();
       if (
         !metadata.isFile() ||

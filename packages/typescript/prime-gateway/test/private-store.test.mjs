@@ -440,6 +440,29 @@ test("private continuation locators bind an exact no-follow transcript", async (
   }
 });
 
+test("private continuation locators restrict a materialized transcript before binding", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  const sessionRoot = join(fixtureRoot.parent, "sessions");
+  const sessionPath = join(sessionRoot, "transcript-1.jsonl");
+  try {
+    await mkdir(sessionRoot, { mode: 0o700 });
+    await writeFile(sessionPath, "private transcript\n", { mode: 0o644 });
+    const values = await PrivateValueStore.open(fixtureRoot.root, {
+      continuationRoot: sessionRoot,
+    });
+    await values.putContinuationLocator({
+      continuationId: "continuation-1",
+      activeSessionId: "prime-active-1",
+      transcriptSessionId: "prime-transcript-1",
+      supervisorGeneration: "supervisor-generation-1",
+      sessionPath,
+    });
+    assert.equal((await stat(sessionPath)).mode & 0o777, 0o600);
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
 test("private values fail closed when a bound result blob is tampered", async () => {
   const fixtureRoot = await temporaryStoreRoot();
   try {
