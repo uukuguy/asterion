@@ -294,6 +294,16 @@ async def collect_native_rlm_message_action_ids(client: object) -> tuple[str, ..
     return tuple(sorted(action_ids))
 
 
+async def observe_native_rlm_gateway_probe(
+    client: object, *, usage: BudgetUsage
+) -> NativeRlmProbeResult:
+    """Compose the closed Gateway event and RLM-read surfaces for one probe."""
+    action_ids = await collect_native_rlm_message_action_ids(client)
+    return await observe_native_rlm_probe(
+        client, message_action_ids=action_ids, usage=usage
+    )
+
+
 def build_native_rlm_sidecar_descriptor(
     reservation: NativeRlmExperimentReservation,
     selection: NativeRlmModelSelection,

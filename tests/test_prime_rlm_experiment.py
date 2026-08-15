@@ -19,6 +19,7 @@ from tools.prime_native_rlm_experiment import (
     classify_native_rlm_probe_observation,
     observe_native_rlm_probe,
     collect_native_rlm_message_action_ids,
+    observe_native_rlm_gateway_probe,
     start_native_rlm_daemon,
     resolve_native_rlm_model,
     NativeRlmProbeResult,
@@ -74,6 +75,33 @@ def _authority(**changes: object) -> dict[str, object]:
 
 
 class TestNativeRlmExperiment(unittest.TestCase):
+    def test_gateway_probe_observer_composes_message_collection_and_lifecycle(self) -> None:
+        class Event:
+            type = "action.proposed"
+            payload = {"kind": "child.message", "action_id": "message-1"}
+
+        class Lifecycle:
+            def __init__(self, type, child_id, status=None):
+                self.type, self.child_id, self.status = type, child_id, status
+
+        class Binding:
+            delivered = True
+
+        class Client:
+            async def events(self):
+                yield Event()
+
+            async def rlm_lifecycle(self):
+                return (Lifecycle("rlm.child.started", "child-1"), Lifecycle("rlm.child.terminal", "child-1", "completed"))
+
+            async def rlm_message_binding(self, _action_id):
+                return Binding()
+
+        self.assertEqual(
+            asyncio.run(observe_native_rlm_gateway_probe(Client(), usage=BudgetUsage(1, 1, 1, 3, 3))).terminal,
+            "completed",
+        )
+
     def test_message_action_collector_uses_only_child_message_proposals(self) -> None:
         class Event:
             def __init__(self, type, payload):
