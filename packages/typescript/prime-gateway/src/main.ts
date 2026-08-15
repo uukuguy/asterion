@@ -1787,20 +1787,35 @@ async function createSidecarFromDescriptor(
 }
 
 async function run(): Promise<void> {
-  const descriptor = readPrivateDescriptor();
-  const sidecar = await createSidecarFromDescriptor(descriptor);
-  const rl = readline.createInterface({
-    input: process.stdin,
-    crlfDelay: Infinity,
-  });
+  let stage = "descriptor";
+  let sidecar: Awaited<ReturnType<typeof createSidecarFromDescriptor>> | undefined;
   try {
+    const descriptor = readPrivateDescriptor();
+    stage = "sidecar";
+    sidecar = await createSidecarFromDescriptor(descriptor);
+    const rl = readline.createInterface({
+      input: process.stdin,
+      crlfDelay: Infinity,
+    });
+    stage = "serve";
     await servePrimeGatewaySidecar(sidecar, rl, async (frame) => {
       if (!process.stdout.write(frame)) {
         await new Promise<void>((resolve) => process.stdout.once("drain", resolve));
       }
     });
+  } catch {
+    process.stderr.write(`asterion-prime-sidecar-stage:${stage}\n`);
+    throw new PrimeGatewayError();
   } finally {
-    await sidecar.close();
+    if (sidecar !== undefined) {
+      stage = "close";
+      try {
+        await sidecar.close();
+      } catch {
+        process.stderr.write(`asterion-prime-sidecar-stage:${stage}\n`);
+        throw new PrimeGatewayError();
+      }
+    }
   }
 }
 

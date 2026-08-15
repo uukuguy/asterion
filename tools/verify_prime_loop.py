@@ -665,6 +665,7 @@ def _native_rlm_failure_class(stderr_path: Path | None) -> str:
         ("credential", (b"unauthorized", b"forbidden", b"api key", b"authentication")),
         ("model", (b"model not found", b"unknown model", b"unsupported model")),
         ("kernel", (b"kernel", b"ipython")),
+        ("sidecar", (b"asterion-prime-sidecar-stage:",)),
         ("provider", (b"fetch failed", b"rate limit", b"connection", b"timeout")),
         ("protocol", (b"protocol", b"invalid request", b"schema")),
     )

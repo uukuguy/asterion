@@ -446,6 +446,13 @@ class TestNativeRlmFailureEvidence(unittest.TestCase):
                 0o600,
             )
 
+    def test_failure_evidence_classifies_safe_sidecar_stage(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stderr = Path(directory) / "sidecar.stderr.log"
+            stderr.write_text("asterion-prime-sidecar-stage:serve\n", encoding="utf-8")
+
+            self.assertEqual(prime_loop._native_rlm_failure_class(stderr), "sidecar")
+
 
 def _write(path: Path, value: object) -> Path:
     path.write_text(json.dumps(value))
