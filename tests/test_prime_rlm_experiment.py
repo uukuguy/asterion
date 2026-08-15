@@ -512,9 +512,11 @@ class TestNativeRlmExperiment(unittest.TestCase):
                 async def wait(self):
                     return 0
 
+            cleanup_observed = []
+
             class Sidecar:
                 async def close(self):
-                    return None
+                    raise RuntimeError("SENTINEL_PRIVATE_CLOSE")
 
             daemon = Daemon()
 
@@ -528,6 +530,9 @@ class TestNativeRlmExperiment(unittest.TestCase):
             async def fail_probe(_sidecar):
                 raise RuntimeError("SENTINEL_PRIVATE_PROBE")
 
+            async def await_owned_worker_cleanup():
+                cleanup_observed.append(True)
+
             with self.assertRaises(PrimeRlmExperimentError) as raised:
                 asyncio.run(execute_native_rlm_sidecar_probe(
                     reservation,
@@ -538,8 +543,10 @@ class TestNativeRlmExperiment(unittest.TestCase):
                     daemon_launcher=launch_daemon,
                     sidecar_launcher=launch_sidecar,
                     probe=fail_probe,
+                    owned_worker_cleanup=await_owned_worker_cleanup,
                 ))
             self.assertNotIn("SENTINEL_PRIVATE_PROBE", str(raised.exception))
+            self.assertEqual(cleanup_observed, [True])
             self.assertTrue(daemon.terminated)
 
     def test_preparation_uses_private_default_authority(self) -> None:

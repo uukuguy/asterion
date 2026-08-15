@@ -664,10 +664,18 @@ async def execute_native_rlm_sidecar_probe(
     except Exception:
         raise PrimeRlmExperimentError("Native RLM probe did not complete") from None
     finally:
-        await _close_owned_sidecar(sidecar)
-        if sidecar is not None and owned_worker_cleanup is not None:
-            await owned_worker_cleanup()
-        await _reap_owned_daemon(daemon)
+        sidecar_cleanup_error: PrimeRlmExperimentError | None = None
+        try:
+            await _close_owned_sidecar(sidecar)
+        except PrimeRlmExperimentError as error:
+            sidecar_cleanup_error = error
+        try:
+            if sidecar is not None and owned_worker_cleanup is not None:
+                await owned_worker_cleanup()
+        finally:
+            await _reap_owned_daemon(daemon)
+        if sidecar_cleanup_error is not None:
+            raise sidecar_cleanup_error
 
 
 async def start_native_rlm_sidecar(
