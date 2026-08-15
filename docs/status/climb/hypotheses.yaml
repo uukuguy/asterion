@@ -2,7 +2,7 @@
   description: real Prime provider-free RLM lifecycle teardown
   parent_paradigm: rlm-provider-free
   ranking: 1.0
-  status: pending
+  status: passed
 - id: H-002
   description: exact durable RLM recovery evidence
   parent_paradigm: rlm-provider-free
