@@ -16,6 +16,7 @@ from tools.prime_native_rlm_experiment import (
     start_native_rlm_sidecar,
     launch_owned_native_rlm_daemon,
     run_owned_native_rlm_sidecar_probe,
+    classify_native_rlm_probe_observation,
     start_native_rlm_daemon,
     resolve_native_rlm_model,
     NativeRlmProbeResult,
@@ -71,6 +72,27 @@ def _authority(**changes: object) -> dict[str, object]:
 
 
 class TestNativeRlmExperiment(unittest.TestCase):
+    def test_probe_observation_requires_started_completed_child_and_delivered_message(self) -> None:
+        complete = classify_native_rlm_probe_observation(
+            (
+                {"type": "rlm.child.started", "child_id": "child-1"},
+                {"type": "rlm.child.terminal", "child_id": "child-1", "status": "completed"},
+            ),
+            message_delivered=True,
+            usage=BudgetUsage(1, 1, 1, 3, 3),
+        )
+        self.assertEqual(complete.terminal, "completed")
+        self.assertTrue(complete.child_started)
+        self.assertTrue(complete.message_delivered)
+        self.assertTrue(complete.child_deleted)
+
+        incomplete = classify_native_rlm_probe_observation(
+            ({"type": "rlm.child.started", "child_id": "child-1"},),
+            message_delivered=False,
+            usage=BudgetUsage(1, 1, 1, 3, 3),
+        )
+        self.assertEqual(incomplete.terminal, "uncertain")
+
     def test_owned_probe_composes_daemon_and_credential_free_sidecar(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

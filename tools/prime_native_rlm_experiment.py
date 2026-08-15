@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from hashlib import sha256
 import asyncio
@@ -164,6 +164,59 @@ def build_native_rlm_daemon_plan(
         ),
         environment,
         socket_path,
+    )
+
+
+def classify_native_rlm_probe_observation(
+    lifecycle: Sequence[Mapping[str, str]],
+    *,
+    message_delivered: bool,
+    usage: BudgetUsage,
+) -> NativeRlmProbeResult:
+    """Reduce only closed lifecycle observations into a safe probe outcome."""
+    if (
+        not isinstance(lifecycle, Sequence)
+        or isinstance(lifecycle, (str, bytes))
+        or not isinstance(message_delivered, bool)
+        or not isinstance(usage, BudgetUsage)
+    ):
+        raise PrimeRlmExperimentError("Native RLM probe observation is invalid")
+    active: set[str] = set()
+    completed: set[str] = set()
+    try:
+        for event in lifecycle:
+            if not isinstance(event, Mapping):
+                raise ValueError
+            event_type = event.get("type")
+            child_id = event.get("child_id")
+            if not isinstance(child_id, str) or not child_id:
+                raise ValueError
+            if event_type == "rlm.child.started" and set(event) == {"type", "child_id"}:
+                if child_id in active or child_id in completed:
+                    raise ValueError
+                active.add(child_id)
+            elif (
+                event_type == "rlm.child.terminal"
+                and set(event) == {"type", "child_id", "status"}
+                and event.get("status") in {"completed", "failed", "cancelled"}
+                and child_id in active
+            ):
+                active.remove(child_id)
+                if event["status"] == "completed":
+                    completed.add(child_id)
+            else:
+                raise ValueError
+    except (TypeError, ValueError):
+        raise PrimeRlmExperimentError("Native RLM probe observation is invalid") from None
+    child_started = bool(completed)
+    child_deleted = child_started and not active
+    terminal = "completed" if child_deleted and message_delivered else "uncertain"
+    return NativeRlmProbeResult(
+        terminal=terminal,
+        child_started=child_started,
+        message_delivered=message_delivered,
+        child_deleted=child_deleted,
+        usage=usage,
     )
 
 
