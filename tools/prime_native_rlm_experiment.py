@@ -267,6 +267,33 @@ async def observe_native_rlm_probe(
         raise PrimeRlmExperimentError("Native RLM probe observation is invalid") from None
 
 
+async def collect_native_rlm_message_action_ids(client: object) -> tuple[str, ...]:
+    """Collect the exact public action identities for native family messages."""
+    events = getattr(client, "events", None)
+    if not callable(events):
+        raise PrimeRlmExperimentError("Native RLM probe events are invalid")
+    action_ids: set[str] = set()
+    try:
+        stream = events()
+        if not hasattr(stream, "__aiter__"):
+            raise ValueError
+        async for event in stream:
+            if getattr(event, "type", None) != "action.proposed":
+                continue
+            payload = getattr(event, "payload", None)
+            if not isinstance(payload, Mapping):
+                raise ValueError
+            if payload.get("kind") != "child.message":
+                continue
+            action_id = payload.get("action_id")
+            if not isinstance(action_id, str) or not action_id:
+                raise ValueError
+            action_ids.add(action_id)
+    except Exception:
+        raise PrimeRlmExperimentError("Native RLM probe events are invalid") from None
+    return tuple(sorted(action_ids))
+
+
 def build_native_rlm_sidecar_descriptor(
     reservation: NativeRlmExperimentReservation,
     selection: NativeRlmModelSelection,
