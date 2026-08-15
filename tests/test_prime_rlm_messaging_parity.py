@@ -252,7 +252,9 @@ class TestPrimeRlmMessagingParity(unittest.TestCase):
                 "model_credential_reads": 0,
                 "provider_operations": 0,
                 "spawn_admitted": True,
+                "lifecycle_recorded": True,
                 "message_delivered": False,
+                "teardown_recorded": True,
             },
         )
 

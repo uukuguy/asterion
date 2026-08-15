@@ -45,13 +45,26 @@ try {
   if (spawn.resolution !== "admitted" || spawn.child_id !== "rlm-child-1") {
     throw new Error("real Prime RLM spawn admission failed");
   }
+  await rlm.recordLifecycle({
+    type: "rlm.child.started",
+    child_id: "rlm-child-1",
+    native_identity_digest: createHash("sha256").update("provider-free-child").digest("hex"),
+  });
+  await rlm.recordLifecycle({
+    type: "rlm.child.terminal",
+    child_id: "rlm-child-1",
+    status: "cancelled",
+  });
+  await rlm.recordLifecycle({ type: "rlm.child.deleted", child_id: "rlm-child-1" });
   process.stdout.write(JSON.stringify({
     format: "asterion.prime-rlm-observation/v1",
     fake_daemon: false,
     model_credential_reads: 0,
     provider_operations: 0,
     spawn_admitted: true,
+    lifecycle_recorded: true,
     message_delivered: false,
+    teardown_recorded: true,
   }) + "\n");
 } finally {
   client.close();
