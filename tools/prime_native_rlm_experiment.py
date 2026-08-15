@@ -127,6 +127,11 @@ class NativeRlmProbeResult:
 
 
 ProbeRunner = Callable[[NativeRlmExperimentReservation], Awaitable[NativeRlmProbeResult]]
+DaemonLauncher = Callable[[NativeRlmDaemonPlan], Awaitable[object]]
+SidecarLauncher = Callable[
+    [Mapping[str, object], NativeRlmRuntimeResources], Awaitable[object]
+]
+SidecarProbe = Callable[[object], Awaitable[NativeRlmProbeResult]]
 
 
 def resolve_native_rlm_model(environ: Mapping[str, str]) -> NativeRlmModelSelection:
@@ -213,6 +218,85 @@ async def start_native_rlm_daemon(
             raise PrimeRlmExperimentError("Native RLM daemon did not become ready")
         await asyncio.sleep(0.01)
     return process
+
+
+async def execute_native_rlm_sidecar_probe(
+    reservation: NativeRlmExperimentReservation,
+    selection: NativeRlmModelSelection,
+    root: Path,
+    resources: NativeRlmRuntimeResources,
+    *,
+    environ: Mapping[str, str],
+    daemon_launcher: DaemonLauncher,
+    sidecar_launcher: SidecarLauncher,
+    probe: SidecarProbe,
+) -> NativeRlmProbeResult:
+    """Run one injected probe and always release the processes it owns."""
+    if (
+        not isinstance(reservation, NativeRlmExperimentReservation)
+        or not isinstance(selection, NativeRlmModelSelection)
+        or not isinstance(root, Path)
+        or not isinstance(resources, NativeRlmRuntimeResources)
+        or not isinstance(environ, Mapping)
+        or any(not isinstance(key, str) or not isinstance(value, str) for key, value in environ.items())
+        or not all(callable(value) for value in (daemon_launcher, sidecar_launcher, probe))
+    ):
+        raise PrimeRlmExperimentError("Native RLM sidecar probe is invalid")
+    plan = build_native_rlm_daemon_plan(
+        resources.node_executable,
+        resources.daemon_entry,
+        root / "prime.sock",
+        selection,
+        environ,
+    )
+    daemon = await start_native_rlm_daemon(
+        plan, launcher=daemon_launcher, timeout_seconds=10
+    )
+    sidecar: object | None = None
+    try:
+        descriptor = build_native_rlm_sidecar_descriptor(
+            reservation, selection, root, resources
+        )
+        sidecar = await sidecar_launcher(descriptor, resources)
+        result = await probe(sidecar)
+        if not isinstance(result, NativeRlmProbeResult):
+            raise PrimeRlmExperimentError("Native RLM probe result is invalid")
+        return result
+    except PrimeRlmExperimentError:
+        raise
+    except Exception:
+        raise PrimeRlmExperimentError("Native RLM probe did not complete") from None
+    finally:
+        await _close_owned_sidecar(sidecar)
+        await _reap_owned_daemon(daemon)
+
+
+async def _close_owned_sidecar(sidecar: object | None) -> None:
+    if sidecar is None:
+        return
+    close = getattr(sidecar, "close", None)
+    if not callable(close):
+        raise PrimeRlmExperimentError("Native RLM sidecar cleanup failed")
+    try:
+        result = close()
+        if hasattr(result, "__await__"):
+            await result
+    except (OSError, RuntimeError, TypeError, ValueError):
+        raise PrimeRlmExperimentError("Native RLM sidecar cleanup failed") from None
+
+
+async def _reap_owned_daemon(daemon: object) -> None:
+    if getattr(daemon, "returncode", None) is not None:
+        return
+    terminate = getattr(daemon, "terminate", None)
+    wait = getattr(daemon, "wait", None)
+    if not callable(terminate) or not callable(wait):
+        raise PrimeRlmExperimentError("Native RLM daemon cleanup failed")
+    try:
+        terminate()
+        await asyncio.wait_for(wait(), timeout=2)
+    except (TimeoutError, OSError, RuntimeError, TypeError, ValueError):
+        raise PrimeRlmExperimentError("Native RLM daemon cleanup failed") from None
 
 
 def build_native_rlm_daemon_environment(
