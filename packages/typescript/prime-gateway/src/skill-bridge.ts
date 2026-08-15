@@ -111,6 +111,10 @@ export interface AsterionSkillBridgeOptions {
   readonly nextEventIdentity: () => SkillEventIdentity;
   readonly emitActionProposal: (event: ControlEvent) => Promise<void>;
   readonly waitForAdmission: (actionId: string) => Promise<SkillAdmission>;
+  readonly afterAdmission?: (
+    event: ControlEvent,
+    admission: SkillAdmission,
+  ) => Promise<void>;
   readonly waitForTerminal: (actionId: string) => Promise<SkillTerminal>;
   readonly actionStatus: (actionId: string) => Promise<unknown>;
 }
@@ -789,6 +793,7 @@ export class AsterionSkillBridge {
     if (admission.resolution === "rejected") {
       return deepFreeze(result);
     }
+    await this.failOnClose(this.options.afterAdmission?.(event, admission) ?? Promise.resolve());
     const terminal = await this.failOnClose(
       this.options.waitForTerminal(derivedActionId),
     );

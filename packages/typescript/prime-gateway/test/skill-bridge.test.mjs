@@ -208,6 +208,25 @@ test("skill bridge authenticates, persists input, and returns only safe results"
   }
 });
 
+test("skill bridge invokes its native adapter only after admission", async () => {
+  const fixtureRoot = await temporaryRoot();
+  const state = await createBridge(fixtureRoot, {
+    async afterAdmission(event, admission) {
+      assert.equal(event.payload.kind, "application.invoke");
+      assert.deepEqual(admission, { resolution: "admitted", reasonCode: "authorized" });
+      state.calls.push("native-adapter");
+    },
+  });
+  try {
+    const response = await exchange(state.bridge.socketPath, applicationRequest());
+    assert.equal(response.status, "ok");
+    assert.deepEqual(state.calls, ["proposal", "admission", "native-adapter", "terminal"]);
+  } finally {
+    await state.bridge.close();
+    await fixtureRoot.cleanup();
+  }
+});
+
 test("skill bridge deduplicates equal effects and rejects divergent reuse", async () => {
   const fixtureRoot = await temporaryRoot();
   const state = await createBridge(fixtureRoot);
