@@ -85,8 +85,10 @@ class TestPrimeRlmMessagingParity(unittest.TestCase):
             PINNED_SOURCE, lock_path=ARTIFACT_LOCK
         )
         self.assertTrue(runtime_entry.is_file())
+        daemon_exit_code: int | None = None
 
         async def run() -> dict[str, object]:
+            nonlocal daemon_exit_code
             with tempfile.TemporaryDirectory(
                 prefix="asterion-prime-rlm-", dir="/tmp"
             ) as temporary:
@@ -240,12 +242,40 @@ class TestPrimeRlmMessagingParity(unittest.TestCase):
                     elif process is not None:
                         await process.close()
                     if daemon.returncode is None:
-                        daemon.terminate()
+                        cleanup_script = (
+                            "import { PrimeDaemonClient } from "
+                            + json.dumps(
+                                (SIDECAR_ENTRY.parent / "daemon-client.js").as_uri()
+                            )
+                            + "; const client = new PrimeDaemonClient({clientId: "
+                            + json.dumps("asterion-rlm-cleanup")
+                            + ", connectTimeoutMs: 3000, requestTimeoutMs: 3000}); "
+                            + "await client.connect("
+                            + json.dumps(str(socket_path))
+                            + "); await client.request({type: 'shutdown', force: true}, "
+                            + json.dumps("asterion-rlm-cleanup")
+                            + ", 3000); client.close();"
+                        )
+                        cleanup = await asyncio.create_subprocess_exec(
+                            str(node),
+                            "--input-type=module",
+                            "-e",
+                            cleanup_script,
+                            stdin=asyncio.subprocess.DEVNULL,
+                            stdout=asyncio.subprocess.DEVNULL,
+                            stderr=asyncio.subprocess.DEVNULL,
+                        )
+                        self.assertEqual(
+                            await asyncio.wait_for(cleanup.wait(), timeout=5), 0
+                        )
                         await asyncio.wait_for(daemon.wait(), timeout=5)
+                    daemon_exit_code = daemon.returncode
                     stderr_sink.close()
 
+        observation = asyncio.run(run())
+        self.assertEqual(daemon_exit_code, 0)
         self.assertEqual(
-            asyncio.run(run()),
+            observation,
             {
                 "format": "asterion.prime-rlm-observation/v1",
                 "fake_daemon": False,
