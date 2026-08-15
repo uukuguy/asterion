@@ -151,6 +151,7 @@ interface PrimeSidecarDescriptor {
   readonly primeSocketPath: string;
   readonly primeSourceRoot: string;
   readonly provider: string;
+  readonly rlmMaxDepth: 0 | 1;
   readonly remainingBudget: SkillBudget;
   readonly sessionDir: string;
   readonly sessionId: string;
@@ -394,6 +395,7 @@ function validateDescriptor(value: unknown): PrimeSidecarDescriptor {
       "primeSocketPath",
       "primeSourceRoot",
       "provider",
+      "rlmMaxDepth",
       "remainingBudget",
       "sessionDir",
       "sessionId",
@@ -421,6 +423,7 @@ function validateDescriptor(value: unknown): PrimeSidecarDescriptor {
     !positiveInteger(value.maxContinuations) ||
     !positiveInteger(value.maxControllerTokens) ||
     !positiveInteger(value.maxTurns) ||
+    (value.rlmMaxDepth !== 0 && value.rlmMaxDepth !== 1) ||
     !positiveInteger(value.timeoutMs)
   ) {
     throw new PrimeGatewayError();
@@ -432,6 +435,7 @@ function validateDescriptor(value: unknown): PrimeSidecarDescriptor {
     maxContinuations: Number(value.maxContinuations),
     maxControllerTokens: Number(value.maxControllerTokens),
     maxTurns: Number(value.maxTurns),
+    rlmMaxDepth: value.rlmMaxDepth as 0 | 1,
     portfolio: validatePortfolio(value.portfolio),
     remainingBudget: validateBudget(value.remainingBudget),
     timeoutMs: Number(value.timeoutMs),
@@ -1472,6 +1476,7 @@ async function createSidecarFromDescriptor(
             maxTurns: descriptor.maxTurns,
             maxControllerTokens: descriptor.maxControllerTokens,
             timeoutMs: descriptor.timeoutMs,
+            rlmMaxDepth: descriptor.rlmMaxDepth,
           },
           bindIdentity,
         });

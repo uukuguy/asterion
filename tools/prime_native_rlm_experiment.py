@@ -147,7 +147,7 @@ def build_native_rlm_sidecar_descriptor(
         "maxContinuations": 1, "maxControllerTokens": budget.controller_tokens, "maxTurns": 1,
         "model": selection.model,
         "portfolio": [{"kind": "application", "provider_id": grant.provider_id, "application_id": grant.application_id, "version": grant.version, "runtime_id": grant.runtime_id} for grant in reservation.authority.allowed_portfolio],
-        "primeSocketPath": str(root / "prime.sock"), "primeSourceRoot": str(root / "source"), "provider": selection.provider,
+        "primeSocketPath": str(root / "prime.sock"), "primeSourceRoot": str(root / "source"), "provider": selection.provider, "rlmMaxDepth": 1,
         "remainingBudget": {"controller_tokens": budget.controller_tokens, "application_tokens": budget.application_tokens, "child_tokens": budget.child_tokens, "aggregate_tokens": budget.aggregate_tokens, "cost_micros": budget.cost_micros, "deadline_ms": reservation.limits.deadline_ms},
         "sessionDir": str(root / "sessions"), "sessionId": "native-rlm-root", "skillPath": str(root / "skill"), "timeoutMs": reservation.limits.deadline_ms, "workspace": str(root / "workspace"),
     })

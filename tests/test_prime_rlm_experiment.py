@@ -92,6 +92,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
             self.assertEqual(descriptor["provider"], "deepseek")
             self.assertEqual(descriptor["model"], "deepseek-v4-flash")
             self.assertEqual(descriptor["remainingBudget"]["cost_micros"], 500_000)
+            self.assertEqual(descriptor["rlmMaxDepth"], 1)
 
     def test_daemon_start_waits_for_owned_socket(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
