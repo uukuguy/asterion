@@ -9,12 +9,18 @@ import asyncio
 import json
 import os
 from pathlib import Path
+import secrets
 import tempfile
 import time
 from types import MappingProxyType
 from typing import Awaitable, Callable
 
-from asterion.control.authority import AuthorityEnvelope, BudgetUsage
+from asterion.control.authority import (
+    AuthorityEnvelope,
+    BudgetLimit,
+    BudgetUsage,
+    PortfolioGrant,
+)
 from asterion.immutable import RedactedImmutableMapping
 from tools.verify_prime_loop import PrimeVerificationError, load_bounded_rlm_authority
 
@@ -22,6 +28,22 @@ from tools.verify_prime_loop import PrimeVerificationError, load_bounded_rlm_aut
 _MAX_COST_MICROS = 500_000
 _MAX_DEADLINE_MS = 600_000
 _MODEL_KEY = "ASTERION_PRIME_EXPERIMENT_MODEL"
+_DEFAULT_OPERATIONS = tuple(
+    sorted(
+        {
+            "application.invoke",
+            "checkpoint.create",
+            "child.cancel",
+            "child.message",
+            "child.spawn",
+            "goal.complete",
+            "goal.fail",
+            "rlm.child.delete",
+            "rlm.child.message",
+            "rlm.child.spawn",
+        }
+    )
+)
 
 
 class PrimeRlmExperimentError(RuntimeError):
@@ -182,45 +204,84 @@ def build_native_rlm_daemon_environment(
 
 
 def prepare_native_rlm_experiment(
-    authority_path: Path,
+    authority_path: Path | None,
     *,
-    max_cost_micros: int,
-    deadline_ms: int,
+    max_cost_micros: int | None,
+    deadline_ms: int | None,
     environ: Mapping[str, str],
     now_ms: int | None = None,
 ) -> NativeRlmExperimentReservation:
     """Validate all non-executing admission inputs without reading process state."""
     try:
+        cost_limit = _MAX_COST_MICROS if max_cost_micros is None else max_cost_micros
+        action_deadline = _MAX_DEADLINE_MS if deadline_ms is None else deadline_ms
         if (
-            not isinstance(authority_path, Path)
-            or not isinstance(environ, Mapping)
+            not isinstance(environ, Mapping)
             or any(not isinstance(key, str) or not isinstance(value, str) for key, value in environ.items())
-            or isinstance(max_cost_micros, bool)
-            or not isinstance(max_cost_micros, int)
-            or max_cost_micros < 1
-            or max_cost_micros > _MAX_COST_MICROS
-            or isinstance(deadline_ms, bool)
-            or not isinstance(deadline_ms, int)
-            or deadline_ms < 1
-            or deadline_ms > _MAX_DEADLINE_MS
+            or authority_path is not None and not isinstance(authority_path, Path)
+            or isinstance(cost_limit, bool)
+            or not isinstance(cost_limit, int)
+            or cost_limit < 1
+            or cost_limit > _MAX_COST_MICROS
+            or isinstance(action_deadline, bool)
+            or not isinstance(action_deadline, int)
+            or action_deadline < 1
+            or action_deadline > _MAX_DEADLINE_MS
         ):
             raise ValueError
         model = environ.get(_MODEL_KEY)
         if not isinstance(model, str) or not model:
             raise ValueError
-        authority = load_bounded_rlm_authority(
-            authority_path, max_cost_micros=max_cost_micros, now_ms=now_ms
+        current = int(time.time() * 1000) if now_ms is None else now_ms
+        authority = (
+            _default_native_rlm_authority(current, action_deadline)
+            if authority_path is None
+            else load_bounded_rlm_authority(
+                authority_path, max_cost_micros=cost_limit, now_ms=current
+            )
         )
-        if authority.max_action_deadline_ms > deadline_ms:
+        if authority.max_action_deadline_ms > action_deadline:
             raise ValueError
         digest = sha256(b"asterion.prime.native-rlm\0" + model.encode()).hexdigest()
         return NativeRlmExperimentReservation(
             authority=authority,
-            limits=NativeRlmExperimentLimits(max_cost_micros, deadline_ms),
+            limits=NativeRlmExperimentLimits(cost_limit, action_deadline),
             configuration_digest=digest,
         )
     except (PrimeVerificationError, TypeError, ValueError):
         raise PrimeRlmExperimentError("Native RLM experiment authorization is invalid") from None
+
+
+def _default_native_rlm_authority(
+    now_ms: int, deadline_ms: int
+) -> AuthorityEnvelope:
+    """Mint a one-command envelope that is never persisted or reused."""
+    return AuthorityEnvelope(
+        authority_id=f"native-rlm-{secrets.token_hex(16)}",
+        revision=1,
+        allowed_portfolio=(
+            PortfolioGrant(
+                provider_id="asterion.prime-gateway",
+                application_id="native-rlm-probe",
+                version="0.1.0",
+                runtime_id="prime.gateway",
+            ),
+        ),
+        allowed_operations=_DEFAULT_OPERATIONS,
+        budget_limit=BudgetLimit(
+            controller_tokens=100,
+            application_tokens=100,
+            child_tokens=100,
+            aggregate_tokens=300,
+            cost_micros=_MAX_COST_MICROS,
+        ),
+        expires_at_ms=now_ms + deadline_ms,
+        max_action_deadline_ms=deadline_ms,
+        max_recursion_depth=1,
+        max_concurrent_children=1,
+        execution_domain="trusted-local",
+        host_service_grants=("artifact.write",),
+    )
 
 
 def write_native_rlm_experiment_receipt(

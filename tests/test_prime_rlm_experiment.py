@@ -66,6 +66,22 @@ def _authority(**changes: object) -> dict[str, object]:
 
 
 class TestNativeRlmExperiment(unittest.TestCase):
+    def test_preparation_uses_private_default_authority(self) -> None:
+        reservation = prepare_native_rlm_experiment(
+            None,
+            max_cost_micros=None,
+            deadline_ms=None,
+            environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"},
+            now_ms=1_000,
+        )
+
+        self.assertEqual(reservation.authority.allowed_portfolio[0].provider_id, "asterion.prime-gateway")
+        self.assertEqual(reservation.authority.max_recursion_depth, 1)
+        self.assertEqual(reservation.authority.max_concurrent_children, 1)
+        self.assertEqual(reservation.limits.cost_micros, 500_000)
+        self.assertEqual(reservation.limits.deadline_ms, 600_000)
+        self.assertEqual(len(reservation.configuration_digest), 64)
+
     def test_sidecar_descriptor_binds_authority_budget_and_selection(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
