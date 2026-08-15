@@ -571,6 +571,8 @@ class TestNativeRlmExperiment(unittest.TestCase):
             )
             self.assertEqual(descriptor["provider"], "deepseek")
             self.assertEqual(descriptor["model"], "deepseek-v4-flash")
+            self.assertEqual(descriptor["maxContinuations"], 3)
+            self.assertEqual(descriptor["maxTurns"], 12)
             self.assertEqual(descriptor["remainingBudget"]["cost_micros"], 500_000)
             self.assertEqual(descriptor["rlmMaxDepth"], 1)
             self.assertEqual(descriptor["artifactLockPath"], str(resources.artifact_lock_path))

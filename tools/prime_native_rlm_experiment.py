@@ -558,7 +558,7 @@ def build_native_rlm_sidecar_descriptor(
         "agentDir": str(root / "agent"), "artifactLockPath": str(resources.artifact_lock_path),
         "authorityId": reservation.authority.authority_id, "authorityRevision": reservation.authority.revision,
         "expectedRuntimeBuildId": resources.expected_runtime_build_id, "gatewayRoot": str(root / "gateway"), "generation": 1,
-        "maxContinuations": 1, "maxControllerTokens": budget.controller_tokens, "maxTurns": 1,
+        "maxContinuations": 3, "maxControllerTokens": budget.controller_tokens, "maxTurns": 12,
         "model": selection.model,
         "portfolio": [{"kind": "application", "provider_id": grant.provider_id, "application_id": grant.application_id, "version": grant.version, "runtime_id": grant.runtime_id} for grant in reservation.authority.allowed_portfolio],
         "primeSocketPath": str(root / "prime.sock"), "primeSourceRoot": str(resources.prime_source_root), "provider": selection.provider, "rlmMaxDepth": 1,
