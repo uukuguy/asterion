@@ -163,6 +163,7 @@ interface PrimeSidecarDescriptor {
   readonly primeSocketPath: string;
   readonly primeSourceRoot: string;
   readonly provider: string;
+  readonly recoveryReadOnly: boolean;
   readonly rlmMaxChildren: number;
   readonly rlmMaxDepth: 0 | 1;
   readonly remainingBudget: SkillBudget;
@@ -393,7 +394,7 @@ function validatePortfolio(value: unknown): readonly SkillApplicationTarget[] {
 function validateDescriptor(value: unknown): PrimeSidecarDescriptor {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, [
+    !(hasExactKeys(value, [
       "agentDir",
       "artifactLockPath",
       "authorityId",
@@ -409,6 +410,7 @@ function validateDescriptor(value: unknown): PrimeSidecarDescriptor {
       "primeSocketPath",
       "primeSourceRoot",
       "provider",
+      "recoveryReadOnly",
       "rlmMaxChildren",
       "rlmMaxDepth",
       "remainingBudget",
@@ -417,7 +419,13 @@ function validateDescriptor(value: unknown): PrimeSidecarDescriptor {
       "skillPath",
       "timeoutMs",
       "workspace",
-    ]) ||
+    ]) || hasExactKeys(value, [
+      "agentDir", "artifactLockPath", "authorityId", "authorityRevision",
+      "expectedRuntimeBuildId", "gatewayRoot", "generation", "maxContinuations",
+      "maxControllerTokens", "maxTurns", "model", "portfolio", "primeSocketPath",
+      "primeSourceRoot", "provider", "rlmMaxChildren", "rlmMaxDepth",
+      "remainingBudget", "sessionDir", "sessionId", "skillPath", "timeoutMs", "workspace",
+    ])) ||
     ![
       value.agentDir,
       value.artifactLockPath,
@@ -433,6 +441,7 @@ function validateDescriptor(value: unknown): PrimeSidecarDescriptor {
       value.skillPath,
       value.workspace,
     ].every(validText) ||
+    (value.recoveryReadOnly !== undefined && typeof value.recoveryReadOnly !== "boolean") ||
     !positiveInteger(value.generation) ||
     !positiveInteger(value.authorityRevision) ||
     !positiveInteger(value.maxContinuations) ||
@@ -453,6 +462,7 @@ function validateDescriptor(value: unknown): PrimeSidecarDescriptor {
     maxTurns: Number(value.maxTurns),
     rlmMaxChildren: Number(value.rlmMaxChildren),
     rlmMaxDepth: value.rlmMaxDepth as 0 | 1,
+    recoveryReadOnly: value.recoveryReadOnly === true,
     portfolio: validatePortfolio(value.portfolio),
     remainingBudget: validateBudget(value.remainingBudget),
     timeoutMs: Number(value.timeoutMs),
@@ -1593,6 +1603,7 @@ async function createSidecarFromDescriptor(
     sessionId: descriptor.sessionId,
     generation: descriptor.generation,
     authorityId: descriptor.authorityId,
+    restoreExistingSession: !descriptor.recoveryReadOnly,
     store,
     privateValues: boundPrivateInputs,
     privateResults: privateValues,
@@ -1723,7 +1734,7 @@ async function createSidecarFromDescriptor(
     },
   });
   const recoveredContext = restoredBridgeContext(store, descriptor.generation, descriptor);
-  if (recoveredContext !== undefined) {
+  if (recoveredContext !== undefined && !descriptor.recoveryReadOnly) {
     await startSkillBridge(recoveredContext, Promise.resolve());
   }
 

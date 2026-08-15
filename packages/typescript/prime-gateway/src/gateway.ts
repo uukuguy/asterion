@@ -267,6 +267,7 @@ export interface PrimeGatewayOptions {
   ) => Promise<PrimeCheckpointCreated>;
   readonly sessionContext?: PrimeGatewaySessionContextExecutor;
   readonly onSessionReady?: (context: PrimeGatewayCreateContext) => void;
+  readonly restoreExistingSession?: boolean;
   readonly now?: () => string;
 }
 
@@ -504,7 +505,9 @@ export class PrimeGateway {
     }
     const gateway = new PrimeGateway(options);
     await gateway.restoreActionCommands();
-    await gateway.restoreExistingSession();
+    if (options.restoreExistingSession !== false) {
+      await gateway.restoreExistingSession();
+    }
     gateway.retryInputAcknowledgements();
     await gateway.restoreGoalTerminals();
     return gateway;

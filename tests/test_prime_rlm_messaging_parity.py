@@ -81,6 +81,9 @@ class TestPrimeRlmMessagingParity(unittest.TestCase):
         node = _node_22()
         if node is None:
             self.skipTest("an offline pinned Node 22 executable is unavailable")
+        kernel_python = Path.home() / ".prime" / "agent" / "kernel-venv" / "bin" / "python"
+        if not kernel_python.is_file():
+            self.skipTest("an operator Prime kernel is unavailable")
         runtime_entry = derive_prime_rlm_runtime(
             PINNED_SOURCE, lock_path=ARTIFACT_LOCK
         )
@@ -109,6 +112,7 @@ class TestPrimeRlmMessagingParity(unittest.TestCase):
                     directory.mkdir(mode=0o700)
                 socket_path = root / "prime.sock"
                 environment = _closed_environment(home)
+                environment["PRIME_AGENT_KERNEL_PYTHON"] = str(kernel_python)
                 daemon = await asyncio.create_subprocess_exec(
                     str(node),
                     str(runtime_entry),
@@ -238,6 +242,27 @@ class TestPrimeRlmMessagingParity(unittest.TestCase):
                     payload["lifecycle_types"] = [
                         observation.type for observation in await client.rlm_lifecycle()
                     ]
+                    await host.close()
+                    host = None
+                    process = await PrimeSidecarProcess.start(
+                        PrimeSidecarLaunchOptions(
+                            node_executable=node,
+                            sidecar_entry=SIDECAR_ENTRY,
+                            private_descriptor={**descriptor, "recoveryReadOnly": True},
+                            environ=environment,
+                            request_timeout=10,
+                            private_stderr_sink=stderr_sink,
+                        )
+                    )
+                    client = PrimeControlPlaneClient(
+                        process=process,
+                        private_content=resolver,
+                        private_attachments=resolver,
+                    )
+                    payload["recovered_lifecycle_types"] = [
+                        observation.type
+                        for observation in await client.rlm_lifecycle()
+                    ]
                     return payload
                 finally:
                     if host is not None:
@@ -287,6 +312,11 @@ class TestPrimeRlmMessagingParity(unittest.TestCase):
                 "spawn_admitted": True,
                 "lifecycle_recorded": True,
                 "lifecycle_types": [
+                    "rlm.child.started",
+                    "rlm.child.terminal",
+                    "rlm.child.deleted",
+                ],
+                "recovered_lifecycle_types": [
                     "rlm.child.started",
                     "rlm.child.terminal",
                     "rlm.child.deleted",
