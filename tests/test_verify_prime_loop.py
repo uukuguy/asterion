@@ -425,6 +425,27 @@ class TestVerifyPrimeLoop(unittest.TestCase):
         )
         self.assertFalse(any("shutdown" in command for command in commands))
 
+class TestNativeRlmFailureEvidence(unittest.TestCase):
+    def test_failure_evidence_classifies_private_stderr_without_retaining_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stderr = root / "sidecar.stderr.log"
+            stderr.write_text("request failed: unauthorized SENTINEL_SECRET", encoding="utf-8")
+
+            prime_loop._write_native_rlm_external_limit_evidence(
+                root, "execution", stderr_path=stderr
+            )
+
+            evidence = json.loads(
+                (root / "native-rlm-external-limit.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(evidence["failure_class"], "credential")
+            self.assertNotIn("SENTINEL_SECRET", repr(evidence))
+            self.assertEqual(
+                (root / "native-rlm-external-limit.json").stat().st_mode & 0o777,
+                0o600,
+            )
+
 
 def _write(path: Path, value: object) -> Path:
     path.write_text(json.dumps(value))

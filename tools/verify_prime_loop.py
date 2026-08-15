@@ -541,6 +541,7 @@ def _native_rlm_bounded_external_limit(
     if not private_evidence_root.is_dir():
         raise PrimeVerificationError("Prime native RLM evidence root is invalid")
     stage = "preflight"
+    stderr_path: Path | None = None
     preflight = verify_preflight(source_root)
     stage = "environment"
     environment = _native_rlm_environment()
@@ -564,7 +565,8 @@ def _native_rlm_bounded_external_limit(
         consumed: object | None = None
         observation: object | None = None
 
-        with (run_root / "sidecar.stderr.log").open("xb") as stderr_sink:
+        stderr_path = run_root / "sidecar.stderr.log"
+        with stderr_path.open("xb") as stderr_sink:
             async def runner(active: object) -> object:
                 nonlocal consumed, observation
                 consumed = active
@@ -610,22 +612,29 @@ def _native_rlm_bounded_external_limit(
             "full_dataset_ran": False,
         }
     except PrimeRlmExperimentError as error:
-        _write_native_rlm_external_limit_evidence(private_evidence_root, stage)
+        _write_native_rlm_external_limit_evidence(
+            private_evidence_root, stage, stderr_path=stderr_path
+        )
         raise PrimeExternalLimit(str(error)) from None
     except (OSError, RuntimeError, TypeError, ValueError):
-        _write_native_rlm_external_limit_evidence(private_evidence_root, stage)
+        _write_native_rlm_external_limit_evidence(
+            private_evidence_root, stage, stderr_path=stderr_path
+        )
         raise PrimeExternalLimit(
             f"Prime native RLM probe {stage} did not complete"
         ) from None
 
 
-def _write_native_rlm_external_limit_evidence(root: Path, stage: str) -> None:
+def _write_native_rlm_external_limit_evidence(
+    root: Path, stage: str, *, stderr_path: Path | None = None
+) -> None:
     """Persist only the safe terminal category when a bounded probe cannot finish."""
 
     if not isinstance(root, Path) or not root.is_dir() or not isinstance(stage, str):
         return
     payload = {
         "format": "asterion.prime-native-rlm-external-limit/v1",
+        "failure_class": _native_rlm_failure_class(stderr_path),
         "stage": stage if stage in {"authorization", "runtime", "workspace", "execution", "receipt"} else "preflight",
         "status": "External-limited",
     }
@@ -642,6 +651,27 @@ def _write_native_rlm_external_limit_evidence(root: Path, stage: str) -> None:
             temporary.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+def _native_rlm_failure_class(stderr_path: Path | None) -> str:
+    """Classify private sidecar diagnostics without retaining their content."""
+    if not isinstance(stderr_path, Path):
+        return "unavailable"
+    try:
+        content = stderr_path.read_bytes()[-65_536:].lower()
+    except OSError:
+        return "unavailable"
+    patterns = (
+        ("credential", (b"unauthorized", b"forbidden", b"api key", b"authentication")),
+        ("model", (b"model not found", b"unknown model", b"unsupported model")),
+        ("kernel", (b"kernel", b"ipython")),
+        ("provider", (b"fetch failed", b"rate limit", b"connection", b"timeout")),
+        ("protocol", (b"protocol", b"invalid request", b"schema")),
+    )
+    for category, markers in patterns:
+        if any(marker in content for marker in markers):
+            return category
+    return "unknown" if content else "unavailable"
 
 
 def _native_rlm_environment() -> dict[str, str]:
