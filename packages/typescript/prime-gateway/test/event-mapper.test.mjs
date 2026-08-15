@@ -120,12 +120,12 @@ test("mapping ignores bodies and projects only fixed recoverable faults", () => 
 });
 
 test("mapping rejects cursor gaps and cross-session events safely", () => {
-  for (const outbound of [
-    primeEvent({ type: "message_update", text: "private" }, 2),
-    {
+  for (const [outbound, kind] of [
+    [primeEvent({ type: "message_update", text: "private" }, 2), "cursor-gap"],
+    [{
       ...primeEvent({ type: "message_update", text: "private" }, 1),
       activeSessionId: "prime-root-2",
-    },
+    }, "session-mismatch"],
   ]) {
     const mapper = mapperFixture();
     assert.throws(
@@ -133,6 +133,7 @@ test("mapping rejects cursor gaps and cross-session events safely", () => {
       (error) => {
         assert.ok(error instanceof PrimeEventMappingError);
         assert.equal(error.message, "Prime event mapping failed");
+        assert.equal(error.kind, kind);
         assert.equal(error.message.includes("private"), false);
         return true;
       },

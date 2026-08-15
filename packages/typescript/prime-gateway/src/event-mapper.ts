@@ -38,7 +38,9 @@ type MapperSessionStatus =
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 
 export class PrimeEventMappingError extends Error {
-  constructor() {
+  constructor(
+    readonly kind: "cursor-gap" | "cursor-generation" | "goal-invalid" | "session-mismatch" | "unknown" = "unknown",
+  ) {
     super("Prime event mapping failed");
     this.name = "PrimeEventMappingError";
   }
@@ -116,7 +118,7 @@ export class PrimeEventMapper {
         activeSessionId !== undefined &&
         activeSessionId !== this.options.activeSessionId
       ) {
-        throw new PrimeEventMappingError();
+        throw new PrimeEventMappingError("session-mismatch");
       }
       this.advanceCursor(outbound);
       if (this.sessionStatus === "terminal") {
@@ -138,13 +140,13 @@ export class PrimeEventMapper {
     }
     if (this.cursor === undefined) {
       if (candidate.sequence !== 1) {
-        throw new PrimeEventMappingError();
+        throw new PrimeEventMappingError("cursor-gap");
       }
     } else if (
       candidate.generation !== this.cursor.generation ||
       candidate.sequence !== this.cursor.sequence + 1
     ) {
-      throw new PrimeEventMappingError();
+      throw new PrimeEventMappingError("cursor-generation");
     }
     this.cursor = candidate;
   }
@@ -179,7 +181,7 @@ export class PrimeEventMapper {
 
   private mapSessionEvent(value: unknown): ControlEvent[] {
     if (!isRecord(value) || typeof value.type !== "string") {
-      throw new PrimeEventMappingError();
+      throw new PrimeEventMappingError("goal-invalid");
     }
     if (value.type === "goal_update") {
       return this.mapGoal(value.goal);
@@ -197,11 +199,11 @@ export class PrimeEventMapper {
       !nonNegativeInteger(value.tokensUsed) ||
       value.tokensUsed < this.controllerTokens
     ) {
-      throw new PrimeEventMappingError();
+      throw new PrimeEventMappingError("goal-invalid");
     }
     const mapped = this.goalStatusFromPrime(value.status);
     if (mapped === undefined) {
-      throw new PrimeEventMappingError();
+      throw new PrimeEventMappingError("goal-invalid");
     }
     const events: ControlEvent[] = [];
     if (mapped !== this.goalStatus) {

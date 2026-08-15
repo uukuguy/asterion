@@ -2872,7 +2872,7 @@ export class PrimeGateway {
   private enqueue(outbound: PrimeDaemonOutbound): void {
     this.eventQueue = this.eventQueue
       .then(() => this.handlePrimeOutbound(outbound))
-      .catch(() => this.raiseMappingFault());
+      .catch((error: unknown) => this.raiseMappingFault(error));
   }
 
   private async handlePrimeOutbound(outbound: PrimeDaemonOutbound): Promise<void> {
@@ -2888,9 +2888,15 @@ export class PrimeGateway {
     }
   }
 
-  private async raiseMappingFault(): Promise<void> {
+  private async raiseMappingFault(error: unknown): Promise<void> {
     if (this.terminal || this.closed) {
       return;
+    }
+    if (
+      process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1" &&
+      error instanceof PrimeEventMappingError
+    ) {
+      process.stderr.write(`asterion-prime-event-mapping:${error.kind}\n`);
     }
     try {
       await this.append(this.event("fault.raised", {

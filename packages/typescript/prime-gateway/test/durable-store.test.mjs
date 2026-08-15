@@ -1006,6 +1006,25 @@ test("durable store permits only one concurrent writer for a position", async ()
   }
 });
 
+test("durable store serializes concurrent cursor persistence for one owner", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    const records = await Promise.all([
+      store.recordPrimeCursor({ generation: "worker-generation-1", sequence: 1 }),
+      store.recordPrimeCursor({ generation: "worker-generation-1", sequence: 2 }),
+    ]);
+
+    assert.deepEqual(records.map((record) => record.position), [1, 2]);
+    assert.deepEqual(store.snapshot().primeCursor, {
+      generation: "worker-generation-1",
+      sequence: 2,
+    });
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
 test("durable store reopens maximum-length protocol identities", async () => {
   const fixtureRoot = await temporaryStoreRoot();
   try {

@@ -1047,6 +1047,7 @@ function validLegacyContextMutationCommit(
 }
 
 export class GatewayDurableStore {
+  private appendQueue: Promise<void> = Promise.resolve();
   private readonly records: LoadedRecord[] = [];
   private readonly recordsById = new Map<string, LoadedRecord>();
   private readonly eventCounts = new Map<number, number>();
@@ -2387,6 +2388,21 @@ export class GatewayDurableStore {
   }
 
   private async appendRecord(
+    kind: string,
+    recordId: string,
+    payload: Record<string, unknown>,
+  ): Promise<GatewayRecordReceipt> {
+    const result = this.appendQueue.then(() =>
+      this.appendRecordSerialized(kind, recordId, payload),
+    );
+    this.appendQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
+  private async appendRecordSerialized(
     kind: string,
     recordId: string,
     payload: Record<string, unknown>,
