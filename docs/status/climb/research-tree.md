@@ -1,5 +1,4 @@
 # Prime Climb Research Tree
 
-- H-001: pending — provider-free RLM lifecycle teardown
-- H-002: pending — durable RLM recovery evidence
-- H-003: pending — bounded native RLM receipt
+- H-001: passed — provider-free RLM harness
+- Next: H-002 — RLM recovery evidence
