@@ -1094,6 +1094,7 @@ async function writeRlmHostDiscovery(
   descriptor: PrimeSidecarDescriptor,
   socketPath: string,
   token: string,
+  budget: SkillBudget,
 ): Promise<void> {
   if (!TOKEN_PATTERN.test(token)) {
     throw new PrimeGatewayError();
@@ -1107,7 +1108,7 @@ async function writeRlmHostDiscovery(
       socket_path: socketPath,
       token,
       session_id: descriptor.sessionId,
-      budget: descriptor.remainingBudget,
+      budget,
     }), Buffer.from("\n")]),
   );
 }
@@ -1422,7 +1423,14 @@ async function createSidecarFromDescriptor(
     );
     rlmHostClose = listener.close;
     try {
-      await writeRlmHostDiscovery(descriptor, socketPath, token);
+      const childDeadlineMs = Math.min(currentRemainingBudget.deadline_ms, 30_000);
+      if (childDeadlineMs <= 0) {
+        throw new PrimeGatewayError();
+      }
+      await writeRlmHostDiscovery(descriptor, socketPath, token, {
+        ...currentRemainingBudget,
+        deadline_ms: childDeadlineMs,
+      });
     } catch (error) {
       await closeRlmHostBridge();
       throw error;
