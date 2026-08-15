@@ -613,7 +613,10 @@ def _native_rlm_bounded_external_limit(
         }
     except PrimeRlmExperimentError as error:
         _write_native_rlm_external_limit_evidence(
-            private_evidence_root, stage, stderr_path=stderr_path
+            private_evidence_root,
+            stage,
+            stderr_path=stderr_path,
+            safe_error=str(error),
         )
         raise PrimeExternalLimit(str(error)) from None
     except (OSError, RuntimeError, TypeError, ValueError):
@@ -626,7 +629,11 @@ def _native_rlm_bounded_external_limit(
 
 
 def _write_native_rlm_external_limit_evidence(
-    root: Path, stage: str, *, stderr_path: Path | None = None
+    root: Path,
+    stage: str,
+    *,
+    stderr_path: Path | None = None,
+    safe_error: str | None = None,
 ) -> None:
     """Persist only the safe terminal category when a bounded probe cannot finish."""
 
@@ -634,7 +641,7 @@ def _write_native_rlm_external_limit_evidence(
         return
     payload = {
         "format": "asterion.prime-native-rlm-external-limit/v1",
-        "failure_class": _native_rlm_failure_class(stderr_path),
+        "failure_class": _native_rlm_failure_class(stderr_path, safe_error=safe_error),
         "stage": stage if stage in {"authorization", "runtime", "workspace", "execution", "receipt"} else "preflight",
         "status": "External-limited",
     }
@@ -653,8 +660,14 @@ def _write_native_rlm_external_limit_evidence(
             pass
 
 
-def _native_rlm_failure_class(stderr_path: Path | None) -> str:
+def _native_rlm_failure_class(
+    stderr_path: Path | None, *, safe_error: str | None = None
+) -> str:
     """Classify private sidecar diagnostics without retaining their content."""
+    if safe_error == "Native RLM controlled probe running event-transport did not complete":
+        return "event_transport"
+    if safe_error == "Native RLM controlled probe running control did not complete":
+        return "control"
     if not isinstance(stderr_path, Path):
         return "unavailable"
     try:

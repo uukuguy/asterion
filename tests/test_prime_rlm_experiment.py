@@ -134,6 +134,36 @@ class TestNativeRlmExperiment(unittest.TestCase):
         self.assertEqual(host.commands[-1].payload, {"reason_code": "probe-cleanup"})
         self.assertTrue(host.closed)
 
+    def test_controlled_probe_classifies_event_transport_without_details(self) -> None:
+        class Host:
+            def __init__(self) -> None:
+                self.commands = []
+
+            async def dispatch(self, command) -> None:
+                self.commands.append(command)
+
+            async def pump(self) -> None:
+                if len(self.commands) > 1:
+                    raise native_rlm.ControlHostTransportError("SENTINEL_PRIVATE")
+
+            async def close(self) -> None:
+                return None
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            reservation = prepare_native_rlm_experiment(
+                None, max_cost_micros=None, deadline_ms=None,
+                environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}, now_ms=1_000,
+            )
+            with mock.patch.object(native_rlm, "build_native_rlm_control_host", return_value=Host()):
+                with self.assertRaisesRegex(
+                    PrimeRlmExperimentError,
+                    "Native RLM controlled probe running event-transport did not complete",
+                ) as raised:
+                    asyncio.run(run_native_rlm_controlled_probe(object(), reservation, root))
+
+        self.assertNotIn("SENTINEL_PRIVATE", str(raised.exception))
+
     def test_controlled_probe_projects_a_recorded_terminal_after_stream_failure(self) -> None:
         class Host:
             def __init__(self) -> None:

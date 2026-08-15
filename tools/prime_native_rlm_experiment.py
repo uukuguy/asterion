@@ -27,7 +27,7 @@ from asterion.control.execution import ActionExecutionReceipt
 from asterion.control.factory import ControlPlaneFactoryRegistry
 from asterion.control.host import ControlCommand, ControlEvent
 from asterion.control.journal import FileCanonicalJournal
-from asterion.control.manager import ControlHost
+from asterion.control.manager import ControlHost, ControlHostTransportError
 from asterion.control.providers.prime.client import PrimeControlPlaneClient
 from asterion.control.providers.prime.factory import prime_control_plane_binding
 from asterion.control.providers.prime.rlm import build_prime_rlm_control_host
@@ -936,15 +936,20 @@ async def run_native_rlm_controlled_probe(
         latest = terminal
         checkpoint()
         return latest
-    except Exception:
+    except Exception as error:
         terminal = _terminal_native_rlm_probe_result(host, latest)
         if terminal is not None:
             session_terminal = True
             latest = terminal
             checkpoint()
             return latest
+        category = (
+            "event-transport"
+            if isinstance(error, ControlHostTransportError)
+            else "control"
+        )
         raise PrimeRlmExperimentError(
-            f"Native RLM controlled probe {stage} did not complete"
+            f"Native RLM controlled probe {stage} {category} did not complete"
         ) from None
     finally:
         try:

@@ -453,6 +453,15 @@ class TestNativeRlmFailureEvidence(unittest.TestCase):
 
             self.assertEqual(prime_loop._native_rlm_failure_class(stderr), "sidecar")
 
+    def test_failure_evidence_classifies_fixed_event_transport(self) -> None:
+        self.assertEqual(
+            prime_loop._native_rlm_failure_class(
+                None,
+                safe_error="Native RLM controlled probe running event-transport did not complete",
+            ),
+            "event_transport",
+        )
+
 
 def _write(path: Path, value: object) -> Path:
     path.write_text(json.dumps(value))
