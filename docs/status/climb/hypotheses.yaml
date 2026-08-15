@@ -1,0 +1,15 @@
+- id: H-001
+  description: real Prime provider-free RLM lifecycle teardown
+  parent_paradigm: rlm-provider-free
+  ranking: 1.0
+  status: pending
+- id: H-002
+  description: exact durable RLM recovery evidence
+  parent_paradigm: rlm-provider-free
+  ranking: 0.9
+  status: pending
+- id: H-003
+  description: bounded real-model native RLM receipt
+  parent_paradigm: rlm-bounded-provider
+  ranking: 0.8
+  status: pending

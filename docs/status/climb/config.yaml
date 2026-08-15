@@ -1,0 +1,8 @@
+score_name: closure_count
+score_direction: max
+subscores: [provider_free, bounded_model, ledger]
+push_mode: foreground-verification
+state_dir: docs/status/climb
+artifact_dir: runs/climb
+run_tag_marker: -prime-climb-
+paradigm_field: closure_gate
