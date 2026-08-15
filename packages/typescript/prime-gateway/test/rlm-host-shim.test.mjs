@@ -154,6 +154,44 @@ test("rejects an RLM child before its native host has an effect", async () => {
   assert.equal(nativeCalls, 0);
 });
 
+test("admits native RLM deletion before invoking the Prime host", async () => {
+  const calls = [];
+  const wrapped = wrapSubagentRuntimeHost({
+    async createRlmSubagentRuntime() { throw new Error("unexpected create"); },
+    async deleteRlmSubagentRuntime(childId, child) {
+      calls.push(`native:${childId}:${child?.sessionId ?? "none"}`);
+    },
+  }, {
+    async proposeSpawn() { throw new Error("unexpected spawn"); },
+    async proposeDelete(proposal) {
+      calls.push(`propose:${proposal.child_id}`);
+      return { resolution: "admitted", child_id: proposal.child_id };
+    },
+    async recordLifecycle() {},
+  }, hostContext());
+
+  await wrapped.deleteRlmSubagentRuntime("child-1", { sessionId: "native-session-1" });
+  assert.deepEqual(calls, ["propose:child-1", "native:child-1:native-session-1"]);
+});
+
+test("does not invoke native RLM deletion when admission rejects it", async () => {
+  let nativeCalls = 0;
+  const wrapped = wrapSubagentRuntimeHost({
+    async createRlmSubagentRuntime() { throw new Error("unexpected create"); },
+    async deleteRlmSubagentRuntime() { nativeCalls += 1; },
+  }, {
+    async proposeSpawn() { throw new Error("unexpected spawn"); },
+    async proposeDelete(proposal) { return { resolution: "rejected", child_id: proposal.child_id }; },
+    async recordLifecycle() {},
+  }, hostContext());
+
+  await assert.rejects(
+    () => wrapped.deleteRlmSubagentRuntime("child-1", undefined),
+    /not admitted/u,
+  );
+  assert.equal(nativeCalls, 0);
+});
+
 test("admits a native Prime message by its generated identity before delivery", async () => {
   const calls = [];
   const client = {

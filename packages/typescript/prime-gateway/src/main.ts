@@ -1401,6 +1401,25 @@ async function createSidecarFromDescriptor(
           return Object.freeze({ resolution: "uncertain" as const, messageId: proposal.messageId });
         }
       },
+      admitDelete: async (proposal) => {
+        try {
+          await ready;
+          const identity = gateway.nextEventIdentity();
+          const actionId = deriveControlActionId(descriptor.sessionId, proposal.requestId);
+          const event = validateControlEvent({
+            protocol: "asterion.agent-control/v1", event_id: identity.eventId, session_id: descriptor.sessionId,
+            generation: descriptor.generation, sequence: identity.sequence, emitted_at: identity.emittedAt,
+            type: "action.proposed", payload: {
+              action_id: actionId, authority_revision: context.authorityRevision, idempotency_key: proposal.requestId,
+              kind: "child.cancel", target: { kind: "child", child_id: proposal.childId },
+              expected_artifacts: [], budget: { ...currentRemainingBudget }, causal_parent_ids: context.causalParentIds,
+            },
+          });
+          await gateway.emitActionProposal(event);
+          const admission = await gateway.waitForAdmission(actionId);
+          return Object.freeze({ resolution: admission.resolution, childId: proposal.childId });
+        } catch { return Object.freeze({ resolution: "uncertain" as const, childId: proposal.childId }); }
+      },
       recordMessageDelivered: async (event: RlmMessageDelivery) => {
         await store.recordRlmMessageDelivered(event.messageId);
       },

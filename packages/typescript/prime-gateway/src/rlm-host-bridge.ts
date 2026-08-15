@@ -46,10 +46,21 @@ export interface RlmSpawnResolution {
   readonly childId: string;
 }
 
+export interface RlmDeleteProposal {
+  readonly requestId: string;
+  readonly childId: string;
+}
+
+export interface RlmDeleteResolution {
+  readonly resolution: "admitted" | "rejected" | "uncertain";
+  readonly childId: string;
+}
+
 export interface RlmHostBridgeOptions {
   readonly sessionId: string;
   readonly maxSpawnCount?: number;
   readonly admitSpawn: (proposal: RlmSpawnProposal) => Promise<RlmSpawnResolution>;
+  readonly admitDelete?: (proposal: RlmDeleteProposal) => Promise<RlmDeleteResolution>;
   readonly admitMessage?: (proposal: RlmMessageProposal) => Promise<RlmMessageResolution>;
   readonly recordMessageDelivered?: (event: RlmMessageDelivery) => Promise<void>;
   readonly recordLifecycle?: (event: RlmHostLifecycleEvent) => Promise<void>;
@@ -128,6 +139,7 @@ function messageDigest(proposal: RlmMessageProposal): string {
 export class RlmHostBridge {
   private readonly spawns = new Map<string, { readonly digest: string; readonly promise: Promise<RlmSpawnResolution> }>();
   private readonly spawnRequestsByChildId = new Map<string, string>();
+  private readonly deletes = new Map<string, { readonly childId: string; readonly promise: Promise<RlmDeleteResolution> }>();
   private readonly messages = new Map<string, { readonly digest: string; readonly messageId: string; readonly promise: Promise<RlmMessageResolution>; delivered: boolean }>();
   private readonly messageRequestsById = new Map<string, string>();
 
@@ -206,6 +218,21 @@ export class RlmHostBridge {
     return promise;
   }
 
+  async proposeDelete(proposal: RlmDeleteProposal): Promise<RlmDeleteResolution> {
+    if (this.options.admitDelete === undefined || !OPAQUE_ID.test(proposal.requestId) || !OPAQUE_ID.test(proposal.childId)) throw new TypeError("RLM delete is invalid");
+    const existing = this.deletes.get(proposal.requestId);
+    if (existing !== undefined) {
+      if (existing.childId !== proposal.childId) throw new TypeError("RLM delete conflicts");
+      return existing.promise;
+    }
+    const promise = this.options.admitDelete(Object.freeze({ ...proposal })).then((resolution) => {
+      if (resolution.childId !== proposal.childId || !["admitted", "rejected", "uncertain"].includes(resolution.resolution)) throw new TypeError("RLM delete admission is invalid");
+      return Object.freeze({ ...resolution });
+    });
+    this.deletes.set(proposal.requestId, { childId: proposal.childId, promise });
+    return promise;
+  }
+
   async recordMessageDelivered(event: RlmMessageDelivery): Promise<void> {
     if (!isRecord(event) || !hasExactKeys(event, ["messageId"]) || !OPAQUE_ID.test(event.messageId)) throw new TypeError("RLM message delivery is invalid");
     const entry = [...this.messages.values()].find((candidate) => candidate.messageId === event.messageId);
@@ -274,6 +301,9 @@ export async function listenRlmHostBridge(
         if (value.type === "rlm.spawn.propose") {
           if (!hasExactKeys(value, ["type", "request_id", "child_id", "idempotency_key", "goal_text", "rlm_depth", "model_selector_digest", "budget"]) || typeof value.request_id !== "string" || typeof value.child_id !== "string" || typeof value.idempotency_key !== "string" || typeof value.goal_text !== "string" || !Number.isSafeInteger(value.rlm_depth) || Number(value.rlm_depth) < 0 || !validDigest(value.model_selector_digest) || !validBudget(value.budget)) throw new TypeError();
           void bridge.proposeSpawn({ requestId: value.request_id, childId: value.child_id, idempotencyKey: value.idempotency_key, goalText: value.goal_text, rlmDepth: Number(value.rlm_depth), modelSelectorDigest: value.model_selector_digest, budget: value.budget }).then((result) => socket.end(`${JSON.stringify(result)}\n`), () => socket.destroy());
+        } else if (value.type === "rlm.delete.propose") {
+          if (!hasExactKeys(value, ["type", "request_id", "child_id"]) || typeof value.request_id !== "string" || typeof value.child_id !== "string") throw new TypeError();
+          void bridge.proposeDelete({ requestId: value.request_id, childId: value.child_id }).then((result) => socket.end(`${JSON.stringify(result)}\n`), () => socket.destroy());
         } else if (value.type === "rlm.message.propose") {
           if (!hasExactKeys(value, ["type", "request_id", "message_id", "sender_id", "recipient_id", "body_text"]) || typeof value.request_id !== "string" || typeof value.message_id !== "string" || typeof value.sender_id !== "string" || typeof value.recipient_id !== "string" || typeof value.body_text !== "string") throw new TypeError();
           void bridge.proposeMessage({ requestId: value.request_id, messageId: value.message_id, senderId: value.sender_id, recipientId: value.recipient_id, bodyText: value.body_text }).then((result) => socket.end(`${JSON.stringify(result)}\n`), () => socket.destroy());

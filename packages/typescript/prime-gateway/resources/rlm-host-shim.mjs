@@ -45,6 +45,10 @@ function idempotencyKey(namespace, childId) {
   return `rlm-${createHash("sha256").update(namespace).update("\0").update(childId).digest("hex").slice(0, 40)}`;
 }
 
+function deleteRequestId(namespace, childId) {
+  return `rlm-delete-${createHash("sha256").update(namespace).update("\0").update(childId).digest("hex").slice(0, 40)}`;
+}
+
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -195,6 +199,12 @@ export async function createRlmHostClient(discoveryPath) {
       if (!isRecord(response) || !hasExactKeys(response, ["resolution", "messageId"]) || response.messageId !== proposal.message_id || !["admitted", "rejected", "uncertain"].includes(response.resolution)) throw new Error("Prime RLM host response is invalid");
       return Object.freeze({ resolution: response.resolution, message_id: response.messageId });
     },
+    async proposeDelete(proposal) {
+      if (!isRecord(proposal) || !hasExactKeys(proposal, ["request_id", "child_id"]) || !validChildId(proposal.request_id) || !validChildId(proposal.child_id)) throw new Error("Prime RLM delete is invalid");
+      const response = await messageResponse(discovery.socket_path, discovery, { type: "rlm.delete.propose", request_id: proposal.request_id, child_id: proposal.child_id });
+      if (!isRecord(response) || !hasExactKeys(response, ["resolution", "childId"]) || response.childId !== proposal.child_id || !["admitted", "rejected", "uncertain"].includes(response.resolution)) throw new Error("Prime RLM host response is invalid");
+      return Object.freeze({ resolution: response.resolution, child_id: response.childId });
+    },
     async recordMessageDelivered(event) {
       if (!isRecord(event) || !hasExactKeys(event, ["message_id"]) || !validChildId(event.message_id)) throw new Error("Prime RLM message is invalid");
       const response = await messageResponse(discovery.socket_path, discovery, { type: "rlm.message.delivered", message_id: event.message_id });
@@ -242,6 +252,13 @@ export function wrapSubagentRuntimeHost(delegate, client, hostContext) {
       await client.recordLifecycle(Object.freeze({ type: "rlm.child.started", child_id: spawn.child_id, native_identity_digest: nativeIdentityDigest(runtime) }));
       startedChildren.add(spawn.child_id);
       return runtime;
+    },
+    async deleteRlmSubagentRuntime(childId, child) {
+      if (!validChildId(childId)) throw new Error("Prime RLM delete is invalid");
+      if (typeof client.proposeDelete !== "function") throw new Error("Prime RLM host shim is invalid");
+      const admission = await client.proposeDelete(Object.freeze({ request_id: deleteRequestId(context.idempotency_namespace, childId), child_id: childId }));
+      if (!isRecord(admission) || admission.resolution !== "admitted" || admission.child_id !== childId) throw new Error("Prime RLM child deletion was not admitted");
+      return delegate.deleteRlmSubagentRuntime(childId, child);
     },
     async releaseRlmSubagentRuntime(runtime, options, status) {
       if (typeof delegate.releaseRlmSubagentRuntime !== "function" || !isRecord(options) || !validChildId(options.id)) throw new Error("Prime RLM release is invalid");
