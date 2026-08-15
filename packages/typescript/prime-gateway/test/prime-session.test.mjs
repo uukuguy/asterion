@@ -595,6 +595,28 @@ test("native RLM child uses the pinned daemon create and prompt protocol", async
   });
 });
 
+test("native RLM children are killed before their owning root is cancelled", async () => {
+  const transport = new FakeTransport();
+  const session = await PrimeSession.create({
+    transport,
+    sessionId: "session-1",
+    privateConfig: { ...PRIVATE_CONFIG, rlmMaxDepth: 1 },
+    async bindIdentity() {},
+  });
+  await session.spawnNativeRlmChild("native-child-1", "child-1", "private goal");
+
+  await session.cancel("cancel-children-1");
+
+  const kills = transport.commands
+    .filter(({ command }) => command.type === "kill")
+    .map(({ command }) => command.activeSessionId);
+  assert.deepEqual(kills, ["prime-child-1", "prime-root-1"]);
+  await assert.rejects(
+    session.terminateNativeRlmChild("terminate-child-1", "child-1"),
+    { name: "PrimeSessionError" },
+  );
+});
+
 test("lifecycle enables one native RLM level only when private config requests it", async () => {
   const transport = new FakeTransport();
   await PrimeSession.create({

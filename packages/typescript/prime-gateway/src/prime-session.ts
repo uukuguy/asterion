@@ -795,6 +795,7 @@ export class PrimeSession {
   >();
   private readonly cancelledModelOperations = new Set<string>();
   private readonly nativeChildConfig: PrimePrivateSessionConfig | undefined;
+  private readonly nativeChildren = new Map<string, PrimeNativeRlmChild>();
 
   private constructor(
     transport: PrimeDaemonTransport,
@@ -1009,6 +1010,7 @@ export class PrimeSession {
         privateConfig.rlmMaxDepth !== 1 ||
         !OPAQUE_ID.test(commandId) ||
         !OPAQUE_ID.test(childId) ||
+        this.nativeChildren.has(childId) ||
         typeof goal !== "string" ||
         Buffer.byteLength(goal, "utf8") > MAX_PRIVATE_TEXT_BYTES ||
         this.currentSessionPath === undefined
@@ -1056,7 +1058,31 @@ export class PrimeSession {
       if (!deferredCreate.acknowledge()) {
         throw new PrimeSessionError();
       }
-      return Object.freeze({ childId, ...identity });
+      const child = Object.freeze({ childId, ...identity });
+      this.nativeChildren.set(childId, child);
+      return child;
+    } catch (error) {
+      if (error instanceof PrimeSessionError) {
+        throw error;
+      }
+      throw new PrimeSessionError();
+    }
+  }
+
+  async terminateNativeRlmChild(commandId: string, childId: string): Promise<void> {
+    try {
+      if (!OPAQUE_ID.test(commandId) || !OPAQUE_ID.test(childId)) {
+        throw new PrimeSessionError();
+      }
+      const child = this.nativeChildren.get(childId);
+      if (child === undefined) {
+        throw new PrimeSessionError();
+      }
+      await this.request(
+        { type: "kill", activeSessionId: child.activeSessionId },
+        `${commandId}-kill`,
+      );
+      this.nativeChildren.delete(childId);
     } catch (error) {
       if (error instanceof PrimeSessionError) {
         throw error;
@@ -1302,14 +1328,29 @@ export class PrimeSession {
 
   async cancel(commandId: string): Promise<void> {
     await this.interruptPendingAdmissions();
-    await this.request({
-      type: "abort_and_clear_queue",
-      activeSessionId: this.activeSessionId,
-    }, `${commandId}-abort`);
-    await this.request({
-      type: "kill",
-      activeSessionId: this.activeSessionId,
-    }, `${commandId}-kill`);
+    let childCleanupFailed = false;
+    for (const childId of this.nativeChildren.keys()) {
+      try {
+        await this.terminateNativeRlmChild(`${commandId}-${childId}`, childId);
+      } catch {
+        childCleanupFailed = true;
+      }
+    }
+    try {
+      await this.request({
+        type: "abort_and_clear_queue",
+        activeSessionId: this.activeSessionId,
+      }, `${commandId}-abort`);
+      await this.request({
+        type: "kill",
+        activeSessionId: this.activeSessionId,
+      }, `${commandId}-kill`);
+    } catch {
+      throw new PrimeSessionError();
+    }
+    if (childCleanupFailed) {
+      throw new PrimeSessionError();
+    }
   }
 
   async setContextName(
