@@ -84,7 +84,8 @@ export type GatewayRlmLifecycleObservation =
       readonly type: "rlm.child.terminal";
       readonly child_id: string;
       readonly status: "completed" | "failed" | "cancelled";
-    }>;
+    }>
+  | Readonly<{ readonly type: "rlm.child.deleted"; readonly child_id: string }>;
 
 export type StorageFaultStage =
   | "before_write"
@@ -527,6 +528,9 @@ function validateRlmLifecycleObservation(
       child_id: value.child_id,
       status: value.status,
     });
+  }
+  if (value.type === "rlm.child.deleted" && hasExactKeys(value, ["child_id", "type"])) {
+    return Object.freeze({ type: value.type, child_id: value.child_id });
   }
   throw new GatewayStoreConflictError();
 }
@@ -1614,7 +1618,9 @@ export class GatewayDurableStore {
         (this.activeRlmChildIds.has(validated.child_id) ||
           this.closedRlmChildIds.has(validated.child_id))) ||
       (validated.type === "rlm.child.terminal" &&
-        !this.activeRlmChildIds.has(validated.child_id))
+        !this.activeRlmChildIds.has(validated.child_id)) ||
+      (validated.type === "rlm.child.deleted" &&
+        (!this.closedRlmChildIds.has(validated.child_id) || this.rlmLifecycleValues.some((item) => item.type === "rlm.child.deleted" && item.child_id === validated.child_id)))
     ) {
       throw new GatewayStoreConflictError();
     }

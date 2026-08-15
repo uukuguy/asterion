@@ -196,7 +196,8 @@ export type RlmLifecycleObservation =
       readonly type: "rlm.child.terminal";
       readonly child_id: string;
       readonly status: "completed" | "failed" | "cancelled";
-    }>;
+    }>
+  | Readonly<{ readonly type: "rlm.child.deleted"; readonly child_id: string }>;
 
 type SidecarResponse =
   | {
@@ -551,6 +552,10 @@ function validateRlmLifecycle(value: unknown): readonly RlmLifecycleObservation[
       if (!seen.has(item.child_id)) throw new PrimeGatewayError();
       seen.delete(item.child_id);
       result.push(Object.freeze({ type: item.type, child_id: item.child_id, status: item.status as "completed" | "failed" | "cancelled" }));
+      continue;
+    }
+    if (item.type === "rlm.child.deleted" && hasExactKeys(item, ["type", "child_id"]) && !seen.has(item.child_id)) {
+      result.push(Object.freeze({ type: item.type, child_id: item.child_id }));
       continue;
     }
     throw new PrimeGatewayError();
@@ -1430,6 +1435,10 @@ async function createSidecarFromDescriptor(
             child_id: event.childId,
             native_identity_digest: event.nativeIdentityDigest,
           });
+          return;
+        }
+        if (event.type === "rlm.child.deleted") {
+          await store.recordRlmLifecycle({ type: event.type, child_id: event.childId });
           return;
         }
         await store.recordRlmLifecycle({

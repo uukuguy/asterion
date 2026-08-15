@@ -258,7 +258,9 @@ export function wrapSubagentRuntimeHost(delegate, client, hostContext) {
       if (typeof client.proposeDelete !== "function") throw new Error("Prime RLM host shim is invalid");
       const admission = await client.proposeDelete(Object.freeze({ request_id: deleteRequestId(context.idempotency_namespace, childId), child_id: childId }));
       if (!isRecord(admission) || admission.resolution !== "admitted" || admission.child_id !== childId) throw new Error("Prime RLM child deletion was not admitted");
-      return delegate.deleteRlmSubagentRuntime(childId, child);
+      const result = await delegate.deleteRlmSubagentRuntime(childId, child);
+      await client.recordLifecycle(Object.freeze({ type: "rlm.child.deleted", child_id: childId }));
+      return result;
     },
     async releaseRlmSubagentRuntime(runtime, options, status) {
       if (typeof delegate.releaseRlmSubagentRuntime !== "function" || !isRecord(options) || !validChildId(options.id)) throw new Error("Prime RLM release is invalid");

@@ -93,7 +93,8 @@ export type RlmHostLifecycleEvent =
       readonly type: "rlm.child.terminal";
       readonly childId: string;
       readonly status: "completed" | "failed" | "cancelled";
-    }>;
+    }>
+  | Readonly<{ readonly type: "rlm.child.deleted"; readonly childId: string }>;
 
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 
@@ -250,7 +251,7 @@ export class RlmHostBridge {
       !isRecord(event)
       || !OPAQUE_ID.test(event.childId)
       || (event.type === "rlm.child.started" && !validDigest(event.nativeIdentityDigest))
-      || (event.type !== "rlm.child.started"
+      || (event.type !== "rlm.child.started" && event.type !== "rlm.child.deleted"
         && (event.type !== "rlm.child.terminal"
           || !["completed", "failed", "cancelled"].includes(event.status)))
     ) {
