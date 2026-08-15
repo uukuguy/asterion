@@ -1428,7 +1428,11 @@ async function createSidecarFromDescriptor(
         throw new PrimeGatewayError();
       }
       await writeRlmHostDiscovery(descriptor, socketPath, token, {
-        ...currentRemainingBudget,
+        controller_tokens: Math.floor(currentRemainingBudget.controller_tokens / 2),
+        application_tokens: Math.floor(currentRemainingBudget.application_tokens / 2),
+        child_tokens: Math.floor(currentRemainingBudget.child_tokens / 2),
+        aggregate_tokens: Math.floor(currentRemainingBudget.aggregate_tokens / 2),
+        cost_micros: Math.floor(currentRemainingBudget.cost_micros / 2),
         deadline_ms: childDeadlineMs,
       });
     } catch (error) {

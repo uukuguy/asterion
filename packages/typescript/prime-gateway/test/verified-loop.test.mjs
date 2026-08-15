@@ -512,9 +512,9 @@ async function runScenario(scenario) {
     assert.match(rlmDiscovery.token, /^[0-9a-f]{64}$/u);
     assert.deepEqual(rlmDiscovery.budget, {
       controller_tokens: 0,
-      application_tokens: 100,
-      child_tokens: 100,
-      aggregate_tokens: 200,
+      application_tokens: 50,
+      child_tokens: 50,
+      aggregate_tokens: 100,
       cost_micros: 0,
       deadline_ms: 10000,
     });
