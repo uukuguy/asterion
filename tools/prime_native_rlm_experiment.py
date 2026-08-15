@@ -41,6 +41,15 @@ class NativeRlmModelSelection:
 
 
 @dataclass(frozen=True, repr=False)
+class NativeRlmDaemonPlan:
+    argv: tuple[str, ...]
+    environ: Mapping[str, str]
+
+    def __repr__(self) -> str:
+        return "NativeRlmDaemonPlan(argv=<redacted>, environ=<redacted>)"
+
+
+@dataclass(frozen=True, repr=False)
 class NativeRlmExperimentReservation:
     authority: AuthorityEnvelope
     limits: NativeRlmExperimentLimits
@@ -70,6 +79,31 @@ def resolve_native_rlm_model(environ: Mapping[str, str]) -> NativeRlmModelSelect
     if not isinstance(environ, Mapping) or environ.get(_MODEL_KEY) != "deepseek-v4-flash":
         raise PrimeRlmExperimentError("Native RLM experiment model is invalid")
     return NativeRlmModelSelection("deepseek", "deepseek-v4-flash", "DEEPSEEK_API_KEY")
+
+
+def build_native_rlm_daemon_plan(
+    node_executable: Path,
+    runtime_entry: Path,
+    socket_path: Path,
+    selection: NativeRlmModelSelection,
+    environ: Mapping[str, str],
+) -> NativeRlmDaemonPlan:
+    """Build the exact direct daemon invocation without starting it."""
+    if (
+        not all(isinstance(value, Path) for value in (node_executable, runtime_entry, socket_path))
+        or not isinstance(selection, NativeRlmModelSelection)
+    ):
+        raise PrimeRlmExperimentError("Native RLM daemon plan is invalid")
+    environment = build_native_rlm_daemon_environment(
+        environ, credential_env=selection.credential_env
+    )
+    return NativeRlmDaemonPlan(
+        (
+            str(node_executable), str(runtime_entry), "--mode", "daemon", "--daemon-socket",
+            str(socket_path), "--provider", selection.provider, "--model", selection.model,
+        ),
+        environment,
+    )
 
 
 def build_native_rlm_daemon_environment(

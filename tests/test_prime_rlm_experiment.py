@@ -10,6 +10,7 @@ from pathlib import Path
 from asterion.control.authority import BudgetUsage
 from tools.prime_native_rlm_experiment import (
     build_native_rlm_daemon_environment,
+    build_native_rlm_daemon_plan,
     resolve_native_rlm_model,
     NativeRlmProbeResult,
     PrimeRlmExperimentError,
@@ -63,6 +64,17 @@ def _authority(**changes: object) -> dict[str, object]:
 
 
 class TestNativeRlmExperiment(unittest.TestCase):
+    def test_daemon_plan_uses_direct_pinned_runtime_and_selected_model(self) -> None:
+        selection = resolve_native_rlm_model(
+            {"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}
+        )
+        plan = build_native_rlm_daemon_plan(
+            Path("/private/node"), Path("/private/prime-cli.js"), Path("/private/prime.sock"),
+            selection, {"HOME": "/private/home", "PATH": "/bin", "DEEPSEEK_API_KEY": "secret"},
+        )
+        self.assertEqual(plan.argv, ("/private/node", "/private/prime-cli.js", "--mode", "daemon", "--daemon-socket", "/private/prime.sock", "--provider", "deepseek", "--model", "deepseek-v4-flash"))
+        self.assertNotIn("secret", repr(plan))
+
     def test_resolves_only_the_pinned_deepseek_experiment_model(self) -> None:
         selection = resolve_native_rlm_model(
             {"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}
