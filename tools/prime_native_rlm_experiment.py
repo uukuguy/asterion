@@ -683,8 +683,24 @@ async def execute_native_rlm_sidecar_probe(
             raise PrimeRlmExperimentError("Native RLM probe result is invalid")
         return result
     except PrimeRlmExperimentError:
+        if await _owned_native_rlm_root_is_inactive(plan, resources):
+            return NativeRlmProbeResult(
+                terminal="failed",
+                child_started=False,
+                message_delivered=False,
+                child_deleted=False,
+                usage=BudgetUsage.zero(),
+            )
         raise
     except Exception:
+        if await _owned_native_rlm_root_is_inactive(plan, resources):
+            return NativeRlmProbeResult(
+                terminal="failed",
+                child_started=False,
+                message_delivered=False,
+                child_deleted=False,
+                usage=BudgetUsage.zero(),
+            )
         raise PrimeRlmExperimentError("Native RLM probe did not complete") from None
     finally:
         sidecar_cleanup_error: PrimeRlmExperimentError | None = None
@@ -1000,6 +1016,39 @@ async def _close_owned_sidecar(sidecar: object | None) -> None:
             await result
     except (OSError, RuntimeError, TypeError, ValueError):
         raise PrimeRlmExperimentError("Native RLM sidecar cleanup failed") from None
+
+
+async def _owned_native_rlm_root_is_inactive(
+    plan: NativeRlmDaemonPlan, resources: NativeRlmRuntimeResources
+) -> bool:
+    """Read one owned root's public daemon state without attaching or replaying it."""
+    client_entry = resources.sidecar_entry.parent / "index.js"
+    script = textwrap.dedent(
+        f'''\
+        import {{ PrimeDaemonClient }} from {client_entry.as_uri()!r};
+        const client = new PrimeDaemonClient({{clientId: "asterion-owned-state", connectTimeoutMs: 3000, requestTimeoutMs: 3000}});
+        await client.connect({str(plan.socket_path)!r});
+        const listed = await client.request({{type: "list", includeClientOwned: true}}, "asterion-owned-state-list", 3000);
+        const sessions = listed.success && listed.command === "list" && Array.isArray(listed.data?.sessions) ? listed.data.sessions : [];
+        const matches = sessions.filter((value) => value?.sessionName === "native-rlm-root");
+        if (matches.length !== 1) process.exit(2);
+        const activeSessionId = matches[0].activeSessionId ?? matches[0].id;
+        if (typeof activeSessionId !== "string") process.exit(2);
+        const state = await client.request({{type: "get_state", activeSessionId}}, "asterion-owned-state-read", 3000);
+        if (!state.success || state.command !== "get_state" || state.data?.activity !== "idle" || state.data?.isSessionActive !== false || state.data?.isStreaming !== false || state.data?.hasRunningRlmChildren !== false) process.exit(2);
+        client.close();
+        '''
+    )
+    try:
+        process = await asyncio.create_subprocess_exec(
+            str(resources.node_executable), "--input-type=module", "-e", script,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        return await asyncio.wait_for(process.wait(), timeout=4) == 0
+    except (TimeoutError, OSError, ValueError):
+        return False
 
 
 async def _reap_owned_daemon(
