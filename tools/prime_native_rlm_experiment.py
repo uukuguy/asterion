@@ -920,6 +920,12 @@ async def run_native_rlm_controlled_probe(
         checkpoint()
         return latest
     except Exception:
+        terminal = _terminal_native_rlm_probe_result(host, latest)
+        if terminal is not None:
+            session_terminal = True
+            latest = terminal
+            checkpoint()
+            return latest
         raise PrimeRlmExperimentError(
             f"Native RLM controlled probe {stage} did not complete"
         ) from None

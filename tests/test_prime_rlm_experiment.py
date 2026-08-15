@@ -145,7 +145,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
 
             async def pump(self) -> None:
                 if len(self.commands) > 1:
-                    raise native_rlm.PrimeRlmExperimentError()
+                    raise RuntimeError("stream closed")
 
             def snapshot(self):
                 return type(
