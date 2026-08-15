@@ -682,7 +682,13 @@ async def execute_native_rlm_sidecar_probe(
             raise PrimeRlmExperimentError("Native RLM probe result is invalid")
         return result
     except PrimeRlmExperimentError:
-        raise
+        terminal = _terminal_native_rlm_probe_result(host, latest)
+        if terminal is None:
+            raise
+        session_terminal = True
+        latest = terminal
+        checkpoint()
+        return latest
     except Exception:
         raise PrimeRlmExperimentError("Native RLM probe did not complete") from None
     finally:
@@ -906,7 +912,13 @@ async def run_native_rlm_controlled_probe(
             await asyncio.sleep(0.025)
         return latest
     except PrimeRlmExperimentError:
-        raise
+        terminal = _terminal_native_rlm_probe_result(host, latest)
+        if terminal is None:
+            raise
+        session_terminal = True
+        latest = terminal
+        checkpoint()
+        return latest
     except Exception:
         raise PrimeRlmExperimentError(
             f"Native RLM controlled probe {stage} did not complete"
@@ -941,6 +953,28 @@ def _write_native_rlm_progress(
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
+
+
+def _terminal_native_rlm_probe_result(
+    host: object, latest: NativeRlmProbeResult
+) -> NativeRlmProbeResult | None:
+    """Project a host-recorded terminal state after a stream-side failure."""
+    snapshot = getattr(host, "snapshot", None)
+    if not callable(snapshot):
+        return None
+    try:
+        state = snapshot().state
+        terminal = state.session_status
+        if state.terminal_event_id is None or terminal not in {
+            "cancelled",
+            "completed",
+            "failed",
+            "budget_limited",
+        }:
+            return None
+    except (AttributeError, TypeError, ValueError):
+        return None
+    return replace(latest, terminal=terminal)
 
 
 async def _close_owned_sidecar(sidecar: object | None) -> None:

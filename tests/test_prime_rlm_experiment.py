@@ -134,6 +134,48 @@ class TestNativeRlmExperiment(unittest.TestCase):
         self.assertEqual(host.commands[-1].payload, {"reason_code": "probe-cleanup"})
         self.assertTrue(host.closed)
 
+    def test_controlled_probe_projects_a_recorded_terminal_after_stream_failure(self) -> None:
+        class Host:
+            def __init__(self) -> None:
+                self.commands = []
+                self.closed = False
+
+            async def dispatch(self, command) -> None:
+                self.commands.append(command)
+
+            async def pump(self) -> None:
+                if len(self.commands) > 1:
+                    raise native_rlm.PrimeRlmExperimentError()
+
+            def snapshot(self):
+                return type(
+                    "Snapshot",
+                    (),
+                    {"state": type("State", (), {"terminal_event_id": "event-3", "session_status": "failed"})()},
+                )()
+
+            async def close(self) -> None:
+                self.closed = True
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            reservation = prepare_native_rlm_experiment(
+                None,
+                max_cost_micros=500_000,
+                deadline_ms=600_000,
+                environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"},
+                now_ms=1_000,
+            )
+            host = Host()
+            with mock.patch.object(native_rlm, "build_native_rlm_control_host", return_value=host):
+                result = asyncio.run(run_native_rlm_controlled_probe(object(), reservation, root))
+
+        self.assertEqual(result.terminal, "failed")
+        self.assertEqual([command.type for command in host.commands], [
+            "session.create", "input.submit",
+        ])
+        self.assertTrue(host.closed)
+
     def test_workspace_preparation_creates_only_private_session_directories(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
