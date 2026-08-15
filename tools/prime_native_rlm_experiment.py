@@ -271,6 +271,46 @@ async def execute_native_rlm_sidecar_probe(
         await _reap_owned_daemon(daemon)
 
 
+async def start_native_rlm_sidecar(
+    descriptor: Mapping[str, object],
+    resources: NativeRlmRuntimeResources,
+    *,
+    environ: Mapping[str, str],
+    starter: Callable[[object], Awaitable[object]] | None = None,
+) -> object:
+    """Start the Asterion sidecar with its model credential deliberately absent."""
+    try:
+        if (
+            not isinstance(descriptor, Mapping)
+            or not isinstance(resources, NativeRlmRuntimeResources)
+            or not isinstance(environ, Mapping)
+            or any(
+                not isinstance(key, str) or not isinstance(value, str)
+                for key, value in environ.items()
+            )
+            or "HOME" not in environ
+            or "PATH" not in environ
+            or starter is not None and not callable(starter)
+        ):
+            raise ValueError
+        from asterion.control.providers.prime.process import PrimeSidecarLaunchOptions
+
+        options = PrimeSidecarLaunchOptions(
+            node_executable=resources.node_executable,
+            sidecar_entry=resources.sidecar_entry,
+            private_descriptor=descriptor,
+            environ={"HOME": environ["HOME"], "PATH": environ["PATH"]},
+            request_timeout=30,
+        )
+        if starter is not None:
+            return await starter(options)
+        from asterion.control.providers.prime.process import PrimeSidecarProcess
+
+        return await PrimeSidecarProcess.start(options)
+    except (OSError, TypeError, ValueError):
+        raise PrimeRlmExperimentError("Native RLM sidecar could not start") from None
+
+
 async def _close_owned_sidecar(sidecar: object | None) -> None:
     if sidecar is None:
         return

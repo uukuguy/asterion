@@ -13,6 +13,7 @@ from tools.prime_native_rlm_experiment import (
     build_native_rlm_daemon_plan,
     build_native_rlm_sidecar_descriptor,
     execute_native_rlm_sidecar_probe,
+    start_native_rlm_sidecar,
     start_native_rlm_daemon,
     resolve_native_rlm_model,
     NativeRlmProbeResult,
@@ -68,6 +69,35 @@ def _authority(**changes: object) -> dict[str, object]:
 
 
 class TestNativeRlmExperiment(unittest.TestCase):
+    def test_sidecar_start_excludes_model_credential(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            resources = NativeRlmRuntimeResources(
+                root / "node", root / "daemon.mjs", root / "gateway.mjs", root / "lock.json",
+                root / "source", root / "skill", "build-1",
+            )
+            seen = []
+
+            async def starter(options):
+                seen.append(options)
+                return object()
+
+            asyncio.run(start_native_rlm_sidecar(
+                {"sessionId": "native-rlm-root"}, resources,
+                environ={"HOME": str(root), "PATH": "/bin", "DEEPSEEK_API_KEY": "secret"},
+                starter=starter,
+            ))
+
+            self.assertEqual(
+                seen[0].argv,
+                (
+                    str(resources.node_executable.resolve(strict=False)),
+                    str(resources.sidecar_entry.resolve(strict=False)),
+                ),
+            )
+            self.assertEqual(set(seen[0].environ), {"HOME", "PATH"})
+            self.assertNotIn("secret", repr(seen[0]))
+
     def test_sidecar_probe_reaps_owned_processes_after_complete_observation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
