@@ -459,8 +459,8 @@ def _bounded_external_limit(
 
 def _native_rlm_bounded_external_limit(
     source_root: Path,
-    authority_path: Path,
-    max_cost_micros: int,
+    authority_path: Path | None,
+    max_cost_micros: int | None,
     private_evidence_root: Path,
 ) -> Mapping[str, object]:
     from tools.prime_native_rlm_experiment import prepare_native_rlm_experiment
@@ -475,6 +475,19 @@ def _native_rlm_bounded_external_limit(
         environ=os.environ,
     )
     raise PrimeExternalLimit("Prime native RLM probe runner is unavailable")
+
+
+def _default_native_rlm_evidence_root() -> Path:
+    """Create the private, ignored default root only for an explicit probe."""
+    try:
+        root = Path.cwd() / ".asterion-private" / "prime-rlm"
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        root.chmod(0o700)
+        if not root.is_dir() or root.stat().st_mode & 0o777 != 0o700:
+            raise OSError
+        return root
+    except OSError:
+        raise PrimeVerificationError("Prime native RLM evidence root is invalid") from None
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -531,19 +544,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             if (
                 arguments.source_root is None
-                or arguments.authority is None
-                or arguments.max_cost_micros is None
-                or arguments.private_evidence_root is None
                 or not arguments.native_rlm_experiment
             ):
                 raise PrimeVerificationError(
-                    "Prime native RLM verification requires exact explicit authorization"
+                    "Prime native RLM verification requires explicit experiment opt-in"
                 )
+            evidence_root = (
+                _default_native_rlm_evidence_root()
+                if arguments.private_evidence_root is None
+                else arguments.private_evidence_root
+            )
             report = _native_rlm_bounded_external_limit(
                 arguments.source_root,
                 arguments.authority,
                 arguments.max_cost_micros,
-                arguments.private_evidence_root,
+                evidence_root,
             )
     except PrimeExternalLimit as error:
         print(

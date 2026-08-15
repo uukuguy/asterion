@@ -52,4 +52,7 @@ tmp/
 # Local design companion state
 .superpowers/
 
+# One-shot private native-RLM experiment receipts
+.asterion-private/
+
 3th-party/

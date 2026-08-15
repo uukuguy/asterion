@@ -167,7 +167,7 @@ prime-verify-bounded:
 	$(UV_BIN) run python tools/verify_prime_loop.py --level bounded --source-root "$(ASTERION_PRIME_SOURCE_ROOT)" --authority "$(ASTERION_PRIME_AUTHORITY)" --max-cost-micros "$(ASTERION_PRIME_MAX_COST_MICROS)"
 
 prime-verify-native-rlm-bounded:
-	$(UV_BIN) run python tools/verify_prime_loop.py --level native-rlm-bounded --native-rlm-experiment --source-root "$(ASTERION_PRIME_SOURCE_ROOT)" --authority "$(ASTERION_PRIME_AUTHORITY)" --max-cost-micros "500000" --private-evidence-root "$(ASTERION_PRIME_EVIDENCE_ROOT)"
+	$(UV_BIN) run python tools/verify_prime_loop.py --level native-rlm-bounded --native-rlm-experiment --source-root "$(ASTERION_PRIME_SOURCE_ROOT)"
 
 prime-parity-inventory:
 	$(UV_BIN) run python tools/check_prime_parity.py --claim inventory

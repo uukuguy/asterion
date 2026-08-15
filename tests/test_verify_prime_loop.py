@@ -88,6 +88,34 @@ def _authorization(**authority_changes: object) -> dict[str, object]:
 
 
 class TestVerifyPrimeLoop(unittest.TestCase):
+    def test_native_rlm_bounded_uses_defaults_after_explicit_opt_in(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with (
+                mock.patch.object(prime_loop, "verify_preflight") as preflight,
+                mock.patch.object(prime_loop.Path, "cwd", return_value=root),
+                mock.patch(
+                    "tools.prime_native_rlm_experiment.prepare_native_rlm_experiment"
+                ) as prepare,
+            ):
+                result = prime_loop.main(
+                    [
+                        "--level", "native-rlm-bounded",
+                        "--source-root", str(root / "source"),
+                        "--native-rlm-experiment",
+                    ]
+                )
+
+            self.assertEqual(result, 2)
+            preflight.assert_called_once_with(root / "source")
+            prepare.assert_called_once()
+            self.assertIsNone(prepare.call_args.args[0])
+            self.assertIsNone(prepare.call_args.kwargs["max_cost_micros"])
+            self.assertEqual(
+                (root / ".asterion-private" / "prime-rlm").stat().st_mode & 0o777,
+                0o700,
+            )
+
     def test_native_rlm_bounded_requires_exact_opt_in_before_preflight(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

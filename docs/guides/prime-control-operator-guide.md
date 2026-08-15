@@ -126,15 +126,17 @@ one explicit $0.50 ceiling and private evidence root; it is never part of
 
 ```bash
 make prime-verify-native-rlm-bounded \
-  ASTERION_PRIME_SOURCE_ROOT=3th-party/prime-agent \
-  ASTERION_PRIME_AUTHORITY=/private/prime-rlm-authority.json \
-  ASTERION_PRIME_EVIDENCE_ROOT=/private/prime-rlm-evidence
+  ASTERION_PRIME_SOURCE_ROOT=3th-party/prime-agent
 ```
 
 Set `ASTERION_PRIME_EXPERIMENT_MODEL` only in the private operator
 environment (for example, `deepseek-v4-flash` when the corresponding
-provider credential is present). It is digested for evidence but never printed
-or placed in the authority document.
+provider credential is present). The explicit target creates one in-memory,
+non-reusable authorization and a mode-0700 `.asterion-private/prime-rlm`
+evidence root. The model is digested for evidence but never printed or placed
+in an authority document. `ASTERION_PRIME_AUTHORITY`,
+`ASTERION_PRIME_MAX_COST_MICROS` (lower only), and
+`ASTERION_PRIME_EVIDENCE_ROOT` remain optional advanced overrides.
 
 Until the native probe runner is installed, this command reports
 `External-limited` after the exact preflight and authorization checks; it does
