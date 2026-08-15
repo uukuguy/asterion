@@ -15,6 +15,7 @@ from tools.prime_native_rlm_experiment import (
     start_native_rlm_daemon,
     resolve_native_rlm_model,
     NativeRlmProbeResult,
+    NativeRlmRuntimeResources,
     PrimeRlmExperimentError,
     prepare_native_rlm_experiment,
     run_native_rlm_experiment,
@@ -88,11 +89,29 @@ class TestNativeRlmExperiment(unittest.TestCase):
             authority = root / "authority.json"
             authority.write_text(json.dumps(_authority()), encoding="utf-8")
             reservation = prepare_native_rlm_experiment(authority, max_cost_micros=500_000, deadline_ms=600_000, environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}, now_ms=1_000)
-            descriptor = build_native_rlm_sidecar_descriptor(reservation, resolve_native_rlm_model({"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}), root)
+            resources = NativeRlmRuntimeResources(
+                node_executable=root / "node",
+                daemon_entry=root / "prime-daemon.mjs",
+                sidecar_entry=root / "gateway.mjs",
+                artifact_lock_path=root / "artifact-lock.json",
+                prime_source_root=root / "prime-source",
+                skill_path=root / "skill",
+                expected_runtime_build_id="build-1",
+            )
+            descriptor = build_native_rlm_sidecar_descriptor(
+                reservation,
+                resolve_native_rlm_model({"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}),
+                root,
+                resources,
+            )
             self.assertEqual(descriptor["provider"], "deepseek")
             self.assertEqual(descriptor["model"], "deepseek-v4-flash")
             self.assertEqual(descriptor["remainingBudget"]["cost_micros"], 500_000)
             self.assertEqual(descriptor["rlmMaxDepth"], 1)
+            self.assertEqual(descriptor["artifactLockPath"], str(resources.artifact_lock_path))
+            self.assertEqual(descriptor["primeSourceRoot"], str(resources.prime_source_root))
+            self.assertEqual(descriptor["skillPath"], str(resources.skill_path))
+            self.assertEqual(descriptor["expectedRuntimeBuildId"], "build-1")
 
     def test_daemon_start_waits_for_owned_socket(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
