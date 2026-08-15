@@ -133,6 +133,19 @@ class FakeTransport {
       });
     }
     if (command.type === "create") {
+      if (command.lifecycle === "client_owned") {
+        return Promise.resolve({
+          id: commandId,
+          type: "response",
+          command: "create",
+          success: true,
+          data: {
+            activeSessionId: "prime-child-1",
+            sessionId: "transcript-child-1",
+            sessionFile: "/private/sessions/transcript-child-1.jsonl",
+          },
+        });
+      }
       return Promise.resolve({
         id: commandId,
         type: "response",
@@ -526,6 +539,59 @@ test("lifecycle create binds exact resident config and disables native RLM", asy
     kind: "prime-resident-session",
     active_session_id: "prime-root-1",
     supervisor_generation: "supervisor-generation-1",
+  });
+});
+
+test("native RLM child uses the pinned daemon create and prompt protocol", async () => {
+  const transport = new FakeTransport();
+  const session = await PrimeSession.create({
+    transport,
+    sessionId: "session-1",
+    privateConfig: { ...PRIVATE_CONFIG, rlmMaxDepth: 1 },
+    async bindIdentity() {},
+  });
+
+  const child = await session.spawnNativeRlmChild(
+    "native-child-1",
+    "child-1",
+    "SENTINEL_PRIVATE_CHILD_GOAL",
+  );
+
+  assert.deepEqual(child, {
+    childId: "child-1",
+    activeSessionId: "prime-child-1",
+    transcriptSessionId: "transcript-child-1",
+    sessionPath: "/private/sessions/transcript-child-1.jsonl",
+  });
+  const create = transport.commands.find(
+    ({ command }) => command.type === "create" && command.lifecycle === "client_owned",
+  ).command;
+  assert.deepEqual(create.config, {
+    cwd: "/private/workspace",
+    agentDir: "/private/agent",
+    sessionDir: "/private/sessions",
+    provider: "example-provider",
+    model: "example-model",
+    skills: ["/private/skills/asterion-control"],
+    telemetryDisabled: true,
+  });
+  assert.deepEqual({
+    ...create.runtimeMetadata,
+    createdAt: typeof create.runtimeMetadata.createdAt,
+  }, {
+    kind: "subagent",
+    createdAt: "number",
+    parentActiveSessionId: "prime-root-1",
+    parentSessionId: "transcript-1",
+    parentSessionFile: "/private/sessions/transcript-1.jsonl",
+    rlmChildId: "child-1",
+    prompt: "SENTINEL_PRIVATE_CHILD_GOAL",
+    sessionDir: "/private/sessions",
+  });
+  assert.deepEqual(transport.commands.at(-1).command, {
+    type: "prompt",
+    activeSessionId: "prime-child-1",
+    message: "SENTINEL_PRIVATE_CHILD_GOAL",
   });
 });
 

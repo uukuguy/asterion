@@ -55,6 +55,13 @@ export interface PrimeSessionRecovery {
   readonly sessionStatus: "running" | "paused";
 }
 
+export interface PrimeNativeRlmChild {
+  readonly childId: string;
+  readonly activeSessionId: string;
+  readonly transcriptSessionId: string;
+  readonly sessionPath: string;
+}
+
 export interface PrimePrivateSessionConfig {
   readonly workspace: string;
   readonly agentDir: string;
@@ -787,6 +794,7 @@ export class PrimeSession {
     "session.branch.summarize" | "session.compact"
   >();
   private readonly cancelledModelOperations = new Set<string>();
+  private readonly nativeChildConfig: PrimePrivateSessionConfig | undefined;
 
   private constructor(
     transport: PrimeDaemonTransport,
@@ -796,12 +804,14 @@ export class PrimeSession {
     continuationId: string,
     sessionPath: string | undefined,
     supervisorGeneration: string,
+    nativeChildConfig?: PrimePrivateSessionConfig,
   ) {
     this.transport = transport;
     this.currentSupervisorGeneration = supervisorGeneration;
     this.currentTranscriptSessionId = transcriptSessionId;
     this.currentContinuationId = continuationId;
     this.currentSessionPath = sessionPath;
+    this.nativeChildConfig = nativeChildConfig;
   }
 
   get supervisorGeneration(): string {
@@ -923,6 +933,7 @@ export class PrimeSession {
         continuationId,
         sessionPath,
         generation,
+        privateConfig,
       );
       await session.ensureManualCompactionOnly("initial-policy");
       await session.request(
@@ -982,6 +993,74 @@ export class PrimeSession {
     try {
       return this.transport.subscribe(listener);
     } catch {
+      throw new PrimeSessionError();
+    }
+  }
+
+  async spawnNativeRlmChild(
+    commandId: string,
+    childId: string,
+    goal: string,
+  ): Promise<PrimeNativeRlmChild> {
+    try {
+      const privateConfig = this.nativeChildConfig;
+      if (
+        privateConfig === undefined ||
+        privateConfig.rlmMaxDepth !== 1 ||
+        !OPAQUE_ID.test(commandId) ||
+        !OPAQUE_ID.test(childId) ||
+        typeof goal !== "string" ||
+        Buffer.byteLength(goal, "utf8") > MAX_PRIVATE_TEXT_BYTES ||
+        this.currentSessionPath === undefined
+      ) {
+        throw new PrimeSessionError();
+      }
+      const deferredCreate = await this.transport.requestDeferred(
+        {
+          type: "create",
+          continueRecent: false,
+          noSession: false,
+          name: `${this.sessionId}-rlm-${childId}`,
+          lifecycle: "client_owned",
+          config: Object.freeze({
+            cwd: privateConfig.workspace,
+            agentDir: privateConfig.agentDir,
+            sessionDir: privateConfig.sessionDir,
+            provider: privateConfig.provider,
+            model: privateConfig.model,
+            skills: Object.freeze([privateConfig.skillPath]),
+            telemetryDisabled: true,
+          }),
+          runtimeMetadata: Object.freeze({
+            kind: "subagent",
+            createdAt: Date.now(),
+            parentActiveSessionId: this.activeSessionId,
+            parentSessionId: this.currentTranscriptSessionId,
+            parentSessionFile: this.currentSessionPath,
+            rlmChildId: childId,
+            prompt: goal,
+            sessionDir: privateConfig.sessionDir,
+          }),
+        },
+        `${commandId}-create`,
+        privateConfig.timeoutMs,
+      );
+      const identity = identityFromCreate(
+        deferredCreate.response,
+        privateConfig.sessionDir,
+      );
+      await this.request(
+        { type: "prompt", activeSessionId: identity.activeSessionId, message: goal },
+        `${commandId}-prompt`,
+      );
+      if (!deferredCreate.acknowledge()) {
+        throw new PrimeSessionError();
+      }
+      return Object.freeze({ childId, ...identity });
+    } catch (error) {
+      if (error instanceof PrimeSessionError) {
+        throw error;
+      }
       throw new PrimeSessionError();
     }
   }
