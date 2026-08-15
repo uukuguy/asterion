@@ -677,6 +677,20 @@ def _native_rlm_failure_class(
     }
     if safe_error in control_categories:
         return control_categories[safe_error]
+    if (
+        isinstance(safe_error, str)
+        and safe_error.startswith("Native RLM controlled probe running event-transition-")
+        and safe_error.endswith(" did not complete")
+    ):
+        event_type = safe_error.removeprefix(
+            "Native RLM controlled probe running event-transition-"
+        ).removesuffix(" did not complete")
+        if event_type in {
+            "goal-updated", "budget-reported", "action-proposed",
+            "session-running", "session-completed", "session-failed",
+            "session-budget-limited", "session-cancelled",
+        }:
+            return "event_transition_" + event_type.replace("-", "_")
     if not isinstance(stderr_path, Path):
         return "unavailable"
     try:

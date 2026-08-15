@@ -8,7 +8,7 @@ import hashlib
 import json
 import uuid
 from collections import OrderedDict
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
@@ -177,13 +177,17 @@ class PrimeControlPlaneClient:
         private_content: PrivateContentResolver,
         private_attachments: PrivateAttachmentResolver | None = None,
         manifest: ControlPlaneManifest | None = None,
+        event_observer: Callable[[ControlEvent], None] | None = None,
     ) -> None:
         if not hasattr(private_content, "resolve_text"):
+            raise PrimeControlError()
+        if event_observer is not None and not callable(event_observer):
             raise PrimeControlError()
         self._process = process
         self._private_content = private_content
         self._private_attachments = private_attachments
         self._manifest = manifest or _load_manifest()
+        self._event_observer = event_observer
         self._closed = False
         self._result_projections: dict[
             str, Mapping[str, str | list[str]]
@@ -580,7 +584,10 @@ class PrimeControlPlaneClient:
         }
         try:
             async for event in self._process.events(envelope):
-                yield ControlEvent.from_mapping(event)
+                control_event = ControlEvent.from_mapping(event)
+                if self._event_observer is not None:
+                    self._event_observer(control_event)
+                yield control_event
         except (ControlProtocolError, TypeError, ValueError, RuntimeError):
             raise PrimeControlError() from None
 

@@ -289,6 +289,7 @@ def build_native_rlm_control_host(
     *,
     goal: NativeRlmPrivateGoal,
     clock_ms: Callable[[], int] | None = None,
+    event_observer: Callable[[ControlEvent], None] | None = None,
 ) -> ControlHost:
     """Wire the real Prime client to provider-owned native RLM lifecycle state."""
     if (
@@ -299,6 +300,7 @@ def build_native_rlm_control_host(
         or not callable(getattr(sidecar, "request", None))
         or not callable(getattr(sidecar, "events", None))
         or not callable(getattr(sidecar, "close", None))
+        or event_observer is not None and not callable(event_observer)
     ):
         raise PrimeRlmExperimentError("Native RLM control host is invalid")
     try:
@@ -306,6 +308,7 @@ def build_native_rlm_control_host(
             process=sidecar,
             private_content=goal,
             private_attachments=goal,
+            event_observer=event_observer,
         )
         return build_prime_rlm_control_host(
             session_id=_SESSION_ID,
@@ -879,11 +882,18 @@ async def run_native_rlm_controlled_probe(
         and (not isinstance(progress_root, Path) or not progress_root.is_dir())
     ):
         raise PrimeRlmExperimentError("Native RLM controlled probe is invalid")
+    last_event_type: str | None = None
+
+    def observe_event(event: ControlEvent) -> None:
+        nonlocal last_event_type
+        last_event_type = event.type
+
     host = build_native_rlm_control_host(
         sidecar,
         reservation,
         root,
         goal=NativeRlmPrivateGoal(_PROBE_GOAL) if goal is None else goal,
+        event_observer=observe_event,
     )
     observer = PrimeControlPlaneClient(
         process=sidecar,
@@ -958,6 +968,8 @@ async def run_native_rlm_controlled_probe(
             checkpoint()
             return latest
         category = _native_rlm_control_failure_category(error)
+        if category == "event-transition" and last_event_type is not None:
+            category = "event-transition-" + last_event_type.replace(".", "-")
         raise PrimeRlmExperimentError(
             f"Native RLM controlled probe {stage} {category} did not complete"
         ) from None

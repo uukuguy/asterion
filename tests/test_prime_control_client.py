@@ -758,6 +758,20 @@ class TestPrimeControlClient(unittest.IsolatedAsyncioTestCase):
             {"generation": 1, "sequence": 2},
         )
 
+    async def test_events_can_observe_only_validated_event_metadata(self) -> None:
+        fake_process = FakeProcess()
+        fake_process.event_values = [event(3)]
+        observed = []
+        client = PrimeControlPlaneClient(
+            process=fake_process,
+            private_content=FakeResolver(),
+            event_observer=lambda value: observed.append(value.type),
+        )
+
+        _ = [item async for item in client.events()]
+
+        self.assertEqual(observed, ["session.running"])
+
     async def test_invalid_sidecar_event_fails_closed(self) -> None:
         fake_process = FakeProcess()
         fake_process.event_values = [{"type": "provider.payload", "body": "SENTINEL_SECRET"}]
