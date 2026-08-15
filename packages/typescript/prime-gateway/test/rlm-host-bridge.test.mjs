@@ -132,6 +132,26 @@ test("serves an authenticated RLM spawn over its private socket", async () => {
   } finally { await listener.close(); await rm(root, { recursive: true, force: true }); }
 });
 
+test("serves an authenticated admitted RLM deletion over its private socket", async () => {
+  const root = await mkdtemp(join(tmpdir(), "asterion-rlm-delete-"));
+  const path = join(root, "r.sock");
+  const bridge = new RlmHostBridge({
+    sessionId: "session-1",
+    admitSpawn: async (p) => ({ resolution: "admitted", childId: p.childId }),
+    admitDelete: async (p) => ({ resolution: "admitted", childId: p.childId }),
+  });
+  const listener = await listenRlmHostBridge(path, "session-1", "22".repeat(32), bridge);
+  try {
+    const response = await new Promise((resolve, reject) => {
+      const socket = createConnection(path);
+      let body = "";
+      socket.once("connect", () => socket.write(`${JSON.stringify({ protocol: RLM_HOST_PROTOCOL, type: "authenticate", session_id: "session-1", token: "22".repeat(32) })}\n${JSON.stringify({ type: "rlm.delete.propose", request_id: "delete-1", child_id: "child-1" })}\n`));
+      socket.on("data", (chunk) => { body += chunk; }); socket.once("error", reject); socket.once("end", () => resolve(JSON.parse(body)));
+    });
+    assert.deepEqual(response, { resolution: "admitted", childId: "child-1" });
+  } finally { await listener.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("serves one authenticated closed child terminal lifecycle frame", async () => {
   const root = await mkdtemp(join(tmpdir(), "asterion-rlm-lifecycle-"));
   const path = join(root, "r.sock");
