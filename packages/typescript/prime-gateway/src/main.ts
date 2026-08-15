@@ -1258,6 +1258,7 @@ async function createSidecarFromDescriptor(
   let gateway: PrimeGateway;
   let skillBridge: AsterionSkillBridge | undefined;
   let skillBridgeRoot: string | undefined;
+  let nativeRootSession: PrimeSession | undefined;
   let rlmHostClose: (() => Promise<void>) | undefined;
   let sessionReady: (() => void) | undefined;
   let currentRemainingBudget = descriptor.remainingBudget;
@@ -1457,9 +1458,58 @@ async function createSidecarFromDescriptor(
       nextEventIdentity: () => gateway.nextEventIdentity(),
       emitActionProposal: async (event) => {
         await ready;
+        if (
+          descriptor.rlmMaxDepth === 1 &&
+          event.type === "action.proposed" &&
+          event.payload.kind === "child.spawn"
+        ) {
+          const actionId = event.payload.action_id;
+          const target = event.payload.target;
+          if (target.kind !== "child") {
+            throw new PrimeGatewayError();
+          }
+          await store.recordRlmBinding({
+            action_id: actionId,
+            child_id: target.child_id,
+            authority_revision: event.payload.authority_revision,
+            depth: 1,
+            model_selector_digest: createHash("sha256")
+              .update(descriptor.model, "utf8")
+              .digest("hex"),
+          });
+        }
         await gateway.emitActionProposal(event);
       },
       waitForAdmission: (actionId) => gateway.waitForAdmission(actionId),
+      afterAdmission: async (event) => {
+        if (
+          descriptor.rlmMaxDepth !== 1 ||
+          event.type !== "action.proposed" ||
+          event.payload.kind !== "child.spawn"
+        ) {
+          return;
+        }
+        const root = nativeRootSession;
+        const target = event.payload.target;
+        if (root === undefined || target.kind !== "child") {
+          throw new PrimeGatewayError();
+        }
+        const goal = await privateValues.readInput(
+          event.payload.input_ref as `private:${string}`,
+        );
+        const child = await root.spawnNativeRlmChild(
+          String(event.payload.action_id),
+          target.child_id,
+          goal,
+        );
+        await store.recordRlmLifecycle({
+          type: "rlm.child.started",
+          child_id: target.child_id,
+          native_identity_digest: createHash("sha256")
+            .update(`${child.activeSessionId}:${child.transcriptSessionId}`, "utf8")
+            .digest("hex"),
+        });
+      },
       waitForTerminal: (actionId) => gateway.waitForTerminal(actionId),
       actionStatus: (actionId) => gateway.actionStatus(actionId),
     });
@@ -1485,7 +1535,7 @@ async function createSidecarFromDescriptor(
       });
       await startSkillBridge(context, ready);
       try {
-        return await PrimeSession.create({
+        const session = await PrimeSession.create({
           transport,
           sessionId: descriptor.sessionId,
           privateConfig: {
@@ -1504,6 +1554,8 @@ async function createSidecarFromDescriptor(
           },
           bindIdentity,
         });
+        nativeRootSession = session;
+        return session;
       } catch (error) {
         sessionReady = undefined;
         await closeSkillBridge();
@@ -1519,6 +1571,7 @@ async function createSidecarFromDescriptor(
         continuationId: identity.continuationId,
         sessionPath: identity.sessionPath,
       });
+      nativeRootSession = session;
       return (async () => {
         await session.ensureManualCompactionOnly("restore-policy");
         const cursor = store.snapshot().primeCursor;
