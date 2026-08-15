@@ -891,6 +891,15 @@ async def run_native_rlm_controlled_probe(
         while time.monotonic() < deadline:
             await host.pump()
             snapshot = host.snapshot()
+            terminal = snapshot.state.session_status
+            if snapshot.state.terminal_event_id is not None:
+                if terminal not in {"cancelled", "completed", "failed", "budget_limited"}:
+                    raise PrimeRlmExperimentError("Native RLM terminal state is invalid")
+                if terminal != "completed":
+                    session_terminal = True
+                    latest = replace(latest, terminal=terminal, usage=snapshot.authority_usage)
+                    checkpoint()
+                    return latest
             latest = await observe_native_rlm_gateway_probe(
                 observer, usage=snapshot.authority_usage
             )
@@ -899,9 +908,6 @@ async def run_native_rlm_controlled_probe(
                 session_terminal = True
                 return latest
             if snapshot.state.terminal_event_id is not None:
-                terminal = snapshot.state.session_status
-                if terminal not in {"cancelled", "completed", "failed", "budget_limited"}:
-                    raise PrimeRlmExperimentError("Native RLM terminal state is invalid")
                 session_terminal = True
                 return replace(latest, terminal=terminal)
             await asyncio.sleep(0.025)

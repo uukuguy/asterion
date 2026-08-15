@@ -176,6 +176,51 @@ class TestNativeRlmExperiment(unittest.TestCase):
         ])
         self.assertTrue(host.closed)
 
+    def test_controlled_probe_records_failed_terminal_before_lifecycle_read(self) -> None:
+        class Host:
+            async def dispatch(self, _command) -> None:
+                return None
+
+            async def pump(self) -> None:
+                return None
+
+            def snapshot(self):
+                return type(
+                    "Snapshot",
+                    (),
+                    {
+                        "authority_usage": BudgetUsage(1, 0, 0, 1, 0),
+                        "state": type(
+                            "State",
+                            (),
+                            {"terminal_event_id": "event-3", "session_status": "failed"},
+                        )(),
+                    },
+                )()
+
+            async def close(self) -> None:
+                return None
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            reservation = prepare_native_rlm_experiment(
+                None,
+                max_cost_micros=500_000,
+                deadline_ms=600_000,
+                environ={"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"},
+                now_ms=1_000,
+            )
+            with mock.patch.object(
+                native_rlm, "build_native_rlm_control_host", return_value=Host()
+            ), mock.patch.object(
+                native_rlm, "observe_native_rlm_gateway_probe", new_callable=mock.AsyncMock
+            ) as observe:
+                result = asyncio.run(run_native_rlm_controlled_probe(object(), reservation, root))
+
+        self.assertEqual(result.terminal, "failed")
+        self.assertEqual(result.usage.controller_tokens, 1)
+        observe.assert_not_awaited()
+
     def test_workspace_preparation_creates_only_private_session_directories(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
