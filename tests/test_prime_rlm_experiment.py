@@ -703,13 +703,37 @@ class TestNativeRlmExperiment(unittest.TestCase):
         with self.assertRaises(PrimeRlmExperimentError):
             resolve_native_rlm_model({"ASTERION_PRIME_EXPERIMENT_MODEL": "other"})
 
-    def test_daemon_environment_forwards_only_selected_credential(self) -> None:
+    def test_daemon_environment_forwards_selected_credential_and_kernel_runtime(
+        self,
+    ) -> None:
         environment = build_native_rlm_daemon_environment(
-            {"HOME": "/private/home", "PATH": "/bin", "DEEPSEEK_API_KEY": "secret", "OTHER": "no"},
+            {
+                "HOME": "/private/home",
+                "PATH": "/bin",
+                "DEEPSEEK_API_KEY": "secret",
+                "PRIME_AGENT_KERNEL_PYTHON": "/private/kernel/python",
+                "PRIME_AGENT_KERNEL_VENV": "/private/kernel-venv",
+                "OTHER": "no",
+            },
             credential_env="DEEPSEEK_API_KEY",
         )
         self.assertEqual(environment["DEEPSEEK_API_KEY"], "secret")
-        self.assertEqual(set(environment), {"HOME", "PATH", "DEEPSEEK_API_KEY"})
+        self.assertEqual(
+            environment["PRIME_AGENT_KERNEL_PYTHON"], "/private/kernel/python"
+        )
+        self.assertEqual(
+            environment["PRIME_AGENT_KERNEL_VENV"], "/private/kernel-venv"
+        )
+        self.assertEqual(
+            set(environment),
+            {
+                "HOME",
+                "PATH",
+                "DEEPSEEK_API_KEY",
+                "PRIME_AGENT_KERNEL_PYTHON",
+                "PRIME_AGENT_KERNEL_VENV",
+            },
+        )
         self.assertNotIn("secret", repr(environment))
 
     def test_preparation_binds_private_model_as_a_digest_only(self) -> None:

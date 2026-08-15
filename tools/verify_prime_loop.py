@@ -623,7 +623,12 @@ def _native_rlm_environment() -> dict[str, str]:
             if isinstance(key, str) and isinstance(value, str)
         }
         environment = dict(os.environ)
-        for key in ("ASTERION_PRIME_EXPERIMENT_MODEL", "DEEPSEEK_API_KEY"):
+        for key in (
+            "ASTERION_PRIME_EXPERIMENT_MODEL",
+            "DEEPSEEK_API_KEY",
+            "PRIME_AGENT_KERNEL_PYTHON",
+            "PRIME_AGENT_KERNEL_VENV",
+        ):
             if key in values:
                 environment[key] = values[key]
         return environment

@@ -93,7 +93,8 @@ class TestVerifyPrimeLoop(unittest.TestCase):
             root = Path(directory)
             (root / ".env").write_text(
                 "ASTERION_PRIME_EXPERIMENT_MODEL=deepseek-v4-flash\n"
-                "DEEPSEEK_API_KEY=current-private-key\n",
+                "DEEPSEEK_API_KEY=current-private-key\n"
+                "PRIME_AGENT_KERNEL_VENV=/private/kernel-venv\n",
                 encoding="utf-8",
             )
             with (
@@ -112,6 +113,7 @@ class TestVerifyPrimeLoop(unittest.TestCase):
 
         self.assertEqual(environment["DEEPSEEK_API_KEY"], "current-private-key")
         self.assertEqual(environment["ASTERION_PRIME_EXPERIMENT_MODEL"], "deepseek-v4-flash")
+        self.assertEqual(environment["PRIME_AGENT_KERNEL_VENV"], "/private/kernel-venv")
         self.assertEqual(environment["HOME"], "/private/home")
         self.assertEqual(environment["PATH"], "/private/bin")
 

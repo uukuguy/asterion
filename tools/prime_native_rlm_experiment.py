@@ -961,10 +961,16 @@ async def _reap_owned_daemon(
         raise PrimeRlmExperimentError("Native RLM daemon cleanup failed") from None
 
 
+_NATIVE_RLM_RUNTIME_ENV = (
+    "PRIME_AGENT_KERNEL_PYTHON",
+    "PRIME_AGENT_KERNEL_VENV",
+)
+
+
 def build_native_rlm_daemon_environment(
     environ: Mapping[str, str], *, credential_env: str
 ) -> Mapping[str, str]:
-    """Forward the sole selected credential to the owned Prime daemon."""
+    """Forward the selected credential and explicit private kernel runtime."""
     try:
         if (
             not isinstance(environ, Mapping)
@@ -976,7 +982,7 @@ def build_native_rlm_daemon_environment(
             raise ValueError
         values = {
             key: environ[key]
-            for key in ("HOME", "PATH", credential_env)
+            for key in ("HOME", "PATH", credential_env, *_NATIVE_RLM_RUNTIME_ENV)
             if key in environ
         }
         if "HOME" not in values or "PATH" not in values:
