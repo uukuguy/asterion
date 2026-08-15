@@ -917,6 +917,7 @@ async def run_native_rlm_controlled_probe(
     stage = "create"
     session_created = False
     session_terminal = False
+    primary_failure = False
 
     def checkpoint() -> None:
         if progress_root is None:
@@ -961,6 +962,7 @@ async def run_native_rlm_controlled_probe(
     except PrimeRlmExperimentError:
         terminal = _terminal_native_rlm_probe_result(host, latest)
         if terminal is None:
+            primary_failure = True
             raise
         session_terminal = True
         latest = terminal
@@ -976,6 +978,7 @@ async def run_native_rlm_controlled_probe(
         category = _native_rlm_control_failure_category(error)
         if category == "event-transition" and last_event_type is not None:
             category = "event-transition-" + last_event_type.replace(".", "-")
+        primary_failure = True
         raise PrimeRlmExperimentError(
             f"Native RLM controlled probe {stage} {category} did not complete"
         ) from None
@@ -987,7 +990,7 @@ async def run_native_rlm_controlled_probe(
             try:
                 await host.close()
             except Exception:
-                if not session_terminal:
+                if not session_terminal and not primary_failure:
                     raise
 
 
