@@ -181,6 +181,7 @@ SidecarLauncher = Callable[
     [Mapping[str, object], NativeRlmRuntimeResources], Awaitable[object]
 ]
 SidecarProbe = Callable[[object], Awaitable[NativeRlmProbeResult]]
+OwnedWorkerCleanup = Callable[[], Awaitable[None]]
 
 
 class _NativeRlmActionExecutor:
@@ -623,6 +624,7 @@ async def execute_native_rlm_sidecar_probe(
     daemon_launcher: DaemonLauncher,
     sidecar_launcher: SidecarLauncher,
     probe: SidecarProbe,
+    owned_worker_cleanup: OwnedWorkerCleanup | None = None,
 ) -> NativeRlmProbeResult:
     """Run one injected probe and always release the processes it owns."""
     if (
@@ -633,6 +635,7 @@ async def execute_native_rlm_sidecar_probe(
         or not isinstance(environ, Mapping)
         or any(not isinstance(key, str) or not isinstance(value, str) for key, value in environ.items())
         or not all(callable(value) for value in (daemon_launcher, sidecar_launcher, probe))
+        or owned_worker_cleanup is not None and not callable(owned_worker_cleanup)
     ):
         raise PrimeRlmExperimentError("Native RLM sidecar probe is invalid")
     prepare_native_rlm_workspace(root)
@@ -662,6 +665,8 @@ async def execute_native_rlm_sidecar_probe(
         raise PrimeRlmExperimentError("Native RLM probe did not complete") from None
     finally:
         await _close_owned_sidecar(sidecar)
+        if sidecar is not None and owned_worker_cleanup is not None:
+            await owned_worker_cleanup()
         await _reap_owned_daemon(daemon)
 
 
@@ -730,6 +735,11 @@ async def launch_owned_native_rlm_daemon(
         raise PrimeRlmExperimentError("Native RLM daemon could not start") from None
 
 
+async def await_owned_native_rlm_worker_cleanup() -> None:
+    """Allow Prime's owner-disconnect cleanup to stop detached workers first."""
+    await asyncio.sleep(31)
+
+
 async def run_owned_native_rlm_sidecar_probe(
     reservation: NativeRlmExperimentReservation,
     selection: NativeRlmModelSelection,
@@ -740,6 +750,7 @@ async def run_owned_native_rlm_sidecar_probe(
     probe: SidecarProbe,
     daemon_spawn: Callable[..., Awaitable[object]] | None = None,
     sidecar_starter: Callable[[object], Awaitable[object]] | None = None,
+    owned_worker_cleanup: OwnedWorkerCleanup | None = None,
 ) -> NativeRlmProbeResult:
     """Compose the real owned process launchers for one explicitly admitted probe."""
 
@@ -755,6 +766,9 @@ async def run_owned_native_rlm_sidecar_probe(
             descriptor, resources, environ=environ, starter=sidecar_starter
         )
 
+    cleanup = await_owned_native_rlm_worker_cleanup if owned_worker_cleanup is None else owned_worker_cleanup
+    if not callable(cleanup):
+        raise PrimeRlmExperimentError("Native RLM owned cleanup is invalid")
     return await execute_native_rlm_sidecar_probe(
         reservation,
         selection,
@@ -764,6 +778,7 @@ async def run_owned_native_rlm_sidecar_probe(
         daemon_launcher=launch_daemon,
         sidecar_launcher=launch_sidecar,
         probe=probe,
+        owned_worker_cleanup=cleanup,
     )
 
 

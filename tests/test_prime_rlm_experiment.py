@@ -329,6 +329,9 @@ class TestNativeRlmExperiment(unittest.TestCase):
             async def probe(_sidecar):
                 return NativeRlmProbeResult("completed", True, True, True, BudgetUsage(1, 1, 1, 3, 3))
 
+            async def await_cleanup():
+                return None
+
             result = asyncio.run(run_owned_native_rlm_sidecar_probe(
                 reservation,
                 resolve_native_rlm_model({"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}),
@@ -338,6 +341,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
                 probe=probe,
                 daemon_spawn=spawn,
                 sidecar_starter=start_sidecar,
+                owned_worker_cleanup=await_cleanup,
             ))
             self.assertEqual(result.terminal, "completed")
 
@@ -437,6 +441,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
 
             daemon = Daemon()
             sidecar = Sidecar()
+            cleanup_observed = []
 
             async def launch_daemon(plan):
                 plan.socket_path.touch()
@@ -455,6 +460,10 @@ class TestNativeRlmExperiment(unittest.TestCase):
                     usage=BudgetUsage(1, 1, 1, 3, 3),
                 )
 
+            async def await_owned_worker_cleanup():
+                self.assertTrue(sidecar.closed)
+                cleanup_observed.append(True)
+
             result = asyncio.run(
                 execute_native_rlm_sidecar_probe(
                     reservation,
@@ -471,11 +480,13 @@ class TestNativeRlmExperiment(unittest.TestCase):
                     daemon_launcher=launch_daemon,
                     sidecar_launcher=launch_sidecar,
                     probe=probe,
+                    owned_worker_cleanup=await_owned_worker_cleanup,
                 )
             )
 
             self.assertEqual(result.terminal, "completed")
             self.assertTrue(sidecar.closed)
+            self.assertEqual(cleanup_observed, [True])
             self.assertTrue(daemon.terminated)
 
     def test_sidecar_probe_redacts_failure_and_reaps_owned_daemon(self) -> None:
