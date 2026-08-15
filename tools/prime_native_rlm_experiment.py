@@ -311,6 +311,31 @@ async def start_native_rlm_sidecar(
         raise PrimeRlmExperimentError("Native RLM sidecar could not start") from None
 
 
+async def launch_owned_native_rlm_daemon(
+    plan: NativeRlmDaemonPlan,
+    resources: NativeRlmRuntimeResources,
+    *,
+    spawn: Callable[..., Awaitable[object]] | None = None,
+) -> object:
+    """Launch the exact daemon directly under its locked source root."""
+    if not isinstance(plan, NativeRlmDaemonPlan) or not isinstance(
+        resources, NativeRlmRuntimeResources
+    ):
+        raise PrimeRlmExperimentError("Native RLM daemon launch is invalid")
+    starter = asyncio.create_subprocess_exec if spawn is None else spawn
+    try:
+        return await starter(
+            *plan.argv,
+            cwd=resources.prime_source_root,
+            env=dict(plan.environ),
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except (OSError, RuntimeError, TypeError, ValueError):
+        raise PrimeRlmExperimentError("Native RLM daemon could not start") from None
+
+
 async def _close_owned_sidecar(sidecar: object | None) -> None:
     if sidecar is None:
         return

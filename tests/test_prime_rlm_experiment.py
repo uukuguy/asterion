@@ -14,6 +14,7 @@ from tools.prime_native_rlm_experiment import (
     build_native_rlm_sidecar_descriptor,
     execute_native_rlm_sidecar_probe,
     start_native_rlm_sidecar,
+    launch_owned_native_rlm_daemon,
     start_native_rlm_daemon,
     resolve_native_rlm_model,
     NativeRlmProbeResult,
@@ -69,6 +70,34 @@ def _authority(**changes: object) -> dict[str, object]:
 
 
 class TestNativeRlmExperiment(unittest.TestCase):
+    def test_owned_daemon_launch_uses_direct_arguments_and_locked_source_root(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            resources = NativeRlmRuntimeResources(
+                root / "node", root / "daemon.mjs", root / "gateway.mjs", root / "lock.json",
+                root / "source", root / "skill", "build-1",
+            )
+            plan = build_native_rlm_daemon_plan(
+                resources.node_executable,
+                resources.daemon_entry,
+                root / "prime.sock",
+                resolve_native_rlm_model({"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}),
+                {"HOME": str(root), "PATH": "/bin", "DEEPSEEK_API_KEY": "secret"},
+            )
+            calls = []
+
+            async def spawn(*argv, **options):
+                calls.append((argv, options))
+                return object()
+
+            process = asyncio.run(launch_owned_native_rlm_daemon(plan, resources, spawn=spawn))
+
+            self.assertIsInstance(process, object)
+            self.assertEqual(calls[0][0], plan.argv)
+            self.assertEqual(calls[0][1]["cwd"], resources.prime_source_root)
+            self.assertEqual(calls[0][1]["env"], dict(plan.environ))
+            self.assertNotIn("secret", repr(plan))
+
     def test_sidecar_start_excludes_model_credential(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
