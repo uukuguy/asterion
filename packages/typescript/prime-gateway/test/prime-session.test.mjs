@@ -524,6 +524,24 @@ test("lifecycle create binds exact resident config and disables native RLM", asy
   });
 });
 
+test("lifecycle enables one native RLM level only when private config requests it", async () => {
+  const transport = new FakeTransport();
+  await PrimeSession.create({
+    transport,
+    sessionId: "session-1",
+    privateConfig: { ...PRIVATE_CONFIG, rlmMaxDepth: 1 },
+    bindIdentity: async () => undefined,
+  });
+
+  const command = transport.commands.find(({ command }) => command.type === "set_rlm_max_depth");
+  assert.deepEqual(command?.command, {
+    type: "set_rlm_max_depth",
+    activeSessionId: "prime-root-1",
+    maxDepth: 1,
+    global: false,
+  });
+});
+
 test("lifecycle rejects a missing path or mismatched pinned header before durability acknowledgement", async () => {
   for (const mutate of [
     (transport) => {

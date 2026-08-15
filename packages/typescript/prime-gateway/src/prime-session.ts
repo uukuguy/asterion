@@ -65,6 +65,7 @@ export interface PrimePrivateSessionConfig {
   readonly maxTurns: number;
   readonly maxControllerTokens: number;
   readonly timeoutMs: number;
+  readonly rlmMaxDepth?: 0 | 1;
 }
 
 export interface PrimeSessionCreateOptions {
@@ -383,7 +384,8 @@ function validatePrivateConfig(
     !positiveInteger(value.maxContinuations) ||
     !positiveInteger(value.maxTurns) ||
     !positiveInteger(value.maxControllerTokens) ||
-    !positiveInteger(value.timeoutMs)
+    !positiveInteger(value.timeoutMs) ||
+    (value.rlmMaxDepth !== undefined && value.rlmMaxDepth !== 0 && value.rlmMaxDepth !== 1)
   ) {
     throw new PrimeSessionError();
   }
@@ -903,7 +905,7 @@ export class PrimeSession {
         {
           type: "set_rlm_max_depth",
           activeSessionId,
-          maxDepth: 0,
+          maxDepth: privateConfig.rlmMaxDepth ?? 0,
           global: false,
         },
         "disable-native-rlm",
