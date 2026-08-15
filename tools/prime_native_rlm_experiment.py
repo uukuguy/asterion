@@ -27,7 +27,11 @@ from asterion.control.execution import ActionExecutionReceipt
 from asterion.control.factory import ControlPlaneFactoryRegistry
 from asterion.control.host import ControlCommand, ControlEvent
 from asterion.control.journal import FileCanonicalJournal
-from asterion.control.manager import ControlHost, ControlHostTransportError
+from asterion.control.manager import (
+    ControlHost,
+    ControlHostError,
+    ControlHostTransportError,
+)
 from asterion.control.providers.prime.client import PrimeControlPlaneClient
 from asterion.control.providers.prime.factory import prime_control_plane_binding
 from asterion.control.providers.prime.rlm import build_prime_rlm_control_host
@@ -953,11 +957,7 @@ async def run_native_rlm_controlled_probe(
             latest = terminal
             checkpoint()
             return latest
-        category = (
-            "event-transport"
-            if isinstance(error, ControlHostTransportError)
-            else "control"
-        )
+        category = _native_rlm_control_failure_category(error)
         raise PrimeRlmExperimentError(
             f"Native RLM controlled probe {stage} {category} did not complete"
         ) from None
@@ -972,6 +972,22 @@ async def run_native_rlm_controlled_probe(
                 if not session_terminal:
                     raise
 
+
+def _native_rlm_control_failure_category(error: Exception) -> str:
+    """Project fixed host failures without retaining private transport detail."""
+    if isinstance(error, ControlHostTransportError):
+        return "event-transport"
+    if not isinstance(error, ControlHostError):
+        return "control"
+    categories = {
+        "control provider event transition failed": "event-transition",
+        "control action admission failed": "action-admission",
+        "provider-owned action lifecycle is invalid": "provider-lifecycle",
+        "control provider event journal failed": "event-journal",
+        "control provider budget report failed": "budget-report",
+        "control provider event is invalid": "event-invalid",
+    }
+    return categories.get(str(error), "control")
 
 def _write_native_rlm_progress(
     root: Path, stage: str, result: NativeRlmProbeResult

@@ -164,6 +164,14 @@ class TestNativeRlmExperiment(unittest.TestCase):
 
         self.assertNotIn("SENTINEL_PRIVATE", str(raised.exception))
 
+    def test_controlled_probe_classifies_fixed_event_transition(self) -> None:
+        self.assertEqual(
+            native_rlm._native_rlm_control_failure_category(
+                native_rlm.ControlHostError("control provider event transition failed")
+            ),
+            "event-transition",
+        )
+
     def test_controlled_probe_projects_a_recorded_terminal_after_stream_failure(self) -> None:
         class Host:
             def __init__(self) -> None:

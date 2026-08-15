@@ -666,8 +666,17 @@ def _native_rlm_failure_class(
     """Classify private sidecar diagnostics without retaining their content."""
     if safe_error == "Native RLM controlled probe running event-transport did not complete":
         return "event_transport"
-    if safe_error == "Native RLM controlled probe running control did not complete":
-        return "control"
+    control_categories = {
+        "Native RLM controlled probe running control did not complete": "control",
+        "Native RLM controlled probe running event-transition did not complete": "event_transition",
+        "Native RLM controlled probe running action-admission did not complete": "action_admission",
+        "Native RLM controlled probe running provider-lifecycle did not complete": "provider_lifecycle",
+        "Native RLM controlled probe running event-journal did not complete": "event_journal",
+        "Native RLM controlled probe running budget-report did not complete": "budget_report",
+        "Native RLM controlled probe running event-invalid did not complete": "event_invalid",
+    }
+    if safe_error in control_categories:
+        return control_categories[safe_error]
     if not isinstance(stderr_path, Path):
         return "unavailable"
     try:
