@@ -140,6 +140,12 @@ const CREATE_CONFIG_FIELDS = Object.freeze([
   "autonomous", "telemetryDisabled",
 ]);
 
+const RUNTIME_METADATA_FIELDS = Object.freeze([
+  "kind", "createdAt", "parentActiveSessionId", "parentSessionId",
+  "parentSessionFile", "rlmChildId", "rlmParentNodeId",
+  "rehydratedCompleted", "prompt", "spawnCode", "sessionDir",
+]);
+
 const EVENT_FIELDS = Object.freeze({
   daemon_closing: ["type", "reason"],
   heartbeats_changed: ["type"],
@@ -383,6 +389,35 @@ function nonEmptyString(value: unknown): value is string {
 
 function nonNegativeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) >= 0;
+}
+
+function validRuntimeMetadata(value: unknown): boolean {
+  if (
+    !isRecord(value) ||
+    !hasOnlyKeys(value, RUNTIME_METADATA_FIELDS) ||
+    (value.kind !== "top-level" && value.kind !== "subagent") ||
+    !nonNegativeInteger(value.createdAt)
+  ) {
+    return false;
+  }
+  for (const field of [
+    "parentActiveSessionId",
+    "parentSessionId",
+    "parentSessionFile",
+    "rlmChildId",
+    "rlmParentNodeId",
+    "prompt",
+    "spawnCode",
+    "sessionDir",
+  ]) {
+    if (value[field] !== undefined && typeof value[field] !== "string") {
+      return false;
+    }
+  }
+  return (
+    value.rehydratedCompleted === undefined ||
+    typeof value.rehydratedCompleted === "boolean"
+  );
 }
 
 function hasBoundedDepth(value: unknown): boolean {
@@ -825,7 +860,7 @@ function validateCommand(command: PrimeDaemonCommand): void {
       !hasOnlyKeys(command.config, CREATE_CONFIG_FIELDS)) ||
     (command.type === "create" &&
       command.runtimeMetadata !== undefined &&
-      !isRecord(command.runtimeMetadata)) ||
+      !validRuntimeMetadata(command.runtimeMetadata)) ||
     (command.type === "cancel_prompt_admission" &&
       !nonEmptyString(command.admissionId)) ||
     (command.type === "set_rlm_max_depth" &&

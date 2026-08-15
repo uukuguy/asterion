@@ -68,6 +68,17 @@ test("daemon wire rejects unbounded create configuration fields", () => {
   }, "create-extra", "asterion-client-1"));
 });
 
+test("daemon wire rejects unbounded create runtime metadata", () => {
+  assertFixedProtocolError(() => encodePrimeDaemonCommand({
+    type: "create",
+    runtimeMetadata: {
+      kind: "subagent",
+      createdAt: 1,
+      injected: "SENTINEL_RUNTIME_METADATA",
+    },
+  }, "create-metadata-extra", "asterion-client-1"));
+});
+
 test("daemon wire decodes and sanitizes the pinned hello", () => {
   const decoded = decodePrimeDaemonLine(JSON.stringify(hello()));
   assert.deepEqual(decoded, {
