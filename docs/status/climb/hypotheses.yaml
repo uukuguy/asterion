@@ -7,7 +7,7 @@
   description: exact durable RLM recovery evidence
   parent_paradigm: rlm-provider-free
   ranking: 0.9
-  status: pending
+  status: passed
 - id: H-003
   description: bounded real-model native RLM receipt
   parent_paradigm: rlm-bounded-provider

@@ -1,4 +1,5 @@
 # Prime Climb Research Tree
 
 - H-001: passed — provider-free RLM harness
-- Next: H-002 — RLM recovery evidence
+- H-002: passed — real daemon durable read-only recovery
+- Next: H-003 — bounded real-model native RLM receipt

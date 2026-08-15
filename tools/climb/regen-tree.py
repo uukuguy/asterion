@@ -23,12 +23,12 @@ def main(arguments: list[str]) -> int:
     if len(arguments) != 4:
         return 2
     hypothesis_id, outcome, next_action, command_id = arguments
-    if (hypothesis_id, outcome, next_action, command_id) != (
-        "H-001",
-        "passed",
-        "H-002",
-        "test.prime-rlm.provider-free",
-    ):
+    accepted = {
+        ("H-001", "passed", "H-002", "test.prime-rlm.provider-free"): 1,
+        ("H-002", "passed", "H-003", "test.prime-rlm.recovery-read-only"): 2,
+    }
+    cycle = accepted.get((hypothesis_id, outcome, next_action, command_id))
+    if cycle is None:
         return 2
     root = state_dir()
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -38,7 +38,7 @@ def main(arguments: list[str]) -> int:
         writer = csv.writer(handle, lineterminator="\n")
         if not existing:
             writer.writerow(("cycle", "hypothesis_id", "outcome", "command_id"))
-        writer.writerow(("1", hypothesis_id, outcome, command_id))
+        writer.writerow((str(cycle), hypothesis_id, outcome, command_id))
     (root / "session-state.json").write_text(
         json.dumps(
             {
@@ -54,7 +54,8 @@ def main(arguments: list[str]) -> int:
     (root / "research-tree.md").write_text(
         "# Prime Climb Research Tree\n\n"
         "- H-001: passed — provider-free RLM harness\n"
-        "- Next: H-002 — RLM recovery evidence\n",
+        "- H-002: passed — real daemon durable read-only recovery\n"
+        "- Next: H-003 — bounded real-model native RLM receipt\n",
         encoding="utf-8",
     )
     return 0
