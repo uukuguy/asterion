@@ -82,6 +82,32 @@ class TestNativeRlmExperiment(unittest.TestCase):
             process = asyncio.run(start_native_rlm_daemon(plan, launcher=launcher, timeout_seconds=1))
             self.assertIsInstance(process, Process)
 
+    def test_daemon_start_reaps_owned_process_when_socket_never_appears(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            selection = resolve_native_rlm_model({"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"})
+            plan = build_native_rlm_daemon_plan(Path("node"), Path("cli.js"), root / "missing.sock", selection, {"HOME": str(root), "PATH": "/bin", "DEEPSEEK_API_KEY": "secret"})
+
+            class Process:
+                returncode = None
+                terminated = False
+
+                def terminate(self):
+                    self.terminated = True
+                    self.returncode = 0
+
+                async def wait(self):
+                    return 0
+
+            process = Process()
+
+            async def launcher(_plan):
+                return process
+
+            with self.assertRaises(PrimeRlmExperimentError):
+                asyncio.run(start_native_rlm_daemon(plan, launcher=launcher, timeout_seconds=0.01))
+            self.assertTrue(process.terminated)
+
     def test_daemon_plan_uses_direct_pinned_runtime_and_selected_model(self) -> None:
         selection = resolve_native_rlm_model(
             {"ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash"}

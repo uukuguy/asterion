@@ -122,6 +122,15 @@ async def start_native_rlm_daemon(
     deadline = time.monotonic() + timeout_seconds
     while not plan.socket_path.exists():
         if getattr(process, "returncode", None) is not None or time.monotonic() >= deadline:
+            if getattr(process, "returncode", None) is None:
+                terminate = getattr(process, "terminate", None)
+                wait = getattr(process, "wait", None)
+                if callable(terminate) and callable(wait):
+                    terminate()
+                    try:
+                        await asyncio.wait_for(wait(), timeout=min(timeout_seconds, 2))
+                    except (TimeoutError, OSError):
+                        pass
             raise PrimeRlmExperimentError("Native RLM daemon did not become ready")
         await asyncio.sleep(0.01)
     return process
