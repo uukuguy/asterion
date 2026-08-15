@@ -607,11 +607,38 @@ def _native_rlm_bounded_external_limit(
             "full_dataset_ran": False,
         }
     except PrimeRlmExperimentError as error:
+        _write_native_rlm_external_limit_evidence(private_evidence_root, stage)
         raise PrimeExternalLimit(str(error)) from None
     except (OSError, RuntimeError, TypeError, ValueError):
+        _write_native_rlm_external_limit_evidence(private_evidence_root, stage)
         raise PrimeExternalLimit(
             f"Prime native RLM probe {stage} did not complete"
         ) from None
+
+
+def _write_native_rlm_external_limit_evidence(root: Path, stage: str) -> None:
+    """Persist only the safe terminal category when a bounded probe cannot finish."""
+
+    if not isinstance(root, Path) or not root.is_dir() or not isinstance(stage, str):
+        return
+    payload = {
+        "format": "asterion.prime-native-rlm-external-limit/v1",
+        "stage": stage if stage in {"authorization", "runtime", "workspace", "execution", "receipt"} else "preflight",
+        "status": "External-limited",
+    }
+    target = root / "native-rlm-external-limit.json"
+    temporary = root / ".native-rlm-external-limit.tmp"
+    try:
+        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            os.fchmod(handle.fileno(), 0o600)
+            json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
+        os.replace(temporary, target)
+    except OSError:
+        try:
+            temporary.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _native_rlm_environment() -> dict[str, str]:
