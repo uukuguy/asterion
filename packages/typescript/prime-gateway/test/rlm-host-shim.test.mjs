@@ -68,6 +68,7 @@ test("preserves Prime's synchronous completion while recording the completed obs
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(order, [
     "native-complete:child-1:native-session-1",
+    "lifecycle:rlm.child.started:child-1:",
     "lifecycle:rlm.child.terminal:child-1:completed",
   ]);
 });

@@ -217,6 +217,7 @@ export function wrapSubagentRuntimeHost(delegate, client, hostContext) {
     throw new TypeError("Prime RLM host shim is invalid");
   }
   const context = canonicalHostContext(hostContext);
+  const startedChildren = new Set();
   return Object.freeze({
     ...delegate,
     async createRlmSubagentRuntime(options) {
@@ -239,6 +240,7 @@ export function wrapSubagentRuntimeHost(delegate, client, hostContext) {
       }
       const runtime = await delegate.createRlmSubagentRuntime(options);
       await client.recordLifecycle(Object.freeze({ type: "rlm.child.started", child_id: spawn.child_id, native_identity_digest: nativeIdentityDigest(runtime) }));
+      startedChildren.add(spawn.child_id);
       return runtime;
     },
     async releaseRlmSubagentRuntime(runtime, options, status) {
@@ -254,7 +256,13 @@ export function wrapSubagentRuntimeHost(delegate, client, hostContext) {
       if (completed === true && validChildId(childId)) {
         queueMicrotask(() => {
           Promise.resolve()
-            .then(() => client.recordLifecycle(Object.freeze({ type: "rlm.child.terminal", child_id: childId, status: "completed" })))
+            .then(async () => {
+              if (!startedChildren.has(childId)) {
+                await client.recordLifecycle(Object.freeze({ type: "rlm.child.started", child_id: childId, native_identity_digest: nativeIdentityDigest({ session }) }));
+                startedChildren.add(childId);
+              }
+              await client.recordLifecycle(Object.freeze({ type: "rlm.child.terminal", child_id: childId, status: "completed" }));
+            })
             .catch(() => undefined);
         });
       }
