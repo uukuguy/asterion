@@ -832,6 +832,7 @@ async def run_native_rlm_controlled_probe(
     root: Path,
     *,
     goal: NativeRlmPrivateGoal | None = None,
+    progress_root: Path | None = None,
 ) -> NativeRlmProbeResult:
     """Drive one root session until the closed native RLM proof is complete.
 
@@ -843,6 +844,8 @@ async def run_native_rlm_controlled_probe(
         or not isinstance(root, Path)
         or not root.is_dir()
         or goal is not None and not isinstance(goal, NativeRlmPrivateGoal)
+        or progress_root is not None
+        and (not isinstance(progress_root, Path) or not progress_root.is_dir())
     ):
         raise PrimeRlmExperimentError("Native RLM controlled probe is invalid")
     host = build_native_rlm_control_host(
@@ -867,20 +870,30 @@ async def run_native_rlm_controlled_probe(
     stage = "create"
     session_created = False
     session_terminal = False
+
+    def checkpoint() -> None:
+        if progress_root is None:
+            return
+        _write_native_rlm_progress(progress_root, stage, latest)
     try:
+        checkpoint()
         await host.dispatch(native_rlm_session_create_command(reservation))
         session_created = True
         stage = "created"
+        checkpoint()
         await host.pump()
         stage = "start"
+        checkpoint()
         await host.dispatch(native_rlm_start_command(reservation))
         stage = "running"
+        checkpoint()
         while time.monotonic() < deadline:
             await host.pump()
             snapshot = host.snapshot()
             latest = await observe_native_rlm_gateway_probe(
                 observer, usage=snapshot.authority_usage
             )
+            checkpoint()
             if latest.terminal == "completed":
                 session_terminal = True
                 return latest
@@ -904,6 +917,30 @@ async def run_native_rlm_controlled_probe(
                 await host.dispatch(native_rlm_session_cancel_command(reservation))
         finally:
             await host.close()
+
+
+def _write_native_rlm_progress(
+    root: Path, stage: str, result: NativeRlmProbeResult
+) -> None:
+    payload = {
+        "format": "asterion.prime-native-rlm-progress/v1",
+        "stage": (
+            stage if stage in {"create", "created", "start", "running"} else "unknown"
+        ),
+        "child_started": result.child_started,
+        "message_delivered": result.message_delivered,
+        "child_deleted": result.child_deleted,
+        "usage": vars(result.usage),
+    }
+    descriptor, temporary = tempfile.mkstemp(prefix=".native-rlm-progress-", dir=root)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            os.fchmod(handle.fileno(), 0o600)
+            json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
+        os.replace(temporary, root / "native-rlm-progress.json")
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 async def _close_owned_sidecar(sidecar: object | None) -> None:

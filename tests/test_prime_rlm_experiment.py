@@ -112,7 +112,21 @@ class TestNativeRlmExperiment(unittest.TestCase):
             host = Host()
             with mock.patch.object(native_rlm, "build_native_rlm_control_host", return_value=host):
                 with self.assertRaises(PrimeRlmExperimentError):
-                    asyncio.run(run_native_rlm_controlled_probe(object(), reservation, root))
+                    asyncio.run(
+                        run_native_rlm_controlled_probe(
+                            object(), reservation, root, progress_root=root
+                        )
+                    )
+
+            progress = json.loads(
+                (root / "native-rlm-progress.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(progress["format"], "asterion.prime-native-rlm-progress/v1")
+            self.assertEqual(progress["stage"], "running")
+            self.assertFalse(progress["child_started"])
+            self.assertEqual(
+                (root / "native-rlm-progress.json").stat().st_mode & 0o777, 0o600
+            )
 
         self.assertEqual([command.type for command in host.commands], [
             "session.create", "input.submit", "session.cancel",

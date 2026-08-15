@@ -575,7 +575,10 @@ def _native_rlm_bounded_external_limit(
                     resources,
                     environ=environment,
                     probe=lambda sidecar: run_native_rlm_controlled_probe(
-                        sidecar, active, run_root  # type: ignore[arg-type]
+                        sidecar,
+                        active,
+                        run_root,
+                        progress_root=private_evidence_root,  # type: ignore[arg-type]
                     ),
                     private_stderr_sink=stderr_sink,
                 )
