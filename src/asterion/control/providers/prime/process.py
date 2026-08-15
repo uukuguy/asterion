@@ -136,6 +136,8 @@ def build_prime_sidecar_spawn_plan(
         if key in options.environ
     }
     env["ASTERION_PRIME_PRIVATE_FD"] = str(private_descriptor_fd)
+    if options.private_stderr_sink is not None:
+        env["ASTERION_PRIME_PRIVATE_DIAGNOSTICS"] = "1"
     return PrimeSidecarSpawnPlan(
         argv=(str(executable), str(entry)),
         env=env,

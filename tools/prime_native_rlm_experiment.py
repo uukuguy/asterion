@@ -13,7 +13,7 @@ import secrets
 import tempfile
 import time
 from types import MappingProxyType
-from typing import Awaitable, Callable
+from typing import Awaitable, Callable, IO
 
 from asterion.control.authority import (
     AuthorityEnvelope,
@@ -684,6 +684,7 @@ async def start_native_rlm_sidecar(
     *,
     environ: Mapping[str, str],
     starter: Callable[[object], Awaitable[object]] | None = None,
+    private_stderr_sink: IO[bytes] | None = None,
 ) -> object:
     """Start the Asterion sidecar with its model credential deliberately absent."""
     try:
@@ -698,6 +699,8 @@ async def start_native_rlm_sidecar(
             or "HOME" not in environ
             or "PATH" not in environ
             or starter is not None and not callable(starter)
+            or private_stderr_sink is not None
+            and not callable(getattr(private_stderr_sink, "fileno", None))
         ):
             raise ValueError
         from asterion.control.providers.prime.process import PrimeSidecarLaunchOptions
@@ -708,6 +711,7 @@ async def start_native_rlm_sidecar(
             private_descriptor=descriptor,
             environ={"HOME": environ["HOME"], "PATH": environ["PATH"]},
             request_timeout=30,
+            private_stderr_sink=private_stderr_sink,
         )
         if starter is not None:
             return await starter(options)
@@ -759,6 +763,7 @@ async def run_owned_native_rlm_sidecar_probe(
     daemon_spawn: Callable[..., Awaitable[object]] | None = None,
     sidecar_starter: Callable[[object], Awaitable[object]] | None = None,
     owned_worker_cleanup: OwnedWorkerCleanup | None = None,
+    private_stderr_sink: IO[bytes] | None = None,
 ) -> NativeRlmProbeResult:
     """Compose the real owned process launchers for one explicitly admitted probe."""
 
@@ -771,7 +776,11 @@ async def run_owned_native_rlm_sidecar_probe(
         descriptor: Mapping[str, object], _: NativeRlmRuntimeResources
     ) -> object:
         return await start_native_rlm_sidecar(
-            descriptor, resources, environ=environ, starter=sidecar_starter
+            descriptor,
+            resources,
+            environ=environ,
+            starter=sidecar_starter,
+            private_stderr_sink=private_stderr_sink,
         )
 
     cleanup = await_owned_native_rlm_worker_cleanup if owned_worker_cleanup is None else owned_worker_cleanup

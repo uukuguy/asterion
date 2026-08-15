@@ -564,23 +564,25 @@ def _native_rlm_bounded_external_limit(
         consumed: object | None = None
         observation: object | None = None
 
-        async def runner(active: object) -> object:
-            nonlocal consumed, observation
-            consumed = active
-            observation = await run_owned_native_rlm_sidecar_probe(
-                active,  # type: ignore[arg-type]
-                selection,
-                run_root,
-                resources,
-                environ=environment,
-                probe=lambda sidecar: run_native_rlm_controlled_probe(
-                    sidecar, active, run_root  # type: ignore[arg-type]
-                ),
-            )
-            return observation
+        with (run_root / "sidecar.stderr.log").open("xb") as stderr_sink:
+            async def runner(active: object) -> object:
+                nonlocal consumed, observation
+                consumed = active
+                observation = await run_owned_native_rlm_sidecar_probe(
+                    active,  # type: ignore[arg-type]
+                    selection,
+                    run_root,
+                    resources,
+                    environ=environment,
+                    probe=lambda sidecar: run_native_rlm_controlled_probe(
+                        sidecar, active, run_root  # type: ignore[arg-type]
+                    ),
+                    private_stderr_sink=stderr_sink,
+                )
+                return observation
 
-        stage = "execution"
-        report = asyncio.run(run_native_rlm_experiment(reservation, runner))
+            stage = "execution"
+            report = asyncio.run(run_native_rlm_experiment(reservation, runner))
         if consumed is None or observation is None:
             raise ValueError
         stage = "receipt"

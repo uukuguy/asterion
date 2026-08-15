@@ -386,11 +386,13 @@ class TestNativeRlmExperiment(unittest.TestCase):
                 seen.append(options)
                 return object()
 
-            asyncio.run(start_native_rlm_sidecar(
-                {"sessionId": "native-rlm-root"}, resources,
-                environ={"HOME": str(root), "PATH": "/bin", "DEEPSEEK_API_KEY": "secret"},
-                starter=starter,
-            ))
+            with (root / "private-stderr.log").open("wb") as stderr_sink:
+                asyncio.run(start_native_rlm_sidecar(
+                    {"sessionId": "native-rlm-root"}, resources,
+                    environ={"HOME": str(root), "PATH": "/bin", "DEEPSEEK_API_KEY": "secret"},
+                    starter=starter,
+                    private_stderr_sink=stderr_sink,
+                ))
 
             self.assertEqual(
                 seen[0].argv,
@@ -400,6 +402,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
                 ),
             )
             self.assertEqual(set(seen[0].environ), {"HOME", "PATH"})
+            self.assertIs(seen[0].private_stderr_sink, stderr_sink)
             self.assertNotIn("secret", repr(seen[0]))
 
     def test_sidecar_probe_reaps_owned_processes_after_complete_observation(self) -> None:

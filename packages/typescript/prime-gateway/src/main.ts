@@ -100,6 +100,18 @@ type SidecarEnvelopeType =
   | "session-context.cancel"
   | "session-context.execute";
 
+const SIDE_CAR_ENVELOPE_TYPES: ReadonlySet<SidecarEnvelopeType> = new Set([
+  "authority.update",
+  "command.accept",
+  "events.stream",
+  "private.read",
+  "rlm.binding.read",
+  "rlm.message.binding.read",
+  "rlm.lifecycle.read",
+  "session-context.cancel",
+  "session-context.execute",
+]);
+
 type SessionContextPrivateValues =
   | Readonly<{ readonly kind: "none" }>
   | Readonly<{ readonly kind: "attachment"; readonly body: Uint8Array }>
@@ -785,6 +797,7 @@ export class PrimeGatewaySidecar {
         events: this.events(envelope),
       });
     } catch {
+      privateDiagnosticEnvelopeFailure(value);
       const id = isRecord(value) && typeof value.id === "string" && REQUEST_ID.test(value.id)
         ? value.id
         : "request-invalid";
@@ -934,6 +947,17 @@ export class PrimeGatewaySidecar {
       privateValues.value,
     );
   }
+}
+
+function privateDiagnosticEnvelopeFailure(value: unknown): void {
+  if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS !== "1") {
+    return;
+  }
+  const type = isRecord(value) && typeof value.type === "string"
+    && SIDE_CAR_ENVELOPE_TYPES.has(value.type as SidecarEnvelopeType)
+    ? value.type
+    : "invalid";
+  process.stderr.write(`asterion-prime-sidecar-failed:${type}\n`);
 }
 
 export class PrimeBoundPrivateInputs implements PrimeGatewayPrivateInputs {
