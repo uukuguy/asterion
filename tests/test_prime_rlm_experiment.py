@@ -538,7 +538,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
 
             with (root / "private-stderr.log").open("wb") as stderr_sink:
                 asyncio.run(start_native_rlm_sidecar(
-                    {"sessionId": "native-rlm-root"}, resources,
+                    {"sessionId": "native-rlm-root", "timeoutMs": 600_000}, resources,
                     environ={"HOME": str(root), "PATH": "/bin", "DEEPSEEK_API_KEY": "secret"},
                     starter=starter,
                     private_stderr_sink=stderr_sink,
@@ -552,6 +552,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
                 ),
             )
             self.assertEqual(set(seen[0].environ), {"HOME", "PATH"})
+            self.assertEqual(seen[0].request_timeout, 600)
             self.assertIs(seen[0].private_stderr_sink, stderr_sink)
             self.assertNotIn("secret", repr(seen[0]))
 

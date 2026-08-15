@@ -747,12 +747,19 @@ async def start_native_rlm_sidecar(
             raise ValueError
         from asterion.control.providers.prime.process import PrimeSidecarLaunchOptions
 
+        timeout_ms = descriptor.get("timeoutMs")
+        if type(timeout_ms) is not int or timeout_ms <= 0:
+            raise ValueError
         options = PrimeSidecarLaunchOptions(
             node_executable=resources.node_executable,
             sidecar_entry=resources.sidecar_entry,
             private_descriptor=descriptor,
             environ={"HOME": environ["HOME"], "PATH": environ["PATH"]},
-            request_timeout=30,
+            # Long-running Prime turns can legitimately hold an IPC request
+            # while the native kernel awaits a control-plane admission.  This
+            # is bounded by the already-authorized session deadline, not a
+            # second, shorter transport deadline.
+            request_timeout=timeout_ms / 1_000,
             private_stderr_sink=private_stderr_sink,
         )
         if starter is not None:
