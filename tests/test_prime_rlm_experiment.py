@@ -708,6 +708,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
                     owned_daemon_shutdown=shutdown,
                 ))
             self.assertNotIn("SENTINEL_PRIVATE_PROBE", str(raised.exception))
+            self.assertEqual(str(raised.exception), "Native RLM probe did not complete")
             self.assertEqual(cleanup_observed, [True])
             self.assertFalse(daemon.terminated)
 

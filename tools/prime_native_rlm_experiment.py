@@ -673,6 +673,7 @@ async def execute_native_rlm_sidecar_probe(
         plan, launcher=daemon_launcher, timeout_seconds=10
     )
     sidecar: object | None = None
+    primary_failure = False
     try:
         descriptor = build_native_rlm_sidecar_descriptor(
             reservation, selection, root, resources
@@ -691,6 +692,7 @@ async def execute_native_rlm_sidecar_probe(
                 child_deleted=False,
                 usage=BudgetUsage.zero(),
             )
+        primary_failure = True
         raise
     except Exception:
         if await _owned_native_rlm_root_is_inactive(plan, resources):
@@ -701,6 +703,7 @@ async def execute_native_rlm_sidecar_probe(
                 child_deleted=False,
                 usage=BudgetUsage.zero(),
             )
+        primary_failure = True
         raise PrimeRlmExperimentError("Native RLM probe did not complete") from None
     finally:
         sidecar_cleanup_error: PrimeRlmExperimentError | None = None
@@ -716,7 +719,7 @@ async def execute_native_rlm_sidecar_probe(
                 daemon, plan, resources,
                 shutdown=owned_daemon_shutdown,
             )
-        if sidecar_cleanup_error is not None:
+        if sidecar_cleanup_error is not None and not primary_failure:
             raise sidecar_cleanup_error
 
 
