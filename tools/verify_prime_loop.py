@@ -556,9 +556,10 @@ def _native_rlm_bounded_external_limit(
         stage = "runtime"
         resources = _native_rlm_runtime_resources(source_root, preflight)
         stage = "workspace"
-        run_root = Path(
-            tempfile.mkdtemp(prefix="native-rlm-", dir=private_evidence_root)
-        )
+        # Unix-domain socket paths are bounded well below a typical repository
+        # path. Keep live Prime IPC under a short private /tmp directory; only
+        # the redacted receipt belongs in the operator-selected evidence root.
+        run_root = Path(tempfile.mkdtemp(prefix="asterion-rlm-", dir="/tmp"))
         run_root.chmod(0o700)
         consumed: object | None = None
         observation: object | None = None
@@ -584,7 +585,7 @@ def _native_rlm_bounded_external_limit(
             raise ValueError
         stage = "receipt"
         receipt = write_native_rlm_experiment_receipt(
-            run_root,
+            private_evidence_root,
             consumed,  # type: ignore[arg-type]
             terminal=observation.terminal,
             child_started=observation.child_started,
