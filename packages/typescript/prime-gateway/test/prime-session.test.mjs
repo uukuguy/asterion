@@ -603,6 +603,31 @@ test("native RLM child uses the pinned daemon create and prompt protocol", async
   });
 });
 
+test("native RLM child message stays on the pinned daemon protocol", async () => {
+  const transport = new FakeTransport();
+  const session = await PrimeSession.create({
+    transport,
+    sessionId: "session-1",
+    privateConfig: { ...PRIVATE_CONFIG, rlmMaxDepth: 1 },
+    async bindIdentity() {},
+  });
+  await session.spawnNativeRlmChild("native-child-1", "child-1", "private goal");
+
+  await session.sendNativeRlmChildMessage(
+    "native-message-1",
+    "child-1",
+    "SENTINEL_PRIVATE_MESSAGE",
+  );
+
+  assert.deepEqual(transport.commands.at(-1).command, {
+    type: "send_message",
+    targetActiveSessionId: "prime-child-1",
+    fromActiveSessionId: "prime-root-1",
+    message: "SENTINEL_PRIVATE_MESSAGE",
+    agentOrigin: true,
+  });
+});
+
 test("native RLM children are killed before their owning root is cancelled", async () => {
   const transport = new FakeTransport();
   const session = await PrimeSession.create({

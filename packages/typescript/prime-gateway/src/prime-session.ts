@@ -1103,6 +1103,45 @@ export class PrimeSession {
     }
   }
 
+  async sendNativeRlmChildMessage(
+    commandId: string,
+    childId: string,
+    message: string,
+  ): Promise<void> {
+    try {
+      if (
+        !OPAQUE_ID.test(commandId) ||
+        !OPAQUE_ID.test(childId) ||
+        !validText(message) ||
+        Buffer.byteLength(message, "utf8") > MAX_PRIVATE_TEXT_BYTES
+      ) {
+        throw new PrimeSessionError();
+      }
+      const child = this.nativeChildren.get(childId);
+      if (child === undefined) {
+        throw new PrimeSessionError();
+      }
+      const response = await this.request(
+        {
+          type: "send_message",
+          targetActiveSessionId: child.activeSessionId,
+          fromActiveSessionId: this.activeSessionId,
+          message,
+          agentOrigin: true,
+        },
+        `${commandId}-message`,
+      );
+      if (!response.success || response.command !== "send_message") {
+        throw new PrimeSessionError();
+      }
+    } catch (error) {
+      if (error instanceof PrimeSessionError) {
+        throw error;
+      }
+      throw new PrimeSessionError();
+    }
+  }
+
   async waitForNativeRlmChild(commandId: string, childId: string): Promise<void> {
     try {
       if (!OPAQUE_ID.test(commandId) || !OPAQUE_ID.test(childId)) {

@@ -81,6 +81,14 @@ const COMMAND_FIELDS = Object.freeze({
   complete_owned_session: ["type", "activeSessionId"],
   promote_owned_session: ["type", "activeSessionId"],
   kill: ["type", "activeSessionId"],
+  send_message: [
+    "type",
+    "targetActiveSessionId",
+    "message",
+    "fromActiveSessionId",
+    "agentOrigin",
+    "deliveryMode",
+  ],
   prompt: [
     "type",
     "activeSessionId",
@@ -891,6 +899,7 @@ function validateCommand(command: PrimeDaemonCommand): void {
     "list",
     "create",
     "detach",
+    "send_message",
     "rename_saved_session",
     "delete_saved_session",
     "prepare_update_restart",
@@ -902,6 +911,13 @@ function validateCommand(command: PrimeDaemonCommand): void {
     (command.activeSessionId !== undefined && !nonEmptyString(command.activeSessionId)) ||
     (command.type === "reattach" && !nonEmptyString(command.targetActiveSessionId)) ||
     (command.type === "prompt" && !nonEmptyString(command.message)) ||
+    (command.type === "send_message" &&
+      (!nonEmptyString(command.targetActiveSessionId) ||
+        !nonEmptyString(command.message) ||
+        (command.fromActiveSessionId !== undefined &&
+          !nonEmptyString(command.fromActiveSessionId)) ||
+        (command.agentOrigin !== undefined &&
+          typeof command.agentOrigin !== "boolean"))) ||
     (command.type === "prompt" &&
       command.content !== undefined &&
       !validPromptContent(command.content)) ||
