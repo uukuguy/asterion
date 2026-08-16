@@ -122,7 +122,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
                 (root / "native-rlm-progress.json").read_text(encoding="utf-8")
             )
             self.assertEqual(progress["format"], "asterion.prime-native-rlm-progress/v1")
-            self.assertEqual(progress["stage"], "running")
+            self.assertEqual(progress["stage"], "skill-spawn")
             self.assertFalse(progress["child_started"])
             self.assertEqual(
                 (root / "native-rlm-progress.json").stat().st_mode & 0o777, 0o600
@@ -158,7 +158,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
             with mock.patch.object(native_rlm, "build_native_rlm_control_host", return_value=Host()):
                 with self.assertRaisesRegex(
                     PrimeRlmExperimentError,
-                    "Native RLM controlled probe running event-transport did not complete",
+                    "Native RLM controlled probe skill-spawn event-transport did not complete",
                 ) as raised:
                     asyncio.run(run_native_rlm_controlled_probe(object(), reservation, root))
 

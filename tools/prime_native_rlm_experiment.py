@@ -1010,6 +1010,8 @@ async def run_native_rlm_controlled_probe(
             "child_tokens": 0, "aggregate_tokens": 1_000,
             "cost_micros": 0, "deadline_ms": 30_000,
         }
+        stage = "skill-spawn"
+        checkpoint()
         spawn_task = asyncio.create_task(_send_native_rlm_skill_effect(
             root, operation="child.spawn", payload={
                 "child_id": "native-rlm-child",
@@ -1032,6 +1034,8 @@ async def run_native_rlm_controlled_probe(
             latest = await observe_bounded(snapshot.authority_usage)
             checkpoint()
             if latest.child_started and message_task is None:
+                stage = "skill-message"
+                checkpoint()
                 message_task = asyncio.create_task(_send_native_rlm_skill_effect(
                     root, operation="child.message", payload={
                         "child_id": "native-rlm-child", "message": "ping",
@@ -1116,7 +1120,9 @@ def _write_native_rlm_progress(
     payload = {
         "format": "asterion.prime-native-rlm-progress/v1",
         "stage": (
-            stage if stage in {"create", "created", "start", "running"} else "unknown"
+            stage
+            if stage in {"create", "created", "start", "running", "skill-spawn", "skill-message"}
+            else "unknown"
         ),
         "child_started": result.child_started,
         "message_delivered": result.message_delivered,
