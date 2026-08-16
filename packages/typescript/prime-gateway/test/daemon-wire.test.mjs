@@ -456,3 +456,16 @@ test("daemon wire preserves only a valid generation-aware event cursor", () => {
   });
   assert.ok(Object.isFrozen(cursorFromPrimeDaemonOutbound(decoded)));
 });
+
+test("daemon wire does not treat a snapshot coverage cursor as an event cursor", () => {
+  const decoded = decodePrimeDaemonLine(JSON.stringify({
+    type: "session_snapshot_end",
+    activeSessionId: "prime-root-1",
+    snapshotId: "snapshot-1",
+    chunkCount: 0,
+    lastEventSequence: 4,
+    lastEventCursor: { generation: "worker-generation-1", sequence: 4 },
+  }));
+
+  assert.equal(cursorFromPrimeDaemonOutbound(decoded), undefined);
+});

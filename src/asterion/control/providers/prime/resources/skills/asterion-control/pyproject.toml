@@ -2,7 +2,7 @@
 name = "asterion-control-skill"
 version = "0.1.0"
 description = "Private Asterion control bridge for Prime Agent"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 
 [build-system]
 requires = ["hatchling"]

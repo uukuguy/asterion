@@ -5,8 +5,8 @@ description: Use the host-authorized Asterion portfolio, child sessions, checkpo
 
 # Asterion Control
 
-Import `asterion_control` in the persistent IPython kernel and call its async
-functions directly. Inspect `await asterion_control.portfolio()` and
+`asterion_control` is pre-imported in the persistent IPython kernel; call its
+async functions directly. Inspect `await asterion_control.portfolio()` and
 `await asterion_control.remaining_budget()` before proposing work.
 
 Every application, child, checkpoint, or goal effect requires a stable

@@ -3976,7 +3976,7 @@ test("gateway rejects unknown action resolution and replays failed handling", as
   }
 });
 
-test("gateway turns a cursor gap into recovery and resumes only on resync", async () => {
+test("gateway turns a native cursor regression into recovery and resumes only on resync", async () => {
   const state = await fixture();
   try {
     const goalRef = await state.privateValues.putInput("goal");
@@ -3991,11 +3991,23 @@ test("gateway turns a cursor gap into recovery and resumes only on resync", asyn
       activeSessionId: "prime-root-1",
       event: { type: "message_update", text: "SENTINEL_PRIVATE_MESSAGE" },
       meta: {
-        id: "prime-event-2",
+        id: "prime-event-1",
         protocol: { name: "prime-agent.daemon", version: 7 },
-        sequence: 2,
-        cursor: { generation: "worker-generation-1", sequence: 2 },
+        sequence: 1,
+        cursor: { generation: "worker-generation-1", sequence: 1 },
         emittedAt: "2026-08-10T04:00:00Z",
+      },
+    });
+    state.session.emit({
+      type: "session_event",
+      activeSessionId: "prime-root-1",
+      event: { type: "message_update", text: "SENTINEL_PRIVATE_REGRESSION" },
+      meta: {
+        id: "prime-event-0",
+        protocol: { name: "prime-agent.daemon", version: 7 },
+        sequence: 0,
+        cursor: { generation: "worker-generation-1", sequence: 0 },
+        emittedAt: "2026-08-10T04:00:01Z",
       },
     });
     await state.gateway.settle();

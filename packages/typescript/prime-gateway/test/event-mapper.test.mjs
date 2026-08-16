@@ -119,22 +119,31 @@ test("mapping ignores bodies and projects only fixed recoverable faults", () => 
   assert.equal(JSON.stringify([...auth, ...extension]).includes("SENTINEL"), false);
 });
 
-test("mapping rejects cursor gaps safely", () => {
-  for (const [outbound, kind] of [
-    [primeEvent({ type: "message_update", text: "private" }, 2), "cursor-gap"],
-  ]) {
-    const mapper = mapperFixture();
-    assert.throws(
-      () => mapper.map(outbound),
-      (error) => {
-        assert.ok(error instanceof PrimeEventMappingError);
-        assert.equal(error.message, "Prime event mapping failed");
-        assert.equal(error.kind, kind);
-        assert.equal(error.message.includes("private"), false);
-        return true;
-      },
-    );
-  }
+test("mapping ignores a replay carrying the exact native cursor", () => {
+  const mapper = mapperFixture();
+  const first = primeEvent({ type: "message_update", text: "SENTINEL_FIRST" }, 1);
+  const replay = primeEvent({ type: "message_update", text: "SENTINEL_REPLAY" }, 1);
+
+  assert.deepEqual(mapper.map(first), []);
+  assert.deepEqual(mapper.map(replay), []);
+});
+
+test("mapping accepts a monotonic native cursor gap but rejects regression", () => {
+  const mapper = mapperFixture();
+  assert.deepEqual(mapper.map(primeEvent({ type: "message_update" }, 2)), []);
+  assert.deepEqual(mapper.map(primeEvent({ type: "message_update" }, 4)), []);
+
+  const regressed = primeEvent({ type: "message_update", text: "private" }, 3);
+  assert.throws(
+    () => mapper.map(regressed),
+    (error) => {
+      assert.ok(error instanceof PrimeEventMappingError);
+      assert.equal(error.message, "Prime event mapping failed");
+      assert.equal(error.kind, "cursor-generation");
+      assert.equal(error.message.includes("private"), false);
+      return true;
+    },
+  );
 });
 
 test("mapping ignores a foreign session while preserving its cursor", () => {

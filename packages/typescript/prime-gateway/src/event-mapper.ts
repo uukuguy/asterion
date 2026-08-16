@@ -121,7 +121,9 @@ export class PrimeEventMapper {
         this.advanceCursor(outbound);
         return Object.freeze([]);
       }
-      this.advanceCursor(outbound);
+      if (this.advanceCursor(outbound) === "duplicate") {
+        return Object.freeze([]);
+      }
       if (this.sessionStatus === "terminal") {
         return Object.freeze([]);
       }
@@ -134,22 +136,21 @@ export class PrimeEventMapper {
     }
   }
 
-  private advanceCursor(outbound: PrimeDaemonOutbound): void {
+  private advanceCursor(outbound: PrimeDaemonOutbound): "advanced" | "duplicate" {
     const candidate = cursorFromPrimeDaemonOutbound(outbound);
     if (candidate === undefined) {
-      return;
+      return "advanced";
     }
     if (this.cursor === undefined) {
-      if (candidate.sequence !== 1) {
-        throw new PrimeEventMappingError("cursor-gap");
-      }
-    } else if (
-      candidate.generation !== this.cursor.generation ||
-      candidate.sequence !== this.cursor.sequence + 1
-    ) {
+    } else if (candidate.generation !== this.cursor.generation) {
+      throw new PrimeEventMappingError("cursor-generation");
+    } else if (candidate.sequence === this.cursor.sequence) {
+      return "duplicate";
+    } else if (candidate.sequence < this.cursor.sequence) {
       throw new PrimeEventMappingError("cursor-generation");
     }
     this.cursor = candidate;
+    return "advanced";
   }
 
   private mapOpenSession(outbound: PrimeDaemonOutbound): ControlEvent[] {

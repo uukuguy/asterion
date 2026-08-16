@@ -1010,17 +1010,12 @@ export function cursorFromPrimeDaemonOutbound(
     return undefined;
   }
   const meta = outbound.meta;
-  const candidates = [
-    isRecord(meta) ? meta.cursor : undefined,
-    outbound.lastEventCursor,
-  ];
-  for (const candidate of candidates) {
-    if (validCursor(candidate)) {
-      return Object.freeze({
-        generation: candidate.generation,
-        sequence: candidate.sequence,
-      });
-    }
+  const candidate = isRecord(meta) ? meta.cursor : undefined;
+  if (validCursor(candidate)) {
+    return Object.freeze({
+      generation: candidate.generation,
+      sequence: candidate.sequence,
+    });
   }
   return undefined;
 }
