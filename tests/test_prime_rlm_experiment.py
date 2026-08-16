@@ -158,7 +158,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
             with mock.patch.object(native_rlm, "build_native_rlm_control_host", return_value=Host()):
                 with self.assertRaisesRegex(
                     PrimeRlmExperimentError,
-                    "Native RLM controlled probe skill-spawn control did not complete",
+                    "Native RLM skill discovery did not complete",
                 ) as raised:
                     asyncio.run(run_native_rlm_controlled_probe(object(), reservation, root))
 
@@ -256,7 +256,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
                 result = asyncio.run(run_native_rlm_controlled_probe(object(), reservation, root))
 
         self.assertEqual(result.terminal, "failed")
-        self.assertEqual(result.usage.controller_tokens, 1)
+        self.assertEqual(result.usage.controller_tokens, 0)
         observe.assert_not_awaited()
 
     def test_workspace_preparation_creates_only_private_session_directories(self) -> None:

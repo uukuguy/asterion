@@ -979,7 +979,28 @@ function privateDiagnosticEnvelopeFailure(value: unknown): void {
     && SIDE_CAR_ENVELOPE_TYPES.has(value.type as SidecarEnvelopeType)
     ? value.type
     : "invalid";
-  process.stderr.write(`asterion-prime-sidecar-failed:${type}\n`);
+  const commandType = type === "command.accept" && isRecord(value)
+    && isRecord(value.command) && typeof value.command.type === "string"
+    && new Set(["session.create", "input.submit", "action.resolve", "session.cancel"])
+      .has(value.command.type)
+    ? value.command.type.replace(".", "-")
+    : undefined;
+  process.stderr.write(
+    `asterion-prime-sidecar-failed:${commandType ?? type}\n`,
+  );
+}
+
+function privateDiagnosticProbeCreateFailure(
+  descriptor: PrimeSidecarDescriptor,
+  stage: "skill-bridge" | "native-session",
+): void {
+  if (
+    !descriptor.probeReady ||
+    process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS !== "1"
+  ) {
+    return;
+  }
+  process.stderr.write(`asterion-prime-probe-create:${stage}\n`);
 }
 
 export class PrimeBoundPrivateInputs implements PrimeGatewayPrivateInputs {
@@ -1652,7 +1673,12 @@ async function createSidecarFromDescriptor(
       const ready = new Promise<void>((resolve) => {
         sessionReady = resolve;
       });
-      await startSkillBridge(context, ready);
+      try {
+        await startSkillBridge(context, ready);
+      } catch (error) {
+        privateDiagnosticProbeCreateFailure(descriptor, "skill-bridge");
+        throw error;
+      }
       try {
         const session = await PrimeSession.create({
           transport,
@@ -1680,6 +1706,7 @@ async function createSidecarFromDescriptor(
         }
         return session;
       } catch (error) {
+        privateDiagnosticProbeCreateFailure(descriptor, "native-session");
         sessionReady = undefined;
         await closeSkillBridge();
         throw error;

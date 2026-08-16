@@ -684,12 +684,14 @@ export class AsterionSkillBridge {
 
   private async processRequest(socket: Socket, line: Buffer): Promise<void> {
     let requestId = "unknown";
+    let raw: unknown;
+    let requestValidated = false;
     try {
       if (line.byteLength > MAX_SKILL_FRAME_BYTES) {
         this.respondAndClose(socket, errorResponse(requestId, "request-too-large"));
         return;
       }
-      const raw = parseJson(line);
+      raw = parseJson(line);
       if (isRecord(raw) && typeof raw.request_id === "string") {
         requestId = raw.request_id;
       }
@@ -698,10 +700,12 @@ export class AsterionSkillBridge {
         this.options.sessionId,
         this.options.goalId,
       );
+      requestValidated = true;
       requestId = request.request_id;
       const result = await this.dispatch(request);
       this.respondAndClose(socket, successResponse(requestId, result));
     } catch (error) {
+      privateDiagnosticSkillRequestFailure(raw, requestValidated);
       const code = error instanceof SkillBridgeConflictError
         ? "request-conflicts"
         : "request-invalid";
@@ -933,4 +937,29 @@ export class AsterionSkillBridge {
       socket.end(bytes);
     }
   }
+}
+
+function privateDiagnosticSkillRequestFailure(
+  value: unknown,
+  requestValidated: boolean,
+): void {
+  if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS !== "1") {
+    return;
+  }
+  const stage = requestValidated
+    ? "dispatch"
+    : !isRecord(value)
+    ? "shape"
+    : !hasExactKeys(value, ["protocol", "request_id", "session_id", "operation", "payload"])
+      ? "fields"
+      : value.protocol !== SKILL_CONTROL_PROTOCOL
+        ? "protocol"
+        : !nonEmptyOpaqueId(value.request_id)
+          ? "request-id"
+          : !isRecord(value.payload)
+            ? "payload"
+            : value.operation === "child.spawn"
+              ? "child-spawn"
+              : "other";
+  process.stderr.write(`asterion-prime-skill-request:${stage}\n`);
 }

@@ -529,6 +529,7 @@ test("lifecycle create binds exact resident config and disables native RLM", asy
   assert.deepEqual(transport.commands[5].command.capabilities, [
     "attach_snapshot",
     "chunked_snapshot",
+    "client_owned_sessions",
     "event_sequence",
     "slim_attach",
   ]);

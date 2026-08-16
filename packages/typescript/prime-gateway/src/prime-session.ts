@@ -446,6 +446,17 @@ function identityFromCreate(
     resolve(response.data.sessionFile) !== response.data.sessionFile ||
     dirname(response.data.sessionFile) !== resolve(sessionDir)
   ) {
+    if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+      const stage = !response.success || response.command !== "create"
+        ? "response"
+        : !isRecord(response.data)
+          ? "data"
+          : typeof response.data.activeSessionId !== "string" ||
+              typeof response.data.sessionId !== "string"
+            ? "ids"
+            : "path";
+      process.stderr.write(`asterion-prime-create-identity:${stage}\n`);
+    }
     throw new PrimeSessionError();
   }
   return Object.freeze({
@@ -1003,6 +1014,7 @@ export class PrimeSession {
     childId: string,
     goal: string,
   ): Promise<PrimeNativeRlmChild> {
+    let stage = "validation";
     try {
       const privateConfig = this.nativeChildConfig;
       if (
@@ -1017,6 +1029,7 @@ export class PrimeSession {
       ) {
         throw new PrimeSessionError();
       }
+      stage = "create";
       const deferredCreate = await this.transport.requestDeferred(
         {
           type: "create",
@@ -1059,14 +1072,17 @@ export class PrimeSession {
         `${commandId}-create`,
         privateConfig.timeoutMs,
       );
+      stage = "identity";
       const identity = identityFromCreate(
         deferredCreate.response,
         privateConfig.sessionDir,
       );
+      stage = "prompt";
       await this.request(
         { type: "prompt", activeSessionId: identity.activeSessionId, message: goal },
         `${commandId}-prompt`,
       );
+      stage = "acknowledge";
       if (!deferredCreate.acknowledge()) {
         throw new PrimeSessionError();
       }
@@ -1074,6 +1090,9 @@ export class PrimeSession {
       this.nativeChildren.set(childId, child);
       return child;
     } catch (error) {
+      if (process.env.ASTERION_PRIME_PRIVATE_DIAGNOSTICS === "1") {
+        process.stderr.write(`asterion-prime-rlm-spawn:${stage}\n`);
+      }
       if (error instanceof PrimeSessionError) {
         throw error;
       }
@@ -1362,6 +1381,7 @@ export class PrimeSession {
       capabilities: [
         "attach_snapshot",
         "chunked_snapshot",
+        "client_owned_sessions",
         "event_sequence",
         "slim_attach",
       ],

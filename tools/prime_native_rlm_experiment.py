@@ -208,6 +208,7 @@ async def _send_native_rlm_skill_effect(
 
     if operation not in {"child.spawn", "child.message"} or not isinstance(root, Path):
         raise PrimeRlmExperimentError("Native RLM skill effect is invalid")
+    stage = "discovery"
     try:
         discovery = json.loads((root / "agent" / "asterion-control.json").read_text("utf-8"))
         socket_path = discovery["socket_path"]
@@ -216,8 +217,10 @@ async def _send_native_rlm_skill_effect(
         if not all(isinstance(value, str) and value for value in (socket_path, token, session_id)):
             raise ValueError
         request_id = "probe-" + secrets.token_hex(16)
+        stage = "connect"
         reader, writer = await asyncio.open_unix_connection(socket_path)
         try:
+            stage = "request"
             for value in (
                 {"protocol": "asterion.skill-control/v1", "type": "authenticate", "token": token, "session_id": session_id},
                 {"protocol": "asterion.skill-control/v1", "request_id": request_id, "session_id": session_id, "operation": operation, "payload": dict(payload)},
@@ -229,6 +232,15 @@ async def _send_native_rlm_skill_effect(
         finally:
             writer.close()
             await writer.wait_closed()
+        if isinstance(response, Mapping) and response.get("status") == "error":
+            code = response.get("code")
+            stage = {
+                "authentication-failed": "authentication",
+                "request-invalid": "request-invalid",
+                "request-conflicts": "request-conflicts",
+                "request-too-large": "request-too-large",
+            }.get(code, "request")
+            raise ValueError
         if (
             not isinstance(response, Mapping)
             or response.get("protocol") != "asterion.skill-control/v1"
@@ -239,7 +251,9 @@ async def _send_native_rlm_skill_effect(
             raise ValueError
         return MappingProxyType(dict(response["result"]))
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
-        raise PrimeRlmExperimentError("Native RLM skill effect did not complete") from None
+        raise PrimeRlmExperimentError(
+            f"Native RLM skill {stage} did not complete"
+        ) from None
 
 
 class _NativeRlmActionExecutor:
@@ -733,7 +747,10 @@ async def execute_native_rlm_sidecar_probe(
         if not isinstance(result, NativeRlmProbeResult):
             raise PrimeRlmExperimentError("Native RLM probe result is invalid")
         return result
-    except PrimeRlmExperimentError:
+    except PrimeRlmExperimentError as error:
+        if str(error).startswith("Native RLM skill "):
+            primary_failure = True
+            raise
         if await _owned_native_rlm_root_is_inactive(plan, resources):
             return NativeRlmProbeResult(
                 terminal="failed",
@@ -994,7 +1011,6 @@ async def run_native_rlm_controlled_probe(
         session_created = True
         stage = "created"
         checkpoint()
-        await pump_bounded()
         stage = "running"
         checkpoint()
         spawn_budget = {
@@ -1017,6 +1033,9 @@ async def run_native_rlm_controlled_probe(
             },
         ))
         while time.monotonic() < deadline:
+            await asyncio.sleep(0)
+            if spawn_task.done():
+                spawn_task.result()
             await pump_bounded()
             snapshot = host.snapshot()
             terminal = snapshot.state.session_status
@@ -1086,7 +1105,13 @@ async def run_native_rlm_controlled_probe(
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
             if session_created and not session_terminal:
-                await host.dispatch(native_rlm_session_cancel_command(reservation))
+                try:
+                    await host.dispatch(native_rlm_session_cancel_command(reservation))
+                except Exception:
+                    # The owned sidecar and daemon are reaped below.  A terminal
+                    # native session can reject this best-effort cancel without
+                    # invalidating the earlier probe result or hiding its cause.
+                    pass
         finally:
             try:
                 await host.close()
