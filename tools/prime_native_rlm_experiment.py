@@ -201,6 +201,47 @@ OwnedWorkerCleanup = Callable[[], Awaitable[None]]
 OwnedDaemonShutdown = Callable[[NativeRlmDaemonPlan, NativeRlmRuntimeResources], Awaitable[None]]
 
 
+async def _send_native_rlm_skill_effect(
+    root: Path, *, operation: str, payload: Mapping[str, object]
+) -> Mapping[str, object]:
+    """Use the same private skill socket as Prime's kernel, without model mediation."""
+
+    if operation not in {"child.spawn", "child.message"} or not isinstance(root, Path):
+        raise PrimeRlmExperimentError("Native RLM skill effect is invalid")
+    try:
+        discovery = json.loads((root / "agent" / "asterion-control.json").read_text("utf-8"))
+        socket_path = discovery["socket_path"]
+        token = discovery["token"]
+        session_id = discovery["session_id"]
+        if not all(isinstance(value, str) and value for value in (socket_path, token, session_id)):
+            raise ValueError
+        request_id = "probe-" + secrets.token_hex(16)
+        reader, writer = await asyncio.open_unix_connection(socket_path)
+        try:
+            for value in (
+                {"protocol": "asterion.skill-control/v1", "type": "authenticate", "token": token, "session_id": session_id},
+                {"protocol": "asterion.skill-control/v1", "request_id": request_id, "session_id": session_id, "operation": operation, "payload": dict(payload)},
+            ):
+                writer.write(json.dumps(value, sort_keys=True, separators=(",", ":")).encode() + b"\n")
+            await writer.drain()
+            raw = await reader.readline()
+            response = json.loads(raw)
+        finally:
+            writer.close()
+            await writer.wait_closed()
+        if (
+            not isinstance(response, Mapping)
+            or response.get("protocol") != "asterion.skill-control/v1"
+            or response.get("request_id") != request_id
+            or response.get("status") != "ok"
+            or not isinstance(response.get("result"), Mapping)
+        ):
+            raise ValueError
+        return MappingProxyType(dict(response["result"]))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        raise PrimeRlmExperimentError("Native RLM skill effect did not complete") from None
+
+
 class _NativeRlmActionExecutor:
     """Defensive fence: admitted native RLM work must remain provider-owned."""
 
@@ -920,6 +961,8 @@ async def run_native_rlm_controlled_probe(
     session_created = False
     session_terminal = False
     primary_failure = False
+    spawn_task: asyncio.Task[Mapping[str, object]] | None = None
+    message_task: asyncio.Task[Mapping[str, object]] | None = None
 
     def checkpoint() -> None:
         if progress_root is None:
@@ -957,6 +1000,23 @@ async def run_native_rlm_controlled_probe(
         await host.dispatch(native_rlm_start_command(reservation))
         stage = "running"
         checkpoint()
+        spawn_budget = {
+            "controller_tokens": 1_000, "application_tokens": 0,
+            "child_tokens": 20_000, "aggregate_tokens": 21_000,
+            "cost_micros": 0, "deadline_ms": 30_000,
+        }
+        message_budget = {
+            "controller_tokens": 1_000, "application_tokens": 0,
+            "child_tokens": 0, "aggregate_tokens": 1_000,
+            "cost_micros": 0, "deadline_ms": 30_000,
+        }
+        spawn_task = asyncio.create_task(_send_native_rlm_skill_effect(
+            root, operation="child.spawn", payload={
+                "child_id": "native-rlm-child",
+                "goal_text": "Reply exactly pong and finish.",
+                "idempotency_key": "native-rlm-spawn", "budget": spawn_budget,
+            },
+        ))
         while time.monotonic() < deadline:
             await pump_bounded()
             snapshot = host.snapshot()
@@ -971,7 +1031,21 @@ async def run_native_rlm_controlled_probe(
                     return latest
             latest = await observe_bounded(snapshot.authority_usage)
             checkpoint()
+            if latest.child_started and message_task is None:
+                message_task = asyncio.create_task(_send_native_rlm_skill_effect(
+                    root, operation="child.message", payload={
+                        "child_id": "native-rlm-child", "message": "ping",
+                        "idempotency_key": "native-rlm-message", "budget": message_budget,
+                    },
+                ))
+            for task in (spawn_task, message_task):
+                if task is not None and task.done():
+                    task.result()
             if latest.terminal == "completed":
+                await spawn_task
+                if message_task is None:
+                    raise PrimeRlmExperimentError("Native RLM message was not started")
+                await message_task
                 session_terminal = True
                 return latest
             if snapshot.state.terminal_event_id is not None:
@@ -1004,6 +1078,12 @@ async def run_native_rlm_controlled_probe(
         ) from None
     finally:
         try:
+            pending = tuple(task for task in (spawn_task, message_task) if task is not None)
+            for task in pending:
+                if not task.done():
+                    task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
             if session_created and not session_terminal:
                 await host.dispatch(native_rlm_session_cancel_command(reservation))
         finally:
