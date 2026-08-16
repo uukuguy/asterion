@@ -54,6 +54,7 @@ except ModuleNotFoundError:  # Direct ``python tools/verify_prime_loop.py`` exec
 _MAX_COST_MICROS = 500_000
 _MAX_DEADLINE_MS = 600_000
 _PUMP_TIMEOUT_SECONDS = 10
+_MODEL_INITIATION_TIMEOUT_SECONDS = 90
 _MODEL_KEY = "ASTERION_PRIME_EXPERIMENT_MODEL"
 _SESSION_ID = "native-rlm-root"
 _GOAL_REFERENCE = "native-rlm-goal"
@@ -1011,31 +1012,14 @@ async def run_native_rlm_controlled_probe(
         session_created = True
         stage = "created"
         checkpoint()
+        await host.dispatch(native_rlm_start_command(reservation))
+        stage = "start"
+        checkpoint()
         stage = "running"
         checkpoint()
-        spawn_budget = {
-            "controller_tokens": 1_000, "application_tokens": 0,
-            "child_tokens": 20_000, "aggregate_tokens": 21_000,
-            "cost_micros": 0, "deadline_ms": 30_000,
-        }
-        message_budget = {
-            "controller_tokens": 1_000, "application_tokens": 0,
-            "child_tokens": 0, "aggregate_tokens": 1_000,
-            "cost_micros": 0, "deadline_ms": 30_000,
-        }
-        stage = "skill-spawn"
-        checkpoint()
-        spawn_task = asyncio.create_task(_send_native_rlm_skill_effect(
-            root, operation="child.spawn", payload={
-                "child_id": "native-rlm-child",
-                "goal_text": "Reply exactly pong and finish.",
-                "idempotency_key": "native-rlm-spawn", "budget": spawn_budget,
-            },
-        ))
+        initiation_deadline = time.monotonic() + _MODEL_INITIATION_TIMEOUT_SECONDS
         while time.monotonic() < deadline:
             await asyncio.sleep(0)
-            if spawn_task.done():
-                spawn_task.result()
             await pump_bounded()
             snapshot = host.snapshot()
             terminal = snapshot.state.session_status
@@ -1049,23 +1033,9 @@ async def run_native_rlm_controlled_probe(
                     return latest
             latest = await observe_bounded(snapshot.authority_usage)
             checkpoint()
-            if latest.child_started and message_task is None:
-                stage = "skill-message"
-                checkpoint()
-                message_task = asyncio.create_task(_send_native_rlm_skill_effect(
-                    root, operation="child.message", payload={
-                        "child_id": "native-rlm-child", "message": "ping",
-                        "idempotency_key": "native-rlm-message", "budget": message_budget,
-                    },
-                ))
-            for task in (spawn_task, message_task):
-                if task is not None and task.done():
-                    task.result()
+            if not latest.child_started and time.monotonic() >= initiation_deadline:
+                return latest
             if latest.terminal == "completed":
-                await spawn_task
-                if message_task is None:
-                    raise PrimeRlmExperimentError("Native RLM message was not started")
-                await message_task
                 session_terminal = True
                 return latest
             if snapshot.state.terminal_event_id is not None:

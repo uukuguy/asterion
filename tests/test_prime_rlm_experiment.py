@@ -122,14 +122,14 @@ class TestNativeRlmExperiment(unittest.TestCase):
                 (root / "native-rlm-progress.json").read_text(encoding="utf-8")
             )
             self.assertEqual(progress["format"], "asterion.prime-native-rlm-progress/v1")
-            self.assertEqual(progress["stage"], "skill-spawn")
+            self.assertEqual(progress["stage"], "running")
             self.assertFalse(progress["child_started"])
             self.assertEqual(
                 (root / "native-rlm-progress.json").stat().st_mode & 0o777, 0o600
             )
 
         self.assertEqual([command.type for command in host.commands], [
-            "session.create", "session.cancel",
+            "session.create", "input.submit", "session.cancel",
         ])
         self.assertEqual(host.commands[-1].payload, {"reason_code": "probe-cleanup"})
         self.assertTrue(host.closed)
@@ -158,7 +158,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
             with mock.patch.object(native_rlm, "build_native_rlm_control_host", return_value=Host()):
                 with self.assertRaisesRegex(
                     PrimeRlmExperimentError,
-                    "Native RLM skill discovery did not complete",
+            "Native RLM controlled probe running event-transport did not complete",
                 ) as raised:
                     asyncio.run(run_native_rlm_controlled_probe(object(), reservation, root))
 
@@ -210,7 +210,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
 
         self.assertEqual(result.terminal, "failed")
         self.assertEqual([command.type for command in host.commands], [
-            "session.create",
+            "session.create", "input.submit",
         ])
         self.assertTrue(host.closed)
 
@@ -256,7 +256,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
                 result = asyncio.run(run_native_rlm_controlled_probe(object(), reservation, root))
 
         self.assertEqual(result.terminal, "failed")
-        self.assertEqual(result.usage.controller_tokens, 0)
+        self.assertEqual(result.usage.controller_tokens, 1)
         observe.assert_not_awaited()
 
     def test_workspace_preparation_creates_only_private_session_directories(self) -> None:
