@@ -227,6 +227,10 @@ class PrimeRlmAdmissionPreparer:
                 elif current.status not in {"started", "completed", "failed", "cancelled"}:
                     raise RlmError("Prime RLM lifecycle conflicts")
                 continue
+            if observation.type == "rlm.child.deleted":
+                if current.status not in {"completed", "failed", "cancelled"}:
+                    raise RlmError("Prime RLM lifecycle conflicts")
+                continue
             if current.status == "started":
                 assert observation.status is not None
                 self._children.record_terminal(binding, status=observation.status)

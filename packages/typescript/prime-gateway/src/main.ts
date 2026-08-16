@@ -1282,6 +1282,33 @@ async function createSidecarFromDescriptor(
   let rlmHostClose: (() => Promise<void>) | undefined;
   let sessionReady: (() => void) | undefined;
   let currentRemainingBudget = descriptor.remainingBudget;
+  const nativeRlmChildReapers = new Map<string, Promise<void>>();
+
+  const reapNativeRlmChild = async (actionId: string, childId: string) => {
+    const root = nativeRootSession;
+    if (root === undefined) {
+      throw new PrimeGatewayError();
+    }
+    let status: "completed" | "failed" = "completed";
+    try {
+      await root.waitForNativeRlmChild(`wait-${actionId}`, childId);
+    } catch {
+      status = "failed";
+    }
+    try {
+      await root.terminateNativeRlmChild(`reap-${actionId}`, childId);
+    } catch {
+      status = "failed";
+    }
+    await store.recordRlmLifecycle({
+      type: "rlm.child.terminal",
+      child_id: childId,
+      status,
+    });
+    if (status === "completed") {
+      await store.recordRlmLifecycle({ type: "rlm.child.deleted", child_id: childId });
+    }
+  };
 
   const closeRlmHostBridge = async () => {
     const close = rlmHostClose;
@@ -1294,6 +1321,8 @@ async function createSidecarFromDescriptor(
 
   const closeSkillBridge = async () => {
     await closeRlmHostBridge();
+    const reapers = [...nativeRlmChildReapers.values()];
+    await Promise.allSettled(reapers);
     const current = skillBridge;
     skillBridge = undefined;
     if (current !== undefined) {
@@ -1532,18 +1561,44 @@ async function createSidecarFromDescriptor(
               .update(descriptor.model, "utf8")
               .digest("hex"),
           });
+        } else if (
+          descriptor.rlmMaxDepth === 1 &&
+          event.type === "action.proposed" &&
+          event.payload.kind === "child.message"
+        ) {
+          const target = event.payload.target;
+          if (target.kind !== "child") throw new PrimeGatewayError();
+          const body = await privateValues.readInput(
+            event.payload.input_ref as `private:${string}`,
+          );
+          await store.recordRlmMessageBinding({
+            action_id: event.payload.action_id,
+            message_id: event.payload.action_id,
+            sender_id: descriptor.sessionId,
+            recipient_id: target.child_id,
+            authority_revision: event.payload.authority_revision,
+            body_digest: createHash("sha256").update(body, "utf8").digest("hex"),
+          });
         }
         await gateway.emitActionProposal(event);
       },
       waitForAdmission: (actionId) => gateway.waitForAdmission(actionId),
       afterAdmission: async (event) => {
-        if (
-          descriptor.rlmMaxDepth !== 1 ||
-          event.type !== "action.proposed" ||
-          event.payload.kind !== "child.spawn"
-        ) {
+        if (descriptor.rlmMaxDepth !== 1 || event.type !== "action.proposed") return;
+        if (event.payload.kind === "child.message") {
+          const root = nativeRootSession;
+          const target = event.payload.target;
+          if (root === undefined || target.kind !== "child") {
+            throw new PrimeGatewayError();
+          }
+          const body = await privateValues.readInput(
+            event.payload.input_ref as `private:${string}`,
+          );
+          await root.sendNativeRlmChildMessage(String(event.payload.action_id), target.child_id, body);
+          await store.recordRlmMessageDelivered(String(event.payload.action_id));
           return;
         }
+        if (event.payload.kind !== "child.spawn") return;
         const root = nativeRootSession;
         const target = event.payload.target;
         if (root === undefined || target.kind !== "child") {
@@ -1564,28 +1619,11 @@ async function createSidecarFromDescriptor(
             .update(`${child.activeSessionId}:${child.transcriptSessionId}`, "utf8")
             .digest("hex"),
         });
-        let status: "completed" | "failed" = "completed";
-        try {
-          await root.waitForNativeRlmChild(
-            `wait-${String(event.payload.action_id)}`,
-            target.child_id,
-          );
-        } catch {
-          status = "failed";
-        }
-        try {
-          await root.terminateNativeRlmChild(
-            `reap-${String(event.payload.action_id)}`,
-            target.child_id,
-          );
-        } catch {
-          status = "failed";
-        }
-        await store.recordRlmLifecycle({
-          type: "rlm.child.terminal",
-          child_id: target.child_id,
-          status,
+        const actionId = String(event.payload.action_id);
+        const reaper = reapNativeRlmChild(actionId, target.child_id).finally(() => {
+          nativeRlmChildReapers.delete(target.child_id);
         });
+        nativeRlmChildReapers.set(target.child_id, reaper);
       },
       waitForTerminal: (actionId) => gateway.waitForTerminal(actionId),
       actionStatus: (actionId) => gateway.actionStatus(actionId),

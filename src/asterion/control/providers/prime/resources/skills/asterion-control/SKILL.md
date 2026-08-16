@@ -15,6 +15,13 @@ only for a byte-for-byte equivalent logical request. Never generate a new key
 to retry an uncertain call; query `await asterion_control.action_status(...)`
 or report the uncertainty instead.
 
+Create an authorized native child with `await asterion_control.spawn_child(...)`.
+After it is admitted, deliver one private message with
+`await asterion_control.message_child(...)`. The `child_id`, idempotency keys,
+and the complete budget mapping are required for both calls. Child termination
+and deletion are provider-owned; do not use Prime-native `rlm` or
+`agent_message` APIs.
+
 Application outputs contain only safe receipt and artifact metadata. They do
 not contain provider payloads or raw host output. Do not read or render the
 private socket, token, session environment, or opaque content references.

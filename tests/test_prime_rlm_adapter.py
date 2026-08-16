@@ -331,6 +331,27 @@ class TestPrimeRlmAdmissionPreparer(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(service.status("child-1").status, "completed")
 
+    async def test_accepts_native_deletion_only_after_a_terminal_child(self) -> None:
+        service = RlmChildService(_authority())
+        client = _Client(
+            RlmAdmissionBinding("action-1", "child-1", 1, 1, "a" * 64)
+        )
+        preparer = PrimeRlmAdmissionPreparer(
+            client=client, children=service, parent_session_id="session-1"
+        )
+        await preparer.prepare(_proposal())
+        client.lifecycle = (
+            RlmLifecycleObservation(
+                "rlm.child.started", "child-1", native_identity_digest="b" * 64
+            ),
+            RlmLifecycleObservation("rlm.child.terminal", "child-1", "completed"),
+            RlmLifecycleObservation("rlm.child.deleted", "child-1"),
+        )
+
+        await preparer.reconcile_lifecycle()
+
+        self.assertEqual(service.status("child-1").status, "completed")
+
     async def test_completed_native_child_stays_uncertain_without_verified_result(self) -> None:
         service = RlmChildService(_authority())
         client = _Client(
