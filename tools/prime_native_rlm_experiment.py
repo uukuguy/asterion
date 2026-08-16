@@ -53,6 +53,7 @@ except ModuleNotFoundError:  # Direct ``python tools/verify_prime_loop.py`` exec
 
 _MAX_COST_MICROS = 500_000
 _MAX_DEADLINE_MS = 600_000
+_PUMP_TIMEOUT_SECONDS = 10
 _MODEL_KEY = "ASTERION_PRIME_EXPERIMENT_MODEL"
 _SESSION_ID = "native-rlm-root"
 _GOAL_REFERENCE = "native-rlm-goal"
@@ -924,20 +925,40 @@ async def run_native_rlm_controlled_probe(
         if progress_root is None:
             return
         _write_native_rlm_progress(progress_root, stage, latest)
+
+    async def pump_bounded() -> None:
+        try:
+            await asyncio.wait_for(host.pump(), timeout=_PUMP_TIMEOUT_SECONDS)
+        except TimeoutError:
+            raise PrimeRlmExperimentError(
+                "Native RLM controlled probe event pump timed out"
+            ) from None
+
+    async def observe_bounded(usage: BudgetUsage) -> NativeRlmProbeResult:
+        try:
+            return await asyncio.wait_for(
+                observe_native_rlm_gateway_probe(observer, usage=usage),
+                timeout=_PUMP_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            raise PrimeRlmExperimentError(
+                "Native RLM controlled probe event observation timed out"
+            ) from None
+
     try:
         checkpoint()
         await host.dispatch(native_rlm_session_create_command(reservation))
         session_created = True
         stage = "created"
         checkpoint()
-        await host.pump()
+        await pump_bounded()
         stage = "start"
         checkpoint()
         await host.dispatch(native_rlm_start_command(reservation))
         stage = "running"
         checkpoint()
         while time.monotonic() < deadline:
-            await host.pump()
+            await pump_bounded()
             snapshot = host.snapshot()
             terminal = snapshot.state.session_status
             if snapshot.state.terminal_event_id is not None:
@@ -948,9 +969,7 @@ async def run_native_rlm_controlled_probe(
                     latest = replace(latest, terminal=terminal, usage=snapshot.authority_usage)
                     checkpoint()
                     return latest
-            latest = await observe_native_rlm_gateway_probe(
-                observer, usage=snapshot.authority_usage
-            )
+            latest = await observe_bounded(snapshot.authority_usage)
             checkpoint()
             if latest.terminal == "completed":
                 session_terminal = True
