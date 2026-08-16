@@ -129,7 +129,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
             )
 
         self.assertEqual([command.type for command in host.commands], [
-            "session.create", "input.submit", "session.cancel",
+            "session.create", "session.cancel",
         ])
         self.assertEqual(host.commands[-1].payload, {"reason_code": "probe-cleanup"})
         self.assertTrue(host.closed)
@@ -158,7 +158,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
             with mock.patch.object(native_rlm, "build_native_rlm_control_host", return_value=Host()):
                 with self.assertRaisesRegex(
                     PrimeRlmExperimentError,
-                    "Native RLM controlled probe skill-spawn event-transport did not complete",
+                    "Native RLM controlled probe skill-spawn control did not complete",
                 ) as raised:
                     asyncio.run(run_native_rlm_controlled_probe(object(), reservation, root))
 
@@ -210,7 +210,7 @@ class TestNativeRlmExperiment(unittest.TestCase):
 
         self.assertEqual(result.terminal, "failed")
         self.assertEqual([command.type for command in host.commands], [
-            "session.create", "input.submit",
+            "session.create",
         ])
         self.assertTrue(host.closed)
 

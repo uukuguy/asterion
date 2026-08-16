@@ -633,7 +633,7 @@ def build_native_rlm_sidecar_descriptor(
         "maxContinuations": 3, "maxControllerTokens": budget.controller_tokens, "maxTurns": 12,
         "model": selection.model,
         "portfolio": [{"kind": "application", "provider_id": grant.provider_id, "application_id": grant.application_id, "version": grant.version, "runtime_id": grant.runtime_id} for grant in reservation.authority.allowed_portfolio],
-        "primeSocketPath": str(root / "prime.sock"), "primeSourceRoot": str(resources.prime_source_root), "provider": selection.provider, "rlmMaxChildren": 1, "rlmMaxDepth": 1,
+        "primeSocketPath": str(root / "prime.sock"), "primeSourceRoot": str(resources.prime_source_root), "provider": selection.provider, "probeReady": True, "rlmMaxChildren": 1, "rlmMaxDepth": 1,
         "remainingBudget": {"controller_tokens": budget.controller_tokens, "application_tokens": budget.application_tokens, "child_tokens": budget.child_tokens, "aggregate_tokens": budget.aggregate_tokens, "cost_micros": budget.cost_micros, "deadline_ms": reservation.limits.deadline_ms},
         "sessionDir": str(root / "sessions"), "sessionId": "native-rlm-root", "skillPath": str(resources.skill_path), "timeoutMs": reservation.limits.deadline_ms, "workspace": str(root / "workspace"),
     })
@@ -995,9 +995,6 @@ async def run_native_rlm_controlled_probe(
         stage = "created"
         checkpoint()
         await pump_bounded()
-        stage = "start"
-        checkpoint()
-        await host.dispatch(native_rlm_start_command(reservation))
         stage = "running"
         checkpoint()
         spawn_budget = {

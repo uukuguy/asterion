@@ -163,6 +163,7 @@ interface PrimeSidecarDescriptor {
   readonly primeSocketPath: string;
   readonly primeSourceRoot: string;
   readonly provider: string;
+  readonly probeReady: boolean;
   readonly recoveryReadOnly: boolean;
   readonly rlmMaxChildren: number;
   readonly rlmMaxDepth: 0 | 1;
@@ -410,6 +411,7 @@ function validateDescriptor(value: unknown): PrimeSidecarDescriptor {
       "primeSocketPath",
       "primeSourceRoot",
       "provider",
+      "probeReady",
       "recoveryReadOnly",
       "rlmMaxChildren",
       "rlmMaxDepth",
@@ -423,7 +425,7 @@ function validateDescriptor(value: unknown): PrimeSidecarDescriptor {
       "agentDir", "artifactLockPath", "authorityId", "authorityRevision",
       "expectedRuntimeBuildId", "gatewayRoot", "generation", "maxContinuations",
       "maxControllerTokens", "maxTurns", "model", "portfolio", "primeSocketPath",
-      "primeSourceRoot", "provider", "rlmMaxChildren", "rlmMaxDepth",
+      "primeSourceRoot", "provider", "probeReady", "rlmMaxChildren", "rlmMaxDepth",
       "remainingBudget", "sessionDir", "sessionId", "skillPath", "timeoutMs", "workspace",
     ])) ||
     ![
@@ -463,6 +465,7 @@ function validateDescriptor(value: unknown): PrimeSidecarDescriptor {
     rlmMaxChildren: Number(value.rlmMaxChildren),
     rlmMaxDepth: value.rlmMaxDepth as 0 | 1,
     recoveryReadOnly: value.recoveryReadOnly === true,
+    probeReady: value.probeReady === true,
     portfolio: validatePortfolio(value.portfolio),
     remainingBudget: validateBudget(value.remainingBudget),
     timeoutMs: Number(value.timeoutMs),
@@ -1671,6 +1674,10 @@ async function createSidecarFromDescriptor(
           bindIdentity,
         });
         nativeRootSession = session;
+        if (descriptor.probeReady) {
+          sessionReady?.();
+          sessionReady = undefined;
+        }
         return session;
       } catch (error) {
         sessionReady = undefined;
