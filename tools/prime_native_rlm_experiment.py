@@ -60,18 +60,11 @@ _SESSION_ID = "native-rlm-root"
 _GOAL_REFERENCE = "native-rlm-goal"
 _START_REFERENCE = "native-rlm-start-input"
 _PROBE_GOAL = (
-    "Use the ipython tool immediately. Do not answer in prose, inspect documentation, "
-    "call help or shell tools, write files, or perform unrelated work. The pre-imported "
-    "asterion_control module must execute exactly these two authorized effects in order:\n"
-    "spawn_budget = {'controller_tokens': 1000, 'application_tokens': 0, 'child_tokens': 20000, "
-    "'aggregate_tokens': 21000, 'cost_micros': 0, 'deadline_ms': 30000}\n"
-    "await asterion_control.spawn_child(child_id='native-rlm-child', "
-    "goal_text='Wait for one parent message, then reply exactly pong and finish.', "
-    "idempotency_key='native-rlm-spawn', budget=spawn_budget)\n"
-    "message_budget = {'controller_tokens': 1000, 'application_tokens': 0, 'child_tokens': 0, "
-    "'aggregate_tokens': 1000, 'cost_micros': 0, 'deadline_ms': 30000}\n"
-    "await asterion_control.message_child(child_id='native-rlm-child', message='ping', "
-    "idempotency_key='native-rlm-message', budget=message_budget)\n"
+    "Use the IPython kernel immediately; do not answer in prose or inspect anything. "
+    "Execute exactly these native Prime calls in order:\n"
+    "handle = await rlm('Wait for one parent message, reply exactly pong to the parent, "
+    "then finish.', name='native-rlm-child')\n"
+    "await agent_message.send('ping', receiver_role='child', receiver_name=handle.name)\n"
     "Do not create another child, send another message, or cancel the child. Then finish."
 )
 _DEFAULT_OPERATIONS = tuple(
@@ -558,6 +551,7 @@ async def observe_native_rlm_probe(
         or not isinstance(usage, BudgetUsage)
     ):
         raise PrimeRlmExperimentError("Native RLM probe observation is invalid")
+    stage = "lifecycle"
     try:
         lifecycle = await lifecycle_reader()
         records: list[Mapping[str, str]] = []
@@ -575,9 +569,17 @@ async def observe_native_rlm_probe(
                 records.append({"type": event_type, "child_id": child_id})
             else:
                 raise ValueError
+        stage = "message-binding"
         delivered = False
         for action_id in message_action_ids:
-            binding = await binding_reader(action_id)
+            try:
+                binding = await binding_reader(action_id)
+            except Exception:
+                # Prime emits family replies as child.message proposals too,
+                # while only parent-directed sends have an Asterion binding.
+                # Ignore those unbound replies; a bound delivered send remains
+                # the sole positive message-evidence path.
+                continue
             if getattr(binding, "delivered", None) is True:
                 delivered = True
         return classify_native_rlm_probe_observation(
@@ -586,7 +588,9 @@ async def observe_native_rlm_probe(
     except PrimeRlmExperimentError:
         raise
     except Exception:
-        raise PrimeRlmExperimentError("Native RLM probe observation is invalid") from None
+        raise PrimeRlmExperimentError(
+            f"Native RLM probe observation {stage} is invalid"
+        ) from None
 
 
 async def collect_native_rlm_message_action_ids(client: object) -> tuple[str, ...]:
@@ -620,7 +624,12 @@ async def observe_native_rlm_gateway_probe(
     client: object, *, usage: BudgetUsage
 ) -> NativeRlmProbeResult:
     """Compose the closed Gateway event and RLM-read surfaces for one probe."""
-    action_ids = await collect_native_rlm_message_action_ids(client)
+    try:
+        action_ids = await collect_native_rlm_message_action_ids(client)
+    except PrimeRlmExperimentError:
+        raise PrimeRlmExperimentError(
+            "Native RLM probe observation message-actions is invalid"
+        ) from None
     return await observe_native_rlm_probe(
         client, message_action_ids=action_ids, usage=usage
     )
