@@ -46,6 +46,41 @@ def _journal() -> MemoryCanonicalJournal:
 
 
 class TestControlJournal(unittest.TestCase):
+    def test_harness_record_factories_are_closed_and_body_free(self) -> None:
+        scope = {"kind": "session", "scope_id": "session-1"}
+        proposed = JournalRecord.harness_proposed(
+            scope=scope,
+            proposal_id="proposal-1",
+            proposal_digest="a" * 64,
+            authority_id="authority-1",
+            authority_revision=1,
+            baseline_snapshot_id="snapshot-0",
+            revision_id="revision-1",
+            sequence=1,
+            edit_count=1,
+            evidence_count=2,
+            rollback_revision_id=None,
+        )
+        started = JournalRecord.harness_effect_started(
+            scope=scope,
+            proposal_id="proposal-1",
+            proposal_digest="a" * 64,
+            revision_id="revision-1",
+            sequence=1,
+            effect_digest="b" * 64,
+        )
+
+        self.assertEqual(proposed.kind, "harness.proposed")
+        self.assertEqual(started.kind, "harness.effect-started")
+        self.assertNotIn("private", repr(proposed))
+        with self.assertRaises(JournalConflictError) as raised:
+            JournalRecord(
+                record_id="harness-proposed:proposal-2",
+                kind="harness.proposed",
+                payload={**proposed.payload, "body_ref": "SENTINEL_PRIVATE_BODY"},
+            )
+        self.assertNotIn("SENTINEL_PRIVATE_BODY", str(raised.exception))
+
     def test_compare_append_and_replay_are_contiguous_and_immutable(self) -> None:
         journal = _journal()
         command = ControlCommand.from_mapping(

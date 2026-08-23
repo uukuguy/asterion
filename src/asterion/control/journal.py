@@ -49,6 +49,11 @@ JOURNAL_RECORD_KINDS = frozenset(
         "context.operation.receipted",
         "checkpoint.sealed",
         "fault.projected",
+        "harness.proposed",
+        "harness.effect-started",
+        "harness.effect-terminal",
+        "harness.snapshot-activated",
+        "harness.effect-uncertain",
     }
 )
 JOURNAL_FILE_VERSION = "asterion.control-journal/v1"
@@ -271,6 +276,141 @@ class JournalRecord:
             record_id=f"checkpoint:{checkpoint_id}",
             kind="checkpoint.sealed",
             payload={"checkpoint_event": checkpoint_event.to_mapping()},
+        )
+
+    @classmethod
+    def harness_proposed(
+        cls,
+        *,
+        scope: Mapping[str, object],
+        proposal_id: str,
+        proposal_digest: str,
+        authority_id: str,
+        authority_revision: int,
+        baseline_snapshot_id: str,
+        revision_id: str,
+        sequence: int,
+        edit_count: int,
+        evidence_count: int,
+        rollback_revision_id: str | None,
+    ) -> JournalRecord:
+        return cls(
+            record_id=f"harness-proposed:{proposal_id}",
+            kind="harness.proposed",
+            payload={
+                "authority_id": authority_id,
+                "authority_revision": authority_revision,
+                "baseline_snapshot_id": baseline_snapshot_id,
+                "edit_count": edit_count,
+                "evidence_count": evidence_count,
+                "proposal_digest": proposal_digest,
+                "proposal_id": proposal_id,
+                "revision_id": revision_id,
+                "rollback_revision_id": rollback_revision_id,
+                "scope": scope,
+                "sequence": sequence,
+            },
+        )
+
+    @classmethod
+    def harness_effect_started(
+        cls,
+        *,
+        scope: Mapping[str, object],
+        proposal_id: str,
+        proposal_digest: str,
+        revision_id: str,
+        sequence: int,
+        effect_digest: str,
+    ) -> JournalRecord:
+        return cls(
+            record_id=f"harness-started:{revision_id}",
+            kind="harness.effect-started",
+            payload={
+                "effect_digest": effect_digest,
+                "proposal_digest": proposal_digest,
+                "proposal_id": proposal_id,
+                "revision_id": revision_id,
+                "scope": scope,
+                "sequence": sequence,
+            },
+        )
+
+    @classmethod
+    def harness_effect_terminal(
+        cls,
+        *,
+        scope: Mapping[str, object],
+        proposal_id: str,
+        proposal_digest: str,
+        revision_id: str,
+        sequence: int,
+        effect_digest: str,
+        status: str,
+        result_snapshot_id: str,
+        entries: tuple[Mapping[str, object], ...],
+        usage: Mapping[str, int],
+    ) -> JournalRecord:
+        return cls(
+            record_id=f"harness-terminal:{revision_id}",
+            kind="harness.effect-terminal",
+            payload={
+                "effect_digest": effect_digest,
+                "entries": entries,
+                "proposal_digest": proposal_digest,
+                "proposal_id": proposal_id,
+                "result_snapshot_id": result_snapshot_id,
+                "revision_id": revision_id,
+                "scope": scope,
+                "sequence": sequence,
+                "status": status,
+                "usage": usage,
+            },
+        )
+
+    @classmethod
+    def harness_snapshot_activated(
+        cls,
+        *,
+        scope: Mapping[str, object],
+        revision_id: str,
+        sequence: int,
+        snapshot_id: str,
+    ) -> JournalRecord:
+        return cls(
+            record_id=f"harness-activated:{revision_id}",
+            kind="harness.snapshot-activated",
+            payload={
+                "revision_id": revision_id,
+                "scope": scope,
+                "sequence": sequence,
+                "snapshot_id": snapshot_id,
+            },
+        )
+
+    @classmethod
+    def harness_effect_uncertain(
+        cls,
+        *,
+        scope: Mapping[str, object],
+        proposal_id: str,
+        proposal_digest: str,
+        revision_id: str,
+        sequence: int,
+        effect_digest: str,
+    ) -> JournalRecord:
+        return cls(
+            record_id=f"harness-uncertain:{revision_id}",
+            kind="harness.effect-uncertain",
+            payload={
+                "effect_digest": effect_digest,
+                "proposal_digest": proposal_digest,
+                "proposal_id": proposal_id,
+                "revision_id": revision_id,
+                "scope": scope,
+                "sequence": sequence,
+                "status": "uncertain",
+            },
         )
 
 
@@ -1154,7 +1294,180 @@ def _validate_record_payload(kind: str, value: object) -> None:
         if value["evidence_ref"] is not None:
             _require_opaque_id(value["evidence_ref"], "journal fault evidence")
         return
+    if kind == "harness.proposed":
+        _require_fields(
+            value,
+            {
+                "authority_id",
+                "authority_revision",
+                "baseline_snapshot_id",
+                "edit_count",
+                "evidence_count",
+                "proposal_digest",
+                "proposal_id",
+                "revision_id",
+                "rollback_revision_id",
+                "scope",
+                "sequence",
+            },
+        )
+        _validate_harness_scope(value["scope"])
+        _require_opaque_id(value["proposal_id"], "journal harness proposal")
+        _require_digest(value["proposal_digest"], "journal harness proposal digest")
+        _require_opaque_id(value["authority_id"], "journal harness authority")
+        _require_positive_integer(
+            value["authority_revision"], "journal harness authority revision"
+        )
+        _require_opaque_id(
+            value["baseline_snapshot_id"], "journal harness baseline snapshot"
+        )
+        _require_opaque_id(value["revision_id"], "journal harness revision")
+        _require_positive_integer(value["sequence"], "journal harness sequence")
+        _require_positive_integer(value["edit_count"], "journal harness edit count")
+        _require_positive_integer(
+            value["evidence_count"], "journal harness evidence count"
+        )
+        if value["rollback_revision_id"] is not None:
+            _require_opaque_id(
+                value["rollback_revision_id"], "journal harness rollback revision"
+            )
+        return
+    if kind == "harness.effect-started":
+        _require_fields(
+            value,
+            {
+                "effect_digest",
+                "proposal_digest",
+                "proposal_id",
+                "revision_id",
+                "scope",
+                "sequence",
+            },
+        )
+        _validate_harness_effect_identity(value)
+        return
+    if kind == "harness.effect-terminal":
+        _require_fields(
+            value,
+            {
+                "effect_digest",
+                "entries",
+                "proposal_digest",
+                "proposal_id",
+                "result_snapshot_id",
+                "revision_id",
+                "scope",
+                "sequence",
+                "status",
+                "usage",
+            },
+        )
+        _validate_harness_effect_identity(value)
+        if value["status"] not in {"succeeded", "failed", "cancelled"}:
+            raise JournalConflictError("journal harness terminal status is invalid")
+        _require_opaque_id(
+            value["result_snapshot_id"], "journal harness result snapshot"
+        )
+        _validate_harness_entries(value["entries"])
+        _validate_harness_usage(value["usage"])
+        return
+    if kind == "harness.snapshot-activated":
+        _require_fields(value, {"revision_id", "scope", "sequence", "snapshot_id"})
+        _validate_harness_scope(value["scope"])
+        _require_opaque_id(value["revision_id"], "journal harness revision")
+        _require_positive_integer(value["sequence"], "journal harness sequence")
+        _require_opaque_id(value["snapshot_id"], "journal harness snapshot")
+        return
+    if kind == "harness.effect-uncertain":
+        _require_fields(
+            value,
+            {
+                "effect_digest",
+                "proposal_digest",
+                "proposal_id",
+                "revision_id",
+                "scope",
+                "sequence",
+                "status",
+            },
+        )
+        _validate_harness_effect_identity(value)
+        if value["status"] != "uncertain":
+            raise JournalConflictError("journal harness uncertain status is invalid")
+        return
     raise JournalConflictError("journal record kind is invalid")
+
+
+def _validate_harness_effect_identity(value: Mapping[str, object]) -> None:
+    _validate_harness_scope(value["scope"])
+    _require_opaque_id(value["proposal_id"], "journal harness proposal")
+    _require_digest(value["proposal_digest"], "journal harness proposal digest")
+    _require_opaque_id(value["revision_id"], "journal harness revision")
+    _require_positive_integer(value["sequence"], "journal harness sequence")
+    _require_digest(value["effect_digest"], "journal harness effect digest")
+
+
+def _validate_harness_scope(value: object) -> None:
+    if not isinstance(value, Mapping):
+        raise JournalConflictError("journal harness scope is invalid")
+    _require_fields(value, {"kind", "scope_id"})
+    if value["kind"] in {"session", "project"}:
+        _require_opaque_id(value["scope_id"], "journal harness scope")
+    elif value["kind"] == "global":
+        if value["scope_id"] is not None:
+            raise JournalConflictError("journal harness scope is invalid")
+    else:
+        raise JournalConflictError("journal harness scope is invalid")
+
+
+def _validate_harness_entries(value: object) -> None:
+    if not isinstance(value, (list, tuple)):
+        raise JournalConflictError("journal harness entries are invalid")
+    entry_ids: list[str] = []
+    for entry in value:
+        if not isinstance(entry, Mapping):
+            raise JournalConflictError("journal harness entries are invalid")
+        _require_fields(
+            entry,
+            {
+                "body_digest",
+                "entry_id",
+                "grouping_path_digest",
+                "kind",
+                "metadata_digest",
+                "title_digest",
+                "version",
+            },
+        )
+        _require_opaque_id(entry["entry_id"], "journal harness entry")
+        if entry["kind"] not in {"prompt", "memory", "skill", "subagent"}:
+            raise JournalConflictError("journal harness entry kind is invalid")
+        for field in ("title_digest", "body_digest", "metadata_digest"):
+            _require_digest(entry[field], "journal harness entry digest")
+        if entry["grouping_path_digest"] is not None:
+            _require_digest(
+                entry["grouping_path_digest"], "journal harness grouping digest"
+            )
+        _require_positive_integer(entry["version"], "journal harness entry version")
+        entry_ids.append(str(entry["entry_id"]))
+    if entry_ids != sorted(set(entry_ids)):
+        raise JournalConflictError("journal harness entries are invalid")
+
+
+def _validate_harness_usage(value: object) -> None:
+    if not isinstance(value, Mapping):
+        raise JournalConflictError("journal harness usage is invalid")
+    _require_fields(
+        value,
+        {
+            "aggregate_tokens",
+            "cost_micros",
+            "model_credential_reads",
+            "provider_operations",
+        },
+    )
+    for item in value.values():
+        _require_nonnegative_integer(item, "journal harness usage")
 
 
 def _validate_usage(value: object) -> None:
@@ -1237,6 +1550,11 @@ def _require_media_types(value: object, label: str) -> None:
 
 def _require_positive_integer(value: object, label: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise JournalConflictError(f"{label} is invalid")
+
+
+def _require_nonnegative_integer(value: object, label: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise JournalConflictError(f"{label} is invalid")
 
 

@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import FrozenInstanceError
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from asterion.control.harness import (
+    HarnessCoordinator,
     HarnessEdit,
     HarnessEffectReceipt,
     HarnessEntryDescriptor,
@@ -12,6 +15,16 @@ from asterion.control.harness import (
     HarnessRevision,
     HarnessScope,
     HarnessSnapshot,
+    HarnessTransportError,
+    MemoryHarnessPrivateRevisionStore,
+    harness_effect_digest,
+)
+from asterion.control.journal import (
+    FileCanonicalJournal,
+    JournalConflictError,
+    JournalCursor,
+    JournalRecord,
+    MemoryCanonicalJournal,
 )
 
 
@@ -36,6 +49,7 @@ def _entry(
 
 def _proposal(
     *,
+    proposal_id: str = "proposal-1",
     scope: HarnessScope | None = None,
     evidence_ids: tuple[str, ...] | list[str] = ("evidence-1", "evidence-2"),
     edits: tuple[HarnessEdit, ...] | list[HarnessEdit] | None = None,
@@ -44,7 +58,7 @@ def _proposal(
     if edits is None:
         edits = (HarnessEdit.create(_entry()),)
     return HarnessProposal(
-        proposal_id="proposal-1",
+        proposal_id=proposal_id,
         authority_id="authority-1",
         authority_revision=1,
         scope=scope or HarnessScope.session("session-1"),
@@ -64,6 +78,49 @@ def _usage() -> dict[str, int]:
         "model_credential_reads": 0,
         "provider_operations": 0,
     }
+
+
+def _journal(session_id: str = "harness-session") -> MemoryCanonicalJournal:
+    journal = MemoryCanonicalJournal(session_id)
+    journal.append(
+        0,
+        JournalRecord.system_bound(
+            system_id="research.system",
+            system_version="1.0.0",
+        ),
+    )
+    journal.append(
+        1,
+        JournalRecord.authority_bound(
+            authority_id="authority-1",
+            authority_revision=1,
+        ),
+    )
+    return journal
+
+
+class _Cancellation:
+    cancelled = False
+
+
+class _FailRecordOnce:
+    def __init__(self, journal: MemoryCanonicalJournal, kind: str) -> None:
+        self.journal = journal
+        self.kind = kind
+        self.failed = False
+
+    @property
+    def position(self) -> int:
+        return self.journal.position
+
+    def replay(self, cursor: JournalCursor):
+        return self.journal.replay(cursor)
+
+    def append(self, expected_position: int, record: JournalRecord):
+        if record.kind == self.kind and not self.failed:
+            self.failed = True
+            raise JournalConflictError("simulated harness persistence loss")
+        return self.journal.append(expected_position, record)
 
 
 class TestHarnessScope(unittest.TestCase):
@@ -101,14 +158,20 @@ class TestHarnessValues(unittest.TestCase):
         import asterion.control as control
 
         expected = (
+            "HarnessCoordinator",
             "HarnessEdit",
+            "HarnessEffectSender",
             "HarnessEffectReceipt",
             "HarnessEntryDescriptor",
             "HarnessError",
             "HarnessProposal",
+            "HarnessPrivateRevisionStore",
             "HarnessRevision",
             "HarnessScope",
             "HarnessSnapshot",
+            "HarnessTransportError",
+            "MemoryHarnessPrivateRevisionStore",
+            "harness_effect_digest",
         )
         self.assertTrue(all(getattr(control, name) for name in expected))
         self.assertTrue(set(expected).issubset(control.__all__))
@@ -230,6 +293,311 @@ class TestHarnessValues(unittest.TestCase):
             HarnessEffectReceipt.uncertain(proposal, effect_digest="f" * 64).status,
             "uncertain",
         )
+
+
+class TestHarnessCoordinator(unittest.TestCase):
+    def test_proposal_and_effect_start_are_durable_before_send(self) -> None:
+        journal = _journal()
+
+        def send(proposal: HarnessProposal) -> HarnessEffectReceipt:
+            kinds = tuple(item.record.kind for item in journal.replay(JournalCursor(0)))
+            self.assertEqual(
+                kinds[-2:], ("harness.proposed", "harness.effect-started")
+            )
+            return HarnessEffectReceipt.succeeded(
+                proposal,
+                effect_digest=harness_effect_digest(proposal),
+                result_entries=(_entry(),),
+                usage=_usage(),
+            )
+
+        revision = HarnessCoordinator(
+            journal,
+            HarnessScope.session("session-1"),
+            send,
+            _Cancellation(),
+        ).apply(_proposal())
+
+        self.assertEqual(revision.status, "succeeded")
+        self.assertEqual(
+            tuple(item.record.kind for item in journal.replay(JournalCursor(2))),
+            (
+                "harness.proposed",
+                "harness.effect-started",
+                "harness.effect-terminal",
+                "harness.snapshot-activated",
+            ),
+        )
+
+    def test_transport_loss_fences_replay_as_uncertain(self) -> None:
+        journal = _journal()
+        calls = 0
+
+        def lose_transport(proposal: HarnessProposal) -> HarnessEffectReceipt:
+            nonlocal calls
+            calls += 1
+            raise HarnessTransportError("SENTINEL_PRIVATE_TRANSPORT")
+
+        private_store = MemoryHarnessPrivateRevisionStore()
+        first = HarnessCoordinator(
+            journal,
+            HarnessScope.session("session-1"),
+            lose_transport,
+            _Cancellation(),
+            private_store,
+        )
+        self.assertEqual(first.apply(_proposal()).status, "uncertain")
+        reopened = HarnessCoordinator(
+            journal,
+            HarnessScope.session("session-1"),
+            lambda proposal: self.fail(f"uncertain effect retried: {proposal.digest}"),
+            _Cancellation(),
+            private_store,
+        )
+
+        self.assertEqual(reopened.recover().pending_status, "uncertain")
+        self.assertEqual(reopened.history()[-1].status, "uncertain")
+        self.assertEqual(calls, 1)
+        self.assertNotIn("SENTINEL_PRIVATE_TRANSPORT", repr(reopened.history()))
+
+    def test_scope_and_version_conflicts_reject_before_effect(self) -> None:
+        calls = 0
+
+        def send(proposal: HarnessProposal) -> HarnessEffectReceipt:
+            nonlocal calls
+            calls += 1
+            return HarnessEffectReceipt.succeeded(
+                proposal,
+                effect_digest=harness_effect_digest(proposal),
+                result_entries=(_entry(),),
+            )
+
+        coordinator = HarnessCoordinator(
+            _journal(),
+            HarnessScope.session("session-1"),
+            send,
+            _Cancellation(),
+        )
+        with self.assertRaisesRegex(HarnessError, "proposal conflicts with snapshot"):
+            coordinator.apply(
+                _proposal(scope=HarnessScope.project("project-1"))
+            )
+        with self.assertRaisesRegex(HarnessError, "edit conflicts with snapshot"):
+            coordinator.apply(
+                _proposal(
+                    edits=(HarnessEdit.update(_entry(version=2), expected_version=1),)
+                )
+            )
+        self.assertEqual(calls, 0)
+
+    def test_identical_proposal_replay_returns_original_without_resend(self) -> None:
+        calls = 0
+
+        def send(proposal: HarnessProposal) -> HarnessEffectReceipt:
+            nonlocal calls
+            calls += 1
+            return HarnessEffectReceipt.succeeded(
+                proposal,
+                effect_digest=harness_effect_digest(proposal),
+                result_entries=(_entry(),),
+            )
+
+        coordinator = HarnessCoordinator(
+            _journal(),
+            HarnessScope.session("session-1"),
+            send,
+            _Cancellation(),
+        )
+        proposal = _proposal()
+
+        self.assertEqual(coordinator.apply(proposal), coordinator.apply(proposal))
+        self.assertEqual(calls, 1)
+
+    def test_failed_revision_consumes_sequence_before_later_success(self) -> None:
+        calls = 0
+
+        def send(proposal: HarnessProposal) -> HarnessEffectReceipt:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return HarnessEffectReceipt.failed(
+                    proposal,
+                    effect_digest=harness_effect_digest(proposal),
+                )
+            return HarnessEffectReceipt.succeeded(
+                proposal,
+                effect_digest=harness_effect_digest(proposal),
+                result_entries=(_entry(),),
+            )
+
+        coordinator = HarnessCoordinator(
+            _journal(),
+            HarnessScope.session("session-1"),
+            send,
+            _Cancellation(),
+        )
+        failed = coordinator.apply(_proposal())
+        succeeded = coordinator.apply(_proposal(proposal_id="proposal-2"))
+
+        self.assertEqual((failed.sequence, succeeded.sequence), (1, 2))
+        self.assertEqual(coordinator.snapshot().sequence, 2)
+
+    def test_activation_persistence_failure_recovers_without_second_effect(self) -> None:
+        journal = _journal()
+        fail_once = _FailRecordOnce(journal, "harness.snapshot-activated")
+        private_store = MemoryHarnessPrivateRevisionStore()
+        calls = 0
+
+        def send(proposal: HarnessProposal) -> HarnessEffectReceipt:
+            nonlocal calls
+            calls += 1
+            return HarnessEffectReceipt.succeeded(
+                proposal,
+                effect_digest=harness_effect_digest(proposal),
+                result_entries=(_entry(),),
+                usage=_usage(),
+            )
+
+        first = HarnessCoordinator(
+            fail_once,
+            HarnessScope.session("session-1"),
+            send,
+            _Cancellation(),
+            private_store,
+        )
+        with self.assertRaisesRegex(HarnessError, "harness journal conflicts"):
+            first.apply(_proposal())
+
+        reopened = HarnessCoordinator(
+            journal,
+            HarnessScope.session("session-1"),
+            lambda proposal: self.fail(f"terminal effect retried: {proposal.digest}"),
+            _Cancellation(),
+            private_store,
+        )
+        recovered = reopened.recover()
+
+        self.assertEqual(calls, 1)
+        self.assertEqual(recovered.sequence, 1)
+        self.assertEqual(recovered.entries, (_entry(),))
+        self.assertEqual(
+            journal.replay(JournalCursor(journal.position - 1))[0].record.kind,
+            "harness.snapshot-activated",
+        )
+
+    def test_proposed_without_effect_start_resumes_only_identical_proposal(self) -> None:
+        journal = _journal()
+        private_store = MemoryHarnessPrivateRevisionStore()
+        proposal = _proposal()
+        first = HarnessCoordinator(
+            _FailRecordOnce(journal, "harness.effect-started"),
+            HarnessScope.session("session-1"),
+            lambda candidate: self.fail(f"effect started early: {candidate.digest}"),
+            _Cancellation(),
+            private_store,
+        )
+        with self.assertRaisesRegex(HarnessError, "harness journal conflicts"):
+            first.apply(proposal)
+
+        calls = 0
+
+        def send(candidate: HarnessProposal) -> HarnessEffectReceipt:
+            nonlocal calls
+            calls += 1
+            return HarnessEffectReceipt.succeeded(
+                candidate,
+                effect_digest=harness_effect_digest(candidate),
+                result_entries=(_entry(),),
+            )
+
+        reopened = HarnessCoordinator(
+            journal,
+            HarnessScope.session("session-1"),
+            send,
+            _Cancellation(),
+            private_store,
+        )
+        with self.assertRaisesRegex(HarnessError, "proposal replay conflicts"):
+            reopened.apply(_proposal(evidence_ids=("evidence-1",)))
+
+        self.assertEqual(reopened.apply(proposal).status, "succeeded")
+        self.assertEqual(calls, 1)
+
+    def test_rollback_creates_new_revision_and_preserves_history(self) -> None:
+        coordinator = HarnessCoordinator(
+            _journal(),
+            HarnessScope.session("session-1"),
+            lambda proposal: HarnessEffectReceipt.succeeded(
+                proposal,
+                effect_digest=harness_effect_digest(proposal),
+                result_entries=() if proposal.edits[0].action == "delete" else (_entry(),),
+                usage=_usage(),
+            ),
+            _Cancellation(),
+        )
+        original = coordinator.apply(_proposal())
+        rollback = coordinator.rollback(
+            proposal_id="proposal-rollback",
+            authority_id="authority-1",
+            authority_revision=1,
+            target_revision_id=original.revision_id,
+            rationale_ref="private:rollback",
+            rationale_digest="1" * 64,
+            expected_outcome_digest="2" * 64,
+        )
+
+        self.assertGreater(rollback.sequence, original.sequence)
+        self.assertEqual(rollback.rollback_revision_id, original.revision_id)
+        self.assertEqual(len(coordinator.history()), 2)
+        self.assertEqual(coordinator.snapshot().entries, ())
+
+    def test_file_journal_reopen_recovers_activated_snapshot_without_resend(self) -> None:
+        private_store = MemoryHarnessPrivateRevisionStore()
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary) / "private-journal"
+            journal = FileCanonicalJournal.open(root, "harness-session")
+            journal.append(
+                0,
+                JournalRecord.system_bound(
+                    system_id="research.system",
+                    system_version="1.0.0",
+                ),
+            )
+            journal.append(
+                1,
+                JournalRecord.authority_bound(
+                    authority_id="authority-1",
+                    authority_revision=1,
+                ),
+            )
+            first = HarnessCoordinator(
+                journal,
+                HarnessScope.session("session-1"),
+                lambda proposal: HarnessEffectReceipt.succeeded(
+                    proposal,
+                    effect_digest=harness_effect_digest(proposal),
+                    result_entries=(_entry(),),
+                    usage=_usage(),
+                ),
+                _Cancellation(),
+                private_store,
+            )
+            expected = first.apply(_proposal())
+            journal.close()
+
+            reopened_journal = FileCanonicalJournal.open(root, "harness-session")
+            reopened = HarnessCoordinator(
+                reopened_journal,
+                HarnessScope.session("session-1"),
+                lambda proposal: self.fail(f"completed effect retried: {proposal.digest}"),
+                _Cancellation(),
+                private_store,
+            )
+
+            self.assertEqual(reopened.snapshot().revision_id, expected.revision_id)
+            self.assertEqual(reopened.snapshot().entries, (_entry(),))
+            self.assertEqual(reopened.history(), (expected,))
+            reopened_journal.close()
 
 
 if __name__ == "__main__":
