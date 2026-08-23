@@ -150,6 +150,7 @@ class TestPrimeContinualHarnessExperiment(unittest.TestCase):
                     **_provider_report(),
                     "format": "asterion.prime-continual-harness-native/v1",
                     "failure_stage": "public-receipt-projection",
+                    "model_selector_digest": "a" * 64,
                 }),
                 encoding="utf-8",
             )

@@ -392,6 +392,7 @@ def recover_prime_continual_harness_bounded(
             "failure_stage",
             "format",
             "host_admitted",
+            "model_selector_digest",
             "proposal_grounded",
             "provider_operations",
             "snapshot_activated",
@@ -402,9 +403,15 @@ def recover_prime_continual_harness_bounded(
         if (
             native["format"] != NATIVE_FORMAT
             or native["failure_stage"] != "public-receipt-projection"
+            or native["model_selector_digest"] != model_selector_digest
+            or not _digest(native["model_selector_digest"])
         ):
             raise ValueError
-        report = {key: native[key] for key in native if key not in {"format", "failure_stage"}}
+        report = {
+            key: native[key]
+            for key in native
+            if key not in {"format", "failure_stage", "model_selector_digest"}
+        }
         receipt = run_prime_continual_harness_bounded_probe(
             lambda: report,
             model_selector_digest=model_selector_digest,
@@ -473,7 +480,12 @@ def _resolve_node_22(root: Path) -> Path:
     )
 
 
-def _write_native_receipt(root: Path, report: Mapping[str, object]) -> Path:
+def _write_native_receipt(
+    root: Path,
+    report: Mapping[str, object],
+    *,
+    model_selector_digest: str,
+) -> Path:
     target = root / NATIVE_RECEIPT_NAME
     descriptor: int | None = None
     try:
@@ -481,7 +493,10 @@ def _write_native_receipt(root: Path, report: Mapping[str, object]) -> Path:
             **dict(_provider_report(report)),
             "failure_stage": "public-receipt-projection",
             "format": NATIVE_FORMAT,
+            "model_selector_digest": model_selector_digest,
         }
+        if not _digest(model_selector_digest):
+            raise ValueError
         descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             descriptor = None
@@ -565,11 +580,15 @@ def run_authorized_bounded(source_root: Path, evidence_root: Path) -> Mapping[st
                 resolve_bounded_prime_environment,
             )
 
-        selection = resolve_native_rlm_model(os.environ)
-        selector_digest = native_rlm_model_selector_digest(selection)
         native_receipt = native_root / NATIVE_RECEIPT_NAME
         public_receipt = evidence_root / RECEIPT_NAME
         if native_receipt.is_file() and not public_receipt.exists():
+            native_value = json.loads(native_receipt.read_text(encoding="utf-8"))
+            if not isinstance(native_value, Mapping):
+                raise ValueError
+            selector_digest = native_value.get("model_selector_digest")
+            if not _digest(selector_digest):
+                raise ValueError
             receipt = recover_prime_continual_harness_bounded(
                 native_root,
                 evidence_root,
@@ -599,8 +618,7 @@ def run_authorized_bounded(source_root: Path, evidence_root: Path) -> Mapping[st
 
         environment = dict(resolve_bounded_prime_environment())
         selection = resolve_native_rlm_model(environment)
-        if native_rlm_model_selector_digest(selection) != selector_digest:
-            raise ValueError
+        selector_digest = native_rlm_model_selector_digest(selection)
         with tempfile.TemporaryDirectory(
             prefix="asterion-prime-harness-", dir=str(native_root)
         ) as temporary:
@@ -667,7 +685,11 @@ def run_authorized_bounded(source_root: Path, evidence_root: Path) -> Mapping[st
             raw = json.loads(result_path.read_text(encoding="utf-8"))
             report = admit_prime_refinement_result(raw, evidence_ids=EVIDENCE_IDS)
 
-        _write_native_receipt(native_root, report)
+        _write_native_receipt(
+            native_root,
+            report,
+            model_selector_digest=selector_digest,
+        )
         receipt = run_prime_continual_harness_bounded_probe(
             lambda: report,
             model_selector_digest=selector_digest,
