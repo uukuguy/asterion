@@ -1,0 +1,17 @@
+{
+  "format": "asterion.prime-harness-module-lock/v1",
+  "source_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
+  "entry": "packages/coding-agent/dist/core/refinement/index.js",
+  "source_files": {
+    "packages/coding-agent/src/core/refinement/refinement.ts": "3f94b16e4626a42dfd22254d8c1426223045d29eabb2be14ec292593a4a9512c"
+  },
+  "built_modules": {
+    "packages/coding-agent/dist/core/refinement/index.js": "e065c88f049fd19e55f5973a69a80f33190a65560fd54f2e33370e827699eab8",
+    "packages/coding-agent/dist/core/refinement/refinement.js": "e8bb31024293143b891b9263bad76726620dac6cb17c2cb47260e075159d2e81"
+  },
+  "required_exports": [
+    "applyRefinementProposal",
+    "loadHarnessState",
+    "saveHarnessState"
+  ]
+}

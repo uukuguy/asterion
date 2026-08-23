@@ -12,6 +12,7 @@ from unittest import mock
 from tools.setup_prime_agent import (
     PrimeSetupError,
     derive_prime_rlm_runtime,
+    resolve_prime_harness_module,
     setup_prime_source,
     verify_prime_source,
 )
@@ -20,6 +21,10 @@ from tools.setup_prime_agent import (
 PROJECT = Path(__file__).resolve().parents[1]
 LOCK_PATH = (
     PROJECT / "packages/typescript/prime-gateway/resources/prime-artifact-lock.json"
+)
+HARNESS_LOCK_PATH = (
+    PROJECT
+    / "packages/typescript/prime-gateway/resources/prime-harness-module-lock.json"
 )
 PINNED_SOURCE = PROJECT / "3th-party/prime-agent"
 OFFLINE_BUILD_COMMANDS = (
@@ -175,6 +180,50 @@ class RecordingRunner:
 
 
 class TestSetupPrimeAgent(unittest.TestCase):
+    def test_resolver_accepts_only_the_pinned_refinement_module(self) -> None:
+        if not PINNED_SOURCE.is_dir():
+            self.skipTest("external pinned Prime checkout is unavailable")
+
+        module = resolve_prime_harness_module(
+            PINNED_SOURCE,
+            lock_path=HARNESS_LOCK_PATH,
+            runner=RecordingRunner(),
+        )
+
+        self.assertEqual(module.name, "index.js")
+        self.assertIn("core/refinement", module.as_posix())
+
+    def test_resolver_rejects_source_export_or_digest_drift(self) -> None:
+        if not PINNED_SOURCE.is_dir():
+            self.skipTest("external pinned Prime checkout is unavailable")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "prime-source"
+            source.mkdir()
+            (source / ".git").mkdir()
+            relative_files = (
+                "packages/coding-agent/src/core/refinement/refinement.ts",
+                "packages/coding-agent/dist/core/refinement/index.js",
+                "packages/coding-agent/dist/core/refinement/refinement.js",
+            )
+            for relative in relative_files:
+                target = source / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes((PINNED_SOURCE / relative).read_bytes())
+            target = source / relative_files[-1]
+            target.write_text(target.read_text() + "\n// SENTINEL_PRIVATE_DRIFT\n")
+
+            with self.assertRaisesRegex(
+                PrimeSetupError, "Prime harness module is invalid"
+            ) as raised:
+                resolve_prime_harness_module(
+                    source,
+                    lock_path=HARNESS_LOCK_PATH,
+                    runner=RecordingRunner(),
+                )
+
+        self.assertNotIn("SENTINEL_PRIVATE_DRIFT", str(raised.exception))
+
     def test_check_verifies_exact_source_without_install_or_path_output(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             source, lock_path = _fixture_source(Path(directory))

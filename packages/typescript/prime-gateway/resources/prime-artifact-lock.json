@@ -8,7 +8,10 @@
   "daemon_schema_id": "protocol-7-schema-14-816309b1cd50",
   "files": {
     "package-lock.json": "39ee303bca10c0933cf917275613c8f44099f50de1650a5c356e7cda02b701e8",
+    "packages/coding-agent/dist/core/refinement/index.js": "e065c88f049fd19e55f5973a69a80f33190a65560fd54f2e33370e827699eab8",
+    "packages/coding-agent/dist/core/refinement/refinement.js": "e8bb31024293143b891b9263bad76726620dac6cb17c2cb47260e075159d2e81",
     "packages/coding-agent/package.json": "4e49f896d35be953c7939c2daaf5fcf884092f3b10370778e1643a54185c4033",
+    "packages/coding-agent/src/core/refinement/refinement.ts": "3f94b16e4626a42dfd22254d8c1426223045d29eabb2be14ec292593a4a9512c",
     "packages/coding-agent/src/modes/daemon/daemon-client.ts": "5b2dcbd5b65697ccae5a80a6e491592afd8d60cde0f93d6ce0091b02eba03d1d",
     "packages/coding-agent/src/modes/daemon/daemon-extension-binding.ts": "4da4f6b1255cebf9225ec8be93e17b9305728915bf1cc2fa15a1d80a136cdce3",
     "packages/coding-agent/src/modes/daemon/daemon-mode.ts": "ca432cb7e2fe1be50a6a70dca22e09ca32b0ddfb6672d0bd4901878ce3351445",

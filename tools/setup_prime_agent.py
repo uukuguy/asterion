@@ -18,6 +18,12 @@ from types import MappingProxyType
 
 
 LOCK_FORMAT = "asterion.prime-artifact-lock/v1"
+HARNESS_MODULE_LOCK_FORMAT = "asterion.prime-harness-module-lock/v1"
+PRIME_HARNESS_REQUIRED_EXPORTS = (
+    "applyRefinementProposal",
+    "loadHarnessState",
+    "saveHarnessState",
+)
 MINIMUM_NODE_VERSION = (22, 8, 0)
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -73,6 +79,15 @@ class PrimeArtifactLock:
     rlm_runtime: PrimeRlmRuntimeLock | None
 
 
+@dataclass(frozen=True, repr=False)
+class PrimeHarnessModuleLock:
+    source_commit: str
+    entry: str
+    source_files: Mapping[str, str]
+    built_modules: Mapping[str, str]
+    required_exports: tuple[str, ...]
+
+
 @dataclass(frozen=True)
 class PrimeSetupReport:
     source_commit: str
@@ -118,6 +133,19 @@ def default_rlm_shim_path() -> Path:
         return repository
     packaged = resources.files("asterion").joinpath(
         "control/providers/prime/resources/prime-rlm-host-shim.json"
+    )
+    return Path(str(packaged))
+
+
+def default_harness_module_lock_path() -> Path:
+    repository = (
+        Path(__file__).resolve().parents[1]
+        / "packages/typescript/prime-gateway/resources/prime-harness-module-lock.json"
+    )
+    if repository.is_file():
+        return repository
+    packaged = resources.files("asterion").joinpath(
+        "control/providers/prime/resources/prime-harness-module-lock.json"
     )
     return Path(str(packaged))
 
@@ -243,6 +271,93 @@ def load_prime_artifact_lock(path: Path | None = None) -> PrimeArtifactLock:
         )
     except (OSError, json.JSONDecodeError, TypeError, ValueError):
         raise PrimeSetupError("Prime artifact lock is invalid") from None
+
+
+def load_prime_harness_module_lock(
+    path: Path | None = None,
+) -> PrimeHarnessModuleLock:
+    try:
+        value = json.loads(
+            (path or default_harness_module_lock_path()).read_text(encoding="utf-8")
+        )
+        if not isinstance(value, dict) or set(value) != {
+            "format",
+            "source_commit",
+            "entry",
+            "source_files",
+            "built_modules",
+            "required_exports",
+        }:
+            raise TypeError
+        entry = value["entry"]
+        source_files = _parse_digest_mapping(value["source_files"])
+        built_modules = _parse_digest_mapping(value["built_modules"])
+        exports = value["required_exports"]
+        if (
+            value["format"] != HARNESS_MODULE_LOCK_FORMAT
+            or not isinstance(value["source_commit"], str)
+            or _COMMIT.fullmatch(value["source_commit"]) is None
+            or not isinstance(entry, str)
+            or entry not in built_modules
+            or Path(entry).name != "index.js"
+            or not isinstance(exports, list)
+            or tuple(exports) != PRIME_HARNESS_REQUIRED_EXPORTS
+        ):
+            raise TypeError
+        return PrimeHarnessModuleLock(
+            source_commit=value["source_commit"],
+            entry=entry,
+            source_files=source_files,
+            built_modules=built_modules,
+            required_exports=tuple(exports),
+        )
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        raise PrimeSetupError("Prime harness module is invalid") from None
+
+
+def resolve_prime_harness_module(
+    source_root: Path,
+    *,
+    lock_path: Path | None = None,
+    runner: Runner = _default_runner,
+) -> Path:
+    """Resolve the exact provider-free Prime refinement module."""
+
+    try:
+        lock = load_prime_harness_module_lock(lock_path)
+        root = _source_root(source_root)
+        files = {**lock.source_files, **lock.built_modules}
+        _verify_digest_mapping(root, files)
+        git_metadata = root / ".git"
+        if git_metadata.is_symlink() or not (
+            git_metadata.is_dir() or git_metadata.is_file()
+        ):
+            raise OSError
+        with tempfile.TemporaryDirectory(
+            prefix="asterion-prime-harness-check-"
+        ) as temporary:
+            environment = _closed_environment(Path(temporary))
+            top_level = _run(
+                runner, ("git", "rev-parse", "--show-toplevel"), root, environment
+            )
+            head = _run(runner, ("git", "rev-parse", "HEAD"), root, environment)
+            status = _run(
+                runner,
+                ("git", "status", "--porcelain", "--untracked-files=normal"),
+                root,
+                environment,
+            )
+            if (
+                not _is_exact_git_root(top_level, root)
+                or head.returncode != 0
+                or head.stdout.strip() != lock.source_commit
+                or status.returncode != 0
+                or status.stdout.strip()
+            ):
+                raise OSError
+        return (root / lock.entry).resolve(strict=True)
+    except (OSError, RuntimeError, ValueError, PrimeSetupError):
+        raise PrimeSetupError("Prime harness module is invalid") from None
 
 
 def verify_prime_source(
@@ -426,7 +541,16 @@ def _source_root(value: Path) -> Path:
 
 
 def _verify_files(root: Path, lock: PrimeArtifactLock) -> None:
-    for relative, expected in lock.files.items():
+    try:
+        _verify_digest_mapping(root, lock.files)
+    except PrimeSetupError:
+        raise PrimeSetupError(
+            "Prime source artifact does not match the lock"
+        ) from None
+
+
+def _verify_digest_mapping(root: Path, files: Mapping[str, str]) -> None:
+    for relative, expected in files.items():
         try:
             path = root / relative
             if path.is_symlink() or not path.is_file():
@@ -439,9 +563,7 @@ def _verify_files(root: Path, lock: PrimeArtifactLock) -> None:
             if digest != expected:
                 raise OSError
         except (OSError, RuntimeError, ValueError):
-            raise PrimeSetupError(
-                "Prime source artifact does not match the lock"
-            ) from None
+            raise PrimeSetupError("Prime source artifact is invalid") from None
 
 
 def _read_regular_file(path: Path) -> bytes:
