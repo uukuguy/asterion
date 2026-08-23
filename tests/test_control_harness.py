@@ -50,6 +50,7 @@ def _entry(
 def _proposal(
     *,
     proposal_id: str = "proposal-1",
+    baseline_snapshot_id: str = "snapshot-0",
     scope: HarnessScope | None = None,
     evidence_ids: tuple[str, ...] | list[str] = ("evidence-1", "evidence-2"),
     edits: tuple[HarnessEdit, ...] | list[HarnessEdit] | None = None,
@@ -62,7 +63,7 @@ def _proposal(
         authority_id="authority-1",
         authority_revision=1,
         scope=scope or HarnessScope.session("session-1"),
-        baseline_snapshot_id="snapshot-0",
+        baseline_snapshot_id=baseline_snapshot_id,
         edits=edits,
         evidence_ids=evidence_ids,
         rationale_ref=rationale_ref,
@@ -441,6 +442,51 @@ class TestHarnessCoordinator(unittest.TestCase):
 
         self.assertEqual((failed.sequence, succeeded.sequence), (1, 2))
         self.assertEqual(coordinator.snapshot().sequence, 2)
+
+    def test_delta_receipt_preserves_unmodified_snapshot_entries(self) -> None:
+        def send(proposal: HarnessProposal) -> HarnessEffectReceipt:
+            changed = tuple(
+                edit.replacement
+                for edit in proposal.edits
+                if edit.replacement is not None
+            )
+            return HarnessEffectReceipt.succeeded(
+                proposal,
+                effect_digest=harness_effect_digest(proposal),
+                result_entries=changed,
+            )
+
+        coordinator = HarnessCoordinator(
+            _journal(),
+            HarnessScope.session("session-1"),
+            send,
+            _Cancellation(),
+        )
+        created = _proposal(
+            edits=(
+                HarnessEdit.create(_entry("memory-1")),
+                HarnessEdit.create(_entry("skill-1", kind="skill")),
+            )
+        )
+        coordinator.apply(created)
+        baseline = coordinator.snapshot()
+        updated = _proposal(
+            proposal_id="proposal-2",
+            baseline_snapshot_id=baseline.snapshot_id,
+            edits=(
+                HarnessEdit.update(
+                    _entry("memory-1", version=2),
+                    expected_version=1,
+                ),
+            ),
+        )
+
+        coordinator.apply(updated)
+
+        self.assertEqual(
+            tuple((item.entry_id, item.version) for item in coordinator.snapshot().entries),
+            (("memory-1", 2), ("skill-1", 1)),
+        )
 
     def test_activation_persistence_failure_recovers_without_second_effect(self) -> None:
         journal = _journal()

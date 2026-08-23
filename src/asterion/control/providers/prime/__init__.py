@@ -26,6 +26,13 @@ from asterion.control.providers.prime.process import (
     PrimeSidecarSpawnPlan,
     build_prime_sidecar_spawn_plan,
 )
+from asterion.control.providers.prime.harness import (
+    PrimeContinualHarnessService,
+    PrimeHarnessEdit,
+    PrimeHarnessEffect,
+    PrimeHarnessError,
+    PrimeHarnessIpcReceipt,
+)
 from asterion.control.providers.prime.system_actions import PrimeSystemActionService
 from asterion.control.providers.prime.rlm import (
     PrimeRlmActionLifecycle,
@@ -41,6 +48,11 @@ __all__ = (
     "PrivateAttachmentResolver",
     "PrimeControlError",
     "PrimeControlPlaneClient",
+    "PrimeContinualHarnessService",
+    "PrimeHarnessEdit",
+    "PrimeHarnessEffect",
+    "PrimeHarnessError",
+    "PrimeHarnessIpcReceipt",
     "PrimeSidecarLaunchOptions",
     "PrimeSidecarProcess",
     "PrimeSidecarProcessError",

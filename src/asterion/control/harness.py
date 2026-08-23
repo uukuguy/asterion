@@ -770,7 +770,7 @@ class HarnessCoordinator:
         else:
             try:
                 receipt = self._effect_sender(proposal)
-                self._validate_receipt(receipt, pending, result_entries)
+                self._validate_receipt(receipt, pending)
             except HarnessTransportError:
                 return self._record_uncertain(pending)
             except Exception:
@@ -817,8 +817,17 @@ class HarnessCoordinator:
         self,
         receipt: object,
         pending: _PendingEffect,
-        expected_entries: tuple[HarnessEntryDescriptor, ...],
     ) -> None:
+        expected_delta = tuple(
+            sorted(
+                (
+                    edit.replacement
+                    for edit in pending.proposal.edits
+                    if edit.replacement is not None
+                ),
+                key=lambda item: item.entry_id,
+            )
+        )
         if (
             not isinstance(receipt, HarnessEffectReceipt)
             or receipt.proposal_id != pending.proposal.proposal_id
@@ -826,7 +835,7 @@ class HarnessCoordinator:
             or receipt.effect_digest != pending.effect_digest
             or (
                 receipt.status == "succeeded"
-                and receipt.result_entries != expected_entries
+                and receipt.result_entries != expected_delta
             )
             or (
                 receipt.status in {"failed", "cancelled"}
