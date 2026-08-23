@@ -24,6 +24,11 @@ import type {
 } from "@dci/agent-runtime";
 
 import type { PrimeDaemonCursor } from "./daemon-wire.js";
+import { harnessEffectBinding } from "./continual-harness.js";
+import type {
+  GatewayHarnessEffectBinding,
+  GatewayHarnessEffectResult,
+} from "./continual-harness.js";
 
 export const MAX_PUBLIC_EVENTS_PER_GENERATION = 100_000;
 export const MAX_PUBLIC_RECORD_BYTES = 1024 * 1024;
@@ -55,6 +60,8 @@ const RECORD_KINDS = new Set([
   "rlm.lifecycle",
   "rlm.message.binding",
   "rlm.message.delivered",
+  "harness.effect.bound",
+  "harness.effect.committed",
 ]);
 
 export interface GatewayRlmBinding {
@@ -300,6 +307,29 @@ export function canonicalJsonBytes(value: unknown): Buffer {
 
 export function sha256Hex(value: Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function validateHarnessBinding(value: unknown): GatewayHarnessEffectBinding {
+  if (!isRecord(value) || !hasExactKeys(value, ["effectDigest", "effectId", "proposalDigest", "scopeDigest"]) ||
+      !nonEmptyIdentifier(value.effectId) || typeof value.proposalDigest !== "string" || !DIGEST_PATTERN.test(value.proposalDigest) ||
+      typeof value.scopeDigest !== "string" || !DIGEST_PATTERN.test(value.scopeDigest) ||
+      typeof value.effectDigest !== "string" || !DIGEST_PATTERN.test(value.effectDigest)) throw new GatewayStoreConflictError();
+  return Object.freeze({ effectId: value.effectId, proposalDigest: value.proposalDigest, scopeDigest: value.scopeDigest, effectDigest: value.effectDigest });
+}
+
+function validateHarnessResult(value: unknown): GatewayHarnessEffectResult {
+  if (!isRecord(value) || !hasExactKeys(value, ["effectDigest", "effectId", "proposalDigest", "scopeDigest", "snapshotDigest", "status"])) throw new GatewayStoreConflictError();
+  const binding = validateHarnessBinding({
+    effectDigest: value.effectDigest,
+    effectId: value.effectId,
+    proposalDigest: value.proposalDigest,
+    scopeDigest: value.scopeDigest,
+  });
+  if ((value.status !== "succeeded" && value.status !== "failed" && value.status !== "uncertain") ||
+      (value.snapshotDigest !== null && (typeof value.snapshotDigest !== "string" || !DIGEST_PATTERN.test(value.snapshotDigest))) ||
+      (value.status === "succeeded" && value.snapshotDigest === null) ||
+      (value.status !== "succeeded" && value.snapshotDigest !== null)) throw new GatewayStoreConflictError();
+  return Object.freeze({ ...binding, status: value.status, snapshotDigest: value.snapshotDigest });
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -1107,6 +1137,8 @@ export class GatewayDurableStore {
   private readonly deliveredRlmMessageIds = new Set<string>();
   private readonly activeRlmChildIds = new Set<string>();
   private readonly closedRlmChildIds = new Set<string>();
+  private readonly harnessBindings = new Map<string, GatewayHarnessEffectBinding>();
+  private readonly harnessResults = new Map<string, GatewayHarnessEffectResult>();
 
   private constructor(
     private readonly root: string,
@@ -1631,6 +1663,39 @@ export class GatewayDurableStore {
     );
   }
 
+  async bindHarnessEffect(effect: unknown): Promise<GatewayHarnessEffectBinding> {
+    let binding: GatewayHarnessEffectBinding;
+    try {
+      binding = validateHarnessBinding(harnessEffectBinding(effect));
+    } catch {
+      throw new GatewayStoreConflictError();
+    }
+    await this.appendRecord("harness.effect.bound", `harness-effect:${binding.effectId}`, binding as unknown as Record<string, unknown>);
+    const stored = this.harnessBindings.get(binding.effectId);
+    if (stored === undefined) throw new GatewayStoreConflictError();
+    return stored;
+  }
+
+  async commitHarnessEffectResult(effectId: string, status: GatewayHarnessEffectResult["status"], snapshotDigest: string | null): Promise<GatewayHarnessEffectResult> {
+    const binding = this.harnessBindings.get(effectId);
+    if (binding === undefined) throw new GatewayStoreConflictError();
+    const result = validateHarnessResult({ ...binding, status, snapshotDigest });
+    await this.appendRecord("harness.effect.committed", `harness-result:${effectId}`, result as unknown as Record<string, unknown>);
+    const stored = this.harnessResults.get(effectId);
+    if (stored === undefined) throw new GatewayStoreConflictError();
+    return stored;
+  }
+
+  harnessEffectBinding(effectId: string): GatewayHarnessEffectBinding | undefined {
+    if (!nonEmptyIdentifier(effectId)) throw new GatewayStoreConflictError();
+    return this.harnessBindings.get(effectId);
+  }
+
+  harnessEffectResult(effectId: string): GatewayHarnessEffectResult | undefined {
+    if (!nonEmptyIdentifier(effectId)) throw new GatewayStoreConflictError();
+    return this.harnessResults.get(effectId);
+  }
+
   async recordRlmBinding(binding: GatewayRlmBinding): Promise<GatewayRecordReceipt> {
     const validated = validateRlmBinding(binding);
     const existingAction = this.rlmActionsByChildId.get(validated.child_id);
@@ -2135,6 +2200,19 @@ export class GatewayDurableStore {
         }
         return observation as unknown as Record<string, unknown>;
       }
+      if (kind === "harness.effect.bound") {
+        const binding = validateHarnessBinding(payload);
+        if (recordId !== `harness-effect:${binding.effectId}`) throw new GatewayStoreCorruptionError();
+        return binding as unknown as Record<string, unknown>;
+      }
+      if (kind === "harness.effect.committed") {
+        const result = validateHarnessResult(payload);
+        const binding = this.harnessBindings.get(result.effectId);
+        if (recordId !== `harness-result:${result.effectId}` || binding === undefined ||
+            binding.effectDigest !== result.effectDigest || binding.proposalDigest !== result.proposalDigest ||
+            binding.scopeDigest !== result.scopeDigest) throw new GatewayStoreCorruptionError();
+        return result as unknown as Record<string, unknown>;
+      }
       if (kind === "rlm.binding") {
         const binding = validateRlmBinding(payload);
         if (recordId !== `rlm-binding:${binding.action_id}`) {
@@ -2333,6 +2411,17 @@ export class GatewayDurableStore {
         throw new GatewayStoreCorruptionError();
       }
       this.primeCursor = cursor;
+    } else if (record.stored.kind === "harness.effect.bound") {
+      const binding = validateHarnessBinding(record.payload);
+      if (this.harnessBindings.has(binding.effectId)) throw new GatewayStoreCorruptionError();
+      this.harnessBindings.set(binding.effectId, binding);
+    } else if (record.stored.kind === "harness.effect.committed") {
+      const result = validateHarnessResult(record.payload);
+      const binding = this.harnessBindings.get(result.effectId);
+      if (binding === undefined || binding.effectDigest !== result.effectDigest ||
+          binding.proposalDigest !== result.proposalDigest || binding.scopeDigest !== result.scopeDigest ||
+          this.harnessResults.has(result.effectId)) throw new GatewayStoreCorruptionError();
+      this.harnessResults.set(result.effectId, result);
     } else if (record.stored.kind === "rlm.lifecycle") {
       const observation = validateRlmLifecycleObservation(record.payload);
       if (!this.rlmActionsByChildId.has(observation.child_id)) {

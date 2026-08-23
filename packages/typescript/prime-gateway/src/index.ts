@@ -72,6 +72,20 @@ export type {
   StorageFaultStage,
 } from "./durable-store.js";
 export {
+  PrimeContinualHarnessAdapter,
+  harnessEffectBinding,
+  validatePrimeHarnessEffect,
+} from "./continual-harness.js";
+export type {
+  GatewayHarnessEffectBinding,
+  GatewayHarnessEffectResult,
+  PrimeContinualHarnessAdapterOptions,
+  PrimeHarnessEdit,
+  PrimeHarnessEffect,
+  PrimeHarnessModule,
+  PrimeHarnessScope,
+} from "./continual-harness.js";
+export {
   PrivateValueInvalidError,
   PrivateValueStore,
   PrivateValueWriteError,
