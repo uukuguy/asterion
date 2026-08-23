@@ -529,11 +529,17 @@ def _stop_process(process: subprocess.Popen[bytes]) -> None:
         process.wait(timeout=5)
 
 
-def run_authorized_bounded(source_root: Path, evidence_root: Path) -> Mapping[str, object]:
+def run_authorized_bounded(
+    source_root: Path,
+    evidence_root: Path,
+    *,
+    provider_free_preflight: bool = False,
+) -> Mapping[str, object]:
     """Run the one authorized native /refine call and project body-free evidence."""
 
     started = time.monotonic()
     daemon: subprocess.Popen[bytes] | None = None
+    stage = "path-validation"
     try:
         project_root = Path(__file__).resolve().parents[1]
         source = source_root.resolve(strict=True)
@@ -546,6 +552,7 @@ def run_authorized_bounded(source_root: Path, evidence_root: Path) -> Mapping[st
                 raise ValueError
         else:
             evidence_root.mkdir(mode=0o700, parents=True)
+        evidence_root = evidence_root.resolve(strict=True)
         os.chmod(evidence_root, 0o700)
         native_root = evidence_root / "native"
         if native_root.is_symlink():
@@ -557,6 +564,7 @@ def run_authorized_bounded(source_root: Path, evidence_root: Path) -> Mapping[st
             native_root.mkdir(mode=0o700)
         os.chmod(native_root, 0o700)
 
+        stage = "integration-imports"
         try:
             from tools.prime_native_rlm_experiment import (
                 native_rlm_model_selector_digest,
@@ -580,6 +588,7 @@ def run_authorized_bounded(source_root: Path, evidence_root: Path) -> Mapping[st
                 resolve_bounded_prime_environment,
             )
 
+        stage = "receipt-recovery-check"
         native_receipt = native_root / NATIVE_RECEIPT_NAME
         public_receipt = evidence_root / RECEIPT_NAME
         if native_receipt.is_file() and not public_receipt.exists():
@@ -605,7 +614,9 @@ def run_authorized_bounded(source_root: Path, evidence_root: Path) -> Mapping[st
         if native_receipt.exists() or public_receipt.exists():
             raise ValueError
 
+        stage = "node-resolution"
         node = _resolve_node_22(project_root)
+        stage = "source-verification"
         verify_prime_source(source, node_executable=str(node))
         resolve_prime_harness_module(source)
         daemon_entry = source / "packages/coding-agent/dist/bundle/cli.js"
@@ -616,11 +627,27 @@ def run_authorized_bounded(source_root: Path, evidence_root: Path) -> Mapping[st
         if not daemon_entry.is_file() or not fixture.is_file():
             raise ValueError
 
-        environment = dict(resolve_bounded_prime_environment())
+        stage = "environment-resolution"
+        if provider_free_preflight:
+            environment = {
+                key: value
+                for key in ("HOME", "PATH", "SystemRoot", "TEMP", "TMP", "TMPDIR")
+                if (value := os.environ.get(key)) is not None
+            }
+            environment.update(
+                {
+                    "ASTERION_PRIME_EXPERIMENT_MODEL": "deepseek-v4-flash",
+                    "DEEPSEEK_API_KEY": "SENTINEL_FAKE_CREDENTIAL",
+                    "ASTERION_PRIME_HARNESS_PREFLIGHT_ONLY": "1",
+                }
+            )
+        else:
+            environment = dict(resolve_bounded_prime_environment())
         selection = resolve_native_rlm_model(environment)
         selector_digest = native_rlm_model_selector_digest(selection)
+        stage = "private-workspace"
         with tempfile.TemporaryDirectory(
-            prefix="asterion-prime-harness-", dir=str(native_root)
+            prefix="asterion-prime-harness-", dir="/tmp"
         ) as temporary:
             private_root = Path(temporary)
             os.chmod(private_root, 0o700)
@@ -636,6 +663,7 @@ def run_authorized_bounded(source_root: Path, evidence_root: Path) -> Mapping[st
                 raise ValueError
             environment["HOME"] = str(home)
             environment["PRIME_AGENT_CODING_AGENT_DIR"] = str(agent_dir)
+            stage = "daemon-start"
             daemon = subprocess.Popen(
                 (
                     str(node),
@@ -663,6 +691,7 @@ def run_authorized_bounded(source_root: Path, evidence_root: Path) -> Mapping[st
             remaining = DEADLINE_MS / 1000 - (time.monotonic() - started)
             if remaining <= 1:
                 raise ValueError
+            stage = "native-fixture"
             completed = subprocess.run(
                 (
                     str(node),
@@ -680,6 +709,26 @@ def run_authorized_bounded(source_root: Path, evidence_root: Path) -> Mapping[st
                 capture_output=True,
                 timeout=min(remaining, 580),
             )
+            stage = "native-result-validation"
+            if provider_free_preflight:
+                if completed.returncode != 0:
+                    stage = "native-fixture-exit"
+                    raise ValueError
+                preflight = json.loads(completed.stdout)
+                if (
+                    preflight != {
+                        "status": "PASS",
+                        "provider_operations": 0,
+                        "model_credential_reads": 0,
+                        "boundary": "before-refine",
+                    }
+                ):
+                    stage = "native-preflight-receipt"
+                    raise ValueError
+                if result_path.exists():
+                    stage = "native-preflight-side-effect"
+                    raise ValueError
+                return preflight
             if completed.returncode != 0 or not result_path.is_file():
                 raise ValueError
             raw = json.loads(result_path.read_text(encoding="utf-8"))
@@ -707,6 +756,10 @@ def run_authorized_bounded(source_root: Path, evidence_root: Path) -> Mapping[st
             "usage": dict(receipt["usage"]),  # type: ignore[arg-type]
         }
     except Exception as error:
+        if provider_free_preflight:
+            raise PrimeContinualHarnessExperimentError(
+                f"Prime continual harness provider-free preflight failed at {stage}"
+            ) from None
         if isinstance(error, PrimeContinualHarnessExperimentError):
             raise
         raise PrimeContinualHarnessExperimentError(
@@ -720,6 +773,7 @@ def run_authorized_bounded(source_root: Path, evidence_root: Path) -> Mapping[st
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--authorized-bounded-provider", action="store_true")
+    parser.add_argument("--provider-free-preflight", action="store_true")
     parser.add_argument("--source-root", type=Path, default=Path("3th-party/prime-agent"))
     parser.add_argument("--private-evidence-root", type=Path, required=True)
     return parser
@@ -727,13 +781,19 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    if not args.authorized_bounded_provider:
+    if not args.authorized_bounded_provider and not args.provider_free_preflight:
         return 1
     try:
-        result = run_authorized_bounded(args.source_root, args.private_evidence_root)
+        result = run_authorized_bounded(
+            args.source_root,
+            args.private_evidence_root,
+            provider_free_preflight=args.provider_free_preflight,
+        )
         print(json.dumps(result, ensure_ascii=True, separators=(",", ":"), sort_keys=True))
         return 0
-    except PrimeContinualHarnessExperimentError:
+    except PrimeContinualHarnessExperimentError as error:
+        if args.provider_free_preflight:
+            print(str(error))
         return 1
 
 
