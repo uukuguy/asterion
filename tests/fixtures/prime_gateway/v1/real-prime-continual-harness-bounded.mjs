@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { chmod, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -22,6 +22,33 @@ const daemonClientUrl = pathToFileURL(join(
 ));
 const { SessionManager } = await import(sessionManagerUrl.href);
 const { DaemonClient } = await import(daemonClientUrl.href);
+const rlmShimSource = new URL(
+  "../../../../packages/typescript/prime-gateway/resources/rlm-host-shim.mjs",
+  import.meta.url,
+);
+const rlmShimPath = join(agentDir, "asterion-rlm-host-shim.mjs");
+await writeFile(rlmShimPath, await readFile(rlmShimSource), { mode: 0o600 });
+await chmod(rlmShimPath, 0o600);
+const rlmDiscoveryPath = join(agentDir, "asterion-rlm-host.json");
+await writeFile(
+  rlmDiscoveryPath,
+  JSON.stringify({
+    protocol: "asterion.prime-rlm-host-discovery/v1",
+    socket_path: join(agentDir, "r.sock"),
+    token: "0".repeat(64),
+    session_id: "prime-continual-harness-bounded",
+    budget: {
+      controller_tokens: 0,
+      application_tokens: 0,
+      child_tokens: 0,
+      aggregate_tokens: 0,
+      cost_micros: 0,
+      deadline_ms: 1,
+    },
+  }),
+  { mode: 0o600 },
+);
+await chmod(rlmDiscoveryPath, 0o600);
 
 const evidenceIds = Object.freeze(
   Array.from({ length: 7 }, (_, index) => `evidence-input-${index}`),
@@ -128,7 +155,9 @@ try {
     },
   }, 15_000);
   if (!created.success || created.command !== "create") {
-    throw new Error("bounded Prime continual harness resident creation failed");
+    throw new Error(
+      `bounded Prime continual harness resident creation failed: ${String(created.error ?? "unknown")}`,
+    );
   }
   activeSessionId = requireString(
     requireRecord(created.data, "create response").activeSessionId,
@@ -144,45 +173,54 @@ try {
     throw new Error("bounded Prime continual harness model selection failed");
   }
 
-  const refinement = await client.request({
-    type: "refine",
-    activeSessionId,
-    instructions: [
-      "Use exactly the seven tagged evidence inputs in the conversation.",
-      "Create exactly one local memory entry that preserves their shared operational lesson.",
-      `The rationale must cite every evidence ID verbatim: ${evidenceIds.join(", ")}.`,
-      "Do not propose update or delete edits and do not include secrets or executable commands.",
-    ].join(" "),
-    global: false,
-  }, 570_000);
-  if (!refinement.success || refinement.command !== "refine") {
-    throw new Error("bounded Prime continual harness refinement failed");
+  if (process.env.ASTERION_PRIME_HARNESS_PREFLIGHT_ONLY === "1") {
+    process.stdout.write(JSON.stringify({
+      status: "PASS",
+      provider_operations: 0,
+      model_credential_reads: 0,
+      boundary: "before-refine",
+    }) + "\n");
+  } else {
+    const refinement = await client.request({
+      type: "refine",
+      activeSessionId,
+      instructions: [
+        "Use exactly the seven tagged evidence inputs in the conversation.",
+        "Create exactly one local memory entry that preserves their shared operational lesson.",
+        `The rationale must cite every evidence ID verbatim: ${evidenceIds.join(", ")}.`,
+        "Do not propose update or delete edits and do not include secrets or executable commands.",
+      ].join(" "),
+      global: false,
+    }, 570_000);
+    if (!refinement.success || refinement.command !== "refine") {
+      throw new Error("bounded Prime continual harness refinement failed");
+    }
+    const result = requireRecord(refinement.data, "refinement result");
+    const applied = result.appliedEdits;
+    if (
+      result.scope !== "local" ||
+      !Array.isArray(applied) ||
+      applied.length !== 1 ||
+      applied[0]?.action !== "create" ||
+      applied[0]?.applied !== true ||
+      !evidenceIds.every((evidenceId) =>
+        typeof result.rationale === "string" && result.rationale.includes(evidenceId)
+      )
+    ) {
+      throw new Error("bounded Prime continual harness result is ungrounded");
+    }
+    await writeFile(resultPath, `${JSON.stringify(result)}\n`, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    });
+    process.stdout.write(JSON.stringify({
+      status: "PASS",
+      evidence_input_count: evidenceIds.length,
+      provider_operations: 1,
+      model_credential_reads: 1,
+    }) + "\n");
   }
-  const result = requireRecord(refinement.data, "refinement result");
-  const applied = result.appliedEdits;
-  if (
-    result.scope !== "local" ||
-    !Array.isArray(applied) ||
-    applied.length !== 1 ||
-    applied[0]?.action !== "create" ||
-    applied[0]?.applied !== true ||
-    !evidenceIds.every((evidenceId) =>
-      typeof result.rationale === "string" && result.rationale.includes(evidenceId)
-    )
-  ) {
-    throw new Error("bounded Prime continual harness result is ungrounded");
-  }
-  await writeFile(resultPath, `${JSON.stringify(result)}\n`, {
-    encoding: "utf8",
-    flag: "wx",
-    mode: 0o600,
-  });
-  process.stdout.write(JSON.stringify({
-    status: "PASS",
-    evidence_input_count: evidenceIds.length,
-    provider_operations: 1,
-    model_credential_reads: 1,
-  }) + "\n");
 } finally {
   if (activeSessionId !== undefined) {
     try {
