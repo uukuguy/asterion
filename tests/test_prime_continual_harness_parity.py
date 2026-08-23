@@ -13,6 +13,7 @@ from asterion.control.providers.prime.parity_testing import (
     PRIME_HARNESS_BOUNDED_SCENARIO_IDS,
     PRIME_HARNESS_PROVIDER_FREE_SCENARIO_IDS,
     PRIME_HARNESS_SCENARIO_MATRIX,
+    build_prime_harness_bounded_observation,
     build_prime_harness_observations,
     register_prime_harness_scenarios,
 )
@@ -131,6 +132,38 @@ def run_real_prime_harness() -> dict[str, object]:
 
 
 class TestPrimeContinualHarnessParity(unittest.TestCase):
+    def test_bounded_observation_requires_one_finite_grounded_receipt(self) -> None:
+        receipt = {
+            "format": "asterion.prime-continual-harness-bounded/v1",
+            "status": "PASS",
+            "model_selector_digest": "a" * 64,
+            "provider_operations": 1,
+            "model_credential_reads": 1,
+            "evidence_input_count": 7,
+            "proposal_grounded": True,
+            "host_admitted": True,
+            "snapshot_activated": True,
+            "limits": {
+                "aggregate_tokens": 150_000,
+                "cost_micros": 500_000,
+                "deadline_ms": 600_000,
+            },
+            "usage": {"aggregate_tokens": 8_203, "cost_micros": 0},
+        }
+
+        observation = build_prime_harness_bounded_observation(receipt)
+
+        self.assertEqual(
+            observation.scenario_id,
+            "prime-parity.harness.evidence-refinement",
+        )
+        self.assertEqual(observation.provider_operations, 1)
+        self.assertEqual(observation.model_credential_reads, 1)
+        with self.assertRaisesRegex(Exception, "bounded observation is invalid"):
+            build_prime_harness_bounded_observation(
+                {**receipt, "raw_output": "SENTINEL_PRIVATE_OUTPUT"}
+            )
+
     def test_harness_matrix_is_seven_provider_free_and_one_bounded(self) -> None:
         self.assertEqual(len(PRIME_HARNESS_PROVIDER_FREE_SCENARIO_IDS), 7)
         self.assertEqual(

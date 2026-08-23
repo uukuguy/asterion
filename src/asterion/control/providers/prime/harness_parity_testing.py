@@ -220,6 +220,100 @@ def build_prime_harness_observations(
         ) from None
 
 
+def build_prime_harness_bounded_observation(
+    receipt: Mapping[str, object],
+) -> PrimeHarnessScenarioObservation:
+    """Bind evidence-refinement to one finite closed bounded receipt."""
+
+    try:
+        if not isinstance(receipt, Mapping) or set(receipt) != {
+            "evidence_input_count",
+            "format",
+            "host_admitted",
+            "limits",
+            "model_credential_reads",
+            "model_selector_digest",
+            "proposal_grounded",
+            "provider_operations",
+            "snapshot_activated",
+            "status",
+            "usage",
+        }:
+            raise ValueError
+        usage = receipt["usage"]
+        limits = receipt["limits"]
+        if (
+            receipt["format"] != "asterion.prime-continual-harness-bounded/v1"
+            or receipt["status"] != "PASS"
+            or not isinstance(receipt["model_selector_digest"], str)
+            or _DIGEST.fullmatch(receipt["model_selector_digest"]) is None
+            or receipt["provider_operations"] != 1
+            or isinstance(receipt["provider_operations"], bool)
+            or receipt["model_credential_reads"] != 1
+            or isinstance(receipt["model_credential_reads"], bool)
+            or receipt["evidence_input_count"] != 7
+            or receipt["proposal_grounded"] is not True
+            or receipt["host_admitted"] is not True
+            or receipt["snapshot_activated"] is not True
+            or not isinstance(usage, Mapping)
+            or set(usage) != {"aggregate_tokens", "cost_micros"}
+            or not isinstance(limits, Mapping)
+            or set(limits) != {"aggregate_tokens", "cost_micros", "deadline_ms"}
+            or any(
+                isinstance(value, bool) or not isinstance(value, int)
+                for value in (*usage.values(), *limits.values())
+            )
+            or usage["aggregate_tokens"] < 1
+            or usage["cost_micros"] < 0
+            or any(limits[key] < 1 for key in limits)
+            or usage["aggregate_tokens"] > limits["aggregate_tokens"]
+            or usage["cost_micros"] > limits["cost_micros"]
+        ):
+            raise ValueError
+        receipt_digest = hashlib.sha256(_canonical(receipt).encode()).hexdigest()
+        scenario_id = PRIME_HARNESS_BOUNDED_SCENARIO_IDS[0]
+        payload = {
+            "artifact_lock": _ARTIFACT_LOCK,
+            "bounded_receipt_sha256": receipt_digest,
+            "checks": list(PRIME_HARNESS_REQUIRED_ASSERTIONS),
+            "command_id": PRIME_HARNESS_BOUNDED_VERIFICATION_COMMAND_ID,
+            "fake_daemon": False,
+            "fault_ids": ["restart-after-admission"],
+            "harness_module_lock": _HARNESS_MODULE_LOCK,
+            "model_credential_reads": 1,
+            "owned_process_count_after_close": 0,
+            "provider_id": "asterion.prime-gateway",
+            "provider_operations": 1,
+            "real_prime_runtime": True,
+            "scenario_id": scenario_id,
+            "source_commit": _SOURCE_COMMIT,
+            "status": "PASS",
+        }
+        serialized = _canonical(payload)
+        return PrimeHarnessScenarioObservation(
+            scenario_id=scenario_id,
+            status="PASS",
+            checks=PRIME_HARNESS_REQUIRED_ASSERTIONS,
+            fault_ids=("restart-after-admission",),
+            real_prime_runtime=True,
+            fake_daemon=False,
+            provider_operations=1,
+            model_credential_reads=1,
+            owned_process_count_after_close=0,
+            source_commit=_SOURCE_COMMIT,
+            artifact_lock=_ARTIFACT_LOCK,
+            harness_module_lock=_HARNESS_MODULE_LOCK,
+            command_id=PRIME_HARNESS_BOUNDED_VERIFICATION_COMMAND_ID,
+            serialized_observations=serialized,
+            evidence_id="evidence.harness."
+            + hashlib.sha256(serialized.encode()).hexdigest(),
+        )
+    except (KeyError, TypeError, ValueError):
+        raise ParityScenarioRegistryError(
+            "Prime harness bounded observation is invalid"
+        ) from None
+
+
 @dataclass(frozen=True)
 class _Clock:
     deterministic: bool = True
@@ -255,12 +349,14 @@ def register_prime_harness_scenarios(
         if (
             registry.provider_id != "asterion.prime-gateway"
             or not callable(provider_factory)
-            or bounded_receipt is not None
             or tuple(item.scenario_id for item in items)
             != PRIME_HARNESS_PROVIDER_FREE_SCENARIO_IDS
             or any(type(item) is not PrimeHarnessScenarioObservation for item in items)
         ):
             raise ValueError
+        validated = list(items)
+        if bounded_receipt is not None:
+            validated.insert(0, build_prime_harness_bounded_observation(bounded_receipt))
         for observation in items:
             payload = json.loads(observation.serialized_observations)
             expected = _canonical(
@@ -297,8 +393,13 @@ def register_prime_harness_scenarios(
             "Prime harness evidence adapter is invalid"
         ) from None
 
-    for observation in items:
+    for observation in validated:
         feature_id = observation.scenario_id.removeprefix("prime-parity.")
+        boundary = (
+            "bounded-provider"
+            if observation.scenario_id in PRIME_HARNESS_BOUNDED_SCENARIO_IDS
+            else "real-prime-provider-free"
+        )
 
         async def executor(
             factory,
@@ -316,7 +417,11 @@ def register_prime_harness_scenarios(
                 provider_id="asterion.prime-gateway",
                 status="pass",
                 evidence_id=evidence_id,
-                reason_code="real-prime-provider-free-verified",
+                reason_code=(
+                    "real-prime-bounded-provider-verified"
+                    if scenario_id in PRIME_HARNESS_BOUNDED_SCENARIO_IDS
+                    else "real-prime-provider-free-verified"
+                ),
             )
 
         registry.register(
@@ -324,7 +429,7 @@ def register_prime_harness_scenarios(
             ParityScenarioRunner(
                 scenario_id=observation.scenario_id,
                 provider_id="asterion.prime-gateway",
-                boundary="real-prime-provider-free",
+                boundary=boundary,
                 feature_ids=(feature_id,),
                 assertion_ids=PRIME_HARNESS_REQUIRED_ASSERTIONS,
                 fault_ids=("restart-after-admission",),

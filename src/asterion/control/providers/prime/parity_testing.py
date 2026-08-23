@@ -24,6 +24,7 @@ from asterion.control.providers.prime.harness_parity_testing import (
     PRIME_HARNESS_REQUIRED_ASSERTIONS,
     PRIME_HARNESS_SCENARIO_MATRIX,
     PrimeHarnessScenarioObservation,
+    build_prime_harness_bounded_observation,
     build_prime_harness_observations,
     register_prime_harness_scenarios,
 )
