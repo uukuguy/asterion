@@ -73,6 +73,16 @@ from asterion.control.journal import (
     JournalRecord,
     MemoryCanonicalJournal,
 )
+from asterion.control.harness import (
+    HarnessEdit,
+    HarnessEffectReceipt,
+    HarnessEntryDescriptor,
+    HarnessError,
+    HarnessProposal,
+    HarnessRevision,
+    HarnessScope,
+    HarnessSnapshot,
+)
 from asterion.control.recovery import (
     RecoveredControlState,
     recover_control_host_state,
@@ -225,6 +235,14 @@ __all__ = [
     "JournalCursor",
     "JournalEntry",
     "JournalRecord",
+    "HarnessEdit",
+    "HarnessEffectReceipt",
+    "HarnessEntryDescriptor",
+    "HarnessError",
+    "HarnessProposal",
+    "HarnessRevision",
+    "HarnessScope",
+    "HarnessSnapshot",
     "MAX_PRIVATE_TEXT_BYTES",
     "MemoryCanonicalJournal",
     "PortfolioGrant",
