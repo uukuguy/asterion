@@ -9,6 +9,7 @@ from unittest import mock
 import tools.prime_continual_harness_experiment as experiment
 from tools.prime_continual_harness_experiment import (
     PrimeContinualHarnessExperimentError,
+    admit_prime_refinement_result,
     recover_prime_continual_harness_bounded,
     run_prime_continual_harness_bounded_probe,
     write_prime_continual_harness_bounded_receipt,
@@ -30,6 +31,48 @@ def _provider_report(**overrides: object) -> dict[str, object]:
 
 
 class TestPrimeContinualHarnessExperiment(unittest.TestCase):
+    def test_native_refinement_is_grounded_and_activated_by_host(self) -> None:
+        evidence_ids = tuple(f"evidence-input-{index}" for index in range(7))
+        result = {
+            "id": "refine_20260823000000000",
+            "summary": "Grounded harness improvement",
+            "rationale": " ".join(evidence_ids),
+            "expectedOutcome": "Preserve the verified operating constraint.",
+            "scope": "local",
+            "harnessStatePath": "/private/harness_state.json",
+            "appliedEdits": [
+                {
+                    "action": "create",
+                    "kind": "memory",
+                    "id": "bounded-evidence-memory",
+                    "applied": True,
+                    "after": {
+                        "id": "bounded-evidence-memory",
+                        "kind": "memory",
+                        "title": "Bounded evidence memory",
+                        "content": "SENTINEL_PRIVATE_MODEL_BODY",
+                        "path": "project/verification",
+                        "scope": "local",
+                        "reference": {},
+                        "arguments": {},
+                        "metadata": {"private": "SENTINEL_PRIVATE_METADATA"},
+                        "source": "refine",
+                        "created_at": "2026-08-23T00:00:00.000Z",
+                        "updated_at": "2026-08-23T00:00:00.000Z",
+                        "version": 1,
+                    },
+                }
+            ],
+        }
+
+        report = admit_prime_refinement_result(result, evidence_ids=evidence_ids)
+
+        self.assertEqual(report["status"], "PASS")
+        self.assertTrue(report["host_admitted"])
+        self.assertTrue(report["snapshot_activated"])
+        self.assertNotIn("SENTINEL_PRIVATE_MODEL_BODY", repr(report))
+        self.assertNotIn("SENTINEL_PRIVATE_METADATA", repr(report))
+
     def test_cli_requires_explicit_bounded_provider_opt_in(self) -> None:
         with TemporaryDirectory() as temporary, mock.patch.object(
             experiment, "run_authorized_bounded"

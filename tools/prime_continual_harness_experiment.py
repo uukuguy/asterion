@@ -3,20 +3,201 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import subprocess
 import sys
+import tempfile
+import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+
+from asterion.control.harness import (
+    HarnessCoordinator,
+    HarnessEdit,
+    HarnessEffectReceipt,
+    HarnessEntryDescriptor,
+    HarnessProposal,
+    HarnessScope,
+    harness_effect_digest,
+)
+from asterion.control.journal import JournalCursor, MemoryCanonicalJournal, JournalRecord
+from asterion.control.providers.prime.harness_parity_testing import (
+    build_prime_harness_bounded_observation,
+)
 
 
 FORMAT = "asterion.prime-continual-harness-bounded/v1"
 NATIVE_FORMAT = "asterion.prime-continual-harness-native/v1"
 RECEIPT_NAME = "prime-continual-harness-bounded-receipt.json"
+NATIVE_RECEIPT_NAME = "prime-continual-harness-native-receipt.json"
+PRIVATE_RESULT_NAME = "prime-refinement-result.json"
+EVIDENCE_IDS = tuple(f"evidence-input-{index}" for index in range(7))
+AGGREGATE_TOKEN_LIMIT = 150_000
+COST_LIMIT_MICROS = 500_000
+DEADLINE_MS = 600_000
 
 
 class PrimeContinualHarnessExperimentError(RuntimeError):
     """Fixed public-safe failure for the bounded continual-harness gate."""
+
+
+def _sha256(value: object) -> str:
+    serialized = json.dumps(
+        value, ensure_ascii=True, separators=(",", ":"), sort_keys=True
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def admit_prime_refinement_result(
+    result: Mapping[str, object],
+    *,
+    evidence_ids: Sequence[str] = EVIDENCE_IDS,
+) -> dict[str, object]:
+    """Admit one private native proposal and activate its digest-only snapshot."""
+
+    try:
+        evidence = tuple(evidence_ids)
+        if evidence != EVIDENCE_IDS or not isinstance(result, Mapping):
+            raise ValueError
+        proposal_id = result["id"]
+        summary = result["summary"]
+        rationale = result["rationale"]
+        expected = result["expectedOutcome"]
+        applied = result["appliedEdits"]
+        if (
+            not all(isinstance(value, str) and value for value in (
+                proposal_id,
+                summary,
+                rationale,
+                expected,
+            ))
+            or result.get("scope") != "local"
+            or type(applied) is not list
+            or not applied
+            or any(item not in rationale for item in evidence)
+        ):
+            raise ValueError
+
+        descriptors: list[HarnessEntryDescriptor] = []
+        for raw_edit in applied:
+            if not isinstance(raw_edit, Mapping):
+                raise ValueError
+            after = raw_edit.get("after")
+            if (
+                raw_edit.get("action") != "create"
+                or raw_edit.get("applied") is not True
+                or not isinstance(after, Mapping)
+                or raw_edit.get("id") != after.get("id")
+                or raw_edit.get("kind") != after.get("kind")
+            ):
+                raise ValueError
+            entry_id = after.get("id")
+            kind = after.get("kind")
+            title = after.get("title")
+            body = after.get("content")
+            grouping_path = after.get("path")
+            version = after.get("version")
+            if (
+                not isinstance(entry_id, str)
+                or not entry_id
+                or kind not in {"prompt", "memory", "skill", "subagent"}
+                or not isinstance(title, str)
+                or not isinstance(body, str)
+                or not isinstance(grouping_path, str)
+                or not grouping_path
+                or version != 1
+            ):
+                raise ValueError
+            descriptors.append(
+                HarnessEntryDescriptor(
+                    entry_id=entry_id,
+                    kind=kind,
+                    title_digest=_sha256(title),
+                    body_ref=f"private:{proposal_id}:{entry_id}",
+                    body_digest=_sha256(body),
+                    grouping_path_digest=_sha256(grouping_path),
+                    metadata_digest=_sha256(after),
+                    version=1,
+                )
+            )
+        descriptors.sort(key=lambda item: item.entry_id)
+        if len({item.entry_id for item in descriptors}) != len(descriptors):
+            raise ValueError
+
+        scope = HarnessScope.session("prime-continual-harness-bounded")
+        proposal = HarnessProposal(
+            proposal_id=proposal_id,
+            authority_id="prime-continual-harness-bounded",
+            authority_revision=1,
+            scope=scope,
+            baseline_snapshot_id="snapshot-0",
+            edits=tuple(HarnessEdit.create(item) for item in descriptors),
+            evidence_ids=evidence,
+            rationale_ref=f"private:{proposal_id}:rationale",
+            rationale_digest=_sha256(rationale),
+            expected_outcome_digest=_sha256(expected),
+        )
+        journal = MemoryCanonicalJournal("prime-continual-harness-bounded")
+        journal.append(
+            0,
+            JournalRecord.system_bound(
+                system_id="prime-continual-harness-bounded",
+                system_version="1.0.0",
+            ),
+        )
+        journal.append(
+            1,
+            JournalRecord.authority_bound(
+                authority_id="prime-continual-harness-bounded",
+                authority_revision=1,
+            ),
+        )
+
+        def effect_sender(candidate: HarnessProposal) -> HarnessEffectReceipt:
+            return HarnessEffectReceipt.succeeded(
+                candidate,
+                effect_digest=harness_effect_digest(candidate),
+                result_entries=tuple(descriptors),
+                usage={
+                    "aggregate_tokens": AGGREGATE_TOKEN_LIMIT,
+                    "cost_micros": COST_LIMIT_MICROS,
+                    "model_credential_reads": 1,
+                    "provider_operations": 1,
+                },
+            )
+
+        coordinator = HarnessCoordinator(journal, scope, effect_sender)
+        revision = coordinator.apply(proposal)
+        kinds = tuple(item.record.kind for item in journal.replay(JournalCursor(0)))
+        if (
+            revision.status != "succeeded"
+            or coordinator.snapshot().revision_id != revision.revision_id
+            or kinds[-4:] != (
+                "harness.proposed",
+                "harness.effect-started",
+                "harness.effect-terminal",
+                "harness.snapshot-activated",
+            )
+        ):
+            raise ValueError
+        return {
+            "status": "PASS",
+            "provider_operations": 1,
+            "evidence_ids": list(evidence),
+            "proposal_grounded": True,
+            "host_admitted": True,
+            "snapshot_activated": True,
+            "usage": {
+                "aggregate_tokens": AGGREGATE_TOKEN_LIMIT,
+                "cost_micros": COST_LIMIT_MICROS,
+            },
+        }
+    except (KeyError, TypeError, ValueError):
+        raise PrimeContinualHarnessExperimentError(
+            "Prime continual harness native result is invalid"
+        ) from None
 
 
 def _digest(value: object) -> bool:
@@ -202,7 +383,7 @@ def recover_prime_continual_harness_bounded(
         ):
             raise ValueError
         native = json.loads(
-            (native_run_root / "prime-continual-harness-native-receipt.json").read_text(
+            (native_run_root / NATIVE_RECEIPT_NAME).read_text(
                 encoding="utf-8"
             )
         )
@@ -241,13 +422,277 @@ def recover_prime_continual_harness_bounded(
         ) from None
 
 
-def run_authorized_bounded(source_root: Path, evidence_root: Path) -> Mapping[str, object]:
-    """Reserved integration seam; calling it requires the explicit CLI opt-in."""
-
-    del source_root, evidence_root
+def _resolve_node_22(root: Path) -> Path:
+    candidates: list[Path] = []
+    configured = os.environ.get("ASTERION_PRIME_NODE")
+    if configured:
+        candidates.append(Path(configured))
+    try:
+        completed = subprocess.run(
+            (
+                "npm",
+                "exec",
+                "--offline",
+                "--yes",
+                "--package=node@22",
+                "--",
+                "which",
+                "node",
+            ),
+            cwd=root,
+            env={
+                key: value
+                for key in ("HOME", "PATH", "SystemRoot", "TEMP", "TMP", "TMPDIR")
+                if (value := os.environ.get(key)) is not None
+            },
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if completed.returncode == 0 and completed.stdout.strip():
+            candidates.append(Path(completed.stdout.strip()))
+    except (OSError, subprocess.SubprocessError):
+        pass
+    for candidate in candidates:
+        try:
+            version = subprocess.run(
+                (str(candidate), "--version"),
+                cwd=root,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if version.returncode == 0 and version.stdout.startswith("v22."):
+                return candidate.resolve(strict=True)
+        except (OSError, subprocess.SubprocessError):
+            continue
     raise PrimeContinualHarnessExperimentError(
-        "Prime continual harness bounded provider integration is unavailable"
+        "Prime continual harness bounded runtime is unavailable"
     )
+
+
+def _write_native_receipt(root: Path, report: Mapping[str, object]) -> Path:
+    target = root / NATIVE_RECEIPT_NAME
+    descriptor: int | None = None
+    try:
+        native = {
+            **dict(_provider_report(report)),
+            "failure_stage": "public-receipt-projection",
+            "format": NATIVE_FORMAT,
+        }
+        descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            descriptor = None
+            handle.write(
+                json.dumps(
+                    native,
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+                + "\n"
+            )
+        return target
+    except (OSError, TypeError, ValueError):
+        if descriptor is not None:
+            os.close(descriptor)
+        raise PrimeContinualHarnessExperimentError(
+            "Prime continual harness native receipt is invalid"
+        ) from None
+
+
+def _stop_process(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+
+
+def run_authorized_bounded(source_root: Path, evidence_root: Path) -> Mapping[str, object]:
+    """Run the one authorized native /refine call and project body-free evidence."""
+
+    started = time.monotonic()
+    daemon: subprocess.Popen[bytes] | None = None
+    try:
+        project_root = Path(__file__).resolve().parents[1]
+        source = source_root.resolve(strict=True)
+        if source_root.is_symlink() or not source.is_dir():
+            raise ValueError
+        if evidence_root.is_symlink():
+            raise ValueError
+        if evidence_root.exists():
+            if not evidence_root.is_dir():
+                raise ValueError
+        else:
+            evidence_root.mkdir(mode=0o700, parents=True)
+        os.chmod(evidence_root, 0o700)
+        native_root = evidence_root / "native"
+        if native_root.is_symlink():
+            raise ValueError
+        if native_root.exists():
+            if not native_root.is_dir():
+                raise ValueError
+        else:
+            native_root.mkdir(mode=0o700)
+        os.chmod(native_root, 0o700)
+
+        try:
+            from tools.prime_native_rlm_experiment import (
+                native_rlm_model_selector_digest,
+                resolve_native_rlm_model,
+            )
+            from tools.setup_prime_agent import (
+                resolve_prime_harness_module,
+                verify_prime_source,
+            )
+            from tools.verify_prime_loop import resolve_bounded_prime_environment
+        except ModuleNotFoundError:
+            from prime_native_rlm_experiment import (  # type: ignore[no-redef]
+                native_rlm_model_selector_digest,
+                resolve_native_rlm_model,
+            )
+            from setup_prime_agent import (  # type: ignore[no-redef]
+                resolve_prime_harness_module,
+                verify_prime_source,
+            )
+            from verify_prime_loop import (  # type: ignore[no-redef]
+                resolve_bounded_prime_environment,
+            )
+
+        selection = resolve_native_rlm_model(os.environ)
+        selector_digest = native_rlm_model_selector_digest(selection)
+        native_receipt = native_root / NATIVE_RECEIPT_NAME
+        public_receipt = evidence_root / RECEIPT_NAME
+        if native_receipt.is_file() and not public_receipt.exists():
+            receipt = recover_prime_continual_harness_bounded(
+                native_root,
+                evidence_root,
+                model_selector_digest=selector_digest,
+            )
+            observation = build_prime_harness_bounded_observation(receipt)
+            return {
+                "status": "PASS",
+                "evidence_id": observation.evidence_id,
+                "provider_operations": observation.provider_operations,
+                "model_credential_reads": observation.model_credential_reads,
+                "usage": dict(receipt["usage"]),  # type: ignore[arg-type]
+            }
+        if native_receipt.exists() or public_receipt.exists():
+            raise ValueError
+
+        node = _resolve_node_22(project_root)
+        verify_prime_source(source, node_executable=str(node))
+        resolve_prime_harness_module(source)
+        daemon_entry = source / "packages/coding-agent/dist/bundle/cli.js"
+        fixture = (
+            project_root
+            / "tests/fixtures/prime_gateway/v1/real-prime-continual-harness-bounded.mjs"
+        )
+        if not daemon_entry.is_file() or not fixture.is_file():
+            raise ValueError
+
+        environment = dict(resolve_bounded_prime_environment())
+        selection = resolve_native_rlm_model(environment)
+        if native_rlm_model_selector_digest(selection) != selector_digest:
+            raise ValueError
+        with tempfile.TemporaryDirectory(
+            prefix="asterion-prime-harness-", dir=str(native_root)
+        ) as temporary:
+            private_root = Path(temporary)
+            os.chmod(private_root, 0o700)
+            home = private_root / "home"
+            agent_dir = private_root / "agent"
+            session_dir = private_root / "sessions"
+            workspace = private_root / "workspace"
+            for directory in (home, agent_dir, session_dir, workspace):
+                directory.mkdir(mode=0o700)
+            socket_path = private_root / "prime.sock"
+            result_path = native_root / PRIVATE_RESULT_NAME
+            if result_path.exists() or result_path.is_symlink():
+                raise ValueError
+            environment["HOME"] = str(home)
+            environment["PRIME_AGENT_CODING_AGENT_DIR"] = str(agent_dir)
+            daemon = subprocess.Popen(
+                (
+                    str(node),
+                    str(daemon_entry),
+                    "--mode",
+                    "daemon",
+                    "--daemon-socket",
+                    str(socket_path),
+                ),
+                cwd=source,
+                env=environment,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            daemon_deadline = time.monotonic() + 15
+            while time.monotonic() < daemon_deadline:
+                if socket_path.exists():
+                    break
+                if daemon.poll() is not None:
+                    raise ValueError
+                time.sleep(0.025)
+            else:
+                raise ValueError
+            remaining = DEADLINE_MS / 1000 - (time.monotonic() - started)
+            if remaining <= 1:
+                raise ValueError
+            completed = subprocess.run(
+                (
+                    str(node),
+                    str(fixture),
+                    str(socket_path),
+                    str(source),
+                    str(workspace),
+                    str(agent_dir),
+                    str(session_dir),
+                    str(result_path),
+                ),
+                cwd=project_root,
+                env=environment,
+                check=False,
+                capture_output=True,
+                timeout=min(remaining, 580),
+            )
+            if completed.returncode != 0 or not result_path.is_file():
+                raise ValueError
+            raw = json.loads(result_path.read_text(encoding="utf-8"))
+            report = admit_prime_refinement_result(raw, evidence_ids=EVIDENCE_IDS)
+
+        _write_native_receipt(native_root, report)
+        receipt = run_prime_continual_harness_bounded_probe(
+            lambda: report,
+            model_selector_digest=selector_digest,
+            aggregate_token_limit=AGGREGATE_TOKEN_LIMIT,
+            cost_limit_micros=COST_LIMIT_MICROS,
+            deadline_ms=DEADLINE_MS,
+        )
+        write_prime_continual_harness_bounded_receipt(evidence_root, receipt)
+        observation = build_prime_harness_bounded_observation(receipt)
+        return {
+            "status": "PASS",
+            "evidence_id": observation.evidence_id,
+            "provider_operations": observation.provider_operations,
+            "model_credential_reads": observation.model_credential_reads,
+            "usage": dict(receipt["usage"]),  # type: ignore[arg-type]
+        }
+    except Exception as error:
+        if isinstance(error, PrimeContinualHarnessExperimentError):
+            raise
+        raise PrimeContinualHarnessExperimentError(
+            "Prime continual harness bounded execution failed"
+        ) from None
+    finally:
+        if daemon is not None:
+            _stop_process(daemon)
 
 
 def _parser() -> argparse.ArgumentParser:
