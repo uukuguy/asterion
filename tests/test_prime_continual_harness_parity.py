@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
@@ -7,7 +8,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.test_prime_session_context_parity import _node_22
+from asterion.control.parity_testing import ParityScenarioRegistry
+from asterion.control.providers.prime.parity_testing import (
+    PRIME_HARNESS_BOUNDED_SCENARIO_IDS,
+    PRIME_HARNESS_PROVIDER_FREE_SCENARIO_IDS,
+    PRIME_HARNESS_SCENARIO_MATRIX,
+    build_prime_harness_observations,
+    register_prime_harness_scenarios,
+)
 from tools.setup_prime_agent import resolve_prime_harness_module
 
 
@@ -21,15 +29,7 @@ REAL_HARNESS = (
     ROOT
     / "tests/fixtures/prime_gateway/v1/real-prime-continual-harness.mjs"
 )
-PRIME_HARNESS_PROVIDER_FREE_SCENARIO_IDS = (
-    "prime-parity.harness.history-snapshots",
-    "prime-parity.harness.memory-entries",
-    "prime-parity.harness.prompt-entries",
-    "prime-parity.harness.rollback",
-    "prime-parity.harness.scope-isolation",
-    "prime-parity.harness.skill-descriptions",
-    "prime-parity.harness.subagent-specifications",
-)
+LEDGER = ROOT / "tests/fixtures/prime-parity/v1/prime-agent-0.7.1.json"
 
 
 def _closed_environment(private_home: Path) -> dict[str, str]:
@@ -40,6 +40,55 @@ def _closed_environment(private_home: Path) -> dict[str, str]:
     }
     environment["HOME"] = str(private_home)
     return environment
+
+
+def _node_22() -> Path | None:
+    configured = os.environ.get("ASTERION_PRIME_NODE")
+    candidates = [Path(configured)] if configured else []
+    npm_environment = {
+        key: value
+        for key in ("HOME", "PATH", "SystemRoot", "TEMP", "TMP", "TMPDIR")
+        if (value := os.environ.get(key)) is not None
+    }
+    try:
+        completed = subprocess.run(
+            (
+                "npm",
+                "exec",
+                "--offline",
+                "--yes",
+                "--package=node@22",
+                "--",
+                "which",
+                "node",
+            ),
+            cwd=ROOT,
+            env=npm_environment,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if completed.returncode == 0 and completed.stdout.strip():
+            candidates.append(Path(completed.stdout.strip()))
+    except (OSError, subprocess.SubprocessError):
+        pass
+    for candidate in candidates:
+        try:
+            version = subprocess.run(
+                (str(candidate), "--version"),
+                cwd=ROOT,
+                env=npm_environment,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if version.returncode == 0 and version.stdout.startswith("v22."):
+                return candidate.resolve()
+        except (OSError, subprocess.SubprocessError):
+            continue
+    return None
 
 
 def _run_phase(
@@ -82,6 +131,13 @@ def run_real_prime_harness() -> dict[str, object]:
 
 
 class TestPrimeContinualHarnessParity(unittest.TestCase):
+    def test_harness_matrix_is_seven_provider_free_and_one_bounded(self) -> None:
+        self.assertEqual(len(PRIME_HARNESS_PROVIDER_FREE_SCENARIO_IDS), 7)
+        self.assertEqual(
+            PRIME_HARNESS_BOUNDED_SCENARIO_IDS,
+            ("prime-parity.harness.evidence-refinement",),
+        )
+
     @unittest.skipUnless(
         PINNED_SOURCE.is_dir() and REAL_HARNESS.is_file(),
         "external pinned Prime continual harness is unavailable",
@@ -108,6 +164,53 @@ class TestPrimeContinualHarnessParity(unittest.TestCase):
         second = run_real_prime_harness()
 
         self.assertEqual(first["observation_digest"], second["observation_digest"])
+
+    @unittest.skipUnless(
+        PINNED_SOURCE.is_dir() and REAL_HARNESS.is_file(),
+        "external pinned Prime continual harness is unavailable",
+    )
+    def test_provider_free_observation_cannot_promote_evidence_refinement(
+        self,
+    ) -> None:
+        observations = build_prime_harness_observations(run_real_prime_harness())
+        registry = ParityScenarioRegistry(
+            json.loads(LEDGER.read_text(encoding="utf-8")),
+            provider_id="asterion.prime-gateway",
+        )
+
+        register_prime_harness_scenarios(
+            registry,
+            observations=observations,
+            bounded_receipt=None,
+            provider_factory=lambda: object(),
+        )
+        report = asyncio.run(registry.run(PRIME_HARNESS_SCENARIO_MATRIX))
+
+        self.assertEqual(
+            report.passed_scenario_ids,
+            PRIME_HARNESS_PROVIDER_FREE_SCENARIO_IDS,
+        )
+        self.assertIn(
+            "prime-parity.harness.evidence-refinement",
+            report.blocking_scenario_ids,
+        )
+
+    @unittest.skipUnless(
+        PINNED_SOURCE.is_dir() and REAL_HARNESS.is_file(),
+        "external pinned Prime continual harness is unavailable",
+    )
+    def test_observation_rejects_raw_or_reordered_report(self) -> None:
+        report = run_real_prime_harness()
+        invalid = (
+            {**report, "raw_body": "SENTINEL_PRIVATE_HARNESS_BODY"},
+            {**report, "scenario_ids": list(reversed(report["scenario_ids"]))},
+        )
+
+        for candidate in invalid:
+            with self.subTest(candidate=tuple(candidate)), self.assertRaisesRegex(
+                Exception, "harness observation is invalid"
+            ):
+                build_prime_harness_observations(candidate)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,17 @@ from asterion.control.parity_testing import (
     ParityScenarioResult,
     ParityScenarioRunner,
 )
+from asterion.control.providers.prime.harness_parity_testing import (
+    PRIME_HARNESS_BOUNDED_SCENARIO_IDS,
+    PRIME_HARNESS_BOUNDED_VERIFICATION_COMMAND_ID,
+    PRIME_HARNESS_PROVIDER_FREE_SCENARIO_IDS,
+    PRIME_HARNESS_PROVIDER_FREE_VERIFICATION_COMMAND_ID,
+    PRIME_HARNESS_REQUIRED_ASSERTIONS,
+    PRIME_HARNESS_SCENARIO_MATRIX,
+    PrimeHarnessScenarioObservation,
+    build_prime_harness_observations,
+    register_prime_harness_scenarios,
+)
 
 
 PHASE1_PRIME_SCENARIO_IDS = (

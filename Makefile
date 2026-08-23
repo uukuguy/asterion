@@ -23,6 +23,7 @@ ASTERION_PRIME_MAX_COST_MICROS ?=
 .PHONY: prime-check prime-setup prime-verify-provider-free prime-verify-bounded prime-verify-native-rlm-bounded
 .PHONY: prime-parity-inventory prime-verify-system-parity
 .PHONY: test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free
+.PHONY: test.prime-continual-harness.provider-free
 
 help:
 	@echo "provider-free setup (network/disk; Agent operations 0; Judge operations 0): setup setup-pi setup-resources-basic setup-resources-benchmark"
@@ -162,6 +163,13 @@ test.prime-rlm-spawn-admission.provider-free:
 		test/rlm-host-shim.test.mjs
 	$(UV_BIN) run python -m unittest -v \
 		tests.test_prime_rlm_messaging_parity
+
+test.prime-continual-harness.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_control_harness \
+		tests.test_prime_continual_harness \
+		tests.test_prime_continual_harness_parity
+	npm --prefix packages/typescript/prime-gateway test -- test/continual-harness.test.mjs
 
 prime-verify-bounded:
 	$(UV_BIN) run python tools/verify_prime_loop.py --level bounded --source-root "$(ASTERION_PRIME_SOURCE_ROOT)" --authority "$(ASTERION_PRIME_AUTHORITY)" --max-cost-micros "$(ASTERION_PRIME_MAX_COST_MICROS)"

@@ -108,6 +108,13 @@ EXPECTED_IMPLEMENTED_PRIME_FEATURE_IDS = (
     "operation.goals",
 )
 EXPECTED_PROVIDER_FREE_PRIME_FEATURE_IDS = (
+    "harness.history-snapshots",
+    "harness.memory-entries",
+    "harness.prompt-entries",
+    "harness.rollback",
+    "harness.scope-isolation",
+    "harness.skill-descriptions",
+    "harness.subagent-specifications",
     "session.delivery",
     "session.fork-clone",
     "session.persistence-naming",
