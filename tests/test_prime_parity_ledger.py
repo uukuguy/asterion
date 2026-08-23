@@ -123,6 +123,9 @@ EXPECTED_PROVIDER_FREE_PRIME_FEATURE_IDS = (
     "session.tree-navigation",
     "session.usage-status",
 )
+EXPECTED_BOUNDED_PRIME_FEATURE_IDS = (
+    "harness.evidence-refinement",
+)
 EXPECTED_EXTERNAL_LIMITED_PRIME_FEATURE_IDS = (
     "session.branch-summaries-labels",
     "session.compaction",
@@ -421,6 +424,22 @@ class TestPrimeParityLedger(unittest.TestCase):
         with self.assertRaises(ParityLedgerError):
             validate_parity_ledger(value)
 
+    def test_native_continual_harness_results_remain_missing(self) -> None:
+        ledger = validate_parity_ledger(_fixture("prime-agent-0.7.1.json"))
+        features = ledger["features"]
+        assert isinstance(features, tuple)
+        statuses = {
+            result["status"]
+            for feature in features
+            if isinstance(feature, Mapping)
+            and feature["domain_id"] == "harness.continual"
+            for result in feature["provider_results"]
+            if isinstance(result, Mapping)
+            and result["provider_id"] == "asterion.native"
+        }
+
+        self.assertEqual(statuses, {"missing"})
+
     def test_exhaustive_prime_inventory_is_exact_closed_and_honest(self) -> None:
         source = _fixture("prime-agent-0.7.1.json")
         ledger = validate_parity_ledger(source)
@@ -464,6 +483,7 @@ class TestPrimeParityLedger(unittest.TestCase):
                 )
 
         prime_features_by_status: dict[str, list[str]] = {
+            "bounded-pass": [],
             "external-limited": [],
             "implemented": [],
             "provider-free-pass": [],
@@ -491,6 +511,10 @@ class TestPrimeParityLedger(unittest.TestCase):
         self.assertEqual(
             tuple(prime_features_by_status["provider-free-pass"]),
             EXPECTED_PROVIDER_FREE_PRIME_FEATURE_IDS,
+        )
+        self.assertEqual(
+            tuple(prime_features_by_status["bounded-pass"]),
+            EXPECTED_BOUNDED_PRIME_FEATURE_IDS,
         )
         self.assertEqual(
             tuple(prime_features_by_status["external-limited"]),

@@ -35,7 +35,7 @@
 - Consumes: `OPAQUE_ID` from `asterion.control.protocol` and canonical JSON/digest conventions already used by control records.
 - Produces: `HarnessScope`, `HarnessEntryDescriptor`, `HarnessEdit`, `HarnessProposal`, `HarnessRevision`, `HarnessSnapshot`, `HarnessEffectReceipt`, and `HarnessError`.
 
-- [ ] **Step 1: Write failing closed-value and redaction tests**
+- [x] **Step 1: Write failing closed-value and redaction tests**
 
 Add tests that construct all three scopes and four entry kinds, reject extra or malformed identities, require sorted unique evidence IDs, recursively freeze descriptors, keep private fields out of `repr`, and verify deterministic digests:
 
@@ -72,13 +72,13 @@ class TestHarnessValues(unittest.TestCase):
             _proposal(evidence_ids=("evidence-2", "evidence-1"))
 ```
 
-- [ ] **Step 2: Run tests to verify the module is missing**
+- [x] **Step 2: Run tests to verify the module is missing**
 
 Run: `uv run python -m unittest -v tests.test_control_harness`
 
 Expected: FAIL because `asterion.control.harness` does not exist.
 
-- [ ] **Step 3: Implement exact immutable types**
+- [x] **Step 3: Implement exact immutable types**
 
 Use these exact literal sets:
 
@@ -135,7 +135,7 @@ Implement the remaining frozen values with these exact fields:
 
 Copy all input containers before freezing, use canonical sorted-key JSON for SHA-256 identities, reject booleans as integers, and raise only fixed `HarnessError` messages without exception chaining. Provide named `HarnessEffectReceipt.succeeded()`, `.failed()`, `.cancelled()`, and `.uncertain()` constructors so callers cannot manufacture an unsupported terminal status.
 
-- [ ] **Step 4: Export the public provider-neutral values and rerun tests**
+- [x] **Step 4: Export the public provider-neutral values and rerun tests**
 
 Add the new values to `src/asterion/control/__init__.py` and `__all__`.
 
@@ -143,7 +143,7 @@ Run: `uv run python -m unittest -v tests.test_control_harness`
 
 Expected: PASS with no private sentinel in test output.
 
-- [ ] **Step 5: Commit the closed value layer**
+- [x] **Step 5: Commit the closed value layer**
 
 ```bash
 git add src/asterion/control/harness.py src/asterion/control/__init__.py tests/test_control_harness.py
@@ -161,10 +161,10 @@ git commit -m "feat: add continual harness value contracts"
 - Modify: `tests/test_control_journal.py`
 
 **Interfaces:**
-- Consumes: Task 1 values, `CanonicalJournal`, `JournalRecord`, `JournalCursor`, and an injected effect sender.
-- Produces: `HarnessEffectSender`, `HarnessCoordinator.apply()`, `HarnessCoordinator.rollback()`, `HarnessCoordinator.recover()`, and five validated journal record kinds.
+- Consumes: Task 1 values, `CanonicalJournal`, `JournalRecord`, `JournalCursor`, an injected effect sender, and an injected host-private revision store for references forbidden from public journal payloads.
+- Produces: `HarnessEffectSender`, `HarnessPrivateRevisionStore`, `MemoryHarnessPrivateRevisionStore`, `HarnessCoordinator.apply()`, `HarnessCoordinator.rollback()`, `HarnessCoordinator.recover()`, and five validated journal record kinds.
 
-- [ ] **Step 1: Write failing persist-before-effect and recovery tests**
+- [x] **Step 1: Write failing persist-before-effect and recovery tests**
 
 Cover create/update/delete, exact expected-version conflicts, scope mismatch, replay, transport uncertainty, activation recovery, and monotonic rollback:
 
@@ -207,13 +207,13 @@ class TestHarnessCoordinator(unittest.TestCase):
         self.assertEqual(len(coordinator.history()), 2)
 ```
 
-- [ ] **Step 2: Run focused tests and observe missing coordinator/record failures**
+- [x] **Step 2: Run focused tests and observe missing coordinator/record failures**
 
 Run: `uv run python -m unittest -v tests.test_control_harness tests.test_control_journal`
 
 Expected: FAIL on missing harness record kinds and `HarnessCoordinator`.
 
-- [ ] **Step 3: Add the closed journal vocabulary**
+- [x] **Step 3: Add the closed journal vocabulary**
 
 Extend `JOURNAL_RECORD_KINDS` with exactly:
 
@@ -227,19 +227,19 @@ Extend `JOURNAL_RECORD_KINDS` with exactly:
 
 Add `JournalRecord.harness_proposed()`, `harness_effect_started()`, `harness_effect_terminal()`, `harness_snapshot_activated()`, and `harness_effect_uncertain()` factories. Payloads contain only scope mapping, proposal/revision/snapshot identities, digests, sequence, status, and safe usage. Validate exact fields and forbid private refs in journal payloads.
 
-- [ ] **Step 4: Implement the coordinator and reducer**
+- [x] **Step 4: Implement the coordinator and reducer**
 
-Use these exact interfaces: `HarnessEffectSender.__call__(HarnessProposal) -> HarnessEffectReceipt`; `HarnessCoordinator.__init__(CanonicalJournal, HarnessScope, HarnessEffectSender, CancellationSignal | None)`; `apply(HarnessProposal) -> HarnessRevision`; keyword-only `rollback(proposal_id: str, authority_id: str, authority_revision: int, target_revision_id: str, rationale_ref: str, rationale_digest: str, expected_outcome_digest: str) -> HarnessRevision`; `recover() -> HarnessSnapshot`; `snapshot() -> HarnessSnapshot`; and `history() -> tuple[HarnessRevision, ...]`. Define `HarnessTransportError` as the sole post-send transport-loss signal.
+Use these exact interfaces: `HarnessEffectSender.__call__(HarnessProposal) -> HarnessEffectReceipt`; `HarnessPrivateRevisionStore.save_proposal/load_proposal/save_snapshot/load_snapshot`; `HarnessCoordinator.__init__(CanonicalJournal, HarnessScope, HarnessEffectSender, CancellationSignal | None, HarnessPrivateRevisionStore | None)`; `apply(HarnessProposal) -> HarnessRevision`; keyword-only `rollback(proposal_id: str, authority_id: str, authority_revision: int, target_revision_id: str, rationale_ref: str, rationale_digest: str, expected_outcome_digest: str) -> HarnessRevision`; `recover() -> HarnessSnapshot`; `snapshot() -> HarnessSnapshot`; and `history() -> tuple[HarnessRevision, ...]`. Define `HarnessTransportError` as the sole post-send transport-loss signal.
 
 The reducer must enforce one scope, contiguous journal positions, exact proposal/effect digest binding, monotonic sequence, one terminal per revision, no retry after uncertain, and activation only after a durable successful terminal. Rollback derives inverse edits from stored descriptor identities; it never mutates old records.
 
-- [ ] **Step 5: Run coordinator, journal, immutability, and file-reopen tests**
+- [x] **Step 5: Run coordinator, journal, immutability, and file-reopen tests**
 
 Run: `uv run python -m unittest -v tests.test_control_harness tests.test_control_journal`
 
 Expected: PASS, including `FileCanonicalJournal` close/reopen recovery and sentinel redaction.
 
-- [ ] **Step 6: Commit the revision kernel**
+- [x] **Step 6: Commit the revision kernel**
 
 ```bash
 git add src/asterion/control/harness.py src/asterion/control/journal.py tests/test_control_harness.py tests/test_control_journal.py
@@ -259,7 +259,7 @@ git commit -m "feat: add continual harness revision kernel"
 - Consumes: admitted `HarnessProposal`, an injected `PrimeContinualHarnessClient`, and body values resolved privately by the host.
 - Produces: `PrimeHarnessScope`, `PrimeHarnessEdit`, `PrimeHarnessEffect`, `PrimeHarnessIpcReceipt`, and `PrimeContinualHarnessService.apply()`.
 
-- [ ] **Step 1: Write failing exact-translation and drift tests**
+- [x] **Step 1: Write failing exact-translation and drift tests**
 
 ```python
 class TestPrimeContinualHarnessService(unittest.TestCase):
@@ -286,25 +286,25 @@ class TestPrimeContinualHarnessService(unittest.TestCase):
         self.assertEqual(client.spawn_count, 0)
 ```
 
-- [ ] **Step 2: Run tests and observe the missing adapter**
+- [x] **Step 2: Run tests and observe the missing adapter**
 
 Run: `uv run python -m unittest -v tests.test_prime_continual_harness`
 
 Expected: FAIL because the selected Prime harness adapter does not exist.
 
-- [ ] **Step 3: Implement closed private translation**
+- [x] **Step 3: Implement closed private translation**
 
 Use these exact protocols: `PrimeContinualHarnessClient.apply_harness_effect(PrimeHarnessEffect) -> PrimeHarnessIpcReceipt`; `PrimeContinualHarnessClient.read_harness_snapshot(PrimeHarnessScope) -> Mapping[str, object]`; and `PrimePrivateHarnessBodies.resolve_text(str) -> str`. The service exposes `__init__(PrimeContinualHarnessClient)`, `apply(HarnessProposal, PrimePrivateHarnessBodies) -> HarnessEffectReceipt`, and `reconcile(HarnessProposal, HarnessSnapshot) -> HarnessEffectReceipt`.
 
 Translate session/project scopes to distinct Prime local roots identified only by a scope digest; translate global to the selected provider global root. Resolve bodies immediately before IPC, preserve edit order and expected versions, reject base-system-prompt identities, and compare proposal/effect digests on return. Map transport loss after send to `HarnessTransportError`; never retry in the adapter.
 
-- [ ] **Step 4: Run adapter tests and public sentinel scan**
+- [x] **Step 4: Run adapter tests and public sentinel scan**
 
 Run: `uv run python -m unittest -v tests.test_prime_continual_harness`
 
 Expected: PASS with no private title/body/path/model value in any mapping, `repr`, or exception.
 
-- [ ] **Step 5: Commit the selected-provider adapter**
+- [x] **Step 5: Commit the selected-provider adapter**
 
 ```bash
 git add src/asterion/control/providers/prime/harness.py src/asterion/control/providers/prime/__init__.py tests/test_prime_continual_harness.py
@@ -325,7 +325,7 @@ git commit -m "feat: add Prime continual harness adapter"
 - Consumes: exact private effect frames from Task 3 and an injected pinned Prime refinement module.
 - Produces: `PrimeContinualHarnessAdapter`, `PrimeHarnessModule`, `GatewayHarnessEffectBinding`, and `GatewayHarnessEffectResult`.
 
-- [ ] **Step 1: Write failing closed-frame, fencing, and restart tests**
+- [x] **Step 1: Write failing closed-frame, fencing, and restart tests**
 
 ```javascript
 test("binds an exact harness effect before applying Prime edits", async () => {
@@ -356,13 +356,13 @@ test("reopen fences an uncommitted effect without applying twice", async () => {
 });
 ```
 
-- [ ] **Step 2: Run the focused Node test and observe missing exports**
+- [x] **Step 2: Run the focused Node test and observe missing exports**
 
 Run: `npm --prefix packages/typescript/prime-gateway test -- test/continual-harness.test.mjs`
 
 Expected: FAIL because `PrimeContinualHarnessAdapter` and durable harness records do not exist.
 
-- [ ] **Step 3: Implement exact module and wire values**
+- [x] **Step 3: Implement exact module and wire values**
 
 Define these interfaces in `continual-harness.ts`:
 
@@ -399,7 +399,7 @@ export class PrimeContinualHarnessAdapter {
 
 Validate exact keys, UTF-8 byte caps, safe integers, digests, sorted edit identities, and the four kinds/three actions before calling the module. Compute the public effect digest from body digests, never serialized bodies. Reject a base-prompt target and skill entries lacking exact Python reference/argument contracts.
 
-- [ ] **Step 4: Add durable bind/terminal records**
+- [x] **Step 4: Add durable bind/terminal records**
 
 Extend `GatewayDurableStore` with:
 
@@ -416,7 +416,7 @@ harnessEffectResult(effectId: string): GatewayHarnessEffectResult | undefined;
 
 Persist only `effectId`, `proposalDigest`, `scopeDigest`, `effectDigest`, terminal status, and snapshot digest. Reopen with a binding and no result returns a newly committed `uncertain` result without module invocation.
 
-- [ ] **Step 5: Export, build, and run the whole Gateway package**
+- [x] **Step 5: Export, build, and run the whole Gateway package**
 
 Run: `npm --prefix packages/typescript/prime-gateway test -- test/continual-harness.test.mjs`
 
@@ -424,7 +424,7 @@ Run: `npm test --prefix packages/typescript/prime-gateway`
 
 Expected: PASS; all public snapshots and errors exclude the private sentinel.
 
-- [ ] **Step 6: Commit the Gateway projection**
+- [x] **Step 6: Commit the Gateway projection**
 
 ```bash
 git add packages/typescript/prime-gateway/src/continual-harness.ts packages/typescript/prime-gateway/src/durable-store.ts packages/typescript/prime-gateway/src/index.ts packages/typescript/prime-gateway/test/continual-harness.test.mjs
@@ -447,7 +447,7 @@ git commit -m "feat: add durable Prime harness projection"
 - Consumes: pinned source commit `a18809e00ea30638584d87b3afea7285a9d7296c` and exact built exports `loadHarnessState`, `applyRefinementProposal`, and `saveHarnessState`.
 - Produces: `resolve_prime_harness_module()` and one real-Prime provider-free observation covering seven deterministic scenarios.
 
-- [ ] **Step 1: Write failing source-lock and real-process tests**
+- [x] **Step 1: Write failing source-lock and real-process tests**
 
 ```python
 class TestPrimeHarnessModuleLock(unittest.TestCase):
@@ -470,17 +470,17 @@ class TestPrimeContinualHarnessParity(unittest.TestCase):
         self.assertEqual(report["owned_process_count_after_close"], 0)
 ```
 
-- [ ] **Step 2: Run source-lock and parity tests to observe failure**
+- [x] **Step 2: Run source-lock and parity tests to observe failure**
 
 Run: `uv run python -m unittest -v tests.test_setup_prime_agent tests.test_prime_continual_harness_parity`
 
 Expected: FAIL because the refinement module lock/resolver and real harness do not exist.
 
-- [ ] **Step 3: Lock and resolve the exact built module**
+- [x] **Step 3: Lock and resolve the exact built module**
 
 Add `prime-harness-module-lock.json` with an Asterion-owned format ID, the pinned source commit, source-file digest for `packages/coding-agent/src/core/refinement/refinement.ts`, built-module digests for `dist/core/refinement/index.js` and `refinement.js`, and exact required export names. `resolve_prime_harness_module()` must reject symlinks, missing/extra exports, dirty source drift, non-regular files, and digest mismatch with one fixed error.
 
-- [ ] **Step 4: Implement the real Node fixture**
+- [x] **Step 4: Implement the real Node fixture**
 
 `real-prime-continual-harness.mjs` must run in an isolated mode-0700 root, dynamically import only the resolved pinned module, and execute this deterministic matrix without credentials:
 
@@ -494,7 +494,7 @@ Add `prime-harness-module-lock.json` with an Asterion-owned format ID, the pinne
 
 The fixture emits one canonical JSON object containing only booleans, counts, digests, sorted scenario IDs, provider-operation count, credential-read count, and owned-process count.
 
-- [ ] **Step 5: Run the real provider-free harness twice for determinism**
+- [x] **Step 5: Run the real provider-free harness twice for determinism**
 
 Run: `uv run python -m unittest -v tests.test_prime_continual_harness_parity`
 
@@ -502,7 +502,7 @@ Run: `uv run python -m unittest -v tests.test_prime_continual_harness_parity`
 
 Expected: both PASS with identical public observation digest, zero provider operations, zero credential reads, and zero owned process after close.
 
-- [ ] **Step 6: Commit the pinned module boundary**
+- [x] **Step 6: Commit the pinned module boundary**
 
 ```bash
 git add packages/typescript/prime-gateway/resources/prime-artifact-lock.json packages/typescript/prime-gateway/resources/prime-harness-module-lock.json tools/setup_prime_agent.py tests/test_setup_prime_agent.py tests/fixtures/prime_gateway/v1/real-prime-continual-harness.mjs tests/test_prime_continual_harness_parity.py
@@ -524,7 +524,7 @@ git commit -m "test: bind pinned Prime harness module"
 - Consumes: the exact real-process observation from Task 5.
 - Produces: `PRIME_HARNESS_PROVIDER_FREE_VERIFICATION_COMMAND_ID`, `PrimeHarnessScenarioObservation`, `build_prime_harness_observations()`, `register_prime_harness_scenarios()`, and seven sorted evidence records.
 
-- [ ] **Step 1: Write failing evidence-boundary and ledger tests**
+- [x] **Step 1: Write failing evidence-boundary and ledger tests**
 
 ```python
 def test_harness_matrix_is_seven_provider_free_and_one_bounded(self) -> None:
@@ -554,13 +554,13 @@ def test_ledger_promotes_exactly_seven_harness_provider_free_results(self) -> No
     self.assertEqual(count_status(results, "missing"), 1)
 ```
 
-- [ ] **Step 2: Run focused tests and observe missing evidence registration**
+- [x] **Step 2: Run focused tests and observe missing evidence registration**
 
 Run: `uv run python -m unittest -v tests.test_prime_continual_harness_parity tests.test_prime_parity_ledger`
 
 Expected: FAIL while all eight ledger results remain missing.
 
-- [ ] **Step 3: Implement exact observation reduction**
+- [x] **Step 3: Implement exact observation reduction**
 
 Use:
 
@@ -575,7 +575,7 @@ PRIME_HARNESS_BOUNDED_VERIFICATION_COMMAND_ID = (
 
 The observation builder must accept exactly seven scenario IDs in ledger order, the four required assertions, `restart-after-admission`, the pinned source/artifact identities, `real_prime_runtime=True`, `fake_daemon=False`, `provider_operations=0`, `model_credential_reads=0`, and zero owned processes. Any missing/extra/reordered scenario, fake runtime, credential access, provider call, raw field, or digest drift fails closed and creates no evidence ID.
 
-- [ ] **Step 4: Add the provider-free Make target**
+- [x] **Step 4: Add the provider-free Make target**
 
 ```make
 test.prime-continual-harness.provider-free:
@@ -586,7 +586,7 @@ test.prime-continual-harness.provider-free:
 	npm --prefix packages/typescript/prime-gateway test -- test/continual-harness.test.mjs
 ```
 
-- [ ] **Step 5: Run the named gate and promote only seven exact rows**
+- [x] **Step 5: Run the named gate and promote only seven exact rows**
 
 Run: `make test.prime-continual-harness.provider-free`
 
@@ -594,7 +594,7 @@ Expected: PASS with seven scenario evidence IDs, zero provider/application opera
 
 Update only the seven provider-free Prime Gateway results to `provider-free-pass`; leave `harness.evidence-refinement` and every `asterion.native` result `missing`. Add sorted evidence records with exact provider, feature, scenario, command, boundary, source commit, and artifact lock.
 
-- [ ] **Step 6: Verify the honest 7/8 blocked domain and commit**
+- [x] **Step 6: Verify the honest 7/8 blocked domain and commit**
 
 Run: `uv run python tools/check_prime_parity.py --domain harness.continual --provider asterion.prime-gateway`
 
@@ -620,7 +620,7 @@ git commit -m "test: promote provider-free harness evidence"
 - Consumes: one newly authorized pinned-model proposal invocation and the same host admission/activation path used by provider-free edits.
 - Produces: `run_prime_continual_harness_bounded_probe()`, `write_prime_continual_harness_bounded_receipt()`, a closed safe receipt, and bounded evidence only for `harness.evidence-refinement`.
 
-- [ ] **Step 1: Write failing authorization, one-call, limit, recovery, and redaction tests**
+- [x] **Step 1: Write failing authorization, one-call, limit, recovery, and redaction tests**
 
 ```python
 class TestPrimeContinualHarnessExperiment(unittest.TestCase):
@@ -656,13 +656,13 @@ class TestPrimeContinualHarnessExperiment(unittest.TestCase):
         self.assertEqual(receipt["provider_operations"], 1)
 ```
 
-- [ ] **Step 2: Run tests and observe the missing bounded experiment**
+- [x] **Step 2: Run tests and observe the missing bounded experiment**
 
 Run: `uv run python -m unittest -v tests.test_prime_continual_harness_experiment tests.test_prime_continual_harness_parity`
 
 Expected: FAIL because the bounded reducer and CLI do not exist.
 
-- [ ] **Step 3: Implement the closed bounded reducer and writer**
+- [x] **Step 3: Implement the closed bounded reducer and writer**
 
 The receipt schema is closed. This valid concrete example fixes field names and JSON value types; runtime values must satisfy the validation rules below:
 
@@ -688,7 +688,7 @@ The receipt schema is closed. This valid concrete example fixes field names and 
 
 Reject extra fields, non-finite values, zero evidence, model/provider/private payloads, missing admission/activation, more or fewer than one provider operation, and any usage above the authorized limits. The writer uses an exclusive mode-0600 file and never overwrites. Recovery is permitted only from a validated already-completed native receipt whose failure stage is public-receipt projection; it performs no provider call.
 
-- [ ] **Step 4: Add an explicit bounded Make target**
+- [x] **Step 4: Add an explicit bounded Make target**
 
 ```make
 test.prime-continual-harness.bounded:
@@ -704,14 +704,14 @@ Run: `uv run python -m unittest -v tests.test_prime_continual_harness_experiment
 
 Expected: PASS without executing the bounded Make target and with zero real provider operations.
 
-- [ ] **Step 5: Commit the dormant bounded boundary**
+- [x] **Step 5: Commit the dormant bounded boundary**
 
 ```bash
 git add Makefile tools/prime_continual_harness_experiment.py tests/test_prime_continual_harness_experiment.py src/asterion/control/providers/prime/parity_testing.py tests/test_prime_continual_harness_parity.py
 git commit -m "test: add bounded harness refinement gate"
 ```
 
-- [ ] **Step 6: Hard authorization checkpoint**
+- [x] **Step 6: Hard authorization checkpoint**
 
 Stop and request new explicit operator authorization that names this continual-harness bounded target and accepts its one-operation/token/cost/deadline envelope. Do not infer authorization from configuration, credentials, Climb autonomy, or earlier bounded runs.
 
@@ -740,7 +740,7 @@ Expected: PASS with one provider operation, one credential read, finite usage, e
 - Consumes: seven exact provider-free evidence IDs and the separately authorized bounded receipt.
 - Produces: Prime Gateway `harness.continual` 8/8 PASS while preserving `asterion.native=missing` and later-domain blockers.
 
-- [ ] **Step 1: Write failing exact-domain tests**
+- [x] **Step 1: Write failing exact-domain tests**
 
 ```python
 def test_continual_harness_domain_closes_only_with_seven_plus_one(self) -> None:
@@ -757,17 +757,17 @@ def test_native_harness_results_remain_missing(self) -> None:
     )
 ```
 
-- [ ] **Step 2: Run and observe the sole bounded blocker**
+- [x] **Step 2: Run and observe the sole bounded blocker**
 
 Run: `uv run python -m unittest -v tests.test_prime_continual_harness_parity tests.test_prime_parity_ledger tests.test_check_prime_parity`
 
 Expected: FAIL until the exact authorized bounded evidence record is added.
 
-- [ ] **Step 3: Promote exactly one bounded result and update human status**
+- [x] **Step 3: Promote exactly one bounded result and update human status**
 
 Add one sorted evidence record for `harness.evidence-refinement` with boundary `bounded-provider`, the named bounded command, pinned baseline identities, and no private/model payload. Update only that Prime Gateway result to `bounded-pass`. Keep every native result missing and do not change ecosystem/interfaces results.
 
-- [ ] **Step 4: Run all closure gates**
+- [x] **Step 4: Run all closure gates**
 
 Run: `make test.prime-continual-harness.provider-free`
 
@@ -781,7 +781,7 @@ Run: `git diff --check`
 
 Expected: all provider-free closure commands PASS; the domain reports 8/8, the previous bounded receipt is validated but not rerun, the system claim remains blocked on later domains, and native parity remains Missing.
 
-- [ ] **Step 5: Advance deterministic Climb state and commit closure**
+- [x] **Step 5: Advance deterministic Climb state and commit closure**
 
 Add the exact next hypothesis for `ecosystem.capabilities`, regenerate rather than hand-edit derived Climb state, and ensure each cycle number occurs once.
 
