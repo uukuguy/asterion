@@ -83,6 +83,7 @@ def completed(
     return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
 
 
+@mock.patch.dict(os.environ, {"ASTERION_PRIME_SOURCE_ROOT": ""})
 class PromotionCheckTests(unittest.TestCase):
     def test_default_runner_forces_sparse_cargo_registry_and_preserves_environment(self) -> None:
         result = completed(("cargo", "test"))
