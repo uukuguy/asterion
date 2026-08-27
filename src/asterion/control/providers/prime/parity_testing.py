@@ -16,7 +16,7 @@ from asterion.control.parity_testing import (
     ParityScenarioResult,
     ParityScenarioRunner,
 )
-from asterion.control.providers.prime.harness_parity_testing import (
+from asterion.control.providers.prime.harness_parity_testing import (  # noqa: F401
     PRIME_HARNESS_BOUNDED_SCENARIO_IDS,
     PRIME_HARNESS_BOUNDED_VERIFICATION_COMMAND_ID,
     PRIME_HARNESS_PROVIDER_FREE_SCENARIO_IDS,

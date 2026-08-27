@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -8,8 +9,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tools.check_promotion import PromotionError, _default_runner, run_promotion
-from tools.setup_prime_agent import PrimeSetupError
+from tools.check_promotion import (
+    PromotionError,
+    _copy_locked_prime_artifacts,
+    _default_runner,
+    run_promotion,
+)
+from tools.setup_prime_agent import PrimeArtifactLock, PrimeSetupError
 
 
 REQUIRED_FIXTURE_ASSETS = (
@@ -40,6 +46,36 @@ def make_source(parent: Path) -> Path:
     (source / "tests").mkdir()
     (source / "included.txt").write_text("included\n", encoding="utf-8")
     return source
+
+
+def make_git_source(parent: Path) -> tuple[Path, str]:
+    source = parent / "external-prime"
+    source.mkdir()
+    (source / "tracked.txt").write_text("tracked\n", encoding="utf-8")
+    subprocess.run(("git", "init", "-q"), cwd=source, check=True)
+    subprocess.run(("git", "add", "tracked.txt"), cwd=source, check=True)
+    subprocess.run(
+        (
+            "git",
+            "-c",
+            "user.name=Promotion Test",
+            "-c",
+            "user.email=promotion@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ),
+        cwd=source,
+        check=True,
+    )
+    head = subprocess.run(
+        ("git", "rev-parse", "HEAD"),
+        cwd=source,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    return source, head
 
 
 def completed(
@@ -142,7 +178,8 @@ class PromotionCheckTests(unittest.TestCase):
                 self.assertTrue((cwd / ".superpowers/keep.md").is_file())
                 for name in excluded:
                     if name == "3th-party" and (cwd / name).exists():
-                        self.assertTrue((cwd / "3th-party/prime-agent").is_symlink())
+                        self.assertTrue((cwd / "3th-party/prime-agent").is_dir())
+                        self.assertFalse((cwd / "3th-party/prime-agent").is_symlink())
                         self.assertFalse((cwd / "3th-party/excluded.txt").exists())
                         continue
                     self.assertFalse((cwd / name).exists(), name)
@@ -380,8 +417,7 @@ class PromotionCheckTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary = Path(temporary_directory)
             source = make_source(temporary)
-            external = temporary / "external-prime"
-            external.mkdir()
+            external, head = make_git_source(temporary)
             roots: list[Path] = []
 
             def runner(
@@ -389,8 +425,16 @@ class PromotionCheckTests(unittest.TestCase):
             ) -> subprocess.CompletedProcess[str]:
                 roots.append(cwd)
                 binding = cwd / "3th-party" / "prime-agent"
-                self.assertTrue(binding.is_symlink())
-                self.assertEqual(binding.resolve(), external.resolve())
+                self.assertTrue(binding.is_dir())
+                self.assertFalse(binding.is_symlink())
+                bound_head = subprocess.run(
+                    ("git", "rev-parse", "HEAD"),
+                    cwd=binding,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+                self.assertEqual(bound_head, head)
                 return completed(command, acceptance_stdout(command))
 
             with (
@@ -402,12 +446,57 @@ class PromotionCheckTests(unittest.TestCase):
                 mock.patch(
                     "tools.check_promotion.resolve_prime_ecosystem_module"
                 ) as resolver,
+                mock.patch("tools.check_promotion.verify_prime_checkout") as verifier,
+                mock.patch(
+                    "tools.check_promotion.load_prime_artifact_lock",
+                    return_value=mock.Mock(
+                        source_commit=head,
+                        files={},
+                        rlm_runtime=None,
+                    ),
+                ),
             ):
                 run_promotion(source_root=source, quick=True, runner=runner)
 
         resolver.assert_called_once()
-        self.assertEqual(resolver.call_args.args[0], external.resolve())
+        self.assertEqual(verifier.call_count, 2)
+        self.assertEqual(verifier.call_args_list[0].args[0], external.resolve())
         self.assertTrue(roots)
+
+    def test_external_prime_copy_includes_only_lock_named_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            source = root / "source"
+            target = root / "target"
+            source.mkdir()
+            target.mkdir()
+            locked = source / "packages/example/dist/locked.js"
+            locked.parent.mkdir(parents=True)
+            locked.write_text("locked\n", encoding="utf-8")
+            (locked.parent / "unlocked.js").write_text("unlocked\n", encoding="utf-8")
+            digest = hashlib.sha256(locked.read_bytes()).hexdigest()
+            lock = PrimeArtifactLock(
+                source_commit="1" * 40,
+                package_name="example",
+                package_version="1.0.0",
+                daemon_protocol=1,
+                daemon_schema_revision=1,
+                daemon_schema_id="schema",
+                files={"packages/example/dist/locked.js": digest},
+                rlm_runtime=None,
+            )
+
+            _copy_locked_prime_artifacts(source, target, lock)
+
+            self.assertEqual(
+                (target / "packages/example/dist/locked.js").read_text(
+                    encoding="utf-8"
+                ),
+                "locked\n",
+            )
+            self.assertFalse(
+                (target / "packages/example/dist/unlocked.js").exists()
+            )
 
     def test_external_prime_source_root_rejects_failed_exact_resolver(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -427,6 +516,7 @@ class PromotionCheckTests(unittest.TestCase):
                     "tools.check_promotion.resolve_prime_ecosystem_module",
                     side_effect=PrimeSetupError("Prime ecosystem module is invalid"),
                 ),
+                mock.patch("tools.check_promotion.verify_prime_checkout"),
                 self.assertRaises(PromotionError),
             ):
                 run_promotion(

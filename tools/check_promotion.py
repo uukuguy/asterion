@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -13,9 +14,21 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 if __package__:
-    from tools.setup_prime_agent import PrimeSetupError, resolve_prime_ecosystem_module
+    from tools.setup_prime_agent import (
+        PrimeArtifactLock,
+        PrimeSetupError,
+        load_prime_artifact_lock,
+        resolve_prime_ecosystem_module,
+        verify_prime_checkout,
+    )
 else:
-    from setup_prime_agent import PrimeSetupError, resolve_prime_ecosystem_module
+    from setup_prime_agent import (
+        PrimeArtifactLock,
+        PrimeSetupError,
+        load_prime_artifact_lock,
+        resolve_prime_ecosystem_module,
+        verify_prime_checkout,
+    )
 
 
 Runner = Callable[[tuple[str, ...], Path], subprocess.CompletedProcess[str]]
@@ -446,10 +459,76 @@ def _external_prime_source_root(source_root: Path) -> Path | None:
         return None
     try:
         resolved = candidate.resolve(strict=True)
-        resolve_prime_ecosystem_module(resolved)
+        verify_prime_checkout(resolved)
     except (OSError, RuntimeError, PrimeSetupError):
         raise PromotionError("external Prime source binding is invalid") from None
     return resolved
+
+
+def _locked_prime_artifacts(lock: PrimeArtifactLock) -> dict[str, frozenset[str]]:
+    expected = {path: {digest} for path, digest in lock.files.items()}
+    runtime = lock.rlm_runtime
+    if runtime is not None:
+        for path, digest in runtime.closure.items():
+            expected.setdefault(path, set()).add(digest)
+        for path, digest in runtime.derived_closure.items():
+            expected.setdefault(path, set()).add(digest)
+    return {path: frozenset(digests) for path, digests in expected.items()}
+
+
+def _copy_locked_prime_artifacts(
+    prime_source: Path,
+    target: Path,
+    lock: PrimeArtifactLock,
+) -> None:
+    try:
+        for relative, accepted_digests in sorted(_locked_prime_artifacts(lock).items()):
+            candidate = Path(relative)
+            if (
+                not relative
+                or candidate.is_absolute()
+                or ".." in candidate.parts
+                or candidate.as_posix() != relative
+            ):
+                raise OSError
+            source_path = prime_source / candidate
+            if source_path.is_symlink() or not source_path.is_file():
+                raise OSError
+            contents = source_path.read_bytes()
+            if hashlib.sha256(contents).hexdigest() not in accepted_digests:
+                raise OSError
+            target_path = target / candidate
+            if target_path.exists():
+                if target_path.is_symlink() or not target_path.is_file():
+                    raise OSError
+                if target_path.read_bytes() == contents:
+                    continue
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_bytes(contents)
+    except (OSError, RuntimeError, ValueError):
+        raise PromotionError("external Prime locked artifacts are invalid") from None
+
+
+def _run_prime_binding_command(command: tuple[str, ...], cwd: Path) -> None:
+    environment = {
+        key: value
+        for key in ("HOME", "LANG", "LC_ALL", "LC_CTYPE", "PATH", "TMPDIR")
+        if (value := os.environ.get(key)) is not None
+    }
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=cwd,
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+    except (OSError, subprocess.SubprocessError):
+        raise PromotionError("external Prime checkout could not be created") from None
+    if completed.returncode != 0:
+        raise PromotionError("external Prime checkout could not be created")
 
 
 def _bind_external_prime_source(copy_root: Path, source_root: Path) -> None:
@@ -460,9 +539,37 @@ def _bind_external_prime_source(copy_root: Path, source_root: Path) -> None:
     parent.mkdir(parents=True, exist_ok=True)
     target = parent / DEFAULT_PRIME_SOURCE.name
     try:
-        target.symlink_to(prime_source, target_is_directory=True)
-    except OSError as error:
-        raise PromotionError("external Prime source binding could not be created") from error
+        resource_root = (
+            copy_root / "packages/typescript/prime-gateway/resources"
+        )
+        artifact_lock_path = resource_root / "prime-artifact-lock.json"
+        lock = load_prime_artifact_lock(artifact_lock_path)
+        _run_prime_binding_command(
+            (
+                "git",
+                "clone",
+                "--no-hardlinks",
+                "--no-checkout",
+                "--",
+                str(prime_source),
+                str(target),
+            ),
+            copy_root,
+        )
+        _run_prime_binding_command(
+            ("git", "checkout", "--detach", lock.source_commit),
+            target,
+        )
+        _copy_locked_prime_artifacts(prime_source, target, lock)
+        verify_prime_checkout(target, lock_path=artifact_lock_path)
+        resolve_prime_ecosystem_module(
+            target,
+            resource_root / "prime-ecosystem-module-lock.json",
+            artifact_lock_path=artifact_lock_path,
+            bundle_path=resource_root / "prime-ecosystem-module.mjs",
+        )
+    except (OSError, RuntimeError, PrimeSetupError):
+        raise PromotionError("external Prime source binding could not be created") from None
 
 
 def _assert_acceptance(stdout: str) -> None:
