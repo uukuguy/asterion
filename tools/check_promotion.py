@@ -330,6 +330,13 @@ DCI_PARENT_PATTERN = re.compile(r"\.\./src/dci(?=$|[/\s`'\"\)])")
 LOCAL_SDD_ARTIFACTS = (".superpowers", "sdd")
 PRIME_SOURCE_ENV = "ASTERION_PRIME_SOURCE_ROOT"
 DEFAULT_PRIME_SOURCE = Path("3th-party/prime-agent")
+PRIME_PREPARE_COMMANDS = (
+    ("npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"),
+    ("npm", "--prefix", "packages/tui", "run", "build"),
+    ("node_modules/.bin/tsgo", "-p", "packages/ai/tsconfig.build.json"),
+    ("npm", "--prefix", "packages/agent", "run", "build"),
+    ("npm", "--prefix", "packages/coding-agent", "run", "build"),
+)
 
 
 class PromotionError(RuntimeError):
@@ -465,24 +472,12 @@ def _external_prime_source_root(source_root: Path) -> Path | None:
     return resolved
 
 
-def _locked_prime_artifacts(lock: PrimeArtifactLock) -> dict[str, frozenset[str]]:
-    expected = {path: {digest} for path, digest in lock.files.items()}
+def _verify_locked_prime_runtime(target: Path, lock: PrimeArtifactLock) -> None:
     runtime = lock.rlm_runtime
-    if runtime is not None:
-        for path, digest in runtime.closure.items():
-            expected.setdefault(path, set()).add(digest)
-        for path, digest in runtime.derived_closure.items():
-            expected.setdefault(path, set()).add(digest)
-    return {path: frozenset(digests) for path, digests in expected.items()}
-
-
-def _copy_locked_prime_artifacts(
-    prime_source: Path,
-    target: Path,
-    lock: PrimeArtifactLock,
-) -> None:
+    if runtime is None:
+        return
     try:
-        for relative, accepted_digests in sorted(_locked_prime_artifacts(lock).items()):
+        for relative, expected_digest in runtime.closure.items():
             candidate = Path(relative)
             if (
                 not relative
@@ -491,22 +486,13 @@ def _copy_locked_prime_artifacts(
                 or candidate.as_posix() != relative
             ):
                 raise OSError
-            source_path = prime_source / candidate
-            if source_path.is_symlink() or not source_path.is_file():
+            path = target / candidate
+            if path.is_symlink() or not path.is_file():
                 raise OSError
-            contents = source_path.read_bytes()
-            if hashlib.sha256(contents).hexdigest() not in accepted_digests:
+            if hashlib.sha256(path.read_bytes()).hexdigest() != expected_digest:
                 raise OSError
-            target_path = target / candidate
-            if target_path.exists():
-                if target_path.is_symlink() or not target_path.is_file():
-                    raise OSError
-                if target_path.read_bytes() == contents:
-                    continue
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            target_path.write_bytes(contents)
     except (OSError, RuntimeError, ValueError):
-        raise PromotionError("external Prime locked artifacts are invalid") from None
+        raise PromotionError("rebuilt Prime runtime is invalid") from None
 
 
 def _run_prime_binding_command(command: tuple[str, ...], cwd: Path) -> None:
@@ -531,6 +517,31 @@ def _run_prime_binding_command(command: tuple[str, ...], cwd: Path) -> None:
         raise PromotionError("external Prime checkout could not be created")
 
 
+def _prepare_external_prime_checkout(
+    prime_source: Path,
+    target: Path,
+    source_commit: str,
+) -> None:
+    _run_prime_binding_command(
+        (
+            "git",
+            "clone",
+            "--no-hardlinks",
+            "--no-checkout",
+            "--",
+            str(prime_source),
+            str(target),
+        ),
+        target.parent.parent,
+    )
+    _run_prime_binding_command(
+        ("git", "checkout", "--detach", source_commit),
+        target,
+    )
+    for command in PRIME_PREPARE_COMMANDS:
+        _run_prime_binding_command(command, target)
+
+
 def _bind_external_prime_source(copy_root: Path, source_root: Path) -> None:
     prime_source = _external_prime_source_root(source_root)
     if prime_source is None:
@@ -544,24 +555,9 @@ def _bind_external_prime_source(copy_root: Path, source_root: Path) -> None:
         )
         artifact_lock_path = resource_root / "prime-artifact-lock.json"
         lock = load_prime_artifact_lock(artifact_lock_path)
-        _run_prime_binding_command(
-            (
-                "git",
-                "clone",
-                "--no-hardlinks",
-                "--no-checkout",
-                "--",
-                str(prime_source),
-                str(target),
-            ),
-            copy_root,
-        )
-        _run_prime_binding_command(
-            ("git", "checkout", "--detach", lock.source_commit),
-            target,
-        )
-        _copy_locked_prime_artifacts(prime_source, target, lock)
+        _prepare_external_prime_checkout(prime_source, target, lock.source_commit)
         verify_prime_checkout(target, lock_path=artifact_lock_path)
+        _verify_locked_prime_runtime(target, lock)
         resolve_prime_ecosystem_module(
             target,
             resource_root / "prime-ecosystem-module-lock.json",

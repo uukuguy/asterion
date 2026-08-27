@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import subprocess
@@ -11,11 +10,11 @@ from unittest import mock
 
 from tools.check_promotion import (
     PromotionError,
-    _copy_locked_prime_artifacts,
     _default_runner,
+    _prepare_external_prime_checkout,
     run_promotion,
 )
-from tools.setup_prime_agent import PrimeArtifactLock, PrimeSetupError
+from tools.setup_prime_agent import PrimeSetupError
 
 
 REQUIRED_FIXTURE_ASSETS = (
@@ -455,6 +454,7 @@ class PromotionCheckTests(unittest.TestCase):
                         rlm_runtime=None,
                     ),
                 ),
+                mock.patch("tools.check_promotion.PRIME_PREPARE_COMMANDS", ()),
             ):
                 run_promotion(source_root=source, quick=True, runner=runner)
 
@@ -463,40 +463,32 @@ class PromotionCheckTests(unittest.TestCase):
         self.assertEqual(verifier.call_args_list[0].args[0], external.resolve())
         self.assertTrue(roots)
 
-    def test_external_prime_copy_includes_only_lock_named_artifacts(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory)
-            source = root / "source"
-            target = root / "target"
-            source.mkdir()
-            target.mkdir()
-            locked = source / "packages/example/dist/locked.js"
-            locked.parent.mkdir(parents=True)
-            locked.write_text("locked\n", encoding="utf-8")
-            (locked.parent / "unlocked.js").write_text("unlocked\n", encoding="utf-8")
-            digest = hashlib.sha256(locked.read_bytes()).hexdigest()
-            lock = PrimeArtifactLock(
-                source_commit="1" * 40,
-                package_name="example",
-                package_version="1.0.0",
-                daemon_protocol=1,
-                daemon_schema_revision=1,
-                daemon_schema_id="schema",
-                files={"packages/example/dist/locked.js": digest},
-                rlm_runtime=None,
+    def test_external_prime_checkout_rebuilds_every_locked_workspace(self) -> None:
+        commands: list[tuple[tuple[str, ...], Path]] = []
+        with mock.patch(
+            "tools.check_promotion._run_prime_binding_command",
+            side_effect=lambda command, cwd: commands.append((command, cwd)),
+        ):
+            _prepare_external_prime_checkout(
+                Path("/external/prime"),
+                Path("/copy/3th-party/prime-agent"),
+                "1" * 40,
             )
 
-            _copy_locked_prime_artifacts(source, target, lock)
-
-            self.assertEqual(
-                (target / "packages/example/dist/locked.js").read_text(
-                    encoding="utf-8"
+        self.assertEqual(
+            tuple(command for command, _ in commands[2:]),
+            (
+                ("npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"),
+                ("npm", "--prefix", "packages/tui", "run", "build"),
+                (
+                    "node_modules/.bin/tsgo",
+                    "-p",
+                    "packages/ai/tsconfig.build.json",
                 ),
-                "locked\n",
-            )
-            self.assertFalse(
-                (target / "packages/example/dist/unlocked.js").exists()
-            )
+                ("npm", "--prefix", "packages/agent", "run", "build"),
+                ("npm", "--prefix", "packages/coding-agent", "run", "build"),
+            ),
+        )
 
     def test_external_prime_source_root_rejects_failed_exact_resolver(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
