@@ -133,6 +133,17 @@ export interface GatewayEcosystemEffectBinding {
   readonly portfolioDigest: string;
   readonly artifactLockDigest: string;
   readonly moduleLockDigest: string;
+  readonly featureIds: readonly string[];
+  readonly lifecycleCount: number;
+  readonly mcpCount: number;
+  readonly packageCount: number;
+  readonly registrationCount: number;
+  readonly resourceCount: number;
+}
+
+export interface GatewayEcosystemEffectBindResult {
+  readonly binding: GatewayEcosystemEffectBinding;
+  readonly disposition: "created" | "preexisting";
 }
 
 export interface GatewayEcosystemEffectResult
@@ -143,7 +154,7 @@ export interface PrimeEcosystemModule {
 }
 
 interface PrimeEcosystemStore {
-  bindEcosystemEffect(frame: unknown): Promise<GatewayEcosystemEffectBinding>;
+  bindEcosystemEffect(frame: unknown): Promise<GatewayEcosystemEffectBindResult>;
   commitEcosystemEffectResult(
     effectId: string,
     receipt: unknown,
@@ -261,7 +272,7 @@ function requireDirectory(path: string): void {
   if (
     metadata.isSymbolicLink() ||
     !metadata.isDirectory() ||
-    (metadata.mode & 0o777) !== 0o700 ||
+    (metadata.mode & 0o7777) !== 0o700 ||
     !hasPrivateOwnership(metadata) ||
     realpathSync(path) !== path
   ) invalidFrame();
@@ -290,12 +301,12 @@ function inspectResourceProjection(
       if (entries > maxEntries) invalidFrame();
       if (metadata.isSymbolicLink() || !hasPrivateOwnership(metadata)) invalidFrame();
       if (metadata.isDirectory()) {
-        if ((metadata.mode & 0o777) !== 0o700 || realpathSync(path) !== path) {
+        if ((metadata.mode & 0o7777) !== 0o700 || realpathSync(path) !== path) {
           invalidFrame();
         }
         visit(path, relativePath);
       } else if (metadata.isFile()) {
-        if ((metadata.mode & 0o777) !== 0o600 || realpathSync(path) !== path) {
+        if ((metadata.mode & 0o7777) !== 0o600 || realpathSync(path) !== path) {
           invalidFrame();
         }
         if (!Number.isSafeInteger(metadata.size) || metadata.size > maxBytes - bytes) {
@@ -316,6 +327,13 @@ function inspectResourceProjection(
   };
   visit(resourceRoot, "");
   if (files.length === 0) invalidFrame();
+  files.sort((left, right) =>
+    left.relative_path < right.relative_path
+      ? -1
+      : left.relative_path > right.relative_path
+        ? 1
+        : 0
+  );
   return Object.freeze({ files: Object.freeze(files), bytes, entries });
 }
 
@@ -561,6 +579,12 @@ export function ecosystemEffectBinding(
     portfolioDigest: frame.portfolioDigest,
     artifactLockDigest: frame.artifactLockDigest,
     moduleLockDigest: frame.moduleLockDigest,
+    featureIds: Object.freeze([...frame.features]),
+    lifecycleCount: frame.resources.filter(({ kind }) => kind === "extension").length,
+    mcpCount: frame.resources.filter(({ kind }) => kind === "mcp-server").length,
+    packageCount: frame.resources.filter(({ kind }) => kind === "package").length,
+    registrationCount: frame.registrations.length,
+    resourceCount: frame.resources.length,
   });
 }
 
@@ -573,9 +597,15 @@ export function validateGatewayEcosystemEffectBinding(
       "artifactLockDigest",
       "authorityDigest",
       "effectId",
+      "featureIds",
       "frameDigest",
+      "lifecycleCount",
+      "mcpCount",
       "moduleLockDigest",
+      "packageCount",
       "portfolioDigest",
+      "registrationCount",
+      "resourceCount",
     ]) ||
     typeof value.effectId !== "string" ||
     !EFFECT_ID.test(value.effectId) ||
@@ -587,7 +617,17 @@ export function validateGatewayEcosystemEffectBinding(
     !DIGEST.test(value.portfolioDigest) ||
     !value.effectId.endsWith(`:${value.portfolioDigest.slice(0, 32)}`) ||
     value.artifactLockDigest !== PRIME_ECOSYSTEM_ARTIFACT_LOCK_DIGEST ||
-    value.moduleLockDigest !== PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST
+    value.moduleLockDigest !== PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST ||
+    !Array.isArray(value.featureIds) ||
+    value.featureIds.some((feature) => typeof feature !== "string" || !OPAQUE_ID.test(feature)) ||
+    value.featureIds.join("\0") !== [...new Set(value.featureIds as string[])].sort().join("\0") ||
+    [
+      value.lifecycleCount,
+      value.mcpCount,
+      value.packageCount,
+      value.registrationCount,
+      value.resourceCount,
+    ].some((count) => !Number.isSafeInteger(count) || Number(count) < 0)
   ) throw new PrimeEcosystemError();
   return Object.freeze({
     effectId: value.effectId,
@@ -596,6 +636,12 @@ export function validateGatewayEcosystemEffectBinding(
     portfolioDigest: value.portfolioDigest,
     artifactLockDigest: value.artifactLockDigest,
     moduleLockDigest: value.moduleLockDigest,
+    featureIds: Object.freeze([...(value.featureIds as string[])]),
+    lifecycleCount: value.lifecycleCount as number,
+    mcpCount: value.mcpCount as number,
+    packageCount: value.packageCount as number,
+    registrationCount: value.registrationCount as number,
+    resourceCount: value.resourceCount as number,
   });
 }
 
@@ -682,6 +728,71 @@ export function uncertainPrimeEcosystemReceipt(
   });
 }
 
+export function validatePrimeEcosystemReceiptForBinding(
+  value: unknown,
+  bindingValue: unknown,
+): PrimeEcosystemReceipt {
+  const binding = validateGatewayEcosystemEffectBinding(bindingValue);
+  const integerFields = [
+    "lifecycleCount",
+    "mcpCount",
+    "modelCredentialReads",
+    "ownedProcessCount",
+    "packageCount",
+    "providerOperations",
+    "registrationCount",
+    "resourceCount",
+  ] as const;
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "authorityDigest",
+      "featureIds",
+      "lifecycleCount",
+      "mcpCount",
+      "modelCredentialReads",
+      "ownedProcessCount",
+      "packageCount",
+      "portfolioDigest",
+      "providerOperations",
+      "registrationCount",
+      "resourceCount",
+      "status",
+    ]) ||
+    value.authorityDigest !== binding.authorityDigest ||
+    value.portfolioDigest !== binding.portfolioDigest ||
+    !Array.isArray(value.featureIds) ||
+    value.featureIds.join("\0") !== binding.featureIds.join("\0") ||
+    typeof value.status !== "string" ||
+    !TERMINAL_STATUSES.has(value.status) ||
+    integerFields.some((field) =>
+      !Number.isSafeInteger(value[field]) || Number(value[field]) < 0
+    ) ||
+    value.resourceCount !== binding.resourceCount ||
+    value.registrationCount !== binding.registrationCount ||
+    value.packageCount !== binding.packageCount ||
+    value.mcpCount !== binding.mcpCount ||
+    value.lifecycleCount !== binding.lifecycleCount ||
+    value.providerOperations !== 0 ||
+    value.modelCredentialReads !== 0 ||
+    value.ownedProcessCount !== 0
+  ) throw new PrimeEcosystemError();
+  return deepFreeze({
+    authorityDigest: binding.authorityDigest,
+    featureIds: Object.freeze([...binding.featureIds]),
+    lifecycleCount: binding.lifecycleCount,
+    mcpCount: binding.mcpCount,
+    modelCredentialReads: 0,
+    ownedProcessCount: 0,
+    packageCount: binding.packageCount,
+    portfolioDigest: binding.portfolioDigest,
+    providerOperations: 0,
+    registrationCount: binding.registrationCount,
+    resourceCount: binding.resourceCount,
+    status: value.status as PrimeEcosystemReceipt["status"],
+  });
+}
+
 export function validateGatewayEcosystemEffectResult(
   value: unknown,
 ): GatewayEcosystemEffectResult {
@@ -690,9 +801,15 @@ export function validateGatewayEcosystemEffectResult(
     artifactLockDigest: value.artifactLockDigest,
     authorityDigest: value.authorityDigest,
     effectId: value.effectId,
+    featureIds: value.featureIds,
     frameDigest: value.frameDigest,
+    lifecycleCount: value.lifecycleCount,
+    mcpCount: value.mcpCount,
     moduleLockDigest: value.moduleLockDigest,
+    packageCount: value.packageCount,
     portfolioDigest: value.portfolioDigest,
+    registrationCount: value.registrationCount,
+    resourceCount: value.resourceCount,
   });
   if (
     !hasExactKeys(value, [
@@ -733,7 +850,13 @@ export function validateGatewayEcosystemEffectResult(
     counts.some((count) => !Number.isSafeInteger(count) || Number(count) < 0) ||
     value.providerOperations !== 0 ||
     value.modelCredentialReads !== 0 ||
-    value.ownedProcessCount !== 0
+    value.ownedProcessCount !== 0 ||
+    (value.featureIds as string[]).join("\0") !== binding.featureIds.join("\0") ||
+    value.lifecycleCount !== binding.lifecycleCount ||
+    value.mcpCount !== binding.mcpCount ||
+    value.packageCount !== binding.packageCount ||
+    value.registrationCount !== binding.registrationCount ||
+    value.resourceCount !== binding.resourceCount
   ) throw new PrimeEcosystemError();
   return deepFreeze({
     ...binding,
@@ -775,11 +898,10 @@ export class PrimeEcosystemAdapter {
 
   async activate(value: unknown): Promise<GatewayEcosystemEffectResult> {
     const frame = validatePrimeEcosystemFrame(value);
-    const existing = this.store.ecosystemEffectBinding(frame.effectId);
-    await this.store.bindEcosystemEffect(frame);
+    const bind = await this.store.bindEcosystemEffect(frame);
     const terminal = this.store.ecosystemEffectResult(frame.effectId);
     if (terminal !== undefined) return terminal;
-    if (existing !== undefined) {
+    if (bind.disposition === "preexisting") {
       return this.store.commitEcosystemEffectResult(
         frame.effectId,
         uncertainPrimeEcosystemReceipt(frame),

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -13,6 +13,7 @@ import {
 } from "../dist/src/main.js";
 import {
   GatewayDurableStore,
+  PrimeEcosystemAdapter,
   PrimeGateway,
   PrivateValueStore,
 } from "../dist/src/index.js";
@@ -104,6 +105,49 @@ function event(sequence, generation = 1) {
         authority_revision: 1,
       }
       : { reason_code: "started" },
+  };
+}
+
+async function ecosystemFrameFixture() {
+  const parent = await realpath(await mkdtemp(join(tmpdir(), "asterion-prime-sidecar-ecosystem-")));
+  const portfolioDigest = createHash("sha256").update("sidecar-portfolio").digest("hex");
+  const projectionRoot = join(parent, portfolioDigest);
+  await mkdir(projectionRoot, { mode: 0o700 });
+  await chmod(projectionRoot, 0o700);
+  return {
+    frame: {
+      artifactLockDigest: "c0ffac5cb40be428ca4a60041694c2359bb1dd0c0ea182dabed1191247df03bc",
+      authorityDigest: createHash("sha256").update("authority-1@7").digest("hex"),
+      effectId: `ecosystem:sidecar:${portfolioDigest.slice(0, 32)}`,
+      features: [],
+      format: "asterion.prime-ecosystem-frame/v1",
+      limits: { deadlineMs: 30_000, maxBytes: 8 * 1024 * 1024, maxEntries: 4096, maxProcesses: 1 },
+      mcpCredentialLeaseId: "mcp-lease:SIDECAR_PRIVATE_LEASE",
+      moduleLockDigest: "bcc22f2da837d9feab0d27fc177012f39d4ee00d7b5f7b0fc9ec877f74b922d2",
+      portfolioDigest,
+      projectionRoot,
+      registrations: [],
+      resources: [],
+    },
+    gatewayRoot: join(parent, "gateway"),
+    async cleanup() { await rm(parent, { recursive: true, force: true }); },
+  };
+}
+
+function ecosystemReceipt(frame) {
+  return {
+    authorityDigest: frame.authorityDigest,
+    featureIds: [],
+    lifecycleCount: 0,
+    mcpCount: 0,
+    modelCredentialReads: 0,
+    ownedProcessCount: 0,
+    packageCount: 0,
+    portfolioDigest: frame.portfolioDigest,
+    providerOperations: 0,
+    registrationCount: 0,
+    resourceCount: 0,
+    status: "succeeded",
   };
 }
 
@@ -280,6 +324,84 @@ function createSidecar(options = {}) {
     }),
   };
 }
+
+test("private ecosystem activation reaches the injected adapter and projects the exact receipt", async () => {
+  const state = await ecosystemFrameFixture();
+  try {
+    const gateway = new FakeGateway();
+    const store = await GatewayDurableStore.open(state.gatewayRoot, "session-1");
+    const module = {
+      calls: 0,
+      async activate(frame) {
+        this.calls += 1;
+        return ecosystemReceipt(frame);
+      },
+    };
+    const adapter = new PrimeEcosystemAdapter({ store, module });
+    gateway.activateEcosystem = (frame) => adapter.activate(frame);
+    const { sidecar } = createSidecar({ gateway });
+    const response = await sidecar.handleEnvelope({
+      protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+      id: "ecosystem-request-1",
+      type: "ecosystem_activate",
+      frame: state.frame,
+    });
+    assert.deepEqual(response, {
+      protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+      id: "ecosystem-request-1",
+      type: "ecosystem_receipt",
+      receipt: ecosystemReceipt(state.frame),
+    });
+    assert.equal(Object.keys(response.receipt).length, 12);
+    assert.equal(JSON.stringify(response).includes(state.frame.projectionRoot), false);
+    assert.equal(JSON.stringify(response).includes(state.frame.mcpCredentialLeaseId), false);
+    assert.equal(module.calls, 1);
+    assert.notEqual(store.ecosystemEffectResult(state.frame.effectId), undefined);
+    assert.equal(JSON.stringify(response).includes(
+      store.ecosystemEffectBinding(state.frame.effectId).frameDigest,
+    ), false);
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("private ecosystem activation rejects envelope and frame drift before adapter dispatch", async () => {
+  const state = await ecosystemFrameFixture();
+  try {
+    const gateway = new FakeGateway();
+    gateway.ecosystemCalls = 0;
+    gateway.activateEcosystem = async (frame) => {
+      gateway.ecosystemCalls += 1;
+      return ecosystemReceipt(frame);
+    };
+    const { sidecar } = createSidecar({ gateway });
+    for (const request of [
+      {
+        protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+        id: "ecosystem-request-extra",
+        type: "ecosystem_activate",
+        frame: state.frame,
+        body: "SENTINEL_PRIVATE_BODY",
+      },
+      {
+        protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+        id: "ecosystem-frame-extra",
+        type: "ecosystem_activate",
+        frame: { ...state.frame, body: "SENTINEL_PRIVATE_BODY" },
+      },
+    ]) {
+      assert.deepEqual(await sidecar.handleEnvelope(request), {
+        protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+        id: request.id,
+        type: "error",
+        code: "prime-gateway-sidecar-failed",
+      });
+    }
+    assert.equal(gateway.ecosystemCalls, 0);
+  } finally {
+    await state.cleanup();
+  }
+});
 
 async function createRealSidecarFixture() {
   const fixtureRoot = await temporaryStoreRoot();

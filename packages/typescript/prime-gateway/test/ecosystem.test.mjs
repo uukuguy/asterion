@@ -4,8 +4,10 @@ import {
   chmod,
   mkdir,
   mkdtemp,
+  readFile,
   realpath,
   rm,
+  readdir,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -303,6 +305,49 @@ test("rejects projection roots, directories, and files with non-private modes", 
   }
 });
 
+test("rejects special permission bits on projection roots, directories, and files", async () => {
+  for (const [target, mode] of [
+    ["root", 0o1700],
+    ["resource", 0o2700],
+    ["file", 0o4600],
+  ]) {
+    const state = await fixture();
+    try {
+      const resourcePath = state.frame.resources[0].projectionPath;
+      const targetPath = target === "root"
+        ? state.projectionRoot
+        : target === "resource"
+          ? resourcePath
+          : join(resourcePath, "payload.txt");
+      await chmod(targetPath, mode);
+      assert.throws(() => validatePrimeEcosystemFrame(state.frame), PrimeEcosystemError);
+    } finally {
+      await state.cleanup();
+    }
+  }
+});
+
+test("hashes the complete projection manifest in global relative-path order", async () => {
+  const state = await fixture();
+  try {
+    const resource = state.frame.resources[0];
+    await rm(join(resource.projectionPath, "payload.txt"));
+    await mkdir(join(resource.projectionPath, "a"), { mode: 0o700 });
+    await chmod(join(resource.projectionPath, "a"), 0o700);
+    await writeFile(join(resource.projectionPath, "a", "x"), "nested", { mode: 0o600 });
+    await chmod(join(resource.projectionPath, "a", "x"), 0o600);
+    await writeFile(join(resource.projectionPath, "a."), "sibling", { mode: 0o600 });
+    await chmod(join(resource.projectionPath, "a."), 0o600);
+    resource.contentDigest = sha256Canonical([
+      { relative_path: "a.", sha256: digest("sibling"), size_bytes: 7 },
+      { relative_path: "a/x", sha256: digest("nested"), size_bytes: 6 },
+    ]);
+    assert.doesNotThrow(() => validatePrimeEcosystemFrame(state.frame));
+  } finally {
+    await state.cleanup();
+  }
+});
+
 test("binds the exact ecosystem effect before Prime lifecycle", async () => {
   const state = await fixture();
   try {
@@ -397,6 +442,44 @@ test("returns an existing terminal result unchanged without replaying the module
   }
 });
 
+test("concurrent duplicate activation invokes the module once and fences the duplicate", async () => {
+  const state = await fixture();
+  let releaseModule;
+  try {
+    const store = await GatewayDurableStore.open(state.gatewayRoot, "session-1");
+    let moduleStarted;
+    const started = new Promise((resolve) => { moduleStarted = resolve; });
+    const gate = new Promise((resolve) => { releaseModule = resolve; });
+    const module = {
+      calls: 0,
+      async activate(frame) {
+        this.calls += 1;
+        moduleStarted();
+        await gate;
+        return expectedReceipt(frame);
+      },
+    };
+    const adapter = new PrimeEcosystemAdapter({ store, module });
+    const firstPromise = adapter.activate(state.frame);
+    await started;
+    const secondPromise = adapter.activate(state.frame);
+    const duplicate = await Promise.race([
+      secondPromise,
+      new Promise((resolve) => setTimeout(() => resolve("timed-out"), 100)),
+    ]);
+    releaseModule();
+    const first = await firstPromise;
+    const second = await secondPromise;
+    assert.notEqual(duplicate, "timed-out");
+    assert.equal(module.calls, 1);
+    assert.equal(first.status, "uncertain");
+    assert.deepEqual(second, first);
+  } finally {
+    releaseModule?.();
+    await state.cleanup();
+  }
+});
+
 test("reopen fences a bound nonterminal effect as uncertain", async () => {
   const state = await fixture();
   try {
@@ -419,6 +502,102 @@ test("reopen fences a bound nonterminal effect as uncertain", async () => {
     assert.equal(result.status, "uncertain");
     assert.equal(failModule.calls, 0);
     assert.deepEqual(reopened.ecosystemEffectResult(state.frame.effectId), result);
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("commit write failure reopens as uncertain without replaying the module", async () => {
+  const state = await fixture();
+  try {
+    await GatewayDurableStore.open(state.gatewayRoot, "session-1");
+    let writes = 0;
+    const faulted = await GatewayDurableStore.open(state.gatewayRoot, "session-1", {
+      faultInjector(stage) {
+        if (stage === "before_write" && ++writes === 2) {
+          throw new Error("SENTINEL_ECOSYSTEM_COMMIT_WRITE");
+        }
+      },
+    });
+    const module = {
+      calls: 0,
+      async activate(frame) {
+        this.calls += 1;
+        return expectedReceipt(frame);
+      },
+    };
+    await assert.rejects(
+      new PrimeEcosystemAdapter({ store: faulted, module }).activate(state.frame),
+      (error) => error.message === "Prime gateway durable write failed",
+    );
+    assert.equal(module.calls, 1);
+    const reopened = await GatewayDurableStore.open(state.gatewayRoot, "session-1");
+    const replayModule = {
+      calls: 0,
+      async activate() {
+        this.calls += 1;
+        return {};
+      },
+    };
+    const recovered = await new PrimeEcosystemAdapter({
+      store: reopened,
+      module: replayModule,
+    }).activate(state.frame);
+    assert.equal(recovered.status, "uncertain");
+    assert.equal(replayModule.calls, 0);
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("durable commit rejects receipt identity and expected-count drift", async () => {
+  for (const drift of [
+    { effectId: "ecosystem:override:" + "0".repeat(32) },
+    { resourceCount: 99 },
+    { featureIds: ["ecosystem.unexpected"] },
+  ]) {
+    const state = await fixture();
+    try {
+      const store = await GatewayDurableStore.open(state.gatewayRoot, "session-1");
+      await store.bindEcosystemEffect(state.frame);
+      await assert.rejects(
+        store.commitEcosystemEffectResult(
+          state.frame.effectId,
+          { ...expectedReceipt(state.frame), ...drift },
+        ),
+        (error) => error.message === "Prime gateway durable record conflicts",
+      );
+    } finally {
+      await state.cleanup();
+    }
+  }
+});
+
+test("replay rejects a terminal result whose expected count drifts from its binding", async () => {
+  const state = await fixture();
+  try {
+    const store = await GatewayDurableStore.open(state.gatewayRoot, "session-1");
+    await new PrimeEcosystemAdapter({
+      store,
+      module: { async activate(frame) { return expectedReceipt(frame); } },
+    }).activate(state.frame);
+    const recordsRoot = join(state.gatewayRoot, "public", "records");
+    const recordName = (await readdir(recordsRoot)).sort().at(-1);
+    const recordPath = join(recordsRoot, recordName);
+    const record = JSON.parse(await readFile(recordPath, "utf8"));
+    record.payload.resourceCount += 1;
+    record.payload_digest = sha256Canonical({
+      kind: record.kind,
+      record_id: record.record_id,
+      payload: record.payload,
+    });
+    const { digest: _digest, ...body } = record;
+    record.digest = sha256Canonical(body);
+    await writeFile(recordPath, `${canonical(record)}\n`, { mode: 0o600 });
+    await assert.rejects(
+      GatewayDurableStore.open(state.gatewayRoot, "session-1"),
+      (error) => error.message === "Prime gateway durable store is corrupt",
+    );
   } finally {
     await state.cleanup();
   }
@@ -479,9 +658,11 @@ test("public frame digest excludes projection paths and MCP lease identities", a
     const firstBinding = await firstStore.bindEcosystemEffect(first.frame);
     const secondBinding = await secondStore.bindEcosystemEffect(second.frame);
 
-    assert.equal(firstBinding.frameDigest, secondBinding.frameDigest);
-    assert.equal(JSON.stringify(firstBinding).includes(first.projectionRoot), false);
-    assert.equal(JSON.stringify(secondBinding).includes(second.frame.mcpCredentialLeaseId), false);
+    assert.equal(firstBinding.disposition, "created");
+    assert.equal(secondBinding.disposition, "created");
+    assert.equal(firstBinding.binding.frameDigest, secondBinding.binding.frameDigest);
+    assert.equal(JSON.stringify(firstBinding.binding).includes(first.projectionRoot), false);
+    assert.equal(JSON.stringify(secondBinding.binding).includes(second.frame.mcpCredentialLeaseId), false);
   } finally {
     await first.cleanup();
     await second.cleanup();

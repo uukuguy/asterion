@@ -33,8 +33,10 @@ import {
   ecosystemEffectBinding,
   validateGatewayEcosystemEffectBinding,
   validateGatewayEcosystemEffectResult,
+  validatePrimeEcosystemReceiptForBinding,
 } from "./ecosystem.js";
 import type {
+  GatewayEcosystemEffectBindResult,
   GatewayEcosystemEffectBinding,
   GatewayEcosystemEffectResult,
 } from "./ecosystem.js";
@@ -1717,7 +1719,7 @@ export class GatewayDurableStore {
 
   async bindEcosystemEffect(
     frame: unknown,
-  ): Promise<GatewayEcosystemEffectBinding> {
+  ): Promise<GatewayEcosystemEffectBindResult> {
     let binding: GatewayEcosystemEffectBinding;
     try {
       binding = validateGatewayEcosystemEffectBinding(
@@ -1726,14 +1728,17 @@ export class GatewayDurableStore {
     } catch {
       throw new GatewayStoreConflictError();
     }
-    await this.appendRecord(
+    const appended = await this.appendRecordWithDisposition(
       "ecosystem.effect.bound",
       `ecosystem-effect:${binding.effectId}`,
       binding as unknown as Record<string, unknown>,
     );
     const stored = this.ecosystemBindings.get(binding.effectId);
     if (stored === undefined) throw new GatewayStoreConflictError();
-    return stored;
+    return Object.freeze({
+      binding: stored,
+      disposition: appended.created ? "created" : "preexisting",
+    });
   }
 
   async commitEcosystemEffectResult(
@@ -1741,12 +1746,19 @@ export class GatewayDurableStore {
     receipt: unknown,
   ): Promise<GatewayEcosystemEffectResult> {
     const binding = this.ecosystemBindings.get(effectId);
-    if (binding === undefined || !isRecord(receipt)) {
+    if (binding === undefined) {
       throw new GatewayStoreConflictError();
     }
     let result: GatewayEcosystemEffectResult;
     try {
-      result = validateGatewayEcosystemEffectResult({ ...binding, ...receipt });
+      const validatedReceipt = validatePrimeEcosystemReceiptForBinding(
+        receipt,
+        binding,
+      );
+      result = validateGatewayEcosystemEffectResult({
+        ...binding,
+        ...validatedReceipt,
+      });
     } catch {
       throw new GatewayStoreConflictError();
     }
@@ -1757,11 +1769,19 @@ export class GatewayDurableStore {
       result.artifactLockDigest !== binding.artifactLockDigest ||
       result.moduleLockDigest !== binding.moduleLockDigest
     ) throw new GatewayStoreConflictError();
-    await this.appendRecord(
-      "ecosystem.effect.committed",
-      `ecosystem-result:${effectId}`,
-      result as unknown as Record<string, unknown>,
-    );
+    const existing = this.ecosystemResults.get(effectId);
+    if (existing !== undefined) return existing;
+    try {
+      await this.appendRecord(
+        "ecosystem.effect.committed",
+        `ecosystem-result:${effectId}`,
+        result as unknown as Record<string, unknown>,
+      );
+    } catch (error) {
+      const terminal = this.ecosystemResults.get(effectId);
+      if (terminal !== undefined) return terminal;
+      throw error;
+    }
     const stored = this.ecosystemResults.get(effectId);
     if (stored === undefined) throw new GatewayStoreConflictError();
     return stored;
@@ -2319,7 +2339,13 @@ export class GatewayDurableStore {
           binding.authorityDigest !== result.authorityDigest ||
           binding.portfolioDigest !== result.portfolioDigest ||
           binding.artifactLockDigest !== result.artifactLockDigest ||
-          binding.moduleLockDigest !== result.moduleLockDigest
+          binding.moduleLockDigest !== result.moduleLockDigest ||
+          binding.featureIds.join("\0") !== result.featureIds.join("\0") ||
+          binding.lifecycleCount !== result.lifecycleCount ||
+          binding.mcpCount !== result.mcpCount ||
+          binding.packageCount !== result.packageCount ||
+          binding.registrationCount !== result.registrationCount ||
+          binding.resourceCount !== result.resourceCount
         ) throw new GatewayStoreCorruptionError();
         return result as unknown as Record<string, unknown>;
       }
@@ -2548,6 +2574,12 @@ export class GatewayDurableStore {
         binding.portfolioDigest !== result.portfolioDigest ||
         binding.artifactLockDigest !== result.artifactLockDigest ||
         binding.moduleLockDigest !== result.moduleLockDigest ||
+        binding.featureIds.join("\0") !== result.featureIds.join("\0") ||
+        binding.lifecycleCount !== result.lifecycleCount ||
+        binding.mcpCount !== result.mcpCount ||
+        binding.packageCount !== result.packageCount ||
+        binding.registrationCount !== result.registrationCount ||
+        binding.resourceCount !== result.resourceCount ||
         this.ecosystemResults.has(result.effectId)
       ) throw new GatewayStoreCorruptionError();
       this.ecosystemResults.set(result.effectId, result);
@@ -2625,6 +2657,14 @@ export class GatewayDurableStore {
     recordId: string,
     payload: Record<string, unknown>,
   ): Promise<GatewayRecordReceipt> {
+    return (await this.appendRecordWithDisposition(kind, recordId, payload)).receipt;
+  }
+
+  private async appendRecordWithDisposition(
+    kind: string,
+    recordId: string,
+    payload: Record<string, unknown>,
+  ): Promise<Readonly<{ receipt: GatewayRecordReceipt; created: boolean }>> {
     const result = this.appendQueue.then(() =>
       this.appendRecordSerialized(kind, recordId, payload),
     );
@@ -2639,7 +2679,7 @@ export class GatewayDurableStore {
     kind: string,
     recordId: string,
     payload: Record<string, unknown>,
-  ): Promise<GatewayRecordReceipt> {
+  ): Promise<Readonly<{ receipt: GatewayRecordReceipt; created: boolean }>> {
     if (this.failed) {
       throw new GatewayStoreWriteError();
     }
@@ -2650,8 +2690,11 @@ export class GatewayDurableStore {
         throw new GatewayStoreConflictError();
       }
       return Object.freeze({
-        position: existing.stored.position,
-        digest: existing.stored.digest,
+        receipt: Object.freeze({
+          position: existing.stored.position,
+          digest: existing.stored.digest,
+        }),
+        created: false,
       });
     }
     const position = this.records.length + 1;
@@ -2685,6 +2728,9 @@ export class GatewayDurableStore {
     }
     const loaded: LoadedRecord = Object.freeze({ stored, payload: deepFreeze(payload) });
     this.applyLoadedRecord(loaded);
-    return Object.freeze({ position, digest: stored.digest });
+    return Object.freeze({
+      receipt: Object.freeze({ position, digest: stored.digest }),
+      created: true,
+    });
   }
 }

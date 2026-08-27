@@ -64,6 +64,16 @@ import type {
   GatewayRlmMessageBinding,
 } from "./durable-store.js";
 import {
+  validateGatewayEcosystemEffectResult,
+  validatePrimeEcosystemFrame,
+  validatePrimeEcosystemReceipt,
+} from "./ecosystem.js";
+import type {
+  GatewayEcosystemEffectResult,
+  PrimeEcosystemFrame,
+  PrimeEcosystemReceipt,
+} from "./ecosystem.js";
+import {
   AsterionSkillBridge,
   deriveControlActionId,
   generateSkillBridgeToken,
@@ -93,6 +103,7 @@ type SidecarEnvelopeType =
   | "authority.update"
   | "command.accept"
   | "events.stream"
+  | "ecosystem_activate"
   | "private.read"
   | "rlm.binding.read"
   | "rlm.message.binding.read"
@@ -104,6 +115,7 @@ const SIDE_CAR_ENVELOPE_TYPES: ReadonlySet<SidecarEnvelopeType> = new Set([
   "authority.update",
   "command.accept",
   "events.stream",
+  "ecosystem_activate",
   "private.read",
   "rlm.binding.read",
   "rlm.message.binding.read",
@@ -133,6 +145,7 @@ export interface PrimeGatewaySidecarOptions {
     rlmLifecycle?(): readonly RlmLifecycleObservation[];
     rlmBinding?(actionId: string): GatewayRlmBinding | undefined;
     rlmMessageBinding?(actionId: string): GatewayRlmMessageBinding | undefined;
+    activateEcosystem?(frame: PrimeEcosystemFrame): Promise<GatewayEcosystemEffectResult>;
     rlmMessageDelivered?(): readonly string[];
     close(): Promise<void>;
   };
@@ -186,6 +199,7 @@ interface SidecarEnvelope {
   readonly budget?: unknown;
   readonly command_id?: unknown;
   readonly action_id?: unknown;
+  readonly frame?: unknown;
 }
 
 export type RlmLifecycleObservation =
@@ -252,6 +266,12 @@ type SidecarResponse =
     readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
     readonly id: string;
     readonly type: "session-context.cancel.accepted";
+  }
+  | {
+    readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
+    readonly id: string;
+    readonly type: "ecosystem_receipt";
+    readonly receipt: PrimeEcosystemReceipt;
   }
   | {
     readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
@@ -481,6 +501,7 @@ function validateEnvelope(value: unknown): SidecarEnvelope {
     (
       value.type !== "command.accept" &&
       value.type !== "events.stream" &&
+      value.type !== "ecosystem_activate" &&
       value.type !== "private.read" &&
       value.type !== "rlm.binding.read" &&
       value.type !== "rlm.message.binding.read" &&
@@ -489,6 +510,12 @@ function validateEnvelope(value: unknown): SidecarEnvelope {
       value.type !== "session-context.cancel" &&
       value.type !== "session-context.execute"
     )
+  ) {
+    throw new PrimeGatewayError();
+  }
+  if (
+    value.type === "ecosystem_activate" &&
+    !hasExactKeys(value, ["protocol", "id", "type", "frame"])
   ) {
     throw new PrimeGatewayError();
   }
@@ -699,6 +726,34 @@ export class PrimeGatewaySidecar {
           protocol: PRIME_GATEWAY_IPC_PROTOCOL,
           id: envelope.id,
           type: "authority.accepted",
+        });
+      }
+      if (envelope.type === "ecosystem_activate") {
+        const activate = this.options.gateway.activateEcosystem;
+        if (activate === undefined) throw new PrimeGatewayError();
+        const frame = validatePrimeEcosystemFrame(envelope.frame);
+        const result = validateGatewayEcosystemEffectResult(
+          await activate.call(this.options.gateway, frame),
+        );
+        const receipt = validatePrimeEcosystemReceipt({
+          authorityDigest: result.authorityDigest,
+          featureIds: result.featureIds,
+          lifecycleCount: result.lifecycleCount,
+          mcpCount: result.mcpCount,
+          modelCredentialReads: result.modelCredentialReads,
+          ownedProcessCount: result.ownedProcessCount,
+          packageCount: result.packageCount,
+          portfolioDigest: result.portfolioDigest,
+          providerOperations: result.providerOperations,
+          registrationCount: result.registrationCount,
+          resourceCount: result.resourceCount,
+          status: result.status,
+        }, frame);
+        return Object.freeze({
+          protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+          id: envelope.id,
+          type: "ecosystem_receipt",
+          receipt,
         });
       }
       if (envelope.type === "command.accept") {
@@ -1825,6 +1880,7 @@ async function createSidecarFromDescriptor(
       rlmBinding: (actionId) => store.rlmBinding(actionId),
       rlmMessageBinding: (actionId) => store.rlmMessageBinding(actionId),
       rlmMessageDelivered: () => store.rlmMessageDelivered(),
+      activateEcosystem: (frame) => gateway.activateEcosystem(frame),
       executeSessionContext: (command, preparePrivate) =>
         gateway.executeSessionContext(command, preparePrivate),
       cancelSessionContext: (commandId) => gateway.cancelSessionContext(commandId),

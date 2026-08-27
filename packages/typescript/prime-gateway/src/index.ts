@@ -95,9 +95,13 @@ export {
   PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST,
   PrimeEcosystemAdapter,
   PrimeEcosystemError,
+  validateGatewayEcosystemEffectResult,
   validatePrimeEcosystemFrame,
+  validatePrimeEcosystemReceipt,
+  validatePrimeEcosystemReceiptForBinding,
 } from "./ecosystem.js";
 export type {
+  GatewayEcosystemEffectBindResult,
   GatewayEcosystemEffectBinding,
   GatewayEcosystemEffectResult,
   PrimeEcosystemAdapterOptions,
