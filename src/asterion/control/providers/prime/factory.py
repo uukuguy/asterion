@@ -443,6 +443,8 @@ def _private_descriptor(context: ControlPlaneFactoryContext) -> Mapping[str, obj
         "primeSocketPath": str(_path_option(options, "prime_socket_path").resolve()),
         "primeSourceRoot": str(_path_option(options, "prime_source_root").resolve()),
         "provider": options["provider"],
+        "probeReady": False,
+        "rlmMaxChildren": 0,
         "rlmMaxDepth": 0,
         "remainingBudget": {
             "controller_tokens": budget.controller_tokens,

@@ -488,6 +488,8 @@ class TestPrimeControlFactory(unittest.TestCase):
             self.assertIs(bind_selected_session_context_client(client), client)
             self.assertEqual(len(seen), 1)
             self.assertEqual(seen[0].argv, (str((root / "node").resolve()), str((root / "main.js").resolve())))
+            self.assertFalse(seen[0].private_descriptor["probeReady"])
+            self.assertEqual(seen[0].private_descriptor["rlmMaxChildren"], 0)
             self.assertNotIn("SENTINEL_SECRET", repr(seen[0]))
 
     def test_process_preflight_uses_direct_argv_no_shell_and_fixed_environment(self) -> None:

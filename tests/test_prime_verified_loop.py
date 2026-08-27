@@ -38,6 +38,8 @@ from asterion.control.manager import ControlHost, ControlHostTransportError
 from asterion.control.parity import validate_parity_ledger
 from asterion.control.parity_testing import ParityScenarioRegistry
 from asterion.control.providers.prime.client import PrimeControlPlaneClient
+from asterion.control.ecosystem import EcosystemPrivateResource
+from asterion.control.ecosystem_materialization import EcosystemProjection
 from asterion.control.providers.prime.factory import (
     PRIME_NATIVE_RLM_MAX_DEPTH,
     build_prime_control_plane_client,
@@ -143,6 +145,27 @@ class _PrivateResolver:
             max_bytes,
         )
         raise KeyError("private attachment is unavailable")
+
+
+class _UnusedEcosystemSourceStore:
+    def private_resource(self, resource_id: str) -> EcosystemPrivateResource:
+        raise KeyError(resource_id)
+
+    def open_file(self, resource_id: str, relative_path: str):
+        raise KeyError((resource_id, relative_path))
+
+
+class _UnusedEcosystemMaterializer:
+    def materialize(self, portfolio, store) -> EcosystemProjection:
+        raise AssertionError((portfolio, store))
+
+    def close(self, projection: EcosystemProjection) -> None:
+        raise AssertionError(projection)
+
+
+class _UnusedMcpCredentialRefresh:
+    def refresh(self, lease_id: str, challenge_digest: str) -> str:
+        raise AssertionError((lease_id, challenge_digest))
 
 
 class _ScenarioExecutor:
@@ -598,6 +621,8 @@ async def _run_python_prime_scenario(
                 "primeSocketPath": str(socket_path),
                 "primeSourceRoot": str(root / "prime-source"),
                 "provider": "provider-free",
+                "probeReady": False,
+                "rlmMaxChildren": 0,
                 "rlmMaxDepth": 0,
                 "remainingBudget": {
                     "controller_tokens": authority.budget_limit.controller_tokens,
@@ -706,6 +731,9 @@ async def _run_python_prime_scenario(
                 control_options=common_options,
                 derive_control_options=derive_child_options,
                 host_services={
+                    "ecosystem-materializer": _UnusedEcosystemMaterializer(),
+                    "ecosystem-source-store": _UnusedEcosystemSourceStore(),
+                    "mcp-credential-refresh": _UnusedMcpCredentialRefresh(),
                     "private-attachments": private_resolver,
                     "private-content": client,
                 },
