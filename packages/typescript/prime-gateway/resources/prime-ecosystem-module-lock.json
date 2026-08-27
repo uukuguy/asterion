@@ -2,7 +2,7 @@
   "format": "asterion.prime-ecosystem-module-lock/v1",
   "source_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
   "artifact_lock_sha256": "c64aecdec9ddff21fb7ed493cc1837eb68bf428fc94803a65e6c185aca0fbba3",
-  "bundle_sha256": "55e5f1cb3b0eb30bf34add70f90ce683a49a87f648d843f0cb0e8e1fcdc2bc6c",
+  "bundle_sha256": "4cf832dbc246daf6fbb90b791caed72f8513477541fad9516a333a03dfe3ca3a",
   "modules": [
     {
       "module_id": "diagnostics",

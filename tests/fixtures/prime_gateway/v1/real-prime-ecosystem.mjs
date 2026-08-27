@@ -89,6 +89,9 @@ const ALLOWED_ARGUMENTS = new Set([
   "--artifact-lock",
   "--descriptor-manifest",
   "--module-lock",
+  "--package-payload-digest",
+  "--package-resource-digest",
+  "--package-source-id",
   "--scenario-package",
   "--sealed-root",
 ]);
@@ -123,7 +126,7 @@ function sha256(value) {
 }
 
 function argumentsMap(argv) {
-  if (argv.length !== 8 && argv.length !== 10) fail();
+  if (argv.length < 8 || argv.length % 2 !== 0) fail();
   const parsed = new Map();
   for (let index = 0; index < argv.length; index += 2) {
     const name = argv[index];
@@ -132,8 +135,6 @@ function argumentsMap(argv) {
     parsed.set(name, value);
   }
   if (!parsed.has("--artifact-lock") || !parsed.has("--module-lock") || !parsed.has("--scenario-package") || !parsed.has("--sealed-root")) fail();
-  if (argv.length === 8 && parsed.has("--descriptor-manifest")) fail();
-  if (argv.length === 10 && !parsed.has("--descriptor-manifest")) fail();
   return parsed;
 }
 
@@ -322,7 +323,7 @@ async function extensionFrame({ artifactLockDigest, moduleLockDigest, sealedRoot
   });
 }
 
-async function packageFrame({ artifactLockDigest, moduleLockDigest, sealedRoot }) {
+async function packageFrame({ artifactLockDigest, moduleLockDigest, packageExpectation, sealedRoot }) {
   const portfolioDigest = basename(sealedRoot);
   if (!/^[0-9a-f]{64}$/u.test(portfolioDigest)) fail();
   const projectionPath = join(sealedRoot, "exact-package");
@@ -347,7 +348,7 @@ async function packageFrame({ artifactLockDigest, moduleLockDigest, sealedRoot }
         resourceId: "exact-package",
         scope: "project",
         source: Object.freeze({
-          contentDigest: sha256(canonical({ files, resourceId: "exact-package" })),
+          contentDigest: packageExpectation.payloadDigest,
           kind: "local-child",
           sourceId: "ecosystem.sample.local-directory",
           version: "1.0.0",
@@ -839,14 +840,20 @@ async function extensionObservation({ artifactLockDigest, bundle, binding, gatew
   }
 }
 
-async function packageObservation({ artifactLockDigest, bundle, binding, gateway, moduleLockDigest, scenarioPackage, sealedRoot }) {
-  const frame = await packageFrame({ artifactLockDigest, moduleLockDigest, sealedRoot });
+async function packageObservation({ artifactLockDigest, bundle, binding, gateway, moduleLockDigest, packageExpectation, scenarioPackage, sealedRoot }) {
+  const frame = await packageFrame({ artifactLockDigest, moduleLockDigest, packageExpectation, sealedRoot });
   const storeRoot = join(dirname(sealedRoot), `.gateway-${basename(sealedRoot)}`);
   try {
-    const moduleObservation = await bundle.resolvePackage(frame);
+    const moduleObservation = await bundle.resolvePackage(frame, packageExpectation);
     if (
       record(moduleObservation).packageCount !== 1 ||
-      moduleObservation.packageManagerAvailable !== true
+      moduleObservation.packageManagerAvailable !== true ||
+      moduleObservation.selectedIdentity !== packageExpectation.sourceId ||
+      moduleObservation.payloadDigest !== packageExpectation.payloadDigest ||
+      moduleObservation.resourceDigest !== packageExpectation.resourceDigest ||
+      moduleObservation.installAttemptCount !== 0 ||
+      moduleObservation.fallbackAttemptCount !== 0 ||
+      moduleObservation.networkAttemptCount !== 0
     ) fail();
     const store = await gateway.GatewayDurableStore.open(storeRoot, "ecosystem-packages");
     await store.bindEcosystemEffect(frame);
@@ -866,14 +873,22 @@ async function packageObservation({ artifactLockDigest, bundle, binding, gateway
     ) fail();
     const publicObservation = Object.freeze({
       assertion_ids: PACKAGE_ASSERTION_IDS,
+      fallback_attempt_count: moduleObservation.fallbackAttemptCount,
       feature_ids: PACKAGE_FEATURE_IDS,
       format: "asterion.prime-ecosystem-observation/v1",
+      install_attempt_count: moduleObservation.installAttemptCount,
       model_credential_reads: response.modelCredentialReads,
+      network_attempt_count: moduleObservation.networkAttemptCount,
       owned_process_count_after_close: response.ownedProcessCount,
       package_count: response.packageCount,
+      prime_payload_digest: moduleObservation.payloadDigest,
+      prime_resource_digest: moduleObservation.resourceDigest,
+      prime_selected_identity_digest: sha256(moduleObservation.selectedIdentity),
       provider_operations: response.providerOperations,
       resource_count: response.resourceCount,
       scenario_package: scenarioPackage,
+      selected_payload_digest: packageExpectation.payloadDigest,
+      selected_resource_digest: packageExpectation.resourceDigest,
       selected_source_digest: sha256(frame.resources[0].source.sourceId),
       status: "PASS",
     });
@@ -899,6 +914,9 @@ async function main() {
   const moduleLockPath = argumentsValue.get("--module-lock");
   const artifactLockPath = argumentsValue.get("--artifact-lock");
   const descriptorManifestPath = argumentsValue.get("--descriptor-manifest");
+  const packageSourceId = argumentsValue.get("--package-source-id");
+  const packagePayloadDigest = argumentsValue.get("--package-payload-digest");
+  const packageResourceDigest = argumentsValue.get("--package-resource-digest");
   const sealedRoot = argumentsValue.get("--sealed-root");
   const scenarioPackage = argumentsValue.get("--scenario-package");
   if (
@@ -908,6 +926,25 @@ async function main() {
     scenarioPackage !== "resources"
   ) fail();
   if ((scenarioPackage === "resources") !== (descriptorManifestPath !== undefined)) fail();
+  const packageExpectation = (
+    scenarioPackage === "packages"
+      ? Object.freeze({
+        payloadDigest: packagePayloadDigest,
+        resourceDigest: packageResourceDigest,
+        sourceId: packageSourceId,
+      })
+      : undefined
+  );
+  if (
+    (scenarioPackage === "packages") !== (
+      typeof packageSourceId === "string" &&
+      typeof packagePayloadDigest === "string" &&
+      typeof packageResourceDigest === "string" &&
+      /^[A-Za-z0-9._:-]+$/u.test(packageSourceId) &&
+      /^[0-9a-f]{64}$/u.test(packagePayloadDigest) &&
+      /^[0-9a-f]{64}$/u.test(packageResourceDigest)
+    )
+  ) fail();
   await requireSealedTree(sealedRoot);
 
   const moduleLockBytes = await lockedFile(moduleLockPath);
@@ -973,6 +1010,7 @@ async function main() {
       bundle,
       gateway,
       moduleLockDigest,
+      packageExpectation,
       scenarioPackage,
       sealedRoot,
     });

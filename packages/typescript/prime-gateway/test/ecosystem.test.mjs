@@ -31,7 +31,7 @@ const PRIVATE_BODY = "SENTINEL_PRIVATE_ECOSYSTEM_BODY";
 const PRIVATE_LEASE = "mcp-lease:SENTINEL_PRIVATE_LEASE";
 const PRIVATE_ERROR = "SENTINEL_PRIVATE_MODULE_ERROR";
 const ARTIFACT_LOCK_DIGEST = "c64aecdec9ddff21fb7ed493cc1837eb68bf428fc94803a65e6c185aca0fbba3";
-const MODULE_LOCK_DIGEST = "87972649dc9c8b713d708b3a37008ab7d071c1c642cd12102d98ed5c3a7ef539";
+const MODULE_LOCK_DIGEST = "b02188c15e551cc41f3b93044417556db2e4c50cbf158cb768ac0f25962a3aab";
 
 test("binds the exact checked-in artifact, module, and bundle digests", async () => {
   const resources = new URL("../resources/", import.meta.url);

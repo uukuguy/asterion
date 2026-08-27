@@ -68,15 +68,23 @@ ASSERTION_IDS = [
 ]
 PUBLIC_KEYS = {
     "assertion_ids",
+    "fallback_attempt_count",
     "feature_ids",
     "format",
+    "install_attempt_count",
     "model_credential_reads",
+    "network_attempt_count",
     "observation_digest",
     "owned_process_count_after_close",
     "package_count",
+    "prime_payload_digest",
+    "prime_resource_digest",
+    "prime_selected_identity_digest",
     "provider_operations",
     "resource_count",
     "scenario_package",
+    "selected_payload_digest",
+    "selected_resource_digest",
     "selected_source_digest",
     "status",
 }
@@ -290,6 +298,10 @@ def _command_with_artifact_lock(
     node: Path,
     sealed_root: Path,
     artifact_lock: Path,
+    *,
+    selected_source_id: str,
+    selected_payload_digest: str,
+    selected_resource_digest: str,
 ) -> tuple[str, ...]:
     return (
         str(node),
@@ -302,12 +314,34 @@ def _command_with_artifact_lock(
         str(sealed_root),
         "--scenario-package",
         SCENARIO_PACKAGE,
+        "--package-source-id",
+        selected_source_id,
+        "--package-payload-digest",
+        selected_payload_digest,
+        "--package-resource-digest",
+        selected_resource_digest,
     )
 
 
-def _run_package_harness(node: Path, *, source_root: Path = FIXTURE_ROOT) -> tuple[int, dict[str, object] | None, str]:
-    selected, _payload_digest, _entry = _selected_local_payload(source_root)
+def _run_package_harness(
+    node: Path,
+    *,
+    source_root: Path = FIXTURE_ROOT,
+    expected_payload_digest: str | None = None,
+    expected_resource_digest: str | None = None,
+) -> tuple[int, dict[str, object] | None, str]:
+    selected, payload_digest, _entry = _selected_local_payload(source_root)
     private_resource = _private_resource(source_root / "payload")
+    selected_resource_digest = _canonical_digest(
+        [
+            {
+                "relative_path": item.relative_path,
+                "sha256": item.sha256,
+                "size_bytes": item.size_bytes,
+            }
+            for item in private_resource.files
+        ]
+    )
     portfolio = _portfolio_for(private_resource, selected)
     with tempfile.TemporaryDirectory(prefix="asterion-prime-ecosystem-packages-", dir="/tmp") as temporary:
         parent = Path(temporary).resolve()
@@ -332,7 +366,15 @@ def _run_package_harness(node: Path, *, source_root: Path = FIXTURE_ROOT) -> tup
         projection = materializer.materialize(portfolio, store)
         try:
             completed = subprocess.run(
-                _command_with_artifact_lock(node, projection.root, artifact_lock),
+                _command_with_artifact_lock(
+                    node,
+                    projection.root,
+                    artifact_lock,
+                    selected_source_id=selected.source_id,
+                    selected_payload_digest=expected_payload_digest or payload_digest,
+                    selected_resource_digest=expected_resource_digest
+                    or selected_resource_digest,
+                ),
                 cwd=ROOT,
                 env=_closed_environment(private_home),
                 check=False,
@@ -355,15 +397,23 @@ def _run_package_harness(node: Path, *, source_root: Path = FIXTURE_ROOT) -> tup
     return completed.returncode, report, completed.stdout + completed.stderr
 
 
-@unittest.skipUnless(
-    PINNED_SOURCE.is_dir(), "external pinned Prime ecosystem source is unavailable"
-)
 class TestPrimeEcosystemPackages(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.node = _node_22()
-        if cls.node is None:
-            raise unittest.SkipTest("an offline pinned Node 22 executable is unavailable")
+    def _real_node(self) -> Path:
+        if not PINNED_SOURCE.is_dir():
+            self.fail("external pinned Prime ecosystem source is required")
+        node = _node_22()
+        if node is None:
+            self.fail("offline pinned Node 22 executable is required")
+        return node
+
+    def test_package_gate_builds_gateway_before_python_harness(self) -> None:
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        target = makefile.split("test.prime-ecosystem-packages.provider-free:", 1)[1]
+        target = target.split("\n\n", 1)[0]
+        build = target.find("npm --prefix packages/typescript/prime-gateway run build")
+        python = target.find("$(UV_BIN) run python -m unittest -v")
+        self.assertGreaterEqual(build, 0)
+        self.assertGreater(python, build)
 
     def test_exact_source_lock_selects_package_without_import_or_fallback(self) -> None:
         with tempfile.TemporaryDirectory(prefix="asterion-package-source-", dir="/tmp") as temporary:
@@ -466,8 +516,20 @@ class TestPrimeEcosystemPackages(unittest.TestCase):
                         self.assertNotIn(sentinel, rendered)
 
     def test_real_prime_package_receipt_is_safe_exact_and_deterministic(self) -> None:
-        first_code, first, first_output = _run_package_harness(self.node)
-        second_code, second, second_output = _run_package_harness(self.node)
+        payload_digest = open_portable_payload(PAYLOAD_ROOT).payload_sha256
+        private_resource = _private_resource(PAYLOAD_ROOT)
+        resource_digest = _canonical_digest(
+            [
+                {
+                    "relative_path": item.relative_path,
+                    "sha256": item.sha256,
+                    "size_bytes": item.size_bytes,
+                }
+                for item in private_resource.files
+            ]
+        )
+        first_code, first, first_output = _run_package_harness(self._real_node())
+        second_code, second, second_output = _run_package_harness(self._real_node())
 
         self.assertEqual(first_code, 0)
         self.assertEqual(second_code, 0)
@@ -483,6 +545,17 @@ class TestPrimeEcosystemPackages(unittest.TestCase):
         self.assertEqual(first["assertion_ids"], ASSERTION_IDS)
         self.assertEqual(first["package_count"], 1)
         self.assertEqual(first["resource_count"], 1)
+        self.assertEqual(first["selected_payload_digest"], payload_digest)
+        self.assertEqual(first["selected_resource_digest"], resource_digest)
+        self.assertEqual(first["prime_payload_digest"], payload_digest)
+        self.assertEqual(first["prime_resource_digest"], resource_digest)
+        self.assertEqual(
+            first["prime_selected_identity_digest"],
+            first["selected_source_digest"],
+        )
+        self.assertEqual(first["install_attempt_count"], 0)
+        self.assertEqual(first["fallback_attempt_count"], 0)
+        self.assertEqual(first["network_attempt_count"], 0)
         self.assertEqual(first["provider_operations"], 0)
         self.assertEqual(first["model_credential_reads"], 0)
         self.assertEqual(first["owned_process_count_after_close"], 0)
@@ -494,6 +567,17 @@ class TestPrimeEcosystemPackages(unittest.TestCase):
         for output in (first_output, second_output):
             for sentinel in BODY_SENTINELS:
                 self.assertNotIn(sentinel, output)
+
+    def test_real_prime_package_rejects_admitted_digest_mismatch_redacted(self) -> None:
+        returncode, report, output = _run_package_harness(
+            self._real_node(),
+            expected_resource_digest="f" * 64,
+        )
+
+        self.assertNotEqual(returncode, 0)
+        self.assertIsNone(report)
+        for sentinel in BODY_SENTINELS:
+            self.assertNotIn(sentinel, output)
 
 
 if __name__ == "__main__":

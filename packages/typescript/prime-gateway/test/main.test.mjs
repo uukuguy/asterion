@@ -125,7 +125,7 @@ async function ecosystemFrameFixture() {
       format: "asterion.prime-ecosystem-frame/v1",
       limits: { deadlineMs: 30_000, maxBytes: 8 * 1024 * 1024, maxEntries: 4096, maxProcesses: 1 },
       mcpCredentialLeaseId: "mcp-lease:SIDECAR_PRIVATE_LEASE",
-      moduleLockDigest: "87972649dc9c8b713d708b3a37008ab7d071c1c642cd12102d98ed5c3a7ef539",
+      moduleLockDigest: "b02188c15e551cc41f3b93044417556db2e4c50cbf158cb768ac0f25962a3aab",
       portfolioDigest,
       projectionRoot,
       registrations: [],

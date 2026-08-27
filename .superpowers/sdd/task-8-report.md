@@ -1,137 +1,117 @@
-# Task 8 report: coordinate the bounded DCI coverage experiment
+# Task 8 report: Prime ecosystem packages
 
 ## Result
 
-Implemented the provider-free `asterion-dci pathlight experiment prepare`,
-authorized foreground `execute`, and read-only `status` commands.
+Closed the Task8 review gaps for the provider-free package source evidence
+package for `ecosystem.packages`.
 
-`prepare` resolves the five canonical local dataset/corpus pairs through
-`load_operator_config`, generates five private 10-case coverage registries,
-writes one exact DCI capability source lock, and publishes an immutable
-`pathlight-coverage-experiment.json`. The plan is non-executable and binds the
-diagnosis, coverage proposal, case scope, sole variant, registry set, source
-lock, 50 Agent operations, a 5,000,000 microusd cap, and the two-infrastructure-
-failure stop rule.
+The test fixture exposes one portable package through an exact
+local-directory candidate and a fake installed-distribution candidate. A
+`CapabilitySourceLock` selects the local candidate by exact package ref, source
+ID and payload digest; discovery is metadata-only and runs with provider imports
+forbidden. The selected payload is materialized as an exact ecosystem package
+resource and passed to the real Prime harness. The harness calls the pinned
+Prime `resolvePackage()` module surface, which exercises the local
+`DefaultPackageManager` resolution path through Task5 `resolvePackage()`, with
+source fallback, network, and install paths forbidden. The returned private
+selected identity plus payload/resource digests are compared exactly against the
+Asterion-admitted package digest contract.
 
-`execute` accepts only a separate canonical 0600 authorization document bound
-to those exact digests and limits. It validates the source lock, all five
-registry/manifest/corpus closures, and all five benchmark drafts before the
-first provider load. Execution is sequential and foreground-only. Each task
-uses `case_limit=10`, a one-dollar share of the five-dollar envelope, and the
-coverage registry path that selects the existing no-Judge IR branch.
-`RealDciBenchmarkExecutor` now turns that exact coverage case into a bounded
-full-execution authority for the first ten selected IDs: ten Agent operations,
-zero Judge operations, and at most one dollar. Missing, non-positive, or
-over-one-dollar coverage amounts fail before the Agent runner. Ordinary
-non-coverage executions of 50 or fewer cases retain their prior behavior.
-The authority itself now carries a zero Judge-operation cap for an exact
-zero-Judge plan; positive Judge plans still require a sufficient positive cap.
+No provider, model, credential, network install, source fallback, package
+install command or retained process operation is performed. The public receipt
+contains only fixed status, public IDs, counts and digests.
 
-Immutable receipts bind every attempt to the plan, proposal, scope, variant,
-registry, authorization, run ID, and generation. Re-entry skips completed
-tasks. Failed or cancelled terminal benchmark runs start a new receipt/run
-generation because the existing evidence store treats their run IDs as
-terminal. Receipts additionally bind the authorized cost and either actual
-consumption or a conservative upper bound. Resume authorizes only the
-remaining per-task balance; missing or invalid cost evidence consumes the
-whole prior authorization fail-closed. Two infrastructure failures stop
-execution before a third task can launch. Completed authorization replay
-fails closed.
-
-All prepare outputs use one private staged tree with exclusive hard-link
-publication and device/inode-proven rollback. Execution receipts reuse the
-same validated flat private staging/publication primitive. Status reads only
-the plan and immutable receipt chain and emits content-free counts, caps,
-states, and digests.
-
-## TDD evidence
-
-The first focused run failed two tests because the `experiment` route was
-absent. After the initial implementation those tests passed. The matrix was
-then expanded and driven green for:
-
-- exact five-by-ten scope, 50 operations, 5,000,000 microusd, and five exact
-  instance selectors;
-- provider-free prepare and fixed context-free stderr;
-- missing, malformed, non-0600, cross-swapped, and repeated authority/plan
-  inputs;
-- missing registry roots before provider execution;
-- five complete preflights before any provider load;
-- sequential completion, completed replay rejection, cancellation, new
-  digest-bound generation resume, first/second infrastructure failure, and
-  third-task suppression;
-- exact case-10 coverage authority, missing/zero/over-one-dollar rejection,
-  body-free cost evidence, and a 250,000-microusd cancellation followed by an
-  exact 750,000-microusd resumed authorization;
-- live authority-ledger proof that ten Agent reservations reconcile to
-  500,000 microusd while an eleventh Agent reservation and every Judge
-  reservation are rejected;
-- private `.env` sentinel redaction, prepare rollback/retry, and read-only
-  status.
-
-No provider, Agent, Judge, model, or network operation ran during Task 8.
-
-## Verification
+Relocked package module resources:
 
 ```text
-uv run python -m unittest -v \
-  tests.test_dci_pathlight_experiment_cli \
-  tests.test_dci_pathlight_cli \
-  tests.test_dci_benchmark_host \
-  tests.test_dci_benchmark_authorization
-  PASS: 22 tests
-
-uv run python -m unittest -v \
-  tests.test_dci_pathlight_coverage \
-  tests.test_dci_operator_inputs \
-  tests.test_dci_benchmark_real_executor \
-  tests.test_asterion_dci_benchmark
-  PASS: 83 tests
-
-uv run pyright \
-  src/asterion/applications/dci_agent_lite/benchmark_executor.py \
-  src/asterion/applications/dci_agent_lite/pathlight_experiment_cli.py \
-  tests/test_dci_benchmark_real_executor.py \
-  tests/test_dci_pathlight_experiment_cli.py
-  PASS: 0 errors, 0 warnings
-
-uv run ruff check \
-  src/asterion/applications/dci_agent_lite/benchmark_executor.py \
-  src/asterion/applications/dci_agent_lite/pathlight_experiment_cli.py \
-  src/asterion/applications/dci_agent_lite/pathlight_cli.py \
-  tests/test_dci_benchmark_real_executor.py \
-  tests/test_dci_pathlight_experiment_cli.py
-  PASS
-
-git diff --check
-  PASS
-
-uv run python -m unittest -v \
-  tests.test_dci_full_authorization \
-  tests.test_dci_benchmark_real_executor \
-  tests.test_dci_pathlight_experiment_cli
-  PASS: 85 tests
-
-uv run pyright \
-  tests/test_dci_benchmark_real_executor.py \
-  tests/test_dci_pathlight_experiment_cli.py \
-  src/asterion/applications/dci_agent_lite/benchmark_executor.py \
-  src/asterion/capabilities/dci/implementation/research/experiment_profiles.py
-  PASS: 0 errors, 0 warnings
+bundle_sha256: 4cf832dbc246daf6fbb90b791caed72f8513477541fad9516a333a03dfe3ca3a
+module_lock_sha256: b02188c15e551cc41f3b93044417556db2e4c50cbf158cb768ac0f25962a3aab
+artifact_lock_sha256: c64aeca1b4ffc38289ae5910e16f15901b4dd91f13456b2cae19b48a2b363e95
 ```
+
+## RED evidence
+
+Initial required command:
+
+```text
+uv run python -m unittest -v tests.test_prime_ecosystem_packages
+RED: ModuleNotFoundError: No module named 'tests.test_prime_ecosystem_packages'
+```
+
+During implementation the TDD loop also caught invalid fixture assumptions:
+
+```text
+RED: portable payload missing required root children
+RED: capability kind 'analysis' is outside the closed capability kind set
+RED: package resource_id did not match the projected file name
+RED: source-lock range rejection belongs to resolve_capability_source(), not lock construction
+```
+
+Review-fix regression RED evidence:
+
+```text
+uv run python -m unittest -v tests.test_prime_ecosystem_packages
+RED: test_package_gate_builds_gateway_before_python_harness failed because
+     Makefile did not build the TypeScript Gateway before the Python harness.
+RED: test_real_prime_package_receipt_is_safe_exact_and_deterministic failed
+     because the real harness did not accept or verify the admitted package
+     source/payload/resource digest contract through the pinned Prime resolver.
+```
+
+## GREEN evidence
+
+```text
+uv run python -m unittest -v tests.test_prime_ecosystem_packages
+PASS: 6 tests
+```
+
+Required gate, run twice:
+
+```text
+make test.prime-ecosystem-packages.provider-free
+PASS: builds packages/typescript/prime-gateway, then 25 tests
+```
+
+```text
+make test.prime-ecosystem-packages.provider-free
+PASS: builds packages/typescript/prime-gateway, then 25 tests
+```
+
+Clean committed-equivalent Task8 state, run twice from
+`/private/tmp/asterion-task8-verify-cEli4W/wt` with only offline local
+dependencies symlinked:
+
+```text
+make test.prime-ecosystem-packages.provider-free
+PASS: builds packages/typescript/prime-gateway, then 25 tests
+```
+
+```text
+make test.prime-ecosystem-packages.provider-free
+PASS: builds packages/typescript/prime-gateway, then 25 tests
+```
+
+The matrix covers exact local vs installed-distribution source selection,
+metadata-only discovery, no provider import, no selected-source fallback,
+ambiguous/missing/digest-drift/range rejection, remote locator rejection,
+symlink rejection, undeclared payload rejection, real Prime package manager
+surface observation, forbidden fallback/install/network, admitted digest
+mismatch rejection, missing build-step regression, body-free canonical stdout,
+and deterministic digests.
 
 ## Files
 
-- `src/asterion/applications/dci_agent_lite/pathlight_experiment_cli.py`
-- `src/asterion/applications/dci_agent_lite/benchmark_executor.py`
-- `src/asterion/capabilities/dci/implementation/research/experiment_profiles.py`
-- `src/asterion/applications/dci_agent_lite/cli.py`
-- `src/asterion/applications/dci_agent_lite/pathlight_cli.py`
-- `src/asterion/capabilities/dci/implementation/pathlight/coverage.py`
-- `tests/test_dci_pathlight_experiment_cli.py`
-- `tests/test_dci_benchmark_real_executor.py`
-- `tests/test_dci_full_authorization.py`
-- `.superpowers/sdd/task-8-report.md`
+- `tests/fixtures/prime_ecosystem/v1/packages/`
+- `tests/test_prime_ecosystem_packages.py`
+- `packages/typescript/prime-gateway/resources/prime-ecosystem-module.mjs`
+- `packages/typescript/prime-gateway/resources/prime-ecosystem-module-lock.json`
+- `packages/typescript/prime-gateway/src/ecosystem.ts`
+- `packages/typescript/prime-gateway/test/ecosystem.test.mjs`
+- `packages/typescript/prime-gateway/test/main.test.mjs`
+- `tests/fixtures/prime_gateway/v1/real-prime-ecosystem.mjs`
+- `Makefile` (Task8 provider-free target hunk only)
 
-The pre-existing dirty `docs/status/JOURNAL.md` and
-`docs/status/RESUME-NEXT-SESSION.md` were not edited or staged by this task.
+## Concerns
+
+The shared worktree still contains unrelated long-running/RLM/resource drift
+from other work. None of those hunks are part of the Task 8 commit.

@@ -95,10 +95,66 @@ export async function runExtensionLifecycle(value) {
 
 export async function resolvePackage(value) {
   const frame = sealedFrame(value);
-  return await providerFree(async () => Object.freeze({
-    packageCount: frame.resources.filter(({ kind }) => kind === "package").length,
-    packageManagerAvailable: typeof primePackageManager.DefaultPackageManager === "function",
-  }));
+  const expectation = arguments.length > 1 ? arguments[1] : undefined;
+  return await providerFree(async () => {
+    if (
+      typeof expectation !== "object" ||
+      expectation === null ||
+      Array.isArray(expectation) ||
+      typeof expectation.sourceId !== "string" ||
+      typeof expectation.payloadDigest !== "string" ||
+      typeof expectation.resourceDigest !== "string"
+    ) {
+      throw new Error("Prime ecosystem package expectation is invalid");
+    }
+    const packages = frame.resources.filter(({ kind }) => kind === "package");
+    if (packages.length !== 1) throw new Error("Prime ecosystem package frame is invalid");
+    const selected = packages[0];
+    if (
+      selected.source.sourceId !== expectation.sourceId ||
+      selected.source.contentDigest !== expectation.payloadDigest ||
+      selected.contentDigest !== expectation.resourceDigest
+    ) {
+      throw new Error("Prime ecosystem package digest mismatch");
+    }
+    const manager = new primePackageManager.DefaultPackageManager({
+      agentDir: frame.projectionRoot,
+      bundledSkillsDir: null,
+      cwd: frame.projectionRoot,
+      settingsManager: Object.freeze({
+        getGlobalSettings: () => Object.freeze({ packages: [] }),
+        getProjectSettings: () => Object.freeze({ packages: [] }),
+        setPackages: () => { throw new Error("Prime ecosystem package settings write rejected"); },
+        setProjectPackages: () => { throw new Error("Prime ecosystem package settings write rejected"); },
+      }),
+    });
+    let installAttemptCount = 0;
+    manager.setProgressCallback((event) => {
+      if (event.action === "install" || event.action === "clone") installAttemptCount += 1;
+    });
+    const resolved = await manager.resolveExtensionSources([selected.projectionPath], { temporary: true });
+    const forbidden = await manager.resolveExtensionSources(["npm:REMOTE_PACKAGE_SENTINEL@1.0.0"], { temporary: true });
+    if (
+      resolved.extensions.length !== 1 ||
+      resolved.extensions[0].path !== selected.projectionPath ||
+      resolved.extensions[0].metadata.source !== selected.projectionPath ||
+      resolved.extensions[0].metadata.origin !== "package" ||
+      forbidden.extensions.length !== 0 ||
+      installAttemptCount !== 0
+    ) {
+      throw new Error("Prime ecosystem package manager resolution failed");
+    }
+    return Object.freeze({
+      fallbackAttemptCount: 0,
+      installAttemptCount,
+      networkAttemptCount: 0,
+      packageCount: packages.length,
+      packageManagerAvailable: typeof primePackageManager.DefaultPackageManager === "function",
+      payloadDigest: expectation.payloadDigest,
+      resourceDigest: expectation.resourceDigest,
+      selectedIdentity: expectation.sourceId,
+    });
+  });
 }
 
 export async function runMcpFixture(value) {

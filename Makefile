@@ -192,6 +192,7 @@ test.prime-ecosystem-extensions.provider-free:
 	npm --prefix packages/typescript/prime-gateway test -- test/ecosystem.test.mjs
 
 test.prime-ecosystem-packages.provider-free:
+	npm --prefix packages/typescript/prime-gateway run build
 	$(UV_BIN) run python -m unittest -v \
 		tests.test_prime_ecosystem_packages \
 		tests.test_local_capability_source \
