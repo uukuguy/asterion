@@ -423,7 +423,9 @@ git commit -m "feat: fence Prime ecosystem activation"
 - Modify: `src/asterion/control/providers/prime/ecosystem.py`
 - Modify: `packages/typescript/prime-gateway/src/ecosystem.ts`
 - Modify: `packages/typescript/prime-gateway/src/main.ts`
+- Modify: `pyproject.toml`
 - Modify: `tools/setup_prime_agent.py`
+- Modify: `tests/test_distribution.py`
 - Modify: `tests/test_setup_prime_agent.py`
 - Modify: `tests/test_prime_ecosystem_adapter.py`
 - Modify: `packages/typescript/prime-gateway/test/ecosystem.test.mjs`
@@ -470,6 +472,8 @@ The Asterion-owned `.mjs` bundle imports only locked built paths and exports `in
 
 Bind the resulting checked-in artifact/module lock digests into both sides of the private frame. Python must read the exact checked-in lock resources without importing Prime and emit their real SHA-256 values; the Gateway adapter/main must receive the exact resolved lock contract and reject any placeholder, frame drift, or bundle drift before activation. No source path or lock body enters the public receipt.
 
+Force-include the module lock and bundle beside the artifact lock in the wheel, and extend distribution tests so packaged-resource fallback is verified from an installed layout rather than only from the repository checkout.
+
 - [ ] **Step 4: Implement the shared real-process fixture and rerun twice**
 
 The fixture accepts only `--module-lock`, `--artifact-lock`, `--sealed-root`, and `--scenario-package`; it starts no provider, clears model credential variables, emits one canonical body-free JSON object, closes all owned handles, and exits nonzero on lifecycle/count/digest drift.
@@ -481,7 +485,7 @@ Expected: PASS twice with identical public digest and zero provider/model/proces
 - [ ] **Step 5: Commit the locked real-Prime harness**
 
 ```bash
-git add packages/typescript/prime-gateway/resources/prime-ecosystem-module-lock.json packages/typescript/prime-gateway/resources/prime-ecosystem-module.mjs packages/typescript/prime-gateway/resources/prime-artifact-lock.json tools/setup_prime_agent.py tests/test_setup_prime_agent.py tests/fixtures/prime_gateway/v1/real-prime-ecosystem.mjs tests/test_prime_ecosystem_real_process.py
+git add packages/typescript/prime-gateway/resources/prime-ecosystem-module-lock.json packages/typescript/prime-gateway/resources/prime-ecosystem-module.mjs packages/typescript/prime-gateway/resources/prime-artifact-lock.json src/asterion/control/providers/prime/ecosystem.py packages/typescript/prime-gateway/src/ecosystem.ts packages/typescript/prime-gateway/src/main.ts pyproject.toml tools/setup_prime_agent.py tests/test_distribution.py tests/test_setup_prime_agent.py tests/test_prime_ecosystem_adapter.py packages/typescript/prime-gateway/test/ecosystem.test.mjs packages/typescript/prime-gateway/test/main.test.mjs tests/fixtures/prime_gateway/v1/real-prime-ecosystem.mjs tests/test_prime_ecosystem_real_process.py
 git commit -m "test: lock Prime ecosystem module bundle"
 ```
 
