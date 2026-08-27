@@ -10,6 +10,7 @@ import * as primeResources from "../../../../3th-party/prime-agent/packages/codi
 import * as primeSkills from "../../../../3th-party/prime-agent/packages/coding-agent/dist/core/skills.js";
 
 const FRAME_FORMAT = "asterion.prime-ecosystem-frame/v1";
+const OWNED_MCP_URL_DIGEST = "781224600d276111113690290697ea94153b42614a8b9a41900cc3fec7ccf5d0";
 
 function sealedFrame(value) {
   if (
@@ -157,12 +158,115 @@ export async function resolvePackage(value) {
   });
 }
 
-export async function runMcpFixture(value) {
+async function channelCall(channel, method, payload) {
+  if (
+    typeof channel !== "object" ||
+    channel === null ||
+    Array.isArray(channel) ||
+    typeof channel[method] !== "function"
+  ) {
+    throw new Error("Prime ecosystem MCP channel is invalid");
+  }
+  const result = await channel[method](payload);
+  if (typeof result !== "object" || result === null || Array.isArray(result)) {
+    throw new Error("Prime ecosystem MCP channel failed");
+  }
+  return result;
+}
+
+export async function runMcpFixture(value, channel) {
   const frame = sealedFrame(value);
-  return await providerFree(async () => Object.freeze({
-    mcpCount: frame.resources.filter(({ kind }) => kind === "mcp-server").length,
-    mcpManagerAvailable: typeof primeMcpManager.McpManager === "function",
-    oauthAvailable: typeof primeMcpOAuth.createMcpOAuthProvider === "function",
-    providerInvocationAvailable: false,
-  }));
+  return await providerFree(async () => {
+    const mcpResources = frame.resources.filter(({ kind }) => kind === "mcp-server");
+    if (mcpResources.length !== 1) throw new Error("Prime ecosystem MCP frame is invalid");
+    const serverIdResult = await channelCall(channel, "serverId", {});
+    const serverId = serverIdResult.server_id;
+    if (typeof serverId !== "string" || serverId.length === 0) {
+      throw new Error("Prime ecosystem MCP channel failed");
+    }
+    const configuredUrl = "http://127.0.0.1/owned-mcp";
+    let storedCredential;
+    let challengeDigest;
+    const authStorage = Object.freeze({
+      get: (providerId) => {
+        if (providerId !== `mcp:${serverId}` || storedCredential === undefined) return undefined;
+        return Object.freeze({ access: storedCredential });
+      },
+      getApiKey: async (providerId) => {
+        if (providerId !== `mcp:${serverId}` || typeof challengeDigest !== "string") {
+          throw new Error("Prime ecosystem MCP OAuth refresh rejected");
+        }
+        const refreshed = await channelCall(channel, "refresh", {
+          challenge_digest: challengeDigest,
+          lease_id: frame.mcpCredentialLeaseId,
+        });
+        if (typeof refreshed.credential !== "string" || refreshed.credential.length === 0) {
+          throw new Error("Prime ecosystem MCP OAuth refresh failed");
+        }
+        storedCredential = refreshed.credential;
+        return refreshed.credential;
+      },
+    });
+    const manager = new primeMcpManager.McpManager({
+      authStorage,
+      getUserServers: () => Object.freeze({
+        [serverId]: Object.freeze({
+          enabled: true,
+          oauth: true,
+          type: "http",
+          url: configuredUrl,
+        }),
+      }),
+    });
+    const handlers = manager.hostHandlers();
+    const config = await handlers["mcp.config"]({ server: serverId });
+    if (config.url !== configuredUrl) throw new Error("Prime ecosystem MCP config failed");
+    const challenge = await channelCall(channel, "initialize", {
+      lease_id: frame.mcpCredentialLeaseId,
+    });
+    challengeDigest = challenge.challenge_digest;
+    if (typeof challengeDigest !== "string" || challenge.lease_id !== frame.mcpCredentialLeaseId) {
+      throw new Error("Prime ecosystem MCP challenge failed");
+    }
+    await handlers["mcp.refresh"]({ server: serverId });
+    await channelCall(channel, "initializeWithCredential", {
+      credential: storedCredential,
+    });
+    const listed = await channelCall(channel, "list", {});
+    if (listed.tool_count !== 1) throw new Error("Prime ecosystem MCP list failed");
+    const shutdown = await channelCall(channel, "shutdown", {});
+    const replay = await channelCall(channel, "replay", {});
+    const status = manager.listStatus().find((item) => item.server === serverId);
+    if (
+      status === undefined ||
+      status.usesOAuth !== true ||
+      status.enabled !== true ||
+      shutdown.credential_refresh_count !== 1 ||
+      shutdown.challenge_count !== 1 ||
+      shutdown.initialize_count !== 2 ||
+      shutdown.list_count !== 1 ||
+      shutdown.shutdown_count !== 1 ||
+      shutdown.owned_process_count_after_close !== 0 ||
+      replay.credential_refresh_count !== 1 ||
+      replay.replay_refresh_count !== 0
+    ) {
+      throw new Error("Prime ecosystem MCP manager flow failed");
+    }
+    return Object.freeze({
+      challenge_count: shutdown.challenge_count,
+      config_url_digest: OWNED_MCP_URL_DIGEST,
+      credential_refresh_count: shutdown.credential_refresh_count,
+      initialize_count: shutdown.initialize_count,
+      list_count: shutdown.list_count,
+      manager_status_count: 1,
+      manager_status_enabled_after_refresh: status.enabled,
+      manager_status_uses_oauth: status.usesOAuth,
+      mcp_count: mcpResources.length,
+      mcp_manager_available: typeof primeMcpManager.McpManager === "function",
+      oauth_available: typeof primeMcpOAuth.createMcpOAuthProvider === "function",
+      provider_operations: 0,
+      replay_refresh_count: replay.replay_refresh_count,
+      shutdown_count: shutdown.shutdown_count,
+    });
+  });
 }

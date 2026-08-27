@@ -7,6 +7,8 @@ const CHALLENGE_DIGEST = "171d8a72511c85d1573964f8a10f4f31e11def2eb2e9eedf7d6fef
 const CREDENTIAL = "opaque-mcp-refresh-token";
 
 const largeOutput = process.argv.includes("--large-output");
+const partialLine = process.argv.includes("--partial-line");
+const stderrFlood = process.argv.includes("--stderr-flood");
 let initialized = false;
 
 function write(value) {
@@ -15,6 +17,14 @@ function write(value) {
 
 const lines = createInterface({ input: process.stdin });
 lines.on("line", (line) => {
+  if (partialLine) {
+    process.stdout.write("{\"type\":\"auth_challenge\"");
+    return;
+  }
+  if (stderrFlood) {
+    process.stderr.write("x".repeat(16384));
+    return;
+  }
   let message;
   try {
     message = JSON.parse(line);

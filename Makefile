@@ -201,6 +201,7 @@ test.prime-ecosystem-packages.provider-free:
 
 
 test.prime-ecosystem-mcp.provider-free:
+	npm --prefix packages/typescript/prime-gateway run build
 	$(UV_BIN) run python -m unittest -v \
 		tests.test_control_ecosystem_mcp \
 		tests.test_prime_ecosystem_mcp

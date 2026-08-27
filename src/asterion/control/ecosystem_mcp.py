@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import selectors
 import subprocess
 import time
@@ -56,9 +57,12 @@ class EcosystemMcpReceipt:
     status: Literal["succeeded", "failed", "cancelled"]
     server_id: str
     challenge_digest: str
+    challenge_count: int
     credential_refresh_count: int
     initialize_count: int
     list_count: int
+    replay_refresh_count: int = 0
+    shutdown_count: int = 0
     provider_operations: int = 0
     model_credential_reads: int = 0
     owned_process_count_after_close: int = 0
@@ -66,6 +70,7 @@ class EcosystemMcpReceipt:
 
     def to_public_mapping(self) -> dict[str, object]:
         return {
+            "challenge_count": self.challenge_count,
             "challenge_digest": self.challenge_digest,
             "credential_refresh_count": self.credential_refresh_count,
             "discovery_digest": self.discovery_digest,
@@ -74,7 +79,9 @@ class EcosystemMcpReceipt:
             "model_credential_reads": self.model_credential_reads,
             "owned_process_count_after_close": self.owned_process_count_after_close,
             "provider_operations": self.provider_operations,
+            "replay_refresh_count": self.replay_refresh_count,
             "server_id": self.server_id,
+            "shutdown_count": self.shutdown_count,
             "status": self.status,
         }
 
@@ -84,7 +91,7 @@ class EcosystemMcpSession:
     session_id: str
     server_id: str
     discovery_path: Path
-    process: subprocess.Popen[str] | None = field(repr=False)
+    process: subprocess.Popen[bytes] | None = field(repr=False)
     receipt: EcosystemMcpReceipt
 
     def __repr__(self) -> str:
@@ -104,6 +111,41 @@ class OwnedMcpFixtureService:
         self._bound_refreshes: set[tuple[str, str]] = set()
         self._refreshes: set[tuple[str, str]] = set()
 
+    def open_channel(
+        self,
+        descriptor: EcosystemMcpDescriptor,
+        cancellation: CancellationSignal | None = None,
+    ) -> "OwnedMcpFixtureChannel":
+        if _cancelled(cancellation):
+            raise EcosystemMcpError("MCP fixture cancelled")
+        discovery_path = self._write_discovery(descriptor)
+        try:
+            process = subprocess.Popen(
+                descriptor.command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=str(self._private_root),
+                env={},
+                shell=False,
+            )
+            if (
+                process.stdin is None
+                or process.stdout is None
+                or process.stderr is None
+            ):
+                raise EcosystemMcpError("MCP fixture failed")
+            os.set_blocking(process.stdout.fileno(), False)
+            os.set_blocking(process.stderr.fileno(), False)
+            return OwnedMcpFixtureChannel(
+                service=self,
+                descriptor=descriptor,
+                discovery_path=discovery_path,
+                process=process,
+            )
+        except (OSError, ValueError, EcosystemMcpError):
+            raise EcosystemMcpError("MCP fixture failed") from None
+
     def start(
         self,
         descriptor: EcosystemMcpDescriptor,
@@ -111,91 +153,41 @@ class OwnedMcpFixtureService:
     ) -> EcosystemMcpSession:
         if _cancelled(cancellation):
             return self._closed_session(descriptor, status="cancelled")
-        discovery_path = self._write_discovery(descriptor)
-        process: subprocess.Popen[str] | None = None
-        initialize_count = 0
-        list_count = 0
-        credential_refresh_count = 0
+        channel: OwnedMcpFixtureChannel | None = None
         try:
-            process = subprocess.Popen(
-                descriptor.command,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                cwd=str(self._private_root),
-                env={},
-                shell=False,
-            )
-            if process.stdin is None or process.stdout is None:
-                raise EcosystemMcpError("MCP fixture failed")
-            deadline = time.monotonic() + descriptor.deadline_seconds
-            _send(
-                process,
-                {
-                    "type": "initialize",
-                    "server_id": descriptor.server_id,
-                    "version": descriptor.version,
-                    "lease_id": descriptor.credential_lease_id,
-                    "discovery_digest": _sha256(discovery_path.read_bytes()),
-                },
-            )
-            initialize_count += 1
-            challenge = _read(process, deadline, descriptor.max_output_bytes)
-            if (
-                challenge.get("type") != "auth_challenge"
-                or challenge.get("server_id") != descriptor.server_id
-                or challenge.get("challenge_digest") != descriptor.challenge_digest
-            ):
-                raise EcosystemMcpError("MCP fixture failed")
+            channel = self.open_channel(descriptor)
+            channel.initialize_challenge()
             if _cancelled(cancellation):
-                self._kill(process)
-                process = None
-                receipt = self._receipt(
-                    descriptor,
-                    "cancelled",
-                    discovery_path,
-                    credential_refresh_count,
-                    initialize_count,
-                    list_count,
+                receipt = channel.cancel()
+                return EcosystemMcpSession(
+                    "mcp-session:cancelled",
+                    descriptor.server_id,
+                    channel.discovery_path,
+                    None,
+                    receipt,
                 )
-                return EcosystemMcpSession("mcp-session:cancelled", descriptor.server_id, discovery_path, None, receipt)
-            refresh_key = (descriptor.credential_lease_id, descriptor.challenge_digest)
-            self._bound_refreshes.add(refresh_key)
-            credential = self.refresh(descriptor.credential_lease_id, descriptor.challenge_digest)
-            self._bound_refreshes.discard(refresh_key)
-            credential_refresh_count += 1
-            _send(
-                process,
-                {
-                    "type": "initialize",
-                    "server_id": descriptor.server_id,
-                    "version": descriptor.version,
-                    "credential": credential,
-                },
+            credential = channel.refresh()
+            channel.initialize_with_credential(credential)
+            channel.list()
+            receipt = channel.receipt("succeeded")
+            return EcosystemMcpSession(
+                "mcp-session:local",
+                descriptor.server_id,
+                channel.discovery_path,
+                channel.process,
+                receipt,
             )
-            initialize_count += 1
-            initialized = _read(process, deadline, descriptor.max_output_bytes)
-            if initialized.get("type") != "initialized" or initialized.get("server_id") != descriptor.server_id:
-                raise EcosystemMcpError("MCP fixture failed")
-            _send(process, {"type": "list"})
-            listed = _read(process, deadline, descriptor.max_output_bytes)
-            list_count += 1
-            if listed.get("type") != "list_result" or listed.get("tool_count") != 1:
-                raise EcosystemMcpError("MCP fixture failed")
-            receipt = self._receipt(
-                descriptor,
-                "succeeded",
-                discovery_path,
-                credential_refresh_count,
-                initialize_count,
-                list_count,
-            )
-            return EcosystemMcpSession("mcp-session:local", descriptor.server_id, discovery_path, process, receipt)
-        except (OSError, ValueError, UnicodeDecodeError, json.JSONDecodeError, BrokenPipeError, TimeoutError, EcosystemMcpError):
-            if process is not None:
-                self._kill(process)
+        except (
+            OSError,
+            ValueError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+            BrokenPipeError,
+            TimeoutError,
+            EcosystemMcpError,
+        ):
+            if channel is not None:
+                channel.kill()
             raise EcosystemMcpError("MCP fixture failed") from None
 
     def refresh(self, lease_id: str, challenge_digest: str) -> str:
@@ -227,9 +219,13 @@ class OwnedMcpFixtureService:
             status=session.receipt.status,
             server_id=session.receipt.server_id,
             challenge_digest=session.receipt.challenge_digest,
+            challenge_count=session.receipt.challenge_count,
             credential_refresh_count=session.receipt.credential_refresh_count,
             initialize_count=session.receipt.initialize_count,
             list_count=session.receipt.list_count,
+            replay_refresh_count=session.receipt.replay_refresh_count,
+            shutdown_count=session.receipt.shutdown_count
+            + (1 if process is not None else 0),
             provider_operations=0,
             model_credential_reads=0,
             owned_process_count_after_close=0 if process is None or process.poll() is not None else 1,
@@ -273,13 +269,14 @@ class OwnedMcpFixtureService:
             status=status,
             server_id=descriptor.server_id,
             challenge_digest=descriptor.challenge_digest,
+            challenge_count=0,
             credential_refresh_count=credential_refresh_count,
             initialize_count=initialize_count,
             list_count=list_count,
             discovery_digest=_sha256(discovery_path.read_bytes()),
         )
 
-    def _kill(self, process: subprocess.Popen[str]) -> None:
+    def _kill(self, process: subprocess.Popen[bytes]) -> None:
         if process.poll() is None:
             process.kill()
         try:
@@ -289,35 +286,223 @@ class OwnedMcpFixtureService:
         _close_streams(process)
 
 
-def _send(process: subprocess.Popen[str], value: Mapping[str, object]) -> None:
+@dataclass
+class OwnedMcpFixtureChannel:
+    """Operator-owned local MCP stdio channel consumed by the Prime fixture."""
+
+    service: OwnedMcpFixtureService = field(repr=False)
+    descriptor: EcosystemMcpDescriptor
+    discovery_path: Path
+    process: subprocess.Popen[bytes] = field(repr=False)
+    challenge_count: int = 0
+    credential_refresh_count: int = 0
+    initialize_count: int = 0
+    list_count: int = 0
+    replay_refresh_count: int = 0
+    shutdown_count: int = 0
+    _terminal: Literal["succeeded", "failed", "cancelled"] | None = field(
+        default=None,
+        repr=False,
+    )
+
+    def initialize_challenge(self) -> dict[str, object]:
+        self._ensure_open()
+        _send(
+            self.process,
+            {
+                "type": "initialize",
+                "server_id": self.descriptor.server_id,
+                "version": self.descriptor.version,
+                "lease_id": self.descriptor.credential_lease_id,
+                "discovery_digest": _sha256(self.discovery_path.read_bytes()),
+            },
+        )
+        self.initialize_count += 1
+        challenge = _read(
+            self.process,
+            time.monotonic() + self.descriptor.deadline_seconds,
+            self.descriptor.max_output_bytes,
+        )
+        if (
+            challenge.get("type") != "auth_challenge"
+            or challenge.get("server_id") != self.descriptor.server_id
+            or challenge.get("challenge_digest") != self.descriptor.challenge_digest
+        ):
+            raise EcosystemMcpError("MCP fixture failed")
+        self.challenge_count += 1
+        self.service._bound_refreshes.add(
+            (self.descriptor.credential_lease_id, self.descriptor.challenge_digest)
+        )
+        return {
+            "challenge_digest": self.descriptor.challenge_digest,
+            "lease_id": self.descriptor.credential_lease_id,
+            "server_id": self.descriptor.server_id,
+        }
+
+    def refresh(self) -> str:
+        self._ensure_open()
+        credential = self.service.refresh(
+            self.descriptor.credential_lease_id,
+            self.descriptor.challenge_digest,
+        )
+        self.service._bound_refreshes.discard(
+            (self.descriptor.credential_lease_id, self.descriptor.challenge_digest)
+        )
+        self.credential_refresh_count += 1
+        return credential
+
+    def initialize_with_credential(self, credential: str) -> dict[str, object]:
+        self._ensure_open()
+        _send(
+            self.process,
+            {
+                "type": "initialize",
+                "server_id": self.descriptor.server_id,
+                "version": self.descriptor.version,
+                "credential": credential,
+            },
+        )
+        self.initialize_count += 1
+        initialized = _read(
+            self.process,
+            time.monotonic() + self.descriptor.deadline_seconds,
+            self.descriptor.max_output_bytes,
+        )
+        if (
+            initialized.get("type") != "initialized"
+            or initialized.get("server_id") != self.descriptor.server_id
+        ):
+            raise EcosystemMcpError("MCP fixture failed")
+        return {"server_id": self.descriptor.server_id}
+
+    def list(self) -> dict[str, object]:
+        self._ensure_open()
+        _send(self.process, {"type": "list"})
+        listed = _read(
+            self.process,
+            time.monotonic() + self.descriptor.deadline_seconds,
+            self.descriptor.max_output_bytes,
+        )
+        self.list_count += 1
+        if listed.get("type") != "list_result" or listed.get("tool_count") != 1:
+            raise EcosystemMcpError("MCP fixture failed")
+        return {"resource_count": listed.get("resource_count", 0), "tool_count": 1}
+
+    def replay(self) -> EcosystemMcpReceipt:
+        if self._terminal not in _TERMINAL:
+            raise EcosystemMcpError("MCP fixture replay rejected")
+        return self.receipt(self._terminal)
+
+    def shutdown(self) -> EcosystemMcpReceipt:
+        if self._terminal is None:
+            if self.process.poll() is None:
+                _send(self.process, {"type": "shutdown"})
+                self.shutdown_count += 1
+                try:
+                    self.process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    self.kill()
+            _close_streams(self.process)
+            self._terminal = "succeeded"
+        return self.receipt("succeeded")
+
+    def cancel(self) -> EcosystemMcpReceipt:
+        self.kill()
+        self._terminal = "cancelled"
+        return self.receipt("cancelled")
+
+    def kill(self) -> None:
+        self.service._kill(self.process)
+        if self._terminal is None:
+            self._terminal = "failed"
+
+    def receipt(
+        self,
+        status: Literal["succeeded", "failed", "cancelled"],
+    ) -> EcosystemMcpReceipt:
+        return EcosystemMcpReceipt(
+            status=status,
+            server_id=self.descriptor.server_id,
+            challenge_digest=self.descriptor.challenge_digest,
+            challenge_count=self.challenge_count,
+            credential_refresh_count=self.credential_refresh_count,
+            initialize_count=self.initialize_count,
+            list_count=self.list_count,
+            replay_refresh_count=self.replay_refresh_count,
+            shutdown_count=self.shutdown_count,
+            provider_operations=0,
+            model_credential_reads=0,
+            owned_process_count_after_close=(
+                0 if self.process.poll() is not None else 1
+            ),
+            discovery_digest=_sha256(self.discovery_path.read_bytes()),
+        )
+
+    def _ensure_open(self) -> None:
+        if self._terminal is not None or self.process.poll() is not None:
+            raise EcosystemMcpError("MCP fixture failed")
+
+
+def _send(process: subprocess.Popen[bytes], value: Mapping[str, object]) -> None:
     if process.stdin is None:
         raise EcosystemMcpError("MCP fixture failed")
-    process.stdin.write(json.dumps(dict(value), sort_keys=True, separators=(",", ":")) + "\n")
+    process.stdin.write(
+        (json.dumps(dict(value), sort_keys=True, separators=(",", ":")) + "\n").encode(
+            "utf-8"
+        )
+    )
     process.stdin.flush()
 
 
 def _read(
-    process: subprocess.Popen[str],
+    process: subprocess.Popen[bytes],
     deadline: float,
     max_output_bytes: int,
 ) -> dict[str, object]:
-    if process.stdout is None:
+    if process.stdout is None or process.stderr is None:
         raise EcosystemMcpError("MCP fixture failed")
     selector = selectors.DefaultSelector()
-    selector.register(process.stdout, selectors.EVENT_READ)
+    stdout_fd = process.stdout.fileno()
+    stderr_fd = process.stderr.fileno()
+    selector.register(stdout_fd, selectors.EVENT_READ, "stdout")
+    selector.register(stderr_fd, selectors.EVENT_READ, "stderr")
+    stdout = bytearray()
+    total = 0
     try:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0 or not selector.select(remaining):
-            raise TimeoutError
-        line = process.stdout.readline()
+        while True:
+            if total > max_output_bytes:
+                raise EcosystemMcpError("MCP fixture failed")
+            newline = stdout.find(b"\n")
+            if newline >= 0:
+                line = bytes(stdout[:newline])
+                if len(line) > max_output_bytes:
+                    raise EcosystemMcpError("MCP fixture failed")
+                value = json.loads(line.decode("utf-8"))
+                if not isinstance(value, dict):
+                    raise EcosystemMcpError("MCP fixture failed")
+                return value
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError
+            events = selector.select(remaining)
+            if not events:
+                raise TimeoutError
+            for key, _ in events:
+                try:
+                    chunk = os.read(key.fd, min(4096, max_output_bytes + 1))
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(key.fd)
+                    if key.data == "stdout" and not stdout:
+                        raise EcosystemMcpError("MCP fixture failed")
+                    continue
+                total += len(chunk)
+                if key.data == "stderr":
+                    raise EcosystemMcpError("MCP fixture failed")
+                stdout.extend(chunk)
     finally:
         selector.close()
-    if len(line.encode("utf-8")) > max_output_bytes:
-        raise EcosystemMcpError("MCP fixture failed")
-    value = json.loads(line)
-    if not isinstance(value, dict):
-        raise EcosystemMcpError("MCP fixture failed")
-    return value
 
 
 def _sha256(value: bytes) -> str:
@@ -332,7 +517,10 @@ def _cancelled(cancellation: CancellationSignal | None) -> bool:
     return bool(cancellation is not None and cancellation.cancelled)
 
 
-def _close_streams(process: subprocess.Popen[str]) -> None:
+def _close_streams(process: subprocess.Popen[bytes]) -> None:
     for stream in (process.stdin, process.stdout, process.stderr):
         if stream is not None:
-            stream.close()
+            try:
+                stream.close()
+            except OSError:
+                pass

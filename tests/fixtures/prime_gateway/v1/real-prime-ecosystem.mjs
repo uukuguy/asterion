@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
 import { lstat, readFile, realpath, readdir, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -96,6 +97,7 @@ const ALLOWED_ARGUMENTS = new Set([
   "--artifact-lock",
   "--descriptor-manifest",
   "--module-lock",
+  "--mcp-channel-command",
   "--package-payload-digest",
   "--package-resource-digest",
   "--package-source-id",
@@ -391,7 +393,7 @@ async function mcpFrame({ artifactLockDigest, moduleLockDigest, sealedRoot }) {
         resourceId: "local-server",
         scope: "project",
         source: Object.freeze({
-          contentDigest: sha256(canonical({ files, resourceId: "local-server" })),
+          contentDigest: sha256(canonical({ files, source_id: "source-local-mcp" })),
           kind: "local-child",
           sourceId: "source-local-mcp",
           version: "1.0.0",
@@ -944,16 +946,104 @@ async function packageObservation({ artifactLockDigest, bundle, binding, gateway
   }
 }
 
-async function mcpObservation({ artifactLockDigest, bundle, binding, gateway, moduleLockDigest, scenarioPackage, sealedRoot }) {
+function createOwnedMcpChannel(commandJson) {
+  let command;
+  try {
+    command = JSON.parse(commandJson);
+  } catch {
+    fail();
+  }
+  if (
+    !Array.isArray(command) ||
+    command.length < 1 ||
+    command.some((item) => typeof item !== "string" || item.length === 0 || !isAbsolute(item))
+  ) fail();
+  const child = spawn(command[0], command.slice(1), {
+    env: {},
+    shell: false,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  child.stdout.setEncoding("utf8");
+  child.stderr.setEncoding("utf8");
+  const pending = [];
+  let buffer = "";
+  let closed = false;
+  const rejectAll = () => {
+    closed = true;
+    while (pending.length > 0) pending.shift().reject(new Error("Prime ecosystem MCP channel failed"));
+  };
+  child.stdout.on("data", (chunk) => {
+    buffer += chunk;
+    while (buffer.includes("\n")) {
+      const index = buffer.indexOf("\n");
+      const line = buffer.slice(0, index);
+      buffer = buffer.slice(index + 1);
+      const pendingRequest = pending.shift();
+      if (pendingRequest === undefined) fail();
+      try {
+        const value = JSON.parse(line);
+        if (value.error !== undefined) throw new Error("Prime ecosystem MCP channel failed");
+        pendingRequest.resolve(value);
+      } catch (error) {
+        pendingRequest.reject(error);
+      }
+    }
+  });
+  child.stderr.on("data", rejectAll);
+  child.on("error", rejectAll);
+  child.on("exit", () => {
+    if (pending.length > 0) rejectAll();
+  });
+  const request = (type, payload) => new Promise((resolve, reject) => {
+    if (closed || child.stdin.destroyed) {
+      reject(new Error("Prime ecosystem MCP channel failed"));
+      return;
+    }
+    pending.push({ resolve, reject });
+    child.stdin.write(`${JSON.stringify({ payload, type })}\n`);
+  });
+  const close = async () => {
+    if (child.exitCode === null && !child.killed) {
+      child.stdin.end();
+      await new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+          child.kill("SIGKILL");
+          resolve();
+        }, 1000);
+        child.once("exit", () => {
+          clearTimeout(timeout);
+          resolve();
+        });
+      });
+    }
+  };
+  return Object.freeze({
+    close,
+    initialize: (payload) => request("initialize", payload),
+    initializeWithCredential: (payload) => request("initialize_with_credential", payload),
+    list: (payload) => request("list", payload),
+    refresh: (payload) => request("refresh", payload),
+    replay: (payload) => request("replay", payload),
+    serverId: (payload) => request("server_id", payload),
+    shutdown: (payload) => request("shutdown", payload),
+  });
+}
+
+async function mcpObservation({ artifactLockDigest, bundle, binding, gateway, mcpChannelCommand, moduleLockDigest, scenarioPackage, sealedRoot }) {
   const frame = await mcpFrame({ artifactLockDigest, moduleLockDigest, sealedRoot });
   const storeRoot = join(dirname(sealedRoot), `.gateway-${basename(sealedRoot)}`);
+  const mcpChannel = createOwnedMcpChannel(mcpChannelCommand);
   try {
-    const moduleObservation = await bundle.runMcpFixture(frame);
+    const moduleObservation = await bundle.runMcpFixture(frame, mcpChannel);
     if (
-      record(moduleObservation).mcpCount !== 1 ||
-      moduleObservation.mcpManagerAvailable !== true ||
-      moduleObservation.oauthAvailable !== true ||
-      moduleObservation.providerInvocationAvailable !== false
+      record(moduleObservation).mcp_count !== 1 ||
+      moduleObservation.challenge_count !== 1 ||
+      moduleObservation.credential_refresh_count !== 1 ||
+      moduleObservation.replay_refresh_count !== 0 ||
+      moduleObservation.shutdown_count !== 1 ||
+      moduleObservation.mcp_manager_available !== true ||
+      moduleObservation.oauth_available !== true ||
+      moduleObservation.provider_operations !== 0
     ) fail();
     const store = await gateway.GatewayDurableStore.open(storeRoot, "ecosystem-mcp");
     await store.bindEcosystemEffect(frame);
@@ -989,6 +1079,7 @@ async function mcpObservation({ artifactLockDigest, bundle, binding, gateway, mo
       observation_digest: sha256(canonical(publicObservation)),
     });
   } finally {
+    await mcpChannel.close();
     await rm(storeRoot, { force: true, recursive: true });
   }
 }
@@ -1009,6 +1100,7 @@ async function main() {
   const packageSourceId = argumentsValue.get("--package-source-id");
   const packagePayloadDigest = argumentsValue.get("--package-payload-digest");
   const packageResourceDigest = argumentsValue.get("--package-resource-digest");
+  const mcpChannelCommand = argumentsValue.get("--mcp-channel-command");
   const sealedRoot = argumentsValue.get("--sealed-root");
   const scenarioPackage = argumentsValue.get("--scenario-package");
   if (
@@ -1019,6 +1111,7 @@ async function main() {
     scenarioPackage !== "resources"
   ) fail();
   if ((scenarioPackage === "resources") !== (descriptorManifestPath !== undefined)) fail();
+  if ((scenarioPackage === "mcp") !== (typeof mcpChannelCommand === "string")) fail();
   const packageExpectation = (
     scenarioPackage === "packages"
       ? Object.freeze({
@@ -1116,6 +1209,7 @@ async function main() {
       binding,
       bundle,
       gateway,
+      mcpChannelCommand,
       moduleLockDigest,
       scenarioPackage,
       sealedRoot,

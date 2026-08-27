@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import multiprocessing
 import stat
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -40,6 +42,30 @@ def _duplicate_refresh(temporary: str, descriptor: EcosystemMcpDescriptor) -> No
     service = OwnedMcpFixtureService(temporary)
     service.refresh(descriptor.credential_lease_id, descriptor.challenge_digest)
     service.refresh(descriptor.credential_lease_id, descriptor.challenge_digest)
+
+
+def _start_with_args(
+    node: str,
+    temporary: str,
+    *extra: str,
+    deadline_seconds: float = 5.0,
+    max_output_bytes: int = 128,
+    suppress_error: bool = False,
+) -> None:
+    descriptor = EcosystemMcpDescriptor(
+        server_id=SERVER_ID,
+        version="1.0.0",
+        command=(node, str(LOCAL_SERVER), *extra),
+        credential_lease_id=LEASE_ID,
+        deadline_seconds=deadline_seconds,
+        max_output_bytes=max_output_bytes,
+    )
+    try:
+        OwnedMcpFixtureService(temporary).start(descriptor)
+    except EcosystemMcpError:
+        if suppress_error:
+            return
+        raise
 
 
 @unittest.skipUnless(LOCAL_SERVER.is_file(), "local MCP fixture server is unavailable")
@@ -125,6 +151,42 @@ class TestOwnedMcpFixtureService(unittest.TestCase):
             service.close(session)
             with self.assertRaises(EcosystemMcpError):
                 service.refresh(LEASE_ID, MCP_CHALLENGE_DIGEST)
+
+    def test_partial_stdout_line_fails_fast_redacted_and_reaped(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="asterion-mcp-partial-", dir="/tmp") as temporary:
+            child = multiprocessing.Process(
+                target=_start_with_args,
+                args=(str(self.node), temporary, "--partial-line"),
+                kwargs={
+                    "deadline_seconds": 0.2,
+                    "max_output_bytes": 128,
+                    "suppress_error": True,
+                },
+            )
+            child.start()
+            child.join(timeout=1.0)
+            still_running = child.is_alive()
+            if still_running:
+                child.terminate()
+                child.join(timeout=1.0)
+        self.assertFalse(still_running, "partial stdout line stalled past the fixed deadline/cap path")
+
+    def test_stderr_flood_fails_before_deadline_redacted_and_reaped(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="asterion-mcp-stderr-", dir="/tmp") as temporary:
+            start = time.monotonic()
+            with self.assertRaises(EcosystemMcpError) as raised:
+                _start_with_args(
+                    str(self.node),
+                    temporary,
+                    "--stderr-flood",
+                    deadline_seconds=5.0,
+                    max_output_bytes=128,
+                )
+            elapsed = time.monotonic() - start
+        self.assertLess(elapsed, 1.0)
+        rendered = repr(raised.exception)
+        for sentinel in BODY_SENTINELS:
+            self.assertNotIn(sentinel, rendered)
 
     def test_cancellation_kills_and_reaps_child_without_refresh(self) -> None:
         with tempfile.TemporaryDirectory(prefix="asterion-mcp-cancel-", dir="/tmp") as temporary:
