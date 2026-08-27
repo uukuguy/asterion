@@ -43,6 +43,19 @@ const EXPECTED_RESOURCE_COLLISIONS = Object.freeze([
   }),
 ]);
 const EXPECTED_RESOURCE_COLLISION_DIGEST = "0816b1f15a7f0cf028a4de1f2b57d3c4c3c77f25d5b1b22560564b719be5a091";
+const EXTENSION_ASSERTION_IDS = Object.freeze([
+  "extensions.command-state-digest",
+  "extensions.lifecycle-order",
+  "extensions.no-provider-invocation",
+  "extensions.provider-model-lookup",
+  "extensions.tool-output-digest",
+]);
+const EXTENSION_FEATURE_IDS = Object.freeze([
+  "ecosystem.custom-providers-models",
+  "ecosystem.extension-state-commands",
+  "ecosystem.extensions-lifecycle",
+  "ecosystem.tools",
+]);
 const RESOURCE_SPECS = Object.freeze([
   Object.freeze(["context-global", "context-file", "global"]),
   Object.freeze(["context-project", "context-file", "project"]),
@@ -52,6 +65,7 @@ const RESOURCE_SPECS = Object.freeze([
   Object.freeze(["prompt-resource", "prompt-template", "project"]),
   Object.freeze(["skill-python", "python-skill", "project"]),
 ]);
+const EXTENSION_STATE_KEY = "__ASTERION_ECOSYSTEM_EXTENSION_STATE__";
 const MODEL_CREDENTIAL_NAME = /(?:API_KEY|OAUTH_TOKEN|AUTH_TOKEN|ACCESS_TOKEN|BEARER_TOKEN|SECRET_ACCESS_KEY|SESSION_TOKEN|APPLICATION_CREDENTIALS)$/u;
 const MODEL_CREDENTIAL_NAMES = new Set([
   "AWS_ACCESS_KEY_ID",
@@ -261,6 +275,46 @@ async function resourceFrame({ artifactLockDigest, descriptorManifestPath, modul
   });
 }
 
+async function extensionFrame({ artifactLockDigest, moduleLockDigest, sealedRoot }) {
+  const portfolioDigest = basename(sealedRoot);
+  if (!/^[0-9a-f]{64}$/u.test(portfolioDigest)) fail();
+  const projectionPath = join(sealedRoot, "exact-extension");
+  const files = await inspectProjectionFiles(projectionPath);
+  return Object.freeze({
+    artifactLockDigest,
+    authorityDigest: sha256("ecosystem-extensions-authority"),
+    effectId: `ecosystem:extensions:${portfolioDigest.slice(0, 32)}`,
+    features: EXTENSION_FEATURE_IDS,
+    format: "asterion.prime-ecosystem-frame/v1",
+    limits: Object.freeze({ deadlineMs: 30_000, maxBytes: 8 * 1024 * 1024, maxEntries: 4096, maxProcesses: 1 }),
+    mcpCredentialLeaseId: "mcp-lease:extensions",
+    moduleLockDigest,
+    portfolioDigest,
+    projectionRoot: sealedRoot,
+    registrations: Object.freeze([
+      Object.freeze({ extensionId: "exact-extension", kind: "command", registrationId: "ecosystem-state", version: "1.0.0" }),
+      Object.freeze({ extensionId: "exact-extension", kind: "provider-model", registrationId: "ecosystem-local:model-1", version: "1.0.0" }),
+      Object.freeze({ extensionId: "exact-extension", kind: "tool", registrationId: "ecosystem_echo", version: "1.0.0" }),
+    ]),
+    resources: Object.freeze([
+      Object.freeze({
+        contentDigest: sha256(canonical(files)),
+        kind: "extension",
+        projectionPath,
+        resourceId: "exact-extension",
+        scope: "project",
+        source: Object.freeze({
+          contentDigest: sha256(canonical({ files, resourceId: "exact-extension" })),
+          kind: "local-child",
+          sourceId: "source-exact-extension",
+          version: "1.0.0",
+        }),
+        version: "1.0.0",
+      }),
+    ]),
+  });
+}
+
 function promptCollisionList(prompts) {
   const groups = new Map();
   for (const prompt of prompts) {
@@ -431,6 +485,172 @@ async function resourceObservation({ artifactLockDigest, bundle, binding, descri
   }
 }
 
+function extensionActions({ appendedEntries }) {
+  return Object.freeze({
+    appendEntry: (customType, data) => {
+      appendedEntries.push(Object.freeze({ customType, data }));
+    },
+    getActiveTools: () => [],
+    getAllTools: () => [],
+    getCommands: () => [],
+    getSessionName: () => undefined,
+    getThinkingLevel: () => "off",
+    refreshTools: () => {},
+    sendMessage: () => {},
+    sendUserMessage: () => {},
+    setActiveTools: () => {},
+    setLabel: () => {},
+    setModel: async () => false,
+    setSessionName: () => {},
+    setThinkingLevel: () => {},
+  });
+}
+
+function extensionContextActions({ teardownEvents }) {
+  return Object.freeze({
+    abort: () => {},
+    compact: () => {},
+    getContextUsage: () => undefined,
+    getModel: () => undefined,
+    getSignal: () => undefined,
+    getSystemPrompt: () => "",
+    hasPendingMessages: () => false,
+    isIdle: () => true,
+    shutdown: () => {
+      teardownEvents.push("teardown");
+    },
+  });
+}
+
+async function extensionObservation({ artifactLockDigest, bundle, binding, gateway, moduleLockDigest, scenarioPackage, sealedRoot }) {
+  const frame = await extensionFrame({ artifactLockDigest, moduleLockDigest, sealedRoot });
+  const storeRoot = join(dirname(sealedRoot), `.gateway-${basename(sealedRoot)}`);
+  try {
+    const moduleObservation = await bundle.runExtensionLifecycle(frame);
+    if (
+      record(moduleObservation).extensionCount !== 1 ||
+      moduleObservation.loaderAvailable !== true ||
+      moduleObservation.runnerAvailable !== true
+    ) fail();
+    const loaderUrl = new URL("../../../../3th-party/prime-agent/packages/coding-agent/dist/core/extensions/loader.js", import.meta.url);
+    const runnerUrl = new URL("../../../../3th-party/prime-agent/packages/coding-agent/dist/core/extensions/runner.js", import.meta.url);
+    const authUrl = new URL("../../../../3th-party/prime-agent/packages/coding-agent/dist/core/auth-storage.js", import.meta.url);
+    const modelRegistryUrl = new URL("../../../../3th-party/prime-agent/packages/coding-agent/dist/core/model-registry.js", import.meta.url);
+    const sessionManagerUrl = new URL("../../../../3th-party/prime-agent/packages/coding-agent/dist/core/session-manager.js", import.meta.url);
+    const [{ discoverAndLoadExtensions }, { ExtensionRunner }, { AuthStorage }, { ModelRegistry }, { SessionManager }] = await Promise.all([
+      import(loaderUrl.href),
+      import(runnerUrl.href),
+      import(authUrl.href),
+      import(modelRegistryUrl.href),
+      import(sessionManagerUrl.href),
+    ]);
+    delete globalThis[EXTENSION_STATE_KEY];
+    const extensionPath = join(sealedRoot, "exact-extension", "exact-extension.ts");
+    const loaded = await discoverAndLoadExtensions([extensionPath], sealedRoot, sealedRoot);
+    if (loaded.errors.length !== 0 || loaded.extensions.length !== 1) fail();
+    const store = await gateway.GatewayDurableStore.open(storeRoot, "ecosystem-extensions");
+    await store.bindEcosystemEffect(frame);
+    const appendedEntries = [];
+    const teardownEvents = [];
+    const extensionErrors = [];
+    const authStorage = AuthStorage.inMemory();
+    const modelRegistry = ModelRegistry.inMemory(authStorage);
+    const runner = new ExtensionRunner(
+      loaded.extensions,
+      loaded.runtime,
+      sealedRoot,
+      SessionManager.inMemory(sealedRoot),
+      modelRegistry,
+    );
+    runner.onError((error) => {
+      extensionErrors.push(error);
+    });
+    runner.bindCore(
+      extensionActions({ appendedEntries }),
+      extensionContextActions({ teardownEvents }),
+    );
+    await runner.emit({ type: "session_start", reason: "startup" });
+    const command = runner.getCommand("ecosystem-state");
+    if (command === undefined) fail();
+    await command.handler("alpha-state", runner.createCommandContext());
+    const tool = runner.getToolDefinition("ecosystem_echo");
+    if (tool === undefined) fail();
+    const toolResult = await tool.execute(
+      "tool-call-1",
+      { message: "sealed" },
+      undefined,
+      undefined,
+      runner.createContext(),
+    );
+    await runner.emit({ type: "session_shutdown", reason: "quit" });
+    runner.shutdown();
+    const state = record(globalThis[EXTENSION_STATE_KEY]);
+    const lifecycleOrder = [
+      ...state.events.filter((event) => ["start", "session", "shutdown"].includes(event)),
+      ...teardownEvents,
+    ];
+    const providerModel = modelRegistry.find("ecosystem-local", "model-1");
+    const toolText = record(toolResult).content?.[0]?.text;
+    if (
+      extensionErrors.length !== 0 ||
+      lifecycleOrder.join("\0") !== "start\0session\0shutdown\0teardown" ||
+      runner.getRegisteredCommands().length !== 1 ||
+      runner.getAllRegisteredTools().length !== 1 ||
+      providerModel === undefined ||
+      providerModel.provider !== "ecosystem-local" ||
+      providerModel.id !== "model-1" ||
+      appendedEntries.length !== 1 ||
+      appendedEntries[0].customType !== "ecosystem-state" ||
+      toolText !== "echo:sealed"
+    ) fail();
+    const response = await store.commitEcosystemEffectResult(
+      frame.effectId,
+      await binding.module.activate(frame),
+    );
+    if (
+      response.status !== "succeeded" ||
+      response.featureIds.join("\0") !== EXTENSION_FEATURE_IDS.join("\0") ||
+      response.lifecycleCount !== 1 ||
+      response.registrationCount !== 3 ||
+      response.resourceCount !== 1 ||
+      response.providerOperations !== 0 ||
+      response.modelCredentialReads !== 0 ||
+      response.ownedProcessCount !== 0
+    ) fail();
+    const privateObservationDigest = sha256(canonical({
+      commandStateDigest: sha256(canonical(appendedEntries)),
+      lifecycleOrder,
+      providerModel: { id: providerModel.id, provider: providerModel.provider },
+      toolOutputDigest: sha256(canonical(toolResult)),
+    }));
+    const publicObservation = Object.freeze({
+      assertion_ids: EXTENSION_ASSERTION_IDS,
+      command_count: 1,
+      feature_ids: EXTENSION_FEATURE_IDS,
+      format: "asterion.prime-ecosystem-observation/v1",
+      lifecycle_count: response.lifecycleCount,
+      model_credential_reads: response.modelCredentialReads,
+      owned_process_count_after_close: response.ownedProcessCount,
+      provider_model_count: 1,
+      provider_operations: response.providerOperations,
+      registration_count: response.registrationCount,
+      resource_count: response.resourceCount,
+      scenario_package: scenarioPackage,
+      status: "PASS",
+      tool_count: 1,
+    });
+    return Object.freeze({
+      ...publicObservation,
+      observation_digest: sha256(canonical({
+        privateObservationDigest,
+        publicObservation,
+      })),
+    });
+  } finally {
+    await rm(storeRoot, { force: true, recursive: true });
+  }
+}
+
 async function main() {
   const argumentsValue = argumentsMap(process.argv.slice(2));
   for (const name of Object.keys(process.env)) {
@@ -446,7 +666,11 @@ async function main() {
   const descriptorManifestPath = argumentsValue.get("--descriptor-manifest");
   const sealedRoot = argumentsValue.get("--sealed-root");
   const scenarioPackage = argumentsValue.get("--scenario-package");
-  if (scenarioPackage !== "lock-boundary" && scenarioPackage !== "resources") fail();
+  if (
+    scenarioPackage !== "extensions" &&
+    scenarioPackage !== "lock-boundary" &&
+    scenarioPackage !== "resources"
+  ) fail();
   if ((scenarioPackage === "resources") !== (descriptorManifestPath !== undefined)) fail();
   await requireSealedTree(sealedRoot);
 
@@ -491,6 +715,19 @@ async function main() {
       sealedRoot,
     });
     process.stdout.write(`${canonical(resourcesOutput)}\n`);
+    return;
+  }
+  if (scenarioPackage === "extensions") {
+    const extensionsOutput = await extensionObservation({
+      artifactLockDigest,
+      binding,
+      bundle,
+      gateway,
+      moduleLockDigest,
+      scenarioPackage,
+      sealedRoot,
+    });
+    process.stdout.write(`${canonical(extensionsOutput)}\n`);
     return;
   }
 
