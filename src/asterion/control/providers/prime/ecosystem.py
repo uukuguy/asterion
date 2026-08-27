@@ -91,6 +91,8 @@ class PrimeEcosystemClient(Protocol):
         self, frame: Mapping[str, object]
     ) -> Mapping[str, object]: ...
 
+    async def quiesce_ecosystem(self) -> None: ...
+
 
 class McpCredentialRefresh(Protocol):
     def refresh(self, lease_id: str, challenge_digest: str) -> str: ...
@@ -109,8 +111,11 @@ class PrimeEcosystemService:
         authority_revision: int,
     ) -> None:
         try:
+            activate_ecosystem = getattr(client, "activate_ecosystem", None)
+            quiesce_ecosystem = getattr(client, "quiesce_ecosystem", None)
             valid = (
-                callable(getattr(client, "activate_ecosystem", None))
+                callable(activate_ecosystem)
+                and callable(quiesce_ecosystem)
                 and _is_materializer(materializer)
                 and _is_source_store(source_store)
                 and isinstance(authority_id, str)
@@ -122,7 +127,8 @@ class PrimeEcosystemService:
             valid = False
         if not valid:
             raise PrimeEcosystemError("Prime ecosystem service is invalid")
-        self._client = client
+        self._activate_ecosystem = activate_ecosystem
+        self._quiesce_ecosystem = quiesce_ecosystem
         self._materializer = materializer
         self._source_store = source_store
         self._authority_id = authority_id
@@ -149,8 +155,10 @@ class PrimeEcosystemService:
         if not _portfolio_is_consistent(portfolio):
             raise PrimeEcosystemError("Prime ecosystem activation is invalid")
 
+        expected = _expected_receipt_values(portfolio)
         projection: object | None = None
         response: object | None = None
+        receipt: EcosystemActivationReceipt | None = None
         client_uncertain = False
         close_uncertain = False
         consumer_quiesced = True
@@ -160,7 +168,7 @@ class PrimeEcosystemService:
                 raise PrimeEcosystemError("Prime ecosystem projection is invalid")
             frame = _build_frame(portfolio, projection)
             try:
-                operation = self._client.activate_ecosystem(frame)
+                operation = self._activate_ecosystem(frame)
                 if not inspect.isawaitable(operation):
                     raise TypeError
                 task = asyncio.ensure_future(operation)
@@ -180,6 +188,30 @@ class PrimeEcosystemService:
                 raise
             except Exception:
                 client_uncertain = True
+            if not client_uncertain:
+                try:
+                    receipt = _validate_receipt(response, portfolio, expected)
+                except PrimeEcosystemError:
+                    try:
+                        operation = self._quiesce_ecosystem()
+                        if not inspect.isawaitable(operation):
+                            raise TypeError
+                        task = asyncio.ensure_future(operation)
+                        try:
+                            await asyncio.wait({task})
+                            task.result()
+                        except asyncio.CancelledError:
+                            try:
+                                await task
+                            except Exception:
+                                consumer_quiesced = False
+                            raise
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        consumer_quiesced = False
+                        raise PrimeEcosystemConsumerNotQuiesced() from None
+                    raise
         except PrimeEcosystemError:
             raise
         except Exception:
@@ -191,12 +223,12 @@ class PrimeEcosystemService:
                 except Exception:
                     close_uncertain = True
 
-        expected = _expected_receipt_values(portfolio)
         if client_uncertain:
             return EcosystemActivationReceipt.uncertain(**expected)
-        receipt = _validate_receipt(response, portfolio, expected)
         if close_uncertain:
             return EcosystemActivationReceipt.uncertain(**expected)
+        if receipt is None:
+            raise PrimeEcosystemError()
         return receipt
 
 

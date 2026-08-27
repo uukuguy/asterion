@@ -291,11 +291,16 @@ class PrimeControlPlaneClient:
                 raise PrimeControlError()
             return MappingProxyType(dict(receipt))
         except Exception:
-            try:
-                await self.close()
-            except Exception:
-                raise PrimeEcosystemConsumerNotQuiesced() from None
+            await self.quiesce_ecosystem()
             raise PrimeControlError() from None
+
+    async def quiesce_ecosystem(self) -> None:
+        """Definitively stop the selected consumer of a private projection."""
+
+        try:
+            await self.close()
+        except Exception:
+            raise PrimeEcosystemConsumerNotQuiesced() from None
 
     def resolve_text(self, reference: str, *, max_bytes: int) -> str:
         """Resolve operator-owned refs or currently prepared provider refs."""

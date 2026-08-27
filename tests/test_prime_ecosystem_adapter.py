@@ -126,9 +126,16 @@ class _CredentialRefresh:
 
 
 class _RecordingClient:
-    def __init__(self, *, changes: Mapping[str, object] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        changes: Mapping[str, object] | None = None,
+        timeline: list[str] | None = None,
+    ) -> None:
         self.frames: list[Mapping[str, object]] = []
         self.changes = dict(changes or {})
+        self.timeline = timeline
+        self.quiesce_calls = 0
 
     async def activate_ecosystem(
         self, frame: Mapping[str, object]
@@ -153,6 +160,11 @@ class _RecordingClient:
         response.update(self.changes)
         return response
 
+    async def quiesce_ecosystem(self) -> None:
+        self.quiesce_calls += 1
+        if self.timeline is not None:
+            self.timeline.append("consumer-quiesced")
+
 
 class _FailingClient:
     async def activate_ecosystem(
@@ -160,6 +172,9 @@ class _FailingClient:
     ) -> Mapping[str, object]:
         del frame
         raise RuntimeError(_SERVICE_ERROR)
+
+    async def quiesce_ecosystem(self) -> None:
+        return None
 
 
 def _service(
@@ -296,13 +311,20 @@ class TestPrimeEcosystemService(unittest.IsolatedAsyncioTestCase):
             {"extra": _BODY},
         )
         for changes in cases:
-            materializer = _Materializer()
+            timeline: list[str] = []
+            materializer = _QuiescenceMaterializer(timeline)
+            client = _RecordingClient(changes=changes, timeline=timeline)
             with self.subTest(changes=changes), self.assertRaises(
                 PrimeEcosystemError
             ) as raised:
-                await _service(
-                    _RecordingClient(changes=changes), materializer
-                ).activate(portfolio, _CredentialRefresh())
+                await _service(client, materializer).activate(
+                    portfolio, _CredentialRefresh()
+                )
+            self.assertEqual(client.quiesce_calls, 1)
+            self.assertEqual(
+                timeline,
+                ["consumer-quiesced", "projection-closed"],
+            )
             self.assertEqual(materializer.calls[-1][0], "close")
             self.assertNotIn(_BODY, str(raised.exception))
             self.assertNotIn(_SERVICE_ERROR, str(raised.exception))
@@ -572,6 +594,57 @@ class _FailingLiveTransport(_AsyncTransport):
         self.timeline.append("consumer-quiesced")
 
 
+class _SemanticDriftLiveTransport(_FailingLiveTransport):
+    def __init__(
+        self,
+        changes: Mapping[str, object],
+        timeline: list[str],
+        *,
+        close_error: bool = False,
+    ) -> None:
+        super().__init__("semantic-drift", timeline)
+        self.changes = dict(changes)
+        self.close_error = close_error
+
+    async def request(self, envelope: Mapping[str, object]) -> Mapping[str, object]:
+        self.envelopes.append(envelope)
+        self.timeline.append("semantic-drift-received")
+        frame = envelope["frame"]
+        resources = tuple(frame["resources"])  # type: ignore[index,arg-type]
+        registrations = tuple(frame["registrations"])  # type: ignore[index,arg-type]
+        receipt = {
+            "authorityDigest": frame["authorityDigest"],  # type: ignore[index]
+            "featureIds": frame["features"],  # type: ignore[index]
+            "lifecycleCount": sum(
+                item["kind"] == "extension" for item in resources
+            ),
+            "mcpCount": sum(item["kind"] == "mcp-server" for item in resources),
+            "modelCredentialReads": 0,
+            "ownedProcessCount": 0,
+            "packageCount": sum(item["kind"] == "package" for item in resources),
+            "portfolioDigest": frame["portfolioDigest"],  # type: ignore[index]
+            "providerOperations": 0,
+            "registrationCount": len(registrations),
+            "resourceCount": len(resources),
+            "status": "succeeded",
+        }
+        receipt.update(self.changes)
+        return {
+            "protocol": "asterion.prime-gateway-ipc/v1",
+            "id": envelope["id"],
+            "type": "ecosystem_receipt",
+            "receipt": receipt,
+        }
+
+    async def close(self) -> None:
+        self.timeline.append("consumer-close-started")
+        self.close_started.set()
+        if self.close_error:
+            raise RuntimeError(_SERVICE_ERROR)
+        await self.allow_close.wait()
+        self.timeline.append("consumer-quiesced")
+
+
 class _QuiescenceMaterializer(_Materializer):
     def __init__(self, timeline: list[str]) -> None:
         super().__init__()
@@ -741,6 +814,89 @@ class TestPrimeEcosystemClient(unittest.IsolatedAsyncioTestCase):
                         "projection-closed",
                     ],
                 )
+
+    async def test_semantic_receipt_drift_quiesces_before_projection_cleanup(
+        self,
+    ) -> None:
+        cases = (
+            {"ownedProcessCount": 1},
+            {"authorityDigest": "f" * 64},
+            {"resourceCount": 6},
+            {"status": "running"},
+        )
+        for changes in cases:
+            timeline: list[str] = []
+            transport = _SemanticDriftLiveTransport(changes, timeline)
+            client = PrimeControlPlaneClient(
+                process=transport,
+                private_content=_PrivateContent(),
+            )
+            materializer = _QuiescenceMaterializer(timeline)
+            activation = asyncio.create_task(
+                _service(client, materializer).activate(
+                    _portfolio(), _CredentialRefresh()
+                )
+            )
+            close_started = asyncio.create_task(transport.close_started.wait())
+            done, _ = await asyncio.wait(
+                {activation, close_started},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            with self.subTest(changes=changes):
+                self.assertIn(close_started, done)
+                self.assertNotIn(activation, done)
+                self.assertEqual(
+                    tuple(item[0] for item in materializer.calls),
+                    ("materialize",),
+                )
+
+            transport.allow_close.set()
+            with self.assertRaises(PrimeEcosystemError) as raised:
+                await activation
+            if not close_started.done():
+                close_started.cancel()
+            await asyncio.gather(close_started, return_exceptions=True)
+
+            with self.subTest(changes=changes):
+                self.assertNotIn(_SERVICE_ERROR, str(raised.exception))
+                self.assertEqual(
+                    timeline,
+                    [
+                        "semantic-drift-received",
+                        "consumer-close-started",
+                        "consumer-quiesced",
+                        "projection-closed",
+                    ],
+                )
+
+    async def test_unquiesceable_semantic_drift_retains_projection(self) -> None:
+        timeline: list[str] = []
+        transport = _SemanticDriftLiveTransport(
+            {"ownedProcessCount": 1},
+            timeline,
+            close_error=True,
+        )
+        client = PrimeControlPlaneClient(
+            process=transport,
+            private_content=_PrivateContent(),
+        )
+        materializer = _QuiescenceMaterializer(timeline)
+
+        with self.assertRaises(PrimeEcosystemError) as raised:
+            await _service(client, materializer).activate(
+                _portfolio(), _CredentialRefresh()
+            )
+
+        self.assertEqual(
+            tuple(item[0] for item in materializer.calls),
+            ("materialize",),
+        )
+        self.assertEqual(
+            timeline,
+            ["semantic-drift-received", "consumer-close-started"],
+        )
+        self.assertNotIn(_SERVICE_ERROR, str(raised.exception))
 
     async def test_unquiesced_consumer_never_releases_projection(self) -> None:
         transport = _UnquiesceableTransport()
