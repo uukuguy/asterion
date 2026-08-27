@@ -63,6 +63,13 @@ const PACKAGE_ASSERTION_IDS = Object.freeze([
   "packages.selected-source-digest",
 ]);
 const PACKAGE_FEATURE_IDS = Object.freeze(["ecosystem.packages"]);
+const MCP_ASSERTION_IDS = Object.freeze([
+  "mcp.exact-local-server",
+  "mcp.manager-and-oauth-surface",
+  "mcp.no-provider-invocation",
+  "mcp.redacted-receipt",
+]);
+const MCP_FEATURE_IDS = Object.freeze(["ecosystem.mcp"]);
 const RESOURCE_SPECS = Object.freeze([
   Object.freeze(["context-global", "context-file", "global"]),
   Object.freeze(["context-project", "context-file", "project"]),
@@ -351,6 +358,42 @@ async function packageFrame({ artifactLockDigest, moduleLockDigest, packageExpec
           contentDigest: packageExpectation.payloadDigest,
           kind: "local-child",
           sourceId: "ecosystem.sample.local-directory",
+          version: "1.0.0",
+        }),
+        version: "1.0.0",
+      }),
+    ]),
+  });
+}
+
+async function mcpFrame({ artifactLockDigest, moduleLockDigest, sealedRoot }) {
+  const portfolioDigest = basename(sealedRoot);
+  if (!/^[0-9a-f]{64}$/u.test(portfolioDigest)) fail();
+  const projectionPath = join(sealedRoot, "local-server");
+  const files = await inspectProjectionFiles(projectionPath);
+  return Object.freeze({
+    artifactLockDigest,
+    authorityDigest: sha256("ecosystem-mcp-authority"),
+    effectId: `ecosystem:mcp:${portfolioDigest.slice(0, 32)}`,
+    features: MCP_FEATURE_IDS,
+    format: "asterion.prime-ecosystem-frame/v1",
+    limits: Object.freeze({ deadlineMs: 30_000, maxBytes: 8 * 1024 * 1024, maxEntries: 4096, maxProcesses: 1 }),
+    mcpCredentialLeaseId: "mcp-lease:local",
+    moduleLockDigest,
+    portfolioDigest,
+    projectionRoot: sealedRoot,
+    registrations: Object.freeze([]),
+    resources: Object.freeze([
+      Object.freeze({
+        contentDigest: sha256(canonical(files)),
+        kind: "mcp-server",
+        projectionPath,
+        resourceId: "local-server",
+        scope: "project",
+        source: Object.freeze({
+          contentDigest: sha256(canonical({ files, resourceId: "local-server" })),
+          kind: "local-child",
+          sourceId: "source-local-mcp",
           version: "1.0.0",
         }),
         version: "1.0.0",
@@ -901,6 +944,55 @@ async function packageObservation({ artifactLockDigest, bundle, binding, gateway
   }
 }
 
+async function mcpObservation({ artifactLockDigest, bundle, binding, gateway, moduleLockDigest, scenarioPackage, sealedRoot }) {
+  const frame = await mcpFrame({ artifactLockDigest, moduleLockDigest, sealedRoot });
+  const storeRoot = join(dirname(sealedRoot), `.gateway-${basename(sealedRoot)}`);
+  try {
+    const moduleObservation = await bundle.runMcpFixture(frame);
+    if (
+      record(moduleObservation).mcpCount !== 1 ||
+      moduleObservation.mcpManagerAvailable !== true ||
+      moduleObservation.oauthAvailable !== true ||
+      moduleObservation.providerInvocationAvailable !== false
+    ) fail();
+    const store = await gateway.GatewayDurableStore.open(storeRoot, "ecosystem-mcp");
+    await store.bindEcosystemEffect(frame);
+    const response = await store.commitEcosystemEffectResult(
+      frame.effectId,
+      await binding.module.activate(frame),
+    );
+    if (
+      response.status !== "succeeded" ||
+      response.featureIds.join("\0") !== MCP_FEATURE_IDS.join("\0") ||
+      response.mcpCount !== 1 ||
+      response.registrationCount !== 0 ||
+      response.resourceCount !== 1 ||
+      response.providerOperations !== 0 ||
+      response.modelCredentialReads !== 0 ||
+      response.ownedProcessCount !== 0
+    ) fail();
+    const publicObservation = Object.freeze({
+      assertion_ids: MCP_ASSERTION_IDS,
+      feature_ids: MCP_FEATURE_IDS,
+      format: "asterion.prime-ecosystem-observation/v1",
+      mcp_count: response.mcpCount,
+      mcp_surface_digest: sha256(canonical(moduleObservation)),
+      model_credential_reads: response.modelCredentialReads,
+      owned_process_count_after_close: response.ownedProcessCount,
+      provider_operations: response.providerOperations,
+      resource_count: response.resourceCount,
+      scenario_package: scenarioPackage,
+      status: "PASS",
+    });
+    return Object.freeze({
+      ...publicObservation,
+      observation_digest: sha256(canonical(publicObservation)),
+    });
+  } finally {
+    await rm(storeRoot, { force: true, recursive: true });
+  }
+}
+
 async function main() {
   const argumentsValue = argumentsMap(process.argv.slice(2));
   for (const name of Object.keys(process.env)) {
@@ -922,6 +1014,7 @@ async function main() {
   if (
     scenarioPackage !== "extensions" &&
     scenarioPackage !== "lock-boundary" &&
+    scenarioPackage !== "mcp" &&
     scenarioPackage !== "packages" &&
     scenarioPackage !== "resources"
   ) fail();
@@ -1015,6 +1108,19 @@ async function main() {
       sealedRoot,
     });
     process.stdout.write(`${canonical(packagesOutput)}\n`);
+    return;
+  }
+  if (scenarioPackage === "mcp") {
+    const mcpOutput = await mcpObservation({
+      artifactLockDigest,
+      binding,
+      bundle,
+      gateway,
+      moduleLockDigest,
+      scenarioPackage,
+      sealedRoot,
+    });
+    process.stdout.write(`${canonical(mcpOutput)}\n`);
     return;
   }
 
