@@ -25,6 +25,7 @@ ASTERION_PRIME_MAX_COST_MICROS ?=
 .PHONY: test.prime-session-context-parity.provider-free test.prime-rlm-spawn-admission.provider-free
 .PHONY: test.prime-continual-harness.provider-free
 .PHONY: test.prime-continual-harness.bounded
+.PHONY: test.prime-ecosystem-resources.provider-free
 
 help:
 	@echo "provider-free setup (network/disk; Agent operations 0; Judge operations 0): setup setup-pi setup-resources-basic setup-resources-benchmark"
@@ -177,6 +178,12 @@ test.prime-continual-harness.bounded:
 		--authorized-bounded-provider \
 		--source-root 3th-party/prime-agent \
 		--private-evidence-root .asterion-private/prime-continual-harness
+
+test.prime-ecosystem-resources.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_control_ecosystem \
+		tests.test_control_ecosystem_materialization \
+		tests.test_prime_ecosystem_resources
 
 
 prime-verify-bounded:
