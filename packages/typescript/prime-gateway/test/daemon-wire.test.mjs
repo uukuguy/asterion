@@ -93,6 +93,31 @@ test("daemon wire admits the bounded root create configuration", () => {
   assert.equal(JSON.parse(line).command.type, "create");
 });
 
+test("daemon wire admits a bounded disabled autonomous configuration", () => {
+  const line = encodePrimeDaemonCommand({
+    type: "create",
+    config: {
+      cwd: "/private/workspace",
+      agentDir: "/private/agent",
+      sessionDir: "/private/sessions",
+      provider: "anthropic",
+      model: "provider-free-model",
+      skills: [],
+      autonomous: {
+        enabled: false,
+        maxContinuations: 1,
+        maxTurns: 1,
+        maxTokens: 1,
+        timeoutMs: 1_000,
+        gates: { commands: [], maxRetries: 1, timeoutMs: 1_000 },
+      },
+      telemetryDisabled: true,
+    },
+  }, "create-disabled-autonomy", "asterion-client-1");
+
+  assert.equal(JSON.parse(line).command.config.autonomous.enabled, false);
+});
+
 test("daemon wire rejects unbounded create runtime metadata", () => {
   assertFixedProtocolError(() => encodePrimeDaemonCommand({
     type: "create",

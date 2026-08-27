@@ -164,6 +164,7 @@ class TestPrimeRlmMessagingParity(unittest.TestCase):
                         "primeSocketPath": str(socket_path),
                         "primeSourceRoot": str(PINNED_SOURCE),
                         "provider": "anthropic",
+                        "probeReady": False,
                         "rlmMaxChildren": 1,
                         "rlmMaxDepth": 0,
                         "remainingBudget": {

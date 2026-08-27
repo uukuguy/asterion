@@ -438,7 +438,7 @@ function validAutonomousConfig(value: unknown): boolean {
     !hasOnlyKeys(value, [
       "enabled", "maxContinuations", "maxTurns", "maxTokens", "timeoutMs", "gates",
     ]) ||
-    value.enabled !== true ||
+    typeof value.enabled !== "boolean" ||
     !positiveInteger(value.maxContinuations) ||
     !positiveInteger(value.maxTurns) ||
     !positiveInteger(value.maxTokens) ||
