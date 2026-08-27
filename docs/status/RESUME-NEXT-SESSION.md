@@ -1,7 +1,7 @@
 # Live Session Checkpoint
 
-> Updated: 2026-08-28. H-034 is closed. H-035 inventory and design are written;
-> implementation is paused at the mandatory specification-review gate.
+> Updated: 2026-08-28. H-034 is closed. H-035 specification is approved and
+> its ten-task implementation plan is ready; execution mode is not selected.
 
 ## TL;DR
 
@@ -12,16 +12,17 @@
   session state points to H-035.
 - Full clean evidence passed: 1,954 Python tests, TypeScript, Ruff, docs, Rust,
   sdist/wheel, and promotion 27/27 with no full dataset.
-- H-035 fixes nine client features and four shared-stream evidence packages in
-  design commit `7add4fb`. No implementation or system-parity claim exists.
+- H-035 fixes nine client features and four shared-stream evidence packages.
+  Design `7add4fb` is approved; plan `0880045` is ready. No implementation or
+  system-parity claim exists.
 
 ## Current work package
 
 - Branch: `h024-ecosystem-capabilities`.
 - Completed plan:
   `docs/superpowers/plans/2026-08-10-asterion-prime-ecosystem-parity.md`.
-- Design awaiting review:
-  `docs/superpowers/specs/2026-08-28-asterion-prime-client-interfaces-design.md`.
+- Approved implementation plan:
+  `docs/superpowers/plans/2026-08-10-asterion-prime-client-interfaces-parity.md`.
 - Existing unrelated working-tree changes must remain untouched.
 
 ## Verified work
@@ -44,10 +45,9 @@
 
 ## Next action
 
-1. Obtain user review of the committed H-035 design specification.
-2. If approved, use `writing-plans` to create the detailed client-interface
-   implementation plan.
-3. Do not change protocols or client implementation before that approval.
+1. Ask whether execution is subagent-driven or inline.
+2. Execute the ten tasks with TDD, atomic commits, and review gates.
+3. Preserve all unrelated dirty working-tree changes through exact staging.
 4. Keep H-035 pending until implementation and all four evidence packages pass.
 
 ## Claim boundaries

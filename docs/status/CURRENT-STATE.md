@@ -9,7 +9,7 @@
 - Project route: managed
 - Canonical worklist:
   `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`
-- Active work package: Phase 2 — H-035 client-interface design review
+- Active work package: Phase 2 — H-035 client-interface execution selection
 
 ## Current Architecture
 
@@ -52,15 +52,13 @@
   parity.
 - The native RLM check remains `External-limited`; no provider operation ran in
   the H-034 verification.
-- H-035 inventory identified the exact nine interface features and four
-  provider-free evidence packages. The design is committed at `7add4fb` and is
-  awaiting specification review; no client implementation exists yet.
+- H-035 inventory and design are approved. The ten-task TDD implementation plan
+  is committed at `0880045`; no client implementation exists yet.
 
 ## Open Problems
 
-- Review
-  `docs/superpowers/specs/2026-08-28-asterion-prime-client-interfaces-design.md`.
-  After approval, write the detailed implementation plan before changing code.
+- Select subagent-driven or inline execution for
+  `docs/superpowers/plans/2026-08-10-asterion-prime-client-interfaces-parity.md`.
 - Design and verify six separate operational features after the client package:
   auth, model selection, settings/keybindings, telemetry/usage, doctor, and
   controlled update/restart.
@@ -84,6 +82,7 @@
 - `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`
 - `docs/superpowers/plans/2026-08-10-asterion-prime-system-parity.md`
 - `docs/superpowers/plans/2026-08-10-asterion-prime-ecosystem-parity.md`
+- `docs/superpowers/plans/2026-08-10-asterion-prime-client-interfaces-parity.md`
 - `docs/superpowers/specs/2026-08-28-asterion-prime-client-interfaces-design.md`
 - `docs/status/PRIME-PARITY-LEDGER.md`
 - `.superpowers/sdd/ecosystem-task-10-report.md`
@@ -104,6 +103,7 @@
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, and the generated Climb tree.
 2. Inspect `git status --short` and recent commits before staging anything.
 3. Preserve unrelated dirty work and use exact partial staging.
-4. Do not implement client code until the design specification is reviewed.
+4. Execute only the approved client-interface plan after an execution mode is
+   selected.
 5. Keep credentials, private configuration, and execution authority external.
 6. Never promote provider-free or External-limited evidence to a broader PASS.
