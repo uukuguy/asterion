@@ -349,6 +349,10 @@ def _default_runner(
     environment = os.environ.copy()
     environment["CARGO_REGISTRIES_CRATES_IO_PROTOCOL"] = "sparse"
     environment["CARGO_HOME"] = str(cwd.parent / "cargo-home")
+    environment.pop(PRIME_SOURCE_ENV, None)
+    isolated_prime = cwd / DEFAULT_PRIME_SOURCE
+    if isolated_prime.is_dir() and not isolated_prime.is_symlink():
+        environment[PRIME_SOURCE_ENV] = str(isolated_prime.resolve())
     return subprocess.run(
         command,
         cwd=cwd,

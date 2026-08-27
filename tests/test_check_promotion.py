@@ -91,6 +91,7 @@ class PromotionCheckTests(unittest.TestCase):
                 os.environ,
                 {
                     "ASTERION_PROMOTION_TEST_MARKER": "preserved",
+                    "ASTERION_PRIME_SOURCE_ROOT": "/external/prime",
                     "CARGO_HOME": "/untrusted-cargo-home",
                 },
                 clear=False,
@@ -108,6 +109,34 @@ class PromotionCheckTests(unittest.TestCase):
         self.assertEqual(environment["CARGO_REGISTRIES_CRATES_IO_PROTOCOL"], "sparse")
         self.assertEqual(environment["CARGO_HOME"], "/promotion-workspace/cargo-home")
         self.assertEqual(environment["ASTERION_PROMOTION_TEST_MARKER"], "preserved")
+        self.assertNotIn("ASTERION_PRIME_SOURCE_ROOT", environment)
+
+    def test_default_runner_binds_only_the_isolated_prime_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            project = Path(temporary_directory) / "project"
+            isolated_prime = project / "3th-party/prime-agent"
+            isolated_prime.mkdir(parents=True)
+            result = completed(("uv", "run", "python"))
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {"ASTERION_PRIME_SOURCE_ROOT": "/external/prime"},
+                    clear=False,
+                ),
+                mock.patch(
+                    "tools.check_promotion.subprocess.run",
+                    return_value=result,
+                ) as run,
+            ):
+                self.assertIs(
+                    _default_runner(("uv", "run", "python"), project),
+                    result,
+                )
+
+        self.assertEqual(
+            run.call_args.kwargs["env"]["ASTERION_PRIME_SOURCE_ROOT"],
+            str(isolated_prime.resolve()),
+        )
 
     def test_quick_copy_excludes_external_generated_and_cache_paths(self) -> None:
         excluded = (
