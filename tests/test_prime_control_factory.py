@@ -15,7 +15,10 @@ from asterion.control.factory import ControlPlaneFactoryContext, ControlPlaneFac
 from asterion.control.factory import bind_selected_session_context_client
 from asterion.control.host import ControlPlaneManifest
 from asterion.control.providers.prime.client import PrimeControlPlaneClient
-from asterion.control.ecosystem import EcosystemPrivateResource
+from asterion.control.ecosystem import (
+    EcosystemPrivateResource,
+    build_ecosystem_portfolio,
+)
 from asterion.control.ecosystem_materialization import EcosystemProjection
 from asterion.control.providers.prime.factory import (
     PRIME_CONTROL_PLANE_ID,
@@ -24,6 +27,7 @@ from asterion.control.providers.prime.factory import (
     derive_prime_child_control_options,
     prime_control_plane_binding,
 )
+from asterion.control.providers.prime.ecosystem import PrimeEcosystemService
 from tests.test_control_children import _child_envelope
 from asterion.control.providers.prime.process import (
     PrimeSidecarProcess,
@@ -82,6 +86,65 @@ class FakeEcosystemMaterializer:
 class FakeMcpCredentialRefresh:
     def refresh(self, lease_id: str, challenge_digest: str) -> str:
         raise AssertionError((lease_id, challenge_digest))
+
+
+class WorkingEcosystemMaterializer:
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.calls: list[tuple[str, str]] = []
+
+    def materialize(self, portfolio, store) -> EcosystemProjection:
+        del store
+        self.calls.append(("materialize", portfolio.digest))
+        return EcosystemProjection(
+            projection_id=portfolio.digest,
+            portfolio_digest=portfolio.digest,
+            root=self.root,
+            resource_roots={},
+        )
+
+    def close(self, projection: EcosystemProjection) -> None:
+        self.calls.append(("close", projection.portfolio_digest))
+
+
+class EcosystemProcess:
+    def __init__(self, options: PrimeSidecarLaunchOptions) -> None:
+        self.options = options
+        self.requests: list[Mapping[str, object]] = []
+
+    async def request(
+        self, envelope: Mapping[str, object]
+    ) -> Mapping[str, object]:
+        self.requests.append(envelope)
+        frame = envelope["frame"]
+        assert isinstance(frame, Mapping)
+        return {
+            "protocol": envelope["protocol"],
+            "id": envelope["id"],
+            "type": "ecosystem_receipt",
+            "receipt": {
+                "authorityDigest": frame["authorityDigest"],
+                "featureIds": [],
+                "lifecycleCount": 0,
+                "mcpCount": 0,
+                "modelCredentialReads": 0,
+                "ownedProcessCount": 0,
+                "packageCount": 0,
+                "portfolioDigest": frame["portfolioDigest"],
+                "providerOperations": 0,
+                "registrationCount": 0,
+                "resourceCount": 0,
+                "status": "succeeded",
+            },
+        }
+
+    async def close(self) -> None:
+        return None
+
+    async def events(self, envelope):
+        del envelope
+        if False:
+            yield {}
 
 
 class ExplodingEcosystemService:
@@ -410,6 +473,62 @@ class TestPrimeControlFactory(unittest.TestCase):
                         private_descriptor={},
                     ),
                 )
+
+
+class TestPrimeEcosystemFactoryIntegration(unittest.IsolatedAsyncioTestCase):
+    async def test_factory_wires_awaitable_activation_through_concrete_client(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prepare_paths(root)
+            base = make_context(root)
+            materializer = WorkingEcosystemMaterializer(root / "projection")
+            services = dict(base.host_services)
+            services["ecosystem-materializer"] = materializer
+            context = ControlPlaneFactoryContext(
+                system_id=base.system_id,
+                system_version=base.system_version,
+                control_plane_id=base.control_plane_id,
+                control_plane_version=base.control_plane_version,
+                private_root=base.private_root,
+                options=base.options,
+                authority=base.authority,
+                host_services=services,
+            )
+            processes: list[EcosystemProcess] = []
+
+            def process_factory(options: PrimeSidecarLaunchOptions) -> EcosystemProcess:
+                process = EcosystemProcess(options)
+                processes.append(process)
+                return process
+
+            client = build_prime_control_plane_client(
+                context,
+                process_factory=process_factory,
+            )
+            portfolio = build_ecosystem_portfolio(
+                portfolio_id="portfolio-1",
+                authority_id="authority-1",
+                authority_revision=1,
+                resources=(),
+                registrations=(),
+            )
+
+            self.assertIsInstance(client.ecosystem_service, PrimeEcosystemService)
+            receipt = await client.activate_ecosystem_portfolio(portfolio)
+
+            self.assertEqual(receipt.status, "succeeded")
+            self.assertEqual(
+                materializer.calls,
+                [
+                    ("materialize", portfolio.digest),
+                    ("close", portfolio.digest),
+                ],
+            )
+            self.assertEqual(len(processes), 1)
+            self.assertEqual(len(processes[0].requests), 1)
+            self.assertEqual(processes[0].requests[0]["type"], "ecosystem_activate")
 
 
 class TestPrimeSidecarProcess(unittest.IsolatedAsyncioTestCase):

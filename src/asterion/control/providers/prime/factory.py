@@ -6,9 +6,11 @@ import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import MappingProxyType
-from typing import TypeGuard
+from typing import TypeGuard, cast
 
 from asterion.control.authority import AuthorityEnvelope
+from asterion.control.ecosystem import EcosystemPrivateSourceStore
+from asterion.control.ecosystem_materialization import SealedEcosystemMaterializer
 from asterion.control.factory import (
     ControlPlaneFactoryBinding,
     ControlPlaneFactoryContext,
@@ -18,6 +20,10 @@ from asterion.control.host import ControlPlaneClient, ControlPlaneManifest
 from asterion.control.protocol import OPAQUE_ID
 from asterion.control.providers.prime.client import (
     PrimeControlPlaneClient,
+)
+from asterion.control.providers.prime.ecosystem import (
+    McpCredentialRefresh,
+    PrimeEcosystemService,
 )
 from asterion.control.private_store import (
     PrivateAttachmentResolver,
@@ -183,8 +189,9 @@ def build_prime_control_plane_client(
         if missing:
             raise ControlPlaneFactoryError("Prime control plane options are invalid")
         manifest = prime_control_plane_binding().manifest
+        ecosystem_services = None
         if "ecosystem.portfolio" in manifest.capabilities:
-            _require_ecosystem_services(context.host_services)
+            ecosystem_services = _require_ecosystem_services(context.host_services)
         resolver = context.host_services.get(_PRIVATE_CONTENT_SERVICE)
         if not _is_private_content_resolver(resolver):
             raise ControlPlaneFactoryError("Prime private content service is unavailable")
@@ -199,13 +206,27 @@ def build_prime_control_plane_client(
             private_descriptor=_private_descriptor(context),
             environ=os.environ,
         )
+        authority = context.authority
+        if authority is None:
+            raise ControlPlaneFactoryError("Prime authority snapshot is unavailable")
         process = process_factory(launch_options)
-        return PrimeControlPlaneClient(
+        client = PrimeControlPlaneClient(
             process=process,  # type: ignore[arg-type]
             private_content=resolver,
             private_attachments=attachment_resolver,
             manifest=manifest,
         )
+        if ecosystem_services is not None:
+            source_store, materializer, credential_refresh = ecosystem_services
+            service = PrimeEcosystemService(
+                client,
+                materializer,
+                source_store,
+                authority_id=authority.authority_id,
+                authority_revision=authority.revision,
+            )
+            client.bind_ecosystem_service(service, credential_refresh)
+        return client
     except ControlPlaneFactoryError:
         raise
     except (OSError, TypeError, ValueError, PrimeSidecarProcessError):
@@ -235,7 +256,13 @@ def _is_private_attachment_resolver(
     return callable(getattr(value, "resolve_bytes", None))
 
 
-def _require_ecosystem_services(services: Mapping[str, object]) -> None:
+def _require_ecosystem_services(
+    services: Mapping[str, object],
+) -> tuple[
+    EcosystemPrivateSourceStore,
+    SealedEcosystemMaterializer,
+    McpCredentialRefresh,
+]:
     try:
         source_store = services.get(_ECOSYSTEM_SOURCE_STORE_SERVICE)
         materializer = services.get(_ECOSYSTEM_MATERIALIZER_SERVICE)
@@ -253,6 +280,11 @@ def _require_ecosystem_services(services: Mapping[str, object]) -> None:
         raise ControlPlaneFactoryError(
             "Prime ecosystem host service is unavailable"
         )
+    return (
+        cast(EcosystemPrivateSourceStore, source_store),
+        cast(SealedEcosystemMaterializer, materializer),
+        cast(McpCredentialRefresh, credential_refresh),
+    )
 
 
 def _path_option(options: Mapping[str, str], key: str) -> Path:

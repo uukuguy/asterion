@@ -524,6 +524,7 @@ def _validate_response(
     expected_response_type = {
         "authority.update": "authority.accepted",
         "command.accept": "command.accepted",
+        "ecosystem_activate": "ecosystem_receipt",
         "events.stream": "events.batch",
         "private.read": "private.value",
         "rlm.binding.read": "rlm.binding.value",
@@ -539,6 +540,7 @@ def _validate_response(
         not in {
             "authority.accepted",
             "command.accepted",
+            "ecosystem_receipt",
             "events.batch",
             "private.value",
             "rlm.binding.value",
@@ -563,7 +565,10 @@ def _validate_response(
         expected = expected | {"text"}
         if not isinstance(response.get("text"), str):
             raise PrimeSidecarProcessError()
-    if response.get("type") == "session-context.receipt":
+    if response.get("type") in {
+        "ecosystem_receipt",
+        "session-context.receipt",
+    }:
         expected = expected | {"receipt"}
         if not isinstance(response.get("receipt"), Mapping):
             raise PrimeSidecarProcessError()

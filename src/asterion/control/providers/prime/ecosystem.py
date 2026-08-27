@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import inspect
 import json
 import secrets
 from collections.abc import Mapping
@@ -18,6 +20,7 @@ from asterion.control.ecosystem_materialization import (
     EcosystemProjection,
     SealedEcosystemMaterializer,
 )
+from asterion.control.protocol import OPAQUE_ID
 
 
 PRIME_ECOSYSTEM_FRAME = "asterion.prime-ecosystem-frame/v1"
@@ -80,7 +83,7 @@ class PrimeEcosystemError(RuntimeError):
 
 
 class PrimeEcosystemClient(Protocol):
-    def activate_ecosystem(
+    async def activate_ecosystem(
         self, frame: Mapping[str, object]
     ) -> Mapping[str, object]: ...
 
@@ -97,26 +100,48 @@ class PrimeEcosystemService:
         client: PrimeEcosystemClient,
         materializer: SealedEcosystemMaterializer,
         source_store: EcosystemPrivateSourceStore,
+        *,
+        authority_id: str,
+        authority_revision: int,
     ) -> None:
-        if (
-            not callable(getattr(client, "activate_ecosystem", None))
-            or not _is_materializer(materializer)
-            or not _is_source_store(source_store)
-        ):
+        try:
+            valid = (
+                callable(getattr(client, "activate_ecosystem", None))
+                and _is_materializer(materializer)
+                and _is_source_store(source_store)
+                and isinstance(authority_id, str)
+                and OPAQUE_ID.fullmatch(authority_id) is not None
+                and type(authority_revision) is int
+                and authority_revision > 0
+            )
+        except Exception:
+            valid = False
+        if not valid:
             raise PrimeEcosystemError("Prime ecosystem service is invalid")
         self._client = client
         self._materializer = materializer
         self._source_store = source_store
+        self._authority_id = authority_id
+        self._authority_revision = authority_revision
 
-    def activate(
+    async def activate(
         self,
         portfolio: EcosystemPortfolio,
         credential_refresh: McpCredentialRefresh,
     ) -> EcosystemActivationReceipt:
-        if type(portfolio) is not EcosystemPortfolio or not callable(
-            getattr(credential_refresh, "refresh", None)
-        ):
+        try:
+            valid = type(portfolio) is EcosystemPortfolio and callable(
+                getattr(credential_refresh, "refresh", None)
+            )
+        except Exception:
+            valid = False
+        if not valid:
             raise PrimeEcosystemError("Prime ecosystem activation is invalid")
+        if (
+            portfolio.authority_id != self._authority_id
+            or portfolio.authority_revision != self._authority_revision
+        ):
+            raise PrimeEcosystemError("Prime ecosystem authority is invalid")
         if not _portfolio_is_consistent(portfolio):
             raise PrimeEcosystemError("Prime ecosystem activation is invalid")
 
@@ -130,7 +155,18 @@ class PrimeEcosystemService:
                 raise PrimeEcosystemError("Prime ecosystem projection is invalid")
             frame = _build_frame(portfolio, projection)
             try:
-                response = self._client.activate_ecosystem(frame)
+                operation = self._client.activate_ecosystem(frame)
+                if not inspect.isawaitable(operation):
+                    raise TypeError
+                task = asyncio.ensure_future(operation)
+                try:
+                    response = await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    try:
+                        await task
+                    except Exception:
+                        pass
+                    raise
             except Exception:
                 client_uncertain = True
         except PrimeEcosystemError:

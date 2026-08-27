@@ -15,6 +15,14 @@ from types import MappingProxyType
 from typing import Literal, Protocol
 
 from asterion.control.authority import RemainingBudget
+from asterion.control.ecosystem import (
+    EcosystemActivationReceipt,
+    EcosystemPortfolio,
+)
+from asterion.control.providers.prime.ecosystem import (
+    McpCredentialRefresh,
+    PrimeEcosystemService,
+)
 from asterion.control.execution import ActionExecutionReceipt
 from asterion.control.host import (
     ControlCommand,
@@ -180,7 +188,13 @@ class PrimeControlPlaneClient:
         manifest: ControlPlaneManifest | None = None,
         event_observer: Callable[[ControlEvent], None] | None = None,
     ) -> None:
-        if not hasattr(private_content, "resolve_text"):
+        try:
+            valid_private_content = callable(
+                getattr(private_content, "resolve_text", None)
+            )
+        except Exception:
+            valid_private_content = False
+        if not valid_private_content:
             raise PrimeControlError()
         if event_observer is not None and not callable(event_observer):
             raise PrimeControlError()
@@ -196,10 +210,56 @@ class PrimeControlPlaneClient:
         self._prepared_inputs: OrderedDict[str, str] = OrderedDict()
         self._close_lock = asyncio.Lock()
         self._close_task: asyncio.Task[None] | None = None
+        self._ecosystem_service: PrimeEcosystemService | None = None
+        self._ecosystem_credential_refresh: McpCredentialRefresh | None = None
 
     @property
     def manifest(self) -> ControlPlaneManifest:
         return self._manifest
+
+    @property
+    def ecosystem_service(self) -> PrimeEcosystemService | None:
+        """Return the private selected-provider ecosystem boundary, if bound."""
+
+        return self._ecosystem_service
+
+    def bind_ecosystem_service(
+        self,
+        service: PrimeEcosystemService,
+        credential_refresh: McpCredentialRefresh,
+    ) -> None:
+        """Bind the already-preflighted ecosystem capabilities exactly once."""
+
+        try:
+            valid = (
+                type(service) is PrimeEcosystemService
+                and callable(getattr(credential_refresh, "refresh", None))
+            )
+        except Exception:
+            valid = False
+        if (
+            not valid
+            or self._ecosystem_service is not None
+            or self._ecosystem_credential_refresh is not None
+        ):
+            raise PrimeControlError()
+        self._ecosystem_service = service
+        self._ecosystem_credential_refresh = credential_refresh
+
+    async def activate_ecosystem_portfolio(
+        self,
+        portfolio: EcosystemPortfolio,
+    ) -> EcosystemActivationReceipt:
+        """Activate one sealed portfolio through the factory-bound service."""
+
+        service = self._ecosystem_service
+        credential_refresh = self._ecosystem_credential_refresh
+        if self._closed or service is None or credential_refresh is None:
+            raise PrimeControlError()
+        try:
+            return await service.activate(portfolio, credential_refresh)
+        except Exception:
+            raise PrimeControlError() from None
 
     async def activate_ecosystem(
         self, frame: Mapping[str, object]
@@ -208,13 +268,13 @@ class PrimeControlPlaneClient:
 
         if self._closed or not isinstance(frame, Mapping):
             raise PrimeControlError()
-        envelope: dict[str, object] = {
-            "protocol": PRIME_GATEWAY_IPC_PROTOCOL,
-            "id": _request_id(),
-            "type": "ecosystem_activate",
-            "frame": _json_value(frame),
-        }
         try:
+            envelope: dict[str, object] = {
+                "protocol": PRIME_GATEWAY_IPC_PROTOCOL,
+                "id": _request_id(),
+                "type": "ecosystem_activate",
+                "frame": _json_value(frame),
+            }
             response = await self._process.request(envelope)
             receipt = response.get("receipt")
             if (
@@ -226,7 +286,7 @@ class PrimeControlPlaneClient:
             ):
                 raise PrimeControlError()
             return MappingProxyType(dict(receipt))
-        except (KeyError, TypeError, ValueError, RuntimeError):
+        except Exception:
             raise PrimeControlError() from None
 
     def resolve_text(self, reference: str, *, max_bytes: int) -> str:

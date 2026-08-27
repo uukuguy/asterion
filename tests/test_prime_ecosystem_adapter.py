@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import unittest
@@ -14,11 +15,16 @@ from asterion.control.ecosystem import (
 )
 from asterion.control.ecosystem_materialization import EcosystemProjection
 from asterion.control.providers.prime.client import PrimeControlPlaneClient
+from asterion.control.providers.prime.client import PrimeControlError
 from asterion.control.providers.prime.ecosystem import (
     PRIME_ECOSYSTEM_ARTIFACT_LOCK_DIGEST,
     PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST,
     PrimeEcosystemError,
     PrimeEcosystemService,
+)
+from asterion.control.providers.prime.process import (
+    PrimeSidecarProcessError,
+    _validate_response,
 )
 
 
@@ -124,7 +130,9 @@ class _RecordingClient:
         self.frames: list[Mapping[str, object]] = []
         self.changes = dict(changes or {})
 
-    def activate_ecosystem(self, frame: Mapping[str, object]) -> Mapping[str, object]:
+    async def activate_ecosystem(
+        self, frame: Mapping[str, object]
+    ) -> Mapping[str, object]:
         self.frames.append(frame)
         resources = tuple(frame["resources"])  # type: ignore[arg-type]
         registrations = tuple(frame["registrations"])  # type: ignore[arg-type]
@@ -147,21 +155,48 @@ class _RecordingClient:
 
 
 class _FailingClient:
-    def activate_ecosystem(self, frame: Mapping[str, object]) -> Mapping[str, object]:
+    async def activate_ecosystem(
+        self, frame: Mapping[str, object]
+    ) -> Mapping[str, object]:
         del frame
         raise RuntimeError(_SERVICE_ERROR)
 
 
-class TestPrimeEcosystemService(unittest.TestCase):
-    def test_activation_materializes_before_client_and_returns_body_free_receipt(self) -> None:
+def _service(
+    client,
+    materializer=None,
+    source_store=None,
+    *,
+    authority_id: str = "authority-1",
+    authority_revision: int = 7,
+):
+    return PrimeEcosystemService(
+        client,
+        materializer if materializer is not None else _Materializer(),
+        source_store if source_store is not None else _SourceStore(),
+        authority_id=authority_id,
+        authority_revision=authority_revision,
+    )
+
+
+class _ExplodingProbe:
+    def __getattribute__(self, name: str):
+        del name
+        raise RuntimeError(_SERVICE_ERROR)
+
+
+class TestPrimeEcosystemService(unittest.IsolatedAsyncioTestCase):
+    async def test_activation_materializes_before_client_and_returns_body_free_receipt(
+        self,
+    ) -> None:
         portfolio = _portfolio()
         materializer = _Materializer()
         client = _RecordingClient()
         credential_refresh = _CredentialRefresh()
 
-        receipt = PrimeEcosystemService(
-            client, materializer, _SourceStore()
-        ).activate(portfolio, credential_refresh)
+        receipt = await _service(client, materializer).activate(
+            portfolio, credential_refresh
+        )
 
         self.assertEqual(receipt.status, "succeeded")
         self.assertEqual(receipt.provider_operations, 0)
@@ -175,12 +210,12 @@ class TestPrimeEcosystemService(unittest.TestCase):
         self.assertNotIn(_PATH, repr(receipt))
         self.assertEqual(credential_refresh.calls, 0)
 
-    def test_private_frame_is_exact_canonical_and_immutable(self) -> None:
+    async def test_private_frame_is_exact_canonical_and_immutable(self) -> None:
         portfolio = _portfolio()
         client = _RecordingClient()
-        service = PrimeEcosystemService(client, _Materializer(), _SourceStore())
+        service = _service(client)
 
-        service.activate(portfolio, _CredentialRefresh())
+        await service.activate(portfolio, _CredentialRefresh())
 
         frame = client.frames[0]
         self.assertEqual(
@@ -246,7 +281,9 @@ class TestPrimeEcosystemService(unittest.TestCase):
         with self.assertRaises(TypeError):
             frame["limits"]["maxBytes"] = 1  # type: ignore[index]
 
-    def test_receipt_drift_and_feature_resource_inconsistency_fail_redacted(self) -> None:
+    async def test_receipt_drift_and_feature_resource_inconsistency_fail_redacted(
+        self,
+    ) -> None:
         portfolio = _portfolio()
         cases = (
             {"authorityDigest": "f" * 64},
@@ -263,44 +300,47 @@ class TestPrimeEcosystemService(unittest.TestCase):
             with self.subTest(changes=changes), self.assertRaises(
                 PrimeEcosystemError
             ) as raised:
-                PrimeEcosystemService(
-                    _RecordingClient(changes=changes), materializer, _SourceStore()
+                await _service(
+                    _RecordingClient(changes=changes), materializer
                 ).activate(portfolio, _CredentialRefresh())
             self.assertEqual(materializer.calls[-1][0], "close")
             self.assertNotIn(_BODY, str(raised.exception))
             self.assertNotIn(_SERVICE_ERROR, str(raised.exception))
             self.assertNotIn(_PATH, str(raised.exception))
 
-    def test_all_terminal_paths_close_and_cleanup_uncertainty_is_terminal(self) -> None:
+    async def test_all_terminal_paths_close_and_cleanup_uncertainty_is_terminal(
+        self,
+    ) -> None:
         portfolio = _portfolio()
         for status in ("succeeded", "failed", "cancelled", "uncertain"):
             materializer = _Materializer()
-            receipt = PrimeEcosystemService(
+            receipt = await _service(
                 _RecordingClient(changes={"status": status}),
                 materializer,
-                _SourceStore(),
             ).activate(portfolio, _CredentialRefresh())
             with self.subTest(status=status):
                 self.assertEqual(receipt.status, status)
                 self.assertEqual(materializer.calls[-1][0], "close")
 
-        receipt = PrimeEcosystemService(
-            _RecordingClient(), _Materializer(close_error=True), _SourceStore()
+        receipt = await _service(
+            _RecordingClient(), _Materializer(close_error=True)
         ).activate(portfolio, _CredentialRefresh())
         self.assertEqual(receipt.status, "uncertain")
         self.assertNotIn(_SERVICE_ERROR, repr(receipt))
 
-    def test_post_materialization_client_exception_is_redacted_uncertainty(self) -> None:
+    async def test_post_materialization_client_exception_is_redacted_uncertainty(
+        self,
+    ) -> None:
         materializer = _Materializer()
-        receipt = PrimeEcosystemService(
-            _FailingClient(), materializer, _SourceStore()
-        ).activate(_portfolio(), _CredentialRefresh())
+        receipt = await _service(_FailingClient(), materializer).activate(
+            _portfolio(), _CredentialRefresh()
+        )
 
         self.assertEqual(receipt.status, "uncertain")
         self.assertEqual(materializer.calls[-1][0], "close")
         self.assertNotIn(_SERVICE_ERROR, repr(receipt))
 
-    def test_wrong_protocol_objects_fail_before_materialization(self) -> None:
+    async def test_wrong_protocol_objects_fail_before_materialization(self) -> None:
         valid = (_RecordingClient(), _Materializer(), _SourceStore())
         invalid = (
             (object(), valid[1], valid[2]),
@@ -309,15 +349,15 @@ class TestPrimeEcosystemService(unittest.TestCase):
         )
         for values in invalid:
             with self.subTest(values=values), self.assertRaises(PrimeEcosystemError):
-                PrimeEcosystemService(*values)  # type: ignore[arg-type]
+                _service(*values)  # type: ignore[arg-type]
 
         materializer = _Materializer()
-        service = PrimeEcosystemService(_RecordingClient(), materializer, _SourceStore())
+        service = _service(_RecordingClient(), materializer)
         with self.assertRaises(PrimeEcosystemError):
-            service.activate(_portfolio(), object())  # type: ignore[arg-type]
+            await service.activate(_portfolio(), object())  # type: ignore[arg-type]
         self.assertEqual(materializer.calls, [])
 
-    def test_registration_without_exact_extension_resource_rejects_before_materialization(
+    async def test_registration_without_exact_extension_resource_rejects_before_materialization(
         self,
     ) -> None:
         portfolio = build_ecosystem_portfolio(
@@ -334,13 +374,17 @@ class TestPrimeEcosystemService(unittest.TestCase):
         materializer = _Materializer()
 
         with self.assertRaises(PrimeEcosystemError):
-            PrimeEcosystemService(
-                _RecordingClient(), materializer, _SourceStore()
+            await _service(
+                _RecordingClient(),
+                materializer,
+                authority_revision=1,
             ).activate(portfolio, _CredentialRefresh())
 
         self.assertEqual(materializer.calls, [])
 
-    def test_extension_portfolio_exposes_only_extension_feature_package(self) -> None:
+    async def test_extension_portfolio_exposes_only_extension_feature_package(
+        self,
+    ) -> None:
         resource = EcosystemResourceRef(
             "extension-1",
             "1.0.0",
@@ -364,8 +408,8 @@ class TestPrimeEcosystemService(unittest.TestCase):
             ),
         )
 
-        receipt = PrimeEcosystemService(
-            _RecordingClient(), _Materializer(), _SourceStore()
+        receipt = await _service(
+            _RecordingClient(), authority_revision=1
         ).activate(portfolio, _CredentialRefresh())
 
         self.assertEqual(
@@ -378,14 +422,62 @@ class TestPrimeEcosystemService(unittest.TestCase):
             ),
         )
 
-    def test_materializer_exception_text_is_redacted(self) -> None:
+    async def test_materializer_exception_text_is_redacted(self) -> None:
         with self.assertRaises(PrimeEcosystemError) as raised:
-            PrimeEcosystemService(
+            await _service(
                 _RecordingClient(),
                 _Materializer(materialize_error=True),
-                _SourceStore(),
             ).activate(_portfolio(), _CredentialRefresh())
 
+        self.assertNotIn(_SERVICE_ERROR, str(raised.exception))
+
+    async def test_authority_drift_rejects_before_materialization_or_client(self) -> None:
+        client = _RecordingClient()
+        materializer = _Materializer()
+        service = _service(
+            client,
+            materializer,
+            authority_id="other-authority",
+            authority_revision=7,
+        )
+
+        with self.assertRaises(PrimeEcosystemError):
+            await service.activate(_portfolio(), _CredentialRefresh())
+
+        self.assertEqual(materializer.calls, [])
+        self.assertEqual(client.frames, [])
+
+        transport = _AsyncTransport()
+        concrete_client = PrimeControlPlaneClient(
+            process=transport,
+            private_content=_PrivateContent(),
+        )
+        concrete_materializer = _Materializer()
+        with self.assertRaises(PrimeEcosystemError):
+            await _service(
+                concrete_client,
+                concrete_materializer,
+                authority_id="other-authority",
+                authority_revision=7,
+            ).activate(_portfolio(), _CredentialRefresh())
+        self.assertEqual(concrete_materializer.calls, [])
+        self.assertEqual(transport.envelopes, [])
+
+    async def test_exception_throwing_protocol_probes_are_redacted(self) -> None:
+        for values in (
+            (_ExplodingProbe(), _Materializer(), _SourceStore()),
+            (_RecordingClient(), _ExplodingProbe(), _SourceStore()),
+            (_RecordingClient(), _Materializer(), _ExplodingProbe()),
+        ):
+            with self.subTest(values=values), self.assertRaises(
+                PrimeEcosystemError
+            ) as raised:
+                _service(*values)
+            self.assertNotIn(_SERVICE_ERROR, str(raised.exception))
+
+        service = _service(_RecordingClient())
+        with self.assertRaises(PrimeEcosystemError) as raised:
+            await service.activate(_portfolio(), _ExplodingProbe())  # type: ignore[arg-type]
         self.assertNotIn(_SERVICE_ERROR, str(raised.exception))
 
 
@@ -417,7 +509,90 @@ class _AsyncTransport:
             yield {}
 
 
+class _AwaitingTransport(_AsyncTransport):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def request(self, envelope: Mapping[str, object]) -> Mapping[str, object]:
+        self.envelopes.append(envelope)
+        self.started.set()
+        await self.release.wait()
+        frame = envelope["frame"]
+        resources = tuple(frame["resources"])  # type: ignore[index,arg-type]
+        registrations = tuple(frame["registrations"])  # type: ignore[index,arg-type]
+        return {
+            "protocol": "asterion.prime-gateway-ipc/v1",
+            "id": envelope["id"],
+            "type": "ecosystem_receipt",
+            "receipt": {
+                "authorityDigest": frame["authorityDigest"],  # type: ignore[index]
+                "featureIds": frame["features"],  # type: ignore[index]
+                "lifecycleCount": sum(
+                    item["kind"] == "extension" for item in resources
+                ),
+                "mcpCount": sum(item["kind"] == "mcp-server" for item in resources),
+                "modelCredentialReads": 0,
+                "ownedProcessCount": 0,
+                "packageCount": sum(item["kind"] == "package" for item in resources),
+                "portfolioDigest": frame["portfolioDigest"],  # type: ignore[index]
+                "providerOperations": 0,
+                "registrationCount": len(registrations),
+                "resourceCount": len(resources),
+                "status": "succeeded",
+            },
+        }
+
+
+class _ExplodingMapping(Mapping[str, object]):
+    def __getitem__(self, key: str) -> object:
+        del key
+        raise RuntimeError(_SERVICE_ERROR)
+
+    def __iter__(self):
+        raise RuntimeError(_SERVICE_ERROR)
+
+    def __len__(self) -> int:
+        raise RuntimeError(_SERVICE_ERROR)
+
+
 class TestPrimeEcosystemClient(unittest.IsolatedAsyncioTestCase):
+    def test_process_accepts_only_exact_ecosystem_receipt_response(self) -> None:
+        request = {
+            "protocol": "asterion.prime-gateway-ipc/v1",
+            "id": "ecosystem-request-1",
+            "type": "ecosystem_activate",
+            "frame": {},
+        }
+        response = {
+            "protocol": "asterion.prime-gateway-ipc/v1",
+            "id": "ecosystem-request-1",
+            "type": "ecosystem_receipt",
+            "receipt": {},
+        }
+
+        self.assertEqual(_validate_response(response, request), response)
+        invalid = (
+            {**response, "extra": "SENTINEL_SECRET"},
+            {key: value for key, value in response.items() if key != "receipt"},
+            {**response, "receipt": []},
+            {**response, "type": "session-context.receipt"},
+        )
+        for candidate in invalid:
+            with self.subTest(candidate=candidate), self.assertRaises(
+                PrimeSidecarProcessError
+            ):
+                _validate_response(candidate, request)
+
+    async def test_client_constructor_probe_exception_is_fixed_and_redacted(self) -> None:
+        with self.assertRaises(PrimeControlError) as raised:
+            PrimeControlPlaneClient(
+                process=_AsyncTransport(), private_content=_ExplodingProbe()
+            )
+
+        self.assertNotIn(_SERVICE_ERROR, str(raised.exception))
+
     async def test_selected_client_adds_only_private_ecosystem_activate_request(self) -> None:
         transport = _AsyncTransport()
         client = PrimeControlPlaneClient(process=transport, private_content=_PrivateContent())
@@ -429,6 +604,45 @@ class TestPrimeEcosystemClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(transport.envelopes[0]["type"], "ecosystem_activate")
         self.assertEqual(transport.envelopes[0]["frame"], frame)
         self.assertNotIn("ecosystem", client.manifest.to_mapping())
+
+    async def test_concrete_client_service_awaits_ipc_before_projection_cleanup(
+        self,
+    ) -> None:
+        transport = _AwaitingTransport()
+        client = PrimeControlPlaneClient(
+            process=transport, private_content=_PrivateContent()
+        )
+        materializer = _Materializer()
+        service = _service(client, materializer)
+
+        activation = asyncio.create_task(
+            service.activate(_portfolio(), _CredentialRefresh())
+        )
+        await transport.started.wait()
+        self.assertEqual(
+            tuple(item[0] for item in materializer.calls), ("materialize",)
+        )
+
+        transport.release.set()
+        receipt = await activation
+
+        self.assertEqual(receipt.status, "succeeded")
+        self.assertEqual(
+            tuple(item[0] for item in materializer.calls),
+            ("materialize", "close"),
+        )
+
+    async def test_frame_conversion_exception_is_fixed_and_redacted(self) -> None:
+        transport = _AsyncTransport()
+        client = PrimeControlPlaneClient(
+            process=transport, private_content=_PrivateContent()
+        )
+
+        with self.assertRaises(PrimeControlError) as raised:
+            await client.activate_ecosystem(_ExplodingMapping())
+
+        self.assertEqual(transport.envelopes, [])
+        self.assertNotIn(_SERVICE_ERROR, str(raised.exception))
 
 
 if __name__ == "__main__":
