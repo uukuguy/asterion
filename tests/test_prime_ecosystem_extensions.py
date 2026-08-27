@@ -50,7 +50,10 @@ ASSERTION_IDS = [
 PUBLIC_KEYS = {
     "assertion_ids",
     "command_count",
+    "command_state_digest",
     "feature_ids",
+    "failure_matrix_count",
+    "failure_matrix_digest",
     "format",
     "lifecycle_count",
     "model_credential_reads",
@@ -58,6 +61,8 @@ PUBLIC_KEYS = {
     "owned_process_count_after_close",
     "provider_model_count",
     "provider_operations",
+    "reopened_command_state_digest",
+    "reopened_nonterminal_status",
     "registration_count",
     "resource_count",
     "scenario_package",
@@ -264,6 +269,14 @@ class TestPrimeEcosystemExtensions(unittest.TestCase):
         self.assertEqual(report["command_count"], 1)
         self.assertEqual(report["tool_count"], 1)
         self.assertEqual(report["provider_model_count"], 1)
+        self.assertRegex(report["command_state_digest"], r"^[0-9a-f]{64}$")
+        self.assertEqual(
+            report["reopened_command_state_digest"],
+            report["command_state_digest"],
+        )
+        self.assertEqual(report["reopened_nonterminal_status"], "uncertain")
+        self.assertEqual(report["failure_matrix_count"], 7)
+        self.assertRegex(report["failure_matrix_digest"], r"^[0-9a-f]{64}$")
         self.assertEqual(report["provider_operations"], 0)
         self.assertEqual(report["model_credential_reads"], 0)
         self.assertEqual(report["owned_process_count_after_close"], 0)
@@ -297,6 +310,18 @@ class TestPrimeEcosystemExtensions(unittest.TestCase):
             "sentinel-error": original.replace(
                 'extensionState.events.push("shutdown");',
                 'throw new Error("SENTINEL_EXTENSION_ERROR");',
+            ),
+            "teardown-throw": original.replace(
+                "pi.on(\"session_shutdown\", () => {",
+                "pi.on(\"session_shutdown\", () => { throw new Error(\"SENTINEL_EXTENSION_ERROR\");",
+            ),
+            "state-append-failure": original.replace(
+                'pi.appendEntry("ecosystem-state", { args });',
+                'throw new Error("SENTINEL_EXTENSION_ERROR");',
+            ),
+            "provider-invocation-attempt": original.replace(
+                'baseUrl: "http://127.0.0.1/unused",',
+                'baseUrl: "http://127.0.0.1/unused/ECOSYSTEM_PROVIDER_KEY_SHOULD_NOT_BE_READ",',
             ),
         }
         for name, body in variants.items():

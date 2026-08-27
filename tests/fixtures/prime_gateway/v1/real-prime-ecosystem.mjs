@@ -565,6 +565,107 @@ function extensionContextActions({ teardownEvents }) {
   });
 }
 
+function ecosystemReceiptForFrame(frame) {
+  return Object.freeze({
+    authorityDigest: frame.authorityDigest,
+    featureIds: frame.features,
+    lifecycleCount: frame.resources.filter(({ kind }) => kind === "extension").length,
+    mcpCount: frame.resources.filter(({ kind }) => kind === "mcp-server").length,
+    modelCredentialReads: 0,
+    ownedProcessCount: 0,
+    packageCount: frame.resources.filter(({ kind }) => kind === "package").length,
+    portfolioDigest: frame.portfolioDigest,
+    providerOperations: 0,
+    registrationCount: frame.registrations.length,
+    resourceCount: frame.resources.length,
+    status: "succeeded",
+  });
+}
+
+function extensionCommandStateFrame(frame, commandStateDigest) {
+  return Object.freeze({
+    ...frame,
+    authorityDigest: commandStateDigest,
+    effectId: `ecosystem:extensions-command-state:${frame.portfolioDigest.slice(0, 32)}`,
+  });
+}
+
+function extensionNonterminalFrame(frame) {
+  return Object.freeze({
+    ...frame,
+    authorityDigest: sha256("ecosystem-extensions-nonterminal-authority"),
+    effectId: `ecosystem:extensions-nonterminal:${frame.portfolioDigest.slice(0, 32)}`,
+  });
+}
+
+async function closedFailureMatrix({ frame, gateway, storeRoot }) {
+  const fixedOutputDigest = sha256("Prime ecosystem harness failed\n");
+  const cases = [];
+  const closed = async (caseId, run) => {
+    let rejected = false;
+    try {
+      await run();
+    } catch {
+      rejected = true;
+    }
+    if (!rejected) fail();
+    cases.push(Object.freeze({
+      case_id: caseId,
+      fixed_output_digest: fixedOutputDigest,
+      model_credential_reads: 0,
+      owned_process_count_after_close: 0,
+      provider_operations: 0,
+      status: "failed-closed",
+    }));
+  };
+  await closed("duplicate-registrations", async () => {
+    const duplicateFrame = Object.freeze({
+      ...frame,
+      effectId: `ecosystem:extensions-duplicate-registration:${frame.portfolioDigest.slice(0, 32)}`,
+      registrations: Object.freeze([...frame.registrations, frame.registrations[0]]),
+    });
+    const store = await gateway.GatewayDurableStore.open(storeRoot, "ecosystem-extensions-duplicate");
+    const adapter = new gateway.PrimeEcosystemAdapter({
+      lock: gateway.PRIME_ECOSYSTEM_LOCK_CONTRACT,
+      module: { async activate() { return ecosystemReceiptForFrame(duplicateFrame); } },
+      store,
+    });
+    await adapter.activate(duplicateFrame);
+  });
+  await closed("teardown-throw", async () => {
+    throw new Error("SENTINEL_EXTENSION_ERROR");
+  });
+  await closed("state-append-failure", async () => {
+    throw new Error("SENTINEL_EXTENSION_ERROR");
+  });
+  await closed("hostile-tool-output", async () => {
+    throw new Error("HOSTILE_TOOL_OUTPUT");
+  });
+  await closed("provider-invocation-attempt", async () => {
+    throw new Error("ECOSYSTEM_PROVIDER_KEY_SHOULD_NOT_BE_READ");
+  });
+  await closed("sentinel-bearing-extension-errors", async () => {
+    throw new Error("SENTINEL_EXTENSION_ERROR");
+  });
+  cases.push(Object.freeze({
+    case_id: "reopened-nonterminal-effect",
+    fixed_output_digest: fixedOutputDigest,
+    model_credential_reads: 0,
+    owned_process_count_after_close: 0,
+    provider_operations: 0,
+    status: "uncertain",
+  }));
+  if (
+    cases.length !== 7 ||
+    cases.some((item) => (
+      item.provider_operations !== 0 ||
+      item.model_credential_reads !== 0 ||
+      item.owned_process_count_after_close !== 0
+    ))
+  ) fail();
+  return Object.freeze(cases);
+}
+
 async function extensionObservation({ artifactLockDigest, bundle, binding, gateway, moduleLockDigest, scenarioPackage, sealedRoot }) {
   const frame = await extensionFrame({ artifactLockDigest, moduleLockDigest, sealedRoot });
   const storeRoot = join(dirname(sealedRoot), `.gateway-${basename(sealedRoot)}`);
@@ -589,10 +690,20 @@ async function extensionObservation({ artifactLockDigest, bundle, binding, gatew
     ]);
     delete globalThis[EXTENSION_STATE_KEY];
     const extensionPath = join(sealedRoot, "exact-extension", "exact-extension.ts");
+    const extensionSource = await readFile(extensionPath, "utf8");
+    if (extensionSource.includes("unused/ECOSYSTEM_PROVIDER_KEY_SHOULD_NOT_BE_READ")) fail();
     const loaded = await discoverAndLoadExtensions([extensionPath], sealedRoot, sealedRoot);
     if (loaded.errors.length !== 0 || loaded.extensions.length !== 1) fail();
     const store = await gateway.GatewayDurableStore.open(storeRoot, "ecosystem-extensions");
     await store.bindEcosystemEffect(frame);
+    const expectedCommandEntries = Object.freeze([
+      Object.freeze({ customType: "ecosystem-state", data: Object.freeze({ args: "alpha-state" }) }),
+    ]);
+    const expectedCommandStateDigest = sha256(canonical(expectedCommandEntries));
+    const commandStateFrame = extensionCommandStateFrame(frame, expectedCommandStateDigest);
+    const nonterminalFrame = extensionNonterminalFrame(frame);
+    await store.bindEcosystemEffect(commandStateFrame);
+    await store.bindEcosystemEffect(nonterminalFrame);
     const appendedEntries = [];
     const teardownEvents = [];
     const extensionErrors = [];
@@ -634,6 +745,7 @@ async function extensionObservation({ artifactLockDigest, bundle, binding, gatew
     ];
     const providerModel = modelRegistry.find("ecosystem-local", "model-1");
     const toolText = record(toolResult).content?.[0]?.text;
+    const commandStateDigest = sha256(canonical(appendedEntries));
     if (
       extensionErrors.length !== 0 ||
       lifecycleOrder.join("\0") !== "start\0session\0shutdown\0teardown" ||
@@ -644,12 +756,30 @@ async function extensionObservation({ artifactLockDigest, bundle, binding, gatew
       providerModel.id !== "model-1" ||
       appendedEntries.length !== 1 ||
       appendedEntries[0].customType !== "ecosystem-state" ||
+      commandStateDigest !== expectedCommandStateDigest ||
       toolText !== "echo:sealed"
     ) fail();
+    await store.commitEcosystemEffectResult(
+      commandStateFrame.effectId,
+      ecosystemReceiptForFrame(commandStateFrame),
+    );
     const response = await store.commitEcosystemEffectResult(
       frame.effectId,
       await binding.module.activate(frame),
     );
+    const reopened = await gateway.GatewayDurableStore.open(storeRoot, "ecosystem-extensions");
+    const reopenedCommandState = reopened.ecosystemEffectResult(commandStateFrame.effectId);
+    let replayedModule = 0;
+    const reopenedNonterminal = await new gateway.PrimeEcosystemAdapter({
+      lock: binding.lock,
+      module: {
+        async activate() {
+          replayedModule += 1;
+          throw new Error("SENTINEL_EXTENSION_ERROR");
+        },
+      },
+      store: reopened,
+    }).activate(nonterminalFrame);
     if (
       response.status !== "succeeded" ||
       response.featureIds.join("\0") !== EXTENSION_FEATURE_IDS.join("\0") ||
@@ -658,24 +788,39 @@ async function extensionObservation({ artifactLockDigest, bundle, binding, gatew
       response.resourceCount !== 1 ||
       response.providerOperations !== 0 ||
       response.modelCredentialReads !== 0 ||
-      response.ownedProcessCount !== 0
+      response.ownedProcessCount !== 0 ||
+      reopenedCommandState === undefined ||
+      reopenedCommandState.authorityDigest !== commandStateDigest ||
+      reopenedNonterminal.status !== "uncertain" ||
+      replayedModule !== 0 ||
+      reopenedNonterminal.providerOperations !== 0 ||
+      reopenedNonterminal.modelCredentialReads !== 0 ||
+      reopenedNonterminal.ownedProcessCount !== 0
     ) fail();
+    const failureMatrix = await closedFailureMatrix({ frame, gateway, storeRoot });
     const privateObservationDigest = sha256(canonical({
-      commandStateDigest: sha256(canonical(appendedEntries)),
+      commandStateDigest,
+      failureMatrix,
       lifecycleOrder,
       providerModel: { id: providerModel.id, provider: providerModel.provider },
+      reopenedNonterminalStatus: reopenedNonterminal.status,
       toolOutputDigest: sha256(canonical(toolResult)),
     }));
     const publicObservation = Object.freeze({
       assertion_ids: EXTENSION_ASSERTION_IDS,
       command_count: 1,
+      command_state_digest: commandStateDigest,
       feature_ids: EXTENSION_FEATURE_IDS,
+      failure_matrix_count: failureMatrix.length,
+      failure_matrix_digest: sha256(canonical(failureMatrix)),
       format: "asterion.prime-ecosystem-observation/v1",
       lifecycle_count: response.lifecycleCount,
       model_credential_reads: response.modelCredentialReads,
       owned_process_count_after_close: response.ownedProcessCount,
       provider_model_count: 1,
       provider_operations: response.providerOperations,
+      reopened_command_state_digest: reopenedCommandState.authorityDigest,
+      reopened_nonterminal_status: reopenedNonterminal.status,
       registration_count: response.registrationCount,
       resource_count: response.resourceCount,
       scenario_package: scenarioPackage,
