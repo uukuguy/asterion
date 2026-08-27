@@ -21,6 +21,7 @@ from asterion.control.ecosystem import (
 )
 from asterion.control.providers.prime.ecosystem import (
     McpCredentialRefresh,
+    PrimeEcosystemConsumerNotQuiesced,
     PrimeEcosystemService,
 )
 from asterion.control.execution import ActionExecutionReceipt
@@ -275,6 +276,9 @@ class PrimeControlPlaneClient:
                 "type": "ecosystem_activate",
                 "frame": _json_value(frame),
             }
+        except Exception:
+            raise PrimeControlError() from None
+        try:
             response = await self._process.request(envelope)
             receipt = response.get("receipt")
             if (
@@ -287,6 +291,10 @@ class PrimeControlPlaneClient:
                 raise PrimeControlError()
             return MappingProxyType(dict(receipt))
         except Exception:
+            try:
+                await self.close()
+            except Exception:
+                raise PrimeEcosystemConsumerNotQuiesced() from None
             raise PrimeControlError() from None
 
     def resolve_text(self, reference: str, *, max_bytes: int) -> str:

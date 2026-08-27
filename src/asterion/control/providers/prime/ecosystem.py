@@ -82,6 +82,10 @@ class PrimeEcosystemError(RuntimeError):
         super().__init__(message)
 
 
+class PrimeEcosystemConsumerNotQuiesced(PrimeEcosystemError):
+    """Raised when a selected provider consumer may still hold a projection."""
+
+
 class PrimeEcosystemClient(Protocol):
     async def activate_ecosystem(
         self, frame: Mapping[str, object]
@@ -149,6 +153,7 @@ class PrimeEcosystemService:
         response: object | None = None
         client_uncertain = False
         close_uncertain = False
+        consumer_quiesced = True
         try:
             projection = self._materializer.materialize(portfolio, self._source_store)
             if not _projection_matches(projection, portfolio):
@@ -160,13 +165,19 @@ class PrimeEcosystemService:
                     raise TypeError
                 task = asyncio.ensure_future(operation)
                 try:
-                    response = await asyncio.shield(task)
+                    await asyncio.wait({task})
+                    response = task.result()
                 except asyncio.CancelledError:
                     try:
                         await task
+                    except PrimeEcosystemConsumerNotQuiesced:
+                        consumer_quiesced = False
                     except Exception:
                         pass
                     raise
+            except PrimeEcosystemConsumerNotQuiesced:
+                consumer_quiesced = False
+                raise
             except Exception:
                 client_uncertain = True
         except PrimeEcosystemError:
@@ -174,7 +185,7 @@ class PrimeEcosystemService:
         except Exception:
             raise PrimeEcosystemError("Prime ecosystem operation failed") from None
         finally:
-            if projection is not None:
+            if projection is not None and consumer_quiesced:
                 try:
                     self._materializer.close(projection)  # type: ignore[arg-type]
                 except Exception:

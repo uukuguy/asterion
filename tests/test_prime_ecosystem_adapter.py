@@ -545,6 +545,65 @@ class _AwaitingTransport(_AsyncTransport):
         }
 
 
+class _FailingLiveTransport(_AsyncTransport):
+    def __init__(self, mode: str, timeline: list[str]) -> None:
+        super().__init__()
+        self.mode = mode
+        self.timeline = timeline
+        self.close_started = asyncio.Event()
+        self.allow_close = asyncio.Event()
+
+    async def request(self, envelope: Mapping[str, object]) -> Mapping[str, object]:
+        self.envelopes.append(envelope)
+        self.timeline.append("consumer-failed")
+        if self.mode == "timeout":
+            raise TimeoutError(_SERVICE_ERROR)
+        return {
+            "protocol": "asterion.prime-gateway-ipc/v1",
+            "id": envelope["id"],
+            "type": "ecosystem_receipt",
+            "receipt": [],
+        }
+
+    async def close(self) -> None:
+        self.timeline.append("consumer-close-started")
+        self.close_started.set()
+        await self.allow_close.wait()
+        self.timeline.append("consumer-quiesced")
+
+
+class _QuiescenceMaterializer(_Materializer):
+    def __init__(self, timeline: list[str]) -> None:
+        super().__init__()
+        self.timeline = timeline
+
+    def close(self, projection):
+        self.timeline.append("projection-closed")
+        super().close(projection)
+
+
+class _UnquiesceableTransport(_AsyncTransport):
+    async def request(self, envelope: Mapping[str, object]) -> Mapping[str, object]:
+        self.envelopes.append(envelope)
+        raise TimeoutError(_SERVICE_ERROR)
+
+    async def close(self) -> None:
+        raise RuntimeError(_SERVICE_ERROR)
+
+
+class _AwaitingUnquiesceableTransport(_UnquiesceableTransport):
+    def __init__(self) -> None:
+        super().__init__()
+        self.request_started = asyncio.Event()
+        self.allow_failure = asyncio.Event()
+
+    async def request(self, envelope: Mapping[str, object]) -> Mapping[str, object]:
+        self.envelopes.append(envelope)
+        self.request_started.set()
+        await self.allow_failure.wait()
+        raise TimeoutError(_SERVICE_ERROR)
+
+
 class _ExplodingMapping(Mapping[str, object]):
     def __getitem__(self, key: str) -> object:
         del key
@@ -630,6 +689,150 @@ class TestPrimeEcosystemClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             tuple(item[0] for item in materializer.calls),
             ("materialize", "close"),
+        )
+
+    async def test_transport_failure_quiesces_consumer_before_projection_cleanup(
+        self,
+    ) -> None:
+        for mode in ("timeout", "invalid-response"):
+            timeline: list[str] = []
+            transport = _FailingLiveTransport(mode, timeline)
+            client = PrimeControlPlaneClient(
+                process=transport,
+                private_content=_PrivateContent(),
+            )
+            materializer = _QuiescenceMaterializer(timeline)
+            activation = asyncio.create_task(
+                _service(client, materializer).activate(
+                    _portfolio(), _CredentialRefresh()
+                )
+            )
+            close_started = asyncio.create_task(transport.close_started.wait())
+
+            done, _ = await asyncio.wait(
+                {activation, close_started},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            close_started_first = close_started in done
+            activation_waited_for_close = activation not in done
+            pre_quiescence_calls = tuple(
+                item[0] for item in materializer.calls
+            )
+            transport.allow_close.set()
+            receipt = await activation
+            if not close_started.done():
+                close_started.cancel()
+            await asyncio.gather(close_started, return_exceptions=True)
+
+            with self.subTest(mode=mode):
+                self.assertTrue(close_started_first)
+                self.assertTrue(activation_waited_for_close)
+                self.assertEqual(
+                    pre_quiescence_calls,
+                    ("materialize",),
+                )
+                self.assertEqual(receipt.status, "uncertain")
+                self.assertEqual(
+                    timeline,
+                    [
+                        "consumer-failed",
+                        "consumer-close-started",
+                        "consumer-quiesced",
+                        "projection-closed",
+                    ],
+                )
+
+    async def test_unquiesced_consumer_never_releases_projection(self) -> None:
+        transport = _UnquiesceableTransport()
+        client = PrimeControlPlaneClient(
+            process=transport,
+            private_content=_PrivateContent(),
+        )
+        materializer = _Materializer()
+
+        with self.assertRaises(PrimeEcosystemError) as raised:
+            await _service(client, materializer).activate(
+                _portfolio(), _CredentialRefresh()
+            )
+
+        self.assertEqual(
+            tuple(item[0] for item in materializer.calls),
+            ("materialize",),
+        )
+        self.assertNotIn(_SERVICE_ERROR, str(raised.exception))
+
+    async def test_cancellation_waits_for_failure_quiescence_before_cleanup(
+        self,
+    ) -> None:
+        loop = asyncio.get_running_loop()
+        previous_handler = loop.get_exception_handler()
+        loop_contexts: list[Mapping[str, object]] = []
+        loop.set_exception_handler(
+            lambda unused_loop, context: loop_contexts.append(context)
+        )
+        timeline: list[str] = []
+        transport = _FailingLiveTransport("timeout", timeline)
+        client = PrimeControlPlaneClient(
+            process=transport,
+            private_content=_PrivateContent(),
+        )
+        materializer = _QuiescenceMaterializer(timeline)
+        activation = asyncio.create_task(
+            _service(client, materializer).activate(
+                _portfolio(), _CredentialRefresh()
+            )
+        )
+        await transport.close_started.wait()
+
+        activation.cancel()
+        done, _ = await asyncio.wait({activation}, timeout=0)
+        self.assertEqual(done, set())
+        self.assertEqual(
+            tuple(item[0] for item in materializer.calls),
+            ("materialize",),
+        )
+
+        transport.allow_close.set()
+        with self.assertRaises(asyncio.CancelledError):
+            await activation
+
+        loop.set_exception_handler(previous_handler)
+
+        self.assertEqual(
+            timeline,
+            [
+                "consumer-failed",
+                "consumer-close-started",
+                "consumer-quiesced",
+                "projection-closed",
+            ],
+        )
+        self.assertEqual(loop_contexts, [])
+
+    async def test_cancelled_unquiesced_consumer_never_releases_projection(
+        self,
+    ) -> None:
+        transport = _AwaitingUnquiesceableTransport()
+        client = PrimeControlPlaneClient(
+            process=transport,
+            private_content=_PrivateContent(),
+        )
+        materializer = _Materializer()
+        activation = asyncio.create_task(
+            _service(client, materializer).activate(
+                _portfolio(), _CredentialRefresh()
+            )
+        )
+
+        await transport.request_started.wait()
+        activation.cancel()
+        transport.allow_failure.set()
+        with self.assertRaises(asyncio.CancelledError):
+            await activation
+
+        self.assertEqual(
+            tuple(item[0] for item in materializer.calls),
+            ("materialize",),
         )
 
     async def test_frame_conversion_exception_is_fixed_and_redacted(self) -> None:

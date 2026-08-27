@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
+from contextlib import AbstractContextManager
 from pathlib import Path
 from types import MappingProxyType
-from typing import TypeGuard, cast
+from typing import IO, TypeGuard, cast
 
 from asterion.control.authority import AuthorityEnvelope
-from asterion.control.ecosystem import EcosystemPrivateSourceStore
-from asterion.control.ecosystem_materialization import SealedEcosystemMaterializer
+from asterion.control.ecosystem import (
+    EcosystemPortfolio,
+    EcosystemPrivateResource,
+    EcosystemPrivateSourceStore,
+)
+from asterion.control.ecosystem_materialization import (
+    EcosystemProjection,
+    SealedEcosystemMaterializer,
+)
 from asterion.control.factory import (
     ControlPlaneFactoryBinding,
     ControlPlaneFactoryContext,
@@ -20,6 +28,7 @@ from asterion.control.host import ControlPlaneClient, ControlPlaneManifest
 from asterion.control.protocol import OPAQUE_ID
 from asterion.control.providers.prime.client import (
     PrimeControlPlaneClient,
+    PrimeSidecarTransport,
 )
 from asterion.control.providers.prime.ecosystem import (
     McpCredentialRefresh,
@@ -112,6 +121,83 @@ _REQUIRED_OPTIONS = frozenset(
 )
 
 ProcessFactory = Callable[[PrimeSidecarLaunchOptions], object]
+
+
+class _DeferredPrimeSidecarTransport:
+    """Permit all selected-service binding to finish before process creation."""
+
+    def __init__(self) -> None:
+        self._process: PrimeSidecarTransport | None = None
+
+    def bind(self, process: object) -> None:
+        self._process = cast(PrimeSidecarTransport, process)
+
+    async def request(
+        self, envelope: Mapping[str, object]
+    ) -> Mapping[str, object]:
+        return await self._bound().request(envelope)
+
+    def events(
+        self, envelope: Mapping[str, object]
+    ) -> AsyncIterator[Mapping[str, object]]:
+        return self._bound().events(envelope)
+
+    async def close(self) -> None:
+        await self._bound().close()
+
+    def _bound(self) -> PrimeSidecarTransport:
+        if self._process is None:
+            raise RuntimeError
+        return self._process
+
+
+class _EcosystemSourceStoreSnapshot:
+    def __init__(
+        self,
+        private_resource: Callable[[str], EcosystemPrivateResource],
+        open_file: Callable[[str, str], AbstractContextManager[IO[bytes]]],
+    ) -> None:
+        self._private_resource = private_resource
+        self._open_file = open_file
+
+    def private_resource(self, resource_id: str) -> EcosystemPrivateResource:
+        return self._private_resource(resource_id)
+
+    def open_file(
+        self, resource_id: str, relative_path: str
+    ) -> AbstractContextManager[IO[bytes]]:
+        return self._open_file(resource_id, relative_path)
+
+
+class _EcosystemMaterializerSnapshot:
+    def __init__(
+        self,
+        materialize: Callable[
+            [EcosystemPortfolio, EcosystemPrivateSourceStore],
+            EcosystemProjection,
+        ],
+        close: Callable[[EcosystemProjection], None],
+    ) -> None:
+        self._materialize = materialize
+        self._close = close
+
+    def materialize(
+        self,
+        portfolio: EcosystemPortfolio,
+        store: EcosystemPrivateSourceStore,
+    ) -> EcosystemProjection:
+        return self._materialize(portfolio, store)
+
+    def close(self, projection: EcosystemProjection) -> None:
+        self._close(projection)
+
+
+class _McpCredentialRefreshSnapshot:
+    def __init__(self, refresh: Callable[[str, str], str]) -> None:
+        self._refresh = refresh
+
+    def refresh(self, lease_id: str, challenge_digest: str) -> str:
+        return self._refresh(lease_id, challenge_digest)
 
 
 def derive_prime_child_control_options(
@@ -209,9 +295,9 @@ def build_prime_control_plane_client(
         authority = context.authority
         if authority is None:
             raise ControlPlaneFactoryError("Prime authority snapshot is unavailable")
-        process = process_factory(launch_options)
+        transport = _DeferredPrimeSidecarTransport()
         client = PrimeControlPlaneClient(
-            process=process,  # type: ignore[arg-type]
+            process=transport,
             private_content=resolver,
             private_attachments=attachment_resolver,
             manifest=manifest,
@@ -226,10 +312,12 @@ def build_prime_control_plane_client(
                 authority_revision=authority.revision,
             )
             client.bind_ecosystem_service(service, credential_refresh)
+        process = process_factory(launch_options)
+        transport.bind(process)
         return client
     except ControlPlaneFactoryError:
         raise
-    except (OSError, TypeError, ValueError, PrimeSidecarProcessError):
+    except (OSError, RuntimeError, TypeError, ValueError, PrimeSidecarProcessError):
         raise ControlPlaneFactoryError("Prime control plane is unavailable") from None
 
 
@@ -267,12 +355,17 @@ def _require_ecosystem_services(
         source_store = services.get(_ECOSYSTEM_SOURCE_STORE_SERVICE)
         materializer = services.get(_ECOSYSTEM_MATERIALIZER_SERVICE)
         credential_refresh = services.get(_MCP_CREDENTIAL_REFRESH_SERVICE)
+        private_resource = getattr(source_store, "private_resource", None)
+        open_file = getattr(source_store, "open_file", None)
+        materialize = getattr(materializer, "materialize", None)
+        close = getattr(materializer, "close", None)
+        refresh = getattr(credential_refresh, "refresh", None)
         valid = (
-            callable(getattr(source_store, "private_resource", None))
-            and callable(getattr(source_store, "open_file", None))
-            and callable(getattr(materializer, "materialize", None))
-            and callable(getattr(materializer, "close", None))
-            and callable(getattr(credential_refresh, "refresh", None))
+            callable(private_resource)
+            and callable(open_file)
+            and callable(materialize)
+            and callable(close)
+            and callable(refresh)
         )
     except Exception:
         valid = False
@@ -281,9 +374,24 @@ def _require_ecosystem_services(
             "Prime ecosystem host service is unavailable"
         )
     return (
-        cast(EcosystemPrivateSourceStore, source_store),
-        cast(SealedEcosystemMaterializer, materializer),
-        cast(McpCredentialRefresh, credential_refresh),
+        _EcosystemSourceStoreSnapshot(
+            cast(Callable[[str], EcosystemPrivateResource], private_resource),
+            cast(
+                Callable[[str, str], AbstractContextManager[IO[bytes]]],
+                open_file,
+            ),
+        ),
+        _EcosystemMaterializerSnapshot(
+            cast(
+                Callable[
+                    [EcosystemPortfolio, EcosystemPrivateSourceStore],
+                    EcosystemProjection,
+                ],
+                materialize,
+            ),
+            cast(Callable[[EcosystemProjection], None], close),
+        ),
+        _McpCredentialRefreshSnapshot(cast(Callable[[str, str], str], refresh)),
     )
 
 

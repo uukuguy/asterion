@@ -147,6 +147,63 @@ class EcosystemProcess:
             yield {}
 
 
+class _OneShotProtocolObject:
+    protocol_names: frozenset[str] = frozenset()
+
+    def __init__(self) -> None:
+        self.accesses: dict[str, int] = {}
+
+    def __getattribute__(self, name: str):
+        protocol_names = object.__getattribute__(self, "protocol_names")
+        if name in protocol_names:
+            accesses = object.__getattribute__(self, "accesses")
+            accesses[name] = accesses.get(name, 0) + 1
+            if accesses[name] > 1:
+                raise RuntimeError("SENTINEL_SECOND_PROTOCOL_ACCESS")
+        return object.__getattribute__(self, name)
+
+
+class OneShotSourceStore(_OneShotProtocolObject):
+    protocol_names = frozenset({"private_resource", "open_file"})
+
+    def private_resource(self, resource_id: str) -> EcosystemPrivateResource:
+        raise KeyError(resource_id)
+
+    def open_file(self, resource_id: str, relative_path: str):
+        raise KeyError((resource_id, relative_path))
+
+
+class OneShotMaterializer(_OneShotProtocolObject):
+    protocol_names = frozenset({"materialize", "close"})
+
+    def __init__(self, root: Path) -> None:
+        super().__init__()
+        self.root = root
+        self.calls: list[str] = []
+
+    def materialize(self, portfolio, store) -> EcosystemProjection:
+        del store
+        self.calls.append("materialize")
+        return EcosystemProjection(
+            projection_id=portfolio.digest,
+            portfolio_digest=portfolio.digest,
+            root=self.root,
+            resource_roots={},
+        )
+
+    def close(self, projection: EcosystemProjection) -> None:
+        del projection
+        self.calls.append("close")
+
+
+class OneShotCredentialRefresh(_OneShotProtocolObject):
+    protocol_names = frozenset({"refresh"})
+
+    def refresh(self, lease_id: str, challenge_digest: str) -> str:
+        del lease_id, challenge_digest
+        raise AssertionError
+
+
 class ExplodingEcosystemService:
     def __getattribute__(self, name: str):
         del name
@@ -529,6 +586,110 @@ class TestPrimeEcosystemFactoryIntegration(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(processes), 1)
             self.assertEqual(len(processes[0].requests), 1)
             self.assertEqual(processes[0].requests[0]["type"], "ecosystem_activate")
+
+    async def test_factory_snapshots_one_shot_protocols_before_process_creation(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prepare_paths(root)
+            base = make_context(root)
+            source_store = OneShotSourceStore()
+            materializer = OneShotMaterializer(root / "projection")
+            credential_refresh = OneShotCredentialRefresh()
+            services = dict(base.host_services)
+            services.update(
+                {
+                    "ecosystem-source-store": source_store,
+                    "ecosystem-materializer": materializer,
+                    "mcp-credential-refresh": credential_refresh,
+                }
+            )
+            context = ControlPlaneFactoryContext(
+                system_id=base.system_id,
+                system_version=base.system_version,
+                control_plane_id=base.control_plane_id,
+                control_plane_version=base.control_plane_version,
+                private_root=base.private_root,
+                options=base.options,
+                authority=base.authority,
+                host_services=services,
+            )
+            processes: list[EcosystemProcess] = []
+            accesses_at_process_creation: list[tuple[dict[str, int], ...]] = []
+
+            def process_factory(options: PrimeSidecarLaunchOptions) -> EcosystemProcess:
+                accesses_at_process_creation.append(
+                    (
+                        dict(source_store.accesses),
+                        dict(materializer.accesses),
+                        dict(credential_refresh.accesses),
+                    )
+                )
+                process = EcosystemProcess(options)
+                processes.append(process)
+                return process
+
+            client = build_prime_control_plane_client(
+                context,
+                process_factory=process_factory,
+            )
+            portfolio = build_ecosystem_portfolio(
+                portfolio_id="portfolio-1",
+                authority_id="authority-1",
+                authority_revision=1,
+                resources=(),
+                registrations=(),
+            )
+
+            receipt = await client.activate_ecosystem_portfolio(portfolio)
+
+            self.assertEqual(receipt.status, "succeeded")
+            self.assertEqual(len(processes), 1)
+            self.assertEqual(
+                accesses_at_process_creation,
+                [
+                    (
+                        {"private_resource": 1, "open_file": 1},
+                        {"materialize": 1, "close": 1},
+                        {"refresh": 1},
+                    )
+                ],
+            )
+            self.assertEqual(materializer.calls, ["materialize", "close"])
+            self.assertEqual(
+                source_store.accesses,
+                {"private_resource": 1, "open_file": 1},
+            )
+            self.assertEqual(
+                materializer.accesses,
+                {"materialize": 1, "close": 1},
+            )
+            self.assertEqual(credential_refresh.accesses, {"refresh": 1})
+
+    async def test_binding_failure_is_fixed_and_precedes_process_creation(
+        self,
+    ) -> None:
+        from unittest import mock as task3_mock
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prepare_paths(root)
+            context = make_context(root)
+            processes: list[object] = []
+
+            with task3_mock.patch.object(
+                PrimeControlPlaneClient,
+                "bind_ecosystem_service",
+                side_effect=RuntimeError("SENTINEL_BINDING_EXCEPTION"),
+            ), self.assertRaises(ControlPlaneFactoryError) as raised:
+                build_prime_control_plane_client(
+                    context,
+                    process_factory=lambda options: processes.append(options),
+                )
+
+            self.assertEqual(processes, [])
+            self.assertNotIn("SENTINEL_BINDING_EXCEPTION", str(raised.exception))
 
 
 class TestPrimeSidecarProcess(unittest.IsolatedAsyncioTestCase):
