@@ -36,6 +36,13 @@ const RESOURCE_FEATURE_IDS = Object.freeze([
   "ecosystem.prompt-templates",
   "ecosystem.skills",
 ]);
+const EXPECTED_RESOURCE_COLLISIONS = Object.freeze([
+  Object.freeze({
+    name: "collision",
+    source_ids: Object.freeze(["prompt-collision-a", "prompt-collision-b"]),
+  }),
+]);
+const EXPECTED_RESOURCE_COLLISION_DIGEST = "0816b1f15a7f0cf028a4de1f2b57d3c4c3c77f25d5b1b22560564b719be5a091";
 const RESOURCE_SPECS = Object.freeze([
   Object.freeze(["context-global", "context-file", "global"]),
   Object.freeze(["context-project", "context-file", "project"]),
@@ -59,6 +66,7 @@ const MODEL_CREDENTIAL_NAMES = new Set([
 ]);
 const ALLOWED_ARGUMENTS = new Set([
   "--artifact-lock",
+  "--descriptor-manifest",
   "--module-lock",
   "--scenario-package",
   "--sealed-root",
@@ -94,7 +102,7 @@ function sha256(value) {
 }
 
 function argumentsMap(argv) {
-  if (argv.length !== 8) fail();
+  if (argv.length !== 8 && argv.length !== 10) fail();
   const parsed = new Map();
   for (let index = 0; index < argv.length; index += 2) {
     const name = argv[index];
@@ -102,7 +110,9 @@ function argumentsMap(argv) {
     if (!ALLOWED_ARGUMENTS.has(name) || parsed.has(name) || typeof value !== "string" || value.length === 0) fail();
     parsed.set(name, value);
   }
-  if (parsed.size !== ALLOWED_ARGUMENTS.size) fail();
+  if (!parsed.has("--artifact-lock") || !parsed.has("--module-lock") || !parsed.has("--scenario-package") || !parsed.has("--sealed-root")) fail();
+  if (argv.length === 8 && parsed.has("--descriptor-manifest")) fail();
+  if (argv.length === 10 && !parsed.has("--descriptor-manifest")) fail();
   return parsed;
 }
 
@@ -158,6 +168,55 @@ async function inspectProjectionFiles(root) {
   return Object.freeze(files);
 }
 
+async function parseResourceDescriptorManifest(path, sealedRoot) {
+  if (typeof path !== "string") fail();
+  const value = record(JSON.parse((await lockedFile(path)).toString("utf8")));
+  exactKeys(value, ["format", "portfolio_digest", "resources"]);
+  if (
+    value.format !== "asterion.prime-ecosystem-resource-descriptor-manifest/v1" ||
+    value.portfolio_digest !== basename(sealedRoot) ||
+    !Array.isArray(value.resources) ||
+    value.resources.length !== RESOURCE_SPECS.length
+  ) fail();
+  const descriptors = [];
+  for (const [index, item] of value.resources.entries()) {
+    const descriptor = record(item);
+    const [resourceId, kind, scope] = RESOURCE_SPECS[index];
+    exactKeys(descriptor, ["content_sha256", "kind", "resource_id", "scope", "source", "version"]);
+    const source = record(descriptor.source);
+    exactKeys(source, ["content_sha256", "kind", "source_id", "version"]);
+    const projectionPath = join(sealedRoot, resourceId);
+    const files = await inspectProjectionFiles(projectionPath);
+    const sourceId = `source-${resourceId}`;
+    if (
+      descriptor.resource_id !== resourceId ||
+      descriptor.kind !== kind ||
+      descriptor.scope !== scope ||
+      descriptor.version !== "1.0.0" ||
+      descriptor.content_sha256 !== sha256(canonical(files)) ||
+      source.source_id !== sourceId ||
+      source.kind !== "local-child" ||
+      source.version !== "1.0.0" ||
+      source.content_sha256 !== sha256(canonical({ files, source_id: sourceId }))
+    ) fail();
+    descriptors.push(Object.freeze({
+      contentDigest: descriptor.content_sha256,
+      kind: descriptor.kind,
+      projectionPath,
+      resourceId: descriptor.resource_id,
+      scope: descriptor.scope,
+      source: Object.freeze({
+        contentDigest: source.content_sha256,
+        kind: source.kind,
+        sourceId: source.source_id,
+        version: source.version,
+      }),
+      version: descriptor.version,
+    }));
+  }
+  return Object.freeze(descriptors);
+}
+
 function parseModuleLock(bytes) {
   const value = record(JSON.parse(bytes.toString("utf8")));
   exactKeys(value, ["artifact_lock_sha256", "bundle_sha256", "format", "modules", "source_commit"]);
@@ -182,28 +241,10 @@ function parseModuleLock(bytes) {
   return value;
 }
 
-async function resourceFrame({ artifactLockDigest, moduleLockDigest, sealedRoot }) {
+async function resourceFrame({ artifactLockDigest, descriptorManifestPath, moduleLockDigest, sealedRoot }) {
   const portfolioDigest = basename(sealedRoot);
   if (!/^[0-9a-f]{64}$/u.test(portfolioDigest)) fail();
-  const resources = [];
-  for (const [resourceId, kind, scope] of RESOURCE_SPECS) {
-    const projectionPath = join(sealedRoot, resourceId);
-    const files = await inspectProjectionFiles(projectionPath);
-    resources.push(Object.freeze({
-      contentDigest: sha256(canonical(files)),
-      kind,
-      projectionPath,
-      resourceId,
-      scope,
-      source: Object.freeze({
-        contentDigest: sha256(canonical({ files, resourceId })),
-        kind: "local-child",
-        sourceId: `source-${resourceId}`,
-        version: "1.0.0",
-      }),
-      version: "1.0.0",
-    }));
-  }
+  const resources = await parseResourceDescriptorManifest(descriptorManifestPath, sealedRoot);
   return Object.freeze({
     artifactLockDigest,
     authorityDigest: sha256("ecosystem-resources-authority"),
@@ -220,7 +261,7 @@ async function resourceFrame({ artifactLockDigest, moduleLockDigest, sealedRoot 
   });
 }
 
-function promptCollisionDigest(prompts) {
+function promptCollisionList(prompts) {
   const groups = new Map();
   for (const prompt of prompts) {
     const sourceId = basename(dirname(prompt.filePath));
@@ -231,10 +272,10 @@ function promptCollisionDigest(prompts) {
   const collisions = [];
   for (const [name, sourceIds] of groups) {
     const unique = [...new Set(sourceIds)].sort();
-    if (unique.length > 1) collisions.push(Object.freeze({ name, sourceIds: Object.freeze(unique) }));
+    if (unique.length > 1) collisions.push(Object.freeze({ name, source_ids: Object.freeze(unique) }));
   }
   collisions.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
-  return sha256(canonical(collisions));
+  return Object.freeze(collisions);
 }
 
 function assertResourceObservation({ contexts, prompts, promptModule, skills }) {
@@ -249,9 +290,14 @@ function assertResourceObservation({ contexts, prompts, promptModule, skills }) 
   );
   if (expanded !== "first=alpha\nliteral=$1\nslice=$1 gamma\nall=alpha $1 gamma") fail();
   if (prompts.length !== 3) fail();
-  const forwardCollisionDigest = promptCollisionDigest(prompts);
-  const reverseCollisionDigest = promptCollisionDigest([...prompts].reverse());
-  if (forwardCollisionDigest !== reverseCollisionDigest) fail();
+  const collisionList = promptCollisionList(prompts);
+  const forwardCollisionDigest = sha256(canonical(collisionList));
+  const reverseCollisionDigest = sha256(canonical(promptCollisionList([...prompts].reverse())));
+  if (
+    canonical(collisionList) !== canonical(EXPECTED_RESOURCE_COLLISIONS) ||
+    forwardCollisionDigest !== EXPECTED_RESOURCE_COLLISION_DIGEST ||
+    reverseCollisionDigest !== EXPECTED_RESOURCE_COLLISION_DIGEST
+  ) fail();
   if (
     skills.diagnostics.length !== 0 ||
     skills.skills.length !== 2 ||
@@ -268,6 +314,7 @@ function assertResourceObservation({ contexts, prompts, promptModule, skills }) 
   }));
   return Object.freeze({
     collisionDigest: forwardCollisionDigest,
+    collisionCount: collisionList.length,
     contextCount: contexts.length,
     digest: sha256(canonical({
       collisionDigest: forwardCollisionDigest,
@@ -282,8 +329,8 @@ function assertResourceObservation({ contexts, prompts, promptModule, skills }) 
   });
 }
 
-async function resourceObservation({ artifactLockDigest, bundle, binding, gateway, moduleLockDigest, scenarioPackage, sealedRoot }) {
-  const frame = await resourceFrame({ artifactLockDigest, moduleLockDigest, sealedRoot });
+async function resourceObservation({ artifactLockDigest, bundle, binding, descriptorManifestPath, gateway, moduleLockDigest, scenarioPackage, sealedRoot }) {
+  const frame = await resourceFrame({ artifactLockDigest, descriptorManifestPath, moduleLockDigest, sealedRoot });
   const storeRoot = join(dirname(sealedRoot), `.gateway-${basename(sealedRoot)}`);
   try {
     const moduleObservation = await bundle.inspectResources(frame);
@@ -358,7 +405,8 @@ async function resourceObservation({ artifactLockDigest, bundle, binding, gatewa
     ) fail();
     const publicObservation = Object.freeze({
       assertion_ids: RESOURCE_ASSERTION_IDS,
-      collision_count: 1,
+      collision_digest: privateObservation.collisionDigest,
+      collision_count: privateObservation.collisionCount,
       context_count: privateObservation.contextCount,
       feature_ids: RESOURCE_FEATURE_IDS,
       format: "asterion.prime-ecosystem-observation/v1",
@@ -371,7 +419,6 @@ async function resourceObservation({ artifactLockDigest, bundle, binding, gatewa
       skill_count: privateObservation.skillCount,
       status: "PASS",
     });
-    if (privateObservation.collisionDigest.length !== 64) fail();
     return Object.freeze({
       ...publicObservation,
       observation_digest: sha256(canonical({
@@ -396,9 +443,11 @@ async function main() {
 
   const moduleLockPath = argumentsValue.get("--module-lock");
   const artifactLockPath = argumentsValue.get("--artifact-lock");
+  const descriptorManifestPath = argumentsValue.get("--descriptor-manifest");
   const sealedRoot = argumentsValue.get("--sealed-root");
   const scenarioPackage = argumentsValue.get("--scenario-package");
   if (scenarioPackage !== "lock-boundary" && scenarioPackage !== "resources") fail();
+  if ((scenarioPackage === "resources") !== (descriptorManifestPath !== undefined)) fail();
   await requireSealedTree(sealedRoot);
 
   const moduleLockBytes = await lockedFile(moduleLockPath);
@@ -435,6 +484,7 @@ async function main() {
       artifactLockDigest,
       binding,
       bundle,
+      descriptorManifestPath,
       gateway,
       moduleLockDigest,
       scenarioPackage,

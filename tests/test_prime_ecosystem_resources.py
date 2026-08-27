@@ -48,6 +48,7 @@ ASSERTION_IDS = [
 ]
 PUBLIC_KEYS = {
     "assertion_ids",
+    "collision_digest",
     "collision_count",
     "context_count",
     "feature_ids",
@@ -62,6 +63,9 @@ PUBLIC_KEYS = {
     "skill_count",
     "status",
 }
+EXPECTED_COLLISION_DIGEST = (
+    "0816b1f15a7f0cf028a4de1f2b57d3c4c3c77f25d5b1b22560564b719be5a091"
+)
 RESOURCE_KINDS = {
     "context-global": ("context-file", "global"),
     "context-project": ("context-file", "project"),
@@ -186,6 +190,7 @@ def _command_with_artifact_lock(
     node: Path,
     sealed_root: Path,
     artifact_lock: Path,
+    descriptor_manifest: Path,
 ) -> tuple[str, ...]:
     return (
         str(node),
@@ -198,6 +203,8 @@ def _command_with_artifact_lock(
         str(sealed_root),
         "--scenario-package",
         SCENARIO_PACKAGE,
+        "--descriptor-manifest",
+        str(descriptor_manifest),
     )
 
 
@@ -219,7 +226,43 @@ def _committed_artifact_lock() -> bytes:
     return completed.stdout
 
 
-def _run_resource_harness(node: Path) -> tuple[dict[str, object], str]:
+def _descriptor_manifest_for(
+    portfolio,
+    *,
+    mismatch: str | None = None,
+) -> dict[str, object]:
+    resources = []
+    for resource in portfolio.resources:
+        source_id = resource.source.source_id
+        if mismatch == "source-id" and resource.resource_id == "prompt-collision-a":
+            source_id = "source-prompt-collision-z"
+        resources.append(
+            {
+                "content_sha256": resource.content_sha256,
+                "kind": resource.kind,
+                "resource_id": resource.resource_id,
+                "scope": resource.scope,
+                "source": {
+                    "content_sha256": resource.source.content_sha256,
+                    "kind": resource.source.kind,
+                    "source_id": source_id,
+                    "version": resource.source.version,
+                },
+                "version": resource.version,
+            }
+        )
+    return {
+        "format": "asterion.prime-ecosystem-resource-descriptor-manifest/v1",
+        "portfolio_digest": portfolio.digest,
+        "resources": resources,
+    }
+
+
+def _run_resource_harness_result(
+    node: Path,
+    *,
+    mismatch: str | None = None,
+) -> tuple[int, dict[str, object] | None, str]:
     private_resources = tuple(
         _private_resource(resource_id) for resource_id in sorted(RESOURCE_KINDS)
     )
@@ -236,6 +279,16 @@ def _run_resource_harness(node: Path) -> tuple[dict[str, object], str]:
         artifact_lock = parent / "prime-artifact-lock.json"
         artifact_lock.write_bytes(_committed_artifact_lock())
         artifact_lock.chmod(0o600)
+        descriptor_manifest = parent / "resource-descriptor-manifest.json"
+        descriptor_manifest.write_text(
+            json.dumps(
+                _descriptor_manifest_for(portfolio, mismatch=mismatch),
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            encoding="utf-8",
+        )
+        descriptor_manifest.chmod(0o600)
         resolved = resolve_prime_ecosystem_module(
             PINNED_SOURCE,
             MODULE_LOCK,
@@ -253,7 +306,12 @@ def _run_resource_harness(node: Path) -> tuple[dict[str, object], str]:
         projection = materializer.materialize(portfolio, store)
         try:
             completed = subprocess.run(
-                _command_with_artifact_lock(node, projection.root, artifact_lock),
+                _command_with_artifact_lock(
+                    node,
+                    projection.root,
+                    artifact_lock,
+                    descriptor_manifest,
+                ),
                 cwd=ROOT,
                 env=_closed_environment(private_home),
                 check=False,
@@ -264,21 +322,28 @@ def _run_resource_harness(node: Path) -> tuple[dict[str, object], str]:
         finally:
             materializer.close(projection)
         stdout = completed.stdout
-        if completed.returncode != 0:
-            raise AssertionError("real Prime ecosystem resource harness failed")
-        try:
-            report = json.loads(stdout)
-        except (json.JSONDecodeError, TypeError):
-            raise AssertionError("real Prime ecosystem resource harness failed") from None
-        if not isinstance(report, dict):
-            raise AssertionError("real Prime ecosystem resource harness failed")
+        report = None
+        if stdout:
+            try:
+                value = json.loads(stdout)
+            except (json.JSONDecodeError, TypeError):
+                value = None
+            if isinstance(value, dict):
+                report = value
         if (
             str(parent) in stdout
             or str(PINNED_SOURCE) in stdout
             or str(FIXTURE_ROOT) in stdout
         ):
             raise AssertionError("real Prime ecosystem resource harness leaked a path")
-    return report, stdout
+    return completed.returncode, report, stdout + completed.stderr
+
+
+def _run_resource_harness(node: Path) -> tuple[dict[str, object], str]:
+    returncode, report, output = _run_resource_harness_result(node)
+    if returncode != 0 or report is None:
+        raise AssertionError("real Prime ecosystem resource harness failed")
+    return report, output
 
 
 @unittest.skipUnless(
@@ -304,6 +369,7 @@ class TestPrimeEcosystemResources(unittest.TestCase):
         self.assertEqual(report["prompt_count"], 3)
         self.assertEqual(report["skill_count"], 2)
         self.assertEqual(report["collision_count"], 1)
+        self.assertEqual(report["collision_digest"], EXPECTED_COLLISION_DIGEST)
         self.assertEqual(report["resource_count"], len(RESOURCE_KINDS))
         self.assertEqual(report["provider_operations"], 0)
         self.assertEqual(report["model_credential_reads"], 0)
@@ -323,6 +389,18 @@ class TestPrimeEcosystemResources(unittest.TestCase):
         self.assertEqual(first["observation_digest"], second["observation_digest"])
         self.assertEqual(first["provider_operations"], 0)
         self.assertEqual(second["provider_operations"], 0)
+
+    def test_resource_descriptor_identity_mismatch_is_rejected_redacted(self) -> None:
+        returncode, report, output = _run_resource_harness_result(
+            self.node,
+            mismatch="source-id",
+        )
+
+        self.assertNotEqual(returncode, 0)
+        self.assertIsNone(report)
+        for sentinel in BODY_SENTINELS:
+            self.assertNotIn(sentinel, output)
+        self.assertNotIn("SENTINEL_MODEL_CREDENTIAL", output)
 
 
 if __name__ == "__main__":
