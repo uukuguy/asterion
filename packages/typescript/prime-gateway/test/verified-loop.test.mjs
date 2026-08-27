@@ -291,6 +291,7 @@ async function startGateway(root, scenario, socketPath, descriptorPatch = {}) {
     primeSocketPath: socketPath,
     primeSourceRoot,
     provider: "provider-free",
+    probeReady: false,
     remainingBudget: {
       controller_tokens: 0,
       application_tokens: 100,
