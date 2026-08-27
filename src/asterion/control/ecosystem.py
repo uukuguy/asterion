@@ -6,6 +6,7 @@ import hashlib
 import json
 from dataclasses import dataclass, field
 from collections.abc import Iterable
+from pathlib import PurePosixPath
 from typing import ContextManager, IO, Literal, Protocol, Self
 
 from asterion.control.protocol import OPAQUE_ID, SEMANTIC_VERSION
@@ -45,6 +46,38 @@ _COLLISION_REASON = "ecosystem-resource-collision"
 
 class EcosystemError(ValueError):
     """Raised when a public ecosystem contract is invalid."""
+
+
+@dataclass(frozen=True)
+class EcosystemPrivateFile:
+    relative_path: str
+    sha256: str
+    size_bytes: int
+
+    def __post_init__(self) -> None:
+        _require_private_relative_path(self.relative_path)
+        _require_sha256(self.sha256)
+        _require_nonnegative_integer(self.size_bytes)
+
+
+@dataclass(frozen=True, repr=False)
+class EcosystemPrivateResource:
+    resource_id: str
+    source_id: str
+    files: tuple[EcosystemPrivateFile, ...]
+
+    def __post_init__(self) -> None:
+        _require_opaque_id(self.resource_id)
+        _require_opaque_id(self.source_id)
+        if (
+            not isinstance(self.files, tuple)
+            or not self.files
+            or any(type(item) is not EcosystemPrivateFile for item in self.files)
+            or self.files
+            != tuple(sorted(self.files, key=lambda item: item.relative_path))
+            or len({item.relative_path for item in self.files}) != len(self.files)
+        ):
+            raise EcosystemError("ecosystem private resource is invalid")
 
 
 @dataclass(frozen=True, repr=False)
@@ -182,6 +215,8 @@ class EcosystemActivationReceipt:
 
 class EcosystemPrivateSourceStore(Protocol):
     """Private host capability for one already-admitted source child."""
+
+    def private_resource(self, resource_id: str) -> EcosystemPrivateResource: ...
 
     def open_file(
         self,
@@ -362,6 +397,18 @@ def _require_sha256(value: object) -> None:
         or any(character not in "0123456789abcdef" for character in value)
     ):
         raise EcosystemError("ecosystem digest is invalid")
+
+
+def _require_private_relative_path(value: object) -> None:
+    if not isinstance(value, str) or not value:
+        raise EcosystemError("ecosystem private file is invalid")
+    path = PurePosixPath(value)
+    if (
+        path.is_absolute()
+        or path.as_posix() != value
+        or any(part in {"", ".", ".."} for part in path.parts)
+    ):
+        raise EcosystemError("ecosystem private file is invalid")
 
 
 def _require_closed_value(value: object, allowed: frozenset[str]) -> None:
