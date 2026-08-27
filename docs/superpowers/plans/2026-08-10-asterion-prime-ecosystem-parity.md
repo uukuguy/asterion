@@ -420,8 +420,14 @@ git commit -m "feat: fence Prime ecosystem activation"
 - Create: `packages/typescript/prime-gateway/resources/prime-ecosystem-module-lock.json`
 - Create: `packages/typescript/prime-gateway/resources/prime-ecosystem-module.mjs`
 - Modify: `packages/typescript/prime-gateway/resources/prime-artifact-lock.json`
+- Modify: `src/asterion/control/providers/prime/ecosystem.py`
+- Modify: `packages/typescript/prime-gateway/src/ecosystem.ts`
+- Modify: `packages/typescript/prime-gateway/src/main.ts`
 - Modify: `tools/setup_prime_agent.py`
 - Modify: `tests/test_setup_prime_agent.py`
+- Modify: `tests/test_prime_ecosystem_adapter.py`
+- Modify: `packages/typescript/prime-gateway/test/ecosystem.test.mjs`
+- Modify: `packages/typescript/prime-gateway/test/main.test.mjs`
 - Create: `tests/fixtures/prime_gateway/v1/real-prime-ecosystem.mjs`
 - Create: `tests/test_prime_ecosystem_real_process.py`
 
@@ -461,6 +467,8 @@ Expected: FAIL because the ecosystem module lock/resolver is absent.
 The lock contains exactly `format`, `source_commit`, `artifact_lock_sha256`, `bundle_sha256`, and a sorted `modules` array of `{module_id, source_path, built_path, sha256}` for Prime resource loader, prompt templates, skills, extension loader/runner, package manager, MCP manager/OAuth, diagnostics, and model registry. The resolver verifies the pinned commit and every source/built/bundle digest without importing modules.
 
 The Asterion-owned `.mjs` bundle imports only locked built paths and exports `inspectResources`, `runExtensionLifecycle`, `resolvePackage`, and `runMcpFixture`. Each function accepts a sealed frame, disables defaults/bundled discovery, returns a private observation, and exposes no executable path or provider invocation function.
+
+Bind the resulting checked-in artifact/module lock digests into both sides of the private frame. Python must read the exact checked-in lock resources without importing Prime and emit their real SHA-256 values; the Gateway adapter/main must receive the exact resolved lock contract and reject any placeholder, frame drift, or bundle drift before activation. No source path or lock body enters the public receipt.
 
 - [ ] **Step 4: Implement the shared real-process fixture and rerun twice**
 
