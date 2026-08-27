@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from tools.check_promotion import PromotionError, _default_runner, run_promotion
+from tools.setup_prime_agent import PrimeSetupError
 
 
 REQUIRED_FIXTURE_ASSETS = (
@@ -140,6 +141,10 @@ class PromotionCheckTests(unittest.TestCase):
                 self.assertFalse((cwd / ".superpowers/sdd").exists())
                 self.assertTrue((cwd / ".superpowers/keep.md").is_file())
                 for name in excluded:
+                    if name == "3th-party" and (cwd / name).exists():
+                        self.assertTrue((cwd / "3th-party/prime-agent").is_symlink())
+                        self.assertFalse((cwd / "3th-party/excluded.txt").exists())
+                        continue
                     self.assertFalse((cwd / name).exists(), name)
                 return completed(command, acceptance_stdout(command))
 
@@ -231,6 +236,7 @@ class PromotionCheckTests(unittest.TestCase):
             "npm test --prefix packages/typescript/asterion-runtime",
             "npm test --prefix packages/typescript/dci-context-extension",
             "npm ci --prefix packages/typescript/prime-gateway",
+            "npm run build --prefix packages/typescript/prime-gateway",
             "npm test --prefix packages/typescript/prime-gateway",
             "uv run python tools/verify_prime_loop.py --level provider-free",
             "cargo test --manifest-path packages/rust/controlled-executor/Cargo.toml",
@@ -345,6 +351,115 @@ class PromotionCheckTests(unittest.TestCase):
             "paper compare",
         ):
             self.assertNotIn(forbidden, command_text)
+
+    def test_full_plan_builds_prime_gateway_before_python_discovery(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            source = make_source(Path(temporary_directory))
+            commands: list[tuple[str, ...]] = []
+
+            def runner(
+                command: tuple[str, ...], cwd: Path
+            ) -> subprocess.CompletedProcess[str]:
+                commands.append(command)
+                if command == ("uv", "build", "."):
+                    dist = cwd / "dist"
+                    dist.mkdir()
+                    (dist / "asterion-0.1.0-py3-none-any.whl").write_bytes(b"wheel")
+                return completed(command, acceptance_stdout(command))
+
+            run_promotion(source_root=source, quick=False, runner=runner)
+
+        self.assertLess(
+            commands.index(
+                ("npm", "run", "build", "--prefix", "packages/typescript/prime-gateway")
+            ),
+            commands.index(("uv", "run", "python", "-m", "unittest", "discover", "-s", "tests", "-v")),
+        )
+
+    def test_external_prime_source_root_is_bound_into_isolated_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = Path(temporary_directory)
+            source = make_source(temporary)
+            external = temporary / "external-prime"
+            external.mkdir()
+            roots: list[Path] = []
+
+            def runner(
+                command: tuple[str, ...], cwd: Path
+            ) -> subprocess.CompletedProcess[str]:
+                roots.append(cwd)
+                binding = cwd / "3th-party" / "prime-agent"
+                self.assertTrue(binding.is_symlink())
+                self.assertEqual(binding.resolve(), external.resolve())
+                return completed(command, acceptance_stdout(command))
+
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {"ASTERION_PRIME_SOURCE_ROOT": str(external)},
+                    clear=False,
+                ),
+                mock.patch(
+                    "tools.check_promotion.resolve_prime_ecosystem_module"
+                ) as resolver,
+            ):
+                run_promotion(source_root=source, quick=True, runner=runner)
+
+        resolver.assert_called_once()
+        self.assertEqual(resolver.call_args.args[0], external.resolve())
+        self.assertTrue(roots)
+
+    def test_external_prime_source_root_rejects_failed_exact_resolver(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = Path(temporary_directory)
+            source = make_source(temporary)
+            external = temporary / "external-prime"
+            external.mkdir()
+            calls: list[tuple[str, ...]] = []
+
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {"ASTERION_PRIME_SOURCE_ROOT": str(external)},
+                    clear=False,
+                ),
+                mock.patch(
+                    "tools.check_promotion.resolve_prime_ecosystem_module",
+                    side_effect=PrimeSetupError("Prime ecosystem module is invalid"),
+                ),
+                self.assertRaises(PromotionError),
+            ):
+                run_promotion(
+                    source_root=source,
+                    quick=True,
+                    runner=lambda command, cwd: calls.append(command)
+                    or completed(command),
+                )
+
+        self.assertEqual(calls, [])
+
+    def test_external_prime_source_root_rejects_missing_explicit_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            temporary = Path(temporary_directory)
+            source = make_source(temporary)
+            calls: list[tuple[str, ...]] = []
+
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {"ASTERION_PRIME_SOURCE_ROOT": str(temporary / "missing-prime")},
+                    clear=False,
+                ),
+                self.assertRaises(PromotionError),
+            ):
+                run_promotion(
+                    source_root=source,
+                    quick=True,
+                    runner=lambda command, cwd: calls.append(command)
+                    or completed(command),
+                )
+
+        self.assertEqual(calls, [])
 
     def test_quick_plan_uses_valid_discovery_commands(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

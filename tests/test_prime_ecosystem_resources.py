@@ -22,9 +22,9 @@ from asterion.control.ecosystem_materialization import (
 from tests.test_prime_ecosystem_real_process import (
     MODEL_CREDENTIAL_VARIABLES,
     MODULE_LOCK,
-    PINNED_SOURCE,
     REAL_HARNESS,
     _node_22,
+    pinned_prime_source_root,
 )
 from tools.setup_prime_agent import resolve_prime_ecosystem_module
 
@@ -209,21 +209,16 @@ def _command_with_artifact_lock(
 
 
 def _committed_artifact_lock() -> bytes:
-    completed = subprocess.run(
-        (
-            "git",
-            "show",
-            "HEAD:packages/typescript/prime-gateway/resources/"
-            "prime-artifact-lock.json",
-        ),
-        cwd=ROOT,
-        check=False,
-        capture_output=True,
-        timeout=10,
+    artifact_lock = (
+        ROOT / "packages/typescript/prime-gateway/resources/prime-artifact-lock.json"
     )
-    if completed.returncode != 0 or not completed.stdout:
+    try:
+        body = artifact_lock.read_bytes()
+    except OSError:
         raise AssertionError("real Prime ecosystem resource harness failed")
-    return completed.stdout
+    if not body:
+        raise AssertionError("real Prime ecosystem resource harness failed")
+    return body
 
 
 def _descriptor_manifest_for(
@@ -289,8 +284,9 @@ def _run_resource_harness_result(
             encoding="utf-8",
         )
         descriptor_manifest.chmod(0o600)
+        prime_source = pinned_prime_source_root()
         resolved = resolve_prime_ecosystem_module(
-            PINNED_SOURCE,
+            prime_source,
             MODULE_LOCK,
             artifact_lock_path=artifact_lock,
         )
@@ -332,7 +328,7 @@ def _run_resource_harness_result(
                 report = value
         if (
             str(parent) in stdout
-            or str(PINNED_SOURCE) in stdout
+            or str(prime_source) in stdout
             or str(FIXTURE_ROOT) in stdout
         ):
             raise AssertionError("real Prime ecosystem resource harness leaked a path")
@@ -347,7 +343,8 @@ def _run_resource_harness(node: Path) -> tuple[dict[str, object], str]:
 
 
 @unittest.skipUnless(
-    PINNED_SOURCE.is_dir(), "external pinned Prime ecosystem source is unavailable"
+    pinned_prime_source_root().is_dir(),
+    "external pinned Prime ecosystem source is unavailable",
 )
 class TestPrimeEcosystemResources(unittest.TestCase):
     @classmethod

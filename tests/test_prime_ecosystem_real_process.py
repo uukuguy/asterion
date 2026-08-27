@@ -12,7 +12,8 @@ from tools.setup_prime_agent import resolve_prime_ecosystem_module
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PINNED_SOURCE = ROOT / "3th-party/prime-agent"
+DEFAULT_PINNED_SOURCE = ROOT / "3th-party/prime-agent"
+PINNED_SOURCE = DEFAULT_PINNED_SOURCE
 MODULE_LOCK = (
     ROOT
     / "packages/typescript/prime-gateway/resources/prime-ecosystem-module-lock.json"
@@ -81,6 +82,13 @@ PUBLIC_KEYS = {
     "scenario_package",
     "status",
 }
+
+
+def pinned_prime_source_root() -> Path:
+    configured = os.environ.get("ASTERION_PRIME_SOURCE_ROOT")
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return DEFAULT_PINNED_SOURCE
 
 
 def _closed_environment(private_home: Path) -> dict[str, str]:
@@ -160,7 +168,8 @@ def _command(node: Path, sealed_root: Path) -> tuple[str, ...]:
 
 
 def _run_real_harness(node: Path) -> tuple[dict[str, object], str]:
-    resolved = resolve_prime_ecosystem_module(PINNED_SOURCE, MODULE_LOCK)
+    prime_source = pinned_prime_source_root()
+    resolved = resolve_prime_ecosystem_module(prime_source, MODULE_LOCK)
     if resolved.bundle_path.name != "prime-ecosystem-module.mjs":
         raise AssertionError("real Prime ecosystem harness failed")
     with tempfile.TemporaryDirectory(
@@ -190,13 +199,14 @@ def _run_real_harness(node: Path) -> tuple[dict[str, object], str]:
             raise AssertionError("real Prime ecosystem harness failed") from None
         if not isinstance(report, dict):
             raise AssertionError("real Prime ecosystem harness failed")
-        if str(parent) in stdout or str(PINNED_SOURCE) in stdout:
+        if str(parent) in stdout or str(prime_source) in stdout:
             raise AssertionError("real Prime ecosystem harness leaked a private path")
     return report, stdout
 
 
 @unittest.skipUnless(
-    PINNED_SOURCE.is_dir(), "external pinned Prime ecosystem source is unavailable"
+    pinned_prime_source_root().is_dir(),
+    "external pinned Prime ecosystem source is unavailable",
 )
 class TestPrimeEcosystemRealProcess(unittest.TestCase):
     @classmethod

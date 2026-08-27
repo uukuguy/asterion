@@ -24,9 +24,9 @@ from asterion.control.ecosystem_materialization import (
 from tests.test_prime_ecosystem_real_process import (
     MODEL_CREDENTIAL_VARIABLES,
     MODULE_LOCK,
-    PINNED_SOURCE,
     REAL_HARNESS,
     _node_22,
+    pinned_prime_source_root,
 )
 from tests.test_prime_ecosystem_resources import _committed_artifact_lock
 from tools.setup_prime_agent import resolve_prime_ecosystem_module
@@ -290,7 +290,7 @@ def _run_mcp_harness(node: Path) -> tuple[int, dict[str, object] | None, str]:
         artifact_lock.chmod(0o600)
         mcp_channel_command = _write_mcp_channel_bridge(parent, node)
         resolved = resolve_prime_ecosystem_module(
-            PINNED_SOURCE,
+            pinned_prime_source_root(),
             MODULE_LOCK,
             artifact_lock_path=artifact_lock,
         )
@@ -335,7 +335,8 @@ def _run_mcp_harness(node: Path) -> tuple[int, dict[str, object] | None, str]:
 
 
 @unittest.skipUnless(
-    PINNED_SOURCE.is_dir(), "external pinned Prime ecosystem source is unavailable"
+    pinned_prime_source_root().is_dir(),
+    "external pinned Prime ecosystem source is unavailable",
 )
 class TestPrimeEcosystemMcp(unittest.TestCase):
     @classmethod

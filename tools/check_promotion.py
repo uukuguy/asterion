@@ -12,6 +12,11 @@ import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+if __package__:
+    from tools.setup_prime_agent import PrimeSetupError, resolve_prime_ecosystem_module
+else:
+    from setup_prime_agent import PrimeSetupError, resolve_prime_ecosystem_module
+
 
 Runner = Callable[[tuple[str, ...], Path], subprocess.CompletedProcess[str]]
 
@@ -310,6 +315,8 @@ FORBIDDEN = (
 )
 DCI_PARENT_PATTERN = re.compile(r"\.\./src/dci(?=$|[/\s`'\"\)])")
 LOCAL_SDD_ARTIFACTS = (".superpowers", "sdd")
+PRIME_SOURCE_ENV = "ASTERION_PRIME_SOURCE_ROOT"
+DEFAULT_PRIME_SOURCE = Path("3th-party/prime-agent")
 
 
 class PromotionError(RuntimeError):
@@ -386,6 +393,9 @@ def _audit_copy(copy_root: Path) -> None:
         raise PromotionError("promotion copy is missing required repository assets")
 
     for path in sorted(copy_root.rglob("*")):
+        relative = path.relative_to(copy_root)
+        if _is_excluded(relative):
+            continue
         if path.is_symlink():
             raise PromotionError("promotion copy contains a symlink")
         if not path.is_file():
@@ -423,6 +433,36 @@ def _run(
             message = f"{message}\n{tail}"
         raise PromotionError(message)
     return completed
+
+
+def _external_prime_source_root(source_root: Path) -> Path | None:
+    configured = os.environ.get(PRIME_SOURCE_ENV)
+    candidate = Path(configured) if configured else source_root / DEFAULT_PRIME_SOURCE
+    if configured and not candidate.is_absolute():
+        candidate = source_root / candidate
+    if not candidate.exists():
+        if configured:
+            raise PromotionError("external Prime source binding is unavailable")
+        return None
+    try:
+        resolved = candidate.resolve(strict=True)
+        resolve_prime_ecosystem_module(resolved)
+    except (OSError, RuntimeError, PrimeSetupError):
+        raise PromotionError("external Prime source binding is invalid") from None
+    return resolved
+
+
+def _bind_external_prime_source(copy_root: Path, source_root: Path) -> None:
+    prime_source = _external_prime_source_root(source_root)
+    if prime_source is None:
+        return
+    parent = copy_root / DEFAULT_PRIME_SOURCE.parent
+    parent.mkdir(parents=True, exist_ok=True)
+    target = parent / DEFAULT_PRIME_SOURCE.name
+    try:
+        target.symlink_to(prime_source, target_is_directory=True)
+    except OSError as error:
+        raise PromotionError("external Prime source binding could not be created") from error
 
 
 def _assert_acceptance(stdout: str) -> None:
@@ -527,6 +567,7 @@ def _run_full(copy_root: Path, venv_root: Path, runner: Runner) -> int:
         ("npm", "ci", "--prefix", "packages/typescript/asterion-runtime"),
         ("npm", "run", "build", "--prefix", "packages/typescript/asterion-runtime"),
         ("npm", "ci", "--prefix", "packages/typescript/prime-gateway"),
+        ("npm", "run", "build", "--prefix", "packages/typescript/prime-gateway"),
         (
             "uv",
             "run",
@@ -641,6 +682,7 @@ def run_promotion(
         workspace = Path(temporary).resolve()
         copy_root = workspace / "project"
         _copy_project(source, copy_root)
+        _bind_external_prime_source(copy_root, source)
         _audit_copy(copy_root)
         command_count = (
             _run_quick(copy_root, runner)

@@ -59,10 +59,10 @@ lint:
 docs-check:
 	$(UV_BIN) run python tools/check_docs.py
 
-check: test lint docs-check test-typescript check-rust build
+check: test-typescript test lint docs-check check-rust build
 
 promotion-check:
-	$(UV_BIN) run python tools/check_promotion.py
+	ASTERION_PRIME_SOURCE_ROOT="$(ASTERION_PRIME_SOURCE_ROOT)" $(UV_BIN) run python tools/check_promotion.py
 
 first-run-check:
 	$(UV_BIN) run python -m unittest -v tests.test_setup_pi tests.test_resource_setup tests.test_asterion_dci_verification
@@ -136,6 +136,8 @@ test-typescript:
 	npm ci --prefix packages/typescript/asterion-runtime
 	npm test --prefix packages/typescript/asterion-runtime
 	npm test --prefix packages/typescript/dci-context-extension
+	npm ci --prefix packages/typescript/prime-gateway
+	npm --prefix packages/typescript/prime-gateway run build
 
 test-rust:
 	cargo test --manifest-path packages/rust/controlled-executor/Cargo.toml

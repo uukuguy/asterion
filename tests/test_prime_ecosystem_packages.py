@@ -8,7 +8,6 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path, PurePosixPath
-from typing import Any
 
 from asterion.capability_packages import (
     CapabilityPackageRef,
@@ -43,10 +42,10 @@ from asterion.control.ecosystem_materialization import (
 )
 from tests.test_prime_ecosystem_real_process import (
     MODULE_LOCK,
-    PINNED_SOURCE,
     REAL_HARNESS,
     _closed_environment,
     _node_22,
+    pinned_prime_source_root,
 )
 from tests.test_prime_ecosystem_resources import _committed_artifact_lock
 from tools.setup_prime_agent import resolve_prime_ecosystem_module
@@ -349,8 +348,9 @@ def _run_package_harness(
         artifact_lock = parent / "prime-artifact-lock.json"
         artifact_lock.write_bytes(_committed_artifact_lock())
         artifact_lock.chmod(0o600)
+        prime_source = pinned_prime_source_root()
         resolved = resolve_prime_ecosystem_module(
-            PINNED_SOURCE,
+            prime_source,
             MODULE_LOCK,
             artifact_lock_path=artifact_lock,
         )
@@ -399,7 +399,7 @@ def _run_package_harness(
 
 class TestPrimeEcosystemPackages(unittest.TestCase):
     def _real_node(self) -> Path:
-        if not PINNED_SOURCE.is_dir():
+        if not pinned_prime_source_root().is_dir():
             self.fail("external pinned Prime ecosystem source is required")
         node = _node_22()
         if node is None:
