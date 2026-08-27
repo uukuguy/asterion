@@ -69,13 +69,15 @@ class EcosystemProjection:
         object.__setattr__(self, "resource_roots", MappingProxyType(copied))
 
 
-@dataclass(frozen=True)
+@dataclass
 class _OwnedProjection:
     projection: EcosystemProjection
-    root_fd: int
-    projection_fd: int
+    root_fd: int | None
+    projection_fd: int | None
     identity: tuple[int, int]
     quarantine_name: str
+    phase: str = "bound"
+    terminal_uncertain: bool = False
 
 
 class _HeldVerifiedReader:
@@ -363,21 +365,37 @@ class SealedEcosystemMaterializer:
             if owned.projection is not projection:
                 raise EcosystemMaterializationError(_ERROR_MESSAGE)
             failed = False
-            try:
-                _remove_owned_tree(
-                    owned.root_fd,
-                    owned.projection.projection_id,
-                    owned.identity,
-                    owned.projection_fd,
-                    owned.quarantine_name,
-                )
-                os.fsync(owned.root_fd)
-            except BaseException:
+            if owned.terminal_uncertain:
                 failed = True
-            if not failed:
-                del self._owned[id(projection)]
-                _close_quietly(owned.projection_fd)
-                _close_quietly(owned.root_fd)
+            elif owned.phase == "bound":
+                try:
+                    if owned.root_fd is None:
+                        raise OSError
+                    _remove_owned_tree(
+                        owned.root_fd,
+                        owned.projection.projection_id,
+                        owned.identity,
+                        owned.projection_fd,
+                        owned.quarantine_name,
+                    )
+                    owned.phase = "tree-removed-pending-fsync"
+                except BaseException:
+                    failed = True
+            if not failed and owned.phase == "tree-removed-pending-fsync":
+                try:
+                    if owned.root_fd is None:
+                        raise OSError
+                    os.fsync(owned.root_fd)
+                except BaseException:
+                    failed = True
+                else:
+                    close_failed = _close_owned_descriptors(owned)
+                    if close_failed:
+                        owned.terminal_uncertain = True
+                        failed = True
+                    else:
+                        owned.phase = "closed"
+                        del self._owned[id(projection)]
         if failed:
             raise EcosystemMaterializationError(_ERROR_MESSAGE)
 
@@ -623,7 +641,7 @@ def _remove_owned_tree(
     expected_identity: tuple[int, int],
     owned_fd: int | None,
     quarantine_name: str | None,
-) -> bool:
+) -> None:
     if quarantine_name is None:
         raise OSError
     if owned_fd is not None:
@@ -641,14 +659,14 @@ def _remove_owned_tree(
         try:
             _atomic_move_no_replace(parent_fd, name, parent_fd, quarantine_name)
         except FileNotFoundError:
-            return False
+            raise OSError
         moved = os.stat(quarantine_name, dir_fd=parent_fd, follow_symlinks=False)
         if not stat.S_ISDIR(moved.st_mode) or _identity(moved) != expected_identity:
             try:
                 _atomic_move_no_replace(parent_fd, quarantine_name, parent_fd, name)
             except BaseException:
                 raise OSError
-            return False
+            raise OSError
         descriptor, details = _open_directory_at(parent_fd, quarantine_name)
     if _identity(details) != expected_identity:
         os.close(descriptor)
@@ -656,7 +674,6 @@ def _remove_owned_tree(
     try:
         _remove_directory_contents(owned_fd if owned_fd is not None else descriptor)
         os.rmdir(quarantine_name, dir_fd=parent_fd)
-        return True
     finally:
         os.close(descriptor)
 
@@ -712,6 +729,20 @@ def _close_quietly(descriptor: int | None) -> bool:
     except OSError:
         return False
     return True
+
+
+def _close_owned_descriptors(owned: _OwnedProjection) -> bool:
+    failed = False
+    for attribute in ("projection_fd", "root_fd"):
+        descriptor = getattr(owned, attribute)
+        setattr(owned, attribute, None)
+        if descriptor is None:
+            continue
+        try:
+            os.close(descriptor)
+        except BaseException:
+            failed = True
+    return failed
 
 
 def _is_sha256(value: object) -> bool:

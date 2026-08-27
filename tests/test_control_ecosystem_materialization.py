@@ -634,6 +634,155 @@ class TestSealedEcosystemMaterializer(unittest.TestCase):
             self.assertFalse(projection.root.exists())
             materializer.close(projection)
 
+    def test_close_retries_only_parent_fsync_after_tree_removal(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            source = base / "source"
+            source.mkdir()
+            _write_files(source, {"file": b"body"})
+            private = _private_resource("resource-1", {"file": b"body"})
+            portfolio = _portfolio_for(private)
+            store = FileEcosystemPrivateSourceStore(
+                roots={"source-1": source}, resources=(private,)
+            )
+            materializer = SealedEcosystemMaterializer(base / "private")
+            projection = materializer.materialize(portfolio, store)
+            root_identity = (
+                (base / "private").stat().st_dev,
+                (base / "private").stat().st_ino,
+            )
+            real_fsync = os.fsync
+            failed = False
+
+            def failing_root_fsync(descriptor: int) -> None:
+                nonlocal failed
+                details = os.fstat(descriptor)
+                if (
+                    not failed
+                    and (details.st_dev, details.st_ino) == root_identity
+                    and not projection.root.exists()
+                ):
+                    failed = True
+                    raise OSError("SENTINEL_ROOT_FSYNC")
+                real_fsync(descriptor)
+
+            with (
+                patch(
+                    "asterion.control.ecosystem_materialization._remove_owned_tree",
+                    wraps=implementation._remove_owned_tree,
+                ) as remove_owned_tree,
+                patch(
+                    "asterion.control.ecosystem_materialization.os.fsync",
+                    side_effect=failing_root_fsync,
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    EcosystemMaterializationError, f"^{ERROR}$"
+                ) as raised:
+                    materializer.close(projection)
+                self.assertIsNone(raised.exception.__cause__)
+                self.assertFalse(projection.root.exists())
+
+                materializer.close(projection)
+
+            self.assertTrue(failed)
+            self.assertEqual(remove_owned_tree.call_count, 1)
+            materializer.close(projection)
+
+    def test_projection_descriptor_close_failure_is_terminal_uncertainty(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            source = base / "source"
+            source.mkdir()
+            _write_files(source, {"file": b"body"})
+            private = _private_resource("resource-1", {"file": b"body"})
+            portfolio = _portfolio_for(private)
+            store = FileEcosystemPrivateSourceStore(
+                roots={"source-1": source}, resources=(private,)
+            )
+            materializer = SealedEcosystemMaterializer(base / "private")
+            projection = materializer.materialize(portfolio, store)
+            projection_fd = materializer._owned[id(projection)].projection_fd
+            real_close = os.close
+            close_attempts: list[int] = []
+            failed = False
+
+            def failing_projection_close(descriptor: int) -> None:
+                nonlocal failed
+                close_attempts.append(descriptor)
+                real_close(descriptor)
+                if descriptor == projection_fd and not failed:
+                    failed = True
+                    raise OSError("SENTINEL_PROJECTION_CLOSE")
+
+            with patch(
+                "asterion.control.ecosystem_materialization.os.close",
+                side_effect=failing_projection_close,
+            ):
+                with self.assertRaisesRegex(
+                    EcosystemMaterializationError, f"^{ERROR}$"
+                ) as raised:
+                    materializer.close(projection)
+                self.assertIsNone(raised.exception.__cause__)
+                attempts_after_failure = tuple(close_attempts)
+
+                with self.assertRaisesRegex(
+                    EcosystemMaterializationError, f"^{ERROR}$"
+                ):
+                    materializer.close(projection)
+
+            self.assertTrue(failed)
+            self.assertEqual(close_attempts.count(projection_fd), 1)
+            self.assertEqual(tuple(close_attempts), attempts_after_failure)
+            self.assertFalse(projection.root.exists())
+
+    def test_root_descriptor_close_failure_is_terminal_uncertainty(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            source = base / "source"
+            source.mkdir()
+            _write_files(source, {"file": b"body"})
+            private = _private_resource("resource-1", {"file": b"body"})
+            portfolio = _portfolio_for(private)
+            store = FileEcosystemPrivateSourceStore(
+                roots={"source-1": source}, resources=(private,)
+            )
+            materializer = SealedEcosystemMaterializer(base / "private")
+            projection = materializer.materialize(portfolio, store)
+            root_fd = materializer._owned[id(projection)].root_fd
+            real_close = os.close
+            close_attempts: list[int] = []
+            failed = False
+
+            def failing_root_close(descriptor: int) -> None:
+                nonlocal failed
+                close_attempts.append(descriptor)
+                real_close(descriptor)
+                if descriptor == root_fd and not failed:
+                    failed = True
+                    raise OSError("SENTINEL_ROOT_CLOSE")
+
+            with patch(
+                "asterion.control.ecosystem_materialization.os.close",
+                side_effect=failing_root_close,
+            ):
+                with self.assertRaisesRegex(
+                    EcosystemMaterializationError, f"^{ERROR}$"
+                ) as raised:
+                    materializer.close(projection)
+                self.assertIsNone(raised.exception.__cause__)
+                attempts_after_failure = tuple(close_attempts)
+
+                with self.assertRaisesRegex(
+                    EcosystemMaterializationError, f"^{ERROR}$"
+                ):
+                    materializer.close(projection)
+
+            self.assertTrue(failed)
+            self.assertEqual(close_attempts.count(root_fd), 1)
+            self.assertEqual(tuple(close_attempts), attempts_after_failure)
+            self.assertFalse(projection.root.exists())
+
     def test_close_quarantines_projection_before_descendant_deletion(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary).resolve()
@@ -761,7 +910,7 @@ class TestSealedEcosystemMaterializer(unittest.TestCase):
             with self.assertRaisesRegex(EcosystemMaterializationError, f"^{ERROR}$"):
                 materializer.close(projection)
 
-    def test_close_removes_only_original_projection_inode_after_replacement(self) -> None:
+    def test_close_rejects_replaced_projection_until_exact_inode_is_restored(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary).resolve()
             source = base / "source"
@@ -779,11 +928,60 @@ class TestSealedEcosystemMaterializer(unittest.TestCase):
             projection.root.mkdir(mode=0o700)
             marker = projection.root / "replacement"
             marker.write_bytes(b"keep")
+            replacement_identity = projection.root.stat().st_dev, projection.root.stat().st_ino
 
-            materializer.close(projection)
+            with self.assertRaisesRegex(
+                EcosystemMaterializationError, f"^{ERROR}$"
+            ) as raised:
+                materializer.close(projection)
 
+            self.assertIsNone(raised.exception.__cause__)
             self.assertEqual(marker.read_bytes(), b"keep")
             self.assertTrue(moved.exists())
+            self.assertEqual(
+                (projection.root.stat().st_dev, projection.root.stat().st_ino),
+                replacement_identity,
+            )
+
+            preserved_replacement = base / "preserved-replacement"
+            projection.root.rename(preserved_replacement)
+            moved.rename(projection.root)
+            materializer.close(projection)
+
+            self.assertFalse(projection.root.exists())
+            self.assertEqual(
+                (preserved_replacement / "replacement").read_bytes(), b"keep"
+            )
+            materializer.close(projection)
+
+    def test_close_rejects_missing_projection_until_exact_inode_is_restored(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            source = base / "source"
+            source.mkdir()
+            _write_files(source, {"file": b"body"})
+            private = _private_resource("resource-1", {"file": b"body"})
+            portfolio = _portfolio_for(private)
+            store = FileEcosystemPrivateSourceStore(
+                roots={"source-1": source}, resources=(private,)
+            )
+            materializer = SealedEcosystemMaterializer(base / "private")
+            projection = materializer.materialize(portfolio, store)
+            moved = base / "moved-original"
+            projection.root.rename(moved)
+
+            with self.assertRaisesRegex(
+                EcosystemMaterializationError, f"^{ERROR}$"
+            ) as raised:
+                materializer.close(projection)
+
+            self.assertIsNone(raised.exception.__cause__)
+            self.assertTrue(moved.exists())
+
+            moved.rename(projection.root)
+            materializer.close(projection)
+
+            self.assertFalse(projection.root.exists())
             materializer.close(projection)
 
     def test_private_root_and_publish_operations_use_no_follow_and_fsync(self) -> None:
