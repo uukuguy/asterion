@@ -7,6 +7,7 @@
 | D-2026-07-26-01 | 🟢 active | Anchor explicit operator configuration to the environment-file directory |
 | D-2026-07-31-02 | 🟢 active | Complete every DCI instance's 50-case result before considering full datasets |
 | D-2026-08-10-03 | 🟢 active | Stage Prime-managed and native kernels as peer control providers |
+| D-2026-08-27-04 | 🟢 active | Quiesce host-owned ecosystem projections before cleanup |
 
 ## D-2026-07-26-01 — Operator configuration root
 
@@ -49,3 +50,20 @@
   separate named phases and cannot be inferred from provider-free evidence.
 - Evidence: `docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`;
   commits `75bd6fe`, `ea7a53f`, `7c202ed`.
+
+## D-2026-08-27-04 — Quiescent ecosystem cleanup boundary
+
+- Status: 🟢 active
+- Decision: The host owns the ecosystem private namespace and must quiesce all
+  projection consumers before rollback or close. Cleanup detects pre-existing
+  drift and fails closed, but does not claim protection from hostile same-UID
+  code retaining write-capable descendant directory descriptors during cleanup.
+- Rationale: Darwin/Python exposes name-relative deletion but no portable
+  conditional unlink or rmdir by held target descriptor. The stronger
+  concurrent retained-fd guarantee cannot be implemented honestly without a
+  new native or helper-process isolation boundary.
+- Consequence: Cleanup keeps explicit retry-safe phases through tree removal and
+  parent fsync. Missing or mismatched names retain ownership. Ambiguous
+  descriptor-close failures are terminal and the numeric fd is never retried.
+- Evidence: approved option 1 on 2026-08-27; H-024 Task 2 feasibility audit;
+  `docs/superpowers/specs/2026-08-23-asterion-prime-ecosystem-parity-design.md`.

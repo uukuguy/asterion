@@ -22,6 +22,8 @@
 - Provider/model parity proves registration and exact lookup only. Never send a prompt or invoke the registered provider.
 - Follow TDD with `unittest` and `node:test`; fake adapters and synthetic receipts never receive parity evidence IDs.
 - `asterion.native` remains `missing`, and later interface/operations domains remain blocked.
+- The injected private root is host-owned. Before rollback or close, the host must quiesce all projection consumers; no actor may retain a write-capable projection/descendant directory descriptor or mutate that namespace during cleanup. This is not an OS-sandbox guarantee against hostile same-UID concurrent mutation.
+- Cleanup verifies held identities and fails closed on pre-cleanup drift. Missing/mismatched names retain ownership; tree removal and parent-fsync use an explicit retry-safe phase. Descriptor-close failures are terminal uncertainty and the same numeric descriptor is never retried.
 
 ---
 
@@ -195,7 +197,7 @@ self.assertEqual(stat.S_IMODE(projection.root.stat().st_mode), 0o700)
 self.assertNotIn(str(source_root), repr(projection))
 ```
 
-Add subtests for root/intermediate/final symlinks, FIFO/device/socket inputs, `..` and absolute child paths, undeclared files, wrong byte count, content digest drift, duplicate file paths, replacement after open, partial copy failure, existing final projection, cleanup failure, and source/private sentinel redaction.
+Add subtests for root/intermediate/final symlinks, FIFO/device/socket inputs, `..` and absolute child paths, undeclared files, wrong byte count, content digest drift, duplicate file paths, source replacement after open, partial copy failure, existing final projection, pre-cleanup projection-name drift, retry after post-removal parent-fsync failure, cleanup failure, and source/private sentinel redaction.
 
 - [ ] **Step 2: Run tests and observe missing materialization types**
 
@@ -230,7 +232,7 @@ class EcosystemProjection:
 
 `FileEcosystemPrivateSourceStore.open_file(resource_id, relative_path)` must open every root/path component with `O_NOFOLLOW`, require regular files, hold the final descriptor, verify the exact size and SHA-256 while reading at most the declared size plus one byte, and raise only `EcosystemMaterializationError("ecosystem source is invalid")` without chaining.
 
-`SealedEcosystemMaterializer.materialize()` creates one mode-0700 staging directory under the injected private root, copies only declared files to mode 0600, fsyncs files/directories, validates the aggregate resource digest, atomically publishes a new direct-child projection, and returns immutable private paths with redacted `repr`. On any failure it removes only its owned staging inode. `.close()` removes only the exact projection identity and is idempotent.
+`SealedEcosystemMaterializer.materialize()` creates one mode-0700 staging directory under the injected private root, copies only declared files to mode 0600, fsyncs files/directories, validates the aggregate resource digest, atomically publishes a new direct-child projection, and returns immutable private paths with redacted `repr`. On any failure it removes only its owned staging inode after the host-owned namespace is quiescent. `.close()` runs only after projection consumers are quiescent, removes only the exact projection identity, and is idempotent. Missing or mismatched managed names fail with the fixed redacted error while retaining ownership. Record `bound`, `tree-removed-pending-fsync`, and `closed` phases so a post-removal parent-fsync failure retries fsync without retrying deletion. Treat descriptor-close failure as terminal uncertainty and never retry the same descriptor number.
 
 - [ ] **Step 4: Run filesystem, package-source, and redaction regressions**
 

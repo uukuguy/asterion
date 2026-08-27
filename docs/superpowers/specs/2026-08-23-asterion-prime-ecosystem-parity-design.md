@@ -136,6 +136,20 @@ provider-private configuration. It is not a catalog and is never published.
 Cleanup runs after teardown and on every failure path. Public values retain only
 the portfolio digest and counts.
 
+The private root is a host-owned namespace, and the host must quiesce every
+projection consumer before rollback or close. During cleanup no actor may retain
+a write-capable directory descriptor into the projection or mutate the private
+root, projection, or descendants. This boundary is not an OS sandbox and does
+not claim protection from hostile same-UID code racing name-relative deletion.
+Cleanup still verifies the held top-level identity, never follows symlinks, and
+fails closed on any drift present before cleanup or quarantine.
+
+Cleanup state is explicit and retry-safe through tree removal and parent fsync.
+A missing or mismatched managed name retains ownership and returns only the
+fixed redacted failure. A failed descriptor close is terminal uncertainty: the
+numeric descriptor is never retried because the platform may already have
+reused it; process exit remains the eventual reclamation boundary.
+
 ## Prime Gateway Projection
 
 Add a closed private `asterion.prime-ecosystem-frame/v1` shape containing:
