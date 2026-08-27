@@ -1,27 +1,27 @@
 # Live Session Checkpoint
 
-> Updated: 2026-08-28. Session remains active; H-034 is closed and H-035 is
-> the deterministic next package.
+> Updated: 2026-08-28. H-034 is closed. H-035 inventory and design are written;
+> implementation is paused at the mandatory specification-review gate.
 
 ## TL;DR
 
-- Ecosystem Task 10 code ends at `ef685f4` before its durable-state closure
-  commit.
+- Ecosystem Task 10 closes at `3db6685`; independent re-review is clean.
 - Prime Gateway `ecosystem.capabilities` is exact 10/10 PASS with zero
   provider/model operations; all native ecosystem rows remain missing.
 - H-034 passed one clean cycle. `runs.csv` contains cycle 34 exactly once and
   session state points to H-035.
 - Full clean evidence passed: 1,954 Python tests, TypeScript, Ruff, docs, Rust,
   sdist/wheel, and promotion 27/27 with no full dataset.
-- The next work is H-035 client-interface inventory, not an implementation or
-  system-parity claim.
+- H-035 fixes nine client features and four shared-stream evidence packages in
+  design commit `7add4fb`. No implementation or system-parity claim exists.
 
 ## Current work package
 
 - Branch: `h024-ecosystem-capabilities`.
 - Completed plan:
   `docs/superpowers/plans/2026-08-10-asterion-prime-ecosystem-parity.md`.
-- Next inventory: nine `interface.*` rows in `interfaces.operations`.
+- Design awaiting review:
+  `docs/superpowers/specs/2026-08-28-asterion-prime-client-interfaces-design.md`.
 - Existing unrelated working-tree changes must remain untouched.
 
 ## Verified work
@@ -37,19 +37,18 @@
   full_dataset=no`.
 - Climb state: H-034 passed exactly once; next action H-035; generated tree and
   session state agree.
-- Independent review found only the previously uncommitted H-034 durable state;
-  no Critical code issue was reported. Re-review is required after the closure
-  commit.
+- Independent Task 10 re-review found no Critical, Important, or Minor issue.
+- Commit-state verification passed 46 focused tests with one expected external
+  source skip, exact ecosystem reduction 10/10, Climb cycles 1–34, and
+  `git diff --check`.
 
 ## Next action
 
-1. Commit only Task 10 report/plan/progress, H-034 state, ledger, journal, and
-   recovery documents.
-2. Regenerate the Task 10 review package and request independent re-review.
-3. Complete H-035 as a read-only closed inventory of nine interface features
-   and exact shared-stream evidence packages.
-4. Do not implement a new client design until the mandatory brainstorming
-   design approval gate is satisfied.
+1. Obtain user review of the committed H-035 design specification.
+2. If approved, use `writing-plans` to create the detailed client-interface
+   implementation plan.
+3. Do not change protocols or client implementation before that approval.
+4. Keep H-035 pending until implementation and all four evidence packages pass.
 
 ## Claim boundaries
 
