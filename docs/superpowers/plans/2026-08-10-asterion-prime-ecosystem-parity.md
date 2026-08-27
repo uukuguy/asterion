@@ -736,7 +736,7 @@ git commit -m "test: prove Prime ecosystem MCP integration"
 - Consumes: four exact provider-free receipts from Tasks 6–9.
 - Produces: ten evidence records, Prime Gateway `ecosystem.capabilities` 10/10 PASS, native results unchanged, and deterministic next Climb hypothesis for client interfaces.
 
-- [ ] **Step 1: Write failing observation, ledger, and exact-domain tests**
+- [x] **Step 1: Write failing observation, ledger, and exact-domain tests**
 
 ```python
 def test_observations_cover_exact_ten_without_provider_work(self) -> None:
@@ -755,17 +755,17 @@ def test_ecosystem_domain_closes_only_with_all_ten(self) -> None:
 
 Add tests that each receipt can promote only its exact package features, wrong command/source/module/portfolio digests reject atomically, fake/nonzero-operation receipts have no evidence ID, arrays must be canonical, every native ecosystem result remains `missing`, and the verified-system claim remains BLOCKED on later domains.
 
-- [ ] **Step 2: Run focused tests and observe ten missing ledger blockers**
+- [x] **Step 2: Run focused tests and observe ten missing ledger blockers**
 
 Run: `uv run python -m unittest -v tests.test_prime_ecosystem_parity tests.test_prime_parity_ledger tests.test_check_prime_parity`
 
 Expected: FAIL with exactly ten `ecosystem.capabilities` Prime Gateway results still `missing`.
 
-- [ ] **Step 3: Implement exact observation reduction and evidence registration**
+- [x] **Step 3: Implement exact observation reduction and evidence registration**
 
 Define sorted `PRIME_ECOSYSTEM_SCENARIO_IDS`, four command-to-feature mappings, and immutable `PrimeEcosystemScenarioObservation`. Validate exact receipt keys, pinned baseline/artifact/module/portfolio identities, zero model/provider/process counts, expected lifecycle/MCP/package counts, and canonical observation digests. Register all ten runners with boundary `real-prime-provider-free` and fixed assertion IDs `authority-preserved`, `feature-reachable`, `identity-stable`, `public-redacted`.
 
-- [ ] **Step 4: Promote only ten Prime Gateway rows and run closure gates**
+- [x] **Step 4: Promote only ten Prime Gateway rows and run closure gates**
 
 Add ten sorted evidence objects with boundary `real-prime-provider-free` and their exact named commands. Change only the ten Prime Gateway results to `provider-free-pass`; keep every native result missing.
 
@@ -784,7 +784,13 @@ git diff --check
 
 Expected: exact domain 10/10 PASS; all commands provider-free; promotion reports zero provider operations; native/system parity remains blocked.
 
-- [ ] **Step 5: Regenerate Climb state and commit closure**
+Closure note: promotion now verifies the explicit external Prime source, clones
+the locked commit into its isolated copy, rebuilds the required workspaces, and
+forces every nested command to that isolated root. The clean H-034 cycle passed
+1,954 Python tests and `promotion full PASS commands=27
+provider_operations=0 full_dataset=no` at `ef685f4`.
+
+- [x] **Step 5: Regenerate Climb state and commit closure**
 
 Use these exact implementation hypotheses and command IDs:
 

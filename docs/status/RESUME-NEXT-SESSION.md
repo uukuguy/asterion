@@ -1,73 +1,68 @@
 # Live Session Checkpoint
 
-> Updated: 2026-08-28 00:12 CST. Session remains active; Task10 domain work is
-> implemented with gate concerns.
+> Updated: 2026-08-28. Session remains active; H-034 is closed and H-035 is
+> the deterministic next package.
 
 ## TL;DR
 
-- Task10 RED was captured at clean `04532ec`: all ten Prime Gateway
-  `ecosystem.capabilities` rows were `result-missing`, with zero provider and
-  application operations.
-- The Task10 reducer now consumes exactly four provider-free receipts and
-  promotes exactly ten Prime Gateway rows to `provider-free-pass`.
-- Focused tests and the exact ecosystem domain checker pass in a clean
-  committed-equivalent candidate.
-- H-034 cannot be promoted: `make check` fails on non-ecosystem pre-existing
-  failures, and `promotion-check` fails in the isolated copy because pinned
-  external Prime ecosystem source is excluded.
+- Ecosystem Task 10 code ends at `ef685f4` before its durable-state closure
+  commit.
+- Prime Gateway `ecosystem.capabilities` is exact 10/10 PASS with zero
+  provider/model operations; all native ecosystem rows remain missing.
+- H-034 passed one clean cycle. `runs.csv` contains cycle 34 exactly once and
+  session state points to H-035.
+- Full clean evidence passed: 1,954 Python tests, TypeScript, Ruff, docs, Rust,
+  sdist/wheel, and promotion 27/27 with no full dataset.
+- The next work is H-035 client-interface inventory, not an implementation or
+  system-parity claim.
 
 ## Current work package
 
 - Branch: `h024-ecosystem-capabilities`.
-- Plan: `docs/superpowers/plans/2026-08-10-asterion-prime-ecosystem-parity.md`.
-- Task: close Task10 evidence binding for `ecosystem.capabilities`.
-- Scope: Task10 files only plus deterministic Climb generated outputs.
+- Completed plan:
+  `docs/superpowers/plans/2026-08-10-asterion-prime-ecosystem-parity.md`.
+- Next inventory: nine `interface.*` rows in `interfaces.operations`.
+- Existing unrelated working-tree changes must remain untouched.
 
 ## Verified work
 
-- Exact RED:
+- Exact domain:
   `uv run python tools/check_prime_parity.py --domain ecosystem.capabilities --provider asterion.prime-gateway`
-  at `04532ec` returned `BLOCKED` with ten missing feature IDs:
-  `ecosystem.collision-diagnostics`, `ecosystem.context-files`,
-  `ecosystem.custom-providers-models`, `ecosystem.extension-state-commands`,
-  `ecosystem.extensions-lifecycle`, `ecosystem.mcp`, `ecosystem.packages`,
-  `ecosystem.prompt-templates`, `ecosystem.skills`, `ecosystem.tools`.
-- Focused GREEN:
-  `uv run python -m unittest -v tests.test_prime_ecosystem_parity tests.test_prime_parity_ledger tests.test_check_prime_parity`
-  passed 32 tests.
-- Exact domain GREEN:
-  `uv run python tools/check_prime_parity.py --domain ecosystem.capabilities --provider asterion.prime-gateway`
-  returned `PASS`, selected 10, passed 10, blocking 0.
-- Climb H-028 through H-033 provider-free ecosystem gates passed in the clean
-  candidate after copying the exact pinned Prime source locally.
+  returned selected 10, passed 10, blocking 0.
+- Exact H-034 cycle passed four ecosystem evidence gates, the domain reducer,
+  `make check`, `make promotion-check`, and `git diff --check`.
+- `make check`: 1,954 Python tests plus all cross-language, lint, docs, Rust,
+  and distribution checks passed.
+- Promotion: `promotion full PASS commands=27 provider_operations=0
+  full_dataset=no`.
+- Climb state: H-034 passed exactly once; next action H-035; generated tree and
+  session state agree.
+- Independent review found only the previously uncommitted H-034 durable state;
+  no Critical code issue was reported. Re-review is required after the closure
+  commit.
 
-## Gate concerns
+## Next action
 
-- `make check` in the clean candidate ran the repository test suite and failed
-  on four non-ecosystem failures. A pure `04532ec` reproduction showed the same
-  failure class before Task10 changes.
-- `make promotion-check` failed because the promotion copy excludes
-  `3th-party/`; `tests.test_prime_ecosystem_packages` requires the external
-  pinned Prime ecosystem source and therefore fails closed.
-- These failures are not promoted to PASS. Climb remains at H-033 passed with
-  H-034 pending.
+1. Commit only Task 10 report/plan/progress, H-034 state, ledger, journal, and
+   recovery documents.
+2. Regenerate the Task 10 review package and request independent re-review.
+3. Complete H-035 as a read-only closed inventory of nine interface features
+   and exact shared-stream evidence packages.
+4. Do not implement a new client design until the mandatory brainstorming
+   design approval gate is satisfied.
 
-## Immediate next action
+## Claim boundaries
 
-1. Review and commit only the Task10 closure patch.
-2. Do not stage unrelated RLM, long-running, client-interface, or dirty
-   `prime-artifact-lock.json` draft changes.
-3. Resolve the H-034 repository/promotion blockers before advancing to H-035
-   client interface inventory.
+- `Verified-system-parity` remains BLOCKED on 15 `interfaces.operations` rows.
+- H-035 covers the nine `interface.*` rows; the six `operation.*` rows remain a
+  separate subsequent package.
+- Pixel-identical TUI and hidden reasoning identity remain the only exclusions.
+- No provider/model operation or full dataset run is authorized by this state.
 
 ## Ready-to-paste verification
 
 ```bash
-uv run python -m unittest -v tests.test_prime_ecosystem_parity tests.test_prime_parity_ledger tests.test_check_prime_parity
 uv run python tools/check_prime_parity.py --domain ecosystem.capabilities --provider asterion.prime-gateway
-make test.prime-ecosystem-resources.provider-free
-make test.prime-ecosystem-extensions.provider-free
-make test.prime-ecosystem-packages.provider-free
-make test.prime-ecosystem-mcp.provider-free
+uv run python -m unittest -v tests.test_prime_ecosystem_parity tests.test_prime_parity_ledger tests.test_check_prime_parity tests.test_check_promotion
 git diff --check
 ```
