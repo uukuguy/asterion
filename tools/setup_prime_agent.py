@@ -19,11 +19,73 @@ from types import MappingProxyType
 
 LOCK_FORMAT = "asterion.prime-artifact-lock/v1"
 HARNESS_MODULE_LOCK_FORMAT = "asterion.prime-harness-module-lock/v1"
+ECOSYSTEM_MODULE_LOCK_FORMAT = "asterion.prime-ecosystem-module-lock/v1"
+PINNED_PRIME_COMMIT = "a18809e00ea30638584d87b3afea7285a9d7296c"
 PRIME_HARNESS_REQUIRED_EXPORTS = (
     "applyRefinementProposal",
     "loadHarnessState",
     "saveHarnessState",
 )
+PRIME_ECOSYSTEM_REQUIRED_EXPORTS = (
+    "inspectResources",
+    "resolvePackage",
+    "runExtensionLifecycle",
+    "runMcpFixture",
+)
+PRIME_ECOSYSTEM_MODULE_IDS = (
+    "diagnostics",
+    "extension-loader",
+    "extension-runner",
+    "mcp-manager",
+    "mcp-oauth",
+    "model-registry",
+    "package-manager",
+    "prompt-templates",
+    "resource-loader",
+    "skills",
+)
+_PRIME_ECOSYSTEM_MODULE_PATHS = {
+    "diagnostics": (
+        "packages/coding-agent/src/core/diagnostics.ts",
+        "packages/coding-agent/dist/core/diagnostics.js",
+    ),
+    "extension-loader": (
+        "packages/coding-agent/src/core/extensions/loader.ts",
+        "packages/coding-agent/dist/core/extensions/loader.js",
+    ),
+    "extension-runner": (
+        "packages/coding-agent/src/core/extensions/runner.ts",
+        "packages/coding-agent/dist/core/extensions/runner.js",
+    ),
+    "mcp-manager": (
+        "packages/coding-agent/src/core/mcp/mcp-manager.ts",
+        "packages/coding-agent/dist/core/mcp/mcp-manager.js",
+    ),
+    "mcp-oauth": (
+        "packages/ai/src/mcp/oauth.ts",
+        "packages/ai/dist/mcp/oauth.js",
+    ),
+    "model-registry": (
+        "packages/coding-agent/src/core/model-registry.ts",
+        "packages/coding-agent/dist/core/model-registry.js",
+    ),
+    "package-manager": (
+        "packages/coding-agent/src/core/package-manager.ts",
+        "packages/coding-agent/dist/core/package-manager.js",
+    ),
+    "prompt-templates": (
+        "packages/coding-agent/src/core/prompt-templates.ts",
+        "packages/coding-agent/dist/core/prompt-templates.js",
+    ),
+    "resource-loader": (
+        "packages/coding-agent/src/core/resource-loader.ts",
+        "packages/coding-agent/dist/core/resource-loader.js",
+    ),
+    "skills": (
+        "packages/coding-agent/src/core/skills.ts",
+        "packages/coding-agent/dist/core/skills.js",
+    ),
+}
 MINIMUM_NODE_VERSION = (22, 8, 0)
 _COMMIT = re.compile(r"^[0-9a-f]{40}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -38,6 +100,16 @@ _ENTRY_DYNAMIC_LOCAL_ESM_IMPORT = re.compile(
 _LINE_DYNAMIC_LOCAL_ESM_IMPORT = re.compile(
     r"^\s*import\(\s*[\"'](\.[^\"']+)[\"']", re.MULTILINE
 )
+_STATIC_ESM_IMPORT = re.compile(
+    r"^import[^\n]*\sfrom\s*[\"']([^\"']+)[\"']\s*;?\s*$", re.MULTILINE
+)
+_ANY_ESM_IMPORT = re.compile(r"^\s*import\b", re.MULTILINE)
+_DYNAMIC_ESM_IMPORT = re.compile(r"\bimport\s*\(")
+_EXPORTED_ESM_FUNCTION = re.compile(
+    r"^export\s+(?:async\s+)?function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(",
+    re.MULTILINE,
+)
+_ANY_ESM_EXPORT = re.compile(r"^export\s+", re.MULTILINE)
 _OFFLINE_BUILD_COMMANDS = (
     ("npm", "--prefix", "packages/tui", "run", "build"),
     (
@@ -86,6 +158,32 @@ class PrimeHarnessModuleLock:
     source_files: Mapping[str, str]
     built_modules: Mapping[str, str]
     required_exports: tuple[str, ...]
+
+
+@dataclass(frozen=True, repr=False)
+class PrimeEcosystemModuleRecord:
+    module_id: str
+    source_path: str
+    built_path: str
+    sha256: str
+
+
+@dataclass(frozen=True, repr=False)
+class PrimeEcosystemModuleLock:
+    source_commit: str
+    artifact_lock_sha256: str
+    bundle_sha256: str
+    modules: tuple[PrimeEcosystemModuleRecord, ...]
+
+
+@dataclass(frozen=True, repr=False)
+class ResolvedPrimeEcosystemModule:
+    source_commit: str
+    artifact_lock_sha256: str
+    bundle_sha256: str
+    module_ids: tuple[str, ...]
+    built_paths: Mapping[str, Path]
+    bundle_path: Path
 
 
 @dataclass(frozen=True)
@@ -146,6 +244,19 @@ def default_harness_module_lock_path() -> Path:
         return repository
     packaged = resources.files("asterion").joinpath(
         "control/providers/prime/resources/prime-harness-module-lock.json"
+    )
+    return Path(str(packaged))
+
+
+def default_ecosystem_module_lock_path() -> Path:
+    repository = (
+        Path(__file__).resolve().parents[1]
+        / "packages/typescript/prime-gateway/resources/prime-ecosystem-module-lock.json"
+    )
+    if repository.is_file():
+        return repository
+    packaged = resources.files("asterion").joinpath(
+        "control/providers/prime/resources/prime-ecosystem-module-lock.json"
     )
     return Path(str(packaged))
 
@@ -315,6 +426,83 @@ def load_prime_harness_module_lock(
         raise PrimeSetupError("Prime harness module is invalid") from None
 
 
+def load_prime_ecosystem_module_lock(
+    path: Path | None = None,
+) -> PrimeEcosystemModuleLock:
+    try:
+        lock_path = path or default_ecosystem_module_lock_path()
+        value = json.loads(_read_locked_regular_file(lock_path))
+        if not isinstance(value, dict) or set(value) != {
+            "format",
+            "source_commit",
+            "artifact_lock_sha256",
+            "bundle_sha256",
+            "modules",
+        }:
+            raise TypeError
+        modules = value["modules"]
+        if (
+            value["format"] != ECOSYSTEM_MODULE_LOCK_FORMAT
+            or value["source_commit"] != PINNED_PRIME_COMMIT
+            or not isinstance(value["artifact_lock_sha256"], str)
+            or _SHA256.fullmatch(value["artifact_lock_sha256"]) is None
+            or not isinstance(value["bundle_sha256"], str)
+            or _SHA256.fullmatch(value["bundle_sha256"]) is None
+            or not isinstance(modules, list)
+            or len(modules) != len(PRIME_ECOSYSTEM_MODULE_IDS)
+        ):
+            raise TypeError
+        parsed: list[PrimeEcosystemModuleRecord] = []
+        source_paths: set[str] = set()
+        built_paths: set[str] = set()
+        for item in modules:
+            if not isinstance(item, dict) or set(item) != {
+                "module_id",
+                "source_path",
+                "built_path",
+                "sha256",
+            }:
+                raise TypeError
+            module_id = item["module_id"]
+            source_path = item["source_path"]
+            built_path = item["built_path"]
+            digest = item["sha256"]
+            if (
+                not isinstance(module_id, str)
+                or not isinstance(source_path, str)
+                or not isinstance(built_path, str)
+                or not isinstance(digest, str)
+                or _SHA256.fullmatch(digest) is None
+                or not _safe_relative_path(source_path, suffix=".ts")
+                or not _safe_relative_path(built_path, suffix=".js")
+                or (source_path, built_path)
+                != _PRIME_ECOSYSTEM_MODULE_PATHS.get(module_id)
+                or source_path in source_paths
+                or built_path in built_paths
+            ):
+                raise TypeError
+            source_paths.add(source_path)
+            built_paths.add(built_path)
+            parsed.append(
+                PrimeEcosystemModuleRecord(
+                    module_id=module_id,
+                    source_path=source_path,
+                    built_path=built_path,
+                    sha256=digest,
+                )
+            )
+        if tuple(item.module_id for item in parsed) != PRIME_ECOSYSTEM_MODULE_IDS:
+            raise TypeError
+        return PrimeEcosystemModuleLock(
+            source_commit=value["source_commit"],
+            artifact_lock_sha256=value["artifact_lock_sha256"],
+            bundle_sha256=value["bundle_sha256"],
+            modules=tuple(parsed),
+        )
+    except (OSError, json.JSONDecodeError, TypeError, ValueError, PrimeSetupError):
+        raise PrimeSetupError("Prime ecosystem module is invalid") from None
+
+
 def resolve_prime_harness_module(
     source_root: Path,
     *,
@@ -358,6 +546,124 @@ def resolve_prime_harness_module(
         return (root / lock.entry).resolve(strict=True)
     except (OSError, RuntimeError, ValueError, PrimeSetupError):
         raise PrimeSetupError("Prime harness module is invalid") from None
+
+
+def resolve_prime_ecosystem_module(
+    source_root: Path,
+    lock_path: Path | None = None,
+    *,
+    artifact_lock_path: Path | None = None,
+    bundle_path: Path | None = None,
+    runner: Runner = _default_runner,
+) -> ResolvedPrimeEcosystemModule:
+    """Resolve the exact provider-free Prime ecosystem module without importing it."""
+
+    try:
+        selected_lock_path = lock_path or default_ecosystem_module_lock_path()
+        lock = load_prime_ecosystem_module_lock(selected_lock_path)
+        selected_artifact_path = artifact_lock_path or selected_lock_path.with_name(
+            "prime-artifact-lock.json"
+        )
+        selected_bundle_path = bundle_path or selected_lock_path.with_name(
+            "prime-ecosystem-module.mjs"
+        )
+        artifact_bytes = _read_locked_regular_file(selected_artifact_path)
+        if hashlib.sha256(artifact_bytes).hexdigest() != lock.artifact_lock_sha256:
+            raise OSError
+        artifact = load_prime_artifact_lock(selected_artifact_path)
+        if artifact.source_commit != lock.source_commit:
+            raise OSError
+        bundle_bytes = _read_locked_regular_file(selected_bundle_path)
+        if hashlib.sha256(bundle_bytes).hexdigest() != lock.bundle_sha256:
+            raise OSError
+
+        root = _source_root(source_root)
+        built_paths: dict[str, Path] = {}
+        for module in lock.modules:
+            source_digest = artifact.files.get(module.source_path)
+            built_digest = artifact.files.get(module.built_path)
+            if (
+                source_digest is None
+                or built_digest is None
+                or built_digest != module.sha256
+            ):
+                raise OSError
+            _verify_locked_file_beneath(root, module.source_path, source_digest)
+            built_paths[module.module_id] = _verify_locked_file_beneath(
+                root, module.built_path, module.sha256
+            )
+
+        bundle_text = bundle_bytes.decode("utf-8")
+        exports = _EXPORTED_ESM_FUNCTION.findall(bundle_text)
+        if (
+            len(_ANY_ESM_EXPORT.findall(bundle_text)) != len(
+                PRIME_ECOSYSTEM_REQUIRED_EXPORTS
+            )
+            or tuple(sorted(exports)) != PRIME_ECOSYSTEM_REQUIRED_EXPORTS
+        ):
+            raise OSError
+        imports = _STATIC_ESM_IMPORT.findall(bundle_text)
+        if (
+            len(_ANY_ESM_IMPORT.findall(bundle_text)) != len(imports)
+            or _DYNAMIC_ESM_IMPORT.search(bundle_text) is not None
+        ):
+            raise OSError
+        expected_imports = tuple(built_paths.values())
+        resolved_imports = tuple(
+            _resolve_locked_bundle_import(selected_bundle_path, specifier)
+            for specifier in imports
+        )
+        if len(resolved_imports) != len(expected_imports) or set(
+            resolved_imports
+        ) != set(expected_imports):
+            raise OSError
+
+        git_metadata = root / ".git"
+        if git_metadata.is_symlink() or not (
+            git_metadata.is_dir() or git_metadata.is_file()
+        ):
+            raise OSError
+        with tempfile.TemporaryDirectory(
+            prefix="asterion-prime-ecosystem-check-"
+        ) as temporary:
+            environment = _closed_environment(Path(temporary))
+            top_level = _run(
+                runner, ("git", "rev-parse", "--show-toplevel"), root, environment
+            )
+            head = _run(runner, ("git", "rev-parse", "HEAD"), root, environment)
+            status = _run(
+                runner,
+                ("git", "status", "--porcelain", "--untracked-files=normal"),
+                root,
+                environment,
+            )
+            if (
+                not _is_exact_git_root(top_level, root)
+                or head.returncode != 0
+                or head.stdout.strip() != PINNED_PRIME_COMMIT
+                or status.returncode != 0
+                or status.stdout.strip()
+            ):
+                raise OSError
+
+        return ResolvedPrimeEcosystemModule(
+            source_commit=lock.source_commit,
+            artifact_lock_sha256=lock.artifact_lock_sha256,
+            bundle_sha256=lock.bundle_sha256,
+            module_ids=tuple(built_paths),
+            built_paths=MappingProxyType(built_paths),
+            bundle_path=selected_bundle_path.resolve(strict=True),
+        )
+    except (
+        KeyError,
+        OSError,
+        RuntimeError,
+        TypeError,
+        UnicodeDecodeError,
+        ValueError,
+        PrimeSetupError,
+    ):
+        raise PrimeSetupError("Prime ecosystem module is invalid") from None
 
 
 def verify_prime_source(
@@ -538,6 +844,69 @@ def _source_root(value: Path) -> Path:
         return root
     except (OSError, RuntimeError):
         raise PrimeSetupError("Prime source checkout is unavailable") from None
+
+
+def _safe_relative_path(value: str, *, suffix: str) -> bool:
+    candidate = Path(value)
+    return (
+        bool(value)
+        and not candidate.is_absolute()
+        and ".." not in candidate.parts
+        and candidate.as_posix() == value
+        and candidate.suffix == suffix
+    )
+
+
+def _read_locked_regular_file(path: Path) -> bytes:
+    try:
+        if not isinstance(path, Path) or path.is_symlink() or not path.is_file():
+            raise OSError
+        metadata = path.stat()
+        if metadata.st_mode & 0o002:
+            raise OSError
+        return path.read_bytes()
+    except (OSError, RuntimeError):
+        raise PrimeSetupError("Prime ecosystem module is invalid") from None
+
+
+def _verify_locked_file_beneath(root: Path, relative: str, digest: str) -> Path:
+    try:
+        path = root / relative
+        current = root
+        for part in Path(relative).parts[:-1]:
+            current = current / part
+            if current.is_symlink() or not current.is_dir():
+                raise OSError
+        if path.is_symlink() or not path.is_file():
+            raise OSError
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(root)
+        metadata = resolved.stat()
+        if metadata.st_mode & 0o002:
+            raise OSError
+        contents = resolved.read_bytes()
+        if hashlib.sha256(contents).hexdigest() != digest:
+            raise OSError
+        return resolved
+    except (OSError, RuntimeError, ValueError):
+        raise PrimeSetupError("Prime ecosystem module is invalid") from None
+
+
+def _resolve_locked_bundle_import(bundle_path: Path, specifier: str) -> Path:
+    try:
+        candidate = Path(specifier)
+        if (
+            not specifier.startswith(".")
+            or candidate.is_absolute()
+            or candidate.suffix != ".js"
+        ):
+            raise OSError
+        target = bundle_path.parent / candidate
+        if target.is_symlink() or not target.is_file():
+            raise OSError
+        return target.resolve(strict=True)
+    except (OSError, RuntimeError):
+        raise PrimeSetupError("Prime ecosystem module is invalid") from None
 
 
 def _verify_files(root: Path, lock: PrimeArtifactLock) -> None:

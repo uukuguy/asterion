@@ -47,6 +47,8 @@ artifacts = [
 
 [tool.hatch.build.targets.wheel.force-include]
 "packages/typescript/prime-gateway/resources/prime-artifact-lock.json" = "asterion/control/providers/prime/resources/prime-artifact-lock.json"
+"packages/typescript/prime-gateway/resources/prime-ecosystem-module-lock.json" = "asterion/control/providers/prime/resources/prime-ecosystem-module-lock.json"
+"packages/typescript/prime-gateway/resources/prime-ecosystem-module.mjs" = "asterion/control/providers/prime/resources/prime-ecosystem-module.mjs"
 "schemas/benchmark-suite/v1/benchmark-suite.schema.json" = "asterion/schemas/benchmark-suite/v1/benchmark-suite.schema.json"
 "schemas/agent-system/v1/agent-system.schema.json" = "asterion/schemas/agent-system/v1/agent-system.schema.json"
 "schemas/control-plane/v1/control-plane-manifest.schema.json" = "asterion/schemas/control-plane/v1/control-plane-manifest.schema.json"

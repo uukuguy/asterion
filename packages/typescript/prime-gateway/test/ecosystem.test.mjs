@@ -16,16 +16,38 @@ import test from "node:test";
 
 import {
   GatewayDurableStore,
+  PRIME_ECOSYSTEM_ARTIFACT_LOCK_DIGEST,
+  PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST,
   PrimeEcosystemAdapter,
   PrimeEcosystemError,
   validatePrimeEcosystemFrame,
 } from "../dist/src/index.js";
+import {
+  PRIME_ECOSYSTEM_BUNDLE_DIGEST,
+  PRIME_ECOSYSTEM_LOCK_CONTRACT,
+} from "../dist/src/ecosystem.js";
 
 const PRIVATE_BODY = "SENTINEL_PRIVATE_ECOSYSTEM_BODY";
 const PRIVATE_LEASE = "mcp-lease:SENTINEL_PRIVATE_LEASE";
 const PRIVATE_ERROR = "SENTINEL_PRIVATE_MODULE_ERROR";
-const ARTIFACT_LOCK_DIGEST = "c0ffac5cb40be428ca4a60041694c2359bb1dd0c0ea182dabed1191247df03bc";
-const MODULE_LOCK_DIGEST = "bcc22f2da837d9feab0d27fc177012f39d4ee00d7b5f7b0fc9ec877f74b922d2";
+const ARTIFACT_LOCK_DIGEST = "c64aecdec9ddff21fb7ed493cc1837eb68bf428fc94803a65e6c185aca0fbba3";
+const MODULE_LOCK_DIGEST = "87972649dc9c8b713d708b3a37008ab7d071c1c642cd12102d98ed5c3a7ef539";
+
+test("binds the exact checked-in artifact, module, and bundle digests", async () => {
+  const resources = new URL("../resources/", import.meta.url);
+  const artifactLock = await readFile(new URL("prime-artifact-lock.json", resources));
+  const moduleLock = await readFile(new URL("prime-ecosystem-module-lock.json", resources));
+  const bundle = await readFile(new URL("prime-ecosystem-module.mjs", resources));
+  const moduleValue = JSON.parse(moduleLock.toString("utf8"));
+
+  assert.equal(PRIME_ECOSYSTEM_ARTIFACT_LOCK_DIGEST, createHash("sha256").update(artifactLock).digest("hex"));
+  assert.equal(PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST, createHash("sha256").update(moduleLock).digest("hex"));
+  assert.equal(PRIME_ECOSYSTEM_BUNDLE_DIGEST, createHash("sha256").update(bundle).digest("hex"));
+  assert.equal(moduleValue.artifact_lock_sha256, PRIME_ECOSYSTEM_ARTIFACT_LOCK_DIGEST);
+  assert.equal(moduleValue.bundle_sha256, PRIME_ECOSYSTEM_BUNDLE_DIGEST);
+  assert.notEqual(PRIME_ECOSYSTEM_ARTIFACT_LOCK_DIGEST, digest("asterion.prime-artifact-lock/v1"));
+  assert.notEqual(PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST, digest("asterion.prime-ecosystem-module-lock/v1"));
+});
 
 function digest(value) {
   const encoded = typeof value === "string"
@@ -50,6 +72,40 @@ function canonical(value) {
 function sha256Canonical(value) {
   return createHash("sha256").update(canonical(value)).digest("hex");
 }
+
+function ecosystemAdapter(options) {
+  return new PrimeEcosystemAdapter({
+    ...options,
+    lock: PRIME_ECOSYSTEM_LOCK_CONTRACT,
+  });
+}
+
+test("rejects a placeholder or drifting lock contract before activation", () => {
+  const store = {
+    bindEcosystemEffect() {},
+    commitEcosystemEffectResult() {},
+    ecosystemEffectBinding() {},
+    ecosystemEffectResult() {},
+  };
+  const module = { activate() {} };
+  for (const lock of [
+    {
+      artifactLockDigest: digest("asterion.prime-artifact-lock/v1"),
+      bundleDigest: PRIME_ECOSYSTEM_BUNDLE_DIGEST,
+      moduleLockDigest: PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST,
+    },
+    {
+      artifactLockDigest: PRIME_ECOSYSTEM_ARTIFACT_LOCK_DIGEST,
+      bundleDigest: "f".repeat(64),
+      moduleLockDigest: PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST,
+    },
+  ]) {
+    assert.throws(
+      () => new PrimeEcosystemAdapter({ lock, module, store }),
+      (error) => error.message === "Prime ecosystem adapter is invalid",
+    );
+  }
+});
 
 function expectedReceipt(frame, changes = {}) {
   return {
@@ -411,7 +467,7 @@ test("binds the exact ecosystem effect before Prime lifecycle", async () => {
       },
     };
 
-    const result = await new PrimeEcosystemAdapter({ store, module }).activate(state.frame);
+    const result = await ecosystemAdapter({ store, module }).activate(state.frame);
 
     assert.deepEqual(calls, ["bind", "module-start", "module-end", "commit"]);
     assert.equal(module.calls, 1);
@@ -442,7 +498,7 @@ test("validation rejects before durable bind or module activation", async () => 
     const invalid = { ...clone(state.frame), body: PRIVATE_BODY };
 
     await assert.rejects(
-      new PrimeEcosystemAdapter({ store, module }).activate(invalid),
+      ecosystemAdapter({ store, module }).activate(invalid),
       PrimeEcosystemError,
     );
     assert.deepEqual(calls, []);
@@ -456,7 +512,7 @@ test("returns an existing terminal result unchanged without replaying the module
   try {
     const store = await GatewayDurableStore.open(state.gatewayRoot, "session-1");
     const firstModule = { async activate(frame) { return expectedReceipt(frame); } };
-    const first = await new PrimeEcosystemAdapter({ store, module: firstModule }).activate(state.frame);
+    const first = await ecosystemAdapter({ store, module: firstModule }).activate(state.frame);
     const reopened = await GatewayDurableStore.open(state.gatewayRoot, "session-1");
     const failModule = {
       calls: 0,
@@ -466,7 +522,7 @@ test("returns an existing terminal result unchanged without replaying the module
       },
     };
 
-    const replayed = await new PrimeEcosystemAdapter({
+    const replayed = await ecosystemAdapter({
       store: reopened,
       module: failModule,
     }).activate(state.frame);
@@ -495,7 +551,7 @@ test("concurrent duplicate activation invokes the module once and fences the dup
         return expectedReceipt(frame);
       },
     };
-    const adapter = new PrimeEcosystemAdapter({ store, module });
+    const adapter = ecosystemAdapter({ store, module });
     const firstPromise = adapter.activate(state.frame);
     await started;
     const secondPromise = adapter.activate(state.frame);
@@ -530,7 +586,7 @@ test("reopen fences a bound nonterminal effect as uncertain", async () => {
       },
     };
 
-    const result = await new PrimeEcosystemAdapter({
+    const result = await ecosystemAdapter({
       store: reopened,
       module: failModule,
     }).activate(state.frame);
@@ -563,7 +619,7 @@ test("commit write failure reopens as uncertain without replaying the module", a
       },
     };
     await assert.rejects(
-      new PrimeEcosystemAdapter({ store: faulted, module }).activate(state.frame),
+      ecosystemAdapter({ store: faulted, module }).activate(state.frame),
       (error) => error.message === "Prime gateway durable write failed",
     );
     assert.equal(module.calls, 1);
@@ -575,7 +631,7 @@ test("commit write failure reopens as uncertain without replaying the module", a
         return {};
       },
     };
-    const recovered = await new PrimeEcosystemAdapter({
+    const recovered = await ecosystemAdapter({
       store: reopened,
       module: replayModule,
     }).activate(state.frame);
@@ -613,7 +669,7 @@ test("replay rejects a terminal result whose expected count drifts from its bind
   const state = await fixture();
   try {
     const store = await GatewayDurableStore.open(state.gatewayRoot, "session-1");
-    await new PrimeEcosystemAdapter({
+    await ecosystemAdapter({
       store,
       module: { async activate(frame) { return expectedReceipt(frame); } },
     }).activate(state.frame);
@@ -651,7 +707,7 @@ test("commits redacted uncertainty for module failures and receipt drift", async
     const state = await fixture();
     try {
       const store = await GatewayDurableStore.open(state.gatewayRoot, "session-1");
-      const result = await new PrimeEcosystemAdapter({ store, module }).activate(state.frame);
+      const result = await ecosystemAdapter({ store, module }).activate(state.frame);
       assert.equal(result.status, "uncertain");
       assert.equal(JSON.stringify(result).includes("SENTINEL"), false);
     } finally {
@@ -672,10 +728,10 @@ test("commits every exact terminal status without lifecycle replay", async () =>
           return expectedReceipt(frame, { status });
         },
       };
-      const result = await new PrimeEcosystemAdapter({ store, module }).activate(state.frame);
+      const result = await ecosystemAdapter({ store, module }).activate(state.frame);
       assert.equal(result.status, status);
       assert.equal(module.calls, 1);
-      const replay = await new PrimeEcosystemAdapter({ store, module }).activate(state.frame);
+      const replay = await ecosystemAdapter({ store, module }).activate(state.frame);
       assert.deepEqual(replay, result);
       assert.equal(module.calls, 1);
     } finally {
@@ -721,7 +777,7 @@ test("a pre-existing effect rejects public frame digest drift without module rep
     };
 
     await assert.rejects(
-      new PrimeEcosystemAdapter({ store, module }).activate(drifted),
+      ecosystemAdapter({ store, module }).activate(drifted),
       (error) => error.message === "Prime gateway durable record conflicts",
     );
     assert.equal(module.calls, 0);
@@ -735,7 +791,7 @@ test("durable public bindings, results, snapshots, and errors exclude private ec
   const state = await fixture();
   try {
     const store = await GatewayDurableStore.open(state.gatewayRoot, "session-1");
-    const result = await new PrimeEcosystemAdapter({
+    const result = await ecosystemAdapter({
       store,
       module: { async activate(frame) { return expectedReceipt(frame); } },
     }).activate(state.frame);

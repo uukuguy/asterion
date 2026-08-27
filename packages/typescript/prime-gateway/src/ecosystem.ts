@@ -10,9 +10,11 @@ import { basename, isAbsolute, join, normalize } from "node:path";
 
 export const PRIME_ECOSYSTEM_FRAME = "asterion.prime-ecosystem-frame/v1";
 export const PRIME_ECOSYSTEM_ARTIFACT_LOCK_DIGEST =
-  "c0ffac5cb40be428ca4a60041694c2359bb1dd0c0ea182dabed1191247df03bc";
+  "c64aecdec9ddff21fb7ed493cc1837eb68bf428fc94803a65e6c185aca0fbba3";
 export const PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST =
-  "bcc22f2da837d9feab0d27fc177012f39d4ee00d7b5f7b0fc9ec877f74b922d2";
+  "87972649dc9c8b713d708b3a37008ab7d071c1c642cd12102d98ed5c3a7ef539";
+export const PRIME_ECOSYSTEM_BUNDLE_DIGEST =
+  "55e5f1cb3b0eb30bf34add70f90ce683a49a87f648d843f0cb0e8e1fcdc2bc6c";
 export const MAX_ECOSYSTEM_BYTES = 8 * 1024 * 1024;
 export const MAX_ECOSYSTEM_ENTRIES = 4096;
 export const MAX_ECOSYSTEM_PROCESSES = 1;
@@ -166,7 +168,21 @@ interface PrimeEcosystemStore {
 export interface PrimeEcosystemAdapterOptions {
   readonly store: PrimeEcosystemStore;
   readonly module: PrimeEcosystemModule;
+  readonly lock: PrimeEcosystemLockContract;
 }
+
+export interface PrimeEcosystemLockContract {
+  readonly artifactLockDigest: string;
+  readonly bundleDigest: string;
+  readonly moduleLockDigest: string;
+}
+
+export const PRIME_ECOSYSTEM_LOCK_CONTRACT: PrimeEcosystemLockContract =
+  Object.freeze({
+    artifactLockDigest: PRIME_ECOSYSTEM_ARTIFACT_LOCK_DIGEST,
+    bundleDigest: PRIME_ECOSYSTEM_BUNDLE_DIGEST,
+    moduleLockDigest: PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST,
+  });
 
 export class PrimeEcosystemError extends Error {
   constructor(message = "Prime ecosystem operation failed") {
@@ -901,7 +917,16 @@ export class PrimeEcosystemAdapter {
         typeof options.store?.commitEcosystemEffectResult !== "function" ||
         typeof options.store?.ecosystemEffectBinding !== "function" ||
         typeof options.store?.ecosystemEffectResult !== "function" ||
-        typeof options.module?.activate !== "function"
+        typeof options.module?.activate !== "function" ||
+        !isRecord(options.lock) ||
+        !hasExactKeys(options.lock, [
+          "artifactLockDigest",
+          "bundleDigest",
+          "moduleLockDigest",
+        ]) ||
+        options.lock.artifactLockDigest !== PRIME_ECOSYSTEM_ARTIFACT_LOCK_DIGEST ||
+        options.lock.bundleDigest !== PRIME_ECOSYSTEM_BUNDLE_DIGEST ||
+        options.lock.moduleLockDigest !== PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST
       ) throw new TypeError();
       this.store = options.store;
       this.module = options.module;

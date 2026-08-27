@@ -9,8 +9,10 @@ import {
   PrimeBoundPrivateInputs,
   PrimeGatewaySidecar,
   PRIME_GATEWAY_IPC_PROTOCOL,
+  loadPrimeEcosystemModule,
   servePrimeGatewaySidecar,
 } from "../dist/src/main.js";
+import { PRIME_ECOSYSTEM_LOCK_CONTRACT } from "../dist/src/ecosystem.js";
 import {
   GatewayDurableStore,
   PrimeEcosystemAdapter,
@@ -116,14 +118,14 @@ async function ecosystemFrameFixture() {
   await chmod(projectionRoot, 0o700);
   return {
     frame: {
-      artifactLockDigest: "c0ffac5cb40be428ca4a60041694c2359bb1dd0c0ea182dabed1191247df03bc",
+      artifactLockDigest: "c64aecdec9ddff21fb7ed493cc1837eb68bf428fc94803a65e6c185aca0fbba3",
       authorityDigest: createHash("sha256").update("authority-1@7").digest("hex"),
       effectId: `ecosystem:sidecar:${portfolioDigest.slice(0, 32)}`,
       features: [],
       format: "asterion.prime-ecosystem-frame/v1",
       limits: { deadlineMs: 30_000, maxBytes: 8 * 1024 * 1024, maxEntries: 4096, maxProcesses: 1 },
       mcpCredentialLeaseId: "mcp-lease:SIDECAR_PRIVATE_LEASE",
-      moduleLockDigest: "bcc22f2da837d9feab0d27fc177012f39d4ee00d7b5f7b0fc9ec877f74b922d2",
+      moduleLockDigest: "87972649dc9c8b713d708b3a37008ab7d071c1c642cd12102d98ed5c3a7ef539",
       portfolioDigest,
       projectionRoot,
       registrations: [],
@@ -150,6 +152,55 @@ function ecosystemReceipt(frame) {
     status: "succeeded",
   };
 }
+
+test("main resolves the exact ecosystem lock contract before importing its bundle", async () => {
+  const resources = new URL("../resources/", import.meta.url);
+  const binding = await loadPrimeEcosystemModule({
+    artifactLockPath: await realpath(new URL("prime-artifact-lock.json", resources)),
+    bundlePath: await realpath(new URL("prime-ecosystem-module.mjs", resources)),
+    moduleLockPath: await realpath(new URL("prime-ecosystem-module-lock.json", resources)),
+  });
+
+  assert.deepEqual(binding.lock, PRIME_ECOSYSTEM_LOCK_CONTRACT);
+  assert.equal(typeof binding.module.activate, "function");
+
+  const temporary = await realpath(
+    await mkdtemp(join(tmpdir(), "asterion-prime-ecosystem-lock-")),
+  );
+  try {
+    const paths = {
+      artifactLockPath: join(temporary, "prime-artifact-lock.json"),
+      bundlePath: join(temporary, "prime-ecosystem-module.mjs"),
+      moduleLockPath: join(temporary, "prime-ecosystem-module-lock.json"),
+    };
+    await Promise.all([
+      writeFile(
+        paths.artifactLockPath,
+        await readFile(new URL("prime-artifact-lock.json", resources)),
+        { mode: 0o600 },
+      ),
+      writeFile(
+        paths.bundlePath,
+        "SENTINEL_PRIVATE_BUNDLE_DRIFT\n",
+        { mode: 0o600 },
+      ),
+      writeFile(
+        paths.moduleLockPath,
+        await readFile(new URL("prime-ecosystem-module-lock.json", resources)),
+        { mode: 0o600 },
+      ),
+    ]);
+    await assert.rejects(
+      loadPrimeEcosystemModule(paths),
+      (error) =>
+        error.message === "Prime gateway operation failed" &&
+        !error.message.includes("SENTINEL_PRIVATE_BUNDLE_DRIFT") &&
+        !error.message.includes(temporary),
+    );
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+});
 
 class FakePrivateValues {
   constructor() {
@@ -337,7 +388,11 @@ test("private ecosystem activation reaches the injected adapter and projects the
         return ecosystemReceipt(frame);
       },
     };
-    const adapter = new PrimeEcosystemAdapter({ store, module });
+    const adapter = new PrimeEcosystemAdapter({
+      lock: PRIME_ECOSYSTEM_LOCK_CONTRACT,
+      store,
+      module,
+    });
     gateway.activateEcosystem = (frame) => adapter.activate(frame);
     const { sidecar } = createSidecar({ gateway });
     const response = await sidecar.handleEnvelope({

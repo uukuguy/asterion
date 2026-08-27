@@ -1,14 +1,16 @@
 import { constants, readFileSync } from "node:fs";
 import {
+  lstat,
   open,
   readFile,
+  realpath,
   rename,
   rm,
   unlink,
 } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import process from "node:process";
-import { join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import readline from "node:readline/promises";
 import { pathToFileURL } from "node:url";
 
@@ -64,6 +66,11 @@ import type {
   GatewayRlmMessageBinding,
 } from "./durable-store.js";
 import {
+  PRIME_ECOSYSTEM_ARTIFACT_LOCK_DIGEST,
+  PRIME_ECOSYSTEM_BUNDLE_DIGEST,
+  PRIME_ECOSYSTEM_LOCK_CONTRACT,
+  PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST,
+  PrimeEcosystemAdapter,
   validateGatewayEcosystemEffectResult,
   validatePrimeEcosystemFrame,
   validatePrimeEcosystemReceipt,
@@ -71,6 +78,8 @@ import {
 import type {
   GatewayEcosystemEffectResult,
   PrimeEcosystemFrame,
+  PrimeEcosystemLockContract,
+  PrimeEcosystemModule,
   PrimeEcosystemReceipt,
 } from "./ecosystem.js";
 import {
@@ -308,6 +317,157 @@ function hasExactKeys(value: Record<string, unknown>, expected: readonly string[
     actual.length === sortedExpected.length &&
     actual.every((key, index) => key === sortedExpected[index])
   );
+}
+
+const PRIME_ECOSYSTEM_MODULE_IDS = Object.freeze([
+  "diagnostics",
+  "extension-loader",
+  "extension-runner",
+  "mcp-manager",
+  "mcp-oauth",
+  "model-registry",
+  "package-manager",
+  "prompt-templates",
+  "resource-loader",
+  "skills",
+]);
+const PRIME_ECOSYSTEM_BUNDLE_EXPORTS = Object.freeze([
+  "inspectResources",
+  "resolvePackage",
+  "runExtensionLifecycle",
+  "runMcpFixture",
+]);
+
+export interface PrimeEcosystemModuleBinding {
+  readonly lock: PrimeEcosystemLockContract;
+  readonly module: PrimeEcosystemModule;
+}
+
+export interface PrimeEcosystemModuleBindingPaths {
+  readonly artifactLockPath: string;
+  readonly bundlePath: string;
+  readonly moduleLockPath: string;
+}
+
+async function readLockedEcosystemFile(path: string): Promise<Buffer> {
+  if (!isAbsolute(path)) throw new PrimeGatewayError();
+  const metadata = await lstat(path);
+  if (
+    metadata.isSymbolicLink() ||
+    !metadata.isFile() ||
+    (metadata.mode & 0o002) !== 0 ||
+    await realpath(path) !== path
+  ) throw new PrimeGatewayError();
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const held = await handle.stat();
+    if (
+      !held.isFile() ||
+      (held.mode & 0o002) !== 0 ||
+      held.dev !== metadata.dev ||
+      held.ino !== metadata.ino
+    ) throw new PrimeGatewayError();
+    return await handle.readFile();
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+}
+
+function validateEcosystemModuleLock(value: unknown): string {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "artifact_lock_sha256",
+      "bundle_sha256",
+      "format",
+      "modules",
+      "source_commit",
+    ]) ||
+    value.format !== "asterion.prime-ecosystem-module-lock/v1" ||
+    value.source_commit !== "a18809e00ea30638584d87b3afea7285a9d7296c" ||
+    value.artifact_lock_sha256 !== PRIME_ECOSYSTEM_ARTIFACT_LOCK_DIGEST ||
+    value.bundle_sha256 !== PRIME_ECOSYSTEM_BUNDLE_DIGEST ||
+    !Array.isArray(value.modules) ||
+    value.modules.length !== PRIME_ECOSYSTEM_MODULE_IDS.length
+  ) throw new PrimeGatewayError();
+  value.modules.forEach((item, index) => {
+    if (
+      !isRecord(item) ||
+      !hasExactKeys(item, ["built_path", "module_id", "sha256", "source_path"]) ||
+      item.module_id !== PRIME_ECOSYSTEM_MODULE_IDS[index] ||
+      typeof item.built_path !== "string" ||
+      typeof item.source_path !== "string" ||
+      typeof item.sha256 !== "string" ||
+      !/^[0-9a-f]{64}$/u.test(item.sha256)
+    ) throw new PrimeGatewayError();
+  });
+  return value.bundle_sha256;
+}
+
+export async function loadPrimeEcosystemModule(
+  paths: PrimeEcosystemModuleBindingPaths,
+): Promise<PrimeEcosystemModuleBinding> {
+  try {
+    if (
+      !isRecord(paths) ||
+      !hasExactKeys(paths, ["artifactLockPath", "bundlePath", "moduleLockPath"]) ||
+      ![paths.artifactLockPath, paths.bundlePath, paths.moduleLockPath]
+        .every((path) => typeof path === "string" && isAbsolute(path))
+    ) throw new PrimeGatewayError();
+    const [artifactLock, moduleLock, bundle] = await Promise.all([
+      readLockedEcosystemFile(paths.artifactLockPath as string),
+      readLockedEcosystemFile(paths.moduleLockPath as string),
+      readLockedEcosystemFile(paths.bundlePath as string),
+    ]);
+    if (
+      createHash("sha256").update(artifactLock).digest("hex") !==
+        PRIME_ECOSYSTEM_ARTIFACT_LOCK_DIGEST ||
+      createHash("sha256").update(moduleLock).digest("hex") !==
+        PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST
+    ) throw new PrimeGatewayError();
+    const bundleDigest = validateEcosystemModuleLock(
+      JSON.parse(moduleLock.toString("utf8")),
+    );
+    if (createHash("sha256").update(bundle).digest("hex") !== bundleDigest) {
+      throw new PrimeGatewayError();
+    }
+    const loaded = await import(
+      `${pathToFileURL(paths.bundlePath as string).href}?sha256=${bundleDigest}`
+    ) as unknown;
+    if (
+      !isRecord(loaded) ||
+      Object.keys(loaded).sort().join("\0") !==
+        PRIME_ECOSYSTEM_BUNDLE_EXPORTS.join("\0") ||
+      PRIME_ECOSYSTEM_BUNDLE_EXPORTS.some(
+        (name) => typeof loaded[name] !== "function",
+      )
+    ) throw new PrimeGatewayError();
+    const inspectResources = loaded.inspectResources as (
+      frame: PrimeEcosystemFrame,
+    ) => Promise<unknown>;
+    const module: PrimeEcosystemModule = Object.freeze({
+      async activate(frame: PrimeEcosystemFrame): Promise<unknown> {
+        await inspectResources(frame);
+        return Object.freeze({
+          authorityDigest: frame.authorityDigest,
+          featureIds: frame.features,
+          lifecycleCount: frame.resources.filter(({ kind }) => kind === "extension").length,
+          mcpCount: frame.resources.filter(({ kind }) => kind === "mcp-server").length,
+          modelCredentialReads: 0,
+          ownedProcessCount: 0,
+          packageCount: frame.resources.filter(({ kind }) => kind === "package").length,
+          portfolioDigest: frame.portfolioDigest,
+          providerOperations: 0,
+          registrationCount: frame.registrations.length,
+          resourceCount: frame.resources.length,
+          status: "succeeded",
+        });
+      },
+    });
+    return Object.freeze({ lock: PRIME_ECOSYSTEM_LOCK_CONTRACT, module });
+  } catch {
+    throw new PrimeGatewayError();
+  }
 }
 
 function validPrivateText(value: unknown): value is string {
@@ -1354,6 +1514,27 @@ async function createSidecarFromDescriptor(
     throw error;
   }
   let checkpointManager: PrimeCheckpointManager | undefined;
+  let ecosystemAdapterPromise: Promise<PrimeEcosystemAdapter> | undefined;
+  const ecosystem = Object.freeze({
+    async activate(frame: PrimeEcosystemFrame): Promise<GatewayEcosystemEffectResult> {
+      ecosystemAdapterPromise ??= loadPrimeEcosystemModule({
+        artifactLockPath: descriptor.artifactLockPath,
+        bundlePath: join(
+          dirname(descriptor.artifactLockPath),
+          "prime-ecosystem-module.mjs",
+        ),
+        moduleLockPath: join(
+          dirname(descriptor.artifactLockPath),
+          "prime-ecosystem-module-lock.json",
+        ),
+      }).then(({ lock, module }) => new PrimeEcosystemAdapter({
+        lock,
+        module,
+        store,
+      }));
+      return (await ecosystemAdapterPromise).activate(frame);
+    },
+  });
   let gateway: PrimeGateway;
   let skillBridge: AsterionSkillBridge | undefined;
   let skillBridgeRoot: string | undefined;
@@ -1720,6 +1901,7 @@ async function createSidecarFromDescriptor(
     sessionId: descriptor.sessionId,
     generation: descriptor.generation,
     authorityId: descriptor.authorityId,
+    ecosystem,
     restoreExistingSession: !descriptor.recoveryReadOnly,
     store,
     privateValues: boundPrivateInputs,

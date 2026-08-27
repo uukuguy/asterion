@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -12,6 +14,7 @@ from unittest import mock
 from tools.setup_prime_agent import (
     PrimeSetupError,
     derive_prime_rlm_runtime,
+    resolve_prime_ecosystem_module,
     resolve_prime_harness_module,
     setup_prime_source,
     verify_prime_source,
@@ -26,7 +29,28 @@ HARNESS_LOCK_PATH = (
     PROJECT
     / "packages/typescript/prime-gateway/resources/prime-harness-module-lock.json"
 )
+ECOSYSTEM_LOCK_PATH = (
+    PROJECT
+    / "packages/typescript/prime-gateway/resources/prime-ecosystem-module-lock.json"
+)
+ECOSYSTEM_BUNDLE_PATH = (
+    PROJECT
+    / "packages/typescript/prime-gateway/resources/prime-ecosystem-module.mjs"
+)
 PINNED_SOURCE = PROJECT / "3th-party/prime-agent"
+PINNED_COMMIT = "a18809e00ea30638584d87b3afea7285a9d7296c"
+EXPECTED_ECOSYSTEM_MODULE_IDS = (
+    "diagnostics",
+    "extension-loader",
+    "extension-runner",
+    "mcp-manager",
+    "mcp-oauth",
+    "model-registry",
+    "package-manager",
+    "prompt-templates",
+    "resource-loader",
+    "skills",
+)
 OFFLINE_BUILD_COMMANDS = (
     ("npm", "--prefix", "packages/tui", "run", "build"),
     (
@@ -144,6 +168,45 @@ def _completed(
     return subprocess.CompletedProcess(command, returncode, stdout=stdout, stderr="")
 
 
+def _copy_ecosystem_boundary(root: Path) -> tuple[Path, Path, Path, Path]:
+    lock = json.loads(ECOSYSTEM_LOCK_PATH.read_text(encoding="utf-8"))
+    source = root / "prime-source"
+    source.mkdir()
+    (source / ".git").mkdir()
+    for module in lock["modules"]:
+        for field in ("source_path", "built_path"):
+            relative = module[field]
+            target = source / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(PINNED_SOURCE / relative, target)
+            target.chmod(0o644)
+    resources = root / "resources"
+    resources.mkdir()
+    artifact_lock = resources / "prime-artifact-lock.json"
+    module_lock = resources / "prime-ecosystem-module-lock.json"
+    bundle = resources / "prime-ecosystem-module.mjs"
+    shutil.copyfile(LOCK_PATH, artifact_lock)
+    shutil.copyfile(ECOSYSTEM_LOCK_PATH, module_lock)
+    shutil.copyfile(ECOSYSTEM_BUNDLE_PATH, bundle)
+    bundle_text = bundle.read_text(encoding="utf-8")
+    for module in lock["modules"]:
+        original = (
+            "../../../../3th-party/prime-agent/" + module["built_path"]
+        )
+        replacement = os.path.relpath(
+            source / module["built_path"], bundle.parent
+        )
+        if not replacement.startswith("."):
+            replacement = f"./{replacement}"
+        bundle_text = bundle_text.replace(original, replacement)
+    bundle.write_text(bundle_text, encoding="utf-8")
+    lock["bundle_sha256"] = hashlib.sha256(bundle.read_bytes()).hexdigest()
+    module_lock.write_text(json.dumps(lock), encoding="utf-8")
+    for path in (artifact_lock, module_lock, bundle):
+        path.chmod(0o644)
+    return source, module_lock, artifact_lock, bundle
+
+
 class RecordingRunner:
     def __init__(
         self,
@@ -180,6 +243,261 @@ class RecordingRunner:
 
 
 class TestSetupPrimeAgent(unittest.TestCase):
+    def test_ecosystem_resolver_requires_exact_source_build_and_bundle_digests(
+        self,
+    ) -> None:
+        if not PINNED_SOURCE.is_dir():
+            self.skipTest("external pinned Prime checkout is unavailable")
+
+        resolved = resolve_prime_ecosystem_module(
+            PINNED_SOURCE,
+            ECOSYSTEM_LOCK_PATH,
+            runner=RecordingRunner(),
+        )
+
+        self.assertEqual(resolved.source_commit, PINNED_COMMIT)
+        self.assertEqual(resolved.module_ids, EXPECTED_ECOSYSTEM_MODULE_IDS)
+        self.assertEqual(resolved.bundle_path, ECOSYSTEM_BUNDLE_PATH.resolve())
+        self.assertEqual(
+            tuple(resolved.built_paths), EXPECTED_ECOSYSTEM_MODULE_IDS
+        )
+        self.assertNotIn(str(PINNED_SOURCE), repr(resolved))
+
+    def test_ecosystem_lock_is_closed_sorted_and_anchored_to_artifacts(self) -> None:
+        lock = json.loads(ECOSYSTEM_LOCK_PATH.read_text(encoding="utf-8"))
+        artifact = json.loads(LOCK_PATH.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            set(lock),
+            {
+                "format",
+                "source_commit",
+                "artifact_lock_sha256",
+                "bundle_sha256",
+                "modules",
+            },
+        )
+        self.assertEqual(lock["source_commit"], PINNED_COMMIT)
+        self.assertEqual(
+            lock["artifact_lock_sha256"],
+            hashlib.sha256(LOCK_PATH.read_bytes()).hexdigest(),
+        )
+        self.assertEqual(
+            lock["bundle_sha256"],
+            hashlib.sha256(ECOSYSTEM_BUNDLE_PATH.read_bytes()).hexdigest(),
+        )
+        self.assertEqual(
+            tuple(module["module_id"] for module in lock["modules"]),
+            EXPECTED_ECOSYSTEM_MODULE_IDS,
+        )
+        for module in lock["modules"]:
+            with self.subTest(module_id=module["module_id"]):
+                self.assertEqual(
+                    set(module),
+                    {"module_id", "source_path", "built_path", "sha256"},
+                )
+                self.assertEqual(
+                    len(artifact["files"][module["source_path"]]),
+                    64,
+                )
+                self.assertEqual(
+                    artifact["files"][module["built_path"]], module["sha256"]
+                )
+                if PINNED_SOURCE.is_dir():
+                    self.assertEqual(
+                        artifact["files"][module["source_path"]],
+                        hashlib.sha256(
+                            (PINNED_SOURCE / module["source_path"]).read_bytes()
+                        ).hexdigest(),
+                    )
+                    self.assertEqual(
+                        module["sha256"],
+                        hashlib.sha256(
+                            (PINNED_SOURCE / module["built_path"]).read_bytes()
+                        ).hexdigest(),
+                    )
+
+        bundle_text = ECOSYSTEM_BUNDLE_PATH.read_text(encoding="utf-8")
+        imported = tuple(re.findall(r'\bfrom\s+["\']([^"\']+)["\']', bundle_text))
+        self.assertEqual(len(imported), len(lock["modules"]))
+        self.assertEqual(
+            {
+                (ECOSYSTEM_BUNDLE_PATH.parent / specifier).resolve()
+                for specifier in imported
+            },
+            {
+                (PINNED_SOURCE / module["built_path"]).resolve()
+                for module in lock["modules"]
+            },
+        )
+
+    def test_ecosystem_resolver_rejects_module_and_lock_drift_redacted(self) -> None:
+        if not PINNED_SOURCE.is_dir():
+            self.skipTest("external pinned Prime checkout is unavailable")
+        cases = (
+            "missing-built",
+            "source-drift",
+            "built-drift",
+            "symlink-built",
+            "world-writable-built",
+            "world-writable-module-lock",
+            "world-writable-artifact-lock",
+            "world-writable-bundle",
+            "bundle-drift",
+            "artifact-lock-drift",
+            "reordered-modules",
+            "swapped-module-paths",
+            "extra-import",
+            "side-effect-import",
+            "dynamic-import",
+            "extra-export",
+        )
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source, module_lock, artifact_lock, bundle = (
+                    _copy_ecosystem_boundary(root)
+                )
+                lock = json.loads(module_lock.read_text(encoding="utf-8"))
+                first = lock["modules"][0]
+                if case == "missing-built":
+                    (source / first["built_path"]).unlink()
+                elif case == "source-drift":
+                    (source / first["source_path"]).write_text(
+                        "SENTINEL_PRIVATE_ECOSYSTEM_SOURCE\n"
+                    )
+                elif case == "built-drift":
+                    (source / first["built_path"]).write_text(
+                        "SENTINEL_PRIVATE_ECOSYSTEM_BUILD\n"
+                    )
+                elif case == "symlink-built":
+                    target = source / first["built_path"]
+                    sibling = target.with_name("locked-sibling.js")
+                    sibling.write_bytes(target.read_bytes())
+                    target.unlink()
+                    target.symlink_to(sibling.name)
+                elif case == "world-writable-built":
+                    (source / first["built_path"]).chmod(0o666)
+                elif case == "world-writable-module-lock":
+                    module_lock.chmod(0o666)
+                elif case == "world-writable-artifact-lock":
+                    artifact_lock.chmod(0o666)
+                elif case == "world-writable-bundle":
+                    bundle.chmod(0o666)
+                elif case == "bundle-drift":
+                    bundle.write_text(
+                        bundle.read_text(encoding="utf-8")
+                        + "\n// SENTINEL_PRIVATE_ECOSYSTEM_BUNDLE\n",
+                        encoding="utf-8",
+                    )
+                elif case == "artifact-lock-drift":
+                    artifact_lock.write_text(
+                        artifact_lock.read_text(encoding="utf-8") + " \n",
+                        encoding="utf-8",
+                    )
+                elif case == "reordered-modules":
+                    lock["modules"] = list(reversed(lock["modules"]))
+                    module_lock.write_text(json.dumps(lock), encoding="utf-8")
+                elif case == "swapped-module-paths":
+                    second = lock["modules"][1]
+                    for field in ("source_path", "built_path", "sha256"):
+                        first[field], second[field] = second[field], first[field]
+                    module_lock.write_text(json.dumps(lock), encoding="utf-8")
+                elif case == "extra-import":
+                    bundle.write_text(
+                        bundle.read_text(encoding="utf-8")
+                        + '\nimport * as unlocked from "../unlocked.js";\n'
+                        + "void unlocked;\n",
+                        encoding="utf-8",
+                    )
+                    (bundle.parent / "../unlocked.js").resolve().write_text(
+                        "export const unlocked = true;\n", encoding="utf-8"
+                    )
+                    lock["bundle_sha256"] = hashlib.sha256(
+                        bundle.read_bytes()
+                    ).hexdigest()
+                    module_lock.write_text(json.dumps(lock), encoding="utf-8")
+                elif case == "side-effect-import":
+                    bundle.write_text(
+                        bundle.read_text(encoding="utf-8")
+                        + '\nimport "../side-effect.js";\n',
+                        encoding="utf-8",
+                    )
+                    (bundle.parent / "../side-effect.js").resolve().write_text(
+                        "globalThis.unlocked = true;\n", encoding="utf-8"
+                    )
+                    lock["bundle_sha256"] = hashlib.sha256(
+                        bundle.read_bytes()
+                    ).hexdigest()
+                    module_lock.write_text(json.dumps(lock), encoding="utf-8")
+                elif case == "dynamic-import":
+                    bundle.write_text(
+                        bundle.read_text(encoding="utf-8")
+                        + '\nconst unlocked = import("../unlocked.js");\n'
+                        + "void unlocked;\n",
+                        encoding="utf-8",
+                    )
+                    (bundle.parent / "../unlocked.js").resolve().write_text(
+                        "export const unlocked = true;\n", encoding="utf-8"
+                    )
+                    lock["bundle_sha256"] = hashlib.sha256(
+                        bundle.read_bytes()
+                    ).hexdigest()
+                    module_lock.write_text(json.dumps(lock), encoding="utf-8")
+                elif case == "extra-export":
+                    bundle.write_text(
+                        bundle.read_text(encoding="utf-8")
+                        + "\nexport function invokeProvider() {}\n",
+                        encoding="utf-8",
+                    )
+                    lock["bundle_sha256"] = hashlib.sha256(
+                        bundle.read_bytes()
+                    ).hexdigest()
+                    module_lock.write_text(json.dumps(lock), encoding="utf-8")
+
+                with self.assertRaisesRegex(
+                    PrimeSetupError, "Prime ecosystem module is invalid"
+                ) as raised:
+                    resolve_prime_ecosystem_module(
+                        source,
+                        module_lock,
+                        artifact_lock_path=artifact_lock,
+                        bundle_path=bundle,
+                        runner=RecordingRunner(),
+                    )
+
+                self.assertNotIn("SENTINEL_PRIVATE_ECOSYSTEM", str(raised.exception))
+                self.assertNotIn(str(root), str(raised.exception))
+
+    def test_ecosystem_resolver_checks_without_importing_the_bundle(self) -> None:
+        if not PINNED_SOURCE.is_dir():
+            self.skipTest("external pinned Prime checkout is unavailable")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, module_lock, artifact_lock, bundle = _copy_ecosystem_boundary(
+                root
+            )
+            sentinel = root / "SENTINEL_IMPORT_SIDE_EFFECT"
+            bundle.write_text(
+                f'throw new Error("{sentinel}");\n'
+                + bundle.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            lock = json.loads(module_lock.read_text(encoding="utf-8"))
+            lock["bundle_sha256"] = hashlib.sha256(bundle.read_bytes()).hexdigest()
+            module_lock.write_text(json.dumps(lock), encoding="utf-8")
+
+            resolved = resolve_prime_ecosystem_module(
+                source,
+                module_lock,
+                artifact_lock_path=artifact_lock,
+                bundle_path=bundle,
+                runner=RecordingRunner(),
+            )
+
+            self.assertEqual(resolved.bundle_path, bundle.resolve())
+            self.assertFalse(sentinel.exists())
+
     def test_resolver_accepts_only_the_pinned_refinement_module(self) -> None:
         if not PINNED_SOURCE.is_dir():
             self.skipTest("external pinned Prime checkout is unavailable")

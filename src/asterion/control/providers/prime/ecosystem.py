@@ -8,6 +8,7 @@ import inspect
 import json
 import secrets
 from collections.abc import Mapping
+from pathlib import Path
 from types import MappingProxyType
 from typing import Protocol
 
@@ -24,12 +25,11 @@ from asterion.control.protocol import OPAQUE_ID
 
 
 PRIME_ECOSYSTEM_FRAME = "asterion.prime-ecosystem-frame/v1"
-PRIME_ECOSYSTEM_ARTIFACT_LOCK_DIGEST = hashlib.sha256(
-    b"asterion.prime-artifact-lock/v1"
-).hexdigest()
-PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST = hashlib.sha256(
-    b"asterion.prime-ecosystem-module-lock/v1"
-).hexdigest()
+_ECOSYSTEM_RESOURCE_NAMES = (
+    "prime-artifact-lock.json",
+    "prime-ecosystem-module-lock.json",
+    "prime-ecosystem-module.mjs",
+)
 
 _TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled", "uncertain"})
 _RECEIPT_FIELDS = frozenset(
@@ -84,6 +84,94 @@ class PrimeEcosystemError(RuntimeError):
 
 class PrimeEcosystemConsumerNotQuiesced(PrimeEcosystemError):
     """Raised when a selected provider consumer may still hold a projection."""
+
+
+def _checked_in_ecosystem_resource(name: str) -> Path:
+    repository = (
+        Path(__file__).resolve().parents[5]
+        / "packages/typescript/prime-gateway/resources"
+        / name
+    )
+    packaged = Path(__file__).resolve().parent / "resources" / name
+    for candidate in (repository, packaged):
+        if candidate.is_file():
+            return candidate
+    raise PrimeEcosystemError("Prime ecosystem lock contract is invalid")
+
+
+def _read_checked_in_ecosystem_resource(name: str) -> bytes:
+    try:
+        path = _checked_in_ecosystem_resource(name)
+        if path.is_symlink() or path.stat().st_mode & 0o002:
+            raise OSError
+        return path.read_bytes()
+    except (OSError, RuntimeError):
+        raise PrimeEcosystemError(
+            "Prime ecosystem lock contract is invalid"
+        ) from None
+
+
+def _load_checked_in_lock_contract() -> tuple[str, str, str]:
+    try:
+        module_lock = _read_checked_in_ecosystem_resource(
+            "prime-ecosystem-module-lock.json"
+        )
+        bundle = _read_checked_in_ecosystem_resource(
+            "prime-ecosystem-module.mjs"
+        )
+        value = json.loads(module_lock)
+        if (
+            not isinstance(value, dict)
+            or set(value)
+            != {
+                "artifact_lock_sha256",
+                "bundle_sha256",
+                "format",
+                "modules",
+                "source_commit",
+            }
+            or value["format"] != "asterion.prime-ecosystem-module-lock/v1"
+            or value["source_commit"]
+            != "a18809e00ea30638584d87b3afea7285a9d7296c"
+            or not isinstance(value["artifact_lock_sha256"], str)
+            or not isinstance(value["bundle_sha256"], str)
+            or len(value["artifact_lock_sha256"]) != 64
+            or len(value["bundle_sha256"]) != 64
+            or hashlib.sha256(bundle).hexdigest() != value["bundle_sha256"]
+        ):
+            raise TypeError
+        return (
+            value["artifact_lock_sha256"],
+            hashlib.sha256(module_lock).hexdigest(),
+            value["bundle_sha256"],
+        )
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        raise PrimeEcosystemError(
+            "Prime ecosystem lock contract is invalid"
+        ) from None
+
+
+(
+    PRIME_ECOSYSTEM_ARTIFACT_LOCK_DIGEST,
+    PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST,
+    PRIME_ECOSYSTEM_BUNDLE_DIGEST,
+) = _load_checked_in_lock_contract()
+
+
+def _validated_checked_in_lock_contract() -> tuple[str, str, str]:
+    contract = _load_checked_in_lock_contract()
+    artifact = _read_checked_in_ecosystem_resource("prime-artifact-lock.json")
+    if (
+        contract
+        != (
+            PRIME_ECOSYSTEM_ARTIFACT_LOCK_DIGEST,
+            PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST,
+            PRIME_ECOSYSTEM_BUNDLE_DIGEST,
+        )
+        or hashlib.sha256(artifact).hexdigest() != contract[0]
+    ):
+        raise PrimeEcosystemError("Prime ecosystem lock contract is invalid")
+    return contract
 
 
 class PrimeEcosystemClient(Protocol):
@@ -236,6 +324,9 @@ def _build_frame(
     portfolio: EcosystemPortfolio,
     projection: EcosystemProjection,
 ) -> Mapping[str, object]:
+    artifact_lock_digest, module_lock_digest, _ = (
+        _validated_checked_in_lock_contract()
+    )
     authority_digest = _canonical_digest(
         {
             "authorityId": portfolio.authority_id,
@@ -276,14 +367,14 @@ def _build_frame(
     )
     return MappingProxyType(
         {
-            "artifactLockDigest": PRIME_ECOSYSTEM_ARTIFACT_LOCK_DIGEST,
+            "artifactLockDigest": artifact_lock_digest,
             "authorityDigest": authority_digest,
             "effectId": f"ecosystem:{portfolio.portfolio_id}:{portfolio.digest[:32]}",
             "features": _feature_ids(portfolio),
             "format": PRIME_ECOSYSTEM_FRAME,
             "limits": _LIMITS,
             "mcpCredentialLeaseId": f"mcp-lease:{secrets.token_hex(16)}",
-            "moduleLockDigest": PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST,
+            "moduleLockDigest": module_lock_digest,
             "portfolioDigest": portfolio.digest,
             "projectionRoot": str(projection.root),
             "registrations": registrations,

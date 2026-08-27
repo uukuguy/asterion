@@ -1,0 +1,68 @@
+{
+  "format": "asterion.prime-ecosystem-module-lock/v1",
+  "source_commit": "a18809e00ea30638584d87b3afea7285a9d7296c",
+  "artifact_lock_sha256": "c64aecdec9ddff21fb7ed493cc1837eb68bf428fc94803a65e6c185aca0fbba3",
+  "bundle_sha256": "55e5f1cb3b0eb30bf34add70f90ce683a49a87f648d843f0cb0e8e1fcdc2bc6c",
+  "modules": [
+    {
+      "module_id": "diagnostics",
+      "source_path": "packages/coding-agent/src/core/diagnostics.ts",
+      "built_path": "packages/coding-agent/dist/core/diagnostics.js",
+      "sha256": "b84fc4bac1fa2a4554cbc33b8b20f56908a2de8c302e63178c2981bfd185dc08"
+    },
+    {
+      "module_id": "extension-loader",
+      "source_path": "packages/coding-agent/src/core/extensions/loader.ts",
+      "built_path": "packages/coding-agent/dist/core/extensions/loader.js",
+      "sha256": "fe94b82a452ac14d812e26e82dd54820f6c26324c99a4a75405e3acd8a586729"
+    },
+    {
+      "module_id": "extension-runner",
+      "source_path": "packages/coding-agent/src/core/extensions/runner.ts",
+      "built_path": "packages/coding-agent/dist/core/extensions/runner.js",
+      "sha256": "42d26396fcf0cb5dd856eef712cafef20c50d85153238561dfcacab35a1a0682"
+    },
+    {
+      "module_id": "mcp-manager",
+      "source_path": "packages/coding-agent/src/core/mcp/mcp-manager.ts",
+      "built_path": "packages/coding-agent/dist/core/mcp/mcp-manager.js",
+      "sha256": "31e59ce6eaba5aaf3c9e8485dd6dda6f3101d30d674554aa7e6e3e58ddcac6d1"
+    },
+    {
+      "module_id": "mcp-oauth",
+      "source_path": "packages/ai/src/mcp/oauth.ts",
+      "built_path": "packages/ai/dist/mcp/oauth.js",
+      "sha256": "9a75bc079ca4debff24ac2c7c06e9af6877955386a2de9da2ed31c05f45213d4"
+    },
+    {
+      "module_id": "model-registry",
+      "source_path": "packages/coding-agent/src/core/model-registry.ts",
+      "built_path": "packages/coding-agent/dist/core/model-registry.js",
+      "sha256": "d77c1c6b8cb1af8945139961b64ca30427aa8b98e0f9172e3aed936b2829e939"
+    },
+    {
+      "module_id": "package-manager",
+      "source_path": "packages/coding-agent/src/core/package-manager.ts",
+      "built_path": "packages/coding-agent/dist/core/package-manager.js",
+      "sha256": "417b99d182396ce1a64c8f72c2e557fff999eab819186135577c89691015857c"
+    },
+    {
+      "module_id": "prompt-templates",
+      "source_path": "packages/coding-agent/src/core/prompt-templates.ts",
+      "built_path": "packages/coding-agent/dist/core/prompt-templates.js",
+      "sha256": "42323708531b1759a66ded68903f0b5fdcaf75f4d0e416e7e8faf02b947c9607"
+    },
+    {
+      "module_id": "resource-loader",
+      "source_path": "packages/coding-agent/src/core/resource-loader.ts",
+      "built_path": "packages/coding-agent/dist/core/resource-loader.js",
+      "sha256": "48517fd47b99a1554b53f1c7ed3a38502304d0e82c29ce39b3c3eb3e9ab64f48"
+    },
+    {
+      "module_id": "skills",
+      "source_path": "packages/coding-agent/src/core/skills.ts",
+      "built_path": "packages/coding-agent/dist/core/skills.js",
+      "sha256": "c20ad7c3088cdd37e2352d3d15d1252502979323fef8c53de862036910799fb6"
+    }
+  ]
+}

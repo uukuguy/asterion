@@ -18,6 +18,7 @@ from asterion.control.providers.prime.client import PrimeControlPlaneClient
 from asterion.control.providers.prime.client import PrimeControlError
 from asterion.control.providers.prime.ecosystem import (
     PRIME_ECOSYSTEM_ARTIFACT_LOCK_DIGEST,
+    PRIME_ECOSYSTEM_BUNDLE_DIGEST,
     PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST,
     PrimeEcosystemError,
     PrimeEcosystemService,
@@ -31,6 +32,10 @@ from asterion.control.providers.prime.process import (
 _BODY = "SENTINEL_BODY"
 _PATH = "/private/SENTINEL_PATH"
 _SERVICE_ERROR = "SENTINEL_SERVICE_EXCEPTION"
+_PROJECT = Path(__file__).resolve().parents[1]
+_ECOSYSTEM_RESOURCES = (
+    _PROJECT / "packages/typescript/prime-gateway/resources"
+)
 
 
 def _sha256(value: object) -> str:
@@ -201,6 +206,38 @@ class _ExplodingProbe:
 
 
 class TestPrimeEcosystemService(unittest.IsolatedAsyncioTestCase):
+    def test_private_frame_digests_are_the_exact_checked_in_lock_contract(
+        self,
+    ) -> None:
+        module_lock = _ECOSYSTEM_RESOURCES / "prime-ecosystem-module-lock.json"
+        bundle = _ECOSYSTEM_RESOURCES / "prime-ecosystem-module.mjs"
+        module_value = json.loads(module_lock.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            PRIME_ECOSYSTEM_ARTIFACT_LOCK_DIGEST,
+            module_value["artifact_lock_sha256"],
+        )
+        self.assertEqual(
+            PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST,
+            hashlib.sha256(module_lock.read_bytes()).hexdigest(),
+        )
+        self.assertEqual(
+            PRIME_ECOSYSTEM_BUNDLE_DIGEST,
+            hashlib.sha256(bundle.read_bytes()).hexdigest(),
+        )
+        self.assertEqual(
+            PRIME_ECOSYSTEM_BUNDLE_DIGEST,
+            module_value["bundle_sha256"],
+        )
+        self.assertNotEqual(
+            PRIME_ECOSYSTEM_ARTIFACT_LOCK_DIGEST,
+            hashlib.sha256(b"asterion.prime-artifact-lock/v1").hexdigest(),
+        )
+        self.assertNotEqual(
+            PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST,
+            hashlib.sha256(b"asterion.prime-ecosystem-module-lock/v1").hexdigest(),
+        )
+
     async def test_activation_materializes_before_client_and_returns_body_free_receipt(
         self,
     ) -> None:
