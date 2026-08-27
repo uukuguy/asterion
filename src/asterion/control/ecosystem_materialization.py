@@ -75,6 +75,7 @@ class _OwnedProjection:
     root_fd: int
     projection_fd: int
     identity: tuple[int, int]
+    quarantine_name: str
 
 
 class _HeldVerifiedReader:
@@ -244,6 +245,7 @@ class SealedEcosystemMaterializer:
         staging_fd: int | None = None
         owned_name: str | None = None
         owned_identity: tuple[int, int] | None = None
+        quarantine_name: str | None = None
         projection: EcosystemProjection | None = None
         failed = False
         try:
@@ -252,18 +254,25 @@ class SealedEcosystemMaterializer:
             declarations = _validated_declarations(portfolio, store)
             root_fd = _open_or_create_private_root(self._private_root)
             staging_name = f".staging-{secrets.token_hex(16)}"
+            quarantine_name = f".cleanup-{secrets.token_hex(16)}"
             os.mkdir(staging_name, 0o700, dir_fd=root_fd)
-            os.fsync(root_fd)
+            owned_name = staging_name
+            created_details = os.stat(
+                staging_name, dir_fd=root_fd, follow_symlinks=False
+            )
+            if not stat.S_ISDIR(created_details.st_mode):
+                raise OSError
+            owned_identity = _identity(created_details)
             staging_fd = os.open(staging_name, _READ_DIRECTORY_FLAGS, dir_fd=root_fd)
             staging_details = os.fstat(staging_fd)
             if (
                 not stat.S_ISDIR(staging_details.st_mode)
+                or _identity(staging_details) != owned_identity
                 or stat.S_IMODE(staging_details.st_mode) != 0o700
                 or staging_details.st_uid != os.getuid()
             ):
                 raise OSError
-            owned_name = staging_name
-            owned_identity = _identity(staging_details)
+            os.fsync(root_fd)
 
             resource_paths: dict[str, Path] = {}
             for resource, declaration in declarations:
@@ -303,7 +312,13 @@ class SealedEcosystemMaterializer:
                 and owned_identity is not None
             ):
                 try:
-                    _remove_owned_tree(root_fd, owned_name, owned_identity)
+                    _remove_owned_tree(
+                        root_fd,
+                        owned_name,
+                        owned_identity,
+                        staging_fd,
+                        quarantine_name,
+                    )
                     os.fsync(root_fd)
                 except BaseException:
                     pass
@@ -317,6 +332,7 @@ class SealedEcosystemMaterializer:
             root_fd=root_fd,
             projection_fd=staging_fd,
             identity=owned_identity,
+            quarantine_name=quarantine_name,
         )
         with self._lock:
             if id(projection) in self._owned:
@@ -325,7 +341,13 @@ class SealedEcosystemMaterializer:
                 self._owned[id(projection)] = owned
         if failed:
             try:
-                _remove_owned_tree(root_fd, projection.projection_id, owned_identity)
+                _remove_owned_tree(
+                    root_fd,
+                    projection.projection_id,
+                    owned_identity,
+                    staging_fd,
+                    quarantine_name,
+                )
             except BaseException:
                 pass
             _close_quietly(staging_fd)
@@ -340,24 +362,22 @@ class SealedEcosystemMaterializer:
                 return
             if owned.projection is not projection:
                 raise EcosystemMaterializationError(_ERROR_MESSAGE)
-            del self._owned[id(projection)]
-
-        failed = False
-        try:
-            _remove_owned_tree(
-                owned.root_fd,
-                owned.projection.projection_id,
-                owned.identity,
-            )
-            os.fsync(owned.root_fd)
-        except FileNotFoundError:
-            pass
-        except BaseException:
-            failed = True
-        if not _close_quietly(owned.projection_fd):
-            failed = True
-        if not _close_quietly(owned.root_fd):
-            failed = True
+            failed = False
+            try:
+                _remove_owned_tree(
+                    owned.root_fd,
+                    owned.projection.projection_id,
+                    owned.identity,
+                    owned.projection_fd,
+                    owned.quarantine_name,
+                )
+                os.fsync(owned.root_fd)
+            except BaseException:
+                failed = True
+            if not failed:
+                del self._owned[id(projection)]
+                _close_quietly(owned.projection_fd)
+                _close_quietly(owned.root_fd)
         if failed:
             raise EcosystemMaterializationError(_ERROR_MESSAGE)
 
@@ -402,22 +422,17 @@ def _open_regular_file(root: Path, relative_path: str) -> int:
     try:
         parts = relative_path.split("/")
         for component in parts[:-1]:
-            next_fd = os.open(
-                component,
-                _READ_DIRECTORY_FLAGS,
-                dir_fd=directory_fd,
-            )
-            details = os.fstat(next_fd)
-            if not stat.S_ISDIR(details.st_mode):
-                os.close(next_fd)
-                raise OSError
+            next_fd, _ = _open_directory_at(directory_fd, component)
             os.close(directory_fd)
             directory_fd = next_fd
         descriptor = os.open(parts[-1], _READ_FILE_FLAGS, dir_fd=directory_fd)
-        details = os.fstat(descriptor)
-        if not stat.S_ISREG(details.st_mode):
+        try:
+            details = os.fstat(descriptor)
+            if not stat.S_ISREG(details.st_mode):
+                raise OSError
+        except BaseException:
             os.close(descriptor)
-            raise OSError
+            raise
         return descriptor
     finally:
         os.close(directory_fd)
@@ -432,11 +447,7 @@ def _open_absolute_directory(path: Path) -> int:
         if not stat.S_ISDIR(details.st_mode):
             raise OSError
         for component in path.parts[1:]:
-            next_fd = os.open(component, _READ_DIRECTORY_FLAGS, dir_fd=descriptor)
-            next_details = os.fstat(next_fd)
-            if not stat.S_ISDIR(next_details.st_mode):
-                os.close(next_fd)
-                raise OSError
+            next_fd, _ = _open_directory_at(descriptor, component)
             os.close(descriptor)
             descriptor = next_fd
         return descriptor
@@ -455,18 +466,19 @@ def _open_or_create_private_root(path: Path) -> int:
             os.fsync(parent_fd)
         except FileExistsError:
             pass
-        descriptor = os.open(path.name, _READ_DIRECTORY_FLAGS, dir_fd=parent_fd)
-        details = os.fstat(descriptor)
-        if (
-            not stat.S_ISDIR(details.st_mode)
-            or stat.S_IMODE(details.st_mode) != 0o700
-            or details.st_uid != os.getuid()
-        ):
+        descriptor, details = _open_directory_at(parent_fd, path.name)
+        try:
+            if (
+                stat.S_IMODE(details.st_mode) != 0o700
+                or details.st_uid != os.getuid()
+            ):
+                raise OSError
+            if created:
+                os.fsync(descriptor)
+            return descriptor
+        except BaseException:
             os.close(descriptor)
-            raise OSError
-        if created:
-            os.fsync(descriptor)
-        return descriptor
+            raise
     finally:
         os.close(parent_fd)
 
@@ -474,16 +486,17 @@ def _open_or_create_private_root(path: Path) -> int:
 def _create_owned_directory_at(parent_fd: int, name: str) -> int:
     os.mkdir(name, 0o700, dir_fd=parent_fd)
     os.fsync(parent_fd)
-    descriptor = os.open(name, _READ_DIRECTORY_FLAGS, dir_fd=parent_fd)
-    details = os.fstat(descriptor)
-    if (
-        not stat.S_ISDIR(details.st_mode)
-        or stat.S_IMODE(details.st_mode) != 0o700
-        or details.st_uid != os.getuid()
-    ):
+    descriptor, details = _open_directory_at(parent_fd, name)
+    try:
+        if (
+            stat.S_IMODE(details.st_mode) != 0o700
+            or details.st_uid != os.getuid()
+        ):
+            raise OSError
+        return descriptor
+    except BaseException:
         os.close(descriptor)
-        raise OSError
-    return descriptor
+        raise
 
 
 def _open_or_create_owned_directory_at(parent_fd: int, name: str) -> int:
@@ -492,16 +505,17 @@ def _open_or_create_owned_directory_at(parent_fd: int, name: str) -> int:
         os.fsync(parent_fd)
     except FileExistsError:
         pass
-    descriptor = os.open(name, _READ_DIRECTORY_FLAGS, dir_fd=parent_fd)
-    details = os.fstat(descriptor)
-    if (
-        not stat.S_ISDIR(details.st_mode)
-        or stat.S_IMODE(details.st_mode) != 0o700
-        or details.st_uid != os.getuid()
-    ):
+    descriptor, details = _open_directory_at(parent_fd, name)
+    try:
+        if (
+            stat.S_IMODE(details.st_mode) != 0o700
+            or details.st_uid != os.getuid()
+        ):
+            raise OSError
+        return descriptor
+    except BaseException:
         os.close(descriptor)
-        raise OSError
-    return descriptor
+        raise
 
 
 def _copy_declared_file(
@@ -560,6 +574,15 @@ def _copy_declared_file(
 
 
 def _atomic_publish(parent_fd: int, source: str, target: str) -> None:
+    _atomic_move_no_replace(parent_fd, source, parent_fd, target)
+
+
+def _atomic_move_no_replace(
+    source_fd: int,
+    source: str,
+    target_fd: int,
+    target: str,
+) -> None:
     source_bytes = os.fsencode(source)
     target_bytes = os.fsencode(target)
     library = ctypes.CDLL(None, use_errno=True)
@@ -575,7 +598,7 @@ def _atomic_publish(parent_fd: int, source: str, target: str) -> None:
             ctypes.c_uint,
         ]
         function.restype = ctypes.c_int
-        result = function(parent_fd, source_bytes, parent_fd, target_bytes, 0x00000004)
+        result = function(source_fd, source_bytes, target_fd, target_bytes, 0x00000004)
     else:
         function = getattr(library, "renameat2", None)
         if function is None:
@@ -588,7 +611,7 @@ def _atomic_publish(parent_fd: int, source: str, target: str) -> None:
             ctypes.c_uint,
         ]
         function.restype = ctypes.c_int
-        result = function(parent_fd, source_bytes, parent_fd, target_bytes, 1)
+        result = function(source_fd, source_bytes, target_fd, target_bytes, 1)
     if result != 0:
         error_number = ctypes.get_errno()
         raise OSError(error_number, os.strerror(error_number))
@@ -598,21 +621,59 @@ def _remove_owned_tree(
     parent_fd: int,
     name: str,
     expected_identity: tuple[int, int],
-) -> None:
-    before = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-    if not stat.S_ISDIR(before.st_mode) or _identity(before) != expected_identity:
-        return
+    owned_fd: int | None,
+    quarantine_name: str | None,
+) -> bool:
+    if quarantine_name is None:
+        raise OSError
+    if owned_fd is not None:
+        held_details = os.fstat(owned_fd)
+        if (
+            not stat.S_ISDIR(held_details.st_mode)
+            or _identity(held_details) != expected_identity
+        ):
+            raise OSError
+
+    descriptor: int | None = None
+    try:
+        descriptor, details = _open_directory_at(parent_fd, quarantine_name)
+    except FileNotFoundError:
+        try:
+            _atomic_move_no_replace(parent_fd, name, parent_fd, quarantine_name)
+        except FileNotFoundError:
+            return False
+        moved = os.stat(quarantine_name, dir_fd=parent_fd, follow_symlinks=False)
+        if not stat.S_ISDIR(moved.st_mode) or _identity(moved) != expected_identity:
+            try:
+                _atomic_move_no_replace(parent_fd, quarantine_name, parent_fd, name)
+            except BaseException:
+                raise OSError
+            return False
+        descriptor, details = _open_directory_at(parent_fd, quarantine_name)
+    if _identity(details) != expected_identity:
+        os.close(descriptor)
+        raise OSError
+    try:
+        _remove_directory_contents(owned_fd if owned_fd is not None else descriptor)
+        os.rmdir(quarantine_name, dir_fd=parent_fd)
+        return True
+    finally:
+        os.close(descriptor)
+
+
+def _open_directory_at(
+    parent_fd: int,
+    name: str,
+) -> tuple[int, os.stat_result]:
     descriptor = os.open(name, _READ_DIRECTORY_FLAGS, dir_fd=parent_fd)
     try:
         details = os.fstat(descriptor)
-        if not stat.S_ISDIR(details.st_mode) or _identity(details) != expected_identity:
-            return
-        _remove_directory_contents(descriptor)
-        current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-        if stat.S_ISDIR(current.st_mode) and _identity(current) == expected_identity:
-            os.rmdir(name, dir_fd=parent_fd)
-    finally:
+        if not stat.S_ISDIR(details.st_mode):
+            raise OSError
+        return descriptor, details
+    except BaseException:
         os.close(descriptor)
+        raise
 
 
 def _remove_directory_contents(directory_fd: int) -> None:

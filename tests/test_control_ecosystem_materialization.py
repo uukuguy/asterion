@@ -12,6 +12,7 @@ from pathlib import Path
 from types import MappingProxyType
 from unittest.mock import patch
 
+from asterion.control import ecosystem_materialization as implementation
 from asterion.control.ecosystem import (
     EcosystemError,
     EcosystemPrivateFile,
@@ -309,6 +310,46 @@ class TestFileEcosystemPrivateSourceStore(unittest.TestCase):
             self.assertNotIn("SENTINEL_PRIVATE", repr(store))
             self._assert_redacted_error(store, "resource-1", "other")
 
+    def test_final_source_descriptor_closes_when_fstat_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            (root / "file").write_bytes(b"body")
+            private = _private_resource("resource-1", {"file": b"body"})
+            store = FileEcosystemPrivateSourceStore(
+                roots={"source-1": root}, resources=(private,)
+            )
+            module = "asterion.control.ecosystem_materialization"
+            real_open = os.open
+            real_fstat = os.fstat
+            final_fd: int | None = None
+            failed = False
+
+            def recording_open(
+                path: object, flags: int, *args: object, **kwargs: object
+            ) -> int:
+                nonlocal final_fd
+                descriptor = real_open(path, flags, *args, **kwargs)  # type: ignore[arg-type]
+                if path == "file":
+                    final_fd = descriptor
+                return descriptor
+
+            def failing_fstat(descriptor: int) -> os.stat_result:
+                nonlocal failed
+                if descriptor == final_fd and not failed:
+                    failed = True
+                    raise OSError("SENTINEL_FSTAT")
+                return real_fstat(descriptor)
+
+            with (
+                patch(f"{module}.os.open", side_effect=recording_open),
+                patch(f"{module}.os.fstat", side_effect=failing_fstat),
+            ):
+                self._assert_redacted_error(store, "resource-1", "file")
+
+            self.assertIsNotNone(final_fd)
+            with self.assertRaises(OSError):
+                real_fstat(final_fd)  # type: ignore[arg-type]
+
     def _assert_redacted_error(
         self,
         store: FileEcosystemPrivateSourceStore,
@@ -475,6 +516,250 @@ class TestSealedEcosystemMaterializer(unittest.TestCase):
                     )
             self.assertIsNone(raised.exception.__cause__)
             self.assertNotIn("SENTINEL", str(raised.exception))
+
+    def test_early_staging_fsync_failure_removes_owned_staging_inode(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            source = base / "source"
+            source.mkdir()
+            _write_files(source, {"file": b"body"})
+            private = _private_resource("resource-1", {"file": b"body"})
+            portfolio = _portfolio_for(private)
+            store = FileEcosystemPrivateSourceStore(
+                roots={"source-1": source}, resources=(private,)
+            )
+            module = "asterion.control.ecosystem_materialization"
+            real_mkdir = os.mkdir
+            real_fsync = os.fsync
+            staging_created = False
+            failed = False
+
+            def recording_mkdir(
+                path: object, mode: int = 0o777, *, dir_fd: int | None = None
+            ) -> None:
+                nonlocal staging_created
+                real_mkdir(path, mode, dir_fd=dir_fd)
+                if isinstance(path, str) and path.startswith(".staging-"):
+                    staging_created = True
+
+            def failing_fsync(descriptor: int) -> None:
+                nonlocal failed
+                if staging_created and not failed:
+                    failed = True
+                    raise OSError("SENTINEL_EARLY_FSYNC")
+                real_fsync(descriptor)
+
+            with (
+                patch(f"{module}.os.mkdir", side_effect=recording_mkdir),
+                patch(f"{module}.os.fsync", side_effect=failing_fsync),
+            ):
+                with self.assertRaisesRegex(
+                    EcosystemMaterializationError, f"^{ERROR}$"
+                ) as raised:
+                    SealedEcosystemMaterializer(base / "private").materialize(
+                        portfolio, store
+                    )
+
+            self.assertIsNone(raised.exception.__cause__)
+            self.assertTrue(staging_created)
+            self.assertEqual(tuple((base / "private").iterdir()), ())
+
+    def test_early_staging_open_failure_reopens_only_quarantined_inode(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            source = base / "source"
+            source.mkdir()
+            _write_files(source, {"file": b"body"})
+            private = _private_resource("resource-1", {"file": b"body"})
+            portfolio = _portfolio_for(private)
+            store = FileEcosystemPrivateSourceStore(
+                roots={"source-1": source}, resources=(private,)
+            )
+            module = "asterion.control.ecosystem_materialization"
+            real_open = os.open
+            staging_open_failed = False
+
+            def failing_open(
+                path: object, flags: int, *args: object, **kwargs: object
+            ) -> int:
+                nonlocal staging_open_failed
+                if (
+                    isinstance(path, str)
+                    and path.startswith(".staging-")
+                    and not staging_open_failed
+                ):
+                    staging_open_failed = True
+                    raise OSError("SENTINEL_STAGING_OPEN")
+                return real_open(path, flags, *args, **kwargs)  # type: ignore[arg-type]
+
+            with patch(f"{module}.os.open", side_effect=failing_open):
+                with self.assertRaisesRegex(
+                    EcosystemMaterializationError, f"^{ERROR}$"
+                ) as raised:
+                    SealedEcosystemMaterializer(base / "private").materialize(
+                        portfolio, store
+                    )
+
+            self.assertIsNone(raised.exception.__cause__)
+            self.assertTrue(staging_open_failed)
+            self.assertEqual(tuple((base / "private").iterdir()), ())
+
+    def test_close_cleanup_failure_retains_ownership_for_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            source = base / "source"
+            source.mkdir()
+            _write_files(source, {"file": b"body"})
+            private = _private_resource("resource-1", {"file": b"body"})
+            portfolio = _portfolio_for(private)
+            store = FileEcosystemPrivateSourceStore(
+                roots={"source-1": source}, resources=(private,)
+            )
+            materializer = SealedEcosystemMaterializer(base / "private")
+            projection = materializer.materialize(portfolio, store)
+
+            with patch(
+                "asterion.control.ecosystem_materialization._remove_owned_tree",
+                side_effect=OSError("SENTINEL_TRANSIENT"),
+            ):
+                with self.assertRaisesRegex(
+                    EcosystemMaterializationError, f"^{ERROR}$"
+                ) as raised:
+                    materializer.close(projection)
+            self.assertIsNone(raised.exception.__cause__)
+            self.assertTrue(projection.root.exists())
+
+            materializer.close(projection)
+
+            self.assertFalse(projection.root.exists())
+            materializer.close(projection)
+
+    def test_close_quarantines_projection_before_descendant_deletion(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            source = base / "source"
+            source.mkdir()
+            _write_files(source, {"nested/file": b"body"})
+            private = _private_resource("resource-1", {"nested/file": b"body"})
+            portfolio = _portfolio_for(private)
+            store = FileEcosystemPrivateSourceStore(
+                roots={"source-1": source}, resources=(private,)
+            )
+            materializer = SealedEcosystemMaterializer(base / "private")
+            projection = materializer.materialize(portfolio, store)
+            real_unlink = os.unlink
+            real_rmdir = os.rmdir
+            deletion_count = 0
+
+            def guarded_unlink(
+                path: object, *, dir_fd: int | None = None
+            ) -> None:
+                nonlocal deletion_count
+                deletion_count += 1
+                if projection.root.exists():
+                    raise AssertionError("public projection remained bound")
+                real_unlink(path, dir_fd=dir_fd)
+
+            def guarded_rmdir(
+                path: object, *, dir_fd: int | None = None
+            ) -> None:
+                nonlocal deletion_count
+                deletion_count += 1
+                if projection.root.exists():
+                    raise AssertionError("public projection remained bound")
+                real_rmdir(path, dir_fd=dir_fd)
+
+            with (
+                patch(
+                    "asterion.control.ecosystem_materialization.os.unlink",
+                    side_effect=guarded_unlink,
+                ),
+                patch(
+                    "asterion.control.ecosystem_materialization.os.rmdir",
+                    side_effect=guarded_rmdir,
+                ),
+            ):
+                materializer.close(projection)
+
+            self.assertGreaterEqual(deletion_count, 3)
+
+    def test_close_never_rmdirs_replaceable_public_projection_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            source = base / "source"
+            source.mkdir()
+            _write_files(source, {"file": b"body"})
+            private = _private_resource("resource-1", {"file": b"body"})
+            portfolio = _portfolio_for(private)
+            store = FileEcosystemPrivateSourceStore(
+                roots={"source-1": source}, resources=(private,)
+            )
+            materializer = SealedEcosystemMaterializer(base / "private")
+            projection = materializer.materialize(portfolio, store)
+            real_rmdir = os.rmdir
+            public_rmdir = False
+
+            def replacing_rmdir(
+                path: object, *, dir_fd: int | None = None
+            ) -> None:
+                nonlocal public_rmdir
+                if path == projection.projection_id:
+                    public_rmdir = True
+                    moved = base / "owned-after-race"
+                    projection.root.rename(moved)
+                    projection.root.mkdir(mode=0o700)
+                real_rmdir(path, dir_fd=dir_fd)
+
+            with patch(
+                "asterion.control.ecosystem_materialization.os.rmdir",
+                side_effect=replacing_rmdir,
+            ):
+                materializer.close(projection)
+
+            self.assertFalse(public_rmdir)
+
+    def test_close_failed_replacement_restore_retains_ownership(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            source = base / "source"
+            source.mkdir()
+            _write_files(source, {"file": b"body"})
+            private = _private_resource("resource-1", {"file": b"body"})
+            portfolio = _portfolio_for(private)
+            store = FileEcosystemPrivateSourceStore(
+                roots={"source-1": source}, resources=(private,)
+            )
+            materializer = SealedEcosystemMaterializer(base / "private")
+            projection = materializer.materialize(portfolio, store)
+            projection.root.rename(base / "moved-owned")
+            projection.root.mkdir(mode=0o700)
+            marker = projection.root / "replacement"
+            marker.write_bytes(b"keep")
+            module = "asterion.control.ecosystem_materialization"
+            real_move = implementation._atomic_move_no_replace
+
+            def failing_restore(
+                source_fd: int,
+                source_name: str,
+                target_fd: int,
+                target_name: str,
+            ) -> None:
+                if source_name.startswith(".cleanup-"):
+                    raise OSError("SENTINEL_RESTORE")
+                real_move(source_fd, source_name, target_fd, target_name)
+
+            with patch(f"{module}._atomic_move_no_replace", side_effect=failing_restore):
+                with self.assertRaisesRegex(
+                    EcosystemMaterializationError, f"^{ERROR}$"
+                ) as raised:
+                    materializer.close(projection)
+
+            self.assertIsNone(raised.exception.__cause__)
+            quarantined = tuple((base / "private").glob(".cleanup-*"))
+            self.assertEqual(len(quarantined), 1)
+            self.assertEqual((quarantined[0] / "replacement").read_bytes(), b"keep")
+            with self.assertRaisesRegex(EcosystemMaterializationError, f"^{ERROR}$"):
+                materializer.close(projection)
 
     def test_close_removes_only_original_projection_inode_after_replacement(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
