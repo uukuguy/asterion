@@ -226,6 +226,10 @@ test("rejects non-exact keys, noncanonical arrays, duplicates, and unsafe limits
     processCap.limits.maxProcesses = 2;
     const deadlineCap = clone(state.frame);
     deadlineCap.limits.deadlineMs = 30_001;
+    const nonAsciiResourceId = clone(state.frame);
+    nonAsciiResourceId.resources[0].resourceId = "resource-\uE000";
+    const nonAsciiRegistrationId = clone(state.frame);
+    nonAsciiRegistrationId.registrations[0].registrationId = "registration-\u{10000}";
 
     for (const invalid of [
       extra,
@@ -242,6 +246,8 @@ test("rejects non-exact keys, noncanonical arrays, duplicates, and unsafe limits
       entryBudget,
       processCap,
       deadlineCap,
+      nonAsciiResourceId,
+      nonAsciiRegistrationId,
     ]) {
       assert.throws(
         () => validatePrimeEcosystemFrame(invalid),
@@ -342,6 +348,36 @@ test("hashes the complete projection manifest in global relative-path order", as
       { relative_path: "a.", sha256: digest("sibling"), size_bytes: 7 },
       { relative_path: "a/x", sha256: digest("nested"), size_bytes: 6 },
     ]);
+    assert.doesNotThrow(() => validatePrimeEcosystemFrame(state.frame));
+  } finally {
+    await state.cleanup();
+  }
+});
+
+test("orders projection paths by Unicode code point like Python", async () => {
+  const state = await fixture();
+  try {
+    const resource = state.frame.resources[0];
+    const bmpPath = "\uE000";
+    const supplementaryPath = "\u{10000}";
+    await rm(join(resource.projectionPath, "payload.txt"));
+    await writeFile(join(resource.projectionPath, bmpPath), "bmp", { mode: 0o600 });
+    await chmod(join(resource.projectionPath, bmpPath), 0o600);
+    await writeFile(
+      join(resource.projectionPath, supplementaryPath),
+      "supplementary",
+      { mode: 0o600 },
+    );
+    await chmod(join(resource.projectionPath, supplementaryPath), 0o600);
+    resource.contentDigest = sha256Canonical([
+      { relative_path: bmpPath, sha256: digest("bmp"), size_bytes: 3 },
+      {
+        relative_path: supplementaryPath,
+        sha256: digest("supplementary"),
+        size_bytes: 13,
+      },
+    ]);
+
     assert.doesNotThrow(() => validatePrimeEcosystemFrame(state.frame));
   } finally {
     await state.cleanup();

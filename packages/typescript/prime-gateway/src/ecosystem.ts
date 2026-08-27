@@ -227,13 +227,25 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
+function compareUnicodeCodePoints(left: string, right: string): number {
+  const leftPoints = Array.from(left);
+  const rightPoints = Array.from(right);
+  const length = Math.min(leftPoints.length, rightPoints.length);
+  for (let index = 0; index < length; index += 1) {
+    const difference = leftPoints[index]!.codePointAt(0)! -
+      rightPoints[index]!.codePointAt(0)!;
+    if (difference !== 0) return difference;
+  }
+  return leftPoints.length - rightPoints.length;
+}
+
 function compareTuples(left: readonly string[], right: readonly string[]): number {
   for (let index = 0; index < left.length; index += 1) {
     const leftValue = left[index];
     const rightValue = right[index];
     if (leftValue === undefined || rightValue === undefined) break;
-    if (leftValue < rightValue) return -1;
-    if (leftValue > rightValue) return 1;
+    const difference = compareUnicodeCodePoints(leftValue, rightValue);
+    if (difference !== 0) return difference;
   }
   return left.length - right.length;
 }
@@ -293,7 +305,7 @@ function inspectResourceProjection(
   let bytes = 0;
   let entries = 0;
   const visit = (directory: string, prefix: string): void => {
-    for (const name of readdirSync(directory).sort()) {
+    for (const name of readdirSync(directory).sort(compareUnicodeCodePoints)) {
       const path = join(directory, name);
       const relativePath = prefix === "" ? name : `${prefix}/${name}`;
       const metadata = lstatSync(path);
@@ -328,11 +340,7 @@ function inspectResourceProjection(
   visit(resourceRoot, "");
   if (files.length === 0) invalidFrame();
   files.sort((left, right) =>
-    left.relative_path < right.relative_path
-      ? -1
-      : left.relative_path > right.relative_path
-        ? 1
-        : 0
+    compareUnicodeCodePoints(left.relative_path, right.relative_path)
   );
   return Object.freeze({ files: Object.freeze(files), bytes, entries });
 }
@@ -480,7 +488,8 @@ export function validatePrimeEcosystemFrame(value: unknown): PrimeEcosystemFrame
     const registrations = value.registrations.map(validateRegistration);
     const features = Object.freeze([...(value.features as string[])]);
     if (
-      features.join("\0") !== [...new Set(features)].sort().join("\0") ||
+      features.join("\0") !== [...new Set(features)]
+        .sort(compareUnicodeCodePoints).join("\0") ||
       resources.some((resource, index) =>
         index > 0 && compareTuples(resourceKey(resources[index - 1]!), resourceKey(resource)) >= 0
       ) ||
@@ -503,12 +512,15 @@ export function validatePrimeEcosystemFrame(value: unknown): PrimeEcosystemFrame
     const expectedFeatures = [...new Set([
       ...resources.flatMap(({ kind }) => RESOURCE_FEATURES[kind] ?? []),
       ...registrations.map(({ kind }) => REGISTRATION_FEATURES[kind]!),
-    ])].sort();
+    ])].sort(compareUnicodeCodePoints);
     if (features.join("\0") !== expectedFeatures.join("\0")) invalidFrame();
 
     requireDirectory(value.projectionRoot);
-    const rootEntries = readdirSync(value.projectionRoot).sort();
-    const expectedRootEntries = resources.map(({ resourceId }) => resourceId).sort();
+    const rootEntries = readdirSync(value.projectionRoot)
+      .sort(compareUnicodeCodePoints);
+    const expectedRootEntries = resources
+      .map(({ resourceId }) => resourceId)
+      .sort(compareUnicodeCodePoints);
     if (rootEntries.join("\0") !== expectedRootEntries.join("\0")) invalidFrame();
     let totalBytes = 0;
     let totalEntries = resources.length;
@@ -620,7 +632,8 @@ export function validateGatewayEcosystemEffectBinding(
     value.moduleLockDigest !== PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST ||
     !Array.isArray(value.featureIds) ||
     value.featureIds.some((feature) => typeof feature !== "string" || !OPAQUE_ID.test(feature)) ||
-    value.featureIds.join("\0") !== [...new Set(value.featureIds as string[])].sort().join("\0") ||
+    value.featureIds.join("\0") !== [...new Set(value.featureIds as string[])]
+      .sort(compareUnicodeCodePoints).join("\0") ||
     [
       value.lifecycleCount,
       value.mcpCount,
@@ -832,7 +845,8 @@ export function validateGatewayEcosystemEffectResult(
     ]) ||
     !Array.isArray(value.featureIds) ||
     value.featureIds.some((feature) => typeof feature !== "string" || !OPAQUE_ID.test(feature)) ||
-    value.featureIds.join("\0") !== [...new Set(value.featureIds as string[])].sort().join("\0") ||
+    value.featureIds.join("\0") !== [...new Set(value.featureIds as string[])]
+      .sort(compareUnicodeCodePoints).join("\0") ||
     typeof value.status !== "string" ||
     !TERMINAL_STATUSES.has(value.status)
   ) throw new PrimeEcosystemError();
