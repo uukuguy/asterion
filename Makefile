@@ -27,6 +27,7 @@ ASTERION_PRIME_MAX_COST_MICROS ?=
 .PHONY: test.prime-continual-harness.bounded
 .PHONY: test.prime-ecosystem-resources.provider-free
 .PHONY: test.prime-ecosystem-extensions.provider-free
+.PHONY: test.prime-ecosystem-packages.provider-free
 
 help:
 	@echo "provider-free setup (network/disk; Agent operations 0; Judge operations 0): setup setup-pi setup-resources-basic setup-resources-benchmark"
@@ -189,6 +190,12 @@ test.prime-ecosystem-resources.provider-free:
 test.prime-ecosystem-extensions.provider-free:
 	$(UV_BIN) run python -m unittest -v tests.test_prime_ecosystem_extensions
 	npm --prefix packages/typescript/prime-gateway test -- test/ecosystem.test.mjs
+
+test.prime-ecosystem-packages.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_prime_ecosystem_packages \
+		tests.test_local_capability_source \
+		tests.test_distribution_capability_source
 
 
 prime-verify-bounded:

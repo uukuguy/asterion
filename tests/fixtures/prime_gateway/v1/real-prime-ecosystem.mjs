@@ -56,6 +56,13 @@ const EXTENSION_FEATURE_IDS = Object.freeze([
   "ecosystem.extensions-lifecycle",
   "ecosystem.tools",
 ]);
+const PACKAGE_ASSERTION_IDS = Object.freeze([
+  "packages.no-install",
+  "packages.no-source-fallback",
+  "packages.prime-package-manager",
+  "packages.selected-source-digest",
+]);
+const PACKAGE_FEATURE_IDS = Object.freeze(["ecosystem.packages"]);
 const RESOURCE_SPECS = Object.freeze([
   Object.freeze(["context-global", "context-file", "global"]),
   Object.freeze(["context-project", "context-file", "project"]),
@@ -307,6 +314,42 @@ async function extensionFrame({ artifactLockDigest, moduleLockDigest, sealedRoot
           contentDigest: sha256(canonical({ files, resourceId: "exact-extension" })),
           kind: "local-child",
           sourceId: "source-exact-extension",
+          version: "1.0.0",
+        }),
+        version: "1.0.0",
+      }),
+    ]),
+  });
+}
+
+async function packageFrame({ artifactLockDigest, moduleLockDigest, sealedRoot }) {
+  const portfolioDigest = basename(sealedRoot);
+  if (!/^[0-9a-f]{64}$/u.test(portfolioDigest)) fail();
+  const projectionPath = join(sealedRoot, "exact-package");
+  const files = await inspectProjectionFiles(projectionPath);
+  return Object.freeze({
+    artifactLockDigest,
+    authorityDigest: sha256("ecosystem-packages-authority"),
+    effectId: `ecosystem:packages:${portfolioDigest.slice(0, 32)}`,
+    features: PACKAGE_FEATURE_IDS,
+    format: "asterion.prime-ecosystem-frame/v1",
+    limits: Object.freeze({ deadlineMs: 30_000, maxBytes: 8 * 1024 * 1024, maxEntries: 4096, maxProcesses: 1 }),
+    mcpCredentialLeaseId: "mcp-lease:packages",
+    moduleLockDigest,
+    portfolioDigest,
+    projectionRoot: sealedRoot,
+    registrations: Object.freeze([]),
+    resources: Object.freeze([
+      Object.freeze({
+        contentDigest: sha256(canonical(files)),
+        kind: "package",
+        projectionPath,
+        resourceId: "exact-package",
+        scope: "project",
+        source: Object.freeze({
+          contentDigest: sha256(canonical({ files, resourceId: "exact-package" })),
+          kind: "local-child",
+          sourceId: "ecosystem.sample.local-directory",
           version: "1.0.0",
         }),
         version: "1.0.0",
@@ -651,6 +694,53 @@ async function extensionObservation({ artifactLockDigest, bundle, binding, gatew
   }
 }
 
+async function packageObservation({ artifactLockDigest, bundle, binding, gateway, moduleLockDigest, scenarioPackage, sealedRoot }) {
+  const frame = await packageFrame({ artifactLockDigest, moduleLockDigest, sealedRoot });
+  const storeRoot = join(dirname(sealedRoot), `.gateway-${basename(sealedRoot)}`);
+  try {
+    const moduleObservation = await bundle.resolvePackage(frame);
+    if (
+      record(moduleObservation).packageCount !== 1 ||
+      moduleObservation.packageManagerAvailable !== true
+    ) fail();
+    const store = await gateway.GatewayDurableStore.open(storeRoot, "ecosystem-packages");
+    await store.bindEcosystemEffect(frame);
+    const response = await store.commitEcosystemEffectResult(
+      frame.effectId,
+      await binding.module.activate(frame),
+    );
+    if (
+      response.status !== "succeeded" ||
+      response.featureIds.join("\0") !== PACKAGE_FEATURE_IDS.join("\0") ||
+      response.packageCount !== 1 ||
+      response.registrationCount !== 0 ||
+      response.resourceCount !== 1 ||
+      response.providerOperations !== 0 ||
+      response.modelCredentialReads !== 0 ||
+      response.ownedProcessCount !== 0
+    ) fail();
+    const publicObservation = Object.freeze({
+      assertion_ids: PACKAGE_ASSERTION_IDS,
+      feature_ids: PACKAGE_FEATURE_IDS,
+      format: "asterion.prime-ecosystem-observation/v1",
+      model_credential_reads: response.modelCredentialReads,
+      owned_process_count_after_close: response.ownedProcessCount,
+      package_count: response.packageCount,
+      provider_operations: response.providerOperations,
+      resource_count: response.resourceCount,
+      scenario_package: scenarioPackage,
+      selected_source_digest: sha256(frame.resources[0].source.sourceId),
+      status: "PASS",
+    });
+    return Object.freeze({
+      ...publicObservation,
+      observation_digest: sha256(canonical(publicObservation)),
+    });
+  } finally {
+    await rm(storeRoot, { force: true, recursive: true });
+  }
+}
+
 async function main() {
   const argumentsValue = argumentsMap(process.argv.slice(2));
   for (const name of Object.keys(process.env)) {
@@ -669,6 +759,7 @@ async function main() {
   if (
     scenarioPackage !== "extensions" &&
     scenarioPackage !== "lock-boundary" &&
+    scenarioPackage !== "packages" &&
     scenarioPackage !== "resources"
   ) fail();
   if ((scenarioPackage === "resources") !== (descriptorManifestPath !== undefined)) fail();
@@ -728,6 +819,19 @@ async function main() {
       sealedRoot,
     });
     process.stdout.write(`${canonical(extensionsOutput)}\n`);
+    return;
+  }
+  if (scenarioPackage === "packages") {
+    const packagesOutput = await packageObservation({
+      artifactLockDigest,
+      binding,
+      bundle,
+      gateway,
+      moduleLockDigest,
+      scenarioPackage,
+      sealedRoot,
+    });
+    process.stdout.write(`${canonical(packagesOutput)}\n`);
     return;
   }
 
