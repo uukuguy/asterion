@@ -12,4 +12,166 @@
   description: bounded real-model native RLM receipt
   parent_paradigm: rlm-bounded-provider
   ranking: 0.8
+  status: passed
+- id: H-004
+  description: Phase 1 Verified-loop gate audit and promotion evidence
+  parent_paradigm: rlm-bounded-provider
+  ranking: 0.7
+  status: falsified
+  outcome: "existing checkpoint prepare transaction conflicts with upstream coordinator ownership"
+- id: H-005
+  description: coordinator-owned checkpoint contract returns an exact private manifest and restored transport
+  parent_paradigm: rlm-bounded-provider
+  ranking: 0.7
+  status: passed
+- id: H-006
+  description: bounded real Prime compaction and branch-summary evidence closes session context model operations
+  parent_paradigm: session-context-bounded-provider
+  ranking: 0.8
+  status: passed
+- id: H-007
+  description: Phase 2 session context closure audit passes whole repository promotion gates
+  parent_paradigm: session-context-bounded-provider
+  ranking: 0.7
+  status: passed
+- id: H-008
+  description: real Prime provider-free evidence promotes six non-model RLM scenarios without promoting bounded model paths
+  parent_paradigm: rlm-provider-free
+  ranking: 0.8
+  status: passed
+- id: H-009
+  description: bounded native RLM evidence proves exact model selection generated-program admission and recursion-depth controls
+  parent_paradigm: rlm-bounded-provider
+  ranking: 0.8
+  status: falsified
+  outcome: "Phase 1 receipt proves lifecycle closure but contains no exact child-model generated-program or depth-limit assertion"
+- id: H-010
+  description: a dedicated bounded RLM receipt derives exact child-model generated-program and depth-limit assertions without private leakage
+  parent_paradigm: rlm-bounded-provider
+  ranking: 0.8
+  status: passed
+- id: H-011
+  description: operation long-running closure inventory isolates exact provider-free scenarios and bounded blockers
+  parent_paradigm: operation-long-running
+  ranking: 0.7
+  status: passed
+- id: H-012
+  description: exact long-running matrix promotes only Phase 1 detach attach and goals evidence
+  parent_paradigm: operation-long-running
+  ranking: 0.8
+  status: passed
+- id: H-013
+  description: host-owned heartbeat and schedule coordinator is deterministic durable and provider-neutral
+  parent_paradigm: operation-long-running
+  ranking: 0.8
+  status: passed
+- id: H-014
+  description: pinned Prime heartbeat daemon commands translate through a closed exact wire contract
+  parent_paradigm: operation-long-running
+  ranking: 0.8
+  status: passed
+- id: H-015
+  description: Prime heartbeat mutations are digest-bound before send and recover without invented success
+  parent_paradigm: operation-long-running
+  ranking: 0.8
+  status: passed
+- id: H-016
+  description: Prime session and private IPC bridge connect durable heartbeat bindings to host-issued operations
+  parent_paradigm: operation-long-running
+  ranking: 0.8
+  status: passed
+- id: H-017
+  description: selected Prime provider binds host effect identities to exact private heartbeat IPC receipts
+  parent_paradigm: operation-long-running
+  ranking: 0.8
+  status: passed
+- id: H-018
+  description: controller residency remains separate from task authority across eviction recovery and orphan audit
+  parent_paradigm: operation-long-running
+  ranking: 0.8
+  status: passed
+- id: H-019
+  description: finite autonomous-quality evidence requires explicit bounded provider authority
+  parent_paradigm: operation-long-running-bounded-provider
+  ranking: 0.7
+  status: passed
+- id: H-020
+  description: one explicitly authorized bounded Prime autonomous-quality run produces the exact safe receipt
+  parent_paradigm: operation-long-running-bounded-provider
+  ranking: 0.7
+  status: passed
+- id: H-021
+  description: exact provider-free long-running observations promote the remaining non-model scenarios
+  parent_paradigm: operation-long-running
+  ranking: 0.8
+  status: passed
+- id: H-022
+  description: operation long-running closes under exact domain and repository gates
+  parent_paradigm: operation-long-running
+  ranking: 0.8
+  status: passed
+- id: H-023
+  description: continual harness closure inventory identifies the next exact evidence package
+  parent_paradigm: harness-continual
+  ranking: 0.7
+  status: passed
+- id: H-024
+  description: ecosystem capabilities closure inventory identifies exact provider-free and bounded evidence packages
+  parent_paradigm: ecosystem-capabilities
+  ranking: 0.7
+  status: passed
+- id: H-025
+  description: closed ecosystem portfolio contracts pass
+  parent_paradigm: ecosystem-capabilities
+  ranking: 0.8
+  status: passed
+- id: H-026
+  description: exact materialization and cleanup pass
+  parent_paradigm: ecosystem-capabilities
+  ranking: 0.8
+  status: passed
+- id: H-027
+  description: selected Prime adapter and host preflight pass
+  parent_paradigm: ecosystem-capabilities
+  ranking: 0.8
+  status: passed
+- id: H-028
+  description: Gateway frame and lifecycle fencing pass
+  parent_paradigm: ecosystem-capabilities
+  ranking: 0.8
+  status: passed
+- id: H-029
+  description: pinned Prime module bundle passes
+  parent_paradigm: ecosystem-capabilities
+  ranking: 0.8
+  status: passed
+- id: H-030
+  description: resource evidence package passes
+  parent_paradigm: ecosystem-capabilities
+  ranking: 0.8
+  status: passed
+- id: H-031
+  description: extension evidence package passes
+  parent_paradigm: ecosystem-capabilities
+  ranking: 0.8
+  status: passed
+- id: H-032
+  description: exact package evidence passes
+  parent_paradigm: ecosystem-capabilities
+  ranking: 0.8
+  status: passed
+- id: H-033
+  description: local MCP evidence passes
+  parent_paradigm: ecosystem-capabilities
+  ranking: 0.8
+  status: passed
+- id: H-034
+  description: 10/10 ecosystem and repository gates pass
+  parent_paradigm: ecosystem-capabilities
+  ranking: 0.8
+  status: pending
+- id: H-035
+  description: client interface closure inventory identifies exact shared-stream evidence packages
+  parent_paradigm: interface-clients
+  ranking: 0.7
   status: pending

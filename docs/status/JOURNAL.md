@@ -780,3 +780,11 @@
 - 08:45 认证 Prime RLM lifecycle socket 帧，仅接受闭合 child 状态 [40a42f7]
 - 09:02 新增 admitted action 预备 hook，保证 provider binding 先于 Gateway 准入送达 [ad5f429]
 - 09:31 持久化并回读 RLM 生命周期，保持关闭状态和私有数据边界 [pending]
+
+## 2026-08-28
+
+- 00:12 RED：干净 `04532ec` 上 `ecosystem.capabilities` Prime Gateway 精确十项均为 `result-missing`，provider/application operations 均为 0。
+- 00:12 Task10 reducer 将四个 provider-free ecosystem receipts 收敛为十条 immutable observations；真实 artifact lock 为 `c64aecdec9ddff21fb7ed493cc1837eb68bf428fc94803a65e6c185aca0fbba3`，真实 module lock 为 `959989c9f6afb907db32bdef709cf19b45fa19421095f62714ff80b9a2c44cd6`。
+- 00:12 精确 `ecosystem.capabilities` domain checker PASS（10 selected / 10 passed / 0 blocking）；所有 native ecosystem rows 保持 `missing`，`Verified-system-parity` 仍阻塞于后续 domains。
+- 00:12 Climb H-028 至 H-033 provider-free ecosystem gates 通过；H-034 因 repository/promotion gates 未能产生 clean PASS 保持 pending，不提升 H-035。
+- 00:12 `make check` 的非 ecosystem 失败已在纯 `04532ec` 复现；`promotion-check` 在隔离副本缺少被排除的 external pinned Prime source，二者均记录为 concern 而非 PASS。

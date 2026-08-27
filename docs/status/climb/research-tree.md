@@ -2,4 +2,35 @@
 
 - H-001: passed — provider-free RLM harness
 - H-002: passed — real daemon durable read-only recovery
-- Next: H-003 — bounded real-model native RLM receipt
+- H-003: passed — bounded real-model native RLM receipt
+- H-004: falsified — early prepare conflicts with coordinator ownership
+- H-005: passed — coordinator-owned checkpoint manifest and restored transport
+- H-006: passed — bounded session/context model evidence
+- H-007: passed — Phase 2 session/context closure audit
+- H-008: passed — provider-free RLM evidence promotion
+- H-009: falsified — Phase 1 receipt lacks exact RLM model assertions
+- H-010: passed — exact bounded RLM model assertions
+- H-011: passed — operation/long-running closure inventory
+- H-012: passed — exact long-running scenario matrix and Phase 1 promotion
+- H-013: passed — host-owned heartbeat and schedule coordinator
+- H-014: passed — pinned Prime heartbeat command translation
+- H-015: passed — durable Prime heartbeat command fencing
+- H-016: passed — Prime heartbeat session and private IPC bridge
+- H-017: passed — selected-provider long-running binding
+- H-018: passed — residency recovery and orphan audit
+- H-019: passed — finite autonomous-quality evidence boundary
+- H-020: passed — authorized bounded autonomous-quality run
+- H-021: passed — provider-free long-running evidence promotion
+- H-022: passed — operation long-running closure gates
+- H-023: passed — continual harness closure gates
+- H-024: passed — ecosystem capabilities closure inventory
+- H-025: passed — closed ecosystem portfolio contracts
+- H-026: passed — exact materialization and cleanup
+- H-027: passed — selected Prime adapter and host preflight
+- H-028: passed — Gateway frame and lifecycle fencing
+- H-029: passed — pinned Prime module bundle
+- H-030: passed — resource evidence package
+- H-031: passed — extension evidence package
+- H-032: passed — exact package evidence
+- H-033: passed — local MCP evidence
+- Next: H-034 — ecosystem closure gates

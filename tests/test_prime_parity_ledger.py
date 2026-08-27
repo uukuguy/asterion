@@ -108,6 +108,16 @@ EXPECTED_IMPLEMENTED_PRIME_FEATURE_IDS = (
     "operation.goals",
 )
 EXPECTED_PROVIDER_FREE_PRIME_FEATURE_IDS = (
+    "ecosystem.collision-diagnostics",
+    "ecosystem.context-files",
+    "ecosystem.custom-providers-models",
+    "ecosystem.extension-state-commands",
+    "ecosystem.extensions-lifecycle",
+    "ecosystem.mcp",
+    "ecosystem.packages",
+    "ecosystem.prompt-templates",
+    "ecosystem.skills",
+    "ecosystem.tools",
     "harness.history-snapshots",
     "harness.memory-entries",
     "harness.prompt-entries",
@@ -433,6 +443,22 @@ class TestPrimeParityLedger(unittest.TestCase):
             for feature in features
             if isinstance(feature, Mapping)
             and feature["domain_id"] == "harness.continual"
+            for result in feature["provider_results"]
+            if isinstance(result, Mapping)
+            and result["provider_id"] == "asterion.native"
+        }
+
+        self.assertEqual(statuses, {"missing"})
+
+    def test_native_ecosystem_results_remain_missing(self) -> None:
+        ledger = validate_parity_ledger(_fixture("prime-agent-0.7.1.json"))
+        features = ledger["features"]
+        assert isinstance(features, tuple)
+        statuses = {
+            result["status"]
+            for feature in features
+            if isinstance(feature, Mapping)
+            and feature["domain_id"] == "ecosystem.capabilities"
             for result in feature["provider_results"]
             if isinstance(result, Mapping)
             and result["provider_id"] == "asterion.native"

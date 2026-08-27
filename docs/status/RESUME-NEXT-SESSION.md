@@ -1,95 +1,73 @@
 # Live Session Checkpoint
 
-> Updated: 2026-08-10 15:18. Phase 2 Task 3 is verified; session/context subplanning is active.
+> Updated: 2026-08-28 00:12 CST. Session remains active; Task10 domain work is
+> implemented with gate concerns.
 
-## Active objective
+## TL;DR
 
-Reach Asterion Prime functional parity in stages. Complete the real managed
-Prime `Verified-loop` first, then system parity and an interchangeable native
-kernel. The canonical worklist is
-`docs/superpowers/plans/2026-08-09-asterion-prime-parity-program.md`.
+- Task10 RED was captured at clean `04532ec`: all ten Prime Gateway
+  `ecosystem.capabilities` rows were `result-missing`, with zero provider and
+  application operations.
+- The Task10 reducer now consumes exactly four provider-free receipts and
+  promotes exactly ten Prime Gateway rows to `provider-free-pass`.
+- Focused tests and the exact ecosystem domain checker pass in a clean
+  committed-equivalent candidate.
+- H-034 cannot be promoted: `make check` fails on non-ecosystem pre-existing
+  failures, and `promotion-check` fails in the isolated copy because pinned
+  external Prime ecosystem source is excluded.
 
-## Durable baseline
+## Current work package
 
-- Prime Gateway and the future native kernel are peer control providers over
-  Asterion-owned authority, execution, journal, budget, recovery, and evidence.
-- Provider-free Phase 1 is implemented and independently reviewed `Ready`.
-- Ten real-process/fake-Prime scenarios pass with zero model-provider operations.
-- Commits `75bd6fe` through `a807307` contain the provider-free closure,
-  packaged resources, checkout hardening, tests, and refreshed evidence.
-- Commit `cfe62b8` fixes offline setup and proves the real Node 22 bundle-daemon
-  preflight without model/provider work.
-- Commit `18b4a87` records the managed program state and peer-provider decision.
-- `docs/superpowers/plans/2026-08-10-asterion-prime-system-parity.md`
-  fixes 61 mandatory feature IDs, two exclusions, claim rules, domain delivery
-  order, and the Phase 2 exit gate.
-- Phase 2 Task 1 adds a provider-neutral closed/immutable parity ledger model,
-  mechanical evidence-bound claim evaluation, hostile-container rejection and
-  exact primary-scenario/exclusion rules.
-- Phase 2 Task 2 pins all 63 feature records, 61 deterministic scenarios and
-  two approved exclusions. Its metadata-only checker proves 48 exact Prime
-  source files, 70 declared source records and 76 anchors at the pinned clean
-  commit without starting a provider or application.
-- `verified-system-parity` currently fails closed with all 61 mandatory feature
-  IDs blocking; the three existing public entry points remain `implemented`,
-  not PASS, until their exact parity scenarios produce admissible evidence.
-- Commit `4482915` owns the exhaustive inventory, exact source-evidence checker,
-  fail-closed system claim and provider-free Make gates.
-- Phase 2 Task 3 adds a provider-neutral registry whose key set is exactly the
-  61 primary scenarios. Missing runners stay blocking, and boundary, feature,
-  clock, fault, credential-access and evidence-digest drift fail closed.
-- The Prime-specific Phase 1 adapter remains under the Prime provider and maps
-  only `operation.detach-attach-replay` and `operation.goals`; narrower child,
-  checkpoint, budget and redaction observations do not become feature PASS.
+- Branch: `h024-ecosystem-capabilities`.
+- Plan: `docs/superpowers/plans/2026-08-10-asterion-prime-ecosystem-parity.md`.
+- Task: close Task10 evidence binding for `ecosystem.capabilities`.
+- Scope: Task10 files only plus deterministic Climb generated outputs.
 
-## Newly verified external boundary
+## Verified work
 
-- `npm exec --package=node@22` supplies Node 22.23.2 without changing the host's
-  default Node.
-- Exact source check passes at commit
-  `a18809e00ea30638584d87b3afea7285a9d7296c`, Prime 0.7.1, protocol 7, schema
-  14, with zero provider operations.
-- Real `prime-setup` passes in a fresh closed HOME. Setup now runs four exact
-  offline workspace builds and never invokes Prime's live `generate-models`
-  catalog fetch.
-- Real daemon preflight passes with runtime build `beta`, zero application
-  operations, and zero provider operations. Preflight directly owns one bundle
-  daemon process and terminates only that exact process; removed `daemon start`
-  and global `shutdown` commands are not used.
-- Reusing the user's npm cache remains ruled out because URL-keyed native
-  prebuilds are unpacked without a content digest check.
+- Exact RED:
+  `uv run python tools/check_prime_parity.py --domain ecosystem.capabilities --provider asterion.prime-gateway`
+  at `04532ec` returned `BLOCKED` with ten missing feature IDs:
+  `ecosystem.collision-diagnostics`, `ecosystem.context-files`,
+  `ecosystem.custom-providers-models`, `ecosystem.extension-state-commands`,
+  `ecosystem.extensions-lifecycle`, `ecosystem.mcp`, `ecosystem.packages`,
+  `ecosystem.prompt-templates`, `ecosystem.skills`, `ecosystem.tools`.
+- Focused GREEN:
+  `uv run python -m unittest -v tests.test_prime_ecosystem_parity tests.test_prime_parity_ledger tests.test_check_prime_parity`
+  passed 32 tests.
+- Exact domain GREEN:
+  `uv run python tools/check_prime_parity.py --domain ecosystem.capabilities --provider asterion.prime-gateway`
+  returned `PASS`, selected 10, passed 10, blocking 0.
+- Climb H-028 through H-033 provider-free ecosystem gates passed in the clean
+  candidate after copying the exact pinned Prime source locally.
 
-## Remaining Phase 1 limit
+## Gate concerns
 
-- No bounded credentials, authority file, cost ceiling, or approved private run
-  configuration is present. No model-provider operation has been attempted.
-- `Verified-loop` therefore remains `External-limited` only at the separately
-  authorized bounded real-model gate. Provider-free and real-daemon preflight
-  PASS do not grant that authority.
+- `make check` in the clean candidate ran the repository test suite and failed
+  on four non-ecosystem failures. A pure `04532ec` reproduction showed the same
+  failure class before Task10 changes.
+- `make promotion-check` failed because the promotion copy excludes
+  `3th-party/`; `tests.test_prime_ecosystem_packages` requires the external
+  pinned Prime ecosystem source and therefore fails closed.
+- These failures are not promoted to PASS. Climb remains at H-033 passed with
+  H-034 pending.
 
-## Current Phase 2 state
+## Immediate next action
 
-- `3fc67d3` owns the closed parity-ledger model and mechanical claim evaluator.
-- `4482915` has passed an independent review with zero Critical or Important
-  findings.
-- Full Python verification passes 1686 tests; focused Pyright reports zero
-  errors and zero warnings, and focused Ruff passes.
-- `docs/status/CURRENT-STATE.md`, `DECISIONS.md`, `JOURNAL.md`, and this checkpoint
-  carry the resumed program state.
-- Existing `.superpowers/sdd/task-8-report.md` and `task-9-report.md` edits are
-  unrelated report artifacts and must not be reverted or included casually.
+1. Review and commit only the Task10 closure patch.
+2. Do not stage unrelated RLM, long-running, client-interface, or dirty
+   `prime-artifact-lock.json` draft changes.
+3. Resolve the H-034 repository/promotion blockers before advancing to H-035
+   client interface inventory.
 
-## Immediate next boundary
+## Ready-to-paste verification
 
-1. Create the Task 4 session/context parity subplan before implementation. It
-   must close all nine `session.*` scenarios across Gateway, host and evidence.
-
-## Invariants
-
-- Source, credentials, provider configuration, mutable state, and evidence stay
-  external and operator-owned.
-- Cache, configuration, or prior evidence never grants execution authority.
-- Public output must not expose prompts, credentials, private paths, provider
-  payloads, raw model/application output, or host-service values.
-- Provider-free PASS cannot promote bounded `Verified-loop`, system parity, or
-  native parity; each requires its separately named passing boundary.
+```bash
+uv run python -m unittest -v tests.test_prime_ecosystem_parity tests.test_prime_parity_ledger tests.test_check_prime_parity
+uv run python tools/check_prime_parity.py --domain ecosystem.capabilities --provider asterion.prime-gateway
+make test.prime-ecosystem-resources.provider-free
+make test.prime-ecosystem-extensions.provider-free
+make test.prime-ecosystem-packages.provider-free
+make test.prime-ecosystem-mcp.provider-free
+git diff --check
+```

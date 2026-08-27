@@ -75,9 +75,9 @@ class TestCheckPrimeParity(unittest.TestCase):
         report = json.loads(rendered)
         self.assertEqual(exit_code, 1)
         self.assertEqual(report["status"], "BLOCKED")
-        self.assertEqual(report["blocking_feature_count"], 53)
-        self.assertEqual(len(report["blocking_feature_ids"]), 53)
-        self.assertEqual(report["passed_feature_count"], 8)
+        self.assertEqual(report["blocking_feature_count"], 36)
+        self.assertEqual(len(report["blocking_feature_ids"]), 36)
+        self.assertEqual(report["passed_feature_count"], 25)
         self.assertIn("result-external-limited", report["reason_codes"])
         self.assertNotIn("prime_evidence", rendered)
         self.assertNotIn("anchors", rendered)
@@ -110,6 +110,26 @@ class TestCheckPrimeParity(unittest.TestCase):
         self.assertEqual(report["passed_feature_count"], 7)
         self.assertEqual(report["reason_codes"], ["result-external-limited"])
         self.assertEqual(report["status"], "BLOCKED")
+
+    def test_ecosystem_domain_closes_only_prime_gateway_rows(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            exit_code = parity_checker.main(
+                [
+                    "--domain",
+                    "ecosystem.capabilities",
+                    "--provider",
+                    "asterion.prime-gateway",
+                ]
+            )
+
+        report = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(report["selected_feature_count"], 10)
+        self.assertEqual(report["passed_feature_count"], 10)
+        self.assertEqual(report["blocking_feature_count"], 0)
+        self.assertEqual(report["reason_codes"], [])
+        self.assertEqual(report["status"], "PASS")
 
     def test_continual_harness_domain_closes_only_with_seven_plus_one(self) -> None:
         output = io.StringIO()
