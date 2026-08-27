@@ -255,6 +255,7 @@ git commit -m "feat: materialize exact ecosystem resources"
 - Create: `src/asterion/control/providers/prime/ecosystem.py`
 - Modify: `src/asterion/control/providers/prime/factory.py`
 - Modify: `src/asterion/control/providers/prime/client.py`
+- Modify: `src/asterion/control/providers/prime/process.py`
 - Modify: `src/asterion/control/providers/prime/resources/control-plane.json`
 - Create: `tests/test_prime_ecosystem_adapter.py`
 - Modify: `tests/test_prime_control_factory.py`
@@ -297,13 +298,13 @@ Define:
 
 ```python
 class PrimeEcosystemClient(Protocol):
-    def activate_ecosystem(self, frame: Mapping[str, object]) -> Mapping[str, object]: ...
+    async def activate_ecosystem(self, frame: Mapping[str, object]) -> Mapping[str, object]: ...
 
 class McpCredentialRefresh(Protocol):
     def refresh(self, lease_id: str, challenge_digest: str) -> str: ...
 
 class PrimeEcosystemService:
-    def activate(
+    async def activate(
         self,
         portfolio: EcosystemPortfolio,
         credential_refresh: McpCredentialRefresh,
@@ -312,7 +313,7 @@ class PrimeEcosystemService:
 
 The private frame contains exact sorted resources/registrations, `portfolioDigest`, `authorityDigest`, private projection references, feature IDs, module/artifact locks, an opaque MCP credential lease ID, and fixed limits. Do not place file paths in `EcosystemActivationReceipt` or any exception. Validate the Gateway mapping against the exact portfolio digest/counts/status before constructing the named receipt.
 
-The factory requires the three services only when the selected manifest declares `ecosystem.portfolio`; reject missing/wrong services before creating the Prime process. Extend the selected client with one private IPC request kind `ecosystem_activate` and no public protocol field.
+The service is bound to the selected provider authority ID/revision and rejects a portfolio for any other authority before materialization or IPC. The factory requires the three services only when the selected manifest declares `ecosystem.portfolio`; reject missing/wrong services before creating the Prime process, then construct and retain the usable async ecosystem service instead of discarding the validated services. Extend the selected client and process transport with one private IPC request kind `ecosystem_activate`, exact response type `ecosystem_receipt`, and no public protocol field.
 
 - [ ] **Step 4: Run adapter, factory, host, and sentinel tests**
 
