@@ -301,6 +301,45 @@ class TestFileEcosystemPrivateSourceStore(unittest.TestCase):
 
             self.assertLessEqual(sum(read_sizes), len(b"original") + 1)
 
+    def test_open_file_redacts_storage_read_failure_during_consumer_read(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            (root / "file").write_bytes(b"body")
+            private = _private_resource("resource-1", {"file": b"body"})
+            store = FileEcosystemPrivateSourceStore(
+                roots={"source-1": root}, resources=(private,)
+            )
+
+            with patch(
+                "asterion.control.ecosystem_materialization.os.read",
+                side_effect=OSError("SENTINEL_STORAGE_READ"),
+            ):
+                with self.assertRaisesRegex(
+                    EcosystemMaterializationError, f"^{ERROR}$"
+                ) as raised:
+                    with store.open_file("resource-1", "file") as stream:
+                        stream.read()
+
+            self.assertIsNone(raised.exception.__cause__)
+            self.assertIsNone(raised.exception.__context__)
+            self.assertNotIn("SENTINEL_STORAGE_READ", str(raised.exception))
+
+    def test_open_file_preserves_genuine_consumer_exception(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            (root / "file").write_bytes(b"body")
+            private = _private_resource("resource-1", {"file": b"body"})
+            store = FileEcosystemPrivateSourceStore(
+                roots={"source-1": root}, resources=(private,)
+            )
+            consumer_error = OSError("SENTINEL_CONSUMER")
+
+            with self.assertRaises(OSError) as raised:
+                with store.open_file("resource-1", "file"):
+                    raise consumer_error
+
+            self.assertIs(raised.exception, consumer_error)
+
     def test_store_copies_private_mappings_and_redacts_all_errors(self) -> None:
         with tempfile.TemporaryDirectory(prefix="SENTINEL_PRIVATE_") as temporary:
             roots = {"source-1": Path(temporary).resolve()}
@@ -564,6 +603,46 @@ class TestSealedEcosystemMaterializer(unittest.TestCase):
             self.assertTrue(staging_created)
             self.assertEqual(tuple((base / "private").iterdir()), ())
 
+    def test_initial_staging_stat_failure_removes_owned_staging_inode(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            source = base / "source"
+            source.mkdir()
+            _write_files(source, {"file": b"body"})
+            private = _private_resource("resource-1", {"file": b"body"})
+            portfolio = _portfolio_for(private)
+            store = FileEcosystemPrivateSourceStore(
+                roots={"source-1": source}, resources=(private,)
+            )
+            module = "asterion.control.ecosystem_materialization"
+            real_stat = os.stat
+            failed = False
+
+            def failing_staging_stat(
+                path: object, *args: object, **kwargs: object
+            ) -> os.stat_result:
+                nonlocal failed
+                if (
+                    isinstance(path, str)
+                    and path.startswith(".staging-")
+                    and not failed
+                ):
+                    failed = True
+                    raise OSError("SENTINEL_STAGING_STAT")
+                return real_stat(path, *args, **kwargs)  # type: ignore[arg-type]
+
+            with patch(f"{module}.os.stat", side_effect=failing_staging_stat):
+                with self.assertRaisesRegex(
+                    EcosystemMaterializationError, f"^{ERROR}$"
+                ) as raised:
+                    SealedEcosystemMaterializer(base / "private").materialize(
+                        portfolio, store
+                    )
+
+            self.assertIsNone(raised.exception.__cause__)
+            self.assertTrue(failed)
+            self.assertEqual(tuple((base / "private").iterdir()), ())
+
     def test_early_staging_open_failure_reopens_only_quarantined_inode(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary).resolve()
@@ -688,6 +767,87 @@ class TestSealedEcosystemMaterializer(unittest.TestCase):
             self.assertTrue(failed)
             self.assertEqual(remove_owned_tree.call_count, 1)
             materializer.close(projection)
+
+    def test_quarantine_close_failure_advances_removal_before_terminal_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            source = base / "source"
+            source.mkdir()
+            _write_files(source, {"file": b"body"})
+            private = _private_resource("resource-1", {"file": b"body"})
+            portfolio = _portfolio_for(private)
+            store = FileEcosystemPrivateSourceStore(
+                roots={"source-1": source}, resources=(private,)
+            )
+            materializer = SealedEcosystemMaterializer(base / "private")
+            projection = materializer.materialize(portfolio, store)
+            owned = materializer._owned[id(projection)]
+            root_fd = owned.root_fd
+            real_open = os.open
+            real_close = os.close
+            real_fsync = os.fsync
+            quarantine_fd: int | None = None
+            quarantine_close_failed = False
+            close_attempts: list[int] = []
+            fsync_descriptors: list[int] = []
+
+            def recording_open(
+                path: object, flags: int, *args: object, **kwargs: object
+            ) -> int:
+                nonlocal quarantine_fd
+                descriptor = real_open(path, flags, *args, **kwargs)  # type: ignore[arg-type]
+                if isinstance(path, str) and path.startswith(".cleanup-"):
+                    quarantine_fd = descriptor
+                return descriptor
+
+            def failing_quarantine_close(descriptor: int) -> None:
+                nonlocal quarantine_close_failed
+                close_attempts.append(descriptor)
+                real_close(descriptor)
+                if descriptor == quarantine_fd and not quarantine_close_failed:
+                    quarantine_close_failed = True
+                    raise OSError("SENTINEL_QUARANTINE_CLOSE")
+
+            def recording_fsync(descriptor: int) -> None:
+                fsync_descriptors.append(descriptor)
+                real_fsync(descriptor)
+
+            with (
+                patch(
+                    "asterion.control.ecosystem_materialization._remove_owned_tree",
+                    wraps=implementation._remove_owned_tree,
+                ) as remove_owned_tree,
+                patch(
+                    "asterion.control.ecosystem_materialization.os.open",
+                    side_effect=recording_open,
+                ),
+                patch(
+                    "asterion.control.ecosystem_materialization.os.close",
+                    side_effect=failing_quarantine_close,
+                ),
+                patch(
+                    "asterion.control.ecosystem_materialization.os.fsync",
+                    side_effect=recording_fsync,
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    EcosystemMaterializationError, f"^{ERROR}$"
+                ) as raised:
+                    materializer.close(projection)
+                self.assertIsNone(raised.exception.__cause__)
+                self.assertFalse(projection.root.exists())
+                attempts_after_failure = tuple(close_attempts)
+
+                with self.assertRaisesRegex(
+                    EcosystemMaterializationError, f"^{ERROR}$"
+                ):
+                    materializer.close(projection)
+
+            self.assertTrue(quarantine_close_failed)
+            self.assertEqual(remove_owned_tree.call_count, 1)
+            self.assertIn(root_fd, fsync_descriptors)
+            self.assertEqual(close_attempts.count(quarantine_fd), 1)
+            self.assertEqual(tuple(close_attempts), attempts_after_failure)
 
     def test_projection_descriptor_close_failure_is_terminal_uncertainty(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

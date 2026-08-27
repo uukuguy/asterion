@@ -103,17 +103,24 @@ class _HeldVerifiedReader:
             return b""
         if not isinstance(size, int):
             raise TypeError
-        requested = self._remaining if size < 0 else min(size, self._remaining)
-        if requested == 0:
-            self._verify()
-            return b""
-        value = os.read(self._descriptor, requested)
-        self._remaining -= len(value)
-        self._count += len(value)
-        self._digest.update(value)
-        if not value or self._remaining == 0:
-            self._verify()
-        return value
+        failed = False
+        result = b""
+        try:
+            requested = self._remaining if size < 0 else min(size, self._remaining)
+            if requested == 0:
+                self._verify()
+            else:
+                result = os.read(self._descriptor, requested)
+                self._remaining -= len(result)
+                self._count += len(result)
+                self._digest.update(result)
+                if not result or self._remaining == 0:
+                    self._verify()
+        except OSError:
+            failed = True
+        if failed:
+            raise EcosystemMaterializationError(_ERROR_MESSAGE)
+        return result
 
     def finalize(self) -> None:
         while not self._verified:
@@ -308,11 +315,7 @@ class SealedEcosystemMaterializer:
             failed = True
 
         if failed or root_fd is None or staging_fd is None or projection is None:
-            if (
-                root_fd is not None
-                and owned_name is not None
-                and owned_identity is not None
-            ):
+            if root_fd is not None and owned_name is not None:
                 try:
                     _remove_owned_tree(
                         root_fd,
@@ -365,13 +368,16 @@ class SealedEcosystemMaterializer:
             if owned.projection is not projection:
                 raise EcosystemMaterializationError(_ERROR_MESSAGE)
             failed = False
-            if owned.terminal_uncertain:
+            if (
+                owned.terminal_uncertain
+                and owned.phase != "tree-removed-pending-fsync"
+            ):
                 failed = True
             elif owned.phase == "bound":
                 try:
                     if owned.root_fd is None:
                         raise OSError
-                    _remove_owned_tree(
+                    descriptor_uncertain = _remove_owned_tree(
                         owned.root_fd,
                         owned.projection.projection_id,
                         owned.identity,
@@ -379,6 +385,8 @@ class SealedEcosystemMaterializer:
                         owned.quarantine_name,
                     )
                     owned.phase = "tree-removed-pending-fsync"
+                    if descriptor_uncertain:
+                        owned.terminal_uncertain = True
                 except BaseException:
                     failed = True
             if not failed and owned.phase == "tree-removed-pending-fsync":
@@ -392,9 +400,10 @@ class SealedEcosystemMaterializer:
                     close_failed = _close_owned_descriptors(owned)
                     if close_failed:
                         owned.terminal_uncertain = True
+                    owned.phase = "closed"
+                    if owned.terminal_uncertain:
                         failed = True
                     else:
-                        owned.phase = "closed"
                         del self._owned[id(projection)]
         if failed:
             raise EcosystemMaterializationError(_ERROR_MESSAGE)
@@ -638,10 +647,10 @@ def _atomic_move_no_replace(
 def _remove_owned_tree(
     parent_fd: int,
     name: str,
-    expected_identity: tuple[int, int],
+    expected_identity: tuple[int, int] | None,
     owned_fd: int | None,
     quarantine_name: str | None,
-) -> None:
+) -> bool:
     if quarantine_name is None:
         raise OSError
     if owned_fd is not None:
@@ -653,6 +662,7 @@ def _remove_owned_tree(
             raise OSError
 
     descriptor: int | None = None
+    moved_to_quarantine = False
     try:
         descriptor, details = _open_directory_at(parent_fd, quarantine_name)
     except FileNotFoundError:
@@ -660,22 +670,36 @@ def _remove_owned_tree(
             _atomic_move_no_replace(parent_fd, name, parent_fd, quarantine_name)
         except FileNotFoundError:
             raise OSError
+        moved_to_quarantine = True
         moved = os.stat(quarantine_name, dir_fd=parent_fd, follow_symlinks=False)
-        if not stat.S_ISDIR(moved.st_mode) or _identity(moved) != expected_identity:
+        if not stat.S_ISDIR(moved.st_mode) or (
+            expected_identity is not None
+            and _identity(moved) != expected_identity
+        ):
             try:
                 _atomic_move_no_replace(parent_fd, quarantine_name, parent_fd, name)
             except BaseException:
                 raise OSError
             raise OSError
+        if expected_identity is None:
+            expected_identity = _identity(moved)
         descriptor, details = _open_directory_at(parent_fd, quarantine_name)
+    if expected_identity is None or not moved_to_quarantine and owned_fd is None:
+        os.close(descriptor)
+        raise OSError
     if _identity(details) != expected_identity:
         os.close(descriptor)
         raise OSError
+    removed = False
     try:
         _remove_directory_contents(owned_fd if owned_fd is not None else descriptor)
         os.rmdir(quarantine_name, dir_fd=parent_fd)
+        removed = True
     finally:
-        os.close(descriptor)
+        descriptor_closed = _close_quietly(descriptor)
+    if not removed:
+        raise OSError
+    return not descriptor_closed
 
 
 def _open_directory_at(
