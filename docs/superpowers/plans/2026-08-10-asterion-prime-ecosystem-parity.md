@@ -337,8 +337,10 @@ git commit -m "feat: bind sealed ecosystem to Prime"
 - Modify: `packages/typescript/prime-gateway/src/durable-store.ts`
 - Modify: `packages/typescript/prime-gateway/src/gateway.ts`
 - Modify: `packages/typescript/prime-gateway/src/index.ts`
+- Modify: `packages/typescript/prime-gateway/src/main.ts`
 - Create: `packages/typescript/prime-gateway/test/ecosystem.test.mjs`
 - Modify: `packages/typescript/prime-gateway/test/gateway.test.mjs`
+- Modify: `packages/typescript/prime-gateway/test/main.test.mjs`
 
 **Interfaces:**
 - Consumes: Task 3 `asterion.prime-ecosystem-frame/v1` and a pinned `PrimeEcosystemModule`.
@@ -393,7 +395,9 @@ export interface PrimeEcosystemFrame {
 }
 ```
 
-Validate exact keys, canonical arrays, byte/entry/process/deadline caps, owned canonical paths, mode 0600/0700, and digest syntax before bind. Hash a public form that excludes paths and lease IDs. Add `bindEcosystemEffect()`, `commitEcosystemEffectResult()`, `ecosystemEffectBinding()`, and `ecosystemEffectResult()` to the durable store. A pre-existing nonterminal bind commits `uncertain` without module invocation; an existing terminal result returns unchanged.
+Validate exact keys, canonical arrays, byte/entry/process/deadline caps, owned canonical paths, exact mode 0600/0700 including rejection of special permission bits, and digest syntax before bind. Globally sort the complete file manifest by the same `relative_path` order as Python before hashing. Hash a public form that excludes paths and lease IDs. Add `bindEcosystemEffect()`, `commitEcosystemEffectResult()`, `ecosystemEffectBinding()`, and `ecosystemEffectResult()` to the durable store. Binding atomically returns created/pre-existing disposition and persists the safe expected feature/count contract; concurrent or reopened pre-existing nonterminal bindings become `uncertain` without module invocation. Every terminal commit/replay validates effect identity, frame/lock digests, features, and derived counts against that binding.
+
+Extend the private main-process envelope with exact `ecosystem_activate` request and `ecosystem_receipt` response variants. Dispatch only through an injected `PrimeEcosystemAdapter`; Task 5 supplies the real digest-locked module dependency. Keep durable-only effect/frame/lock fields out of the IPC result and project exactly the twelve Task 3 receipt fields so Python rejects no valid response and accepts no extras.
 
 - [ ] **Step 4: Build and run the complete Gateway package**
 
