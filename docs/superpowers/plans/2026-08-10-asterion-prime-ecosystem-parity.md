@@ -602,6 +602,12 @@ git commit -m "test: prove Prime ecosystem extensions"
 **Files:**
 - Create: `tests/fixtures/prime_ecosystem/v1/packages/`
 - Create: `tests/test_prime_ecosystem_packages.py`
+- Modify: `packages/typescript/prime-gateway/resources/prime-ecosystem-module.mjs`
+- Modify: `packages/typescript/prime-gateway/resources/prime-ecosystem-module-lock.json`
+- Modify: `packages/typescript/prime-gateway/src/ecosystem.ts`
+- Modify: `src/asterion/control/providers/prime/ecosystem.py`
+- Modify: `tests/test_setup_prime_agent.py`
+- Modify: `tests/test_prime_ecosystem_adapter.py`
 - Modify: `tests/fixtures/prime_gateway/v1/real-prime-ecosystem.mjs`
 - Modify: `Makefile`
 
@@ -621,12 +627,13 @@ Expected: FAIL until the real harness implements the package scenario.
 
 - [ ] **Step 3: Implement exact package projection and Prime resolution**
 
-Resolve the candidate through Asterion first, materialize only its declared payload, pass the exact selected identity/digest to Prime's locked package manager, disable installation commands and source fallback, and compare Prime's private resource result to the admitted package digest. Emit only one package count, selected source ID digest, and zero operation counts.
+Resolve the candidate through Asterion first, materialize only its declared payload, pass the exact selected identity/digest to Prime's locked `DefaultPackageManager`, disable installation commands, network access, and source fallback, and compare Prime's private selected identity and payload/resource digest to the admitted package digest. Re-lock the bundle and propagate the resulting exact module-lock digest through Python and Gateway validation before activation. Emit only one package count, selected source ID digest, and zero operation counts.
 
 - [ ] **Step 4: Add and run the package gate twice**
 
 ```make
 test.prime-ecosystem-packages.provider-free:
+	npm --prefix packages/typescript/prime-gateway run build
 	$(UV_BIN) run python -m unittest -v tests.test_prime_ecosystem_packages tests.test_local_capability_source tests.test_distribution_capability_source
 ```
 
@@ -637,7 +644,7 @@ Expected: PASS with no provider, model, network-install, or retained-process ope
 - [ ] **Step 5: Commit the package evidence package**
 
 ```bash
-git add tests/fixtures/prime_ecosystem/v1/packages tests/fixtures/prime_gateway/v1/real-prime-ecosystem.mjs tests/test_prime_ecosystem_packages.py Makefile
+git add tests/fixtures/prime_ecosystem/v1/packages packages/typescript/prime-gateway/resources/prime-ecosystem-module.mjs packages/typescript/prime-gateway/resources/prime-ecosystem-module-lock.json packages/typescript/prime-gateway/src/ecosystem.ts src/asterion/control/providers/prime/ecosystem.py tests/test_setup_prime_agent.py tests/test_prime_ecosystem_adapter.py tests/fixtures/prime_gateway/v1/real-prime-ecosystem.mjs tests/test_prime_ecosystem_packages.py Makefile
 git commit -m "test: prove Prime ecosystem packages"
 ```
 
@@ -650,6 +657,11 @@ git commit -m "test: prove Prime ecosystem packages"
 - Create: `tests/fixtures/prime_ecosystem/v1/mcp/local-server.mjs`
 - Create: `tests/test_control_ecosystem_mcp.py`
 - Create: `tests/test_prime_ecosystem_mcp.py`
+- Modify: `packages/typescript/prime-gateway/resources/prime-ecosystem-module.mjs`
+- Modify: `packages/typescript/prime-gateway/resources/prime-ecosystem-module-lock.json`
+- Modify: `packages/typescript/prime-gateway/src/ecosystem.ts`
+- Modify: `packages/typescript/prime-gateway/test/ecosystem.test.mjs`
+- Modify: `packages/typescript/prime-gateway/test/main.test.mjs`
 - Modify: `tests/fixtures/prime_gateway/v1/real-prime-ecosystem.mjs`
 - Modify: `Makefile`
 
@@ -678,14 +690,15 @@ class OwnedMcpFixtureService:
     def close(self, session: EcosystemMcpSession) -> None: ...
 ```
 
-Validate one exact local server identity and executable binding injected by the operator; never accept an executable path from a manifest/frame. Launch directly with a cleared environment, cap bytes/deadline, persist bind before refresh, allow one refresh for the exact lease/challenge digest, and close/reap on success, failure, cancellation, or uncertainty. Return only IDs, counts, digests, and terminal state.
+Validate one exact local server identity and executable binding injected by the operator; never accept an executable path from a manifest/frame. Launch directly with a cleared environment, multiplex stdout and stderr non-blockingly under one byte/deadline cap, persist bind before refresh, allow one refresh for the exact lease/challenge digest, and close/reap on success, failure, cancellation, or uncertainty. Partial-line stalls and stderr floods must fail with fixed redacted errors and kill/reap the child. Return only IDs, counts, digests, and terminal state.
 
 - [ ] **Step 4: Implement the real Prime MCP observation and run twice**
 
-Call Prime's locked MCP manager/OAuth integration over the owned local channel, prove explicit configuration and one refresh, then shutdown both manager and server. Add:
+Call Prime's locked `McpManager` and OAuth integration over the owned local channel, perform the exact initialize/list exchange, prove explicit configuration and exactly one host-owned challenge refresh with no replay refresh, then shutdown both manager and server. Re-lock the bundle and propagate the exact module-lock digest through Gateway validation. Add:
 
 ```make
 test.prime-ecosystem-mcp.provider-free:
+	npm --prefix packages/typescript/prime-gateway run build
 	$(UV_BIN) run python -m unittest -v tests.test_control_ecosystem_mcp tests.test_prime_ecosystem_mcp
 ```
 
@@ -696,7 +709,7 @@ Expected: PASS with one host credential refresh, zero model credential reads, ze
 - [ ] **Step 5: Commit the MCP evidence package**
 
 ```bash
-git add src/asterion/control/ecosystem_mcp.py tests/fixtures/prime_ecosystem/v1/mcp/local-server.mjs tests/fixtures/prime_gateway/v1/real-prime-ecosystem.mjs tests/test_control_ecosystem_mcp.py tests/test_prime_ecosystem_mcp.py Makefile
+git add src/asterion/control/ecosystem_mcp.py tests/fixtures/prime_ecosystem/v1/mcp/local-server.mjs packages/typescript/prime-gateway/resources/prime-ecosystem-module.mjs packages/typescript/prime-gateway/resources/prime-ecosystem-module-lock.json packages/typescript/prime-gateway/src/ecosystem.ts packages/typescript/prime-gateway/test/ecosystem.test.mjs packages/typescript/prime-gateway/test/main.test.mjs tests/fixtures/prime_gateway/v1/real-prime-ecosystem.mjs tests/test_control_ecosystem_mcp.py tests/test_prime_ecosystem_mcp.py Makefile
 git commit -m "test: prove Prime ecosystem MCP integration"
 ```
 
