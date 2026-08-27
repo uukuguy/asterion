@@ -30,6 +30,7 @@
   "capabilities": [
     "action-proposals",
     "checkpointing",
+    "ecosystem.portfolio",
     "event-replay",
     "session-lifecycle",
     "session.context-v1"

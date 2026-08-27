@@ -11,6 +11,7 @@ from collections import OrderedDict
 from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Literal, Protocol
 
 from asterion.control.authority import RemainingBudget
@@ -199,6 +200,34 @@ class PrimeControlPlaneClient:
     @property
     def manifest(self) -> ControlPlaneManifest:
         return self._manifest
+
+    async def activate_ecosystem(
+        self, frame: Mapping[str, object]
+    ) -> Mapping[str, object]:
+        """Send one selected-provider private ecosystem activation frame."""
+
+        if self._closed or not isinstance(frame, Mapping):
+            raise PrimeControlError()
+        envelope: dict[str, object] = {
+            "protocol": PRIME_GATEWAY_IPC_PROTOCOL,
+            "id": _request_id(),
+            "type": "ecosystem_activate",
+            "frame": _json_value(frame),
+        }
+        try:
+            response = await self._process.request(envelope)
+            receipt = response.get("receipt")
+            if (
+                set(response) != {"protocol", "id", "type", "receipt"}
+                or response.get("protocol") != PRIME_GATEWAY_IPC_PROTOCOL
+                or response.get("id") != envelope["id"]
+                or response.get("type") != "ecosystem_receipt"
+                or not isinstance(receipt, Mapping)
+            ):
+                raise PrimeControlError()
+            return MappingProxyType(dict(receipt))
+        except (KeyError, TypeError, ValueError, RuntimeError):
+            raise PrimeControlError() from None
 
     def resolve_text(self, reference: str, *, max_bytes: int) -> str:
         """Resolve operator-owned refs or currently prepared provider refs."""
@@ -726,6 +755,14 @@ class PrimeControlPlaneClient:
 
 def _request_id() -> str:
     return f"request-{uuid.uuid4().hex}"
+
+
+def _json_value(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {str(key): _json_value(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_json_value(item) for item in value]
+    return value
 
 
 def _load_manifest() -> ControlPlaneManifest:

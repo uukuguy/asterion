@@ -70,11 +70,15 @@ _EVENTS = (
 _CAPABILITIES = (
     "action-proposals",
     "checkpointing",
+    "ecosystem.portfolio",
     "event-replay",
     "session-lifecycle",
     "session.context-v1",
 )
 _CONTINUATION_MEDIA_TYPE = "application/vnd.asterion.control-capsule"
+_ECOSYSTEM_SOURCE_STORE_SERVICE = "ecosystem-source-store"
+_ECOSYSTEM_MATERIALIZER_SERVICE = "ecosystem-materializer"
+_MCP_CREDENTIAL_REFRESH_SERVICE = "mcp-credential-refresh"
 _PRIVATE_CONTENT_SERVICE = "private-content"
 _PRIVATE_ATTACHMENT_SERVICE = "private-attachments"
 _REQUIRED_OPTIONS = frozenset(
@@ -178,6 +182,9 @@ def build_prime_control_plane_client(
         missing = _REQUIRED_OPTIONS.difference(context.options)
         if missing:
             raise ControlPlaneFactoryError("Prime control plane options are invalid")
+        manifest = prime_control_plane_binding().manifest
+        if "ecosystem.portfolio" in manifest.capabilities:
+            _require_ecosystem_services(context.host_services)
         resolver = context.host_services.get(_PRIVATE_CONTENT_SERVICE)
         if not _is_private_content_resolver(resolver):
             raise ControlPlaneFactoryError("Prime private content service is unavailable")
@@ -197,8 +204,10 @@ def build_prime_control_plane_client(
             process=process,  # type: ignore[arg-type]
             private_content=resolver,
             private_attachments=attachment_resolver,
-            manifest=prime_control_plane_binding().manifest,
+            manifest=manifest,
         )
+    except ControlPlaneFactoryError:
+        raise
     except (OSError, TypeError, ValueError, PrimeSidecarProcessError):
         raise ControlPlaneFactoryError("Prime control plane is unavailable") from None
 
@@ -224,6 +233,26 @@ def _is_private_attachment_resolver(
     value: object,
 ) -> TypeGuard[PrivateAttachmentResolver]:
     return callable(getattr(value, "resolve_bytes", None))
+
+
+def _require_ecosystem_services(services: Mapping[str, object]) -> None:
+    try:
+        source_store = services.get(_ECOSYSTEM_SOURCE_STORE_SERVICE)
+        materializer = services.get(_ECOSYSTEM_MATERIALIZER_SERVICE)
+        credential_refresh = services.get(_MCP_CREDENTIAL_REFRESH_SERVICE)
+        valid = (
+            callable(getattr(source_store, "private_resource", None))
+            and callable(getattr(source_store, "open_file", None))
+            and callable(getattr(materializer, "materialize", None))
+            and callable(getattr(materializer, "close", None))
+            and callable(getattr(credential_refresh, "refresh", None))
+        )
+    except Exception:
+        valid = False
+    if not valid:
+        raise ControlPlaneFactoryError(
+            "Prime ecosystem host service is unavailable"
+        )
 
 
 def _path_option(options: Mapping[str, str], key: str) -> Path:

@@ -15,6 +15,8 @@ from asterion.control.factory import ControlPlaneFactoryContext, ControlPlaneFac
 from asterion.control.factory import bind_selected_session_context_client
 from asterion.control.host import ControlPlaneManifest
 from asterion.control.providers.prime.client import PrimeControlPlaneClient
+from asterion.control.ecosystem import EcosystemPrivateResource
+from asterion.control.ecosystem_materialization import EcosystemProjection
 from asterion.control.providers.prime.factory import (
     PRIME_CONTROL_PLANE_ID,
     PRIME_CONTROL_PLANE_VERSION,
@@ -61,6 +63,33 @@ class FakeProcess:
         self.options = options
 
 
+class FakeEcosystemSourceStore:
+    def private_resource(self, resource_id: str) -> EcosystemPrivateResource:
+        raise KeyError(resource_id)
+
+    def open_file(self, resource_id: str, relative_path: str):
+        raise KeyError((resource_id, relative_path))
+
+
+class FakeEcosystemMaterializer:
+    def materialize(self, portfolio, store) -> EcosystemProjection:
+        raise AssertionError((portfolio, store))
+
+    def close(self, projection: EcosystemProjection) -> None:
+        raise AssertionError(projection)
+
+
+class FakeMcpCredentialRefresh:
+    def refresh(self, lease_id: str, challenge_digest: str) -> str:
+        raise AssertionError((lease_id, challenge_digest))
+
+
+class ExplodingEcosystemService:
+    def __getattribute__(self, name: str):
+        del name
+        raise RuntimeError("SENTINEL_SERVICE_EXCEPTION")
+
+
 def make_context(
     root: Path,
     *,
@@ -102,6 +131,9 @@ def make_context(
         options=values,
         authority=authority if authority is not None else _child_envelope(),
         host_services={
+            "ecosystem-materializer": FakeEcosystemMaterializer(),
+            "ecosystem-source-store": FakeEcosystemSourceStore(),
+            "mcp-credential-refresh": FakeMcpCredentialRefresh(),
             "private-attachments": FakeResolver(),
             "private-content": FakeResolver(),
         },
@@ -135,6 +167,102 @@ class TestPrimeControlFactory(unittest.TestCase):
             ),
         )
         self.assertIn("session.context-v1", manifest.capabilities)
+        self.assertIn("ecosystem.portfolio", manifest.capabilities)
+
+    def test_factory_requires_ecosystem_services_before_process_creation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prepare_paths(root)
+            base = make_context(root)
+            service_names = (
+                "ecosystem-source-store",
+                "ecosystem-materializer",
+                "mcp-credential-refresh",
+            )
+            for service_name in service_names:
+                services = dict(base.host_services)
+                services.pop(service_name)
+                context = ControlPlaneFactoryContext(
+                    system_id=base.system_id,
+                    system_version=base.system_version,
+                    control_plane_id=base.control_plane_id,
+                    control_plane_version=base.control_plane_version,
+                    private_root=base.private_root,
+                    options=base.options,
+                    authority=base.authority,
+                    host_services=services,
+                )
+                calls: list[object] = []
+
+                with self.subTest(service_name=service_name), self.assertRaisesRegex(
+                    ControlPlaneFactoryError, "host service is unavailable"
+                ):
+                    build_prime_control_plane_client(
+                        context,
+                        process_factory=lambda options: calls.append(options),
+                    )
+                self.assertEqual(calls, [])
+
+    def test_factory_rejects_wrong_ecosystem_protocol_objects_before_process(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prepare_paths(root)
+            base = make_context(root)
+            for service_name in (
+                "ecosystem-source-store",
+                "ecosystem-materializer",
+                "mcp-credential-refresh",
+            ):
+                services = dict(base.host_services)
+                services[service_name] = object()
+                context = ControlPlaneFactoryContext(
+                    system_id=base.system_id,
+                    system_version=base.system_version,
+                    control_plane_id=base.control_plane_id,
+                    control_plane_version=base.control_plane_version,
+                    private_root=base.private_root,
+                    options=base.options,
+                    authority=base.authority,
+                    host_services=services,
+                )
+                calls: list[object] = []
+
+                with self.subTest(service_name=service_name), self.assertRaisesRegex(
+                    ControlPlaneFactoryError, "host service is unavailable"
+                ):
+                    build_prime_control_plane_client(
+                        context,
+                        process_factory=lambda options: calls.append(options),
+                    )
+                self.assertEqual(calls, [])
+
+    def test_factory_redacts_ecosystem_service_validation_exception(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            prepare_paths(root)
+            base = make_context(root)
+            services = dict(base.host_services)
+            services["ecosystem-source-store"] = ExplodingEcosystemService()
+            context = ControlPlaneFactoryContext(
+                system_id=base.system_id,
+                system_version=base.system_version,
+                control_plane_id=base.control_plane_id,
+                control_plane_version=base.control_plane_version,
+                private_root=base.private_root,
+                options=base.options,
+                authority=base.authority,
+                host_services=services,
+            )
+            calls: list[object] = []
+
+            with self.assertRaises(ControlPlaneFactoryError) as raised:
+                build_prime_control_plane_client(
+                    context,
+                    process_factory=lambda options: calls.append(options),
+                )
+
+            self.assertEqual(calls, [])
+            self.assertNotIn("SENTINEL_SERVICE_EXCEPTION", str(raised.exception))
 
     def test_packaged_manifest_matches_exact_factory_binding(self) -> None:
         manifest_path = (
