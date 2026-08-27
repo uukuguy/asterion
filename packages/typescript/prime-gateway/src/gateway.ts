@@ -75,6 +75,10 @@ import {
   PrimePromptAdmissionUncertainError,
 } from "./prime-session.js";
 import type { PrimeSessionTreeProjection } from "./session-tree.js";
+import type {
+  GatewayEcosystemEffectResult,
+  PrimeEcosystemAdapter,
+} from "./ecosystem.js";
 
 type CheckpointPayload = Extract<
   ControlEvent,
@@ -238,6 +242,7 @@ export interface PrimeGatewayOptions {
   readonly store: GatewayDurableStore;
   readonly privateValues: PrimeGatewayPrivateInputs;
   readonly privateResults?: PrimeGatewayPrivateResults;
+  readonly ecosystem?: Pick<PrimeEcosystemAdapter, "activate">;
   readonly createSession: (
     goal: string,
     bindIdentity: (identity: PrimeSessionInitialBinding) => Promise<void>,
@@ -499,6 +504,8 @@ export class PrimeGateway {
       (options.sessionContext !== undefined &&
         (typeof options.sessionContext.execute !== "function" ||
           typeof options.sessionContext.cancel !== "function")) ||
+      (options.ecosystem !== undefined &&
+        typeof options.ecosystem.activate !== "function") ||
       options.store.snapshot().sessionId !== options.sessionId
     ) {
       throw new PrimeGatewayError();
@@ -543,6 +550,16 @@ export class PrimeGateway {
       generation: this.options.generation,
       status: this.sessionStatus ?? "uninitialized",
     });
+  }
+
+  async activateEcosystem(value: unknown): Promise<GatewayEcosystemEffectResult> {
+    this.assertOpen();
+    if (this.options.ecosystem === undefined) throw new PrimeGatewayError();
+    try {
+      return await this.options.ecosystem.activate(value);
+    } catch {
+      throw new PrimeGatewayError();
+    }
   }
 
   async accept(value: unknown): Promise<void> {

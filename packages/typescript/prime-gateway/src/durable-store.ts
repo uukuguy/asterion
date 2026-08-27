@@ -29,6 +29,15 @@ import type {
   GatewayHarnessEffectBinding,
   GatewayHarnessEffectResult,
 } from "./continual-harness.js";
+import {
+  ecosystemEffectBinding,
+  validateGatewayEcosystemEffectBinding,
+  validateGatewayEcosystemEffectResult,
+} from "./ecosystem.js";
+import type {
+  GatewayEcosystemEffectBinding,
+  GatewayEcosystemEffectResult,
+} from "./ecosystem.js";
 
 export const MAX_PUBLIC_EVENTS_PER_GENERATION = 100_000;
 export const MAX_PUBLIC_RECORD_BYTES = 1024 * 1024;
@@ -50,6 +59,8 @@ const RECORD_KINDS = new Set([
   "context.operation.committed",
   "context.model.prepared",
   "context.operation.prepared",
+  "ecosystem.effect.bound",
+  "ecosystem.effect.committed",
   "event.accepted",
   "input.delivery.committed",
   "input.delivery.protocol",
@@ -1139,6 +1150,14 @@ export class GatewayDurableStore {
   private readonly closedRlmChildIds = new Set<string>();
   private readonly harnessBindings = new Map<string, GatewayHarnessEffectBinding>();
   private readonly harnessResults = new Map<string, GatewayHarnessEffectResult>();
+  private readonly ecosystemBindings = new Map<
+    string,
+    GatewayEcosystemEffectBinding
+  >();
+  private readonly ecosystemResults = new Map<
+    string,
+    GatewayEcosystemEffectResult
+  >();
 
   private constructor(
     private readonly root: string,
@@ -1696,6 +1715,76 @@ export class GatewayDurableStore {
     return this.harnessResults.get(effectId);
   }
 
+  async bindEcosystemEffect(
+    frame: unknown,
+  ): Promise<GatewayEcosystemEffectBinding> {
+    let binding: GatewayEcosystemEffectBinding;
+    try {
+      binding = validateGatewayEcosystemEffectBinding(
+        ecosystemEffectBinding(frame),
+      );
+    } catch {
+      throw new GatewayStoreConflictError();
+    }
+    await this.appendRecord(
+      "ecosystem.effect.bound",
+      `ecosystem-effect:${binding.effectId}`,
+      binding as unknown as Record<string, unknown>,
+    );
+    const stored = this.ecosystemBindings.get(binding.effectId);
+    if (stored === undefined) throw new GatewayStoreConflictError();
+    return stored;
+  }
+
+  async commitEcosystemEffectResult(
+    effectId: string,
+    receipt: unknown,
+  ): Promise<GatewayEcosystemEffectResult> {
+    const binding = this.ecosystemBindings.get(effectId);
+    if (binding === undefined || !isRecord(receipt)) {
+      throw new GatewayStoreConflictError();
+    }
+    let result: GatewayEcosystemEffectResult;
+    try {
+      result = validateGatewayEcosystemEffectResult({ ...binding, ...receipt });
+    } catch {
+      throw new GatewayStoreConflictError();
+    }
+    if (
+      result.frameDigest !== binding.frameDigest ||
+      result.authorityDigest !== binding.authorityDigest ||
+      result.portfolioDigest !== binding.portfolioDigest ||
+      result.artifactLockDigest !== binding.artifactLockDigest ||
+      result.moduleLockDigest !== binding.moduleLockDigest
+    ) throw new GatewayStoreConflictError();
+    await this.appendRecord(
+      "ecosystem.effect.committed",
+      `ecosystem-result:${effectId}`,
+      result as unknown as Record<string, unknown>,
+    );
+    const stored = this.ecosystemResults.get(effectId);
+    if (stored === undefined) throw new GatewayStoreConflictError();
+    return stored;
+  }
+
+  ecosystemEffectBinding(
+    effectId: string,
+  ): GatewayEcosystemEffectBinding | undefined {
+    if (typeof effectId !== "string" || !RECORD_ID_PATTERN.test(effectId)) {
+      throw new GatewayStoreConflictError();
+    }
+    return this.ecosystemBindings.get(effectId);
+  }
+
+  ecosystemEffectResult(
+    effectId: string,
+  ): GatewayEcosystemEffectResult | undefined {
+    if (typeof effectId !== "string" || !RECORD_ID_PATTERN.test(effectId)) {
+      throw new GatewayStoreConflictError();
+    }
+    return this.ecosystemResults.get(effectId);
+  }
+
   async recordRlmBinding(binding: GatewayRlmBinding): Promise<GatewayRecordReceipt> {
     const validated = validateRlmBinding(binding);
     const existingAction = this.rlmActionsByChildId.get(validated.child_id);
@@ -2213,6 +2302,27 @@ export class GatewayDurableStore {
             binding.scopeDigest !== result.scopeDigest) throw new GatewayStoreCorruptionError();
         return result as unknown as Record<string, unknown>;
       }
+      if (kind === "ecosystem.effect.bound") {
+        const binding = validateGatewayEcosystemEffectBinding(payload);
+        if (recordId !== `ecosystem-effect:${binding.effectId}`) {
+          throw new GatewayStoreCorruptionError();
+        }
+        return binding as unknown as Record<string, unknown>;
+      }
+      if (kind === "ecosystem.effect.committed") {
+        const result = validateGatewayEcosystemEffectResult(payload);
+        const binding = this.ecosystemBindings.get(result.effectId);
+        if (
+          recordId !== `ecosystem-result:${result.effectId}` ||
+          binding === undefined ||
+          binding.frameDigest !== result.frameDigest ||
+          binding.authorityDigest !== result.authorityDigest ||
+          binding.portfolioDigest !== result.portfolioDigest ||
+          binding.artifactLockDigest !== result.artifactLockDigest ||
+          binding.moduleLockDigest !== result.moduleLockDigest
+        ) throw new GatewayStoreCorruptionError();
+        return result as unknown as Record<string, unknown>;
+      }
       if (kind === "rlm.binding") {
         const binding = validateRlmBinding(payload);
         if (recordId !== `rlm-binding:${binding.action_id}`) {
@@ -2422,6 +2532,25 @@ export class GatewayDurableStore {
           binding.proposalDigest !== result.proposalDigest || binding.scopeDigest !== result.scopeDigest ||
           this.harnessResults.has(result.effectId)) throw new GatewayStoreCorruptionError();
       this.harnessResults.set(result.effectId, result);
+    } else if (record.stored.kind === "ecosystem.effect.bound") {
+      const binding = validateGatewayEcosystemEffectBinding(record.payload);
+      if (this.ecosystemBindings.has(binding.effectId)) {
+        throw new GatewayStoreCorruptionError();
+      }
+      this.ecosystemBindings.set(binding.effectId, binding);
+    } else if (record.stored.kind === "ecosystem.effect.committed") {
+      const result = validateGatewayEcosystemEffectResult(record.payload);
+      const binding = this.ecosystemBindings.get(result.effectId);
+      if (
+        binding === undefined ||
+        binding.frameDigest !== result.frameDigest ||
+        binding.authorityDigest !== result.authorityDigest ||
+        binding.portfolioDigest !== result.portfolioDigest ||
+        binding.artifactLockDigest !== result.artifactLockDigest ||
+        binding.moduleLockDigest !== result.moduleLockDigest ||
+        this.ecosystemResults.has(result.effectId)
+      ) throw new GatewayStoreCorruptionError();
+      this.ecosystemResults.set(result.effectId, result);
     } else if (record.stored.kind === "rlm.lifecycle") {
       const observation = validateRlmLifecycleObservation(record.payload);
       if (!this.rlmActionsByChildId.has(observation.child_id)) {

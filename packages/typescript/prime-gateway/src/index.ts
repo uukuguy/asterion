@@ -86,6 +86,30 @@ export type {
   PrimeHarnessScope,
 } from "./continual-harness.js";
 export {
+  MAX_ECOSYSTEM_BYTES,
+  MAX_ECOSYSTEM_DEADLINE_MS,
+  MAX_ECOSYSTEM_ENTRIES,
+  MAX_ECOSYSTEM_PROCESSES,
+  PRIME_ECOSYSTEM_ARTIFACT_LOCK_DIGEST,
+  PRIME_ECOSYSTEM_FRAME,
+  PRIME_ECOSYSTEM_MODULE_LOCK_DIGEST,
+  PrimeEcosystemAdapter,
+  PrimeEcosystemError,
+  validatePrimeEcosystemFrame,
+} from "./ecosystem.js";
+export type {
+  GatewayEcosystemEffectBinding,
+  GatewayEcosystemEffectResult,
+  PrimeEcosystemAdapterOptions,
+  PrimeEcosystemFrame,
+  PrimeEcosystemLimits,
+  PrimeEcosystemModule,
+  PrimeEcosystemReceipt,
+  PrimeEcosystemRegistration,
+  PrimeEcosystemResource,
+  PrimeEcosystemSource,
+} from "./ecosystem.js";
+export {
   PrivateValueInvalidError,
   PrivateValueStore,
   PrivateValueWriteError,

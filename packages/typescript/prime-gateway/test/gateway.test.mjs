@@ -672,6 +672,7 @@ class FakePrimeSession {
 
 async function fixture({
   checkpointAckFailures = 0,
+  ecosystemAdapter = undefined,
   failCheckpointEvent = false,
 } = {}) {
   const parent = await mkdtemp(join(tmpdir(), "asterion-prime-gateway-"));
@@ -730,6 +731,7 @@ async function fixture({
     store,
     privateValues,
     privateResults,
+    ...(ecosystemAdapter === undefined ? {} : { ecosystem: ecosystemAdapter }),
     async createSession(goal, bindIdentity) {
       createdGoals.push(goal);
       await bindIdentity({
@@ -4064,5 +4066,47 @@ test("gateway exposes unknown prompt admission as recoverable uncertainty", asyn
     });
   } finally {
     await state.cleanup();
+  }
+});
+
+test("gateway delegates private ecosystem activation only to its injected adapter", async () => {
+  const calls = [];
+  const receipt = Object.freeze({
+    authorityDigest: "a".repeat(64),
+    featureIds: Object.freeze(["ecosystem.packages"]),
+    lifecycleCount: 0,
+    mcpCount: 0,
+    modelCredentialReads: 0,
+    ownedProcessCount: 0,
+    packageCount: 1,
+    portfolioDigest: "b".repeat(64),
+    providerOperations: 0,
+    registrationCount: 0,
+    resourceCount: 1,
+    status: "succeeded",
+  });
+  const ecosystem = {
+    async activate(frame) {
+      calls.push(frame);
+      return receipt;
+    },
+  };
+  const state = await fixture({ ecosystemAdapter: ecosystem });
+  try {
+    const frame = Object.freeze({ format: "asterion.prime-ecosystem-frame/v1" });
+    assert.equal(await state.gateway.activateEcosystem(frame), receipt);
+    assert.deepEqual(calls, [frame]);
+  } finally {
+    await state.cleanup();
+  }
+
+  const withoutAdapter = await fixture();
+  try {
+    await assert.rejects(
+      withoutAdapter.gateway.activateEcosystem({}),
+      (error) => error.message === "Prime gateway operation failed",
+    );
+  } finally {
+    await withoutAdapter.cleanup();
   }
 });
