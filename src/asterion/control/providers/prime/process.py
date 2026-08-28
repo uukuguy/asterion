@@ -20,6 +20,7 @@ from asterion.immutable import RedactedImmutableMapping
 PRIME_GATEWAY_IPC_PROTOCOL = "asterion.prime-gateway-ipc/v1"
 _MAX_FRAME_BYTES = 1024 * 1024
 _MAX_PRIVATE_ATTACHMENT_FRAME_BYTES = 12 * 1024 * 1024
+_MAX_SAFE_INTEGER = 9_007_199_254_740_991
 _PRIVATE_PROCESS_UMASK = 0o077
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _PUBLIC_ENV_ALLOWLIST = frozenset(
@@ -413,15 +414,11 @@ async def _event_iterator(
     elif (
         isinstance(cursor, Mapping)
         and set(cursor) == {"generation", "sequence"}
-        and not isinstance(cursor.get("generation"), bool)
-        and isinstance(cursor.get("generation"), int)
-        and not isinstance(cursor.get("sequence"), bool)
-        and isinstance(cursor.get("sequence"), int)
-        and cursor["generation"] >= 1
-        and cursor["sequence"] >= 1
+        and _safe_integer(cursor.get("generation"), minimum=1)
+        and _safe_integer(cursor.get("sequence"), minimum=0)
     ):
-        generation = cursor["generation"]
-        sequence = cursor["sequence"]
+        generation = int(cursor["generation"])
+        sequence = int(cursor["sequence"])
     else:
         raise PrimeSidecarProcessError()
 
@@ -438,10 +435,9 @@ async def _event_iterator(
             event_sequence = event.get("source_sequence") if isinstance(event, Mapping) else None
             if (
                 not isinstance(event, Mapping)
-                or isinstance(event_generation, bool)
+                or not _safe_integer(event_generation, minimum=1)
+                or not _safe_integer(event_sequence, minimum=1)
                 or not isinstance(event_generation, int)
-                or event_generation < 1
-                or isinstance(event_sequence, bool)
                 or not isinstance(event_sequence, int)
                 or event_sequence != page_sequence + 1
                 or (page_generation is not None and event_generation != page_generation)
@@ -462,12 +458,8 @@ async def _event_iterator(
         if (
             not isinstance(next_cursor, Mapping)
             or set(next_cursor) != {"generation", "sequence"}
-            or isinstance(next_cursor.get("generation"), bool)
-            or not isinstance(next_cursor.get("generation"), int)
-            or isinstance(next_cursor.get("sequence"), bool)
-            or not isinstance(next_cursor.get("sequence"), int)
-            or next_cursor["generation"] < 1
-            or next_cursor["sequence"] < 1
+            or not _safe_integer(next_cursor.get("generation"), minimum=1)
+            or not _safe_integer(next_cursor.get("sequence"), minimum=1)
             or not values
             or page_generation is None
             or next_cursor["generation"] != page_generation
@@ -489,6 +481,14 @@ def _positive_finite(value: object) -> bool:
         and isinstance(value, (int, float))
         and math.isfinite(float(value))
         and float(value) > 0
+    )
+
+
+def _safe_integer(value: object, *, minimum: int) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, int)
+        and minimum <= value <= _MAX_SAFE_INTEGER
     )
 
 

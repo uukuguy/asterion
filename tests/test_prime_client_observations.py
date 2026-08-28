@@ -12,8 +12,11 @@ from asterion.control.providers.prime.client import (
     PrimeControlError,
     PrimeControlPlaneClient,
 )
-from asterion.control.providers.prime.process import _event_iterator
-from asterion.control.providers.prime.process import PrimeSidecarProcess
+from asterion.control.providers.prime.process import (
+    PrimeSidecarProcess,
+    PrimeSidecarProcessError,
+    _event_iterator,
+)
 
 
 class _Resolver:
@@ -257,3 +260,57 @@ class TestPrimeClientObservations(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(PrimeControlError, "^Prime control operation failed$"):
             client.describe("private:00000000-0000-4000-8000-000000000001")
         await client.close()
+
+    async def test_process_and_public_adapter_replay_from_explicit_zero_cursor(self) -> None:
+        observation = {
+            "observation_id": "observation-1", "active_session_id": "session-1",
+            "generation": 1, "source_sequence": 1,
+            "emitted_at": "2026-08-10T03:00:01Z",
+            "kind": "commands.changed", "payload": {"commands": [], "revision": 1},
+        }
+        second_observation = {
+            **observation,
+            "observation_id": "observation-2",
+            "source_sequence": 2,
+            "emitted_at": "2026-08-10T03:00:02Z",
+        }
+        pages: Mapping[tuple[int, int] | None, Mapping[str, object]] = {
+            (1, 0): {
+                "observations": [observation],
+                "next_cursor": {"generation": 1, "sequence": 1},
+            },
+            (1, 1): {"observations": [second_observation], "next_cursor": None},
+        }
+        process = _PagedProcess(pages)
+        direct = [
+            item
+            async for item in _event_iterator(cast(PrimeSidecarProcess, process), {
+                "type": "client_observations",
+                "cursor": {"generation": 1, "sequence": 0},
+            })
+        ]
+        self.assertEqual(direct, [observation, second_observation])
+
+        client = PrimeControlPlaneClient(
+            process=_PagedProcess(pages), private_content=_Resolver()
+        )
+        replay = [
+            item async for item in client.client_observations(ClientCursor(1, 0))
+        ]
+        self.assertEqual([item.source_sequence for item in replay], [1, 2])
+        await client.close()
+
+    async def test_process_rejects_invalid_explicit_cursor_values(self) -> None:
+        for sequence in (-1, 9_007_199_254_740_992, 1.5):
+            with self.subTest(sequence=sequence):
+                with self.assertRaises(PrimeSidecarProcessError):
+                    _ = [
+                        item
+                        async for item in _event_iterator(
+                            cast(PrimeSidecarProcess, _PagedProcess({})),
+                            {
+                                "type": "client_observations",
+                                "cursor": {"generation": 1, "sequence": sequence},
+                            },
+                        )
+                    ]
