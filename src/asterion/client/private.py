@@ -17,6 +17,7 @@ _MEDIA_TYPE = re.compile(
 _PURPOSES = frozenset(
     {"interactive-render", "headless-final", "extension-ui-response", "private-export"}
 )
+_MAX_CLOCK_MS = (1 << 63) - 1
 
 
 class ClientPrivateValueError(ValueError):
@@ -177,7 +178,7 @@ class ClientPrivateValueService:
         authority_revision: int | None,
         expires_at_ms: int | None,
     ) -> None:
-        now = self._clock_ms()
+        now = self._current_clock_ms()
         try:
             live_authority_revision = self._authority_revision_source()
         except Exception:
@@ -200,6 +201,20 @@ class ClientPrivateValueService:
             or (self._cancellation_signal is not None and self._cancellation_signal.cancelled)
         ):
             raise ClientPrivateValueError("private value access is denied")
+
+    def _current_clock_ms(self) -> int:
+        try:
+            now = self._clock_ms()
+        except Exception:
+            raise ClientPrivateValueError("private value access is denied") from None
+        if (
+            isinstance(now, bool)
+            or not isinstance(now, int)
+            or now < 0
+            or now > _MAX_CLOCK_MS
+        ):
+            raise ClientPrivateValueError("private value access is denied")
+        return now
 
     @staticmethod
     def _validate_descriptor(

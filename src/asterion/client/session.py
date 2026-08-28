@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from collections.abc import AsyncIterator, Mapping
@@ -127,6 +128,8 @@ class HostClientSessionEndpoint:
         self._intent_digests: dict[str, str] = {}
         self._dispatched_intent_ids: set[str] = set()
         self._pending_intent_id: str | None = None
+        self._submit_lock = asyncio.Lock()
+        self._inflight_dispatches: dict[str, tuple[str, asyncio.Task[None]]] = {}
         self._events: list[ClientEvent] = []
         self._event_ids: set[str] = set()
         self._active_call_ids: set[str] = set()
@@ -148,27 +151,45 @@ class HostClientSessionEndpoint:
         ):
             raise ClientSessionError("client intent identity is invalid")
         digest = _digest(intent.to_mapping())
-        previous = self._intent_digests.get(intent.intent_id)
-        if previous is not None:
-            if previous != digest:
-                raise ClientSessionError("client intent retry conflicts")
-            if intent.intent_id not in self._dispatched_intent_ids:
-                await self._dispatch_intent(intent)
-            return f"client:{intent.intent_id}"
-        if self._pending_intent_id is not None:
-            raise ClientSessionError("client intent recovery is incomplete")
-        command_type, payload = _control_mapping(intent)
+        _control_mapping(intent)
+        async with self._submit_lock:
+            previous = self._intent_digests.get(intent.intent_id)
+            in_flight = self._inflight_dispatches.get(intent.intent_id)
+            if in_flight is not None:
+                if in_flight[0] != digest:
+                    raise ClientSessionError("client intent retry conflicts")
+                dispatch = in_flight[1]
+            else:
+                if previous is not None:
+                    if previous != digest:
+                        raise ClientSessionError("client intent retry conflicts")
+                    if intent.intent_id in self._dispatched_intent_ids:
+                        return f"client:{intent.intent_id}"
+                    if self._pending_intent_id != intent.intent_id:
+                        raise ClientSessionError("client intent recovery is incomplete")
+                else:
+                    if self._pending_intent_id is not None:
+                        raise ClientSessionError("client intent recovery is incomplete")
+                    try:
+                        entry = self._journal.accept_client_intent(
+                            intent, expected_position=self._journal.position
+                        )
+                        self._host.advance_client_record(entry)
+                    except Exception:
+                        raise ClientSessionError(
+                            "client intent journal admission failed"
+                        ) from None
+                    self._intent_digests[intent.intent_id] = digest
+                    self._pending_intent_id = intent.intent_id
+                dispatch = asyncio.create_task(self._dispatch_intent(intent))
+                self._inflight_dispatches[intent.intent_id] = (digest, dispatch)
         try:
-            entry = self._journal.accept_client_intent(
-                intent, expected_position=self._journal.position
-            )
-            self._host.advance_client_record(entry)
-        except Exception:
-            raise ClientSessionError("client intent journal admission failed") from None
-        self._intent_digests[intent.intent_id] = digest
-        self._pending_intent_id = intent.intent_id
-        del command_type, payload
-        await self._dispatch_intent(intent)
+            await dispatch
+        finally:
+            async with self._submit_lock:
+                if self._inflight_dispatches.get(intent.intent_id) == (digest, dispatch):
+                    if dispatch.done():
+                        del self._inflight_dispatches[intent.intent_id]
         return f"client:{intent.intent_id}"
 
     def events(self, cursor: ClientCursor | None = None) -> AsyncIterator[ClientEvent]:
@@ -209,16 +230,7 @@ class HostClientSessionEndpoint:
                 )
             ):
                 raise ClientSessionError("client observation identity is invalid")
-            event = ClientEvent(
-                protocol="asterion.agent-client/v1",
-                event_id=observation.observation_id,
-                session_id=observation.session_id,
-                generation=observation.generation,
-                sequence=len(self._events) + 1,
-                emitted_at=observation.emitted_at,
-                type=observation.kind,
-                payload=observation.payload,
-            )
+            event = self._project_observation(observation)
             self._validate_next_event(event)
             try:
                 observation_entry = self._journal.accept_client_observation(
@@ -299,7 +311,16 @@ class HostClientSessionEndpoint:
                 elif record.kind == "client.event.accepted":
                     raise ValueError
             if pending_observation is not None:
-                raise ValueError
+                event = self._project_observation(pending_observation)
+                self._validate_next_event(event)
+                event_entry = self._journal.accept_client_event(
+                    event, expected_position=self._journal.position
+                )
+                self._host.advance_client_record(event_entry)
+                self._append_event(event)
+                self._last_observation_source_sequence = (
+                    pending_observation.source_sequence
+                )
         except Exception:
             raise ClientSessionError("client session recovery failed") from None
 
@@ -337,6 +358,18 @@ class HostClientSessionEndpoint:
             )
         except Exception:
             raise ClientSessionError("client intent recovery failed") from None
+
+    def _project_observation(self, observation: ClientObservation) -> ClientEvent:
+        return ClientEvent(
+            protocol="asterion.agent-client/v1",
+            event_id=observation.observation_id,
+            session_id=observation.session_id,
+            generation=observation.generation,
+            sequence=len(self._events) + 1,
+            emitted_at=observation.emitted_at,
+            type=observation.kind,
+            payload=observation.payload,
+        )
 
     def _validate_next_event(self, event: ClientEvent) -> None:
         if (

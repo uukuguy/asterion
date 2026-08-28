@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import tempfile
 import unittest
@@ -35,6 +36,7 @@ from asterion.control.system import resolve_agent_system
 class _PrivateBackend:
     def __init__(self) -> None:
         self._body = b"SENTINEL_PRIVATE_BODY"
+        self.read_calls = 0
         self._descriptor = PrivateValueDescriptor(
             reference="private-input-1",
             kind="input",
@@ -49,9 +51,24 @@ class _PrivateBackend:
         return self._descriptor
 
     def read(self, reference: str, *, max_bytes: int) -> bytes:
+        self.read_calls += 1
         if reference != self._descriptor.reference or max_bytes < len(self._body):
             raise KeyError(reference)
         return self._body
+
+
+class _BlockingSendClient(ScriptedClient):
+    def __init__(self, manifest) -> None:
+        super().__init__(manifest)
+        self.send_calls = 0
+        self.send_started = asyncio.Event()
+        self.release_send = asyncio.Event()
+
+    async def send(self, command: ControlCommand) -> None:
+        self.send_calls += 1
+        self.send_started.set()
+        await self.release_send.wait()
+        self.sent.append(command)
 
 
 class _ObservationSource:
@@ -126,6 +143,7 @@ def _endpoint(
     journal: MemoryCanonicalJournal | None = None,
     provider: ScriptedClient | None = None,
     observation_source: _ObservationSource | None = None,
+    backend: _PrivateBackend | None = None,
 ) -> tuple[HostClientSessionEndpoint, ScriptedClient, MemoryCanonicalJournal]:
     with tempfile.TemporaryDirectory() as directory:
         plan = resolve_agent_system(
@@ -153,7 +171,7 @@ def _endpoint(
             authority_revision=1,
             purposes=("interactive-render",),
         ),
-        backend=_PrivateBackend(),
+        backend=backend or _PrivateBackend(),
         clock_ms=lambda: 1,
         authority_revision_source=lambda: host.authority_revision,
     )
@@ -168,6 +186,127 @@ def _endpoint(
 
 
 class TestClientSession(unittest.IsolatedAsyncioTestCase):
+    async def test_concurrent_identical_submit_single_flights_provider_send(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            plan = resolve_agent_system(
+                _manifest(),
+                application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
+            )
+        provider = _BlockingSendClient(plan.control_binding.manifest)
+        endpoint, _, _ = _endpoint(provider=provider)
+        intent = _input_intent("intent-1", "private-input-1")
+
+        first = asyncio.create_task(endpoint.submit(intent))
+        await asyncio.wait_for(provider.send_started.wait(), timeout=1)
+        second = asyncio.create_task(endpoint.submit(intent))
+        await asyncio.sleep(0)
+
+        self.assertEqual(provider.send_calls, 1)
+        provider.release_send.set()
+        self.assertEqual(
+            await asyncio.gather(first, second),
+            ["client:intent-1", "client:intent-1"],
+        )
+        self.assertEqual([item.command_id for item in provider.sent], ["client:intent-1"])
+
+    async def test_concurrent_divergent_submit_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            plan = resolve_agent_system(
+                _manifest(),
+                application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
+            )
+        provider = _BlockingSendClient(plan.control_binding.manifest)
+        endpoint, _, _ = _endpoint(provider=provider)
+        first = asyncio.create_task(
+            endpoint.submit(_input_intent("intent-1", "private-input-1"))
+        )
+        await asyncio.wait_for(provider.send_started.wait(), timeout=1)
+
+        with self.assertRaises(ClientSessionError):
+            await endpoint.submit(_input_intent("intent-1", "private-input-2"))
+        self.assertEqual(provider.send_calls, 1)
+        provider.release_send.set()
+        self.assertEqual(await first, "client:intent-1")
+
+    async def test_recovery_projects_observation_only_prefix_once_without_body_read(self) -> None:
+        endpoint, _, journal = _endpoint()
+        observation = _observation(41, "observation-41")
+        journal.accept_client_observation(
+            observation.to_mapping(), expected_position=journal.position
+        )
+        backend = _PrivateBackend()
+
+        recovered, _, recovered_journal = _endpoint(journal=journal, backend=backend)
+        events = [event async for event in recovered.events()]
+        repeated, _, _ = _endpoint(journal=recovered_journal, backend=backend)
+
+        self.assertEqual(
+            events,
+            [
+                ClientEvent(
+                    protocol="asterion.agent-client/v1",
+                    event_id="observation-41",
+                    session_id="session-1",
+                    generation=1,
+                    sequence=1,
+                    emitted_at="2026-08-10T15:00:00Z",
+                    type="message.available",
+                    payload=observation.payload,
+                )
+            ],
+        )
+        self.assertEqual(
+            _client_kinds(recovered_journal),
+            ("client.observation.accepted", "client.event.accepted"),
+        )
+        self.assertEqual(
+            [event async for event in repeated.events()],
+            events,
+        )
+        self.assertEqual(backend.read_calls, 0)
+
+    async def test_recovery_rejects_interleaved_or_divergent_observation_prefix(self) -> None:
+        for case in ("interleaved-intent", "divergent-event"):
+            with self.subTest(case=case):
+                endpoint, _, journal = _endpoint()
+                observation = _observation(41, "observation-41")
+                journal.accept_client_observation(
+                    observation.to_mapping(), expected_position=journal.position
+                )
+                if case == "interleaved-intent":
+                    journal.accept_client_intent(
+                        _input_intent("intent-1", "private-input-1"),
+                        expected_position=journal.position,
+                    )
+                else:
+                    journal.accept_client_event(
+                        ClientEvent(
+                            protocol="asterion.agent-client/v1",
+                            event_id="different-event",
+                            session_id="session-1",
+                            generation=1,
+                            sequence=1,
+                            emitted_at="2026-08-10T15:00:00Z",
+                            type="message.available",
+                            payload={
+                                "content_ref": "private-different-event",
+                                "media_type": "text/plain",
+                                "message_id": "different-event",
+                                "role": "assistant",
+                                "sha256": "a" * 64,
+                                "size": 1,
+                            },
+                        ),
+                        expected_position=journal.position,
+                    )
+
+                with self.assertRaises(ClientSessionError):
+                    _endpoint(journal=journal)
+
     async def test_recovery_retries_durably_accepted_undispatched_intent_once(self) -> None:
         endpoint, provider, journal = _endpoint()
         intent = _input_intent("intent-1", "private-input-1")
@@ -403,3 +542,69 @@ class TestClientSession(unittest.IsolatedAsyncioTestCase):
                 max_bytes=32,
                 deadline_ms=10,
             )
+
+    async def test_private_resolution_rejects_invalid_or_throwing_clock_before_read(self) -> None:
+        cases: tuple[tuple[str, object], ...] = (
+            ("throws", RuntimeError("SENTINEL_CLOCK")),
+            ("bool", True),
+            ("non-integer", "1"),
+            ("negative", -1),
+            ("unsafe-large", 1 << 63),
+        )
+        for label, value in cases:
+            with self.subTest(label=label):
+                backend = _PrivateBackend()
+
+                def clock() -> int:
+                    if isinstance(value, Exception):
+                        raise value
+                    return value  # type: ignore[return-value]
+
+                service = ClientPrivateValueService(
+                    access=ClientAccess(
+                        client_id="client-1",
+                        session_id="session-1",
+                        authority_revision=1,
+                        purposes=("interactive-render",),
+                    ),
+                    backend=backend,
+                    clock_ms=clock,
+                    authority_revision_source=lambda: 1,
+                )
+
+                with self.assertRaisesRegex(
+                    ClientPrivateValueError, "^private value access is denied$"
+                ):
+                    service.resolve_bytes(
+                        "private-input-1",
+                        purpose="interactive-render",
+                        max_bytes=32,
+                        deadline_ms=(1 << 63) - 1,
+                    )
+                self.assertEqual(backend.read_calls, 0)
+
+    async def test_private_resolution_rechecks_clock_after_backend_read(self) -> None:
+        values: list[object] = [1, True]
+        backend = _PrivateBackend()
+        service = ClientPrivateValueService(
+            access=ClientAccess(
+                client_id="client-1",
+                session_id="session-1",
+                authority_revision=1,
+                purposes=("interactive-render",),
+            ),
+            backend=backend,
+            clock_ms=lambda: values.pop(0),  # type: ignore[return-value]
+            authority_revision_source=lambda: 1,
+        )
+
+        with self.assertRaisesRegex(
+            ClientPrivateValueError, "^private value access is denied$"
+        ):
+            service.resolve_bytes(
+                "private-input-1",
+                purpose="interactive-render",
+                max_bytes=32,
+                deadline_ms=10,
+            )
+        self.assertEqual(backend.read_calls, 1)
