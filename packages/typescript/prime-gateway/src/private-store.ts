@@ -81,6 +81,7 @@ const INPUT_LIMIT_BYTES = 1024 * 1024;
 const RESULT_LIMIT_BYTES = 64 * 1024;
 const CAPSULE_LIMIT_BYTES = 8 * 1024 * 1024;
 const ATTACHMENT_LIMIT_BYTES = 8 * 1024 * 1024;
+const CLIENT_VALUE_LIMIT_BYTES = 700 * 1024;
 const CONTINUATION_LIMIT_BYTES = 16 * 1024;
 const TRANSCRIPT_LIMIT_BYTES = 64 * 1024 * 1024;
 const CONTINUATION_READY_ATTEMPTS = 40;
@@ -199,7 +200,7 @@ function limitForKind(kind: PrivateValueKind): number {
     return CONTINUATION_LIMIT_BYTES;
   }
   if (kind === "client") {
-    return ATTACHMENT_LIMIT_BYTES;
+    return CLIENT_VALUE_LIMIT_BYTES;
   }
   return CAPSULE_LIMIT_BYTES;
 }

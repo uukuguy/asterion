@@ -724,8 +724,10 @@ class PrimeControlPlaneClient:
                     if observation.source_sequence != previous + 1:
                         raise PrimeControlError()
                     previous = observation.source_sequence
-                    self._remember_client_descriptors(observation)
+                    await self._remember_client_descriptors(observation)
                     yield observation
+            except asyncio.CancelledError:
+                raise PrimeControlError() from None
             except (PrimeControlError, TypeError, ValueError, RuntimeError):
                 raise PrimeControlError() from None
 
@@ -778,10 +780,12 @@ class PrimeControlPlaneClient:
             ):
                 raise PrimeControlError()
             return bytes(body)
+        except asyncio.CancelledError:
+            raise PrimeControlError() from None
         except (PrimeControlError, TypeError, ValueError, RuntimeError):
             raise PrimeControlError() from None
 
-    def _remember_client_descriptors(self, observation: ClientObservation) -> None:
+    async def _remember_client_descriptors(self, observation: ClientObservation) -> None:
         payload = observation.payload
         reference_fields = {
             "artifact.available": ("artifact_ref", "artifact", "media_type"),
@@ -790,6 +794,16 @@ class PrimeControlPlaneClient:
             "tool.started": ("arguments_ref", "tool-arguments", None),
         }
         binding = reference_fields.get(observation.kind)
+        if observation.kind == "extension-ui.requested":
+            reference = payload.get("payload_ref")
+            if not isinstance(reference, str):
+                raise PrimeControlError()
+            descriptor = await self._read_extension_descriptor(reference)
+            existing = self._client_private_descriptors.get(reference)
+            if existing is not None and existing != descriptor:
+                raise PrimeControlError()
+            self._client_private_descriptors[reference] = descriptor
+            return
         if binding is None:
             return
         reference = payload.get(binding[0])
@@ -809,6 +823,46 @@ class PrimeControlPlaneClient:
         if existing is not None and existing != descriptor:
             raise PrimeControlError()
         self._client_private_descriptors[reference] = descriptor
+
+    async def _read_extension_descriptor(
+        self, reference: str
+    ) -> PrivateValueDescriptor:
+        envelope: dict[str, object] = {
+            "protocol": PRIME_GATEWAY_IPC_PROTOCOL,
+            "id": _request_id(),
+            "type": "client_value_read",
+            "reference": reference,
+            "max_bytes": 700 * 1024,
+        }
+        try:
+            response = await self._process.request(envelope)
+            if (
+                set(response) != {"protocol", "id", "type", "descriptor", "body_base64"}
+                or response.get("protocol") != PRIME_GATEWAY_IPC_PROTOCOL
+                or response.get("id") != envelope["id"]
+                or response.get("type") != "client_value"
+                or not isinstance(response.get("descriptor"), Mapping)
+                or not isinstance(response.get("body_base64"), str)
+            ):
+                raise PrimeControlError()
+            response_descriptor = response["descriptor"]
+            body_base64 = response["body_base64"]
+            if not isinstance(response_descriptor, Mapping) or not isinstance(body_base64, str):
+                raise PrimeControlError()
+            descriptor = _private_descriptor_from_mapping(response_descriptor)
+            body = base64.b64decode(body_base64.encode("ascii"), validate=True)
+            if (
+                descriptor.reference != reference
+                or descriptor.kind != "extension-ui"
+                or len(body) != descriptor.size
+                or hashlib.sha256(body).hexdigest() != descriptor.sha256
+            ):
+                raise PrimeControlError()
+            return descriptor
+        except asyncio.CancelledError:
+            raise PrimeControlError() from None
+        except (PrimeControlError, TypeError, ValueError, RuntimeError):
+            raise PrimeControlError() from None
 
     async def close(self) -> None:
         async with self._close_lock:

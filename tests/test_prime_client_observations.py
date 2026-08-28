@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import asyncio
 import base64
 import hashlib
 from collections.abc import AsyncIterator, Mapping
@@ -21,6 +22,7 @@ class _Resolver:
 class _Process:
     def __init__(self) -> None:
         self.event_requests: list[Mapping[str, object]] = []
+        self.client_value_kind = "message"
         self.observations = [
             {
                 "observation_id": "observation-1",
@@ -58,7 +60,7 @@ class _Process:
             "type": "client_value",
             "descriptor": {
                 "reference": "private:00000000-0000-4000-8000-000000000001",
-                "kind": "message",
+                "kind": self.client_value_kind,
                 "media_type": "text/plain",
                 "size": 13,
                 "sha256": hashlib.sha256(b"SENTINEL_BODY").hexdigest(),
@@ -120,3 +122,29 @@ class TestPrimeClientObservations(unittest.IsolatedAsyncioTestCase):
             self.fail("content reference is invalid")
         self.assertEqual(self.client.describe(reference).size, 13)
         self.assertEqual(await self.client.read(reference, max_bytes=13), b"SENTINEL_BODY")
+
+    async def test_extension_payload_reference_is_readable(self) -> None:
+        self.process.client_value_kind = "extension-ui"
+        self.process.observations = [{
+            "observation_id": "observation-1", "active_session_id": "session-1",
+            "generation": 1, "source_sequence": 1, "emitted_at": "2026-08-10T03:00:01Z",
+            "kind": "extension-ui.requested",
+            "payload": {"deadline_ms": 1, "method": "extension-1", "payload_ref": "private:00000000-0000-4000-8000-000000000001", "request_id": "request-1"},
+        }]
+        observations = [item async for item in self.client.client_observations()]
+        reference = observations[0].payload["payload_ref"]
+        if not isinstance(reference, str):
+            self.fail("payload reference is invalid")
+        self.assertEqual(self.client.describe(reference).kind, "extension-ui")
+
+    async def test_client_observation_cancellation_is_redacted(self) -> None:
+        class CancelProcess(_Process):
+            def events(self, envelope: Mapping[str, object]) -> AsyncIterator[Mapping[str, object]]:
+                async def iterate() -> AsyncIterator[Mapping[str, object]]:
+                    raise asyncio.CancelledError()
+                    yield envelope
+                return iterate()
+        client = PrimeControlPlaneClient(process=CancelProcess(), private_content=_Resolver())
+        with self.assertRaisesRegex(PrimeControlError, "^Prime control operation failed$"):
+            _ = [item async for item in client.client_observations()]
+        await client.close()

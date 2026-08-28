@@ -561,6 +561,7 @@ export class PrimeGateway {
   }
 
   clientObservationsAfterCursor(cursor: { readonly generation: number; readonly sequence: number }): readonly PrimeClientObservation[] {
+    this.assertOpen();
     if (
       !Number.isSafeInteger(cursor.generation) || cursor.generation !== this.options.generation ||
       !Number.isSafeInteger(cursor.sequence) || cursor.sequence < 0 || cursor.sequence > this.clientObservations.length

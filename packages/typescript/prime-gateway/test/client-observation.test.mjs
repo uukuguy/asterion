@@ -38,6 +38,7 @@ test("stores client bodies and emits only references", async () => {
     const mapped = await mapper.map({
       type: "session_event",
       activeSessionId: "prime-session-1",
+      meta: { sequence: 1 },
       event: { type: "message_end", role: "assistant", content: "SENTINEL_BODY" },
     });
     assert.equal(mapped[0].kind, "message.available");
@@ -84,6 +85,57 @@ test("fails closed for cursor gaps, foreign sessions, and post-close observation
       activeSessionId: "prime-session-1",
       event: { type: "message_end", role: "assistant", content: "late" },
       meta: { sequence: 2 },
+    }));
+  } finally {
+    await root.cleanup();
+  }
+});
+
+test("requires an exact native sequence and does not consume it when storage fails", async () => {
+  let fail = true;
+  const root = await temporaryStoreRoot();
+  try {
+    const values = await PrivateValueStore.open(root.root);
+    const mapper = mapperFixture({
+      async putClientValue(...args) {
+        if (fail) throw new Error("store failed");
+        return values.putClientValue(...args);
+      },
+    });
+    const native = {
+      type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 1 },
+      event: { type: "message_end", role: "assistant", content: "retry-body" },
+    };
+    await assert.rejects(mapper.map({ ...native, meta: {} }));
+    await assert.rejects(mapper.map(native));
+    fail = false;
+    const [mapped] = await mapper.map(native);
+    assert.equal(mapped.source_sequence, 1);
+    assert.equal(mapped.observation_id, "prime-client-1-1");
+  } finally {
+    await root.cleanup();
+  }
+});
+
+test("rejects hostile client descriptors before body-free observations escape", async () => {
+  const mapper = mapperFixture({
+    async putClientValue() {
+      return { reference: "SENTINEL_BODY", kind: "message", mediaType: "text/plain", size: 1, sha256: "0".repeat(64) };
+    },
+  });
+  await assert.rejects(mapper.map({
+    type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 1 },
+    event: { type: "message_end", role: "assistant", content: "SENTINEL_BODY" },
+  }));
+});
+
+test("rejects a client value above the conservative one-frame limit", async () => {
+  const root = await temporaryStoreRoot();
+  try {
+    const mapper = mapperFixture(await PrivateValueStore.open(root.root));
+    await assert.rejects(mapper.map({
+      type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 1 },
+      event: { type: "message_end", role: "assistant", content: "x".repeat(700 * 1024 + 1) },
     }));
   } finally {
     await root.cleanup();
