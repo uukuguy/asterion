@@ -183,6 +183,38 @@ def _create_command() -> ControlCommand:
 
 
 class TestControlHost(unittest.IsolatedAsyncioTestCase):
+    async def test_client_command_uses_only_existing_control_values(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            plan = resolve_agent_system(
+                _manifest(),
+                application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
+            )
+            host = ControlHost(
+                session_id="session-1",
+                generation=1,
+                plan=plan,
+                authority=AuthorityLedger(_envelope()),
+                journal=MemoryCanonicalJournal("session-1"),
+                client=ScriptedClient(plan.control_binding.manifest),
+                action_executor=SpyExecutor(),
+                clock_ms=lambda: 1_000,
+            )
+
+            command = host.client_command(
+                command_id="client:intent-1",
+                command_type="input.submit",
+                payload={
+                    "content_ref": "private-input-1",
+                    "delivery": "direct",
+                    "input_id": "input-1",
+                },
+            )
+
+        self.assertEqual(command.type, "input.submit")
+        self.assertEqual(command.command_id, "client:intent-1")
+
     async def test_provider_owned_child_skips_generic_executor_and_settles_later(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             plan = resolve_agent_system(

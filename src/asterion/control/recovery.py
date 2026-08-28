@@ -161,6 +161,12 @@ def recover_control_host_state(
 
         for entry in values[start:]:
             record = entry.record
+            if record.kind in {
+                "client.intent.accepted",
+                "client.observation.accepted",
+                "client.event.accepted",
+            }:
+                continue
             if record.kind == "event.accepted":
                 event = ControlEvent.from_mapping(_mapping(record.payload["event"]))
                 if event.type == "session.created" and (

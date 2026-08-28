@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol, cast
 
@@ -375,6 +375,66 @@ class ControlHost:
 
         return self._session_context_manager
 
+    @property
+    def session_id(self) -> str:
+        """Return the host-bound session identity without exposing provider state."""
+
+        return self._state.session_id
+
+    @property
+    def generation(self) -> int:
+        """Return the current host-owned control generation."""
+
+        return self._state.generation
+
+    @property
+    def authority_revision(self) -> int:
+        """Return the current host-authoritative revision."""
+
+        return self._authority.envelope.revision
+
+    def client_command(
+        self,
+        *,
+        command_id: str,
+        command_type: str,
+        payload: Mapping[str, object],
+    ) -> ControlCommand:
+        """Build one existing control command from a body-free client intent."""
+
+        if (
+            command_type
+            not in {
+                "input.submit",
+                "session.attach",
+                "session.cancel",
+                "session.create",
+                "session.pause",
+                "session.resume",
+            }
+            or not isinstance(payload, Mapping)
+        ):
+            raise ControlHostError("client control command is invalid")
+        command_payload: Mapping[str, object] = dict(payload)
+        if command_type == "session.create":
+            if set(command_payload) != {"goal_id", "goal_ref"}:
+                raise ControlHostError("client control command is invalid")
+            command_payload = {
+                "system_id": self._plan.system_id,
+                "system_version": self._plan.version,
+                **command_payload,
+            }
+        try:
+            return ControlCommand(
+                command_id=command_id,
+                session_id=self._state.session_id,
+                authority_revision=self._authority.envelope.revision,
+                type=command_type,
+                payload=command_payload,
+            )
+        except (TypeError, ValueError):
+            raise ControlHostError("client control command is invalid") from None
+
     async def dispatch(self, command: ControlCommand) -> None:
         if (
             not isinstance(command, ControlCommand)
@@ -392,6 +452,10 @@ class ControlHost:
         if command.type == "session.cancel":
             await self._close_children()
         try:
+            journal_position = self._journal.position
+            if journal_position < self._journal_position:
+                raise JournalConflictError("control journal changed")
+            self._journal_position = journal_position
             entry = self._journal.accept_command(
                 command, expected_position=self._journal_position
             )

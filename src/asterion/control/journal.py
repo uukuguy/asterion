@@ -41,6 +41,9 @@ JOURNAL_RECORD_KINDS = frozenset(
         "authority.revised",
         "command.accepted",
         "event.accepted",
+        "client.intent.accepted",
+        "client.observation.accepted",
+        "client.event.accepted",
         "action.decided",
         "action.running",
         "action.receipted",
@@ -95,7 +98,12 @@ class JournalRecord:
             or self.kind not in JOURNAL_RECORD_KINDS
         ):
             raise JournalConflictError("journal record identity is invalid")
-        _validate_record_payload(self.kind, self.payload)
+        try:
+            _validate_record_payload(self.kind, self.payload)
+        except JournalConflictError:
+            raise
+        except (TypeError, ValueError):
+            raise JournalConflictError("journal record payload is invalid") from None
         object.__setattr__(self, "payload", _freeze_mapping(self.payload))
 
     @property
@@ -171,6 +179,38 @@ class JournalRecord:
                 "recoverable": recoverable,
                 "evidence_ref": evidence_ref,
             },
+        )
+
+    @classmethod
+    def client_intent_accepted(cls, intent: object) -> JournalRecord:
+        from asterion.client.protocol import validate_client_intent
+
+        accepted = validate_client_intent(intent)
+        return cls(
+            record_id=f"client-intent:{accepted.intent_id}",
+            kind="client.intent.accepted",
+            payload={"intent": accepted.to_mapping()},
+        )
+
+    @classmethod
+    def client_observation_accepted(
+        cls, observation: Mapping[str, object]
+    ) -> JournalRecord:
+        return cls(
+            record_id=f"client-observation:{observation.get('observation_id', '')}",
+            kind="client.observation.accepted",
+            payload={"observation": observation},
+        )
+
+    @classmethod
+    def client_event_accepted(cls, event: object) -> JournalRecord:
+        from asterion.client.protocol import validate_client_event
+
+        accepted = validate_client_event(event)
+        return cls(
+            record_id=f"client-event:{accepted.event_id}",
+            kind="client.event.accepted",
+            payload={"event": accepted.to_mapping()},
         )
 
     @classmethod
@@ -456,6 +496,24 @@ class CanonicalJournal(Protocol):
         """Append one validated event record."""
         ...
 
+    def accept_client_intent(
+        self, intent: object, *, expected_position: int | None = None
+    ) -> JournalEntry:
+        """Append one body-free client intent before dispatch."""
+        ...
+
+    def accept_client_observation(
+        self, observation: Mapping[str, object], *, expected_position: int | None = None
+    ) -> JournalEntry:
+        """Append one body-free provider observation before projection."""
+        ...
+
+    def accept_client_event(
+        self, event: object, *, expected_position: int | None = None
+    ) -> JournalEntry:
+        """Append one body-free projected client event."""
+        ...
+
     def accept_session_context_command(
         self,
         command: SessionContextCommand,
@@ -538,6 +596,26 @@ class MemoryCanonicalJournal:
             ),
         )
 
+    def accept_client_intent(
+        self, intent: object, *, expected_position: int | None = None
+    ) -> JournalEntry:
+        position = self.position if expected_position is None else expected_position
+        return self.append(position, JournalRecord.client_intent_accepted(intent))
+
+    def accept_client_observation(
+        self, observation: Mapping[str, object], *, expected_position: int | None = None
+    ) -> JournalEntry:
+        position = self.position if expected_position is None else expected_position
+        return self.append(
+            position, JournalRecord.client_observation_accepted(observation)
+        )
+
+    def accept_client_event(
+        self, event: object, *, expected_position: int | None = None
+    ) -> JournalEntry:
+        position = self.position if expected_position is None else expected_position
+        return self.append(position, JournalRecord.client_event_accepted(event))
+
     def accept_session_context_command(
         self,
         command: SessionContextCommand,
@@ -567,6 +645,9 @@ class MemoryCanonicalJournal:
         field = {
             "command.accepted": "command",
             "event.accepted": "event",
+            "client.intent.accepted": "intent",
+            "client.observation.accepted": "observation",
+            "client.event.accepted": "event",
             "context.command.accepted": "command",
             "context.operation.receipted": "receipt",
         }.get(record.kind)
@@ -772,6 +853,26 @@ class FileCanonicalJournal:
                 payload={"event": event.to_mapping()},
             ),
         )
+
+    def accept_client_intent(
+        self, intent: object, *, expected_position: int | None = None
+    ) -> JournalEntry:
+        position = self.position if expected_position is None else expected_position
+        return self.append(position, JournalRecord.client_intent_accepted(intent))
+
+    def accept_client_observation(
+        self, observation: Mapping[str, object], *, expected_position: int | None = None
+    ) -> JournalEntry:
+        position = self.position if expected_position is None else expected_position
+        return self.append(
+            position, JournalRecord.client_observation_accepted(observation)
+        )
+
+    def accept_client_event(
+        self, event: object, *, expected_position: int | None = None
+    ) -> JournalEntry:
+        position = self.position if expected_position is None else expected_position
+        return self.append(position, JournalRecord.client_event_accepted(event))
 
     def accept_session_context_command(
         self,
@@ -1163,6 +1264,9 @@ def _validate_session(session_id: str, record: JournalRecord) -> None:
     field = {
         "command.accepted": "command",
         "event.accepted": "event",
+        "client.intent.accepted": "intent",
+        "client.observation.accepted": "observation",
+        "client.event.accepted": "event",
         "checkpoint.sealed": "checkpoint_event",
         "context.command.accepted": "command",
         "context.operation.receipted": "receipt",
@@ -1196,6 +1300,22 @@ def _validate_record_payload(kind: str, value: object) -> None:
     if kind == "event.accepted":
         _require_fields(value, {"event"})
         validate_control_event(value["event"])
+        return
+    if kind == "client.intent.accepted":
+        _require_fields(value, {"intent"})
+        from asterion.client.protocol import validate_client_intent
+
+        validate_client_intent(value["intent"])
+        return
+    if kind == "client.observation.accepted":
+        _require_fields(value, {"observation"})
+        _validate_client_observation(value["observation"])
+        return
+    if kind == "client.event.accepted":
+        _require_fields(value, {"event"})
+        from asterion.client.protocol import validate_client_event
+
+        validate_client_event(value["event"])
         return
     if kind == "action.decided":
         _require_fields(
@@ -1396,6 +1516,35 @@ def _validate_record_payload(kind: str, value: object) -> None:
             raise JournalConflictError("journal harness uncertain status is invalid")
         return
     raise JournalConflictError("journal record kind is invalid")
+
+
+def _validate_client_observation(value: object) -> None:
+    if not isinstance(value, Mapping):
+        raise JournalConflictError("journal client observation is invalid")
+    _require_fields(
+        value,
+        {
+            "observation_id",
+            "session_id",
+            "generation",
+            "source_sequence",
+            "emitted_at",
+            "kind",
+            "payload",
+        },
+    )
+    from asterion.client.protocol import ClientEvent
+
+    ClientEvent(
+        protocol="asterion.agent-client/v1",
+        event_id=str(value["observation_id"]),
+        session_id=str(value["session_id"]),
+        generation=value["generation"],  # type: ignore[arg-type]
+        sequence=value["source_sequence"],  # type: ignore[arg-type]
+        emitted_at=str(value["emitted_at"]),
+        type=str(value["kind"]),
+        payload=value["payload"],  # type: ignore[arg-type]
+    )
 
 
 def _validate_harness_effect_identity(value: Mapping[str, object]) -> None:

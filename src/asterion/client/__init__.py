@@ -10,13 +10,37 @@ from .protocol import (
     validate_client_event_stream,
     validate_client_intent,
 )
+from .private import (
+    ClientAccess,
+    ClientPrivateValueBackend,
+    ClientPrivateValueError,
+    ClientPrivateValueService,
+    PrivateValueDescriptor,
+)
+from .session import (
+    ClientObservation,
+    ClientObservationSource,
+    ClientSessionEndpoint,
+    ClientSessionError,
+    HostClientSessionEndpoint,
+)
 
 __all__ = (
     "AGENT_CLIENT_PROTOCOL",
     "ClientCursor",
+    "ClientAccess",
     "ClientEvent",
     "ClientIntent",
+    "ClientObservation",
+    "ClientObservationSource",
+    "ClientPrivateValueBackend",
+    "ClientPrivateValueError",
+    "ClientPrivateValueService",
     "ClientProtocolError",
+    "ClientSessionEndpoint",
+    "ClientSessionError",
+    "HostClientSessionEndpoint",
+    "PrivateValueDescriptor",
     "validate_client_event",
     "validate_client_event_stream",
     "validate_client_intent",

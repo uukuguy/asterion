@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from asterion.client.protocol import ClientIntent
 from asterion.control.host import ControlCommand, ControlEvent
 from asterion.control.journal import (
     FileCanonicalJournal,
@@ -46,6 +47,44 @@ def _journal() -> MemoryCanonicalJournal:
 
 
 class TestControlJournal(unittest.TestCase):
+    def test_client_intent_is_session_bound_and_body_free(self) -> None:
+        journal = _journal()
+        intent = ClientIntent(
+            protocol="asterion.agent-client/v1",
+            intent_id="intent-1",
+            client_id="client-1",
+            session_id="session-1",
+            authority_revision=1,
+            type="input.submit",
+            payload={
+                "content_ref": "private-input-1",
+                "delivery": "direct",
+                "input_id": "input-1",
+            },
+        )
+
+        entry = journal.accept_client_intent(intent, expected_position=2)
+
+        self.assertEqual(entry.record.kind, "client.intent.accepted")
+        self.assertNotIn("SENTINEL_PRIVATE_BODY", repr(entry.record))
+        with self.assertRaises(JournalConflictError) as raised:
+            JournalRecord(
+                record_id="client-intent:intent-2",
+                kind="client.intent.accepted",
+                payload={
+                    "intent": {
+                        **intent.to_mapping(),
+                        "payload": {
+                            "content_ref": "private-input-2",
+                            "delivery": "direct",
+                            "input_id": "input-2",
+                            "text": "SENTINEL_PRIVATE_BODY",
+                        },
+                    }
+                },
+            )
+        self.assertNotIn("SENTINEL_PRIVATE_BODY", str(raised.exception))
+
     def test_harness_record_factories_are_closed_and_body_free(self) -> None:
         scope = {"kind": "session", "scope_id": "session-1"}
         proposed = JournalRecord.harness_proposed(
