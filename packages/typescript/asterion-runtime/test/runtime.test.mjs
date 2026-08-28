@@ -38,6 +38,7 @@ import {
   validateOperationRequestDescriptor,
   validateOperationTransaction,
   validateAuthRequest,
+  validateModelSelectionRequest,
   validateSessionContextCommand,
   validateSessionContextReceipt,
   validateEventStream,
@@ -401,6 +402,19 @@ test("validates closed private auth request fixtures", async () => {
   assert.throws(() => validateAuthRequest(invalid), OperationProtocolError);
   assert.throws(
     () => validateAuthRequest({ action: "auth.clear", refresh_ref: "refresh-ref-1" }),
+    OperationProtocolError,
+  );
+});
+
+test("validates the closed exact fixture model selection request", async () => {
+  const valid = await readFixture(operationFixtures, "valid-model-selection-request.json");
+  const invalid = await readFixture(operationFixtures, "invalid-model-selection-request-extra.json");
+  const snapshot = validateModelSelectionRequest(valid);
+  assert.deepEqual(snapshot, valid);
+  assert.ok(Object.isFrozen(snapshot));
+  assert.throws(() => validateModelSelectionRequest(invalid), OperationProtocolError);
+  assert.throws(
+    () => validateModelSelectionRequest({ ...valid, model_id: "Fixture.Model.Small" }),
     OperationProtocolError,
   );
 });

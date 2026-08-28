@@ -20,6 +20,15 @@ from asterion.operation.auth import (
     OAuthRefresher,
     validate_auth_request,
 )
+from asterion.operation.model_selection import (
+    ModelCatalog,
+    ModelSelection,
+    ModelSelectionOperationError,
+    ModelSelectionOperationService,
+    ModelSelectionStore,
+    ModelSelectionStoreReceipt,
+    validate_model_selection_request,
+)
 
 __all__ = [
     "EFFECT_COUNTERS",
@@ -38,4 +47,11 @@ __all__ = [
     "AuthStorageBackend",
     "OAuthRefresher",
     "validate_auth_request",
+    "ModelCatalog",
+    "ModelSelection",
+    "ModelSelectionOperationError",
+    "ModelSelectionOperationService",
+    "ModelSelectionStore",
+    "ModelSelectionStoreReceipt",
+    "validate_model_selection_request",
 ]

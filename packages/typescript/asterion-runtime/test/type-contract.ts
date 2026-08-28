@@ -16,6 +16,7 @@ import type {
   OperationRequestDescriptor,
   OperationTransaction,
   AuthRequest,
+  ModelSelectionRequest,
   RunEvent,
   RunRequest,
   RuntimeManifest,
@@ -28,6 +29,14 @@ export const fixtureAuthRequest: AuthRequest = {
   credential_ref: "credential-ref-1",
   subject_digest: "a".repeat(64),
   precedence: 4,
+};
+
+export const fixtureModelSelectionRequest: ModelSelectionRequest = {
+  catalog_id: "fixture-catalog-1",
+  model_id: "fixture.model.small",
+  thinking_level: "low",
+  service_tier: "standard",
+  transport_id: "fixture.transport-1",
 };
 
 export const fixtureOperationRequestDescriptor: OperationRequestDescriptor = {

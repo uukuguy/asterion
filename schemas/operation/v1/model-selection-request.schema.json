@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asterion.local/schemas/operation/v1/model-selection-request.schema.json",
+  "title": "Asterion Private Model Selection Request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["catalog_id", "model_id", "thinking_level", "service_tier", "transport_id"],
+  "properties": {
+    "catalog_id": {"$ref": "#/$defs/identifier"},
+    "model_id": {"$ref": "#/$defs/identifier"},
+    "thinking_level": {"$ref": "#/$defs/identifier"},
+    "service_tier": {"$ref": "#/$defs/identifier"},
+    "transport_id": {"$ref": "#/$defs/identifier"}
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"
+    }
+  }
+}

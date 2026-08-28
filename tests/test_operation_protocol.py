@@ -139,7 +139,16 @@ class TestOperationProtocol(unittest.TestCase):
             json.loads(path.read_text(encoding="utf-8"))
             for path in sorted(SCHEMAS.glob("*.json"))
         )
-        self.assertEqual(len(schemas), 4)
+        schema_names = {schema["$id"].rsplit("/", 1)[-1] for schema in schemas}
+        self.assertTrue(
+            {
+                "auth-request.schema.json",
+                "model-selection-request.schema.json",
+                "operation-request-descriptor.schema.json",
+                "operation-transaction.schema.json",
+                "operation-receipt.schema.json",
+            }.issubset(schema_names)
+        )
         rendered = json.dumps(schemas, sort_keys=True)
         for schema in schemas:
             self.assertFalse(schema["additionalProperties"])

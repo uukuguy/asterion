@@ -9,6 +9,7 @@ import {
 import type {
   ActionKind,
   AuthRequest,
+  ModelSelectionRequest,
   AgentSystemManifest,
   AssemblyManifest,
   BenchmarkSuiteManifest,
@@ -95,6 +96,9 @@ const operationReceiptValidator = ajv.compile(
   readSchema("operation-receipt.schema.json"),
 );
 const authRequestValidator = ajv.compile(readSchema("auth-request.schema.json"));
+const modelSelectionRequestValidator = ajv.compile(
+  readSchema("model-selection-request.schema.json"),
+);
 
 const EFFECT_COUNTERS = [
   "credential_value_reads",
@@ -347,6 +351,15 @@ export function validateAuthRequest(value: unknown): AuthRequest {
   return requireOperationValid<AuthRequest>(
     "auth request",
     authRequestValidator,
+    value,
+  );
+}
+
+export function validateModelSelectionRequest(value: unknown): ModelSelectionRequest {
+  requireNoForbiddenOperationKeys(value);
+  return requireOperationValid<ModelSelectionRequest>(
+    "model selection request",
+    modelSelectionRequestValidator,
     value,
   );
 }

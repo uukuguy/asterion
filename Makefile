@@ -250,6 +250,13 @@ test.prime-operational-auth.provider-free:
 		tests.test_prime_operational_auth
 	npm --prefix packages/typescript/asterion-runtime test
 
+.PHONY: test.prime-operational-model-selection.provider-free
+test.prime-operational-model-selection.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_operation_model_selection \
+		tests.test_prime_operational_model_selection
+	npm --prefix packages/typescript/asterion-runtime test
+
 prime-verify-bounded:
 	$(UV_BIN) run python tools/verify_prime_loop.py --level bounded --source-root "$(ASTERION_PRIME_SOURCE_ROOT)" --authority "$(ASTERION_PRIME_AUTHORITY)" --max-cost-micros "$(ASTERION_PRIME_MAX_COST_MICROS)"
 

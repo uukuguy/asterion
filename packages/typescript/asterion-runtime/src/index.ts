@@ -1,6 +1,7 @@
 export type {
   ActionBudget,
   AuthRequest,
+  ModelSelectionRequest,
   ActionKind,
   ActionResolution,
   ActionTarget,
@@ -103,6 +104,7 @@ export {
   validateOperationRequestDescriptor,
   validateOperationTransaction,
   validateAuthRequest,
+  validateModelSelectionRequest,
   validateSessionContextCommand,
   validateSessionContextReceipt,
 } from "./validation.js";

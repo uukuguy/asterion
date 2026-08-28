@@ -121,6 +121,14 @@ export type AuthRequest =
       readonly precedence: number;
     };
 
+export interface ModelSelectionRequest {
+  readonly catalog_id: string;
+  readonly model_id: string;
+  readonly thinking_level: string;
+  readonly service_tier: string;
+  readonly transport_id: string;
+}
+
 export interface ClientCursor {
   readonly generation: number;
   readonly sequence: number;
