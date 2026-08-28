@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 from collections.abc import Callable
@@ -94,16 +95,15 @@ class ClientPrivateValueService:
         authority_revision_source: Callable[[], int],
         cancellation_signal: _CancellationSignal | None = None,
     ) -> None:
+        _cancellation_signal_value(
+            cancellation_signal, error_message="client private service is invalid"
+        )
         if (
             not isinstance(access, ClientAccess)
             or not callable(getattr(backend, "describe", None))
             or not callable(getattr(backend, "read", None))
             or not callable(clock_ms)
             or not callable(authority_revision_source)
-            or (
-                cancellation_signal is not None
-                and not isinstance(getattr(cancellation_signal, "cancelled", None), bool)
-            )
         ):
             raise ClientPrivateValueError("client private service is invalid")
         self._access = access
@@ -198,7 +198,10 @@ class ClientPrivateValueService:
             or not isinstance(live_authority_revision, int)
             or live_authority_revision != self._access.authority_revision
             or (authority_revision is not None and authority_revision != live_authority_revision)
-            or (self._cancellation_signal is not None and self._cancellation_signal.cancelled)
+            or _cancellation_signal_value(
+                self._cancellation_signal,
+                error_message="private value access is denied",
+            )
         ):
             raise ClientPrivateValueError("private value access is denied")
 
@@ -226,3 +229,19 @@ class ClientPrivateValueService:
             or descriptor.size > max_bytes
         ):
             raise ClientPrivateValueError("private value descriptor is invalid")
+
+
+def _cancellation_signal_value(
+    cancellation_signal: _CancellationSignal | None, *, error_message: str
+) -> bool:
+    if cancellation_signal is None:
+        return False
+    try:
+        cancelled = cancellation_signal.cancelled
+    except asyncio.CancelledError:
+        raise ClientPrivateValueError(error_message) from None
+    except Exception:
+        raise ClientPrivateValueError(error_message) from None
+    if type(cancelled) is not bool:
+        raise ClientPrivateValueError(error_message)
+    return cancelled

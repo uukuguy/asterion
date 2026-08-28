@@ -130,6 +130,7 @@ class HostClientSessionEndpoint:
         self._pending_intent_id: str | None = None
         self._submit_lock = asyncio.Lock()
         self._inflight_dispatches: dict[str, tuple[str, asyncio.Task[None]]] = {}
+        self._closed = False
         self._events: list[ClientEvent] = []
         self._event_ids: set[str] = set()
         self._active_call_ids: set[str] = set()
@@ -153,6 +154,8 @@ class HostClientSessionEndpoint:
         digest = _digest(intent.to_mapping())
         _control_mapping(intent)
         async with self._submit_lock:
+            if self._closed:
+                raise ClientSessionError("client session is closed")
             previous = self._intent_digests.get(intent.intent_id)
             in_flight = self._inflight_dispatches.get(intent.intent_id)
             if in_flight is not None:
@@ -183,13 +186,12 @@ class HostClientSessionEndpoint:
                     self._pending_intent_id = intent.intent_id
                 dispatch = asyncio.create_task(self._dispatch_intent(intent))
                 self._inflight_dispatches[intent.intent_id] = (digest, dispatch)
-        try:
-            await dispatch
-        finally:
-            async with self._submit_lock:
-                if self._inflight_dispatches.get(intent.intent_id) == (digest, dispatch):
-                    if dispatch.done():
-                        del self._inflight_dispatches[intent.intent_id]
+                dispatch.add_done_callback(
+                    lambda completed: self._complete_dispatch(
+                        intent.intent_id, digest, completed
+                    )
+                )
+        await asyncio.shield(dispatch)
         return f"client:{intent.intent_id}"
 
     def events(self, cursor: ClientCursor | None = None) -> AsyncIterator[ClientEvent]:
@@ -247,7 +249,22 @@ class HostClientSessionEndpoint:
             self._last_observation_source_sequence = observation.source_sequence
 
     async def close(self) -> None:
+        async with self._submit_lock:
+            self._closed = True
+            dispatches = tuple(entry[1] for entry in self._inflight_dispatches.values())
+        for dispatch in dispatches:
+            dispatch.cancel()
+        if dispatches:
+            await asyncio.gather(*dispatches, return_exceptions=True)
         await self._host.close()
+
+    def _complete_dispatch(
+        self, intent_id: str, digest: str, dispatch: asyncio.Task[None]
+    ) -> None:
+        if not dispatch.cancelled():
+            dispatch.exception()
+        if self._inflight_dispatches.get(intent_id) == (digest, dispatch):
+            del self._inflight_dispatches[intent_id]
 
     def _rebuild(self) -> None:
         try:

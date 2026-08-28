@@ -71,6 +71,14 @@ class _BlockingSendClient(ScriptedClient):
         self.sent.append(command)
 
 
+class _BlockingFailingSendClient(_BlockingSendClient):
+    async def send(self, command: ControlCommand) -> None:
+        self.send_calls += 1
+        self.send_started.set()
+        await self.release_send.wait()
+        raise RuntimeError("SENTINEL_PROVIDER_FAILURE")
+
+
 class _ObservationSource:
     def __init__(self, observations: tuple[ClientObservation, ...]) -> None:
         self.observations = observations
@@ -186,6 +194,130 @@ def _endpoint(
 
 
 class TestClientSession(unittest.IsolatedAsyncioTestCase):
+    async def test_owner_cancellation_does_not_cancel_shared_dispatch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            plan = resolve_agent_system(
+                _manifest(),
+                application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
+            )
+        provider = _BlockingSendClient(plan.control_binding.manifest)
+        endpoint, _, _ = _endpoint(provider=provider)
+        intent = _input_intent("intent-1", "private-input-1")
+
+        owner = asyncio.create_task(endpoint.submit(intent))
+        await asyncio.wait_for(provider.send_started.wait(), timeout=1)
+        owner.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await owner
+
+        retry = asyncio.create_task(endpoint.submit(intent))
+        await asyncio.sleep(0)
+        self.assertEqual(provider.send_calls, 1)
+        provider.release_send.set()
+        self.assertEqual(await retry, "client:intent-1")
+        self.assertEqual(await endpoint.submit(intent), "client:intent-1")
+        self.assertEqual(provider.send_calls, 1)
+
+    async def test_follower_cancellation_does_not_cancel_shared_dispatch(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            plan = resolve_agent_system(
+                _manifest(),
+                application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
+            )
+        provider = _BlockingSendClient(plan.control_binding.manifest)
+        endpoint, _, _ = _endpoint(provider=provider)
+        intent = _input_intent("intent-1", "private-input-1")
+
+        owner = asyncio.create_task(endpoint.submit(intent))
+        await asyncio.wait_for(provider.send_started.wait(), timeout=1)
+        follower = asyncio.create_task(endpoint.submit(intent))
+        await asyncio.sleep(0)
+        follower.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await follower
+
+        self.assertEqual(provider.send_calls, 1)
+        provider.release_send.set()
+        self.assertEqual(await owner, "client:intent-1")
+        self.assertEqual(provider.send_calls, 1)
+
+    async def test_all_waiter_cancellation_keeps_dispatch_for_blocked_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            plan = resolve_agent_system(
+                _manifest(),
+                application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
+            )
+        provider = _BlockingSendClient(plan.control_binding.manifest)
+        endpoint, _, _ = _endpoint(provider=provider)
+        intent = _input_intent("intent-1", "private-input-1")
+
+        owner = asyncio.create_task(endpoint.submit(intent))
+        await asyncio.wait_for(provider.send_started.wait(), timeout=1)
+        follower = asyncio.create_task(endpoint.submit(intent))
+        await asyncio.sleep(0)
+        owner.cancel()
+        follower.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await owner
+        with self.assertRaises(asyncio.CancelledError):
+            await follower
+
+        retry = asyncio.create_task(endpoint.submit(intent))
+        await asyncio.sleep(0)
+        self.assertEqual(provider.send_calls, 1)
+        provider.release_send.set()
+        self.assertEqual(await retry, "client:intent-1")
+        self.assertEqual(provider.send_calls, 1)
+
+    async def test_provider_failure_is_shared_and_does_not_leak_after_close(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            plan = resolve_agent_system(
+                _manifest(),
+                application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
+            )
+        provider = _BlockingFailingSendClient(plan.control_binding.manifest)
+        endpoint, _, _ = _endpoint(provider=provider)
+        intent = _input_intent("intent-1", "private-input-1")
+
+        owner = asyncio.create_task(endpoint.submit(intent))
+        await asyncio.wait_for(provider.send_started.wait(), timeout=1)
+        follower = asyncio.create_task(endpoint.submit(intent))
+        await asyncio.sleep(0)
+        provider.release_send.set()
+        for caller in (owner, follower):
+            with self.assertRaisesRegex(ClientSessionError, "^client intent dispatch failed$"):
+                await caller
+        self.assertEqual(provider.send_calls, 1)
+        await endpoint.close()
+
+    async def test_close_cancels_unobserved_dispatch_without_a_second_send(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            plan = resolve_agent_system(
+                _manifest(),
+                application_providers=(_provider(Path(directory)),),
+                control_factories=_control_factories([]),
+                host_capabilities=("clock.monotonic", "storage.private"),
+            )
+        provider = _BlockingSendClient(plan.control_binding.manifest)
+        endpoint, _, _ = _endpoint(provider=provider)
+        owner = asyncio.create_task(
+            endpoint.submit(_input_intent("intent-1", "private-input-1"))
+        )
+        await asyncio.wait_for(provider.send_started.wait(), timeout=1)
+
+        await endpoint.close()
+        with self.assertRaises(asyncio.CancelledError):
+            await owner
+        self.assertEqual(provider.send_calls, 1)
+
     async def test_concurrent_identical_submit_single_flights_provider_send(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             plan = resolve_agent_system(
@@ -608,3 +740,120 @@ class TestClientSession(unittest.IsolatedAsyncioTestCase):
                 deadline_ms=10,
             )
         self.assertEqual(backend.read_calls, 1)
+
+    async def test_private_service_redacts_hostile_cancellation_signal_at_construction(self) -> None:
+        class HostileCancellationSignal:
+            @property
+            def cancelled(self) -> bool:
+                raise RuntimeError("SENTINEL_CANCELLED_ACCESS")
+
+        with self.assertRaisesRegex(
+            ClientPrivateValueError, "^client private service is invalid$"
+        ):
+            ClientPrivateValueService(
+                access=ClientAccess(
+                    client_id="client-1",
+                    session_id="session-1",
+                    authority_revision=1,
+                    purposes=("interactive-render",),
+                ),
+                backend=_PrivateBackend(),
+                clock_ms=lambda: 1,
+                authority_revision_source=lambda: 1,
+                cancellation_signal=HostileCancellationSignal(),
+            )
+
+    async def test_private_service_redacts_cancelled_error_at_construction(self) -> None:
+        class CancelledCancellationSignal:
+            @property
+            def cancelled(self) -> bool:
+                raise asyncio.CancelledError("SENTINEL_CANCELLED_ERROR")
+
+        with self.assertRaisesRegex(
+            ClientPrivateValueError, "^client private service is invalid$"
+        ):
+            ClientPrivateValueService(
+                access=ClientAccess(
+                    client_id="client-1",
+                    session_id="session-1",
+                    authority_revision=1,
+                    purposes=("interactive-render",),
+                ),
+                backend=_PrivateBackend(),
+                clock_ms=lambda: 1,
+                authority_revision_source=lambda: 1,
+                cancellation_signal=CancelledCancellationSignal(),
+            )
+
+    async def test_private_service_rejects_non_bool_cancellation_signal_at_construction(self) -> None:
+        class NonBooleanCancellationSignal:
+            @property
+            def cancelled(self) -> bool:
+                return "SENTINEL_NON_BOOLEAN"  # type: ignore[return-value]
+
+        with self.assertRaisesRegex(
+            ClientPrivateValueError, "^client private service is invalid$"
+        ):
+            ClientPrivateValueService(
+                access=ClientAccess(
+                    client_id="client-1",
+                    session_id="session-1",
+                    authority_revision=1,
+                    purposes=("interactive-render",),
+                ),
+                backend=_PrivateBackend(),
+                clock_ms=lambda: 1,
+                authority_revision_source=lambda: 1,
+                cancellation_signal=NonBooleanCancellationSignal(),
+            )
+
+    async def test_private_service_redacts_cancellation_signal_before_and_after_read(self) -> None:
+        class ChangingCancellationSignal:
+            def __init__(self, values: list[object]) -> None:
+                self._values = values
+                self.accesses = 0
+
+            @property
+            def cancelled(self) -> bool:
+                self.accesses += 1
+                value = self._values.pop(0)
+                if isinstance(value, BaseException):
+                    raise value
+                return value  # type: ignore[return-value]
+
+        for label, values, reads in (
+            ("before-read", [False, RuntimeError("SENTINEL_BEFORE")], 0),
+            ("after-read", [False, False, "SENTINEL_AFTER"], 1),
+            ("before-read-cancelled", [False, asyncio.CancelledError("SENTINEL_BEFORE_CANCELLED")], 0),
+            ("after-read-cancelled", [False, False, asyncio.CancelledError("SENTINEL_AFTER_CANCELLED")], 1),
+        ):
+            with self.subTest(label=label):
+                backend = _PrivateBackend()
+                signal = ChangingCancellationSignal(values)
+                service = ClientPrivateValueService(
+                    access=ClientAccess(
+                        client_id="client-1",
+                        session_id="session-1",
+                        authority_revision=1,
+                        purposes=("interactive-render",),
+                    ),
+                    backend=backend,
+                    clock_ms=lambda: 1,
+                    authority_revision_source=lambda: 1,
+                    cancellation_signal=signal,
+                )
+
+                with self.assertRaisesRegex(
+                    ClientPrivateValueError, "^private value access is denied$"
+                ):
+                    service.resolve_bytes(
+                        "private-input-1",
+                        purpose="interactive-render",
+                        max_bytes=32,
+                        deadline_ms=10,
+                    )
+                self.assertEqual(backend.read_calls, reads)
+                self.assertEqual(
+                    signal.accesses,
+                    2 if label.startswith("before-read") else 3,
+                )
