@@ -16,6 +16,15 @@ PROJECT = Path(__file__).resolve().parents[1]
 BENCHMARK_SOURCE = PROJECT / "src/asterion/benchmarks"
 DCI_SOURCE = PROJECT / "src/asterion/capabilities/dci"
 PACKAGED_SCHEMAS = {
+    "schemas/operation/v1/operation-request-descriptor.schema.json": (
+        "asterion/schemas/operation/v1/operation-request-descriptor.schema.json"
+    ),
+    "schemas/operation/v1/operation-transaction.schema.json": (
+        "asterion/schemas/operation/v1/operation-transaction.schema.json"
+    ),
+    "schemas/operation/v1/operation-receipt.schema.json": (
+        "asterion/schemas/operation/v1/operation-receipt.schema.json"
+    ),
     "schemas/agent-client/v1/event.schema.json": (
         "asterion/schemas/agent-client/v1/event.schema.json"
     ),

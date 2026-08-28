@@ -16,6 +16,7 @@ export const CONTROL_PLANE_PROTOCOL = "asterion.control-plane/v1" as const;
 export const AGENT_CONTROL_PROTOCOL = "asterion.agent-control/v1" as const;
 export const SESSION_CONTEXT_PROTOCOL = "asterion.session-context/v1" as const;
 export const AGENT_CLIENT_PROTOCOL = "asterion.agent-client/v1" as const;
+export const OPERATION_PROTOCOL = "asterion.operation/v1" as const;
 
 export type ProtocolVersion = typeof RUNTIME_PROTOCOL_VERSION;
 export type CapabilityProtocolVersion = typeof CAPABILITY_PROTOCOL_VERSION;
@@ -34,6 +35,75 @@ export type ControlPlaneProtocolVersion = typeof CONTROL_PLANE_PROTOCOL;
 export type AgentControlProtocolVersion = typeof AGENT_CONTROL_PROTOCOL;
 export type SessionContextProtocolVersion = typeof SESSION_CONTEXT_PROTOCOL;
 export type AgentClientProtocolVersion = typeof AGENT_CLIENT_PROTOCOL;
+export type OperationProtocolVersion = typeof OPERATION_PROTOCOL;
+
+export type OperationFeatureId =
+  | "operation.auth"
+  | "operation.controlled-update-restart"
+  | "operation.doctor"
+  | "operation.model-selection"
+  | "operation.settings-keybindings"
+  | "operation.telemetry-usage";
+
+export interface OperationRequestDescriptor {
+  readonly protocol: OperationProtocolVersion;
+  readonly request_kind: string;
+  readonly request_ref: string;
+  readonly request_sha256: string;
+  readonly media_type: string;
+  readonly byte_count: number;
+  readonly purpose: string;
+  readonly client_id: string;
+  readonly session_id: string;
+  readonly generation: number;
+  readonly authority_revision: number;
+}
+
+export interface OperationTransaction {
+  readonly protocol: OperationProtocolVersion;
+  readonly operation_id: string;
+  readonly request: OperationRequestDescriptor;
+  readonly session_id: string;
+  readonly client_id: string;
+  readonly generation: number;
+  readonly authority_revision: number;
+  readonly authority_id: string;
+  readonly idempotency_key: string;
+  readonly feature_id: OperationFeatureId;
+  readonly requested_at: string;
+}
+
+export interface OperationEffectCounts {
+  readonly credential_value_reads: number;
+  readonly provider_model_requests: number;
+  readonly network_operations: number;
+  readonly package_manager_operations: number;
+  readonly os_process_restart_operations: number;
+  readonly external_telemetry_deliveries: number;
+  readonly uploads: number;
+}
+
+export interface OperationReceipt {
+  readonly protocol: OperationProtocolVersion;
+  readonly receipt_id: string;
+  readonly operation_id: string;
+  readonly request_ref: string;
+  readonly request_sha256: string;
+  readonly purpose: string;
+  readonly session_id: string;
+  readonly client_id: string;
+  readonly generation: number;
+  readonly authority_revision: number;
+  readonly authority_id: string;
+  readonly idempotency_key: string;
+  readonly feature_id: OperationFeatureId;
+  readonly status: "succeeded" | "rejected" | "failed" | "cancelled" | "uncertain";
+  readonly reason_code: string;
+  readonly receipt_ref: string;
+  readonly reconciliation_ref: string | null;
+  readonly effect_counts: OperationEffectCounts;
+  readonly completed_at: string;
+}
 
 export interface ClientCursor {
   readonly generation: number;

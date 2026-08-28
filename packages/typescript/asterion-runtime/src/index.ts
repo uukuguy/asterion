@@ -5,6 +5,12 @@ export type {
   ActionTarget,
   AgentControlProtocolVersion,
   AgentClientProtocolVersion,
+  OperationEffectCounts,
+  OperationFeatureId,
+  OperationProtocolVersion,
+  OperationReceipt,
+  OperationRequestDescriptor,
+  OperationTransaction,
   AgentSystemApplicationRef,
   AgentSystemManifest,
   AgentSystemProtocolVersion,
@@ -60,6 +66,7 @@ export {
   AGENT_CONTROL_PROTOCOL,
   AGENT_CLIENT_PROTOCOL,
   AGENT_SYSTEM_PROTOCOL,
+  OPERATION_PROTOCOL,
   APPLICATION_ASSEMBLY_PROTOCOL_VERSION,
   BENCHMARK_SUITE_PROTOCOL_VERSION,
   CAPABILITY_LOCK_PROTOCOL_VERSION,
@@ -72,6 +79,7 @@ export {
   SESSION_CONTEXT_PROTOCOL,
 } from "./types.js";
 export {
+  OperationProtocolError,
   ProtocolValidationError,
   validateAssemblyManifest,
   validateAgentSystemManifest,
@@ -90,6 +98,9 @@ export {
   validateControlPlaneManifest,
   validateRunRequest,
   validateRuntimeManifest,
+  validateOperationReceipt,
+  validateOperationRequestDescriptor,
+  validateOperationTransaction,
   validateSessionContextCommand,
   validateSessionContextReceipt,
 } from "./validation.js";

@@ -12,12 +12,73 @@ import type {
   ControlCommand,
   ControlEvent,
   ControlPlaneManifest,
+  OperationReceipt,
+  OperationRequestDescriptor,
+  OperationTransaction,
   RunEvent,
   RunRequest,
   RuntimeManifest,
   SessionContextCommand,
   SessionContextReceipt,
 } from "../src/index.js";
+
+export const fixtureOperationRequestDescriptor: OperationRequestDescriptor = {
+  protocol: "asterion.operation/v1",
+  request_kind: "operation.auth-request",
+  request_ref: "request-1",
+  request_sha256: "a".repeat(64),
+  media_type: "application/json",
+  byte_count: 1,
+  purpose: "operation.auth.read",
+  client_id: "client-1",
+  session_id: "session-1",
+  generation: 1,
+  authority_revision: 1,
+};
+
+export const fixtureOperationTransaction: OperationTransaction = {
+  protocol: "asterion.operation/v1",
+  operation_id: "operation-1",
+  request: fixtureOperationRequestDescriptor,
+  session_id: "session-1",
+  client_id: "client-1",
+  generation: 1,
+  authority_revision: 1,
+  authority_id: "authority-1",
+  idempotency_key: "idempotency-1",
+  feature_id: "operation.auth",
+  requested_at: "2026-08-10T15:00:00Z",
+};
+
+export const fixtureOperationReceipt: OperationReceipt = {
+  protocol: "asterion.operation/v1",
+  receipt_id: "receipt-1",
+  operation_id: "operation-1",
+  request_ref: "request-1",
+  request_sha256: "a".repeat(64),
+  purpose: "operation.auth.read",
+  session_id: "session-1",
+  client_id: "client-1",
+  generation: 1,
+  authority_revision: 1,
+  authority_id: "authority-1",
+  idempotency_key: "idempotency-1",
+  feature_id: "operation.auth",
+  status: "succeeded",
+  reason_code: "operation-succeeded",
+  receipt_ref: "receipt-public-1",
+  reconciliation_ref: null,
+  effect_counts: {
+    credential_value_reads: 0,
+    provider_model_requests: 0,
+    network_operations: 0,
+    package_manager_operations: 0,
+    os_process_restart_operations: 0,
+    external_telemetry_deliveries: 0,
+    uploads: 0,
+  },
+  completed_at: "2026-08-10T15:00:01Z",
+};
 
 export const fixtureClientIntent: ClientIntent = {
   protocol: "asterion.agent-client/v1",

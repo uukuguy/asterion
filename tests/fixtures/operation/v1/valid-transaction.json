@@ -1,0 +1,25 @@
+{
+  "protocol": "asterion.operation/v1",
+  "operation_id": "operation-1",
+  "request": {
+    "protocol": "asterion.operation/v1",
+    "request_kind": "operation.auth-request",
+    "request_ref": "request-1",
+    "request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "media_type": "application/json",
+    "byte_count": 1,
+    "purpose": "operation.auth",
+    "client_id": "client-1",
+    "session_id": "session-1",
+    "generation": 1,
+    "authority_revision": 1
+  },
+  "session_id": "session-1",
+  "client_id": "client-1",
+  "generation": 1,
+  "authority_revision": 1,
+  "authority_id": "authority-1",
+  "idempotency_key": "idempotency-1",
+  "feature_id": "operation.auth",
+  "requested_at": "2026-08-10T15:00:00Z"
+}

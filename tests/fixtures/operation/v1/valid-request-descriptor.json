@@ -1,0 +1,13 @@
+{
+  "protocol": "asterion.operation/v1",
+  "request_kind": "operation.auth-request",
+  "request_ref": "request-1",
+  "request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "media_type": "application/json",
+  "byte_count": 1,
+  "purpose": "operation.auth",
+  "client_id": "client-1",
+  "session_id": "session-1",
+  "generation": 1,
+  "authority_revision": 1
+}

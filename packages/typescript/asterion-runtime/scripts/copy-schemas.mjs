@@ -89,6 +89,24 @@ const agentClientEventSource = fileURLToPath(
     import.meta.url,
   ),
 );
+const operationRequestDescriptorSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/operation/v1/operation-request-descriptor.schema.json",
+    import.meta.url,
+  ),
+);
+const operationTransactionSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/operation/v1/operation-transaction.schema.json",
+    import.meta.url,
+  ),
+);
+const operationReceiptSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/operation/v1/operation-receipt.schema.json",
+    import.meta.url,
+  ),
+);
 const destination = `${packageRoot}/dist/schemas`;
 
 rmSync(destination, { force: true, recursive: true });
@@ -132,3 +150,9 @@ cpSync(
 );
 cpSync(agentClientIntentSource, `${destination}/agent-client-intent.schema.json`);
 cpSync(agentClientEventSource, `${destination}/agent-client-event.schema.json`);
+cpSync(
+  operationRequestDescriptorSource,
+  `${destination}/operation-request-descriptor.schema.json`,
+);
+cpSync(operationTransactionSource, `${destination}/operation-transaction.schema.json`);
+cpSync(operationReceiptSource, `${destination}/operation-receipt.schema.json`);

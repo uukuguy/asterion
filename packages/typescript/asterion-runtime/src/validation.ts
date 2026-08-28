@@ -23,6 +23,9 @@ import type {
   RunEvent,
   RunRequest,
   RuntimeManifest,
+  OperationReceipt,
+  OperationRequestDescriptor,
+  OperationTransaction,
   SessionContextCommand,
   SessionContextReceipt,
 } from "./types.js";
@@ -81,6 +84,29 @@ const clientIntentValidator = ajv.compile(
 const clientEventValidator = ajv.compile(
   readSchema("agent-client-event.schema.json"),
 );
+const operationRequestDescriptorValidator = ajv.compile(
+  readSchema("operation-request-descriptor.schema.json"),
+);
+const operationTransactionValidator = ajv.compile(
+  readSchema("operation-transaction.schema.json"),
+);
+const operationReceiptValidator = ajv.compile(
+  readSchema("operation-receipt.schema.json"),
+);
+
+const EFFECT_COUNTERS = [
+  "credential_value_reads",
+  "provider_model_requests",
+  "network_operations",
+  "package_manager_operations",
+  "os_process_restart_operations",
+  "external_telemetry_deliveries",
+  "uploads",
+] as const;
+const FORBIDDEN_OPERATION_KEYS = new Set([
+  "api_key", "authorization", "body", "credential", "destination", "path",
+  "prompt", "refresh_token", "text", "token",
+]);
 
 export class ProtocolValidationError extends Error {
   constructor(label: string, errors: readonly ErrorObject[] | null | undefined) {
@@ -89,6 +115,13 @@ export class ProtocolValidationError extends Error {
     const reason = first?.message || "violates Asterion Agent Runtime Protocol v1";
     super(`${label} ${location} ${reason}`);
     this.name = "ProtocolValidationError";
+  }
+}
+
+export class OperationProtocolError extends ProtocolValidationError {
+  constructor(label: string, errors: readonly ErrorObject[] | null | undefined) {
+    super(label, errors);
+    this.name = "OperationProtocolError";
   }
 }
 
@@ -115,6 +148,53 @@ function requireValid<T>(
     throw new ProtocolValidationError(label, validator.errors);
   }
   return immutableSnapshot(value as T);
+}
+
+function requireOperationValid<T>(
+  label: string,
+  validator: ValidateFunction,
+  value: unknown,
+): T {
+  if (!validator(value)) {
+    throw new OperationProtocolError(label, validator.errors);
+  }
+  return immutableSnapshot(value as T);
+}
+
+function requireNoForbiddenOperationKeys(value: unknown): void {
+  if (value === null || typeof value !== "object") {
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const child of value) requireNoForbiddenOperationKeys(child);
+    return;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (FORBIDDEN_OPERATION_KEYS.has(key)) {
+      throw new OperationProtocolError("operation value", null);
+    }
+    requireNoForbiddenOperationKeys(child);
+  }
+}
+
+function requireOperationIdentity(value: OperationTransaction): void {
+  const request = value.request;
+  if (
+    request.client_id !== value.client_id ||
+    request.session_id !== value.session_id ||
+    request.generation !== value.generation ||
+    request.authority_revision !== value.authority_revision
+  ) {
+    throw new OperationProtocolError("operation transaction identity", null);
+  }
+}
+
+function requireOperationReceipt(value: OperationReceipt): void {
+  for (const counter of EFFECT_COUNTERS) {
+    if (value.effect_counts[counter] !== 0) {
+      throw new OperationProtocolError("operation receipt effect counts", null);
+    }
+  }
 }
 
 function requireSortedUnique(
@@ -225,6 +305,39 @@ export function validateRuntimeManifest(value: unknown): RuntimeManifest {
   );
   requireSortedUnique("runtime manifest capabilities", manifest.capabilities);
   return manifest;
+}
+
+export function validateOperationRequestDescriptor(
+  value: unknown,
+): OperationRequestDescriptor {
+  requireNoForbiddenOperationKeys(value);
+  return requireOperationValid<OperationRequestDescriptor>(
+    "operation request descriptor",
+    operationRequestDescriptorValidator,
+    value,
+  );
+}
+
+export function validateOperationTransaction(value: unknown): OperationTransaction {
+  requireNoForbiddenOperationKeys(value);
+  const transaction = requireOperationValid<OperationTransaction>(
+    "operation transaction",
+    operationTransactionValidator,
+    value,
+  );
+  requireOperationIdentity(transaction);
+  return transaction;
+}
+
+export function validateOperationReceipt(value: unknown): OperationReceipt {
+  requireNoForbiddenOperationKeys(value);
+  const receipt = requireOperationValid<OperationReceipt>(
+    "operation receipt",
+    operationReceiptValidator,
+    value,
+  );
+  requireOperationReceipt(receipt);
+  return receipt;
 }
 
 export function validateAgentSystemManifest(

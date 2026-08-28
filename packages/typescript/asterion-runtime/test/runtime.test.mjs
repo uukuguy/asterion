@@ -15,6 +15,8 @@ import {
   CAPABILITY_PROTOCOL_VERSION,
   CAPABILITY_SOURCE_PROTOCOL_VERSION,
   CONTROL_PLANE_PROTOCOL,
+  OPERATION_PROTOCOL,
+  OperationProtocolError,
   SESSION_CONTEXT_PROTOCOL,
   ProtocolValidationError,
   RUNTIME_PROTOCOL_VERSION,
@@ -32,6 +34,9 @@ import {
   validateControlEvent,
   validateControlEventStream,
   validateControlPlaneManifest,
+  validateOperationReceipt,
+  validateOperationRequestDescriptor,
+  validateOperationTransaction,
   validateSessionContextCommand,
   validateSessionContextReceipt,
   validateEventStream,
@@ -76,6 +81,10 @@ const controlPlaneFixtures = new URL(
 );
 const agentControlFixtures = new URL(
   "../../../../tests/fixtures/agent_control/v1/",
+  import.meta.url,
+);
+const operationFixtures = new URL(
+  "../../../../tests/fixtures/operation/v1/",
   import.meta.url,
 );
 const sessionContextFixtures = new URL(
@@ -323,6 +332,62 @@ test("validates the shared long-running control contracts", async () => {
   ]) {
     const invalid = await readFixture(root, name);
     assert.throws(() => validate(invalid), ProtocolValidationError);
+  }
+});
+
+test("validates the closed shared operation protocol fixtures", async () => {
+  assert.equal(OPERATION_PROTOCOL, "asterion.operation/v1");
+  assert.ok(OperationProtocolError.prototype instanceof ProtocolValidationError);
+  assert.throws(
+    () => validateOperationRequestDescriptor({}),
+    (error) =>
+      error instanceof OperationProtocolError &&
+      error instanceof ProtocolValidationError &&
+      error.name === "OperationProtocolError",
+  );
+  const descriptor = await readFixture(
+    operationFixtures,
+    "valid-request-descriptor.json",
+  );
+  const transaction = await readFixture(operationFixtures, "valid-transaction.json");
+  const receipt = await readFixture(operationFixtures, "valid-receipt.json");
+  assert.deepEqual(validateOperationRequestDescriptor(descriptor), descriptor);
+  assert.deepEqual(validateOperationTransaction(transaction), transaction);
+  const validatedReceipt = validateOperationReceipt(receipt);
+  assert.deepEqual(validatedReceipt, receipt);
+  assert.ok(Object.isFrozen(validatedReceipt.effect_counts));
+
+  const purposeTransaction = await readFixture(
+    operationFixtures,
+    "valid-purpose-feature-distinct.json",
+  );
+  const purposeReceipt = await readFixture(
+    operationFixtures,
+    "valid-receipt-purpose-feature-distinct.json",
+  );
+  assert.equal(
+    validateOperationTransaction(purposeTransaction).request.purpose,
+    "operation.auth.read",
+  );
+  assert.equal(
+    validateOperationReceipt(purposeReceipt).purpose,
+    "operation.auth.read",
+  );
+
+  for (const [name, validate] of [
+    ["invalid-protocol-missing.json", validateOperationRequestDescriptor],
+    ["invalid-identity-mismatch.json", validateOperationTransaction],
+    ["invalid-recursive-forbidden-key.json", validateOperationTransaction],
+    ["invalid-timestamp.json", validateOperationTransaction],
+    ["invalid-unsafe-integer.json", validateOperationRequestDescriptor],
+    ["invalid-nested-extra.json", validateOperationTransaction],
+    ["invalid-canonical-array.json", validateOperationReceipt],
+    ["invalid-transaction-secret.json", validateOperationTransaction],
+    ["invalid-transaction-unknown.json", validateOperationTransaction],
+    ["invalid-receipt-effect-counter.json", validateOperationReceipt],
+  ]) {
+    const invalid = await readFixture(operationFixtures, name);
+    assert.throws(() => validate(invalid), OperationProtocolError);
   }
 });
 
