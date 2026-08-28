@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import unittest
 from collections.abc import AsyncIterator
+from types import MappingProxyType
 from typing import cast
 
 from asterion.client import (
@@ -146,3 +147,53 @@ class TestJsonlClientCodec(unittest.TestCase):
             with self.subTest(value=value):
                 with self.assertRaises(ClientJsonlError):
                     codec.encode(value)
+
+    def test_decoded_graph_is_recursively_immutable_and_encoder_accepts_it(self) -> None:
+        source = {"nested": {"items": ["first", {"second": 2}]}}
+        encoded = JsonlClientCodec().encode(source)
+        source["nested"]["items"].append("source-mutation")
+
+        decoded = JsonlClientCodec().feed(encoded, eof=True)[0]
+        nested = cast(MappingProxyType, decoded["nested"])
+        items = cast(tuple[object, ...], nested["items"])
+        second = cast(MappingProxyType, items[1])
+        self.assertIsInstance(decoded, MappingProxyType)
+        self.assertIsInstance(nested, MappingProxyType)
+        self.assertIsInstance(items, tuple)
+        self.assertIsInstance(second, MappingProxyType)
+        self.assertEqual(items, ("first", {"second": 2}))
+        with self.assertRaises(TypeError):
+            decoded["new"] = "value"  # type: ignore[index]
+        with self.assertRaises(TypeError):
+            nested["new"] = "value"  # type: ignore[index]
+        with self.assertRaises(TypeError):
+            items[0] = "changed"  # type: ignore[index]
+        with self.assertRaises(TypeError):
+            second["second"] = 3  # type: ignore[index]
+
+        self.assertEqual(
+            JsonlClientCodec().encode(decoded),
+            b'{"nested":{"items":["first",{"second":2}]}}\n',
+        )
+
+    def test_malicious_mapping_cycles_and_framing_errors_close_the_codec(self) -> None:
+        cyclic: dict[str, object] = {}
+        cyclic["self"] = cyclic
+        for value in (_ExplodingMapping(), cyclic):
+            with self.subTest(value=type(value).__name__):
+                codec = JsonlClientCodec()
+                with self.assertRaises(ClientJsonlError):
+                    codec.encode(value)
+                with self.assertRaises(ClientJsonlError):
+                    codec.encode({"after": "failure"})
+
+        codec = JsonlClientCodec()
+        with self.assertRaises(ClientJsonlError):
+            codec.feed(b'{"x":1}\r\n')
+        with self.assertRaises(ClientJsonlError):
+            codec.feed(b'{"x":1}\n')
+
+
+class _ExplodingMapping(dict[str, object]):
+    def __iter__(self):  # type: ignore[no-untyped-def]
+        raise RuntimeError("SENTINEL_MAPPING_FAILURE")
