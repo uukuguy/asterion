@@ -26,7 +26,7 @@ const scenarioOutcomes = {
   "stdout.protocol-purity": ["clean", "stdout_protocol_pure"],
   "interactive.command-rollback": ["rejected", "command_revision_rollback"],
   "interactive.ui-timeout": ["cancelled", "ui_timeout"],
-  "export.public-private-read": ["rejected", "private_read_forbidden"],
+  "export.public-private-read": ["succeeded", "public_export_no_private_read"],
   "share.unauthorized-upload": ["rejected", "upload_unauthorized"],
 };
 
@@ -69,6 +69,11 @@ test("loads only the exact locked Prime client bundle and emits body-free packag
       assert.equal(item.counters.retained_processes, 0);
       assert.equal(item.counters.stdout_writes, 0);
       assert.equal(item.counters.unauthorized_uploads, 0);
+      if (item.id === "interactive.ui-timeout") {
+        assert.equal(item.counters.ui_cancellations, 1);
+        assert.equal(item.counters.ui_renders >= 1, true);
+        assert.equal(item.counters.ui_submits, 0);
+      }
       assert.equal(/^[0-9a-f]{64}$/u.test(item.digest), true);
     }
     assert.equal(JSON.stringify(receipt).includes("SENTINEL_PRIVATE_VALUE"), false);

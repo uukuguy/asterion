@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 const SOURCE_COMMIT = "a18809e00ea30638584d87b3afea7285a9d7296c";
 const NODE_FLOOR = [22, 8, 0];
 const PACKAGE_COUNTS = Object.freeze({ core: [2, 2], protocols: [2, 2], interactive: [4, 4], "export-share": [1, 1] });
-const MODULE_IDS = Object.freeze(["sdk", "cli", "rpc", "acp", "jsonl", "print", "slash-command", "extension-ui", "export-share"]);
+const MODULE_IDS = Object.freeze(["sdk", "cli", "rpc", "acp", "jsonl", "print", "slash-command", "extension-ui", "extension-ui-theme", "export-share"]);
 const REQUIRED_SCENARIOS = Object.freeze(["identity.source-module-artifact", "stream.cursor-gap", "stream.partial-oversized", "redaction.body-credential", "lifecycle.disconnect-cancel", "lifecycle.retained-process", "stdout.protocol-purity", "interactive.command-rollback", "interactive.ui-timeout", "export.public-private-read", "share.unauthorized-upload"]);
 const SCENARIO_RESULTS = Object.freeze({
   "identity.source-module-artifact": ["rejected", "identity_mismatch"],
@@ -18,7 +18,7 @@ const SCENARIO_RESULTS = Object.freeze({
   "stdout.protocol-purity": ["clean", "stdout_protocol_pure"],
   "interactive.command-rollback": ["rejected", "command_revision_rollback"],
   "interactive.ui-timeout": ["cancelled", "ui_timeout"],
-  "export.public-private-read": ["rejected", "private_read_forbidden"],
+  "export.public-private-read": ["succeeded", "public_export_no_private_read"],
   "share.unauthorized-upload": ["rejected", "upload_unauthorized"],
 });
 
@@ -110,8 +110,11 @@ async function main() {
   if (result.package !== packageId || result.featureCount !== expected[0] || result.scenarioCount !== expected[1] || result.providerOperations !== 0 || result.credentialReads !== 0 || result.networkRequests !== 0 || result.retainedProcesses !== 0 || result.privateReads !== 0 || result.unauthorizedUploads !== 0 || result.stdoutWrites !== 0 || !Array.isArray(result.scenarioEvidence) || result.scenarioEvidence.map((item) => item.id).join("\0") !== REQUIRED_SCENARIOS.join("\0") || canonical(Object.fromEntries(result.scenarioEvidence.map((item) => [item.id, [item.outcome, item.error_code]]))) !== canonical(SCENARIO_RESULTS)) fail();
   for (const item of result.scenarioEvidence) {
     exactKeys(item, ["counters", "digest", "error_code", "id", "outcome"]);
-    exactKeys(record(item.counters), ["credential_reads", "network_requests", "private_reads", "provider_operations", "retained_processes", "scenario_calls", "stdout_writes", "unauthorized_uploads"]);
-    if (item.counters.scenario_calls !== 1 || Object.entries(item.counters).some(([key, value]) => key !== "scenario_calls" && value !== 0) || !/^[0-9a-f]{64}$/u.test(item.digest)) fail();
+    const expectedCounters = item.id === "interactive.ui-timeout"
+      ? ["credential_reads", "network_requests", "private_reads", "provider_operations", "retained_processes", "scenario_calls", "stdout_writes", "ui_cancellations", "ui_renders", "ui_submits", "unauthorized_uploads"]
+      : ["credential_reads", "network_requests", "private_reads", "provider_operations", "retained_processes", "scenario_calls", "stdout_writes", "unauthorized_uploads"];
+    exactKeys(record(item.counters), expectedCounters);
+    if (item.counters.scenario_calls !== 1 || Object.entries(item.counters).some(([key, value]) => !["scenario_calls", "ui_cancellations", "ui_renders"].includes(key) && value !== 0) || (item.id === "interactive.ui-timeout" && (item.counters.ui_cancellations !== 1 || item.counters.ui_renders < 1 || item.counters.ui_submits !== 0)) || !/^[0-9a-f]{64}$/u.test(item.digest)) fail();
   }
   if (!cleanPublic(result)) fail();
   const receipt = Object.freeze({

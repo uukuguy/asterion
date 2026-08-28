@@ -21,6 +21,7 @@ const ANCHORS = Object.freeze([
   ["print", "packages/coding-agent/dist/modes/print-mode.js", "5805a38946d3eb78d17d77b51d3a4502512da198cf01c439943c05b050833d08"],
   ["slash-command", "packages/coding-agent/dist/core/slash-commands.js", "ef96e6bb524adc70a72af594f570afc16e7feb734e6872636b2f65427c2665ba"],
   ["extension-ui", "packages/coding-agent/dist/modes/interactive/components/extension-input.js", "3bf770d6d27d1bee0ec8fbce3afdc458a4302233bcf10c3a43ad2e1fdad9413c"],
+  ["extension-ui-theme", "packages/coding-agent/dist/modes/interactive/theme/theme.js", "085158cba0ba80a9d3ff22b6e1f29e4c4586ffe5be4e223631428cd4e3484c1e"],
   ["export-share", "packages/coding-agent/dist/core/export-html/index.js", "4dd3fde2e199fbac771c72d23a355eab79d78daae3e47aa22782bcfdee9aaa44"],
 ]);
 const REQUIRED_SCENARIOS = Object.freeze(["identity.source-module-artifact", "stream.cursor-gap", "stream.partial-oversized", "redaction.body-credential", "lifecycle.disconnect-cancel", "lifecycle.retained-process", "stdout.protocol-purity", "interactive.command-rollback", "interactive.ui-timeout", "export.public-private-read", "share.unauthorized-upload"]);
@@ -46,11 +47,12 @@ async function anchors(root) {
   const { stdout } = await executeFile("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8", timeout: 5000 });
   if (stdout.trim() !== SOURCE_COMMIT) fail();
   const modules = [];
-  for (const [, builtPath, expected] of ANCHORS) {
+  for (const [moduleId, builtPath, expected] of ANCHORS) {
     const path = join(root, builtPath);
     const metadata = await lstat(path);
     if (!inside(root, path) || !metadata.isFile() || metadata.isSymbolicLink() || await realpath(path) !== path || createHash("sha256").update(await readFile(path)).digest("hex") !== expected) fail();
-    modules.push(await import(`${pathToFileURL(path).href}?sha256=${expected}`));
+    const url = pathToFileURL(path).href;
+    modules.push(await import(moduleId === "extension-ui-theme" ? url : `${url}?sha256=${expected}`));
   }
   return modules;
 }
@@ -74,10 +76,10 @@ function tracker() {
     counts,
     calls,
     hooks: Object.freeze({ credential: touch("credential_reads"), privateRead: touch("private_reads"), stdout, upload: touch("unauthorized_uploads") }),
-    snapshot(id) {
+    snapshot(id, extra = {}) {
       const scenario_calls = (calls.get(id) ?? 0) + 1;
       calls.set(id, scenario_calls);
-      return Object.freeze({ ...counts, scenario_calls });
+      return Object.freeze({ ...counts, ...extra, scenario_calls });
     },
     assertZero() { if (Object.values(counts).some((count) => count !== 0)) fail(); },
   });
@@ -107,10 +109,10 @@ function contiguous(records) {
 }
 
 async function scenarios(modules, effects, sealed) {
-  const [, , rpc, , jsonl, print, slash, extensionUi, exportShare] = modules;
+  const [, , rpc, , jsonl, print, slash, extensionUi, theme, exportShare] = modules;
   const observed = [];
-  const record = (id, outcome, error_code) => {
-    const counters = effects.snapshot(id);
+  const record = (id, outcome, error_code, extraCounters) => {
+    const counters = effects.snapshot(id, extraCounters);
     const bodyFree = Object.freeze({ id, outcome, error_code, counters });
     observed.push(Object.freeze({ ...bodyFree, digest: createHash("sha256").update(canonical(bodyFree)).digest("hex") }));
   };
@@ -147,11 +149,12 @@ async function scenarios(modules, effects, sealed) {
   if (!rejected(() => slash.parseRefineCommandOptions("rollback"))) fail();
   record("interactive.command-rollback", "rejected", "command_revision_rollback");
 
-  let cancelled = 0; let deadline = 0;
-  if (!rejected(() => new extensionUi.ExtensionInputComponent("body-free", undefined, () => fail(), () => { cancelled += 1; }))) fail();
-  await new Promise((resolve) => setTimeout(() => { deadline += 1; cancelled += 1; resolve(); }, 1));
-  if (cancelled !== 1 || deadline !== 1) fail();
-  record("interactive.ui-timeout", "cancelled", "ui_timeout");
+  let cancelled = 0; let renders = 0; let submitted = 0;
+  theme.initTheme("dark", false);
+  const input = new extensionUi.ExtensionInputComponent("body-free", undefined, () => { submitted += 1; }, () => { cancelled += 1; }, { timeout: 1, tui: { requestRender: () => { renders += 1; } } });
+  await new Promise((resolve) => setTimeout(resolve, 1_050)); input.dispose();
+  if (cancelled !== 1 || renders < 1 || submitted !== 0) fail();
+  record("interactive.ui-timeout", "cancelled", "ui_timeout", { ui_cancellations: cancelled, ui_renders: renders, ui_submits: submitted });
 
   const directory = await mkdtemp(join(tmpdir(), "asterion-prime-client-"));
   try {
@@ -162,7 +165,7 @@ async function scenarios(modules, effects, sealed) {
     const manager = Object.freeze({ getEntries: () => [], getHeader: () => ({}), getLeafId: () => null, getSessionFile: () => session });
     if (await exportShare.exportSessionToHtml(manager, state, { outputPath: output }) !== output) fail();
   } finally { await rm(directory, { force: true, recursive: true }); }
-  record("export.public-private-read", "rejected", "private_read_forbidden");
+  record("export.public-private-read", "succeeded", "public_export_no_private_read");
 
   const command = slash.parseSlashCommand("/share");
   const authorize = () => false;

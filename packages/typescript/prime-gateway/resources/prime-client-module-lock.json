@@ -1,6 +1,6 @@
 {
   "artifact_lock_sha256": "c64aecdec9ddff21fb7ed493cc1837eb68bf428fc94803a65e6c185aca0fbba3",
-  "bundle_sha256": "6454e3e9384313cf5df3da4e421a809a3c005520353d796cc3db813f358a522e",
+  "bundle_sha256": "266698144670d880438696592fb67f5fb669c7cea7868f93d1c27cd7ff2b6a7f",
   "format": "asterion.prime-client-module-lock/v1",
   "modules": [
     {"built_path": "packages/coding-agent/dist/core/sdk.js", "module_id": "sdk", "sha256": "16f6d32a79af61e7be0557f53ed6968b2102ddbb141bf45cb4059a1bce6dc0bc", "source_path": "packages/coding-agent/src/core/sdk.ts"},
@@ -11,6 +11,7 @@
     {"built_path": "packages/coding-agent/dist/modes/print-mode.js", "module_id": "print", "sha256": "5805a38946d3eb78d17d77b51d3a4502512da198cf01c439943c05b050833d08", "source_path": "packages/coding-agent/src/modes/print-mode.ts"},
     {"built_path": "packages/coding-agent/dist/core/slash-commands.js", "module_id": "slash-command", "sha256": "ef96e6bb524adc70a72af594f570afc16e7feb734e6872636b2f65427c2665ba", "source_path": "packages/coding-agent/src/core/slash-commands.ts"},
     {"built_path": "packages/coding-agent/dist/modes/interactive/components/extension-input.js", "module_id": "extension-ui", "sha256": "3bf770d6d27d1bee0ec8fbce3afdc458a4302233bcf10c3a43ad2e1fdad9413c", "source_path": "packages/coding-agent/src/modes/interactive/components/extension-input.ts"},
+    {"built_path": "packages/coding-agent/dist/modes/interactive/theme/theme.js", "module_id": "extension-ui-theme", "sha256": "085158cba0ba80a9d3ff22b6e1f29e4c4586ffe5be4e223631428cd4e3484c1e", "source_path": "packages/coding-agent/src/modes/interactive/theme/theme.ts"},
     {"built_path": "packages/coding-agent/dist/core/export-html/index.js", "module_id": "export-share", "sha256": "4dd3fde2e199fbac771c72d23a355eab79d78daae3e47aa22782bcfdee9aaa44", "source_path": "packages/coding-agent/src/core/export-html/index.ts"}
   ],
   "node_floor": "22.8.0",
