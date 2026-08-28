@@ -854,6 +854,7 @@ class PrimeControlPlaneClient:
             if (
                 descriptor.reference != reference
                 or descriptor.kind != "extension-ui"
+                or descriptor.media_type != "application/json"
                 or len(body) != descriptor.size
                 or hashlib.sha256(body).hexdigest() != descriptor.sha256
             ):

@@ -856,6 +856,53 @@ test("durable store reopens only a contiguous canonical client observation prefi
   }
 });
 
+test("durable client observations reject non-closed public payloads before storage", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  const base = {
+    observation_id: "prime-client-1-1",
+    active_session_id: "session-1",
+    generation: 1,
+    source_sequence: 1,
+    emitted_at: "2026-08-10T03:00:01.000Z",
+  };
+  try {
+    for (const payload of [
+      { commands: ["SENTINEL_BODY"], revision: 1 },
+      { commands: ["beta", "alpha"], revision: 1 },
+      { commands: ["alpha", "alpha"], revision: 1 },
+    ]) {
+      const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+      await assert.rejects(store.recordClientObservationProgress(1, 1, {
+        ...base, kind: "commands.changed", payload,
+      }));
+    }
+    const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    await assert.rejects(store.recordClientObservationProgress(1, 1, {
+      ...base,
+      kind: "tool.started",
+      payload: {
+        arguments_ref: "private:00000000-0000-4000-8000-000000000001",
+        call_id: "call-1",
+        name: "SENTINEL_BODY",
+        sha256: "a".repeat(64),
+        size: 0,
+      },
+    }));
+    await assert.rejects(store.recordClientObservationProgress(1, 1, {
+      ...base,
+      kind: "extension-ui.requested",
+      payload: {
+        deadline_ms: 1,
+        method: "SENTINEL_BODY",
+        payload_ref: "private:00000000-0000-4000-8000-000000000001",
+        request_id: "request-1",
+      },
+    }));
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
 test("durable store replays events by generation and sequence across mixed records", async () => {
   const fixtureRoot = await temporaryStoreRoot();
   try {

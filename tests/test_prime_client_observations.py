@@ -23,6 +23,7 @@ class _Process:
     def __init__(self) -> None:
         self.event_requests: list[Mapping[str, object]] = []
         self.client_value_kind = "message"
+        self.client_value_media_type = "text/plain"
         self.observations = [
             {
                 "observation_id": "observation-1",
@@ -61,7 +62,7 @@ class _Process:
             "descriptor": {
                 "reference": "private:00000000-0000-4000-8000-000000000001",
                 "kind": self.client_value_kind,
-                "media_type": "text/plain",
+                "media_type": self.client_value_media_type,
                 "size": 13,
                 "sha256": hashlib.sha256(b"SENTINEL_BODY").hexdigest(),
             },
@@ -125,6 +126,7 @@ class TestPrimeClientObservations(unittest.IsolatedAsyncioTestCase):
 
     async def test_extension_payload_reference_is_readable(self) -> None:
         self.process.client_value_kind = "extension-ui"
+        self.process.client_value_media_type = "application/json"
         self.process.observations = [{
             "observation_id": "observation-1", "active_session_id": "session-1",
             "generation": 1, "source_sequence": 1, "emitted_at": "2026-08-10T03:00:01Z",
@@ -136,6 +138,19 @@ class TestPrimeClientObservations(unittest.IsolatedAsyncioTestCase):
         if not isinstance(reference, str):
             self.fail("payload reference is invalid")
         self.assertEqual(self.client.describe(reference).kind, "extension-ui")
+
+    async def test_extension_payload_descriptor_requires_json_and_redacts_body(self) -> None:
+        self.process.client_value_kind = "extension-ui"
+        self.process.client_value_media_type = "text/plain"
+        self.process.observations = [{
+            "observation_id": "observation-1", "active_session_id": "session-1",
+            "generation": 1, "source_sequence": 1, "emitted_at": "2026-08-10T03:00:01Z",
+            "kind": "extension-ui.requested",
+            "payload": {"deadline_ms": 1, "method": "extension-1", "payload_ref": "private:00000000-0000-4000-8000-000000000001", "request_id": "request-1"},
+        }]
+        with self.assertRaisesRegex(PrimeControlError, "^Prime control operation failed$") as raised:
+            _ = [item async for item in self.client.client_observations()]
+        self.assertNotIn("SENTINEL_BODY", str(raised.exception))
 
     async def test_client_observation_cancellation_is_redacted(self) -> None:
         class CancelProcess(_Process):

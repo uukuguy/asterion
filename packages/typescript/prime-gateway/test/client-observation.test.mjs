@@ -141,3 +141,88 @@ test("rejects a client value above the conservative one-frame limit", async () =
     await root.cleanup();
   }
 });
+
+test("passes unscoped daemon events through without consuming the client sequence", async () => {
+  const root = await temporaryStoreRoot();
+  try {
+    const mapper = mapperFixture(await PrivateValueStore.open(root.root));
+    for (const outbound of [
+      { type: "daemon_closing", reason: "shutdown" },
+      { type: "heartbeats_changed" },
+      { type: "extension_error", activeSessionId: "prime-session-1", error: { code: "private" } },
+    ]) {
+      assert.deepEqual(await mapper.map(outbound), []);
+    }
+    const [observation] = await mapper.map({
+      type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 1 },
+      event: { type: "message_end", role: "assistant", content: "mapped" },
+    });
+    assert.equal(observation.source_sequence, 1);
+  } finally {
+    await root.cleanup();
+  }
+});
+
+test("rejects non-canonical commands and broad tool or extension identifiers", async () => {
+  const root = await temporaryStoreRoot();
+  try {
+    const mapper = mapperFixture(await PrivateValueStore.open(root.root));
+    for (const event of [
+      { type: "commands_changed", commands: ["SENTINEL_BODY"], revision: 1 },
+      { type: "commands_changed", commands: ["beta", "alpha"], revision: 1 },
+      { type: "commands_changed", commands: ["alpha", "alpha"], revision: 1 },
+      { type: "tool_start", callId: "call-1", name: "SENTINEL_BODY", arguments: {} },
+    ]) {
+      await assert.rejects(mapper.map({
+        type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 1 }, event,
+      }));
+    }
+    await assert.rejects(mapper.map({
+      type: "extension_ui_request", activeSessionId: "prime-session-1", meta: { sequence: 1 },
+      id: "request-1", method: "SENTINEL_BODY", payload: {},
+    }));
+    assert.equal(JSON.stringify(await mapper.map({
+      type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 1 },
+      event: { type: "commands_changed", commands: ["alpha", "beta"], revision: 1 },
+    })).includes("SENTINEL_BODY"), false);
+  } finally {
+    await root.cleanup();
+  }
+});
+
+test("rolls back a staged private body when observation progress commit fails", async () => {
+  const root = await temporaryStoreRoot();
+  let descriptor;
+  let failCommit = true;
+  try {
+    const values = await PrivateValueStore.open(root.root);
+    const mapper = new PrimeClientObservationMapper({
+      sessionId: "session-1", generation: 1, activeSessionId: "prime-session-1",
+      privateValues: {
+        async putClientValue(...args) {
+          descriptor = await values.putClientValue(...args);
+          return descriptor;
+        },
+        deleteClientValue(reference, sessionId) {
+          return values.deleteClientValue(reference, sessionId);
+        },
+      },
+      async commit() {
+        if (failCommit) throw new Error("commit failed");
+      },
+      now: () => "2026-08-10T03:00:00Z",
+    });
+    const outbound = {
+      type: "session_event", activeSessionId: "prime-session-1", meta: { sequence: 1 },
+      event: { type: "message_end", role: "assistant", content: "SENTINEL_ROLLBACK_BODY" },
+    };
+    await assert.rejects(mapper.map(outbound));
+    assert.ok(descriptor);
+    await assert.rejects(values.describeClientValue(descriptor.reference, "session-1"));
+    failCommit = false;
+    const [retry] = await mapper.map(outbound);
+    assert.equal(retry.source_sequence, 1);
+  } finally {
+    await root.cleanup();
+  }
+});

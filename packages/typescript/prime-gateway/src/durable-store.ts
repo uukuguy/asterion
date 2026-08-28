@@ -52,10 +52,13 @@ const RECORD_NAME_PATTERN = /^(?<position>[0-9]{12})\.json$/u;
 const ATOMIC_TEMP_PATTERN = /^\.asterion-[0-9a-f-]{36}\.tmp$/u;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/u;
 const MEDIA_TYPE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$/u;
+const CLIENT_IDENTIFIER_PATTERN = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/u;
+const CLIENT_MEDIA_TYPE_PATTERN = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/u;
 const PRIVATE_REF_PATTERN = /^private:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const RECORD_KINDS = new Set([
   "command.accepted",
   "client.observation.progress",
+  "client.observation.staged",
   "context.binding.initialized",
   "context.binding.rebound",
   "context.command.accepted",
@@ -217,6 +220,16 @@ export interface GatewayClientObservation {
 export interface GatewayClientObservationProgress {
   readonly nativeSequence: number;
   readonly observationSequence: number;
+}
+
+export interface GatewayClientObservationStage {
+  readonly generation: number;
+  readonly nativeSequence: number;
+  readonly reference: string;
+  readonly kind: string;
+  readonly mediaType: string;
+  readonly size: number;
+  readonly sha256: string;
 }
 
 interface StoredRecordBody {
@@ -570,6 +583,13 @@ function canonicalTimestamp(value: unknown): value is string {
     new Date(value).toISOString() === value;
 }
 
+function sortedUniqueClientIdentifiers(value: unknown): value is readonly string[] {
+  return Array.isArray(value) && value.every(
+    (item, index) => typeof item === "string" && CLIENT_IDENTIFIER_PATTERN.test(item) &&
+      (index === 0 || String(value[index - 1]) < item),
+  );
+}
+
 function validateClientObservationPayload(
   value: unknown,
 ): GatewayClientObservation {
@@ -603,7 +623,7 @@ function validateClientObservationPayload(
     size: unknown,
   ): boolean =>
     typeof reference === "string" && PRIVATE_REF_PATTERN.test(reference) &&
-    typeof mediaType === "string" && MEDIA_TYPE_PATTERN.test(mediaType) &&
+    typeof mediaType === "string" && CLIENT_MEDIA_TYPE_PATTERN.test(mediaType) &&
     typeof digest === "string" && DIGEST_PATTERN.test(digest) &&
     nonNegativeInteger(size);
   const kind = value.kind as GatewayClientObservationKind;
@@ -614,7 +634,7 @@ function validateClientObservationPayload(
       !descriptor(payload.content_ref, payload.media_type, payload.sha256, payload.size)) throw new GatewayStoreConflictError();
   } else if (kind === "tool.started") {
     if (!hasExactKeys(payload, ["arguments_ref", "call_id", "name", "sha256", "size"]) ||
-      !nonEmptyIdentifier(payload.call_id) || !nonEmptyIdentifier(payload.name) ||
+      !nonEmptyIdentifier(payload.call_id) || typeof payload.name !== "string" || !CLIENT_IDENTIFIER_PATTERN.test(payload.name) ||
       !descriptor(payload.arguments_ref, "application/json", payload.sha256, payload.size)) throw new GatewayStoreConflictError();
   } else if (kind === "tool.completed") {
     if (!hasExactKeys(payload, ["call_id", "is_error", "media_type", "result_ref", "sha256", "size"]) ||
@@ -625,11 +645,11 @@ function validateClientObservationPayload(
       !nonEmptyIdentifier(payload.artifact_id) ||
       !descriptor(payload.artifact_ref, payload.media_type, payload.sha256, payload.size)) throw new GatewayStoreConflictError();
   } else if (kind === "commands.changed") {
-    if (!hasExactKeys(payload, ["commands", "revision"]) || !Array.isArray(payload.commands) || !positiveInteger(payload.revision)) throw new GatewayStoreConflictError();
+    if (!hasExactKeys(payload, ["commands", "revision"]) || !sortedUniqueClientIdentifiers(payload.commands) || !positiveInteger(payload.revision)) throw new GatewayStoreConflictError();
   } else if (kind === "extension-ui.requested") {
     if (!hasExactKeys(payload, ["deadline_ms", "method", "payload_ref", "request_id"]) ||
-      !Number.isSafeInteger(payload.deadline_ms) || Number(payload.deadline_ms) < 0 ||
-      !nonEmptyIdentifier(payload.method) || !nonEmptyIdentifier(payload.request_id) ||
+      !Number.isSafeInteger(payload.deadline_ms) || Number(payload.deadline_ms) < 1 ||
+      typeof payload.method !== "string" || !CLIENT_IDENTIFIER_PATTERN.test(payload.method) || !nonEmptyIdentifier(payload.request_id) ||
       typeof payload.payload_ref !== "string" || !PRIVATE_REF_PATTERN.test(payload.payload_ref)) throw new GatewayStoreConflictError();
   } else {
     throw new GatewayStoreConflictError();
@@ -657,6 +677,18 @@ function validateClientObservationProgressPayload(value: unknown): Readonly<{
     nativeSequence: value.native_sequence,
     observation: value.observation === null ? null : validateClientObservationPayload(value.observation),
   });
+}
+
+function validateClientObservationStagePayload(value: unknown): GatewayClientObservationStage {
+  if (!isRecord(value) || !hasExactKeys(value, ["generation", "kind", "media_type", "native_sequence", "reference", "sha256", "size"]) ||
+    !positiveInteger(value.generation) || !positiveInteger(value.native_sequence) ||
+    typeof value.reference !== "string" || !PRIVATE_REF_PATTERN.test(value.reference) ||
+    typeof value.kind !== "string" || !nonEmptyIdentifier(value.kind) ||
+    typeof value.media_type !== "string" || !CLIENT_MEDIA_TYPE_PATTERN.test(value.media_type) ||
+    typeof value.sha256 !== "string" || !DIGEST_PATTERN.test(value.sha256) || !nonNegativeInteger(value.size)) {
+    throw new GatewayStoreConflictError();
+  }
+  return Object.freeze({ generation: value.generation, nativeSequence: value.native_sequence, reference: value.reference, kind: value.kind, mediaType: value.media_type, size: value.size, sha256: value.sha256 });
 }
 
 function validateRlmLifecycleObservation(
@@ -1221,6 +1253,7 @@ export class GatewayDurableStore {
     number,
     GatewayClientObservationProgress
   >();
+  private readonly clientObservationStages = new Map<string, GatewayClientObservationStage>();
   private readonly contextCommands = new Map<string, SessionContextCommand>();
   private readonly controlCommands = new Map<string, ControlCommand>();
   private readonly inputDeliveryValues = new Map<string, GatewayInputDelivery>();
@@ -1790,6 +1823,29 @@ export class GatewayDurableStore {
     );
   }
 
+  async stageClientObservationValue(stage: GatewayClientObservationStage): Promise<GatewayRecordReceipt> {
+    const validated = validateClientObservationStagePayload({
+      generation: stage?.generation,
+      native_sequence: stage?.nativeSequence,
+      reference: stage?.reference,
+      kind: stage?.kind,
+      media_type: stage?.mediaType,
+      size: stage?.size,
+      sha256: stage?.sha256,
+    });
+    const progress = this.clientObservationProgressByGeneration.get(validated.generation);
+    if (validated.nativeSequence <= (progress?.nativeSequence ?? 0)) throw new GatewayStoreConflictError();
+    return this.appendRecord("client.observation.staged", `client-observation-stage:${validated.generation}:${validated.nativeSequence}`, {
+      generation: validated.generation, native_sequence: validated.nativeSequence, reference: validated.reference,
+      kind: validated.kind, media_type: validated.mediaType, size: validated.size, sha256: validated.sha256,
+    });
+  }
+
+  stagedClientObservationValues(generation: number): readonly GatewayClientObservationStage[] {
+    if (!positiveInteger(generation)) throw new GatewayStoreConflictError();
+    return Object.freeze([...this.clientObservationStages.values()].filter((stage) => stage.generation === generation));
+  }
+
   clientObservations(generation: number): readonly GatewayClientObservation[] {
     if (!positiveInteger(generation)) {
       throw new GatewayStoreConflictError();
@@ -2311,6 +2367,15 @@ export class GatewayDurableStore {
         }
         return progress as unknown as Record<string, unknown>;
       }
+      if (kind === "client.observation.staged") {
+        const match = /^client-observation-stage:(?<generation>[1-9][0-9]*):(?<native>[1-9][0-9]*)$/u.exec(recordId);
+        const stage = validateClientObservationStagePayload(payload);
+        if (match === null || stage.generation !== Number(match.groups?.generation) || stage.nativeSequence !== Number(match.groups?.native) ||
+          stage.nativeSequence <= (this.clientObservationProgressByGeneration.get(stage.generation)?.nativeSequence ?? 0)) {
+          throw new GatewayStoreCorruptionError();
+        }
+        return stage as unknown as Record<string, unknown>;
+      }
       if (kind === "input.delivery.committed") {
         if (this.inputDeliveryProtocolRecordPosition === undefined) {
           throw new GatewayStoreCorruptionError();
@@ -2760,6 +2825,17 @@ export class GatewayDurableStore {
         nativeSequence: progress.nativeSequence,
         observationSequence: observationSequence + (progress.observation === null ? 0 : 1),
       }));
+      this.clientObservationStages.delete(`${generation}:${progress.nativeSequence}`);
+    } else if (record.stored.kind === "client.observation.staged") {
+      const stage = "nativeSequence" in record.payload
+        ? record.payload as unknown as GatewayClientObservationStage
+        : validateClientObservationStagePayload(record.payload);
+      const key = `${stage.generation}:${stage.nativeSequence}`;
+      const previous = this.clientObservationStages.get(key);
+      if (previous !== undefined && (previous.reference !== stage.reference || previous.kind !== stage.kind || previous.mediaType !== stage.mediaType || previous.size !== stage.size || previous.sha256 !== stage.sha256)) {
+        throw new GatewayStoreCorruptionError();
+      }
+      this.clientObservationStages.set(key, stage);
     } else if (record.stored.kind === "input.delivery.committed") {
       const delivery = record.payload as unknown as GatewayInputDelivery;
       if (this.inputDeliveryValues.has(delivery.commandId)) {

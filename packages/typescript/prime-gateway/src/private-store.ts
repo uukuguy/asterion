@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat, open, readdir, realpath } from "node:fs/promises";
+import { lstat, open, readdir, realpath, unlink } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { TextDecoder } from "node:util";
 
@@ -1106,6 +1106,7 @@ export class PrivateValueStore {
     kind: string,
     mediaType: string,
     value: Uint8Array,
+    reference?: PrivateValueRef,
   ): Promise<PrivateClientValueDescriptor> {
     if (
       !OPAQUE_ID_PATTERN.test(sessionId) ||
@@ -1115,12 +1116,27 @@ export class PrivateValueStore {
     ) {
       throw new PrivateValueInvalidError();
     }
-    const reference = await this.put("client", Buffer.from(value), {
+    if (reference !== undefined && typeof reference !== "string") {
+      throw new PrivateValueInvalidError();
+    }
+    const expectedDigest = sha256(value);
+    if (reference !== undefined) {
+      try {
+        const existing = await this.describeClientValue(reference, sessionId);
+        if (existing.kind !== kind || existing.mediaType !== mediaType || existing.size !== value.byteLength || existing.sha256 !== expectedDigest) {
+          throw new PrivateValueInvalidError();
+        }
+        return existing;
+      } catch (error) {
+        if (!(error instanceof PrivateValueInvalidError)) throw error;
+      }
+    }
+    const written = await this.put("client", Buffer.from(value), {
       clientKind: kind,
       mediaType,
       sessionId,
-    });
-    return this.describeClientValue(reference, sessionId);
+    }, reference);
+    return this.describeClientValue(written, sessionId);
   }
 
   async describeClientValue(
@@ -1152,6 +1168,28 @@ export class PrivateValueStore {
     return this.read(header.reference, "client");
   }
 
+  async deleteClientValue(reference: string, sessionId: string): Promise<void> {
+    try {
+      const identifier = parseReference(reference);
+      const path = join(this.valuesRoot, `${identifier}.value`);
+      const metadata = await lstat(path);
+      const header = await this.clientHeader(reference, sessionId);
+      if (metadata.isSymbolicLink() || !metadata.isFile()) {
+        throw new PrivateValueInvalidError();
+      }
+      await unlink(path);
+      await syncPrivateDirectory(this.valuesRoot);
+    } catch (error) {
+      if (isRecord(error) && "code" in error && error.code === "ENOENT") {
+        return;
+      }
+      if (error instanceof PrivateValueInvalidError) {
+        throw error;
+      }
+      throw new PrivateValueInvalidError();
+    }
+  }
+
   async readCapsule(reference: PrivateValueRef): Promise<Buffer> {
     return Buffer.from(await this.read(reference, "capsule"));
   }
@@ -1164,11 +1202,13 @@ export class PrivateValueStore {
     kind: PrivateValueKind,
     body: Buffer,
     client?: Readonly<{ readonly clientKind: string; readonly mediaType: string; readonly sessionId: string }>,
+    requestedReference?: PrivateValueRef,
   ): Promise<PrivateValueRef> {
     if (body.byteLength > limitForKind(kind)) {
       throw new PrivateValueInvalidError();
     }
-    const reference = `private:${randomUUID()}` as PrivateValueRef;
+    const reference = requestedReference ?? `private:${randomUUID()}` as PrivateValueRef;
+    parseReference(reference);
     const header: PrivateValueHeader = {
       format: PRIVATE_VALUE_FORMAT,
       reference,

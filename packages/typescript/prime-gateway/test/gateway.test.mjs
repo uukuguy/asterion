@@ -3163,6 +3163,56 @@ test("gateway persists body-free client observations across reopen and resumes t
   }
 });
 
+test("gateway cleans a staged-only client body before reopen can replay it", async () => {
+  const state = await fixture({ clientObservations: true });
+  let reopened;
+  const reference = "private:00000000-0000-4000-8000-000000000099";
+  const body = Buffer.from("SENTINEL_STAGED_ONLY_BODY");
+  try {
+    await state.store.stageClientObservationValue({
+      generation: 1, nativeSequence: 1, reference, kind: "message", mediaType: "text/plain",
+      size: body.byteLength, sha256: createHash("sha256").update(body).digest("hex"),
+    });
+    await state.privateValues.putClientValue("session-1", "message", "text/plain", body, reference);
+    await state.gateway.close();
+    const store = await GatewayDurableStore.open(state.root, "session-1");
+    reopened = await PrimeGateway.open({
+      sessionId: "session-1", generation: 1, authorityId: "authority-1", store,
+      privateValues: state.privateValues, clientObservationValues: state.privateValues,
+      restoreExistingSession: false,
+      async createSession() { throw new Error("not used"); },
+      async createCheckpoint() { throw new Error("not used"); },
+    });
+    await assert.rejects(state.privateValues.describeClientValue(reference, "session-1"));
+    assert.deepEqual(store.clientObservations(1), []);
+  } finally {
+    await reopened?.close().catch(() => undefined);
+    await state.cleanup({ allowCloseFailure: true });
+  }
+});
+
+test("gateway preserves daemon control mapping with client observations enabled or disabled", async () => {
+  for (const clientObservations of [false, true]) {
+    const state = await fixture({ clientObservations });
+    try {
+      const goalRef = await state.privateValues.putInput("goal");
+      await state.gateway.accept(command("session.create", {
+        system_id: "research.system", system_version: "1.0.0", goal_id: "goal-1", goal_ref: goalRef,
+      }, `command-create-daemon-${clientObservations}`));
+      state.session.emit({ type: "heartbeats_changed" });
+      state.session.emit({ type: "daemon_closing", reason: "shutdown" });
+      await state.gateway.settle();
+      assert.deepEqual(
+        eventTypes(state.store).slice(-2),
+        ["fault.raised", "session.recovery-required"],
+      );
+      assert.deepEqual(state.gateway.clientObservationsAfterCursor({ generation: 1, sequence: 0 }), []);
+    } finally {
+      await state.cleanup();
+    }
+  }
+});
+
 test("gateway drains an already queued Prime event before checkpoint recovery", async () => {
   const state = await fixture();
   try {

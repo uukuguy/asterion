@@ -250,7 +250,7 @@ export interface PrimeGatewayOptions {
   readonly privateResults?: PrimeGatewayPrivateResults;
   readonly clientObservationValues?: Pick<
     PrivateValueStore,
-    "putClientValue" | "describeClientValue"
+    "putClientValue" | "describeClientValue" | "deleteClientValue"
   >;
   readonly ecosystem?: Pick<PrimeEcosystemAdapter, "activate">;
   readonly createSession: (
@@ -530,6 +530,7 @@ export class PrimeGateway {
       throw new PrimeGatewayError();
     }
     const gateway = new PrimeGateway(options);
+    await gateway.cleanupStagedClientObservationValues();
     await gateway.restoreClientObservationPrefix();
     await gateway.restoreActionCommands();
     if (options.restoreExistingSession !== false) {
@@ -2469,8 +2470,27 @@ export class PrimeGateway {
           observation,
         );
       },
+      stage: async (stage) => {
+        await this.options.store.stageClientObservationValue(stage);
+      },
       now: this.now,
     });
+  }
+
+  private async cleanupStagedClientObservationValues(): Promise<void> {
+    const stages = this.options.store.stagedClientObservationValues(
+      this.options.generation,
+    );
+    if (stages.length === 0) return;
+    const values = this.options.clientObservationValues;
+    if (values === undefined) throw new PrimeGatewayError();
+    try {
+      for (const stage of stages) {
+        await values.deleteClientValue(stage.reference, this.options.sessionId);
+      }
+    } catch {
+      throw new PrimeGatewayError();
+    }
   }
 
   private async restoreClientObservationPrefix(): Promise<void> {
