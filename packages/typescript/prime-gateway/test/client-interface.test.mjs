@@ -16,6 +16,19 @@ const primeRoot = await realpath(new URL("../../../../3th-party/prime-agent", im
 const specifications = {
   core: [2, 2], protocols: [2, 2], interactive: [4, 4], "export-share": [1, 1],
 };
+const scenarioOutcomes = {
+  "identity.source-module-artifact": ["rejected", "identity_mismatch"],
+  "stream.cursor-gap": ["rejected", "cursor_gap"],
+  "stream.partial-oversized": ["rejected", "jsonl_frame_rejected"],
+  "redaction.body-credential": ["rejected", "private_value_rejected"],
+  "lifecycle.disconnect-cancel": ["cancelled", "disconnect_cancelled"],
+  "lifecycle.retained-process": ["cleaned", "no_retained_process"],
+  "stdout.protocol-purity": ["clean", "stdout_protocol_pure"],
+  "interactive.command-rollback": ["rejected", "command_revision_rollback"],
+  "interactive.ui-timeout": ["cancelled", "ui_timeout"],
+  "export.public-private-read": ["rejected", "private_read_forbidden"],
+  "share.unauthorized-upload": ["rejected", "upload_unauthorized"],
+};
 
 test("loads only the exact locked Prime client bundle and emits body-free package receipts", async () => {
   const paths = {
@@ -42,7 +55,22 @@ test("loads only the exact locked Prime client bundle and emits body-free packag
     assert.equal(receipt.retainedProcesses, 0);
     assert.equal(receipt.networkRequests, 0);
     assert.equal(receipt.scenarioEvidence.length, 11);
-    assert.equal(receipt.scenarioEvidence.every((item) => /^[0-9a-f]{64}$/u.test(item.digest)), true);
+    assert.deepEqual(
+      Object.fromEntries(receipt.scenarioEvidence.map((item) => [item.id, [item.outcome, item.error_code]])),
+      scenarioOutcomes,
+    );
+    for (const item of receipt.scenarioEvidence) {
+      assert.deepEqual(Object.keys(item).sort(), ["counters", "digest", "error_code", "id", "outcome"]);
+      assert.equal(item.counters.scenario_calls, 1);
+      assert.equal(item.counters.credential_reads, 0);
+      assert.equal(item.counters.network_requests, 0);
+      assert.equal(item.counters.private_reads, 0);
+      assert.equal(item.counters.provider_operations, 0);
+      assert.equal(item.counters.retained_processes, 0);
+      assert.equal(item.counters.stdout_writes, 0);
+      assert.equal(item.counters.unauthorized_uploads, 0);
+      assert.equal(/^[0-9a-f]{64}$/u.test(item.digest), true);
+    }
     assert.equal(JSON.stringify(receipt).includes("SENTINEL_PRIVATE_VALUE"), false);
   }
 });

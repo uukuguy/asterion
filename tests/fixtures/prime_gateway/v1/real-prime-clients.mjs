@@ -8,6 +8,19 @@ const NODE_FLOOR = [22, 8, 0];
 const PACKAGE_COUNTS = Object.freeze({ core: [2, 2], protocols: [2, 2], interactive: [4, 4], "export-share": [1, 1] });
 const MODULE_IDS = Object.freeze(["sdk", "cli", "rpc", "acp", "jsonl", "print", "slash-command", "extension-ui", "export-share"]);
 const REQUIRED_SCENARIOS = Object.freeze(["identity.source-module-artifact", "stream.cursor-gap", "stream.partial-oversized", "redaction.body-credential", "lifecycle.disconnect-cancel", "lifecycle.retained-process", "stdout.protocol-purity", "interactive.command-rollback", "interactive.ui-timeout", "export.public-private-read", "share.unauthorized-upload"]);
+const SCENARIO_RESULTS = Object.freeze({
+  "identity.source-module-artifact": ["rejected", "identity_mismatch"],
+  "stream.cursor-gap": ["rejected", "cursor_gap"],
+  "stream.partial-oversized": ["rejected", "jsonl_frame_rejected"],
+  "redaction.body-credential": ["rejected", "private_value_rejected"],
+  "lifecycle.disconnect-cancel": ["cancelled", "disconnect_cancelled"],
+  "lifecycle.retained-process": ["cleaned", "no_retained_process"],
+  "stdout.protocol-purity": ["clean", "stdout_protocol_pure"],
+  "interactive.command-rollback": ["rejected", "command_revision_rollback"],
+  "interactive.ui-timeout": ["cancelled", "ui_timeout"],
+  "export.public-private-read": ["rejected", "private_read_forbidden"],
+  "share.unauthorized-upload": ["rejected", "upload_unauthorized"],
+});
 
 function fail() { throw new Error("Prime client harness failed"); }
 function sha256(value) { return createHash("sha256").update(value).digest("hex"); }
@@ -94,7 +107,12 @@ async function main() {
   await assertAdversarialMatrix(loaded.runClientPackage, frame);
   const result = await loaded.runClientPackage(frame);
   const expected = PACKAGE_COUNTS[packageId];
-  if (result.package !== packageId || result.featureCount !== expected[0] || result.scenarioCount !== expected[1] || result.providerOperations !== 0 || result.credentialReads !== 0 || result.networkRequests !== 0 || result.retainedProcesses !== 0 || result.privateReads !== 0 || result.unauthorizedUploads !== 0 || result.stdoutWrites !== 0 || !Array.isArray(result.scenarioEvidence) || result.scenarioEvidence.map((item) => item.id).join("\0") !== REQUIRED_SCENARIOS.join("\0") || result.scenarioEvidence.some((item) => !/^[0-9a-f]{64}$/u.test(item.digest))) fail();
+  if (result.package !== packageId || result.featureCount !== expected[0] || result.scenarioCount !== expected[1] || result.providerOperations !== 0 || result.credentialReads !== 0 || result.networkRequests !== 0 || result.retainedProcesses !== 0 || result.privateReads !== 0 || result.unauthorizedUploads !== 0 || result.stdoutWrites !== 0 || !Array.isArray(result.scenarioEvidence) || result.scenarioEvidence.map((item) => item.id).join("\0") !== REQUIRED_SCENARIOS.join("\0") || canonical(Object.fromEntries(result.scenarioEvidence.map((item) => [item.id, [item.outcome, item.error_code]]))) !== canonical(SCENARIO_RESULTS)) fail();
+  for (const item of result.scenarioEvidence) {
+    exactKeys(item, ["counters", "digest", "error_code", "id", "outcome"]);
+    exactKeys(record(item.counters), ["credential_reads", "network_requests", "private_reads", "provider_operations", "retained_processes", "scenario_calls", "stdout_writes", "unauthorized_uploads"]);
+    if (item.counters.scenario_calls !== 1 || Object.entries(item.counters).some(([key, value]) => key !== "scenario_calls" && value !== 0) || !/^[0-9a-f]{64}$/u.test(item.digest)) fail();
+  }
   if (!cleanPublic(result)) fail();
   const receipt = Object.freeze({
     artifact_lock_digest: binding.artifactDigest, credential_reads: result.credentialReads, feature_count: result.featureCount,

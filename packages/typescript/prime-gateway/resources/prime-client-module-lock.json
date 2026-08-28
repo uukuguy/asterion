@@ -1,6 +1,6 @@
 {
   "artifact_lock_sha256": "c64aecdec9ddff21fb7ed493cc1837eb68bf428fc94803a65e6c185aca0fbba3",
-  "bundle_sha256": "490c90e5b02678cc189dd3e9e79c3b9151a74dfb50c78f1465eab42e2585c08e",
+  "bundle_sha256": "6454e3e9384313cf5df3da4e421a809a3c005520353d796cc3db813f358a522e",
   "format": "asterion.prime-client-module-lock/v1",
   "modules": [
     {"built_path": "packages/coding-agent/dist/core/sdk.js", "module_id": "sdk", "sha256": "16f6d32a79af61e7be0557f53ed6968b2102ddbb141bf45cb4059a1bce6dc0bc", "source_path": "packages/coding-agent/src/core/sdk.ts"},
