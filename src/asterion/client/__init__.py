@@ -19,6 +19,8 @@ from .private import (
 )
 from .jsonl import ClientJsonlError, JsonlClientCodec
 from .sdk import AgentClient, AgentClientError
+from .rpc import ClientRpcAdapter, ClientRpcError, RPC_METHODS
+from .acp import ACP_EVENT_METHODS, ClientAcpAdapter, ClientAcpError
 from .session import (
     ClientObservation,
     ClientObservationSource,
@@ -31,6 +33,9 @@ __all__ = (
     "AGENT_CLIENT_PROTOCOL",
     "AgentClient",
     "AgentClientError",
+    "ACP_EVENT_METHODS",
+    "ClientAcpAdapter",
+    "ClientAcpError",
     "ClientCursor",
     "ClientAccess",
     "ClientEvent",
@@ -42,11 +47,14 @@ __all__ = (
     "ClientPrivateValueError",
     "ClientPrivateValueService",
     "ClientProtocolError",
+    "ClientRpcAdapter",
+    "ClientRpcError",
     "ClientSessionEndpoint",
     "ClientSessionError",
     "HostClientSessionEndpoint",
     "JsonlClientCodec",
     "PrivateValueDescriptor",
+    "RPC_METHODS",
     "validate_client_event",
     "validate_client_event_stream",
     "validate_client_intent",
