@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from collections.abc import Callable, Mapping
@@ -27,10 +28,12 @@ from asterion.operation.protocol import (
     OperationTransaction,
 )
 from asterion.operation.services import (
+    OperationHandoffProof,
     OperationPrivateRequestResolver,
     OperationPrivateRequestStore,
     OperationReconciliationContext,
     OperationService,
+    StagedOperationService,
 )
 
 
@@ -47,6 +50,8 @@ class _RecoveryPhase:
     reserved: bool = False
     dispatched: bool = False
     handoff: bool = False
+    prepared_proof_digest: str | None = None
+    entered_proof_digest: str | None = None
     receipt: OperationReceipt | None = None
     reconciliation_attempt: int = 0
     reconciled_after_uncertain: bool = False
@@ -92,6 +97,7 @@ class OperationManager:
         self._receipts: dict[str, OperationReceipt] = {}
         self._dispatched: set[str] = set()
         self._attempts: dict[str, int] = {}
+        self._handoff_proofs: dict[str, OperationHandoffProof] = {}
         self.fail_after: str | None = None
         self._recover()
 
@@ -151,8 +157,64 @@ class OperationManager:
                 )
             self._append(JournalRecord.operation_dispatch_started(transaction))
             self._dispatched.add(transaction.operation_id)
+            staged = self._staged_service(service)
             if self.fail_after == "operation.dispatch.started":
+                if staged is not None:
+                    return self._record_terminal(
+                        self._receipt(
+                            transaction, "failed", "handoff-preparation-incomplete"
+                        ),
+                        reserve=True,
+                    )
                 return self._uncertain(transaction)
+            if staged is not None:
+                try:
+                    prepared = await staged.prepare_handoff(transaction, typed)
+                except (KeyboardInterrupt, SystemExit, asyncio.CancelledError):
+                    raise
+                except Exception:
+                    return self._record_terminal(
+                        self._receipt(transaction, "failed", "handoff-preparation-failed"),
+                        reserve=True,
+                    )
+                if isinstance(prepared, OperationReceipt):
+                    if prepared.status not in {"failed", "cancelled"}:
+                        return self._record_terminal(
+                            self._receipt(transaction, "failed", "handoff-preparation-failed"),
+                            reserve=True,
+                        )
+                    return self._record_terminal(prepared, reserve=True)
+                proof = self._validated_handoff_proof(prepared)
+                if proof is None:
+                    return self._record_terminal(
+                        self._receipt(transaction, "failed", "handoff-preparation-failed"),
+                        reserve=True,
+                    )
+                self._append(JournalRecord.operation_handoff_prepared(
+                    transaction, handoff_proof_digest=proof.digest
+                ))
+                self._handoff_proofs[transaction.operation_id] = proof
+                try:
+                    receipt = await staged.handoff_prepared(transaction, typed, proof)
+                except (KeyboardInterrupt, SystemExit, asyncio.CancelledError):
+                    raise
+                except Exception:
+                    return self._record_terminal(
+                        self._receipt(transaction, "failed", "handoff-preparation-failed"),
+                        reserve=True,
+                    )
+                if not self._is_valid_staged_handoff_receipt(transaction, receipt):
+                    return self._record_terminal(
+                        self._receipt(transaction, "failed", "handoff-preparation-failed"),
+                        reserve=True,
+                    )
+                self._append(JournalRecord.operation_handoff_entered(
+                    transaction, handoff_proof_digest=proof.digest
+                ))
+                if self.fail_after == "operation.handoff.fenced":
+                    # The injected crash is after the real boundary and durable entry.
+                    return self._uncertain(transaction)
+                return self._record_terminal(receipt, reserve=True)
             self._append(JournalRecord.operation_handoff_fenced(transaction))
             if self.fail_after == "operation.handoff.fenced":
                 return self._uncertain(transaction)
@@ -206,6 +268,12 @@ class OperationManager:
         if transaction.operation_id not in self._dispatched:
             raise OperationManagerError("operation reconciliation is unavailable")
         service = self._service(transaction)
+        proof: OperationHandoffProof | None = None
+        staged = self._staged_service(service)
+        if staged is not None:
+            proof = self._handoff_proofs.get(transaction.operation_id)
+            if proof is None:
+                raise OperationManagerError("operation reconciliation is unavailable")
         attempt = self._attempts.get(transaction.operation_id, 0) + 1
         self._append(
             JournalRecord.operation_reconciliation_recorded(
@@ -219,7 +287,10 @@ class OperationManager:
                 transaction,
                 typed,
                 OperationReconciliationContext(
-                    transaction.operation_id, transaction.authority_revision, attempt
+                    transaction.operation_id,
+                    transaction.authority_revision,
+                    attempt,
+                    proof.digest if proof is not None else None,
                 ),
             )
             return self._record_terminal(result, reserve=True)
@@ -227,6 +298,8 @@ class OperationManager:
             if str(error) == "operation private request is unavailable":
                 return self._uncertain(transaction)
             raise
+        except (OperationProtocolError, ValueError):
+            raise OperationManagerError("operation reconciliation is unavailable") from None
         except Exception:
             return self._uncertain(transaction)
 
@@ -290,6 +363,8 @@ class OperationManager:
                         or not phase.reserved
                         or phase.dispatched
                         or phase.handoff
+                        or phase.prepared_proof_digest is not None
+                        or phase.entered_proof_digest is not None
                         or phase.receipt is not None
                     ):
                         raise ValueError
@@ -304,10 +379,44 @@ class OperationManager:
                         or not phase.reserved
                         or not phase.dispatched
                         or phase.handoff
+                        or phase.prepared_proof_digest is not None
+                        or phase.entered_proof_digest is not None
                         or phase.receipt is not None
                     ):
                         raise ValueError
                     phase.handoff = True
+                elif record.kind == "operation.handoff.prepared":
+                    phase = self._phase_for_digest(phases, record)
+                    proof_value = record.payload["handoff_proof_digest"]
+                    if (
+                        phase.decision is None
+                        or phase.decision.status != "admitted"
+                        or not phase.reserved
+                        or not phase.dispatched
+                        or phase.handoff
+                        or phase.prepared_proof_digest is not None
+                        or phase.entered_proof_digest is not None
+                        or phase.receipt is not None
+                        or not _is_digest(proof_value)
+                    ):
+                        raise ValueError
+                    phase.prepared_proof_digest = str(proof_value)
+                elif record.kind == "operation.handoff.entered":
+                    phase = self._phase_for_digest(phases, record)
+                    proof_value = record.payload["handoff_proof_digest"]
+                    if (
+                        phase.decision is None
+                        or phase.decision.status != "admitted"
+                        or not phase.reserved
+                        or not phase.dispatched
+                        or phase.handoff
+                        or phase.prepared_proof_digest is None
+                        or phase.entered_proof_digest is not None
+                        or phase.receipt is not None
+                        or proof_value != phase.prepared_proof_digest
+                    ):
+                        raise ValueError
+                    phase.entered_proof_digest = str(proof_value)
                 elif record.kind == "operation.receipted":
                     receipt_value = record.payload["receipt"]
                     if not isinstance(receipt_value, Mapping):
@@ -352,6 +461,11 @@ class OperationManager:
                         or not phase.dispatched
                         or phase.receipt is None
                         or phase.receipt.status != "uncertain"
+                        or (
+                            self._staged_service(self._service(phase.transaction))
+                            is not None
+                            and phase.entered_proof_digest is None
+                        )
                         or attempt != phase.reconciliation_attempt + 1
                     ):
                         raise ValueError
@@ -359,9 +473,38 @@ class OperationManager:
                     phase.reconciled_after_uncertain = True
                     self._attempts[operation_id] = attempt
             for phase in phases.values():
+                if phase.transaction is not None and (
+                    phase.prepared_proof_digest is not None
+                    or phase.entered_proof_digest is not None
+                ) and self._staged_service(self._service(phase.transaction)) is None:
+                    raise ValueError
+                if (
+                    phase.transaction is not None
+                    and phase.decision is not None
+                    and phase.decision.status == "admitted"
+                    and self._staged_service(self._service(phase.transaction)) is not None
+                    and phase.handoff
+                ):
+                    raise ValueError
+                if phase.transaction is not None and phase.entered_proof_digest is not None:
+                    service = self._service(phase.transaction)
+                    if self._staged_service(service) is not None:
+                        if phase.prepared_proof_digest != phase.entered_proof_digest:
+                            raise ValueError
+                        self._handoff_proofs[phase.transaction.operation_id] = OperationHandoffProof(
+                            phase.entered_proof_digest
+                        )
                 if phase.dispatched and phase.receipt is None:
                     if phase.transaction is None:
                         raise ValueError
+                    if self._staged_service(self._service(phase.transaction)) is not None and phase.entered_proof_digest is None:
+                        self._record_terminal(
+                            self._receipt(
+                                phase.transaction, "failed", "handoff-preparation-incomplete"
+                            ),
+                            reserve=True,
+                        )
+                        continue
                     self._uncertain(phase.transaction)
         except (
             AuthorityError,
@@ -390,9 +533,8 @@ class OperationManager:
             raise ValueError
         return phase
 
-    @staticmethod
     def _record_recovered_receipt(
-        phase: _RecoveryPhase, receipt: OperationReceipt
+        self, phase: _RecoveryPhase, receipt: OperationReceipt
     ) -> None:
         """Validate a terminal record against the durable prefix without effects."""
 
@@ -431,12 +573,27 @@ class OperationManager:
         if not phase.reserved:
             raise ValueError
         if receipt.status == "uncertain":
-            if not phase.dispatched:
+            staged = (
+                phase.transaction is not None
+                and self._staged_service(self._service(phase.transaction)) is not None
+            )
+            if not phase.dispatched or (staged and phase.entered_proof_digest is None):
                 raise ValueError
             phase.receipt = receipt
             return
         if phase.dispatched:
-            if not phase.handoff:
+            staged = (
+                phase.transaction is not None
+                and self._staged_service(self._service(phase.transaction)) is not None
+            )
+            if not phase.handoff and phase.entered_proof_digest is None:
+                if (
+                    phase.transaction is None
+                    or not staged
+                    or receipt.status not in {"failed", "cancelled"}
+                ):
+                    raise ValueError
+            elif staged and phase.entered_proof_digest is None:
                 raise ValueError
         elif (
             receipt.status not in {"failed", "cancelled"}
@@ -474,6 +631,27 @@ class OperationManager:
         ):
             raise OperationManagerError("operation service binding is invalid")
         return service
+
+    @staticmethod
+    def _staged_service(service: OperationService) -> StagedOperationService | None:
+        if isinstance(service, StagedOperationService):
+            return service
+        return None
+
+    @staticmethod
+    def _validated_handoff_proof(value: object) -> OperationHandoffProof | None:
+        if type(value) is not OperationHandoffProof or not _is_digest(value.digest):
+            return None
+        return OperationHandoffProof(value.digest)
+
+    def _is_valid_staged_handoff_receipt(
+        self, transaction: OperationTransaction, value: object
+    ) -> bool:
+        return (
+            type(value) is OperationReceipt
+            and self._same_receipt_identity(transaction, value)
+            and value.status in {"succeeded", "failed", "cancelled", "uncertain"}
+        )
 
     def _resolve(
         self, transaction: OperationTransaction, service: OperationService
@@ -639,3 +817,11 @@ def _typed_digest(value: object) -> str:
     return hashlib.sha256(
         json.dumps(_json_value(value), sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+def _is_digest(value: object) -> bool:
+    return (
+        type(value) is str
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )

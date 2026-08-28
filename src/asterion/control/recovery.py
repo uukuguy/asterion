@@ -125,6 +125,8 @@ class _OperationRecoveryPhase:
     reserved: bool = False
     dispatched: bool = False
     handoff: bool = False
+    prepared_proof_digest: str | None = None
+    entered_proof_digest: str | None = None
     receipt: OperationReceipt | None = None
     reconciliation_attempt: int = 0
     reconciled_after_uncertain: bool = False
@@ -553,6 +555,8 @@ def _recover_operation_record(
             or not phase.reserved
             or phase.dispatched
             or phase.handoff
+            or phase.prepared_proof_digest is not None
+            or phase.entered_proof_digest is not None
             or phase.receipt is not None
         ):
             raise JournalConflictError("control journal recovery failed")
@@ -566,10 +570,48 @@ def _recover_operation_record(
             or not phase.reserved
             or not phase.dispatched
             or phase.handoff
+            or phase.prepared_proof_digest is not None
+            or phase.entered_proof_digest is not None
             or phase.receipt is not None
         ):
             raise JournalConflictError("control journal recovery failed")
         phase.handoff = True
+        return True
+    if kind == "operation.handoff.prepared":
+        phase = _operation_phase_for_digest(phases, record)
+        proof = payload.get("handoff_proof_digest")
+        if (
+            phase.decision is None
+            or phase.decision.status != "admitted"
+            or not phase.reserved
+            or not phase.dispatched
+            or phase.handoff
+            or phase.prepared_proof_digest is not None
+            or phase.entered_proof_digest is not None
+            or phase.receipt is not None
+            or type(proof) is not str
+            or len(proof) != 64
+            or any(character not in "0123456789abcdef" for character in proof)
+        ):
+            raise JournalConflictError("control journal recovery failed")
+        phase.prepared_proof_digest = proof
+        return True
+    if kind == "operation.handoff.entered":
+        phase = _operation_phase_for_digest(phases, record)
+        proof = payload.get("handoff_proof_digest")
+        if (
+            phase.decision is None
+            or phase.decision.status != "admitted"
+            or not phase.reserved
+            or not phase.dispatched
+            or phase.handoff
+            or phase.prepared_proof_digest is None
+            or phase.entered_proof_digest is not None
+            or phase.receipt is not None
+            or proof != phase.prepared_proof_digest
+        ):
+            raise JournalConflictError("control journal recovery failed")
+        phase.entered_proof_digest = proof
         return True
     if kind == "operation.reconciliation.recorded":
         operation_id = payload.get("operation_id")
@@ -585,6 +627,10 @@ def _recover_operation_record(
             or not phase.dispatched
             or phase.receipt is None
             or phase.receipt.status != "uncertain"
+            or (
+                phase.prepared_proof_digest is not None
+                and phase.entered_proof_digest is None
+            )
             or attempt != phase.reconciliation_attempt + 1
         ):
             raise JournalConflictError("control journal recovery failed")
@@ -699,12 +745,19 @@ def _record_recovered_operation_receipt(
     if not phase.reserved:
         raise JournalConflictError("control journal recovery failed")
     if receipt.status == "uncertain":
-        if not phase.dispatched:
+        if not phase.dispatched or (
+            phase.prepared_proof_digest is not None
+            and phase.entered_proof_digest is None
+        ):
             raise JournalConflictError("control journal recovery failed")
         phase.receipt = receipt
         return
     if phase.dispatched:
-        if not phase.handoff:
+        entered_staged_handoff = (
+            phase.prepared_proof_digest is not None
+            and phase.entered_proof_digest == phase.prepared_proof_digest
+        )
+        if not phase.handoff and not entered_staged_handoff:
             raise JournalConflictError("control journal recovery failed")
     elif (
         receipt.status not in {"failed", "cancelled"}

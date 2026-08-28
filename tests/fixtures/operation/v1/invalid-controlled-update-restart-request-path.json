@@ -1,0 +1,16 @@
+{
+  "current_artifact": {
+    "artifact_id": "artifact-current-1",
+    "artifact_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "daemon_id": "prime-daemon-1",
+    "protocol_compatibility_id": "asterion.agent-runtime.v1"
+  },
+  "next_artifact": {
+    "artifact_id": "artifact-next-1",
+    "artifact_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "daemon_id": "prime-daemon-1",
+    "protocol_compatibility_id": "asterion.agent-runtime.v1"
+  },
+  "checkpoint_ref": "checkpoint-1",
+  "path": "/SENTINEL_PRIVATE_PATH"
+}

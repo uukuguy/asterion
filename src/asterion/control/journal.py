@@ -59,6 +59,8 @@ JOURNAL_RECORD_KINDS = frozenset(
         "operation.admitted",
         "operation.reserved",
         "operation.dispatch.started",
+        "operation.handoff.prepared",
+        "operation.handoff.entered",
         "operation.handoff.fenced",
         "operation.receipted",
         "operation.reconciliation.recorded",
@@ -451,6 +453,52 @@ class JournalRecord:
             payload={
                 "operation_id": transaction.operation_id,
                 "transaction_digest": _operation_digest(transaction),
+            },
+        )
+
+    @classmethod
+    def operation_handoff_prepared(
+        cls, transaction: OperationTransaction, *, handoff_proof_digest: str
+    ) -> JournalRecord:
+        return cls._operation_handoff_proof_record(
+            transaction,
+            kind="operation.handoff.prepared",
+            record_id_prefix="operation-handoff-prepared",
+            handoff_proof_digest=handoff_proof_digest,
+        )
+
+    @classmethod
+    def operation_handoff_entered(
+        cls, transaction: OperationTransaction, *, handoff_proof_digest: str
+    ) -> JournalRecord:
+        return cls._operation_handoff_proof_record(
+            transaction,
+            kind="operation.handoff.entered",
+            record_id_prefix="operation-handoff-entered",
+            handoff_proof_digest=handoff_proof_digest,
+        )
+
+    @classmethod
+    def _operation_handoff_proof_record(
+        cls,
+        transaction: OperationTransaction,
+        *,
+        kind: str,
+        record_id_prefix: str,
+        handoff_proof_digest: str,
+    ) -> JournalRecord:
+        from asterion.operation.protocol import OperationTransaction
+
+        if not isinstance(transaction, OperationTransaction):
+            raise JournalConflictError("journal operation transaction is invalid")
+        _require_digest(handoff_proof_digest, "journal handoff proof digest")
+        return cls(
+            record_id=f"{record_id_prefix}:{transaction.operation_id}",
+            kind=kind,
+            payload={
+                "operation_id": transaction.operation_id,
+                "transaction_digest": _operation_digest(transaction),
+                "handoff_proof_digest": handoff_proof_digest,
             },
         )
 
@@ -1620,10 +1668,24 @@ def _validate_record_payload(kind: str, value: object) -> None:
         _require_opaque_id(value["operation_id"], "journal operation identity")
         _require_digest(value["transaction_digest"], "journal operation digest")
         return
-    if kind in {"operation.dispatch.started", "operation.handoff.fenced"}:
+    if kind == "operation.dispatch.started":
         _require_fields(value, {"operation_id", "transaction_digest"})
         _require_opaque_id(value["operation_id"], "journal operation identity")
         _require_digest(value["transaction_digest"], "journal operation digest")
+        return
+    if kind == "operation.handoff.fenced":
+        _require_fields(value, {"operation_id", "transaction_digest"})
+        _require_opaque_id(value["operation_id"], "journal operation identity")
+        _require_digest(value["transaction_digest"], "journal operation digest")
+        return
+    if kind in {"operation.handoff.prepared", "operation.handoff.entered"}:
+        _require_fields(
+            value,
+            {"operation_id", "transaction_digest", "handoff_proof_digest"},
+        )
+        _require_opaque_id(value["operation_id"], "journal operation identity")
+        _require_digest(value["transaction_digest"], "journal operation digest")
+        _require_digest(value["handoff_proof_digest"], "journal handoff proof digest")
         return
     if kind == "operation.receipted":
         from asterion.operation.protocol import OperationReceipt

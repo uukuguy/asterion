@@ -6,6 +6,8 @@ export type {
   TelemetryUsageRequest,
   TelemetryUsageSnapshot,
   DoctorRequest,
+  ArtifactIdentity,
+  ControlledUpdateRestartRequest,
   ActionKind,
   ActionResolution,
   ActionTarget,
@@ -112,6 +114,7 @@ export {
   validateSettingsKeybindingsRequest,
   validateTelemetryUsageRequest,
   validateDoctorRequest,
+  validateControlledUpdateRestartRequest,
   validateSessionContextCommand,
   validateSessionContextReceipt,
 } from "./validation.js";

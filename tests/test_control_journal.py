@@ -61,6 +61,16 @@ class TestControlJournal(unittest.TestCase):
                 kind="operation.transaction.accepted",
                 payload={"transaction": {**transaction.to_mapping(), "body": "secret"}},
             )
+        with self.assertRaises(JournalConflictError):
+            JournalRecord(
+                record_id="operation-handoff:operation-1",
+                kind="operation.handoff.fenced",
+                payload={
+                    "operation_id": transaction.operation_id,
+                    "transaction_digest": "a" * 64,
+                    "handoff_proof_digest": "b" * 64,
+                },
+            )
 
     def test_client_export_and_share_receipts_are_closed_and_body_free(self) -> None:
         artifact = ClientArtifactReceipt(

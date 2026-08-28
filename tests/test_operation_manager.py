@@ -13,6 +13,7 @@ from asterion.control.authority import (
 )
 from asterion.control.journal import JournalCursor, JournalRecord, MemoryCanonicalJournal
 from asterion.operation.manager import OperationManager, OperationManagerError
+from asterion.operation.services import OperationHandoffProof, StagedOperationService
 from asterion.operation.protocol import (
     EFFECT_COUNTERS,
     OperationReceipt,
@@ -156,6 +157,24 @@ class Service:
         return _receipt(transaction)
 
 
+class StagedService(Service, StagedOperationService):
+    async def prepare_handoff(
+        self, transaction: OperationTransaction, typed_request: object
+    ) -> OperationHandoffProof | OperationReceipt:
+        assert typed_request == {"action": "read"}
+        return OperationHandoffProof("a" * 64)
+
+    async def handoff_prepared(
+        self,
+        transaction: OperationTransaction,
+        typed_request: object,
+        proof: OperationHandoffProof,
+    ) -> OperationReceipt:
+        assert typed_request == {"action": "read"}
+        assert proof.digest == "a" * 64
+        return _receipt(transaction)
+
+
 def _manager():
     journal = MemoryCanonicalJournal("session-1")
     first = journal.append(
@@ -276,6 +295,58 @@ class TestOperationManager(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await manager.reconcile(_transaction())).status, "succeeded")
         self.assertEqual(service.execute_calls, [])
         self.assertEqual(service.reconcile_calls, ["operation-1"])
+
+    async def test_staged_prepare_cannot_claim_nonterminal_or_success_before_entered_boundary(self) -> None:
+        class PrematureSuccess(StagedService):
+            status = "succeeded"
+
+            async def prepare_handoff(
+                self, transaction: OperationTransaction, typed_request: object
+            ) -> OperationHandoffProof | OperationReceipt:
+                return _receipt(transaction, self.status)
+
+        for status in ("succeeded", "uncertain"):
+            with self.subTest(status=status):
+                manager, _, _, _, journal = _manager()
+                service = PrematureSuccess()
+                service.status = status
+                manager._services["operation.auth"] = service
+                receipt = await manager.execute(_transaction())
+                self.assertEqual((receipt.status, receipt.reason_code), ("failed", "handoff-preparation-failed"))
+                self.assertNotIn(
+                    "operation.handoff.prepared",
+                    [entry.record.kind for entry in journal.replay(JournalCursor(0))],
+                )
+
+    async def test_staged_handoff_exception_never_enters_or_becomes_reconcilable(self) -> None:
+        class RaisingHandoff(StagedService):
+            async def handoff_prepared(self, transaction, typed_request, proof):
+                raise RuntimeError("SENTINEL_PRECALL")
+
+        manager, _, _, _, journal = _manager()
+        manager._services["operation.auth"] = RaisingHandoff()
+        receipt = await manager.execute(_transaction())
+        self.assertEqual((receipt.status, receipt.reason_code), ("failed", "handoff-preparation-failed"))
+        kinds = [entry.record.kind for entry in journal.replay(JournalCursor(0))]
+        self.assertIn("operation.handoff.prepared", kinds)
+        self.assertNotIn("operation.handoff.entered", kinds)
+        self.assertEqual(await manager.reconcile(_transaction()), receipt)
+
+    async def test_dynamic_service_is_not_probed_for_staged_capability(self) -> None:
+        class DynamicService(Service):
+            def __init__(self) -> None:
+                super().__init__()
+                self.probes = 0
+
+            def __getattr__(self, name):
+                self.probes += 1
+                raise AssertionError(name)
+
+        manager, _, _, _, _ = _manager()
+        service = DynamicService()
+        manager._services["operation.auth"] = service
+        self.assertEqual((await manager.execute(_transaction())).status, "succeeded")
+        self.assertEqual(service.probes, 0)
 
     async def test_feature_grant_is_consumed_after_first_transaction(self) -> None:
         manager, resolver, _, service, _ = _manager()

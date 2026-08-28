@@ -13,6 +13,7 @@ import type {
   SettingsKeybindingsRequest,
   TelemetryUsageRequest,
   DoctorRequest,
+  ControlledUpdateRestartRequest,
   AgentSystemManifest,
   AssemblyManifest,
   BenchmarkSuiteManifest,
@@ -109,6 +110,9 @@ const telemetryUsageRequestValidator = ajv.compile(
   readSchema("telemetry-usage-request.schema.json"),
 );
 const doctorRequestValidator = ajv.compile(readSchema("doctor-request.schema.json"));
+const controlledUpdateRestartRequestValidator = ajv.compile(
+  readSchema("controlled-update-restart-request.schema.json"),
+);
 
 const EFFECT_COUNTERS = [
   "credential_value_reads",
@@ -415,6 +419,17 @@ export function validateDoctorRequest(value: unknown): DoctorRequest {
     value,
   );
   return request;
+}
+
+export function validateControlledUpdateRestartRequest(
+  value: unknown,
+): ControlledUpdateRestartRequest {
+  requireNoForbiddenOperationKeys(value);
+  return requireOperationValid<ControlledUpdateRestartRequest>(
+    "controlled update restart request",
+    controlledUpdateRestartRequestValidator,
+    value,
+  );
 }
 
 export function validateAgentSystemManifest(

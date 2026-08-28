@@ -19,6 +19,9 @@ PACKAGED_SCHEMAS = {
     "schemas/operation/v1/doctor-request.schema.json": (
         "asterion/schemas/operation/v1/doctor-request.schema.json"
     ),
+    "schemas/operation/v1/controlled-update-restart-request.schema.json": (
+        "asterion/schemas/operation/v1/controlled-update-restart-request.schema.json"
+    ),
     "schemas/operation/v1/telemetry-usage-request.schema.json": (
         "asterion/schemas/operation/v1/telemetry-usage-request.schema.json"
     ),

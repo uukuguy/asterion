@@ -32,10 +32,18 @@ class OperationPrivateRequestStore(Protocol):
 
 
 @dataclass(frozen=True)
+class OperationHandoffProof:
+    """Opaque, manager-durable proof emitted before an irreversible handoff."""
+
+    digest: str
+
+
+@dataclass(frozen=True)
 class OperationReconciliationContext:
     operation_id: str
     authority_revision: int
     reconciliation_attempt: int
+    handoff_proof_digest: str | None = None
 
 
 class OperationService(Protocol):
@@ -47,10 +55,26 @@ class OperationService(Protocol):
     async def execute(
         self, transaction: OperationTransaction, typed_request: object
     ) -> OperationReceipt: ...
+
     async def cancel(self, transaction: OperationTransaction) -> OperationReceipt: ...
     async def reconcile(
         self,
         transaction: OperationTransaction,
         typed_request: object,
         context: OperationReconciliationContext,
+    ) -> OperationReceipt: ...
+
+
+class StagedOperationService:
+    """Nominal opt-in for the manager-owned two-phase handoff path."""
+
+    async def prepare_handoff(
+        self, transaction: OperationTransaction, typed_request: object
+    ) -> OperationHandoffProof | OperationReceipt: ...
+
+    async def handoff_prepared(
+        self,
+        transaction: OperationTransaction,
+        typed_request: object,
+        proof: OperationHandoffProof,
     ) -> OperationReceipt: ...

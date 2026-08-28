@@ -20,6 +20,7 @@ import type {
   SettingsKeybindingsRequest,
   TelemetryUsageRequest,
   DoctorRequest,
+  ControlledUpdateRestartRequest,
   RunEvent,
   RunRequest,
   RuntimeManifest,
@@ -64,6 +65,28 @@ export const fixtureTelemetryUsageRequest: TelemetryUsageRequest = {
 };
 
 export const fixtureDoctorRequest: DoctorRequest = {};
+
+export const fixtureControlledUpdateRestartRequest: ControlledUpdateRestartRequest = {
+  current_artifact: {
+    artifact_id: "artifact-current-1",
+    artifact_sha256: "a".repeat(64),
+    daemon_id: "prime-daemon-1",
+    protocol_compatibility_id: "asterion.agent-runtime.v1",
+  },
+  next_artifact: {
+    artifact_id: "artifact-next-1",
+    artifact_sha256: "b".repeat(64),
+    daemon_id: "prime-daemon-1",
+    protocol_compatibility_id: "asterion.agent-runtime.v1",
+  },
+  checkpoint_ref: "checkpoint-1",
+};
+
+export const invalidControlledUpdateRestartPath: ControlledUpdateRestartRequest = {
+  ...fixtureControlledUpdateRestartRequest,
+  // @ts-expect-error Controlled restart requests cannot disclose a path.
+  path: "/SENTINEL_PRIVATE_PATH",
+};
 
 // @ts-expect-error Doctor requests are compile-time closed.
 export const invalidDoctorFixRequest: DoctorRequest = { fix: "repair" };

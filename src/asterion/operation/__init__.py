@@ -64,6 +64,17 @@ from asterion.operation.doctor import (
     reduce_diagnostics,
     validate_doctor_request,
 )
+from asterion.operation.update_restart import (
+    CONTROLLED_UPDATE_RESTART_MAX_REQUEST_BYTES,
+    CONTROLLED_UPDATE_RESTART_REQUEST_KIND,
+    CONTROLLED_UPDATE_RESTART_REQUEST_PURPOSE,
+    ArtifactIdentity,
+    ControlledUpdateRestartOperationError,
+    RestartCapsule,
+    UpdateRestartCoordinator,
+    UpdateRestartOperationService,
+    validate_controlled_update_restart_request,
+)
 
 __all__ = [
     "EFFECT_COUNTERS",
@@ -118,4 +129,13 @@ __all__ = [
     "DoctorReport",
     "reduce_diagnostics",
     "validate_doctor_request",
+    "CONTROLLED_UPDATE_RESTART_MAX_REQUEST_BYTES",
+    "CONTROLLED_UPDATE_RESTART_REQUEST_KIND",
+    "CONTROLLED_UPDATE_RESTART_REQUEST_PURPOSE",
+    "ArtifactIdentity",
+    "ControlledUpdateRestartOperationError",
+    "RestartCapsule",
+    "UpdateRestartCoordinator",
+    "UpdateRestartOperationService",
+    "validate_controlled_update_restart_request",
 ]

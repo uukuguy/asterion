@@ -42,6 +42,7 @@ import {
   validateSettingsKeybindingsRequest,
   validateTelemetryUsageRequest,
   validateDoctorRequest,
+  validateControlledUpdateRestartRequest,
   validateSessionContextCommand,
   validateSessionContextReceipt,
   validateEventStream,
@@ -493,6 +494,23 @@ test("validates closed immutable doctor requests without probe selectors or repa
     { fix: "repair" },
   ]) {
     assert.throws(() => validateDoctorRequest(value), OperationProtocolError);
+  }
+});
+
+test("validates closed immutable controlled update restart requests", async () => {
+  const valid = await readFixture(operationFixtures, "valid-controlled-update-restart-request.json");
+  const invalid = await readFixture(operationFixtures, "invalid-controlled-update-restart-request-path.json");
+  const snapshot = validateControlledUpdateRestartRequest(valid);
+  assert.deepEqual(snapshot, valid);
+  assert.ok(Object.isFrozen(snapshot));
+  assert.ok(Object.isFrozen(snapshot.next_artifact));
+  assert.throws(() => validateControlledUpdateRestartRequest(invalid), OperationProtocolError);
+  for (const value of [
+    { ...valid, body: "SENTINEL_BODY" },
+    { ...valid, checkpoint_ref: ["checkpoint-1"] },
+    { ...valid, next_artifact: { artifact_id: "artifact-next-1" } },
+  ]) {
+    assert.throws(() => validateControlledUpdateRestartRequest(value), OperationProtocolError);
   }
 });
 

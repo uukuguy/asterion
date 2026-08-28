@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://asterion.local/schemas/operation/v1/controlled-update-restart-request.schema.json",
+  "title": "Asterion Controlled Update Restart Request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["current_artifact", "next_artifact", "checkpoint_ref"],
+  "properties": {
+    "current_artifact": {"$ref": "#/$defs/artifact_identity"},
+    "next_artifact": {"$ref": "#/$defs/artifact_identity"},
+    "checkpoint_ref": {"$ref": "#/$defs/opaque_id"}
+  },
+  "$defs": {
+    "opaque_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "identifier": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "artifact_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifact_id", "artifact_sha256", "daemon_id", "protocol_compatibility_id"],
+      "properties": {
+        "artifact_id": {"$ref": "#/$defs/opaque_id"},
+        "artifact_sha256": {"$ref": "#/$defs/sha256"},
+        "daemon_id": {"$ref": "#/$defs/opaque_id"},
+        "protocol_compatibility_id": {"$ref": "#/$defs/identifier"}
+      }
+    }
+  }
+}

@@ -137,6 +137,12 @@ const doctorRequestSource = fileURLToPath(
     import.meta.url,
   ),
 );
+const controlledUpdateRestartRequestSource = fileURLToPath(
+  new URL(
+    "../../../../schemas/operation/v1/controlled-update-restart-request.schema.json",
+    import.meta.url,
+  ),
+);
 const destination = `${packageRoot}/dist/schemas`;
 
 rmSync(destination, { force: true, recursive: true });
@@ -200,3 +206,7 @@ cpSync(
   `${destination}/telemetry-usage-request.schema.json`,
 );
 cpSync(doctorRequestSource, `${destination}/doctor-request.schema.json`);
+cpSync(
+  controlledUpdateRestartRequestSource,
+  `${destination}/controlled-update-restart-request.schema.json`,
+);

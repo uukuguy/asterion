@@ -188,6 +188,19 @@ export interface TelemetryUsageRequest {
 
 export type DoctorRequest = Readonly<Record<string, never>>;
 
+export interface ArtifactIdentity {
+  readonly artifact_id: string;
+  readonly artifact_sha256: string;
+  readonly daemon_id: string;
+  readonly protocol_compatibility_id: string;
+}
+
+export interface ControlledUpdateRestartRequest {
+  readonly current_artifact: ArtifactIdentity;
+  readonly next_artifact: ArtifactIdentity;
+  readonly checkpoint_ref: string;
+}
+
 export interface ClientCursor {
   readonly generation: number;
   readonly sequence: number;
