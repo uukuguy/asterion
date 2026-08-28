@@ -152,6 +152,34 @@ class TestClientRpcAdapter(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("SENTINEL_PRIVATE_VALUE", str(raised.exception))
         self.assertEqual(endpoint.submissions, 0)
 
+    async def test_rpc_revalidates_hostile_event_mappers_before_yielding(self) -> None:
+        client, _ = _agent_client(_Endpoint((_evil_event(),)))
+        adapter = ClientRpcAdapter(client)
+        yielded: list[Mapping[str, object]] = []
+
+        with self.assertRaisesRegex(ClientRpcError, "^client RPC event stream is unavailable$") as raised:
+            async for event in adapter.events():
+                yielded.append(event)
+
+        self.assertEqual(yielded, [])
+        self.assertNotIn("SENTINEL_PRIVATE_VALUE", str(raised.exception))
+
+    async def test_rpc_redacts_hostile_mapper_failures_and_propagates_cancellation(self) -> None:
+        client, _ = _agent_client(_Endpoint((_exploding_event(),)))
+        adapter = ClientRpcAdapter(client)
+        with self.assertRaisesRegex(ClientRpcError, "^client RPC event stream is unavailable$") as raised:
+            _ = [event async for event in adapter.events()]
+        self.assertNotIn("SENTINEL_PRIVATE_VALUE", str(raised.exception))
+
+        client, _ = _agent_client(_CancelledEndpoint())
+        with self.assertRaises(asyncio.CancelledError):
+            _ = [event async for event in ClientRpcAdapter(client).events()]
+        for signal in (KeyboardInterrupt, SystemExit):
+            with self.subTest(signal=signal):
+                client, _ = _agent_client(_ProcessExceptionEndpoint(signal))
+                with self.assertRaises(signal):
+                    _ = [event async for event in ClientRpcAdapter(client).events()]
+
 
 class TestClientAcpAdapter(unittest.IsolatedAsyncioTestCase):
     async def test_acp_rejects_unknown_request_without_stdout_data(self) -> None:
@@ -192,6 +220,35 @@ class TestClientAcpAdapter(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ClientAcpError, "^client ACP event is unsupported$"):
             _ = [frame async for frame in adapter.events()]
 
+    async def test_acp_revalidates_hostile_events_before_stdout_write(self) -> None:
+        output = _AtomicBytesIO()
+        client, _ = _agent_client(_Endpoint((_evil_event(),)))
+        adapter = ClientAcpAdapter(client, stdout=output)
+
+        with self.assertRaisesRegex(ClientAcpError, "^client ACP event stream is unavailable$") as raised:
+            _ = [frame async for frame in adapter.events()]
+
+        self.assertEqual(output.getvalue(), b"")
+        self.assertEqual(output.write_calls, 0)
+        self.assertNotIn("SENTINEL_PRIVATE_VALUE", str(raised.exception))
+
+    async def test_acp_redacts_hostile_mapper_failures_and_propagates_cancellation(self) -> None:
+        output = _AtomicBytesIO()
+        client, _ = _agent_client(_Endpoint((_exploding_event(),)))
+        with self.assertRaisesRegex(ClientAcpError, "^client ACP event stream is unavailable$") as raised:
+            _ = [frame async for frame in ClientAcpAdapter(client, stdout=output).events()]
+        self.assertEqual(output.getvalue(), b"")
+        self.assertNotIn("SENTINEL_PRIVATE_VALUE", str(raised.exception))
+
+        client, _ = _agent_client(_CancelledEndpoint())
+        with self.assertRaises(asyncio.CancelledError):
+            _ = [frame async for frame in ClientAcpAdapter(client, stdout=output).events()]
+        for signal in (KeyboardInterrupt, SystemExit):
+            with self.subTest(signal=signal):
+                client, _ = _agent_client(_ProcessExceptionEndpoint(signal))
+                with self.assertRaises(signal):
+                    _ = [frame async for frame in ClientAcpAdapter(client, stdout=output).events()]
+
 
 class _AtomicBytesIO(io.BytesIO):
     def __init__(self) -> None:
@@ -207,6 +264,67 @@ class _FailingBytesIO(io.BytesIO):
     def write(self, data: Buffer, /) -> int:
         del data
         raise RuntimeError("SENTINEL_PRIVATE_VALUE")
+
+
+class _EvilEvent(ClientEvent):
+    def to_mapping(self) -> Mapping[str, object]:
+        mapping = dict(super().to_mapping())
+        payload = dict(cast(Mapping[str, object], mapping["payload"]))
+        payload["raw_output"] = "SENTINEL_PRIVATE_VALUE"
+        mapping["payload"] = payload
+        return mapping
+
+
+class _ExplodingEvent(ClientEvent):
+    def to_mapping(self) -> Mapping[str, object]:
+        raise RuntimeError("SENTINEL_PRIVATE_VALUE")
+
+
+class _CancelledEndpoint(_Endpoint):
+    def __init__(self) -> None:
+        super().__init__(())
+
+    def events(self, cursor: ClientCursor | None = None) -> AsyncIterator[ClientEvent]:
+        del cursor
+
+        async def iterate() -> AsyncIterator[ClientEvent]:
+            raise asyncio.CancelledError()
+            yield _event("session.terminal")
+
+        return iterate()
+
+
+class _ProcessExceptionEndpoint(_Endpoint):
+    def __init__(self, signal: type[BaseException]) -> None:
+        super().__init__(())
+        self._signal = signal
+
+    def events(self, cursor: ClientCursor | None = None) -> AsyncIterator[ClientEvent]:
+        del cursor
+
+        async def iterate() -> AsyncIterator[ClientEvent]:
+            raise self._signal()
+            yield _event("session.terminal")
+
+        return iterate()
+
+
+def _evil_event() -> ClientEvent:
+    event = _event("session.terminal")
+    return _EvilEvent(
+        protocol=event.protocol, event_id=event.event_id, session_id=event.session_id,
+        generation=event.generation, sequence=event.sequence, emitted_at=event.emitted_at,
+        type=event.type, payload=event.payload,
+    )
+
+
+def _exploding_event() -> ClientEvent:
+    event = _event("session.terminal")
+    return _ExplodingEvent(
+        protocol=event.protocol, event_id=event.event_id, session_id=event.session_id,
+        generation=event.generation, sequence=event.sequence, emitted_at=event.emitted_at,
+        type=event.type, payload=event.payload,
+    )
 
 
 class TestProtocolConstants(unittest.TestCase):

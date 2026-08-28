@@ -9,7 +9,13 @@ from collections.abc import AsyncIterator, Mapping
 from types import MappingProxyType
 
 from asterion.client.jsonl import ClientJsonlError, JsonlClientCodec
-from asterion.client.protocol import CLIENT_INTENT_TYPES, ClientCursor, ClientEvent, ClientIntent
+from asterion.client.protocol import (
+    CLIENT_INTENT_TYPES,
+    ClientCursor,
+    ClientEvent,
+    ClientIntent,
+    validate_client_event,
+)
 from asterion.client.sdk import AgentClient
 
 
@@ -112,4 +118,15 @@ def _snapshot_mapping(value: object) -> Mapping[str, object]:
 def _validated_event(value: object) -> ClientEvent:
     if not isinstance(value, ClientEvent):
         raise ClientRpcError("client RPC event stream is unavailable")
+    try:
+        return validate_client_event(_thaw_event_mapping(value.to_mapping()))
+    except Exception:
+        raise ClientRpcError("client RPC event stream is unavailable") from None
+
+
+def _thaw_event_mapping(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {key: _thaw_event_mapping(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_event_mapping(item) for item in value]
     return value

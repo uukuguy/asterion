@@ -8,7 +8,7 @@ from types import MappingProxyType
 from typing import Protocol
 
 from asterion.client.jsonl import ClientJsonlError, JsonlClientCodec
-from asterion.client.protocol import ClientCursor, ClientEvent
+from asterion.client.protocol import ClientCursor, ClientEvent, validate_client_event
 from asterion.client.sdk import AgentClient
 
 
@@ -98,8 +98,19 @@ class ClientAcpAdapter:
 def _frame_for_event(value: object) -> Mapping[str, object]:
     if not isinstance(value, ClientEvent):
         raise ClientAcpError("client ACP event stream is unavailable")
-    event = value
+    try:
+        event = validate_client_event(_thaw_event_mapping(value.to_mapping()))
+    except Exception:
+        raise ClientAcpError("client ACP event stream is unavailable") from None
     method = ACP_EVENT_METHODS.get(event.type)
     if method is None:
         raise ClientAcpError("client ACP event is unsupported")
     return MappingProxyType({"method": method, "params": event.to_mapping()})
+
+
+def _thaw_event_mapping(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {key: _thaw_event_mapping(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_event_mapping(item) for item in value]
+    return value
