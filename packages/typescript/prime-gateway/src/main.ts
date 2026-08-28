@@ -47,6 +47,9 @@ import {
 import {
   PrimeGateway,
   PrimeGatewayError,
+  PRIME_CLIENT_ARTIFACT_LOCK_DIGEST,
+  PRIME_CLIENT_BUNDLE_DIGEST,
+  PRIME_CLIENT_MODULE_LOCK_DIGEST,
 } from "./gateway.js";
 import type {
   PrimeGatewayPrivateInputs,
@@ -368,6 +371,26 @@ const PRIME_ECOSYSTEM_BUNDLE_EXPORTS = Object.freeze([
   "runExtensionLifecycle",
   "runMcpFixture",
 ]);
+const PRIME_CLIENT_MODULE_EXPORTS = Object.freeze(["runClientPackage"]);
+
+export async function loadPrimeClientModule(paths: Readonly<{
+  artifactLockPath: string;
+  bundlePath: string;
+  moduleLockPath: string;
+}>): Promise<Readonly<{ module: Readonly<{ runClientPackage: (frame: object) => Promise<unknown> }> }>> {
+  try {
+    if (!isRecord(paths) || !hasExactKeys(paths, ["artifactLockPath", "bundlePath", "moduleLockPath"])) throw new PrimeGatewayError();
+    const [artifact, lock, bundle] = await Promise.all([
+      readLockedEcosystemFile(paths.artifactLockPath), readLockedEcosystemFile(paths.moduleLockPath), readLockedEcosystemFile(paths.bundlePath),
+    ]);
+    if (createHash("sha256").update(artifact).digest("hex") !== PRIME_CLIENT_ARTIFACT_LOCK_DIGEST || createHash("sha256").update(lock).digest("hex") !== PRIME_CLIENT_MODULE_LOCK_DIGEST || createHash("sha256").update(bundle).digest("hex") !== PRIME_CLIENT_BUNDLE_DIGEST) throw new PrimeGatewayError();
+    const parsed = JSON.parse(lock.toString("utf8"));
+    if (!isRecord(parsed) || parsed.format !== "asterion.prime-client-module-lock/v1" || parsed.bundle_sha256 !== PRIME_CLIENT_BUNDLE_DIGEST || parsed.artifact_lock_sha256 !== PRIME_CLIENT_ARTIFACT_LOCK_DIGEST || parsed.source_commit !== "a18809e00ea30638584d87b3afea7285a9d7296c") throw new PrimeGatewayError();
+    const loaded = await import(`${pathToFileURL(paths.bundlePath).href}?sha256=${PRIME_CLIENT_BUNDLE_DIGEST}`) as Record<string, unknown>;
+    if (Object.keys(loaded).join("\0") !== PRIME_CLIENT_MODULE_EXPORTS.join("\0") || typeof loaded.runClientPackage !== "function") throw new PrimeGatewayError();
+    return Object.freeze({ module: Object.freeze({ runClientPackage: loaded.runClientPackage as (frame: object) => Promise<unknown> }) });
+  } catch { throw new PrimeGatewayError(); }
+}
 
 export interface PrimeEcosystemModuleBinding {
   readonly lock: PrimeEcosystemLockContract;

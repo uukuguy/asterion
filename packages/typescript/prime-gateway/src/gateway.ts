@@ -91,6 +91,32 @@ type CheckpointPayload = Extract<
   { readonly type: "checkpoint.created" }
 >["payload"];
 
+/** Exact, body-free receipt contract emitted by the locked Prime client module. */
+export const PRIME_CLIENT_RECEIPT_FORMAT = "asterion.prime-client-receipt/v1";
+export const PRIME_CLIENT_ARTIFACT_LOCK_DIGEST =
+  "c64aecdec9ddff21fb7ed493cc1837eb68bf428fc94803a65e6c185aca0fbba3";
+export const PRIME_CLIENT_MODULE_LOCK_DIGEST =
+  "b24a58d0957b9b927df74f2368b57a842376d64b52155fbff11a6e7e9160fa4c";
+export const PRIME_CLIENT_BUNDLE_DIGEST =
+  "2a7468316f0da078228912196e01d54bfd5c7fd998479f520826ed7fb187f503";
+
+export interface PrimeClientReceipt {
+  readonly artifact_lock_digest: string;
+  readonly credential_reads: 0;
+  readonly feature_count: number;
+  readonly feature_ids: readonly string[];
+  readonly module_digest: string;
+  readonly module_lock_digest: string;
+  readonly package: "core" | "protocols" | "interactive" | "export-share";
+  readonly provider_operations: 0;
+  readonly public_export_private_reads: 0;
+  readonly retained_processes: 0;
+  readonly scenario_count: number;
+  readonly scenario_ids: readonly string[];
+  readonly source_commit: "a18809e00ea30638584d87b3afea7285a9d7296c";
+  readonly unauthorized_uploads: 0;
+}
+
 export interface PrimeGatewaySession {
   readonly activeSessionId: string;
   readonly transcriptSessionId: string;

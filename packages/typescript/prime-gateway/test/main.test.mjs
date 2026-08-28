@@ -12,6 +12,7 @@ import {
   loadPrimeEcosystemModule,
   servePrimeGatewaySidecar,
 } from "../dist/src/main.js";
+import { loadPrimeClientModule } from "../dist/src/main.js";
 import { PRIME_ECOSYSTEM_LOCK_CONTRACT } from "../dist/src/ecosystem.js";
 import {
   GatewayDurableStore,
@@ -200,6 +201,18 @@ test("main resolves the exact ecosystem lock contract before importing its bundl
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
+});
+
+test("main rejects a client module whose identity is not the checked-in lock", async () => {
+  const resources = new URL("../resources/", import.meta.url);
+  await assert.rejects(
+    loadPrimeClientModule({
+      artifactLockPath: await realpath(new URL("prime-artifact-lock.json", resources)),
+      bundlePath: await realpath(new URL("prime-client-module-lock.json", resources)),
+      moduleLockPath: await realpath(new URL("prime-client-module-lock.json", resources)),
+    }),
+    (error) => error.message === "Prime gateway operation failed",
+  );
 });
 
 class FakePrivateValues {

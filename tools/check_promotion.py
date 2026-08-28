@@ -139,6 +139,12 @@ prime_lock = json.loads(
 )
 assert prime_lock['format'] == 'asterion.prime-artifact-lock/v1'
 assert len(prime_lock['source_commit']) == 40
+client_lock = json.loads(
+    (prime_root / 'prime-client-module-lock.json').read_text(encoding='utf-8')
+)
+assert client_lock['format'] == 'asterion.prime-client-module-lock/v1'
+assert client_lock['source_commit'] == prime_lock['source_commit']
+assert (prime_root / 'prime-client-module.mjs').is_file()
 assert (prime_root / 'control-plane.json').is_file()
 assert (prime_root / 'skills/asterion-control/SKILL.md').is_file()
 assert (prime_root / 'skills/asterion-control/pyproject.toml').is_file()

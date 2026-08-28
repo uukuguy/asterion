@@ -85,6 +85,12 @@ def completed(
 
 @mock.patch.dict(os.environ, {"ASTERION_PRIME_SOURCE_ROOT": ""})
 class PromotionCheckTests(unittest.TestCase):
+    def test_wheel_resource_smoke_requires_the_locked_client_module(self) -> None:
+        from tools.check_promotion import WHEEL_PROTOCOL_RESOURCE_SMOKE
+
+        self.assertIn("prime-client-module-lock.json", WHEEL_PROTOCOL_RESOURCE_SMOKE)
+        self.assertIn("prime-client-module.mjs", WHEEL_PROTOCOL_RESOURCE_SMOKE)
+
     def test_default_runner_forces_sparse_cargo_registry_and_preserves_environment(self) -> None:
         result = completed(("cargo", "test"))
         with (

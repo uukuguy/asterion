@@ -3,7 +3,9 @@ from __future__ import annotations
 import hashlib
 import itertools
 import json
+import subprocess
 import unittest
+from pathlib import Path
 
 from asterion.client.export import ClientArtifactReceipt, ClientExportAuthority, export_client_session, share_client_export
 from tests.test_client_export_share import _Store, _authority, _events
@@ -14,6 +16,16 @@ _FEATURE_IDS = ("interface.export-share",)
 _SCENARIO_IDS = ("prime-client-export-share.public", "prime-client-export-share.private", "prime-client-export-share.share")
 _MODULE_IDS = ("tests.test_client_export_share", "tests.test_prime_client_export_share")
 _AUTHORITY_IDS = itertools.count(1)
+_PROJECT = Path(__file__).resolve().parents[1]
+
+
+def _real_prime_receipt(package: str) -> dict[str, object]:
+    completed = subprocess.run(
+        ("node", str(_PROJECT / "tests/fixtures/prime_gateway/v1/real-prime-clients.mjs"),
+         "--package", package),
+        cwd=_PROJECT, check=True, capture_output=True, text=True,
+    )
+    return json.loads(completed.stdout)
 
 
 class _Share:
@@ -41,6 +53,12 @@ def _receipt() -> dict[str, object]:
 
 
 class TestPrimeClientExportShareReceipt(unittest.TestCase):
+    def test_locked_real_prime_harness_proves_exact_export_share_package(self) -> None:
+        receipt = _real_prime_receipt("export-share")
+        self.assertEqual((receipt["package"], receipt["feature_count"], receipt["scenario_count"]), ("export-share", 1, 1))
+        self.assertEqual((receipt["provider_operations"], receipt["credential_reads"], receipt["retained_processes"]), (0, 0, 0))
+        self.assertNotIn("SENTINEL_PRIVATE_VALUE", json.dumps(receipt, sort_keys=True))
+
     def test_provider_free_receipt_is_exact_and_deterministic(self) -> None:
         receipt = _receipt()
         self.assertEqual(receipt["gate_id"], _GATE_ID)

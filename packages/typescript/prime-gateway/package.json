@@ -7,7 +7,11 @@
   "types": "./dist/src/index.d.ts",
   "files": [
     "dist",
-    "resources"
+    "resources/prime-artifact-lock.json",
+    "resources/prime-client-module-lock.json",
+    "resources/prime-client-module.mjs",
+    "resources/prime-ecosystem-module-lock.json",
+    "resources/prime-ecosystem-module.mjs"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",

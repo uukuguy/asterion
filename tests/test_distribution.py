@@ -56,6 +56,12 @@ PRIME_DISTRIBUTION_MEMBERS = {
     "packages/typescript/prime-gateway/resources/prime-ecosystem-module.mjs": (
         "asterion/control/providers/prime/resources/prime-ecosystem-module.mjs"
     ),
+    "packages/typescript/prime-gateway/resources/prime-client-module-lock.json": (
+        "asterion/control/providers/prime/resources/prime-client-module-lock.json"
+    ),
+    "packages/typescript/prime-gateway/resources/prime-client-module.mjs": (
+        "asterion/control/providers/prime/resources/prime-client-module.mjs"
+    ),
     "src/asterion/control/providers/prime/resources/skills/asterion-control/SKILL.md": (
         "asterion/control/providers/prime/resources/skills/asterion-control/SKILL.md"
     ),

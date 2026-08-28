@@ -4,9 +4,11 @@ import hashlib
 import io
 import json
 import re
+import subprocess
 import unittest
 from collections.abc import AsyncIterator, Mapping
 from typing import TypedDict, cast
+from pathlib import Path
 
 from asterion.client import AgentClient, ClientCursor, ClientEvent
 from asterion.client.acp import ACP_EVENT_METHODS, ClientAcpAdapter
@@ -35,6 +37,16 @@ _FORBIDDEN_VALUE_TERMS = (
     "answer", "body", "credential", "destination", "output", "path", "private",
     "prompt", "raw", "source",
 )
+_PROJECT = Path(__file__).resolve().parents[1]
+
+
+def _real_prime_receipt(package: str) -> dict[str, object]:
+    completed = subprocess.run(
+        ("node", str(_PROJECT / "tests/fixtures/prime_gateway/v1/real-prime-clients.mjs"),
+         "--package", package),
+        cwd=_PROJECT, check=True, capture_output=True, text=True,
+    )
+    return cast(dict[str, object], json.loads(completed.stdout))
 
 
 class _Receipt(TypedDict):
@@ -201,6 +213,12 @@ def _validate_public_evidence(value: object) -> None:
 
 
 class TestPrimeClientProtocolReceipt(unittest.IsolatedAsyncioTestCase):
+    async def test_locked_real_prime_harness_proves_exact_protocol_package(self) -> None:
+        receipt = _real_prime_receipt("protocols")
+        self.assertEqual((receipt["package"], receipt["feature_count"], receipt["scenario_count"]), ("protocols", 2, 2))
+        self.assertEqual((receipt["provider_operations"], receipt["credential_reads"], receipt["retained_processes"]), (0, 0, 0))
+        self.assertNotIn(_SENTINEL, json.dumps(receipt, sort_keys=True))
+
     async def test_provider_free_receipt_executes_the_exact_protocol_boundary(self) -> None:
         receipt = await _provider_free_receipt()
 
