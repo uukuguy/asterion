@@ -9,6 +9,7 @@ from datetime import datetime
 from types import MappingProxyType
 
 from asterion.protocol_ordering import is_sorted_unique_scalar_strings
+from asterion.operation.protocol import EFFECT_COUNTERS, OPERATION_FEATURE_IDS
 
 
 AGENT_CLIENT_PROTOCOL = "asterion.agent-client/v1"
@@ -35,6 +36,7 @@ CLIENT_EVENT_TYPES = frozenset(
         "extension-ui.requested",
         "fault.raised",
         "message.available",
+        "operation.receipted",
         "session.state",
         "session.terminal",
         "share.created",
@@ -94,6 +96,14 @@ CLIENT_EVENT_PAYLOAD_FIELDS = MappingProxyType(
             "role",
             "sha256",
             "size",
+        ),
+        "operation.receipted": (
+            "effect_counts",
+            "feature_id",
+            "operation_id",
+            "reason_code",
+            "receipt_ref",
+            "status",
         ),
         "session.state": ("reason_code", "status"),
         "session.terminal": ("reason_code", "status"),
@@ -408,6 +418,21 @@ def _validate_event_payload(event_type: str, value: Mapping[str, object]) -> Non
             raise ClientProtocolError("message role is invalid")
         _require_sha256(payload["sha256"], "message digest")
         _require_nonnegative_integer(payload["size"], "message size")
+    elif event_type == "operation.receipted":
+        _require_opaque_id(payload["operation_id"], "operation identity")
+        if payload["feature_id"] not in OPERATION_FEATURE_IDS:
+            raise ClientProtocolError("operation feature is invalid")
+        if payload["status"] not in {
+            "succeeded", "rejected", "failed", "cancelled", "uncertain"
+        }:
+            raise ClientProtocolError("operation status is invalid")
+        _require_identifier(payload["reason_code"], "operation reason")
+        _require_opaque_id(payload["receipt_ref"], "operation receipt reference")
+        counts = _closed_mapping(
+            payload["effect_counts"], set(EFFECT_COUNTERS), "operation effect counts"
+        )
+        for name in EFFECT_COUNTERS:
+            _require_nonnegative_integer(counts[name], f"operation effect count {name}")
     elif event_type in {"session.state", "session.terminal"}:
         _require_identifier(payload["reason_code"], "session reason")
         statuses = _TERMINAL_STATUSES if event_type == "session.terminal" else _SESSION_STATUSES

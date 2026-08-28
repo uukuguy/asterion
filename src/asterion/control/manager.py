@@ -471,6 +471,12 @@ class ControlHost:
 
         return self._authority.envelope.revision
 
+    @property
+    def operation_authority_id(self) -> str:
+        """Return only the authority identity required by a bound operation transaction."""
+
+        return self._authority.envelope.authority_id
+
     def client_command(
         self,
         *,
@@ -598,6 +604,8 @@ class ControlHost:
             return await self._operation_manager.execute(transaction)
         except OperationManagerError:
             raise ControlHostError("control operation failed") from None
+        finally:
+            self._journal_position = self._journal.position
 
     async def reconcile_operation(self, transaction: OperationTransaction):
         if self._operation_manager is None:
@@ -608,6 +616,8 @@ class ControlHost:
             return await self._operation_manager.reconcile(transaction)
         except OperationManagerError:
             raise ControlHostError("control operation reconciliation failed") from None
+        finally:
+            self._journal_position = self._journal.position
 
     @classmethod
     def recover_operation_host(

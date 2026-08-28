@@ -5,12 +5,17 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from types import MappingProxyType
 from typing import Protocol
 
-from asterion.client.private import ClientPrivateValueService
+from asterion.client.private import (
+    ClientPrivateValueService,
+    OperationPrivateRequestMetadata,
+)
 from asterion.client.export import (
     ClientArtifactReceipt,
     ClientArtifactStore,
@@ -25,10 +30,104 @@ from asterion.client.protocol import (
 from asterion.control.journal import CanonicalJournal, JournalCursor
 from asterion.control.host import ControlCommand
 from asterion.control.manager import ControlHost
+from asterion.operation.protocol import OperationReceipt, OperationRequestDescriptor, OperationTransaction
 
 
 class ClientSessionError(RuntimeError):
     """Raised when host-owned client session processing is rejected."""
+
+
+@dataclass(frozen=True)
+class OperationCommandBinding:
+    """One closed client command binding; it never names a provider or service."""
+
+    command_name: str
+    feature_id: str
+    request_kind: str
+    request_purpose: str
+    accepted_media_type: str
+    max_request_bytes: int
+    deadline_ms: int
+
+    def __post_init__(self) -> None:
+        expected = _OPERATION_BINDING_VALUES.get(self.command_name)
+        if (
+            expected is None
+            or tuple(getattr(self, field) for field in _OPERATION_BINDING_FIELDS)
+            != expected
+        ):
+            raise ClientSessionError("operation command binding is invalid")
+
+
+class OperationCommandDispatcher(Protocol):
+    async def execute_operation(self, transaction: OperationTransaction) -> OperationReceipt:
+        ...
+
+
+class OperationPrivateRequestDescriber(Protocol):
+    def describe_operation_request(
+        self,
+        request_ref: str,
+        *,
+        client_id: str,
+        session_id: str,
+        generation: int,
+        authority_revision: int,
+    ) -> OperationPrivateRequestMetadata:
+        ...
+
+
+_OPERATION_BINDING_FIELDS = (
+    "command_name", "feature_id", "request_kind", "request_purpose",
+    "accepted_media_type", "max_request_bytes", "deadline_ms",
+)
+_OPERATION_BINDING_VALUES = MappingProxyType({
+    "operation.auth": ("operation.auth", "operation.auth", "operation.auth-request", "operation.auth", "application/json", 4096, 30_000),
+    "operation.controlled-update-restart": ("operation.controlled-update-restart", "operation.controlled-update-restart", "operation.controlled-update-restart-request", "operation.controlled-update-restart", "application/json", 4096, 30_000),
+    "operation.doctor": ("operation.doctor", "operation.doctor", "operation.doctor-request", "operation.doctor", "application/json", 4096, 30_000),
+    "operation.model-selection": ("operation.model-selection", "operation.model-selection", "operation.model-selection-request", "operation.model-selection", "application/json", 4096, 30_000),
+    "operation.settings-keybindings": ("operation.settings-keybindings", "operation.settings-keybindings", "operation.settings-keybindings-request", "operation.settings-keybindings", "application/json", 4096, 30_000),
+    "operation.telemetry-usage": ("operation.telemetry-usage", "operation.telemetry-usage", "operation.telemetry-usage-request", "operation.telemetry-usage", "application/json", 4096, 30_000),
+})
+
+
+@dataclass(frozen=True)
+class OperationCommandRegistry:
+    """Immutable exact operation command names at one selected revision."""
+
+    revision: int = 1
+    bindings: tuple[OperationCommandBinding, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.revision, int) or isinstance(self.revision, bool) or self.revision < 1:
+            raise ClientSessionError("operation command registry is invalid")
+        bindings = self.bindings or tuple(
+            OperationCommandBinding(*values) for _, values in sorted(_OPERATION_BINDING_VALUES.items())
+        )
+        if (
+            not isinstance(bindings, tuple)
+            or any(type(binding) is not OperationCommandBinding for binding in bindings)
+            or tuple(binding.command_name for binding in bindings) != tuple(sorted(_OPERATION_BINDING_VALUES))
+        ):
+            raise ClientSessionError("operation command registry is invalid")
+        object.__setattr__(self, "bindings", bindings)
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        return tuple(binding.command_name for binding in self.bindings)
+
+    def resolve(self, command_name: str, *, revision: int) -> OperationCommandBinding:
+        if revision != self.revision or not isinstance(command_name, str):
+            raise ClientSessionError("operation command is invalid")
+        for binding in self.bindings:
+            if binding.command_name == command_name:
+                return binding
+        raise ClientSessionError("operation command is invalid")
+
+    def invoke(self, command_name: str) -> OperationCommandBinding:
+        """Compatibility-free exact lookup for UI command validation."""
+
+        return self.resolve(command_name, revision=self.revision)
 
 
 @dataclass(frozen=True, repr=False)
@@ -121,6 +220,11 @@ class HostClientSessionEndpoint:
         journal: CanonicalJournal,
         private_values: ClientPrivateValueService,
         observation_source: ClientObservationSource | None = None,
+        operation_dispatcher: OperationCommandDispatcher | None = None,
+        operation_registry: OperationCommandRegistry | None = None,
+        operation_describer: OperationPrivateRequestDescriber | None = None,
+        operation_authority_id: str | None = None,
+        operation_cancellation_signal: object | None = None,
     ) -> None:
         if (
             not isinstance(client_id, str)
@@ -137,11 +241,37 @@ class HostClientSessionEndpoint:
             )
         ):
             raise ClientSessionError("client session construction is invalid")
+        dispatcher = host if operation_dispatcher is None else operation_dispatcher
+        describer = private_values if operation_describer is None else operation_describer
+        registry = OperationCommandRegistry() if operation_registry is None else operation_registry
+        authority_id = (
+            host.operation_authority_id
+            if operation_authority_id is None
+            else operation_authority_id
+        )
+        cancelled = _cancellation_value(
+            operation_cancellation_signal,
+            error_message="client session construction is invalid",
+        )
+        if (
+            not callable(getattr(dispatcher, "execute_operation", None))
+            or not callable(getattr(describer, "describe_operation_request", None))
+            or type(registry) is not OperationCommandRegistry
+            or not isinstance(authority_id, str)
+            or not _opaque_id(authority_id)
+            or cancelled
+        ):
+            raise ClientSessionError("client session construction is invalid")
         self._client_id = client_id
         self._host = host
         self._journal = journal
         self._private_values = private_values
         self._observation_source = observation_source
+        self._operation_dispatcher = dispatcher
+        self._operation_registry = registry
+        self._operation_describer = describer
+        self._operation_authority_id = authority_id
+        self._operation_cancellation_signal = operation_cancellation_signal
         self._intent_digests: dict[str, str] = {}
         self._dispatched_intent_ids: set[str] = set()
         self._pending_intent_id: str | None = None
@@ -154,6 +284,9 @@ class HostClientSessionEndpoint:
         self._seen_call_ids: set[str] = set()
         self._terminal_seen = False
         self._last_observation_source_sequence: int | None = None
+        self._operation_receipt_keys: set[tuple[str, str, str]] = set()
+        self._operation_receipt_statuses: dict[str, str] = {}
+        self._operation_receipt_identities: dict[str, tuple[object, ...]] = {}
         self._rebuild()
 
     @property
@@ -171,6 +304,10 @@ class HostClientSessionEndpoint:
     @property
     def generation(self) -> int:
         return self._host.generation
+
+    @property
+    def command_registry(self) -> OperationCommandRegistry:
+        return self._operation_registry
 
     def export(
         self,
@@ -198,7 +335,16 @@ class HostClientSessionEndpoint:
         ):
             raise ClientSessionError("client intent identity is invalid")
         digest = _digest(intent.to_mapping())
-        _control_mapping(intent)
+        if intent.type == "command.invoke":
+            command_name = intent.payload["command_name"]
+            command_revision = intent.payload["command_revision"]
+            if not isinstance(command_name, str) or type(command_revision) is not int:
+                raise ClientSessionError("operation command is invalid")
+            self._operation_registry.resolve(
+                command_name, revision=command_revision,
+            )
+        else:
+            _control_mapping(intent)
         async with self._submit_lock:
             if self._closed:
                 raise ClientSessionError("client session is closed")
@@ -257,6 +403,7 @@ class HostClientSessionEndpoint:
 
     async def pump(self, *, until_terminal: bool = False) -> None:
         await self._host.pump(until_terminal=until_terminal)
+        await self._project_durable_operation_receipts()
         source = self._observation_source
         if source is None:
             return
@@ -317,9 +464,37 @@ class HostClientSessionEndpoint:
             entries = self._journal.replay(JournalCursor(0))
             pending_intent: ClientIntent | None = None
             pending_observation: ClientObservation | None = None
+            pending_operation_receipt: OperationReceipt | None = None
+            pending_durable_operation_receipts: list[OperationReceipt] = []
             for entry in entries:
                 record = entry.record
                 if pending_intent is not None:
+                    if pending_intent.type == "command.invoke":
+                        if record.kind.startswith("operation."):
+                            if record.kind == "operation.receipted":
+                                if pending_operation_receipt is not None:
+                                    raise ValueError
+                                pending_operation_receipt = OperationReceipt.from_mapping(
+                                    _mapping(record.payload["receipt"])
+                                )
+                            continue
+                        if (
+                            record.kind != "client.event.accepted"
+                            or pending_operation_receipt is None
+                        ):
+                            raise ValueError
+                        event = ClientEvent.from_mapping(
+                            _mapping(record.payload["event"])
+                        )
+                        if event != self._operation_event(pending_operation_receipt):
+                            raise ValueError
+                        self._append_event(event)
+                        self._remember_operation_receipt(pending_operation_receipt)
+                        self._dispatched_intent_ids.add(pending_intent.intent_id)
+                        pending_intent = None
+                        pending_operation_receipt = None
+                        self._pending_intent_id = None
+                        continue
                     if record.kind != "command.accepted":
                         raise ValueError
                     command = ControlCommand.from_mapping(
@@ -371,8 +546,29 @@ class HostClientSessionEndpoint:
                     ):
                         raise ValueError
                     pending_observation = observation
+                elif record.kind == "operation.receipted":
+                    pending_durable_operation_receipts.append(
+                        OperationReceipt.from_mapping(_mapping(record.payload["receipt"]))
+                    )
                 elif record.kind == "client.event.accepted":
+                    event = ClientEvent.from_mapping(_mapping(record.payload["event"]))
+                    if event.type != "operation.receipted":
+                        raise ValueError
+                    matches = tuple(
+                        receipt for receipt in pending_durable_operation_receipts
+                        if self._operation_event(receipt) == event
+                    )
+                    if len(matches) != 1:
+                        raise ValueError
+                    self._append_event(event)
+                    self._remember_operation_receipt(matches[0])
+                    pending_durable_operation_receipts.remove(matches[0])
+            if pending_intent is not None and pending_intent.type == "command.invoke":
+                if pending_operation_receipt is None:
                     raise ValueError
+                self._project_operation_receipt_sync(pending_operation_receipt)
+                self._dispatched_intent_ids.add(pending_intent.intent_id)
+                self._pending_intent_id = None
             if pending_observation is not None:
                 event = self._project_observation(pending_observation)
                 self._validate_next_event(event)
@@ -390,6 +586,11 @@ class HostClientSessionEndpoint:
     async def _dispatch_intent(self, intent: ClientIntent) -> None:
         if self._pending_intent_id != intent.intent_id:
             raise ClientSessionError("client intent recovery is invalid")
+        if intent.type == "command.invoke":
+            await self._dispatch_operation_intent(intent)
+            self._dispatched_intent_ids.add(intent.intent_id)
+            self._pending_intent_id = None
+            return
         command = self._client_command(intent)
         try:
             await self._host.dispatch(command)
@@ -400,6 +601,185 @@ class HostClientSessionEndpoint:
             raise ClientSessionError("client intent dispatch failed") from None
         self._dispatched_intent_ids.add(intent.intent_id)
         self._pending_intent_id = None
+
+    async def _dispatch_operation_intent(self, intent: ClientIntent) -> None:
+        transaction = self._operation_transaction(intent)
+        try:
+            receipt = await self._operation_dispatcher.execute_operation(transaction)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            raise ClientSessionError("client operation dispatch failed") from None
+        if type(receipt) is not OperationReceipt:
+            raise ClientSessionError("client operation receipt is invalid")
+        await self._project_operation_receipt(receipt)
+
+    def _operation_transaction(self, intent: ClientIntent) -> OperationTransaction:
+        payload = intent.payload
+        try:
+            command_name = payload["command_name"]
+            command_revision = payload["command_revision"]
+            request_ref = payload["arguments_ref"]
+            if (
+                not isinstance(command_name, str)
+                or type(command_revision) is not int
+                or not isinstance(request_ref, str)
+            ):
+                raise ValueError
+            binding = self._operation_registry.resolve(
+                command_name, revision=command_revision
+            )
+            if _cancellation_value(
+                self._operation_cancellation_signal,
+                error_message="client operation is cancelled",
+            ):
+                raise ValueError
+            metadata = self._operation_describer.describe_operation_request(
+                request_ref, client_id=self._client_id,
+                session_id=self._host.session_id, generation=self._host.generation,
+                authority_revision=self._host.authority_revision,
+            )
+            if type(metadata) is not OperationPrivateRequestMetadata:
+                raise ValueError
+            if (
+                metadata.request_ref != request_ref
+                or metadata.client_id != self._client_id
+                or metadata.session_id != self._host.session_id
+                or metadata.generation != self._host.generation
+                or metadata.authority_revision != self._host.authority_revision
+                or metadata.media_type != binding.accepted_media_type
+                or metadata.byte_count > binding.max_request_bytes
+                or _cancellation_value(
+                    self._operation_cancellation_signal,
+                    error_message="client operation is cancelled",
+                )
+            ):
+                raise ValueError
+            request = OperationRequestDescriptor(
+                request_kind=binding.request_kind, request_ref=metadata.request_ref,
+                request_sha256=metadata.request_sha256, media_type=metadata.media_type,
+                byte_count=metadata.byte_count, purpose=binding.request_purpose,
+                client_id=metadata.client_id, session_id=metadata.session_id,
+                generation=metadata.generation,
+                authority_revision=metadata.authority_revision,
+            )
+            digest = _digest(intent.to_mapping())
+            return OperationTransaction(
+                operation_id=f"operation-{digest}", request=request,
+                session_id=self._host.session_id, client_id=self._client_id,
+                generation=self._host.generation,
+                authority_revision=self._host.authority_revision,
+                authority_id=self._operation_authority_id, idempotency_key=digest,
+                feature_id=binding.feature_id, requested_at=_operation_timestamp(digest),
+            )
+        except asyncio.CancelledError:
+            raise ClientSessionError("client operation is invalid") from None
+        except ClientSessionError:
+            raise
+        except Exception:
+            raise ClientSessionError("client operation is invalid") from None
+
+    async def _project_operation_receipt(self, receipt: OperationReceipt) -> None:
+        try:
+            if (
+                receipt.client_id != self._client_id
+                or receipt.session_id != self._host.session_id
+                or receipt.generation != self._host.generation
+                or receipt.authority_revision != self._host.authority_revision
+                or receipt.authority_id != self._operation_authority_id
+            ):
+                raise ValueError
+            key = (receipt.operation_id, receipt.status, receipt.receipt_ref)
+            prior = self._operation_receipt_statuses.get(receipt.operation_id)
+            if key in self._operation_receipt_keys:
+                return
+            if (
+                (prior is not None and (prior != "uncertain" or receipt.status == "uncertain"))
+                or (
+                    receipt.operation_id in self._operation_receipt_identities
+                    and self._operation_receipt_identities[receipt.operation_id]
+                    != _operation_receipt_identity(receipt)
+                )
+            ):
+                raise ValueError
+            event = self._operation_event(receipt)
+            entry = self._journal.accept_client_event(
+                event, expected_position=self._journal.position
+            )
+            self._host.advance_client_record(entry)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            raise ClientSessionError("client operation receipt is invalid") from None
+        self._append_event(event)
+        self._remember_operation_receipt(receipt)
+
+    def _project_operation_receipt_sync(self, receipt: OperationReceipt) -> None:
+        try:
+            event = self._operation_event(receipt)
+            entry = self._journal.accept_client_event(
+                event, expected_position=self._journal.position
+            )
+            self._host.advance_client_record(entry)
+        except Exception:
+            raise ValueError from None
+        self._append_event(event)
+        self._remember_operation_receipt(receipt)
+
+    def _operation_event(self, receipt: OperationReceipt) -> ClientEvent:
+        return ClientEvent(
+            protocol="asterion.agent-client/v1",
+            event_id="operation-event-" + hashlib.sha256(
+                f"{receipt.operation_id}:{receipt.status}:{receipt.receipt_ref}".encode()
+            ).hexdigest(),
+            session_id=self._host.session_id, generation=self._host.generation,
+            sequence=len(self._events) + 1, emitted_at=receipt.completed_at,
+            type="operation.receipted",
+            payload={
+                "effect_counts": dict(receipt.effect_counts),
+                "feature_id": receipt.feature_id,
+                "operation_id": receipt.operation_id,
+                "reason_code": receipt.reason_code,
+                "receipt_ref": receipt.receipt_ref,
+                "status": receipt.status,
+            },
+        )
+
+    def _remember_operation_receipt(self, receipt: OperationReceipt) -> None:
+        key = (receipt.operation_id, receipt.status, receipt.receipt_ref)
+        identity = _operation_receipt_identity(receipt)
+        prior = self._operation_receipt_statuses.get(receipt.operation_id)
+        if (
+            receipt.client_id != self._client_id
+            or receipt.session_id != self._host.session_id
+            or receipt.generation != self._host.generation
+            or receipt.authority_revision != self._host.authority_revision
+            or receipt.authority_id != self._operation_authority_id
+            or key in self._operation_receipt_keys
+            or (
+                receipt.operation_id in self._operation_receipt_identities
+                and self._operation_receipt_identities[receipt.operation_id] != identity
+            )
+            or (prior is not None and (prior != "uncertain" or receipt.status == "uncertain"))
+        ):
+            raise ValueError
+        self._operation_receipt_keys.add(key)
+        self._operation_receipt_statuses[receipt.operation_id] = receipt.status
+        self._operation_receipt_identities[receipt.operation_id] = identity
+
+    async def _project_durable_operation_receipts(self) -> None:
+        try:
+            entries = self._journal.replay(JournalCursor(0))
+            receipts = tuple(
+                OperationReceipt.from_mapping(_mapping(entry.record.payload["receipt"]))
+                for entry in entries if entry.record.kind == "operation.receipted"
+            )
+        except Exception:
+            raise ClientSessionError("client operation receipt is invalid") from None
+        for receipt in receipts:
+            key = (receipt.operation_id, receipt.status, receipt.receipt_ref)
+            if key not in self._operation_receipt_keys:
+                await self._project_operation_receipt(receipt)
 
     def _client_command(self, intent: ClientIntent) -> ControlCommand:
         command_type, payload = _control_mapping(intent)
@@ -530,4 +910,44 @@ def _json_value(value: object) -> object:
         return {str(key): _json_value(item) for key, item in value.items()}
     if isinstance(value, tuple):
         return [_json_value(item) for item in value]
+    return value
+
+
+def _operation_timestamp(intent_digest: str) -> str:
+    """Derive a replay-stable protocol timestamp from the full intent digest."""
+
+    seconds = int(intent_digest[:8], 16) % 2_000_000_000
+    return datetime.fromtimestamp(seconds, timezone.utc).isoformat(
+        timespec="seconds"
+    ).replace("+00:00", "Z")
+
+
+def _operation_receipt_identity(receipt: OperationReceipt) -> tuple[object, ...]:
+    return (
+        receipt.operation_id, receipt.request_ref, receipt.request_sha256,
+        receipt.purpose, receipt.session_id, receipt.client_id,
+        receipt.generation, receipt.authority_revision, receipt.authority_id,
+        receipt.idempotency_key, receipt.feature_id,
+    )
+
+
+def _opaque_id(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) <= 128
+        and bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", value))
+    )
+
+
+def _cancellation_value(signal: object | None, *, error_message: str) -> bool:
+    if signal is None:
+        return False
+    try:
+        value = getattr(signal, "cancelled")
+    except asyncio.CancelledError:
+        raise ClientSessionError(error_message) from None
+    except Exception:
+        raise ClientSessionError(error_message) from None
+    if type(value) is not bool:
+        raise ClientSessionError(error_message)
     return value

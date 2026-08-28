@@ -249,6 +249,34 @@ test("validates the closed body-free agent client contract", async () => {
     const validate = "intent_id" in invalid ? validateClientIntent : validateClientEvent;
     assert.throws(() => validate(invalid), ProtocolValidationError);
   }
+  const operationReceipt = validateClientEvent({
+    protocol: "asterion.agent-client/v1",
+    event_id: "event-operation-1",
+    session_id: "session-1",
+    generation: 1,
+    sequence: 1,
+    emitted_at: "2026-08-10T15:00:00Z",
+    type: "operation.receipted",
+    payload: {
+      effect_counts: {
+        credential_value_reads: 0,
+        external_telemetry_deliveries: 0,
+        network_operations: 0,
+        os_process_restart_operations: 0,
+        package_manager_operations: 0,
+        provider_model_requests: 0,
+        uploads: 0,
+      },
+      feature_id: "operation.auth",
+      operation_id: "operation-1",
+      reason_code: "operation-succeeded",
+      receipt_ref: "receipt-public-1",
+      status: "succeeded",
+    },
+  });
+  assert.deepEqual(Object.keys(operationReceipt.payload), [
+    "effect_counts", "feature_id", "operation_id", "reason_code", "receipt_ref", "status",
+  ]);
   const toolStarted = {
     ...message,
     type: "tool.started",

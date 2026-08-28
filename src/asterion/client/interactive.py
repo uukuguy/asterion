@@ -109,6 +109,7 @@ class ClientViewState:
     exports: tuple[ClientEvent, ...] = ()
     faults: tuple[ClientEvent, ...] = ()
     messages: tuple[ClientEvent, ...] = ()
+    operation_receipts: tuple[ClientEvent, ...] = ()
     shares: tuple[ClientEvent, ...] = ()
     active_tool_calls: Mapping[str, ClientEvent] = field(default_factory=dict)
     completed_tool_calls: tuple[ClientEvent, ...] = ()
@@ -134,8 +135,8 @@ class ClientViewState:
             any(not isinstance(key, str) or type(value) is not ClientUiRequest for key, value in pending_ui.items())
             or any(not isinstance(key, str) or type(value) is not ClientEvent for key, value in active_calls.items())
             or not isinstance(self.terminal, bool)
-            or any(not isinstance(group, tuple) for group in (self.artifacts, self.exports, self.faults, self.messages, self.shares, self.completed_tool_calls))
-            or any(type(event) is not ClientEvent for group in (self.artifacts, self.exports, self.faults, self.messages, self.shares, self.completed_tool_calls) for event in group)
+            or any(not isinstance(group, tuple) for group in (self.artifacts, self.exports, self.faults, self.messages, self.operation_receipts, self.shares, self.completed_tool_calls))
+            or any(type(event) is not ClientEvent for group in (self.artifacts, self.exports, self.faults, self.messages, self.operation_receipts, self.shares, self.completed_tool_calls) for event in group)
         ):
             raise ClientInteractiveError("client view state is invalid")
         if self.usage is not None:
@@ -338,6 +339,8 @@ async def run_headless(
             state = reduce_client_view(state, event)
             if mode == "json":
                 _write_bounded(stdout, json.dumps(_public_event(event), separators=(",", ":"), sort_keys=True) + "\n", max_output_bytes)
+            elif event.type == "operation.receipted":
+                _write_bounded(stdout, _operation_receipt_text(event) + "\n", max_output_bytes)
             elif event.type == "message.available" and event.payload["role"] == "assistant":
                 final_messages.append(event)
         if state is None or not state.terminal:
@@ -481,6 +484,16 @@ def _reduce_message(state: ClientViewState, event: ClientEvent) -> ClientViewSta
     return replace(state, messages=state.messages + (event,))
 
 
+def _reduce_operation_receipt(state: ClientViewState, event: ClientEvent) -> ClientViewState:
+    operation_id = event.payload["operation_id"]
+    status = event.payload["status"]
+    for prior in state.operation_receipts:
+        if prior.payload["operation_id"] == operation_id:
+            if prior.payload["status"] != "uncertain" or status == "uncertain":
+                raise ClientInteractiveError("client operation receipt is not monotonic")
+    return replace(state, operation_receipts=state.operation_receipts + (event,))
+
+
 def _reduce_state(state: ClientViewState, event: ClientEvent) -> ClientViewState:
     return replace(state, status=str(event.payload["status"]))
 
@@ -521,6 +534,7 @@ _VIEW_EVENT_REDUCERS: Mapping[str, Callable[[ClientViewState, ClientEvent], Clie
     "artifact.available": _reduce_artifact, "commands.changed": _reduce_commands,
     "export.created": _reduce_export, "extension-ui.requested": _reduce_ui_request,
     "fault.raised": _reduce_fault, "message.available": _reduce_message,
+    "operation.receipted": _reduce_operation_receipt,
     "session.state": _reduce_state, "session.terminal": _reduce_terminal,
     "share.created": _reduce_share, "tool.started": _reduce_tool_started,
     "tool.completed": _reduce_tool_completed, "usage.reported": _reduce_usage,
@@ -561,6 +575,19 @@ def _freeze_mapping(value: object) -> Mapping[str, object]:
 
 def _public_event(event: ClientEvent) -> Mapping[str, object]:
     return _thaw(event.to_mapping())  # type: ignore[return-value]
+
+
+def _operation_receipt_text(event: ClientEvent) -> str:
+    payload = event.payload
+    counts = payload["effect_counts"]
+    if not isinstance(counts, Mapping):
+        raise ClientInteractiveError("client operation receipt is invalid")
+    return "operation " + " ".join((
+        f"status={payload['status']}",
+        f"feature={payload['feature_id']}",
+        f"reason={payload['reason_code']}",
+        "counters=" + json.dumps(dict(counts), sort_keys=True, separators=(",", ":")),
+    ))
 
 
 def _accessible_state(state: ClientViewState) -> Mapping[str, object]:

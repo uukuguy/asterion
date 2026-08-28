@@ -15,6 +15,7 @@ from .private import (
     ClientPrivateValueBackend,
     ClientPrivateValueError,
     ClientPrivateValueService,
+    OperationPrivateRequestMetadata,
     PrivateValueDescriptor,
 )
 from .export import (
@@ -49,6 +50,10 @@ from .session import (
     ClientSessionEndpoint,
     ClientSessionError,
     HostClientSessionEndpoint,
+    OperationCommandBinding,
+    OperationCommandDispatcher,
+    OperationCommandRegistry,
+    OperationPrivateRequestDescriber,
 )
 
 __all__ = (
@@ -75,6 +80,7 @@ __all__ = (
     "ClientPrivateValueBackend",
     "ClientPrivateValueError",
     "ClientPrivateValueService",
+    "OperationPrivateRequestMetadata",
     "ClientProtocolError",
     "ClientRpcAdapter",
     "ClientRpcError",
@@ -86,6 +92,10 @@ __all__ = (
     "ClientViewState",
     "ExtensionUiResponse",
     "HostClientSessionEndpoint",
+    "OperationCommandBinding",
+    "OperationCommandDispatcher",
+    "OperationCommandRegistry",
+    "OperationPrivateRequestDescriber",
     "JsonlClientCodec",
     "PrivateValueDescriptor",
     "RPC_METHODS",

@@ -101,6 +101,27 @@ class TestClientInteractive(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([(reference, purpose) for reference, purpose, _, _ in endpoint.private_values.reads], [("private-final-1", "headless-final")])
         self.assertTrue(endpoint.closed)
 
+    async def test_headless_operation_text_uses_only_safe_receipt_metadata(self) -> None:
+        operation = _event("operation.receipted", 1, {
+            "effect_counts": {
+                "credential_value_reads": 0, "external_telemetry_deliveries": 0,
+                "network_operations": 0, "os_process_restart_operations": 0,
+                "package_manager_operations": 0, "provider_model_requests": 0, "uploads": 0,
+            },
+            "feature_id": "operation.auth", "operation_id": "operation-secret-id",
+            "reason_code": "operation-succeeded", "receipt_ref": "receipt-secret-ref",
+            "status": "succeeded",
+        })
+        terminal = _event("session.terminal", 2, {"reason_code": "completed", "status": "completed"})
+        client, endpoint = _client((operation, terminal))
+        output = io.StringIO()
+        with self.assertRaisesRegex(ClientInteractiveError, "final message"):
+            await run_headless(client, mode="text", stdout=output, deadline_ms=100)
+        self.assertIn("status=succeeded", output.getvalue())
+        self.assertNotIn("operation-secret-id", output.getvalue())
+        self.assertNotIn("receipt-secret-ref", output.getvalue())
+        self.assertEqual(endpoint.private_values.reads, [])
+
     async def test_headless_text_requires_exactly_one_final_assistant_message(self) -> None:
         final = _event("message.available", 1, {"content_ref": "private-final-1", "media_type": "text/plain", "message_id": "message-1", "role": "assistant", "sha256": hashlib.sha256(b"FINAL_SENTINEL").hexdigest(), "size": 14})
         terminal = _event("session.terminal", 2, {"reason_code": "completed", "status": "completed"})

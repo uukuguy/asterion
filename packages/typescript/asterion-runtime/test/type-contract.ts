@@ -344,6 +344,32 @@ export const fixtureCapabilityLock: CapabilitySourceLock = {
   ],
 };
 
+export const fixtureOperationReceiptEvent: ClientEvent = {
+  protocol: "asterion.agent-client/v1",
+  event_id: "event-operation-1",
+  session_id: "session-1",
+  generation: 1,
+  sequence: 1,
+  emitted_at: "2026-08-10T15:00:00Z",
+  type: "operation.receipted",
+  payload: {
+    effect_counts: {
+      credential_value_reads: 0,
+      external_telemetry_deliveries: 0,
+      network_operations: 0,
+      os_process_restart_operations: 0,
+      package_manager_operations: 0,
+      provider_model_requests: 0,
+      uploads: 0,
+    },
+    feature_id: "operation.auth",
+    operation_id: "operation-1",
+    reason_code: "operation-succeeded",
+    receipt_ref: "receipt-public-1",
+    status: "succeeded",
+  },
+};
+
 export class FixtureClient implements AgentRuntimeClient {
   readonly manifest: RuntimeManifest = {
     protocol: "asterion.agent-runtime/v1",

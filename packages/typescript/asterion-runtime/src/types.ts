@@ -287,6 +287,7 @@ export type ClientEventType =
   | "extension-ui.requested"
   | "fault.raised"
   | "message.available"
+  | "operation.receipted"
   | "session.state"
   | "session.terminal"
   | "share.created"
@@ -318,6 +319,7 @@ export type ClientEvent =
   | ClientEventBase<"extension-ui.requested", { readonly deadline_ms: number; readonly method: string; readonly payload_ref: string; readonly request_id: string }>
   | ClientEventBase<"fault.raised", { readonly code: string; readonly evidence_ref: string; readonly recoverable: boolean }>
   | ClientEventBase<"message.available", { readonly content_ref: string; readonly media_type: string; readonly message_id: string; readonly role: "assistant" | "system" | "tool" | "user"; readonly sha256: string; readonly size: number }>
+  | ClientEventBase<"operation.receipted", { readonly effect_counts: OperationEffectCounts; readonly feature_id: OperationFeatureId; readonly operation_id: string; readonly reason_code: string; readonly receipt_ref: string; readonly status: "succeeded" | "rejected" | "failed" | "cancelled" | "uncertain" }>
   | ClientEventBase<"session.state", { readonly reason_code: string; readonly status: "budget_limited" | "cancelled" | "completed" | "creating" | "failed" | "idle" | "needs_input" | "paused" | "running" }>
   | ClientEventBase<"session.terminal", { readonly reason_code: string; readonly status: "budget_limited" | "cancelled" | "completed" | "failed" }>
   | ClientEventBase<"share.created", { readonly export_id: string; readonly share_id: string; readonly share_ref: string }>

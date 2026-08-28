@@ -16,7 +16,11 @@ _MEDIA_TYPE = re.compile(
     r"^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$"
 )
 _PURPOSES = frozenset(
-    {"interactive-render", "headless-final", "extension-ui-response", "private-export"}
+    {
+        "interactive-render", "headless-final", "extension-ui-response", "private-export",
+        "operation.auth", "operation.controlled-update-restart", "operation.doctor",
+        "operation.model-selection", "operation.settings-keybindings", "operation.telemetry-usage",
+    }
 )
 _MAX_CLOCK_MS = (1 << 63) - 1
 
@@ -67,6 +71,40 @@ class PrivateValueDescriptor:
             or re.fullmatch(r"[0-9a-f]{64}", self.sha256) is None
         ):
             raise ClientPrivateValueError("private value descriptor is invalid")
+
+
+@dataclass(frozen=True, repr=False)
+class OperationPrivateRequestMetadata:
+    """Read-free, identity-bound metadata for an operation request document."""
+
+    request_ref: str
+    request_sha256: str
+    media_type: str
+    byte_count: int
+    client_id: str
+    session_id: str
+    generation: int
+    authority_revision: int
+
+    def __post_init__(self) -> None:
+        if (
+            _OPAQUE_ID.fullmatch(self.request_ref) is None
+            or not isinstance(self.request_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", self.request_sha256) is None
+            or _MEDIA_TYPE.fullmatch(self.media_type) is None
+            or isinstance(self.byte_count, bool)
+            or not isinstance(self.byte_count, int)
+            or not 0 <= self.byte_count <= 9_007_199_254_740_991
+            or _OPAQUE_ID.fullmatch(self.client_id) is None
+            or _OPAQUE_ID.fullmatch(self.session_id) is None
+            or isinstance(self.generation, bool)
+            or not isinstance(self.generation, int)
+            or self.generation < 1
+            or isinstance(self.authority_revision, bool)
+            or not isinstance(self.authority_revision, int)
+            or self.authority_revision < 1
+        ):
+            raise ClientPrivateValueError("operation request metadata is invalid")
 
 
 class ClientPrivateValueBackend(Protocol):
@@ -145,6 +183,52 @@ class ClientPrivateValueService:
             )
         ):
             raise ClientPrivateValueError("private value access is denied")
+
+    def describe_operation_request(
+        self,
+        request_ref: str,
+        *,
+        client_id: str,
+        session_id: str,
+        generation: int,
+        authority_revision: int,
+    ) -> OperationPrivateRequestMetadata:
+        """Return bounded request metadata without resolving its private bytes."""
+
+        if (
+            not isinstance(request_ref, str)
+            or _OPAQUE_ID.fullmatch(request_ref) is None
+            or client_id != self._access.client_id
+            or session_id != self._access.session_id
+            or type(generation) is not int
+            or generation < 1
+            or type(authority_revision) is not int
+            or authority_revision != self._access.authority_revision
+            or _cancellation_signal_value(
+                self._cancellation_signal,
+                error_message="private value access is denied",
+            )
+        ):
+            raise ClientPrivateValueError("private value access is denied")
+        try:
+            descriptor = self._backend.describe(request_ref)
+            self._validate_descriptor(request_ref, descriptor, 9_007_199_254_740_991)
+        except ClientPrivateValueError:
+            raise
+        except asyncio.CancelledError:
+            raise ClientPrivateValueError("private value is unavailable") from None
+        except Exception:
+            raise ClientPrivateValueError("private value is unavailable") from None
+        return OperationPrivateRequestMetadata(
+            request_ref=request_ref,
+            request_sha256=descriptor.sha256,
+            media_type=descriptor.media_type,
+            byte_count=descriptor.size,
+            client_id=client_id,
+            session_id=session_id,
+            generation=generation,
+            authority_revision=authority_revision,
+        )
 
     def describe_for_export(
         self,
