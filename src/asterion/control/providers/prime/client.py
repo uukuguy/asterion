@@ -716,10 +716,13 @@ class PrimeControlPlaneClient:
 
         async def iterate() -> AsyncIterator[ClientObservation]:
             previous = 0 if cursor is None else cursor.sequence
+            generation = None if cursor is None else cursor.generation
             try:
                 async for value in self._process.events(envelope):
                     observation = _client_observation_from_mapping(value)
-                    if cursor is not None and observation.generation != cursor.generation:
+                    if generation is None:
+                        generation = observation.generation
+                    elif observation.generation != generation:
                         raise PrimeControlError()
                     if observation.source_sequence != previous + 1:
                         raise PrimeControlError()

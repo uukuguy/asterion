@@ -395,22 +395,69 @@ async def _event_iterator(
     process: PrimeSidecarProcess, envelope: Mapping[str, object]
 ) -> AsyncIterator[Mapping[str, object]]:
     request = dict(envelope)
-    previous_cursor = request.get("cursor")
-    while True:
+    if request.get("type") != "client_observations":
         response = await process.request(request)
-        values = response.get(
-            "observations" if request.get("type") == "client_observations" else "events"
-        )
+        values = response.get("events")
         if not isinstance(values, list):
             raise PrimeSidecarProcessError()
         for event in values:
             if not isinstance(event, Mapping):
                 raise PrimeSidecarProcessError()
             yield event
-        if request.get("type") != "client_observations":
-            return
+        return
+
+    cursor = request.get("cursor")
+    if cursor is None:
+        generation: int | None = None
+        sequence = 0
+    elif (
+        isinstance(cursor, Mapping)
+        and set(cursor) == {"generation", "sequence"}
+        and not isinstance(cursor.get("generation"), bool)
+        and isinstance(cursor.get("generation"), int)
+        and not isinstance(cursor.get("sequence"), bool)
+        and isinstance(cursor.get("sequence"), int)
+        and cursor["generation"] >= 1
+        and cursor["sequence"] >= 1
+    ):
+        generation = cursor["generation"]
+        sequence = cursor["sequence"]
+    else:
+        raise PrimeSidecarProcessError()
+
+    while True:
+        response = await process.request(request)
+        values = response.get("observations")
+        if not isinstance(values, list):
+            raise PrimeSidecarProcessError()
+
+        page_generation = generation
+        page_sequence = sequence
+        for event in values:
+            event_generation = event.get("generation") if isinstance(event, Mapping) else None
+            event_sequence = event.get("source_sequence") if isinstance(event, Mapping) else None
+            if (
+                not isinstance(event, Mapping)
+                or isinstance(event_generation, bool)
+                or not isinstance(event_generation, int)
+                or event_generation < 1
+                or isinstance(event_sequence, bool)
+                or not isinstance(event_sequence, int)
+                or event_sequence != page_sequence + 1
+                or (page_generation is not None and event_generation != page_generation)
+            ):
+                raise PrimeSidecarProcessError()
+            page_generation = event_generation
+            page_sequence = event_sequence
+
         next_cursor = response.get("next_cursor")
         if next_cursor is None:
+            generation = page_generation
+            sequence = page_sequence
+            for event in values:
+                if not isinstance(event, Mapping):
+                    raise PrimeSidecarProcessError()
+                yield event
             return
         if (
             not isinstance(next_cursor, Mapping)
@@ -422,14 +469,18 @@ async def _event_iterator(
             or next_cursor["generation"] < 1
             or next_cursor["sequence"] < 1
             or not values
-            or not isinstance(values[-1], Mapping)
-            or values[-1].get("generation") != next_cursor["generation"]
-            or values[-1].get("source_sequence") != next_cursor["sequence"]
-            or previous_cursor == next_cursor
+            or page_generation is None
+            or next_cursor["generation"] != page_generation
+            or next_cursor["sequence"] != page_sequence
         ):
             raise PrimeSidecarProcessError()
-        previous_cursor = dict(next_cursor)
-        request["cursor"] = previous_cursor
+        generation = page_generation
+        sequence = page_sequence
+        request["cursor"] = dict(next_cursor)
+        for event in values:
+            if not isinstance(event, Mapping):
+                raise PrimeSidecarProcessError()
+            yield event
 
 
 def _positive_finite(value: object) -> bool:
