@@ -156,11 +156,17 @@ class ClientViewState:
 
 @dataclass(frozen=True)
 class ClientCommandRegistry:
-    """Exact, immutable command registry used to construct command intents."""
+    """Exact command registry with one direct owner per canonical intent identity.
+
+    A normal failure is retained and replayed as the same public error.  Owner
+    cancellation/process control abandons the local record: waiters are cancelled
+    and a later retry is a new endpoint admission, including if the endpoint had
+    already acted before signalling cancellation.
+    """
 
     revision: int
     commands: tuple[ClientCommand, ...]
-    _invocations: dict[tuple[str, ...], asyncio.Task[str]] = field(
+    _invocations: dict[tuple[str, ...], _CommandInvocation] = field(
         default_factory=dict, init=False, compare=False, repr=False
     )
     _invocation_lock: asyncio.Lock = field(
@@ -221,17 +227,82 @@ class ClientCommandRegistry:
                 intent_id=intent_id, command_name=command_name,
                 arguments_ref=arguments_ref, client_id=client_id,
             )
-            key = (client_id, session_id, str(authority_revision), intent_id, command_name, arguments_ref)
+            identity = (
+                intent.client_id, intent.session_id, str(intent.authority_revision),
+                intent.intent_id,
+            )
+            digest = _intent_digest(intent)
             async with self._invocation_lock:
-                admission = self._invocations.get(key)
-                if admission is None:
-                    admission = asyncio.create_task(client.submit(intent))
-                    self._invocations[key] = admission
-            return await asyncio.shield(admission)
+                invocation = self._invocations.get(identity)
+                if invocation is None:
+                    invocation = _CommandInvocation(
+                        digest=digest,
+                        completed=asyncio.get_running_loop().create_future(),
+                    )
+                    self._invocations[identity] = invocation
+                    owner = True
+                elif invocation.digest != digest:
+                    raise ClientInteractiveError("client command invocation conflicts")
+                else:
+                    owner = False
+            if owner:
+                return await self._submit_owner(client, intent, identity, invocation)
+            return await self._wait_for_invocation(invocation)
         except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+            raise
+        except ClientInteractiveError:
             raise
         except Exception:
             raise ClientInteractiveError("client command submission is unavailable") from None
+
+    async def _submit_owner(
+        self, client: AgentClient, intent: ClientIntent, identity: tuple[str, ...],
+        invocation: _CommandInvocation,
+    ) -> str:
+        try:
+            result = await client.submit(intent)
+            if not isinstance(result, str):
+                raise ValueError
+        except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+            await self._abandon_invocation(identity, invocation)
+            raise
+        except Exception:
+            await self._finish_invocation(invocation, result=None)
+            raise ClientInteractiveError("client command submission is unavailable") from None
+        await self._finish_invocation(invocation, result=result)
+        return result
+
+    async def _wait_for_invocation(self, invocation: _CommandInvocation) -> str:
+        await asyncio.shield(invocation.completed)
+        if invocation.result is None:
+            raise ClientInteractiveError("client command submission is unavailable")
+        return invocation.result
+
+    async def _finish_invocation(
+        self, invocation: _CommandInvocation, *, result: str | None,
+    ) -> None:
+        async with self._invocation_lock:
+            invocation.result = result
+            if not invocation.completed.done():
+                invocation.completed.set_result(None)
+
+    async def _abandon_invocation(
+        self, identity: tuple[str, ...], invocation: _CommandInvocation,
+    ) -> None:
+        async with self._invocation_lock:
+            if self._invocations.get(identity) is invocation:
+                del self._invocations[identity]
+            if not invocation.completed.done():
+                invocation.completed.cancel()
+
+
+@dataclass
+class _CommandInvocation:
+    """One digest-bound command admission shared by its owner and waiters."""
+
+    digest: str
+    completed: asyncio.Future[None]
+    result: str | None = None
 
 
 def reduce_client_view(state: ClientViewState, event: ClientEvent) -> ClientViewState:
@@ -552,6 +623,19 @@ def _client_id(client: AgentClient) -> str:
     if not isinstance(value, str) or _OPAQUE_ID.fullmatch(value) is None:
         raise ClientInteractiveError("client command is invalid")
     return value
+
+
+def _intent_digest(intent: ClientIntent) -> str:
+    """Return a canonical digest of every field admitted under one intent identity."""
+
+    try:
+        encoded = json.dumps(
+            _thaw(intent.to_mapping()), ensure_ascii=False,
+            separators=(",", ":"), sort_keys=True,
+        ).encode("utf-8")
+    except Exception:
+        raise ClientInteractiveError("client command submission is unavailable") from None
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _positive_integer(value: object) -> bool:

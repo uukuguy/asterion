@@ -211,6 +211,11 @@ class TestClientInteractive(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ClientInteractiveError, "^client command submission is unavailable$") as raised:
             await registry.invoke(client, session_id="session-1", authority_revision=1, intent_id="invoke-1", command_name="alpha", arguments_ref="arguments-1")
         self.assertNotIn("SENTINEL_PRIVATE_VALUE", str(raised.exception))
+        with self.assertRaisesRegex(ClientInteractiveError, "^client command submission is unavailable$"):
+            await registry.invoke(client, session_id="session-1", authority_revision=1, intent_id="invoke-1", command_name="alpha", arguments_ref="arguments-1")
+        with self.assertRaisesRegex(ClientInteractiveError, "^client command invocation conflicts$"):
+            await registry.invoke(client, session_id="session-1", authority_revision=1, intent_id="invoke-1", command_name="alpha", arguments_ref="arguments-2")
+        self.assertEqual(len(failing.submitted), 0)
 
         client, endpoint = _client(())
         first, second = await asyncio.gather(
@@ -219,3 +224,61 @@ class TestClientInteractive(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual((first, second), ("accepted", "accepted"))
         self.assertEqual(len(endpoint.submitted), 1)
+
+    async def test_command_registry_rejects_conflicts_while_owner_is_in_flight_and_after_success(self) -> None:
+        registry = ClientCommandRegistry(1, (ClientCommand("alpha"),))
+
+        class BlockingEndpoint(_Endpoint):
+            def __init__(self) -> None:
+                super().__init__(())
+                self.started = asyncio.Event()
+                self.release = asyncio.Event()
+
+            async def submit(self, intent: object) -> str:
+                self.submitted.append(intent)
+                self.started.set()
+                await self.release.wait()
+                return "accepted"
+
+        endpoint = BlockingEndpoint()
+        client = AgentClient(cast(ClientSessionEndpoint, endpoint), client_id="client-1")
+        owner = asyncio.create_task(registry.invoke(client, session_id="session-1", authority_revision=1, intent_id="intent-1", command_name="alpha", arguments_ref="arguments-1"))
+        await endpoint.started.wait()
+        with self.assertRaisesRegex(ClientInteractiveError, "^client command invocation conflicts$"):
+            await registry.invoke(client, session_id="session-1", authority_revision=1, intent_id="intent-1", command_name="alpha", arguments_ref="arguments-2")
+        waiter = asyncio.create_task(registry.invoke(client, session_id="session-1", authority_revision=1, intent_id="intent-1", command_name="alpha", arguments_ref="arguments-1"))
+        await asyncio.sleep(0)
+        waiter.cancel()
+        with self.assertRaises(asyncio.CancelledError):
+            await waiter
+        self.assertEqual(len(endpoint.submitted), 1)
+        endpoint.release.set()
+        self.assertEqual(await owner, "accepted")
+        self.assertEqual(await registry.invoke(client, session_id="session-1", authority_revision=1, intent_id="intent-1", command_name="alpha", arguments_ref="arguments-1"), "accepted")
+        with self.assertRaisesRegex(ClientInteractiveError, "^client command invocation conflicts$"):
+            await registry.invoke(client, session_id="session-1", authority_revision=1, intent_id="intent-1", command_name="alpha", arguments_ref="arguments-2")
+        self.assertEqual(len(endpoint.submitted), 1)
+
+    async def test_command_registry_preserves_process_control_and_retries_after_owner_cancellation(self) -> None:
+        registry = ClientCommandRegistry(1, (ClientCommand("alpha"),))
+
+        class ControlEndpoint(_Endpoint):
+            def __init__(self, signal: BaseException) -> None:
+                super().__init__(())
+                self.signal: BaseException | None = signal
+
+            async def submit(self, intent: object) -> str:
+                self.submitted.append(intent)
+                if self.signal is not None:
+                    signal, self.signal = self.signal, None
+                    raise signal
+                return "accepted"
+
+        for signal in (asyncio.CancelledError(), KeyboardInterrupt(), SystemExit()):
+            with self.subTest(signal=type(signal).__name__):
+                endpoint = ControlEndpoint(signal)
+                client = AgentClient(cast(ClientSessionEndpoint, endpoint), client_id="client-1")
+                with self.assertRaises(type(signal)):
+                    await registry.invoke(client, session_id="session-1", authority_revision=1, intent_id=f"intent-{type(signal).__name__}", command_name="alpha", arguments_ref="arguments-1")
+                self.assertEqual(await registry.invoke(client, session_id="session-1", authority_revision=1, intent_id=f"intent-{type(signal).__name__}", command_name="alpha", arguments_ref="arguments-1"), "accepted")
+                self.assertEqual(len(endpoint.submitted), 2)
