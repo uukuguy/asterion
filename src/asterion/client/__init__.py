@@ -17,6 +17,8 @@ from .private import (
     ClientPrivateValueService,
     PrivateValueDescriptor,
 )
+from .jsonl import ClientJsonlError, JsonlClientCodec
+from .sdk import AgentClient, AgentClientError
 from .session import (
     ClientObservation,
     ClientObservationSource,
@@ -27,10 +29,13 @@ from .session import (
 
 __all__ = (
     "AGENT_CLIENT_PROTOCOL",
+    "AgentClient",
+    "AgentClientError",
     "ClientCursor",
     "ClientAccess",
     "ClientEvent",
     "ClientIntent",
+    "ClientJsonlError",
     "ClientObservation",
     "ClientObservationSource",
     "ClientPrivateValueBackend",
@@ -40,6 +45,7 @@ __all__ = (
     "ClientSessionEndpoint",
     "ClientSessionError",
     "HostClientSessionEndpoint",
+    "JsonlClientCodec",
     "PrivateValueDescriptor",
     "validate_client_event",
     "validate_client_event_stream",
