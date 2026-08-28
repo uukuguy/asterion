@@ -56,6 +56,29 @@ def _receipt() -> dict[str, object]:
 class TestPrimeClientExportShareReceipt(unittest.TestCase):
     def test_locked_real_prime_harness_proves_exact_export_share_package(self) -> None:
         receipt = _real_prime_receipt("export-share")
+        self.assertEqual(
+            set(receipt),
+            {
+                "artifact_lock_digest", "credential_reads", "feature_count", "feature_ids",
+                "module_digest", "module_lock_digest", "package", "private_reads",
+                "provider_operations", "retained_processes", "scenario_count",
+                "scenario_evidence", "scenario_ids", "source_commit", "stdout_writes",
+                "unauthorized_uploads",
+            },
+        )
+        for field, filename in (
+            ("artifact_lock_digest", "prime-artifact-lock.json"),
+            ("module_lock_digest", "prime-client-module-lock.json"),
+            ("module_digest", "prime-client-module.mjs"),
+        ):
+            with self.subTest(field=field):
+                self.assertEqual(
+                    receipt[field],
+                    hashlib.sha256(
+                        (_PROJECT / "packages/typescript/prime-gateway/resources" / filename).read_bytes()
+                    ).hexdigest(),
+                )
+        self.assertEqual(receipt["source_commit"], "a18809e00ea30638584d87b3afea7285a9d7296c")
         self.assertEqual((receipt["package"], receipt["feature_count"], receipt["scenario_count"]), ("export-share", 1, 1))
         self.assertEqual((receipt["provider_operations"], receipt["credential_reads"], receipt["retained_processes"]), (0, 0, 0))
         self.assertNotIn("SENTINEL_PRIVATE_VALUE", json.dumps(receipt, sort_keys=True))

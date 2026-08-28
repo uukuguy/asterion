@@ -155,40 +155,7 @@ class ParityScenarioRegistry:
         """Register one exact implementation without invoking provider work."""
 
         try:
-            if (
-                not isinstance(scenario_id, str)
-                or scenario_id not in self._runners
-                or type(runner) is not ParityScenarioRunner
-                or self._runners[scenario_id] is not None
-                or runner.scenario_id != scenario_id
-                or runner.provider_id != self._provider_id
-            ):
-                raise ParityScenarioRegistryError(
-                    "parity scenario registration is invalid"
-                )
-            contract = self._scenario_contracts[scenario_id]
-            if (
-                runner.boundary != contract.get("boundary")
-                or runner.feature_ids != _string_sequence(contract.get("feature_ids"))
-                or runner.assertion_ids
-                != _string_sequence(contract.get("assertion_ids"))
-                or runner.fault_ids != _string_sequence(contract.get("fault_ids"))
-                or not callable(runner.provider_factory)
-                or not callable(runner.executor)
-                or runner.clock.deterministic is not True
-                or runner.fault_injector.deterministic is not True
-            ):
-                raise ParityScenarioRegistryError(
-                    "parity scenario registration is invalid"
-                )
-            credential_reads = _credential_reads(runner.private_fixture_store)
-            if (
-                runner.boundary in _PROVIDER_FREE_BOUNDARIES
-                and credential_reads != 0
-            ):
-                raise ParityScenarioRegistryError(
-                    "provider-free parity scenario accessed a model credential"
-                )
+            self._validate_registration(scenario_id, runner, unavailable=set())
         except ParityScenarioRegistryError:
             raise
         except Exception:
@@ -196,6 +163,75 @@ class ParityScenarioRegistry:
                 "parity scenario registration is invalid"
             ) from None
         self._runners[scenario_id] = runner
+
+    def register_many(
+        self, registrations: Sequence[tuple[str, ParityScenarioRunner]]
+    ) -> None:
+        """Atomically register a closed runner set without provider work."""
+
+        try:
+            if type(registrations) not in {list, tuple}:
+                raise ParityScenarioRegistryError(
+                    "parity scenario registration is invalid"
+                )
+            items = tuple(registrations)
+            unavailable: set[str] = set()
+            for item in items:
+                if type(item) is not tuple or len(item) != 2:
+                    raise ParityScenarioRegistryError(
+                        "parity scenario registration is invalid"
+                    )
+                scenario_id, runner = item
+                self._validate_registration(scenario_id, runner, unavailable=unavailable)
+                unavailable.add(scenario_id)
+        except ParityScenarioRegistryError:
+            raise
+        except Exception:
+            raise ParityScenarioRegistryError(
+                "parity scenario registration is invalid"
+            ) from None
+
+        for scenario_id, runner in items:
+            self._runners[scenario_id] = runner
+
+    def _validate_registration(
+        self,
+        scenario_id: object,
+        runner: object,
+        *,
+        unavailable: set[str],
+    ) -> None:
+        if (
+            not isinstance(scenario_id, str)
+            or scenario_id not in self._runners
+            or scenario_id in unavailable
+            or type(runner) is not ParityScenarioRunner
+            or self._runners[scenario_id] is not None
+            or runner.scenario_id != scenario_id
+            or runner.provider_id != self._provider_id
+        ):
+            raise ParityScenarioRegistryError(
+                "parity scenario registration is invalid"
+            )
+        contract = self._scenario_contracts[scenario_id]
+        if (
+            runner.boundary != contract.get("boundary")
+            or runner.feature_ids != _string_sequence(contract.get("feature_ids"))
+            or runner.assertion_ids != _string_sequence(contract.get("assertion_ids"))
+            or runner.fault_ids != _string_sequence(contract.get("fault_ids"))
+            or not callable(runner.provider_factory)
+            or not callable(runner.executor)
+            or runner.clock.deterministic is not True
+            or runner.fault_injector.deterministic is not True
+        ):
+            raise ParityScenarioRegistryError(
+                "parity scenario registration is invalid"
+            )
+        credential_reads = _credential_reads(runner.private_fixture_store)
+        if runner.boundary in _PROVIDER_FREE_BOUNDARIES and credential_reads != 0:
+            raise ParityScenarioRegistryError(
+                "provider-free parity scenario accessed a model credential"
+            )
 
     async def run(self, scenario_ids: Sequence[str]) -> ParityScenarioReport:
         """Run a canonical subset; every absent implementation remains blocking."""

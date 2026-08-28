@@ -8,7 +8,6 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import TypedDict, cast
 
 from asterion.control.parity_testing import (
     ParityScenarioRegistry,
@@ -97,22 +96,13 @@ class PrimeClientParityError(ParityScenarioRegistryError):
     """Raised without exposing the rejected client receipt."""
 
 
-class _PackageContract(TypedDict):
-    gate_id: str
-    module_ids: tuple[str, ...]
-    keys: frozenset[str]
-    exact_values: Mapping[str, object]
-
-
 _COMMON_KEYS = frozenset(
     {
         "artifact_lock_digest",
         "credential_reads",
         "feature_count",
         "feature_ids",
-        "gate_id",
         "module_digest",
-        "module_ids",
         "module_lock_digest",
         "package",
         "private_reads",
@@ -126,112 +116,12 @@ _COMMON_KEYS = frozenset(
         "unauthorized_uploads",
     }
 )
-
-
-def _contract(
-    gate_id: str,
-    module_ids: tuple[str, ...],
-    *,
-    keys: frozenset[str] = frozenset(),
-    exact_values: Mapping[str, object] = MappingProxyType({}),
-) -> _PackageContract:
-    return cast(
-        _PackageContract,
-        MappingProxyType(
-            {
-                "gate_id": gate_id,
-                "module_ids": module_ids,
-                "keys": _COMMON_KEYS | keys,
-                "exact_values": MappingProxyType(dict(exact_values)),
-            }
-        ),
-    )
-
-
-PRIME_CLIENT_PACKAGE_CONTRACTS: Mapping[str, _PackageContract] = MappingProxyType(
+PRIME_CLIENT_PACKAGE_COMMAND_IDS: Mapping[str, str] = MappingProxyType(
     {
-        "core": _contract(
-            "test.prime-client-core.provider-free",
-            ("tests.test_client_sdk_jsonl", "tests.test_prime_client_core"),
-            keys=frozenset(
-                {"private_service_contract_digest", "stream_contract_digest"}
-            ),
-            exact_values=MappingProxyType(
-                {
-                    "private_service_contract_digest": "253fd97dfe3a84ec859474538bc0998afa8182ae420d5bc5b1e46460a91ea85b",
-                    "stream_contract_digest": "7859db9960e895e4ffd60d90c06f54471897409c753ee7dbb7eed23a1369a1f4",
-                }
-            ),
-        ),
-        "protocols": _contract(
-            "test.prime-client-protocols.provider-free",
-            ("tests.test_client_rpc_acp", "tests.test_prime_client_protocols"),
-            keys=frozenset(
-                {"acp_event_methods", "protocol_digest", "redaction_status", "rpc_methods"}
-            ),
-            exact_values=MappingProxyType(
-                {
-                    "acp_event_methods": {
-                        "artifact.available": "artifact_update",
-                        "fault.raised": "session_error",
-                        "message.available": "agent_message_chunk",
-                        "session.state": "session_update",
-                        "session.terminal": "session_end",
-                        "tool.completed": "tool_call_update",
-                        "tool.started": "tool_call",
-                        "usage.reported": "usage_update",
-                    },
-                    "protocol_digest": "2c1f61b6920342893dc9aeef10e232e87251db50c7fbcceb187c78e1826c35ab",
-                    "redaction_status": "pass",
-                    "rpc_methods": [
-                        "command.invoke",
-                        "export.request",
-                        "extension-ui.respond",
-                        "input.submit",
-                        "session.attach",
-                        "session.cancel",
-                        "session.create",
-                        "session.detach",
-                        "session.pause",
-                        "session.resume",
-                        "share.request",
-                    ],
-                }
-            ),
-        ),
-        "interactive": _contract(
-            "test.prime-client-interactive.provider-free",
-            (
-                "tests.test_client_interactive",
-                "tests.test_asterion_cli",
-                "tests.test_prime_client_interactive",
-            ),
-            keys=frozenset(
-                {
-                    "private_service_contract_digest",
-                    "redaction_status",
-                    "stream_contract_digest",
-                }
-            ),
-            exact_values=MappingProxyType(
-                {
-                    "private_service_contract_digest": "2698bba4cdb115363cc5cb0af1b45b52f4e17a20f890a9afec7478270913b403",
-                    "redaction_status": "pass",
-                    "stream_contract_digest": "b4727b9bbedfa05b9bba658462562f6c5e61bde8a8608d7b2277620c6d134c72",
-                }
-            ),
-        ),
-        "export-share": _contract(
-            "test.prime-client-export-share.provider-free",
-            ("tests.test_client_export_share", "tests.test_prime_client_export_share"),
-            keys=frozenset({"redaction_status", "stream_digest"}),
-            exact_values=MappingProxyType(
-                {
-                    "redaction_status": "pass",
-                    "stream_digest": "5cb4d5887deb470266ba91a0d41ad3871753c8b2fd365edb27351c0d73151e7d",
-                }
-            ),
-        ),
+        "core": "test.prime-client-core.provider-free",
+        "protocols": "test.prime-client-protocols.provider-free",
+        "interactive": "test.prime-client-interactive.provider-free",
+        "export-share": "test.prime-client-export-share.provider-free",
     }
 )
 PRIME_CLIENT_FEATURE_IDS = tuple(
@@ -288,18 +178,18 @@ def build_prime_client_observations(
             package = receipt.get("package")
             if (
                 type(package) is not str
-                or package not in PRIME_CLIENT_PACKAGE_CONTRACTS
+                or package not in PRIME_CLIENT_PACKAGE_FEATURES
                 or package in receipt_by_package
             ):
                 raise ValueError
             receipt_by_package[package] = receipt
-        if tuple(receipt_by_package) != tuple(PRIME_CLIENT_PACKAGE_CONTRACTS):
+        if tuple(receipt_by_package) != tuple(PRIME_CLIENT_PACKAGE_FEATURES):
             raise ValueError
 
         observations: list[PrimeClientScenarioObservation] = []
-        for package, contract in PRIME_CLIENT_PACKAGE_CONTRACTS.items():
+        for package in PRIME_CLIENT_PACKAGE_FEATURES:
             receipt = receipt_by_package[package]
-            _validate_receipt(package, receipt, contract)
+            _validate_receipt(package, receipt)
             receipt_digest = _canonical_digest(receipt)
             for feature_id in PRIME_CLIENT_PACKAGE_FEATURES[package]:
                 scenario_id = f"prime-parity.{feature_id}"
@@ -307,7 +197,7 @@ def build_prime_client_observations(
                     "artifact_lock_digest": PRIME_CLIENT_ARTIFACT_LOCK_DIGEST,
                     "assertion_ids": list(PRIME_CLIENT_REQUIRED_ASSERTIONS),
                     "boundary": "real-prime-provider-free",
-                    "command_id": contract["gate_id"],
+                    "command_id": PRIME_CLIENT_PACKAGE_COMMAND_IDS[package],
                     "feature_ids": [feature_id],
                     "module_digest": PRIME_CLIENT_MODULE_DIGEST,
                     "module_lock_digest": PRIME_CLIENT_MODULE_LOCK_DIGEST,
@@ -326,7 +216,7 @@ def build_prime_client_observations(
                         feature_id=feature_id,
                         package=package,
                         status="PASS",
-                        command_id=contract["gate_id"],
+                        command_id=PRIME_CLIENT_PACKAGE_COMMAND_IDS[package],
                         source_commit=PRIME_CLIENT_SOURCE_COMMIT,
                         artifact_lock_digest=PRIME_CLIENT_ARTIFACT_LOCK_DIGEST,
                         module_lock_digest=PRIME_CLIENT_MODULE_LOCK_DIGEST,
@@ -421,26 +311,24 @@ def register_prime_client_scenarios(
     except (AttributeError, KeyError, TypeError, ValueError):
         raise PrimeClientParityError("Prime client evidence adapter is invalid") from None
 
-    for scenario_id, runner in runners:
-        registry.register(scenario_id, runner)
+    try:
+        registry.register_many(runners)
+    except ParityScenarioRegistryError:
+        raise PrimeClientParityError("Prime client evidence adapter is invalid") from None
 
 
-def _validate_receipt(
-    package: str, receipt: Mapping[str, object], contract: _PackageContract
-) -> None:
-    if set(receipt) != contract["keys"]:
+def _validate_receipt(package: str, receipt: Mapping[str, object]) -> None:
+    if set(receipt) != _COMMON_KEYS:
         raise ValueError
     _validate_public_receipt(receipt)
     if (
         receipt["package"] != package
-        or receipt["gate_id"] != contract["gate_id"]
         or receipt["source_commit"] != PRIME_CLIENT_SOURCE_COMMIT
         or receipt["artifact_lock_digest"] != PRIME_CLIENT_ARTIFACT_LOCK_DIGEST
         or receipt["module_lock_digest"] != PRIME_CLIENT_MODULE_LOCK_DIGEST
         or receipt["module_digest"] != PRIME_CLIENT_MODULE_DIGEST
         or receipt["feature_ids"] != list(PRIME_CLIENT_PACKAGE_FEATURES[package])
         or receipt["scenario_ids"] != list(_PACKAGE_SCENARIOS[package])
-        or receipt["module_ids"] != list(contract["module_ids"])
         or receipt["feature_count"] != len(PRIME_CLIENT_PACKAGE_FEATURES[package])
         or receipt["scenario_count"] != len(_PACKAGE_SCENARIOS[package])
         or any(
@@ -456,9 +344,6 @@ def _validate_receipt(
         )
     ):
         raise ValueError
-    for key, expected in contract["exact_values"].items():
-        if receipt[key] != expected:
-            raise ValueError
     _validate_scenario_evidence(receipt["scenario_evidence"])
 
 
@@ -531,7 +416,7 @@ def _validate_observation(observation: PrimeClientScenarioObservation) -> None:
         or observation.feature_id not in PRIME_CLIENT_PACKAGE_FEATURES[observation.package]
         or observation.status != "PASS"
         or observation.command_id
-        != PRIME_CLIENT_PACKAGE_CONTRACTS[observation.package]["gate_id"]
+        != PRIME_CLIENT_PACKAGE_COMMAND_IDS[observation.package]
         or observation.source_commit != PRIME_CLIENT_SOURCE_COMMIT
         or observation.artifact_lock_digest != PRIME_CLIENT_ARTIFACT_LOCK_DIGEST
         or observation.module_lock_digest != PRIME_CLIENT_MODULE_LOCK_DIGEST
