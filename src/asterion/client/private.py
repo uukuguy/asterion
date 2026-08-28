@@ -116,6 +116,66 @@ class ClientPrivateValueService:
     def access(self) -> ClientAccess:
         return self._access
 
+    def validate_export_access(
+        self, *, authority_revision: int, expires_at_ms: int
+    ) -> None:
+        """Check export authority freshness without resolving a private value."""
+
+        now = self._current_clock_ms()
+        try:
+            live_authority_revision = self._authority_revision_source()
+        except asyncio.CancelledError:
+            raise ClientPrivateValueError("private value access is denied") from None
+        except Exception:
+            raise ClientPrivateValueError("private value access is denied") from None
+        if (
+            "private-export" not in self._access.purposes
+            or isinstance(authority_revision, bool)
+            or not isinstance(authority_revision, int)
+            or authority_revision != self._access.authority_revision
+            or isinstance(expires_at_ms, bool)
+            or not isinstance(expires_at_ms, int)
+            or expires_at_ms < now
+            or isinstance(live_authority_revision, bool)
+            or not isinstance(live_authority_revision, int)
+            or live_authority_revision != self._access.authority_revision
+            or _cancellation_signal_value(
+                self._cancellation_signal,
+                error_message="private value access is denied",
+            )
+        ):
+            raise ClientPrivateValueError("private value access is denied")
+
+    def describe_for_export(
+        self,
+        reference: str,
+        *,
+        max_bytes: int,
+        deadline_ms: int,
+        authority_revision: int,
+        expires_at_ms: int,
+    ) -> PrivateValueDescriptor:
+        """Describe a private export value before any export body is read."""
+
+        self._validate_request(
+            reference=reference,
+            purpose="private-export",
+            max_bytes=max_bytes,
+            deadline_ms=deadline_ms,
+            authority_revision=authority_revision,
+            expires_at_ms=expires_at_ms,
+        )
+        try:
+            descriptor = self._backend.describe(reference)
+            self._validate_descriptor(reference, descriptor, max_bytes)
+        except ClientPrivateValueError:
+            raise
+        except asyncio.CancelledError:
+            raise ClientPrivateValueError("private value is unavailable") from None
+        except Exception:
+            raise ClientPrivateValueError("private value is unavailable") from None
+        return descriptor
+
     def resolve_bytes(
         self,
         reference: str,

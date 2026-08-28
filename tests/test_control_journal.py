@@ -15,6 +15,7 @@ from asterion.control.journal import (
     JournalRecord,
     MemoryCanonicalJournal,
 )
+from asterion.client.export import ClientArtifactReceipt, ClientShareReceipt
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,6 +48,33 @@ def _journal() -> MemoryCanonicalJournal:
 
 
 class TestControlJournal(unittest.TestCase):
+    def test_client_export_and_share_receipts_are_closed_and_body_free(self) -> None:
+        artifact = ClientArtifactReceipt(
+            artifact_id="artifact-1", sha256="a" * 64,
+            media_type="application/vnd.asterion.client-events+json", size=1,
+            storage_ref="storage-1",
+        )
+        exported = JournalRecord.client_export_receipted(
+            client_id="client-1", session_id="session-1", generation=1,
+            artifact=artifact, visibility="public",
+        )
+        shared = JournalRecord.client_share_receipted(
+            client_id="client-1", session_id="session-1", generation=1,
+            artifact=artifact,
+            share=ClientShareReceipt("share-1", "artifact-1", "a" * 64,
+                "application/vnd.asterion.client-events+json", "destination-1", "share-ref-1"),
+        )
+
+        self.assertEqual(exported.kind, "client.export.receipted")
+        self.assertEqual(shared.kind, "client.share.receipted")
+        self.assertNotIn("destination-1", repr(shared))
+        with self.assertRaises(JournalConflictError) as raised:
+            JournalRecord(
+                record_id="client-export:artifact-2", kind="client.export.receipted",
+                payload={**exported.payload, "artifact_id": "artifact-2", "body": "SENTINEL_BODY"},
+            )
+        self.assertNotIn("SENTINEL_BODY", str(raised.exception))
+
     def test_client_observation_rejects_noncanonical_values_without_coercion(self) -> None:
         with self.assertRaises(JournalConflictError):
             JournalRecord.client_observation_accepted(

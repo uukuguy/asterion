@@ -17,6 +17,16 @@ from .private import (
     ClientPrivateValueService,
     PrivateValueDescriptor,
 )
+from .export import (
+    ClientArtifactReceipt,
+    ClientArtifactStore,
+    ClientExportAuthority,
+    ClientExportError,
+    ClientShareReceipt,
+    ClientShareService,
+    export_client_session,
+    share_client_export,
+)
 from .jsonl import ClientJsonlError, JsonlClientCodec
 from .sdk import AgentClient, AgentClientError
 from .rpc import ClientRpcAdapter, ClientRpcError, RPC_METHODS
@@ -48,12 +58,16 @@ __all__ = (
     "ACP_EVENT_METHODS",
     "ClientAcpAdapter",
     "ClientAcpError",
+    "ClientArtifactReceipt",
+    "ClientArtifactStore",
     "ClientCursor",
     "ClientCommand",
     "ClientCommandRegistry",
     "ClientInteractiveError",
     "ClientAccess",
     "ClientEvent",
+    "ClientExportAuthority",
+    "ClientExportError",
     "ClientIntent",
     "ClientJsonlError",
     "ClientObservation",
@@ -66,6 +80,8 @@ __all__ = (
     "ClientRpcError",
     "ClientSessionEndpoint",
     "ClientSessionError",
+    "ClientShareReceipt",
+    "ClientShareService",
     "ClientUiRequest",
     "ClientViewState",
     "ExtensionUiResponse",
@@ -77,7 +93,9 @@ __all__ = (
     "validate_client_event_stream",
     "validate_client_intent",
     "reduce_client_view",
+    "export_client_session",
     "respond_to_extension_ui",
     "run_headless",
     "run_interactive",
+    "share_client_export",
 )

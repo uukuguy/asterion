@@ -44,6 +44,8 @@ JOURNAL_RECORD_KINDS = frozenset(
         "client.intent.accepted",
         "client.observation.accepted",
         "client.event.accepted",
+        "client.export.receipted",
+        "client.share.receipted",
         "action.decided",
         "action.running",
         "action.receipted",
@@ -215,6 +217,60 @@ class JournalRecord:
             record_id=f"client-event:{accepted.event_id}",
             kind="client.event.accepted",
             payload={"event": accepted.to_mapping()},
+        )
+
+    @classmethod
+    def client_export_receipted(
+        cls,
+        *,
+        client_id: str,
+        session_id: str,
+        generation: int,
+        artifact: object,
+        visibility: str,
+    ) -> JournalRecord:
+        values = _client_artifact_receipt_values(artifact)
+        return cls(
+            record_id=f"client-export:{values['artifact_id']}",
+            kind="client.export.receipted",
+            payload={
+                "artifact_id": values["artifact_id"],
+                "client_id": client_id,
+                "generation": generation,
+                "media_type": values["media_type"],
+                "sha256": values["sha256"],
+                "size": values["size"],
+                "storage_ref": values["storage_ref"],
+                "session_id": session_id,
+                "visibility": visibility,
+            },
+        )
+
+    @classmethod
+    def client_share_receipted(
+        cls,
+        *,
+        client_id: str,
+        session_id: str,
+        generation: int,
+        artifact: object,
+        share: object,
+    ) -> JournalRecord:
+        artifact_values = _client_artifact_receipt_values(artifact)
+        share_values = _client_share_receipt_values(share)
+        return cls(
+            record_id=f"client-share:{share_values['share_id']}",
+            kind="client.share.receipted",
+            payload={
+                "artifact_id": artifact_values["artifact_id"],
+                "client_id": client_id,
+                "generation": generation,
+                "media_type": artifact_values["media_type"],
+                "session_id": session_id,
+                "sha256": artifact_values["sha256"],
+                "share_id": share_values["share_id"],
+                "share_ref": share_values["share_ref"],
+            },
         )
 
     @classmethod
@@ -1275,6 +1331,10 @@ def _validate_session(session_id: str, record: JournalRecord) -> None:
         "context.command.accepted": "command",
         "context.operation.receipted": "receipt",
     }.get(record.kind)
+    if record.kind in {"client.export.receipted", "client.share.receipted"}:
+        if record.payload.get("session_id") != session_id:
+            raise JournalConflictError("journal record session identity mismatches")
+        return
     if field is None:
         return
     value = record.payload[field]
@@ -1320,6 +1380,39 @@ def _validate_record_payload(kind: str, value: object) -> None:
         from asterion.client.protocol import validate_client_event
 
         validate_client_event(value["event"])
+        return
+    if kind == "client.export.receipted":
+        _require_fields(
+            value,
+            {
+                "artifact_id", "client_id", "generation", "media_type", "session_id",
+                "sha256", "size", "storage_ref", "visibility",
+            },
+        )
+        _require_opaque_id(value["artifact_id"], "journal client export artifact")
+        _require_opaque_id(value["client_id"], "journal client export client")
+        _require_opaque_id(value["session_id"], "journal client export session")
+        _require_safe_positive_integer(value["generation"], "journal client export generation")
+        _require_one_media_type(value["media_type"], "journal client export media type")
+        _require_digest(value["sha256"], "journal client export digest")
+        _require_safe_nonnegative_integer(value["size"], "journal client export size")
+        _require_opaque_id(value["storage_ref"], "journal client export storage")
+        if value["visibility"] not in {"private", "public"}:
+            raise JournalConflictError("journal client export visibility is invalid")
+        return
+    if kind == "client.share.receipted":
+        _require_fields(
+            value,
+            {
+                "artifact_id", "client_id", "generation", "media_type", "session_id",
+                "sha256", "share_id", "share_ref",
+            },
+        )
+        for field in ("artifact_id", "client_id", "session_id", "share_id", "share_ref"):
+            _require_opaque_id(value[field], f"journal client share {field}")
+        _require_safe_positive_integer(value["generation"], "journal client share generation")
+        _require_one_media_type(value["media_type"], "journal client share media type")
+        _require_digest(value["sha256"], "journal client share digest")
         return
     if kind == "action.decided":
         _require_fields(
@@ -1566,6 +1659,46 @@ def _canonical_client_observation(value: object) -> Mapping[str, object]:
     )
 
 
+def _client_artifact_receipt_values(value: object) -> Mapping[str, object]:
+    try:
+        values = {
+            "artifact_id": getattr(value, "artifact_id"),
+            "sha256": getattr(value, "sha256"),
+            "media_type": getattr(value, "media_type"),
+            "size": getattr(value, "size"),
+            "storage_ref": getattr(value, "storage_ref"),
+        }
+        _require_opaque_id(values["artifact_id"], "journal client artifact")
+        _require_digest(values["sha256"], "journal client artifact digest")
+        if not isinstance(values["media_type"], str) or MEDIA_TYPE.fullmatch(values["media_type"]) is None:
+            raise JournalConflictError("journal client artifact media type is invalid")
+        _require_safe_nonnegative_integer(values["size"], "journal client artifact size")
+        _require_opaque_id(values["storage_ref"], "journal client artifact storage")
+        return MappingProxyType(values)
+    except (AttributeError, TypeError, ValueError):
+        raise JournalConflictError("journal client artifact receipt is invalid") from None
+
+
+def _client_share_receipt_values(value: object) -> Mapping[str, object]:
+    try:
+        values = {
+            "share_id": getattr(value, "share_id"),
+            "artifact_id": getattr(value, "artifact_id"),
+            "sha256": getattr(value, "sha256"),
+            "media_type": getattr(value, "media_type"),
+            "share_ref": getattr(value, "share_ref"),
+        }
+        _require_opaque_id(values["share_id"], "journal client share")
+        _require_opaque_id(values["artifact_id"], "journal client share artifact")
+        _require_digest(values["sha256"], "journal client share digest")
+        if not isinstance(values["media_type"], str) or MEDIA_TYPE.fullmatch(values["media_type"]) is None:
+            raise JournalConflictError("journal client share media type is invalid")
+        _require_opaque_id(values["share_ref"], "journal client share reference")
+        return MappingProxyType(values)
+    except (AttributeError, TypeError, ValueError):
+        raise JournalConflictError("journal client share receipt is invalid") from None
+
+
 def _validate_harness_effect_identity(value: Mapping[str, object]) -> None:
     _validate_harness_scope(value["scope"])
     _require_opaque_id(value["proposal_id"], "journal harness proposal")
@@ -1718,6 +1851,21 @@ def _require_media_types(value: object, label: str) -> None:
 
 def _require_positive_integer(value: object, label: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise JournalConflictError(f"{label} is invalid")
+
+
+def _require_one_media_type(value: object, label: str) -> None:
+    if not isinstance(value, str) or MEDIA_TYPE.fullmatch(value) is None:
+        raise JournalConflictError(f"{label} is invalid")
+
+
+def _require_safe_positive_integer(value: object, label: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 9_007_199_254_740_991:
+        raise JournalConflictError(f"{label} is invalid")
+
+
+def _require_safe_nonnegative_integer(value: object, label: str) -> None:
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 9_007_199_254_740_991:
         raise JournalConflictError(f"{label} is invalid")
 
 

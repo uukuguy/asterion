@@ -11,6 +11,11 @@ from types import MappingProxyType
 from typing import Protocol
 
 from asterion.client.private import ClientPrivateValueService
+from asterion.client.export import (
+    ClientArtifactReceipt,
+    ClientArtifactStore,
+    ClientExportAuthority,
+)
 from asterion.client.protocol import (
     ClientCursor,
     ClientEvent,
@@ -73,6 +78,18 @@ class ClientObservationSource(Protocol):
 class ClientSessionEndpoint(Protocol):
     @property
     def private_values(self) -> ClientPrivateValueService:
+        ...
+
+    @property
+    def client_id(self) -> str:
+        ...
+
+    @property
+    def session_id(self) -> str:
+        ...
+
+    @property
+    def generation(self) -> int:
         ...
 
     async def submit(self, intent: ClientIntent) -> str:
@@ -142,6 +159,35 @@ class HostClientSessionEndpoint:
     @property
     def private_values(self) -> ClientPrivateValueService:
         return self._private_values
+
+    @property
+    def client_id(self) -> str:
+        return self._client_id
+
+    @property
+    def session_id(self) -> str:
+        return self._host.session_id
+
+    @property
+    def generation(self) -> int:
+        return self._host.generation
+
+    def export(
+        self,
+        *,
+        visibility: str,
+        artifacts: ClientArtifactStore,
+        authority: ClientExportAuthority | None = None,
+    ) -> ClientArtifactReceipt:
+        """Export the admitted complete stream through injected host services."""
+
+        from asterion.client.export import export_client_session
+
+        return export_client_session(
+            tuple(self._events), visibility=visibility, artifacts=artifacts,
+            authority=authority, private_values=self._private_values,
+            journal=self._journal, client_id=self._client_id,
+        )
 
     async def submit(self, intent: ClientIntent) -> str:
         if (
