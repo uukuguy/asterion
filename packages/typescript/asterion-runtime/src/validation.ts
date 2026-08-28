@@ -33,7 +33,11 @@ function readSchema(name: string): object {
   ) as object;
 }
 
-const ajv = new Ajv2020({ allErrors: true, strictTypes: false });
+const ajv = new Ajv2020({
+  allErrors: true,
+  formats: { "date-time": { type: "string", validate: isValidClientUtcTimestamp } },
+  strictTypes: false,
+});
 const manifestValidator = ajv.compile(readSchema("runtime-manifest.schema.json"));
 const capabilityManifestValidator = ajv.compile(
   readSchema("capability-manifest.schema.json"),
@@ -126,6 +130,30 @@ function requireSortedUnique(
     )
   ) {
     throw new ProtocolValidationError(label, null);
+  }
+}
+
+function isValidClientUtcTimestamp(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?Z$/.exec(value);
+  if (match === null || match[1] === "0000") {
+    return false;
+  }
+  const [, year, month, day, hour, minute, second] = match;
+  const timestamp = new Date(value);
+  return !(
+    Number.isNaN(timestamp.getTime()) ||
+    timestamp.getUTCFullYear() !== Number(year) ||
+    timestamp.getUTCMonth() + 1 !== Number(month) ||
+    timestamp.getUTCDate() !== Number(day) ||
+    timestamp.getUTCHours() !== Number(hour) ||
+    timestamp.getUTCMinutes() !== Number(minute) ||
+    timestamp.getUTCSeconds() !== Number(second)
+  );
+}
+
+function requireClientUtcTimestamp(value: string): void {
+  if (!isValidClientUtcTimestamp(value)) {
+    throw new ProtocolValidationError("client event timestamp", null);
   }
 }
 
@@ -414,6 +442,7 @@ export function validateClientEvent(value: unknown): ClientEvent {
   if (event.type === "commands.changed") {
     requireSortedUnique("client commands", event.payload.commands);
   }
+  requireClientUtcTimestamp(event.emitted_at);
   return event;
 }
 
@@ -428,6 +457,7 @@ export function validateClientEventStream(
   const generation = events[0]!.generation;
   const eventIds = new Set<string>();
   const activeCalls = new Set<string>();
+  const seenCalls = new Set<string>();
   let terminalSeen = false;
   for (const [index, event] of events.entries()) {
     if (
@@ -441,10 +471,11 @@ export function validateClientEventStream(
     }
     eventIds.add(event.event_id);
     if (event.type === "tool.started") {
-      if (activeCalls.has(event.payload.call_id)) {
+      if (seenCalls.has(event.payload.call_id)) {
         throw new ProtocolValidationError("client event stream tool call", null);
       }
       activeCalls.add(event.payload.call_id);
+      seenCalls.add(event.payload.call_id);
     } else if (event.type === "tool.completed") {
       if (!activeCalls.delete(event.payload.call_id)) {
         throw new ProtocolValidationError("client event stream tool call", null);

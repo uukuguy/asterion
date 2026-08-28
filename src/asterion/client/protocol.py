@@ -130,6 +130,7 @@ _TERMINAL_STATUSES = frozenset({"budget_limited", "cancelled", "completed", "fai
 _SESSION_STATUSES = frozenset(
     {"creating", "idle", "needs_input", "paused", "running", *_TERMINAL_STATUSES}
 )
+_MAX_SAFE_INTEGER = 9_007_199_254_740_991
 
 
 class ClientProtocolError(ValueError):
@@ -216,7 +217,7 @@ def validate_client_intent(value: object) -> ClientIntent:
     """Validate and snapshot one client-to-host intent."""
 
     if isinstance(value, ClientIntent):
-        return ClientIntent(**value.to_mapping())
+        return _intent_from_mapping(value.to_mapping())
     if not isinstance(value, Mapping):
         raise ClientProtocolError("client intent is invalid")
     return _intent_from_mapping(value)
@@ -226,7 +227,7 @@ def validate_client_event(value: object) -> ClientEvent:
     """Validate and snapshot one host-to-client public event."""
 
     if isinstance(value, ClientEvent):
-        return ClientEvent(**value.to_mapping())
+        return _event_from_mapping(value.to_mapping())
     if not isinstance(value, Mapping):
         raise ClientProtocolError("client event is invalid")
     return _event_from_mapping(value)
@@ -246,6 +247,7 @@ def validate_client_event_stream(value: object) -> tuple[ClientEvent, ...]:
         raise ClientProtocolError("client event stream sequence is not contiguous")
 
     active_calls: set[str] = set()
+    seen_calls: set[str] = set()
     terminal_seen = False
     for index, event in enumerate(events):
         if terminal_seen:
@@ -253,9 +255,10 @@ def validate_client_event_stream(value: object) -> tuple[ClientEvent, ...]:
         if event.type == "tool.started":
             call_id = event.payload["call_id"]
             assert isinstance(call_id, str)
-            if call_id in active_calls:
+            if call_id in seen_calls:
                 raise ClientProtocolError("client event stream tool call is invalid")
             active_calls.add(call_id)
+            seen_calls.add(call_id)
         elif event.type == "tool.completed":
             call_id = event.payload["call_id"]
             assert isinstance(call_id, str)
@@ -282,7 +285,7 @@ def _intent_from_mapping(value: Mapping[str, object]) -> ClientIntent:
         intent_id=_string(mapping, "intent_id", "client intent"),
         client_id=_string(mapping, "client_id", "client intent"),
         session_id=_string(mapping, "session_id", "client intent"),
-        authority_revision=mapping["authority_revision"],
+        authority_revision=_integer(mapping, "authority_revision", "client intent"),
         type=_string(mapping, "type", "client intent"),
         payload=_mapping(mapping["payload"], "client intent payload"),
     )
@@ -298,8 +301,8 @@ def _event_from_mapping(value: Mapping[str, object]) -> ClientEvent:
         protocol=_string(mapping, "protocol", "client event"),
         event_id=_string(mapping, "event_id", "client event"),
         session_id=_string(mapping, "session_id", "client event"),
-        generation=mapping["generation"],
-        sequence=mapping["sequence"],
+        generation=_integer(mapping, "generation", "client event"),
+        sequence=_integer(mapping, "sequence", "client event"),
         emitted_at=_string(mapping, "emitted_at", "client event"),
         type=_string(mapping, "type", "client event"),
         payload=_mapping(mapping["payload"], "client event payload"),
@@ -314,8 +317,9 @@ def _validate_intent_fields(intent: ClientIntent) -> None:
     _require_positive_integer(intent.authority_revision, "client intent authority revision")
     if intent.type not in CLIENT_INTENT_TYPES:
         raise ClientProtocolError("client intent type is invalid")
-    _forbid_body_fields(intent.payload)
-    _validate_intent_payload(intent.type, intent.payload)
+    payload = _mapping(intent.payload, "client payload")
+    _forbid_body_fields(payload)
+    _validate_intent_payload(intent.type, payload)
 
 
 def _validate_event_fields(event: ClientEvent) -> None:
@@ -328,8 +332,9 @@ def _validate_event_fields(event: ClientEvent) -> None:
     _require_utc_timestamp(event.emitted_at)
     if event.type not in CLIENT_EVENT_TYPES:
         raise ClientProtocolError("client event type is invalid")
-    _forbid_body_fields(event.payload)
-    _validate_event_payload(event.type, event.payload)
+    payload = _mapping(event.payload, "client payload")
+    _forbid_body_fields(payload)
+    _validate_event_payload(event.type, payload)
 
 
 def _validate_intent_payload(intent_type: str, value: Mapping[str, object]) -> None:
@@ -447,6 +452,13 @@ def _string(value: Mapping[str, object], field: str, label: str) -> str:
     return item
 
 
+def _integer(value: Mapping[str, object], field: str, label: str) -> int:
+    item = value[field]
+    if isinstance(item, bool) or not isinstance(item, int):
+        raise ClientProtocolError(f"{label} is invalid")
+    return item
+
+
 def _require_identifier(value: object, label: str) -> None:
     if not isinstance(value, str) or _IDENTIFIER.fullmatch(value) is None:
         raise ClientProtocolError(f"{label} is invalid")
@@ -468,12 +480,20 @@ def _require_sha256(value: object, label: str) -> None:
 
 
 def _require_positive_integer(value: object, label: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 1 <= value <= _MAX_SAFE_INTEGER
+    ):
         raise ClientProtocolError(f"{label} is invalid")
 
 
 def _require_nonnegative_integer(value: object, label: str) -> None:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 <= value <= _MAX_SAFE_INTEGER
+    ):
         raise ClientProtocolError(f"{label} is invalid")
 
 

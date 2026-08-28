@@ -191,6 +191,83 @@ test("validates the closed body-free agent client contract", async () => {
       ]),
     ProtocolValidationError,
   );
+  assert.throws(
+    () =>
+      validateClientEvent({
+        ...message,
+        emitted_at: "2026-02-30T15:00:00Z",
+      }),
+    ProtocolValidationError,
+  );
+  assert.throws(
+    () =>
+      validateClientEvent({
+        ...message,
+        emitted_at: "0000-01-01T00:00:00Z",
+      }),
+    ProtocolValidationError,
+  );
+  for (const invalid of [
+    { ...intent, authority_revision: Number.MAX_SAFE_INTEGER + 1 },
+    {
+      ...intent,
+      type: "command.invoke",
+      payload: {
+        arguments_ref: "arguments-1",
+        command_name: "command",
+        command_revision: Number.MAX_SAFE_INTEGER + 1,
+      },
+    },
+    { ...message, generation: Number.MAX_SAFE_INTEGER + 1 },
+    {
+      ...message,
+      type: "usage.reported",
+      payload: {
+        aggregate_tokens: Number.MAX_SAFE_INTEGER + 1,
+        application_tokens: Number.MAX_SAFE_INTEGER + 1,
+        child_tokens: Number.MAX_SAFE_INTEGER + 1,
+        controller_tokens: Number.MAX_SAFE_INTEGER + 1,
+        cost_micros: Number.MAX_SAFE_INTEGER + 1,
+      },
+    },
+  ]) {
+    const validate = "intent_id" in invalid ? validateClientIntent : validateClientEvent;
+    assert.throws(() => validate(invalid), ProtocolValidationError);
+  }
+  const toolStarted = {
+    ...message,
+    type: "tool.started",
+    payload: {
+      arguments_ref: "arguments-1",
+      call_id: "call-1",
+      name: "tool",
+      sha256: "a".repeat(64),
+      size: 1,
+    },
+  };
+  const toolCompleted = {
+    ...message,
+    type: "tool.completed",
+    payload: {
+      call_id: "call-1",
+      is_error: false,
+      media_type: "application/json",
+      result_ref: "result-1",
+      sha256: "b".repeat(64),
+      size: 1,
+    },
+  };
+  assert.throws(
+    () =>
+      validateClientEventStream([
+        { ...toolStarted, event_id: "event-1", sequence: 1 },
+        { ...toolCompleted, event_id: "event-2", sequence: 2 },
+        { ...toolStarted, event_id: "event-3", sequence: 3 },
+        { ...toolCompleted, event_id: "event-4", sequence: 4 },
+        { ...terminal, event_id: "event-5", sequence: 5 },
+      ]),
+    ProtocolValidationError,
+  );
 });
 
 test("validates the shared long-running control contracts", async () => {

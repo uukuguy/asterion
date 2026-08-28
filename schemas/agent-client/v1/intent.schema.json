@@ -10,7 +10,7 @@
     "intent_id": {"$ref": "#/$defs/opaque_id"},
     "client_id": {"$ref": "#/$defs/opaque_id"},
     "session_id": {"$ref": "#/$defs/opaque_id"},
-    "authority_revision": {"type": "integer", "minimum": 1},
+    "authority_revision": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
     "type": {"enum": ["command.invoke", "export.request", "extension-ui.respond", "input.submit", "session.attach", "session.cancel", "session.create", "session.detach", "session.pause", "session.resume", "share.request"]},
     "payload": {}
   },
@@ -33,12 +33,12 @@
     "media_type": {"type": "string", "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$"},
     "opaque_ids": {"type": "array", "items": {"$ref": "#/$defs/opaque_id"}, "uniqueItems": true},
     "reason": {"type": "object", "additionalProperties": false, "required": ["reason_code"], "properties": {"reason_code": {"$ref": "#/$defs/identifier"}}},
-    "command_invoke": {"type": "object", "additionalProperties": false, "required": ["arguments_ref", "command_name", "command_revision"], "properties": {"arguments_ref": {"$ref": "#/$defs/opaque_id"}, "command_name": {"$ref": "#/$defs/identifier"}, "command_revision": {"type": "integer", "minimum": 1}}},
-    "export_request": {"type": "object", "additionalProperties": false, "required": ["destination_ref", "expires_at_ms", "export_id", "max_bytes", "media_type", "reference_ids", "visibility"], "properties": {"destination_ref": {"$ref": "#/$defs/opaque_id"}, "expires_at_ms": {"type": "integer", "minimum": 1}, "export_id": {"$ref": "#/$defs/opaque_id"}, "max_bytes": {"type": "integer", "minimum": 1}, "media_type": {"$ref": "#/$defs/media_type"}, "reference_ids": {"$ref": "#/$defs/opaque_ids"}, "visibility": {"enum": ["private", "public"]}}},
+    "command_invoke": {"type": "object", "additionalProperties": false, "required": ["arguments_ref", "command_name", "command_revision"], "properties": {"arguments_ref": {"$ref": "#/$defs/opaque_id"}, "command_name": {"$ref": "#/$defs/identifier"}, "command_revision": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}}},
+    "export_request": {"type": "object", "additionalProperties": false, "required": ["destination_ref", "expires_at_ms", "export_id", "max_bytes", "media_type", "reference_ids", "visibility"], "properties": {"destination_ref": {"$ref": "#/$defs/opaque_id"}, "expires_at_ms": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "export_id": {"$ref": "#/$defs/opaque_id"}, "max_bytes": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "media_type": {"$ref": "#/$defs/media_type"}, "reference_ids": {"$ref": "#/$defs/opaque_ids"}, "visibility": {"enum": ["private", "public"]}}},
     "extension_response": {"type": "object", "additionalProperties": false, "required": ["cancelled", "request_id", "response_ref"], "properties": {"cancelled": {"type": "boolean"}, "request_id": {"$ref": "#/$defs/opaque_id"}, "response_ref": {"$ref": "#/$defs/opaque_id"}}},
     "input_submit": {"type": "object", "additionalProperties": false, "required": ["content_ref", "delivery", "input_id"], "properties": {"content_ref": {"$ref": "#/$defs/opaque_id"}, "delivery": {"enum": ["direct", "steer", "follow_up"]}, "input_id": {"$ref": "#/$defs/opaque_id"}}},
-    "session_attach": {"type": "object", "additionalProperties": false, "required": ["cursor"], "properties": {"cursor": {"type": "object", "additionalProperties": false, "required": ["generation", "sequence"], "properties": {"generation": {"type": "integer", "minimum": 1}, "sequence": {"type": "integer", "minimum": 0}}}}},
+    "session_attach": {"type": "object", "additionalProperties": false, "required": ["cursor"], "properties": {"cursor": {"type": "object", "additionalProperties": false, "required": ["generation", "sequence"], "properties": {"generation": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "sequence": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}}}}},
     "session_create": {"type": "object", "additionalProperties": false, "required": ["goal_id", "goal_ref"], "properties": {"goal_id": {"$ref": "#/$defs/opaque_id"}, "goal_ref": {"$ref": "#/$defs/opaque_id"}}},
-    "share_request": {"type": "object", "additionalProperties": false, "required": ["expires_at_ms", "export_id", "share_id"], "properties": {"expires_at_ms": {"type": "integer", "minimum": 1}, "export_id": {"$ref": "#/$defs/opaque_id"}, "share_id": {"$ref": "#/$defs/opaque_id"}}}
+    "share_request": {"type": "object", "additionalProperties": false, "required": ["expires_at_ms", "export_id", "share_id"], "properties": {"expires_at_ms": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "export_id": {"$ref": "#/$defs/opaque_id"}, "share_id": {"$ref": "#/$defs/opaque_id"}}}
   }
 }
