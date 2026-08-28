@@ -394,16 +394,42 @@ class PrimeSidecarProcess:
 async def _event_iterator(
     process: PrimeSidecarProcess, envelope: Mapping[str, object]
 ) -> AsyncIterator[Mapping[str, object]]:
-    response = await process.request(envelope)
-    values = response.get(
-        "observations" if envelope.get("type") == "client_observations" else "events"
-    )
-    if not isinstance(values, list):
-        raise PrimeSidecarProcessError()
-    for event in values:
-        if not isinstance(event, Mapping):
+    request = dict(envelope)
+    previous_cursor = request.get("cursor")
+    while True:
+        response = await process.request(request)
+        values = response.get(
+            "observations" if request.get("type") == "client_observations" else "events"
+        )
+        if not isinstance(values, list):
             raise PrimeSidecarProcessError()
-        yield event
+        for event in values:
+            if not isinstance(event, Mapping):
+                raise PrimeSidecarProcessError()
+            yield event
+        if request.get("type") != "client_observations":
+            return
+        next_cursor = response.get("next_cursor")
+        if next_cursor is None:
+            return
+        if (
+            not isinstance(next_cursor, Mapping)
+            or set(next_cursor) != {"generation", "sequence"}
+            or isinstance(next_cursor.get("generation"), bool)
+            or not isinstance(next_cursor.get("generation"), int)
+            or isinstance(next_cursor.get("sequence"), bool)
+            or not isinstance(next_cursor.get("sequence"), int)
+            or next_cursor["generation"] < 1
+            or next_cursor["sequence"] < 1
+            or not values
+            or not isinstance(values[-1], Mapping)
+            or values[-1].get("generation") != next_cursor["generation"]
+            or values[-1].get("source_sequence") != next_cursor["sequence"]
+            or previous_cursor == next_cursor
+        ):
+            raise PrimeSidecarProcessError()
+        previous_cursor = dict(next_cursor)
+        request["cursor"] = previous_cursor
 
 
 def _positive_finite(value: object) -> bool:
@@ -560,8 +586,11 @@ def _validate_response(
     if response.get("type") == "events.batch":
         expected = expected | {"events"}
     if response.get("type") == "client_observations.batch":
-        expected = expected | {"observations"}
+        expected = expected | {"observations", "next_cursor"}
         if not isinstance(response.get("observations"), list):
+            raise PrimeSidecarProcessError()
+        next_cursor = response.get("next_cursor")
+        if next_cursor is not None and not isinstance(next_cursor, Mapping):
             raise PrimeSidecarProcessError()
     if response.get("type") == "client_value":
         expected = expected | {"descriptor", "body_base64"}

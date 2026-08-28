@@ -838,7 +838,17 @@ test("durable store reopens only a contiguous canonical client observation prefi
         size: sequence,
       },
     });
+    const stage = async (sequence) => {
+      const value = observation(sequence);
+      await store.stageClientObservationValue({
+        generation: 1, nativeSequence: sequence,
+        reference: value.payload.content_ref, kind: "message", mediaType: "text/plain",
+        size: value.payload.size, sha256: value.payload.sha256,
+      });
+    };
+    await stage(1);
     await store.recordClientObservationProgress(1, 1, observation(1));
+    await stage(2);
     await store.recordClientObservationProgress(1, 2, observation(2));
     await store.recordClientObservationProgress(1, 2, observation(2));
     await assert.rejects(
@@ -898,6 +908,31 @@ test("durable client observations reject non-closed public payloads before stora
         request_id: "request-1",
       },
     }));
+  } finally {
+    await fixtureRoot.cleanup();
+  }
+});
+
+test("durable progress binds its staged private reference exactly", async () => {
+  const fixtureRoot = await temporaryStoreRoot();
+  try {
+    const store = await GatewayDurableStore.open(fixtureRoot.root, "session-1");
+    await store.stageClientObservationValue({
+      generation: 1, nativeSequence: 1,
+      reference: "private:00000000-0000-4000-8000-000000000001",
+      kind: "message", mediaType: "text/plain", size: 1, sha256: "a".repeat(64),
+    });
+    await assert.rejects(store.recordClientObservationProgress(1, 1, {
+      observation_id: "prime-client-1-1", active_session_id: "session-1",
+      generation: 1, source_sequence: 1, emitted_at: "2026-08-10T03:00:01.000Z",
+      kind: "message.available",
+      payload: {
+        content_ref: "private:00000000-0000-4000-8000-000000000002",
+        media_type: "text/plain", message_id: "message-1", role: "assistant",
+        sha256: "a".repeat(64), size: 1,
+      },
+    }));
+    assert.equal(store.stagedClientObservationValues(1).length, 1);
   } finally {
     await fixtureRoot.cleanup();
   }

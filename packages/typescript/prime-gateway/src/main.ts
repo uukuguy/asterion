@@ -108,6 +108,7 @@ export const PRIME_GATEWAY_SKILL_DISCOVERY_FILE = "asterion-control.json";
 export const PRIME_GATEWAY_RLM_HOST_DISCOVERY = "asterion.prime-rlm-host-discovery/v1";
 export const PRIME_GATEWAY_RLM_HOST_DISCOVERY_FILE = "asterion-rlm-host.json";
 export const PRIME_GATEWAY_RLM_HOST_SHIM_FILE = "asterion-rlm-host-shim.mjs";
+const MAX_CLIENT_OBSERVATION_RESPONSE_BYTES = 900 * 1024;
 
 type SidecarEnvelopeType =
   | "authority.update"
@@ -256,6 +257,7 @@ type SidecarResponse =
     readonly id: string;
     readonly type: "client_observations.batch";
     readonly observations: readonly PrimeClientObservation[];
+    readonly next_cursor: Readonly<{ readonly generation: number; readonly sequence: number }> | null;
   }
   | {
     readonly protocol: typeof PRIME_GATEWAY_IPC_PROTOCOL;
@@ -974,7 +976,7 @@ export class PrimeGatewaySidecar {
           protocol: PRIME_GATEWAY_IPC_PROTOCOL,
           id: envelope.id,
           type: "client_observations.batch",
-          observations: this.clientObservations(envelope),
+          ...this.clientObservations(envelope),
         });
       }
       if (envelope.type === "client_value_read") {
@@ -1185,14 +1187,18 @@ export class PrimeGatewaySidecar {
     return Object.freeze(events);
   }
 
-  private clientObservations(envelope: SidecarEnvelope): readonly PrimeClientObservation[] {
+  private clientObservations(envelope: SidecarEnvelope): Readonly<{
+    observations: readonly PrimeClientObservation[];
+    next_cursor: Readonly<{ readonly generation: number; readonly sequence: number }> | null;
+  }> {
     const cursor = validateCursor(envelope.cursor);
     const replayCursor = cursor ?? { generation: this.options.currentGeneration, sequence: 0 };
     const observations = this.options.gateway.clientObservationsAfterCursor;
     if (observations === undefined) throw new PrimeGatewayError();
     const batch = observations.call(this.options.gateway, replayCursor);
     let expected = replayCursor.sequence + 1;
-    for (const observation of batch) {
+    const selected: PrimeClientObservation[] = [];
+    for (const [index, observation] of batch.entries()) {
       if (
         observation.active_session_id !== this.options.sessionId ||
         observation.generation !== replayCursor.generation ||
@@ -1200,8 +1206,30 @@ export class PrimeGatewaySidecar {
         JSON.stringify(observation).includes("SENTINEL_BODY")
       ) throw new PrimeGatewayError();
       expected += 1;
+      const next_cursor = index + 1 === batch.length ? null : Object.freeze({
+        generation: replayCursor.generation,
+        sequence: observation.source_sequence,
+      });
+      const candidate = [...selected, observation];
+      if (Buffer.byteLength(JSON.stringify({
+        protocol: PRIME_GATEWAY_IPC_PROTOCOL,
+        id: envelope.id,
+        type: "client_observations.batch",
+        observations: candidate,
+        next_cursor,
+      }), "utf8") > MAX_CLIENT_OBSERVATION_RESPONSE_BYTES) {
+        if (selected.length === 0) throw new PrimeGatewayError();
+        return Object.freeze({
+          observations: Object.freeze(selected),
+          next_cursor: Object.freeze({
+            generation: replayCursor.generation,
+            sequence: selected.at(-1)!.source_sequence,
+          }),
+        });
+      }
+      selected.push(observation);
     }
-    return Object.freeze([...batch]);
+    return Object.freeze({ observations: Object.freeze(selected), next_cursor: null });
   }
 
   private async readClientValue(envelope: SidecarEnvelope): Promise<Readonly<{

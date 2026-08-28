@@ -984,6 +984,50 @@ test("sidecar replays only the requested body-free client observation suffix", a
   assert.equal(JSON.stringify(response).includes("SENTINEL_BODY"), false);
 });
 
+test("sidecar pages a large client observation suffix below the response frame cap", async () => {
+  const gateway = new FakeGateway();
+  gateway.clientObservations = Array.from({ length: 5_000 }, (_, index) => {
+    const sequence = index + 1;
+    return {
+      observation_id: `prime-client-1-${sequence}`, active_session_id: "session-1", generation: 1,
+      source_sequence: sequence, emitted_at: "2026-08-10T03:00:01.000Z", kind: "commands.changed",
+      payload: { commands: ["alpha", "beta", "gamma"], revision: sequence },
+    };
+  });
+  const { sidecar } = createSidecar({ gateway });
+  const received = [];
+  let cursor = { generation: 1, sequence: 0 };
+  for (;;) {
+    const response = await sidecar.handleEnvelope({
+      protocol: PRIME_GATEWAY_IPC_PROTOCOL, id: `client-page-${cursor.sequence}`,
+      type: "client_observations", cursor,
+    });
+    assert.equal(response.type, "client_observations.batch");
+    assert.ok(Buffer.byteLength(JSON.stringify(response), "utf8") < 1024 * 1024);
+    received.push(...response.observations);
+    if (response.next_cursor === null) break;
+    assert.equal(response.next_cursor.generation, 1);
+    assert.equal(response.next_cursor.sequence, received.length);
+    cursor = response.next_cursor;
+  }
+  assert.deepEqual(received, gateway.clientObservations);
+});
+
+test("sidecar rejects one client observation that cannot fit a response frame", async () => {
+  const gateway = new FakeGateway();
+  gateway.clientObservations = [{
+    observation_id: "prime-client-1-1", active_session_id: "session-1", generation: 1,
+    source_sequence: 1, emitted_at: "2026-08-10T03:00:01.000Z", kind: "commands.changed",
+    payload: { commands: [`a${"a".repeat(950 * 1024)}`], revision: 1 },
+  }];
+  const { sidecar } = createSidecar({ gateway });
+  const response = await sidecar.handleEnvelope({
+    protocol: PRIME_GATEWAY_IPC_PROTOCOL, id: "client-observation-oversize",
+    type: "client_observations", cursor: { generation: 1, sequence: 0 },
+  });
+  assert.equal(response.type, "error");
+});
+
 test("sidecar rejects unknown generation cursors instead of returning empty batches", async () => {
   const { sidecar } = createSidecar({
     gateway: new FakeGateway({
