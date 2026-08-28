@@ -141,6 +141,8 @@ class ClientPrivateValueService:
             after = self._backend.describe(reference)
         except ClientPrivateValueError:
             raise
+        except asyncio.CancelledError:
+            raise ClientPrivateValueError("private value is unavailable") from None
         except Exception:
             raise ClientPrivateValueError("private value is unavailable") from None
         if (
@@ -181,6 +183,8 @@ class ClientPrivateValueService:
         now = self._current_clock_ms()
         try:
             live_authority_revision = self._authority_revision_source()
+        except asyncio.CancelledError:
+            raise ClientPrivateValueError("private value access is denied") from None
         except Exception:
             raise ClientPrivateValueError("private value access is denied") from None
         if (
@@ -208,6 +212,8 @@ class ClientPrivateValueService:
     def _current_clock_ms(self) -> int:
         try:
             now = self._clock_ms()
+        except asyncio.CancelledError:
+            raise ClientPrivateValueError("private value access is denied") from None
         except Exception:
             raise ClientPrivateValueError("private value access is denied") from None
         if (

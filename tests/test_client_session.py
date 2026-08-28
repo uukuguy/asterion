@@ -741,6 +741,125 @@ class TestClientSession(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(backend.read_calls, 1)
 
+    async def test_private_resolution_redacts_cancelled_dependency_boundaries(self) -> None:
+        class CancelledBackend(_PrivateBackend):
+            def __init__(self, cancelled_at: str | None, sentinel: str) -> None:
+                super().__init__()
+                self.cancelled_at = cancelled_at
+                self.sentinel = sentinel
+                self.describe_calls = 0
+
+            def describe(self, reference: str) -> PrivateValueDescriptor:
+                self.describe_calls += 1
+                if self.cancelled_at == f"describe-{self.describe_calls}":
+                    raise asyncio.CancelledError(self.sentinel)
+                return super().describe(reference)
+
+            def read(self, reference: str, *, max_bytes: int) -> bytes:
+                self.read_calls += 1
+                if self.cancelled_at == "read":
+                    raise asyncio.CancelledError(self.sentinel)
+                if reference != self._descriptor.reference or max_bytes < len(self._body):
+                    raise KeyError(reference)
+                return self._body
+
+        def source(values: list[object]) -> int:
+            value = values.pop(0)
+            if isinstance(value, BaseException):
+                raise value
+            return value  # type: ignore[return-value]
+
+        cases: tuple[
+            tuple[str, list[object], list[object], str | None, str, tuple[int, int]],
+            ...,
+        ] = (
+            (
+                "clock before read",
+                [asyncio.CancelledError("SENTINEL_CLOCK_BEFORE")],
+                [1],
+                None,
+                "private value access is denied",
+                (0, 0),
+            ),
+            (
+                "clock after read",
+                [1, asyncio.CancelledError("SENTINEL_CLOCK_AFTER")],
+                [1, 1],
+                None,
+                "private value access is denied",
+                (2, 1),
+            ),
+            (
+                "authority revision before read",
+                [1],
+                [asyncio.CancelledError("SENTINEL_AUTHORITY_BEFORE")],
+                None,
+                "private value access is denied",
+                (0, 0),
+            ),
+            (
+                "authority revision after read",
+                [1, 1],
+                [1, asyncio.CancelledError("SENTINEL_AUTHORITY_AFTER")],
+                None,
+                "private value access is denied",
+                (2, 1),
+            ),
+            (
+                "backend describe before read",
+                [1],
+                [1],
+                "describe-1",
+                "private value is unavailable",
+                (1, 0),
+            ),
+            (
+                "backend read",
+                [1],
+                [1],
+                "read",
+                "private value is unavailable",
+                (1, 1),
+            ),
+            (
+                "backend describe after read",
+                [1],
+                [1],
+                "describe-2",
+                "private value is unavailable",
+                (2, 1),
+            ),
+        )
+        for label, clock_values, authority_values, cancelled_at, message, calls in cases:
+            with self.subTest(label=label):
+                sentinel = f"SENTINEL_{label.upper().replace(' ', '_')}"
+                backend = CancelledBackend(cancelled_at, sentinel)
+                service = ClientPrivateValueService(
+                    access=ClientAccess(
+                        client_id="client-1",
+                        session_id="session-1",
+                        authority_revision=1,
+                        purposes=("interactive-render",),
+                    ),
+                    backend=backend,
+                    clock_ms=lambda values=clock_values: source(values),
+                    authority_revision_source=(
+                        lambda values=authority_values: source(values)
+                    ),
+                )
+
+                with self.assertRaisesRegex(ClientPrivateValueError, f"^{message}$") as raised:
+                    service.resolve_bytes(
+                        "private-input-1",
+                        purpose="interactive-render",
+                        max_bytes=32,
+                        deadline_ms=10,
+                    )
+
+                self.assertNotIn("SENTINEL", str(raised.exception))
+                self.assertNotIn("SENTINEL", repr(raised.exception))
+                self.assertEqual((backend.describe_calls, backend.read_calls), calls)
+
     async def test_private_service_redacts_hostile_cancellation_signal_at_construction(self) -> None:
         class HostileCancellationSignal:
             @property
@@ -771,7 +890,7 @@ class TestClientSession(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaisesRegex(
             ClientPrivateValueError, "^client private service is invalid$"
-        ):
+        ) as raised:
             ClientPrivateValueService(
                 access=ClientAccess(
                     client_id="client-1",
@@ -784,6 +903,8 @@ class TestClientSession(unittest.IsolatedAsyncioTestCase):
                 authority_revision_source=lambda: 1,
                 cancellation_signal=CancelledCancellationSignal(),
             )
+        self.assertNotIn("SENTINEL", str(raised.exception))
+        self.assertNotIn("SENTINEL", repr(raised.exception))
 
     async def test_private_service_rejects_non_bool_cancellation_signal_at_construction(self) -> None:
         class NonBooleanCancellationSignal:
@@ -845,13 +966,15 @@ class TestClientSession(unittest.IsolatedAsyncioTestCase):
 
                 with self.assertRaisesRegex(
                     ClientPrivateValueError, "^private value access is denied$"
-                ):
+                ) as raised:
                     service.resolve_bytes(
                         "private-input-1",
                         purpose="interactive-render",
                         max_bytes=32,
                         deadline_ms=10,
                     )
+                self.assertNotIn("SENTINEL", str(raised.exception))
+                self.assertNotIn("SENTINEL", repr(raised.exception))
                 self.assertEqual(backend.read_calls, reads)
                 self.assertEqual(
                     signal.accesses,
