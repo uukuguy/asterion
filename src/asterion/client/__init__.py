@@ -21,6 +21,18 @@ from .jsonl import ClientJsonlError, JsonlClientCodec
 from .sdk import AgentClient, AgentClientError
 from .rpc import ClientRpcAdapter, ClientRpcError, RPC_METHODS
 from .acp import ACP_EVENT_METHODS, ClientAcpAdapter, ClientAcpError
+from .interactive import (
+    ClientCommand,
+    ClientCommandRegistry,
+    ClientInteractiveError,
+    ClientUiRequest,
+    ClientViewState,
+    ExtensionUiResponse,
+    reduce_client_view,
+    respond_to_extension_ui,
+    run_headless,
+    run_interactive,
+)
 from .session import (
     ClientObservation,
     ClientObservationSource,
@@ -37,6 +49,9 @@ __all__ = (
     "ClientAcpAdapter",
     "ClientAcpError",
     "ClientCursor",
+    "ClientCommand",
+    "ClientCommandRegistry",
+    "ClientInteractiveError",
     "ClientAccess",
     "ClientEvent",
     "ClientIntent",
@@ -51,6 +66,9 @@ __all__ = (
     "ClientRpcError",
     "ClientSessionEndpoint",
     "ClientSessionError",
+    "ClientUiRequest",
+    "ClientViewState",
+    "ExtensionUiResponse",
     "HostClientSessionEndpoint",
     "JsonlClientCodec",
     "PrivateValueDescriptor",
@@ -58,4 +76,8 @@ __all__ = (
     "validate_client_event",
     "validate_client_event_stream",
     "validate_client_intent",
+    "reduce_client_view",
+    "respond_to_extension_ui",
+    "run_headless",
+    "run_interactive",
 )

@@ -8,9 +8,12 @@ import unittest
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 from asterion.cli import _load_available_capability_packages, _parser, main
+from asterion.client import AgentClient, ClientCursor, ClientEvent
+from asterion.client.session import ClientSessionEndpoint
 from asterion.applications.dci_agent_lite.provider import (
     create_provider as create_dci_provider,
 )
@@ -2260,6 +2263,49 @@ class AsterionCliTests(unittest.TestCase):
         self.assertEqual(calls, [])
         for output in (stdout.getvalue(), stderr.getvalue()):
             self.assertNotIn("SECRET-NON-CALLABLE-IMPLEMENTATION", output)
+
+class _InteractiveCliEndpoint:
+    private_values = None
+
+    async def submit(self, intent: object) -> str:
+        del intent
+        return "accepted"
+
+    def events(self, cursor: ClientCursor | None = None) -> AsyncIterator[ClientEvent]:
+        del cursor
+
+        async def iterate() -> AsyncIterator[ClientEvent]:
+            yield ClientEvent(
+                protocol="asterion.agent-client/v1", event_id="client-event-1",
+                session_id="client-session-1", generation=1, sequence=1,
+                emitted_at="2026-08-28T12:00:00Z", type="session.terminal",
+                payload={"reason_code": "completed", "status": "completed"},
+            )
+
+        return iterate()
+
+    async def close(self) -> None:
+        return None
+
+
+class ClientCommandCliTests(unittest.TestCase):
+    def test_client_requires_explicit_factory_and_never_loads_provider(self) -> None:
+        stderr = io.StringIO()
+        self.assertEqual(
+            main(["client", "--mode", "json"], stdout=io.StringIO(), stderr=stderr), 2
+        )
+        self.assertEqual(stderr.getvalue(), "asterion: command failed\n")
+
+        output = io.StringIO()
+        endpoint = _InteractiveCliEndpoint()
+        self.assertEqual(
+            main(
+                ["client", "--mode", "json"], stdout=output, stderr=io.StringIO(),
+                client_factory=lambda: AgentClient(cast(ClientSessionEndpoint, endpoint), client_id="client-1"),
+            ),
+            0,
+        )
+        self.assertEqual(json.loads(output.getvalue())["type"], "session.terminal")
 
 
 if __name__ == "__main__":

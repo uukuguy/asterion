@@ -31,6 +31,7 @@ ASTERION_PRIME_MAX_COST_MICROS ?=
 .PHONY: test.prime-ecosystem-mcp.provider-free
 .PHONY: test.prime-client-core.provider-free
 .PHONY: test.prime-client-protocols.provider-free
+.PHONY: test.prime-client-interactive.provider-free
 
 help:
 	@echo "provider-free setup (network/disk; Agent operations 0; Judge operations 0): setup setup-pi setup-resources-basic setup-resources-benchmark"
@@ -219,6 +220,12 @@ test.prime-client-protocols.provider-free:
 	$(UV_BIN) run python -m unittest -v \
 		tests.test_client_rpc_acp \
 		tests.test_prime_client_protocols
+
+test.prime-client-interactive.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_client_interactive \
+		tests.test_asterion_cli \
+		tests.test_prime_client_interactive
 
 prime-verify-bounded:
 	$(UV_BIN) run python tools/verify_prime_loop.py --level bounded --source-root "$(ASTERION_PRIME_SOURCE_ROOT)" --authority "$(ASTERION_PRIME_AUTHORITY)" --max-cost-micros "$(ASTERION_PRIME_MAX_COST_MICROS)"

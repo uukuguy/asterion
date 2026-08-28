@@ -69,9 +69,11 @@ from asterion.services.registry import (
     HostServiceRegistryError,
     parse_host_service_options,
 )
+from asterion.client.cli import ClientCliError
 
 if TYPE_CHECKING:
     from asterion.benchmarks.cli import BenchmarkCommandHost
+    from asterion.client.sdk import AgentClient
 
 
 def main(
@@ -86,6 +88,7 @@ def main(
     managed_executor_factory: Callable[[OperatorExecutorConfig], object] | None = None,
     capability_packages: Iterable[InstalledCapabilityPackage] | None = None,
     benchmark_host: BenchmarkCommandHost | None = None,
+    client_factory: Callable[[], AgentClient] | None = None,
 ) -> int:
     """Run the generic installed-application CLI."""
 
@@ -127,6 +130,14 @@ def main(
     parser = _parser()
     try:
         args = parser.parse_args(raw_argv)
+        if args.command == "client":
+            from asterion.client.cli import run_client_command
+
+            return asyncio.run(
+                run_client_command(
+                    args, client_factory=client_factory, stdout=stdout
+                )
+            )
         if args.command == "list":
             if args.provider is not None:
                 provider = load_application_provider(
@@ -231,6 +242,7 @@ def main(
         CapabilityExecutionError,
         RuntimeFactoryError,
         HostServiceRegistryError,
+        ClientCliError,
         OSError,
         TypeError,
         ValueError,
@@ -454,8 +466,10 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="asterion")
     subparsers = parser.add_subparsers(dest="command", required=True)
     from asterion.cli_capability import add_capability_parser
+    from asterion.client.cli import add_client_parser
 
     add_capability_parser(subparsers)
+    add_client_parser(subparsers)
     list_command = subparsers.add_parser("list")
     list_command.add_argument("--provider")
     describe = subparsers.add_parser(
