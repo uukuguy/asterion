@@ -17,6 +17,7 @@ from asterion.control.authority import (
     PortfolioGrant,
     ProviderUsageReport,
 )
+from asterion.operation.protocol import OperationTransaction
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -75,11 +76,43 @@ def _envelope(**changes: object) -> AuthorityEnvelope:
 
 
 class TestControlAuthority(unittest.TestCase):
+    def test_operation_reservation_is_one_use_and_conflicts_fail_closed(self) -> None:
+        transaction = OperationTransaction.from_mapping(
+            {
+                "protocol": "asterion.operation/v1",
+                "operation_id": "operation-1",
+                "request": {
+                    "protocol": "asterion.operation/v1",
+                    "request_kind": "operation.auth-request",
+                    "request_ref": "request-1",
+                    "request_sha256": "a" * 64,
+                    "media_type": "application/json",
+                    "byte_count": 1,
+                    "purpose": "operation.auth",
+                    "client_id": "client-1",
+                    "session_id": "session-1",
+                    "generation": 1,
+                    "authority_revision": 1,
+                },
+                "session_id": "session-1",
+                "client_id": "client-1",
+                "generation": 1,
+                "authority_revision": 1,
+                "authority_id": "authority-1",
+                "idempotency_key": "key-1",
+                "feature_id": "operation.auth",
+                "requested_at": "2026-08-10T15:00:00Z",
+            }
+        )
+        ledger = AuthorityLedger(_envelope(allowed_operations=("operation.auth",)))
+        decision = ledger.evaluate_operation(transaction, now_ms=1_000)
+        ledger.reserve_operation(decision)
+        ledger.reserve_operation(decision)
+        self.assertEqual(ledger.reserved_operation_ids, ("operation-1",))
+
     def test_remaining_budget_subtracts_effective_usage_and_reservations(self) -> None:
         ledger = AuthorityLedger(_envelope())
-        ledger.record_provider_usage(
-            ProviderUsageReport(BudgetUsage(30, 20, 0, 50, 7))
-        )
+        ledger.record_provider_usage(ProviderUsageReport(BudgetUsage(30, 20, 0, 50, 7)))
         decision = ledger.evaluate(_proposal(), now_ms=1_000)
         ledger.reserve(decision)
 
@@ -109,21 +142,26 @@ class TestControlAuthority(unittest.TestCase):
         )
         self.assertEqual(ledger.usage, BudgetUsage(30, 80, 0, 110, 7))
 
-    def test_controller_report_and_disjoint_receipt_have_coherent_aggregate(self) -> None:
+    def test_controller_report_and_disjoint_receipt_have_coherent_aggregate(
+        self,
+    ) -> None:
         ledger = AuthorityLedger(_envelope())
         ledger.record_provider_usage(ProviderUsageReport(BudgetUsage(30, 0, 0, 30, 0)))
         decision = ledger.evaluate(_proposal(), now_ms=1_000)
         ledger.reserve(decision)
-        ledger.settle("action-1", ActionReceipt("action-1", "receipt-1", BudgetUsage(0, 80, 0, 80, 0)))
+        ledger.settle(
+            "action-1",
+            ActionReceipt("action-1", "receipt-1", BudgetUsage(0, 80, 0, 80, 0)),
+        )
         self.assertEqual(ledger.usage.aggregate_tokens, 110)
 
-    def test_provider_reports_are_monotonic_coherent_and_immutable_on_failure(self) -> None:
+    def test_provider_reports_are_monotonic_coherent_and_immutable_on_failure(
+        self,
+    ) -> None:
         ledger = AuthorityLedger(_envelope())
         report = ProviderUsageReport(BudgetUsage(10, 0, 0, 10, 0))
         ledger.record_provider_usage(report)
-        for invalid in (
-            ProviderUsageReport(BudgetUsage(5, 0, 0, 5, 0)),
-        ):
+        for invalid in (ProviderUsageReport(BudgetUsage(5, 0, 0, 5, 0)),):
             with self.assertRaises(AuthorityError):
                 ledger.record_provider_usage(invalid)
             self.assertEqual(ledger.reported_usage, report.usage)
@@ -135,28 +173,41 @@ class TestControlAuthority(unittest.TestCase):
             _envelope(budget_limit=_limit(child_tokens=100, aggregate_tokens=100))
         )
         budget = {
-            "controller_tokens": 0, "application_tokens": 0, "child_tokens": 30,
-            "aggregate_tokens": 30, "cost_micros": 0, "deadline_ms": 1_000,
+            "controller_tokens": 0,
+            "application_tokens": 0,
+            "child_tokens": 30,
+            "aggregate_tokens": 30,
+            "cost_micros": 0,
+            "deadline_ms": 1_000,
         }
         for action_id in ("action-1", "action-2"):
             decision = ledger.evaluate(
-                _proposal(action_id=action_id, idempotency_key=f"key-{action_id}", budget=budget),
+                _proposal(
+                    action_id=action_id,
+                    idempotency_key=f"key-{action_id}",
+                    budget=budget,
+                ),
                 now_ms=1_000,
             )
             ledger.reserve(decision)
             ledger.settle(
                 action_id,
-                ActionReceipt(action_id, f"receipt-{action_id}", BudgetUsage(0, 0, 30, 30, 0)),
+                ActionReceipt(
+                    action_id, f"receipt-{action_id}", BudgetUsage(0, 0, 30, 30, 0)
+                ),
             )
         ledger.record_provider_usage(ProviderUsageReport(BudgetUsage(20, 0, 0, 20, 0)))
         self.assertEqual(ledger.usage, BudgetUsage(20, 0, 60, 80, 0))
         third = ledger.evaluate(
             _proposal(
-                action_id="action-3", idempotency_key="key-action-3",
+                action_id="action-3",
+                idempotency_key="key-action-3",
                 budget={**budget, "child_tokens": 50, "aggregate_tokens": 50},
-            ), now_ms=1_000,
+            ),
+            now_ms=1_000,
         )
         self.assertEqual(third.reason, "budget-exceeded")
+
     def test_evaluate_does_not_mutate_and_reserve_settle_are_idempotent(self) -> None:
         ledger = AuthorityLedger(_envelope())
         proposal = _proposal()
@@ -186,7 +237,9 @@ class TestControlAuthority(unittest.TestCase):
         self.assertEqual(ledger.usage, receipt.usage)
         self.assertEqual(ledger.reserved_action_ids, ())
 
-    def test_rejects_target_operation_and_stale_revision_without_reservation(self) -> None:
+    def test_rejects_target_operation_and_stale_revision_without_reservation(
+        self,
+    ) -> None:
         ledger = AuthorityLedger(_envelope())
         cases = (
             (
@@ -213,11 +266,15 @@ class TestControlAuthority(unittest.TestCase):
         for proposal, reason in cases:
             with self.subTest(reason=reason):
                 decision = ledger.evaluate(proposal, now_ms=1_000)
-                self.assertEqual((decision.status, decision.reason), ("rejected", reason))
+                self.assertEqual(
+                    (decision.status, decision.reason), ("rejected", reason)
+                )
         self.assertEqual(ledger.usage, BudgetUsage.zero())
         self.assertEqual(ledger.reserved_action_ids, ())
 
-    def test_enforces_budget_deadline_expiry_cancellation_and_service_grants(self) -> None:
+    def test_enforces_budget_deadline_expiry_cancellation_and_service_grants(
+        self,
+    ) -> None:
         budget = {
             "controller_tokens": 0,
             "application_tokens": 101,
@@ -270,7 +327,9 @@ class TestControlAuthority(unittest.TestCase):
                     now_ms=now_ms,
                     requested_host_services=services,
                 )
-                self.assertEqual((decision.status, decision.reason), ("rejected", reason))
+                self.assertEqual(
+                    (decision.status, decision.reason), ("rejected", reason)
+                )
 
     def test_enforces_child_depth_and_concurrency(self) -> None:
         child = _proposal(
@@ -336,7 +395,9 @@ class TestControlAuthority(unittest.TestCase):
         operations = ["application.invoke", "child.spawn"]
         envelope = _envelope(allowed_operations=operations)
         operations.clear()
-        self.assertEqual(envelope.allowed_operations, ("application.invoke", "child.spawn"))
+        self.assertEqual(
+            envelope.allowed_operations, ("application.invoke", "child.spawn")
+        )
 
         for invalid in (
             {"allowed_operations": ("child.spawn", "application.invoke")},

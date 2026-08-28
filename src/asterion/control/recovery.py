@@ -17,8 +17,11 @@ from asterion.control.authority import (
     ProviderUsageReport,
     SessionContextDecision,
     SessionContextSettlement,
+    OperationDecision,
+    OperationSettlement,
     session_context_command_digest,
 )
+from asterion.operation.protocol import OperationReceipt, OperationTransaction
 from asterion.control.execution import ActionExecutionReceipt
 from asterion.control.host import ControlCommand, ControlEvent, EventCursor
 from asterion.control.journal import (
@@ -149,6 +152,8 @@ def recover_control_host_state(
             | ProviderUsageReport
             | SessionContextDecision
             | SessionContextSettlement
+            | OperationDecision
+            | OperationSettlement
         ] = []
         decisions: dict[str, AdmissionDecision] = {}
         terminal_commands: dict[str, ControlCommand] = {}
@@ -158,6 +163,10 @@ def recover_control_host_state(
         context_decisions: dict[str, SessionContextDecision] = {}
         context_receipts: dict[str, SessionContextReceipt] = {}
         context_idempotency: dict[str, str] = {}
+        operation_transactions: dict[str, OperationTransaction] = {}
+        operation_decisions: dict[str, OperationDecision] = {}
+        operation_reserved: set[str] = set()
+        operation_receipts: dict[str, OperationReceipt] = {}
 
         for entry in values[start:]:
             record = entry.record
@@ -166,6 +175,81 @@ def recover_control_host_state(
                 "client.observation.accepted",
                 "client.event.accepted",
             }:
+                continue
+            if record.kind == "operation.transaction.accepted":
+                value = record.payload["transaction"]
+                if not isinstance(value, Mapping):
+                    raise JournalConflictError("control journal recovery failed")
+                transaction = OperationTransaction.from_mapping(value)
+                if transaction.operation_id in operation_transactions:
+                    raise JournalConflictError("control journal recovery failed")
+                operation_transactions[transaction.operation_id] = transaction
+                continue
+            if record.kind == "operation.admitted":
+                decision = OperationDecision(**record.payload)  # type: ignore[arg-type]
+                transaction = operation_transactions.get(decision.operation_id)
+                if (
+                    transaction is None
+                    or decision.transaction_digest
+                    != _operation_transaction_digest(transaction)
+                    or decision.operation_id in operation_decisions
+                ):
+                    raise JournalConflictError("control journal recovery failed")
+                operation_decisions[decision.operation_id] = decision
+                continue
+            if record.kind == "operation.reserved":
+                operation_id = str(record.payload["operation_id"])
+                decision = operation_decisions.get(operation_id)
+                if (
+                    decision is None
+                    or decision.status != "admitted"
+                    or record.payload["transaction_digest"]
+                    != decision.transaction_digest
+                    or operation_id in operation_reserved
+                ):
+                    raise JournalConflictError("control journal recovery failed")
+                operation_reserved.add(operation_id)
+                authority_operations.append(decision)
+                continue
+            if record.kind in {
+                "operation.dispatch.started",
+                "operation.handoff.fenced",
+                "operation.reconciliation.recorded",
+            }:
+                continue
+            if record.kind == "operation.receipted":
+                value = record.payload["receipt"]
+                if not isinstance(value, Mapping):
+                    raise JournalConflictError("control journal recovery failed")
+                receipt = OperationReceipt.from_mapping(value)
+                transaction = operation_transactions.get(receipt.operation_id)
+                decision = operation_decisions.get(receipt.operation_id)
+                previous_receipt = operation_receipts.get(receipt.operation_id)
+                rejected = decision is not None and decision.status == "rejected"
+                if (
+                    transaction is None
+                    or decision is None
+                    or (
+                        previous_receipt is not None
+                        and (
+                            previous_receipt.status != "uncertain"
+                            or receipt.status == "uncertain"
+                        )
+                    )
+                    or (rejected and receipt.status != "rejected")
+                    or (not rejected and receipt.operation_id not in operation_reserved)
+                    or not _same_operation_identity(transaction, receipt)
+                ):
+                    raise JournalConflictError("control journal recovery failed")
+                operation_receipts[receipt.operation_id] = receipt
+                if receipt.status != "uncertain":
+                    authority_operations.append(
+                        OperationSettlement(
+                            receipt.operation_id,
+                            receipt.receipt_id,
+                            _operation_receipt_digest(receipt),
+                        )
+                    )
                 continue
             if record.kind == "event.accepted":
                 event = ControlEvent.from_mapping(_mapping(record.payload["event"]))
@@ -228,11 +312,7 @@ def recover_control_host_state(
                 session_id = _bind_session(session_id, command.session_id)
                 if (
                     command.generation
-                    != (
-                        expected_generation
-                        if state is None
-                        else state.generation
-                    )
+                    != (expected_generation if state is None else state.generation)
                     or command.authority_revision != journal_revision
                     or command.command_id in context_commands
                 ):
@@ -261,9 +341,7 @@ def recover_control_host_state(
                     command_id=command_id,
                     idempotency_key=str(record.payload["idempotency_key"]),
                     authority_id=authority_id,
-                    authority_revision=_integer(
-                        record.payload["authority_revision"]
-                    ),
+                    authority_revision=_integer(record.payload["authority_revision"]),
                     operation=str(record.payload["operation"]),
                     command_digest=str(record.payload["command_digest"]),
                     status=status,
@@ -295,30 +373,22 @@ def recover_control_host_state(
                     or receipt.session_id != command.session_id
                     or receipt.generation != command.generation
                     or receipt.operation != command.operation
-                    or (
-                        decision.status == "rejected"
-                        and receipt.status != "rejected"
-                    )
+                    or (decision.status == "rejected" and receipt.status != "rejected")
                 ):
                     raise JournalConflictError("control journal recovery failed")
                 usage_value = record.payload["usage"]
                 if receipt.status == "uncertain":
                     if usage_value is not None:
-                        raise JournalConflictError(
-                            "control journal recovery failed"
-                        )
+                        raise JournalConflictError("control journal recovery failed")
                 elif decision.status == "admitted":
                     usage = _usage(usage_value)
                     if (
                         receipt.status == "succeeded"
-                        and command.operation
-                        in SESSION_CONTEXT_MODEL_OPERATIONS
+                        and command.operation in SESSION_CONTEXT_MODEL_OPERATIONS
                         and usage
                         != _usage(_mapping(receipt.payload["result"])["usage"])
                     ):
-                        raise JournalConflictError(
-                            "control journal recovery failed"
-                        )
+                        raise JournalConflictError("control journal recovery failed")
                     authority_operations.append(
                         SessionContextSettlement(
                             command_id=receipt.command_id,
@@ -473,6 +543,44 @@ def recover_control_host_state(
         raise
     except (AuthorityError, ControlStateError, KeyError, TypeError, ValueError):
         raise JournalConflictError("control journal recovery failed") from None
+
+
+def _same_operation_identity(
+    transaction: OperationTransaction, receipt: OperationReceipt
+) -> bool:
+    return (
+        receipt.operation_id == transaction.operation_id
+        and receipt.request_ref == transaction.request.request_ref
+        and receipt.request_sha256 == transaction.request.request_sha256
+        and receipt.purpose == transaction.request.purpose
+        and receipt.session_id == transaction.session_id
+        and receipt.client_id == transaction.client_id
+        and receipt.generation == transaction.generation
+        and receipt.authority_revision == transaction.authority_revision
+        and receipt.authority_id == transaction.authority_id
+        and receipt.idempotency_key == transaction.idempotency_key
+        and receipt.feature_id == transaction.feature_id
+    )
+
+
+def _operation_transaction_digest(transaction: OperationTransaction) -> str:
+    from asterion.control.authority import operation_transaction_digest
+
+    return operation_transaction_digest(transaction)
+
+
+def _operation_receipt_digest(receipt: OperationReceipt) -> str:
+    import hashlib
+    import json
+
+    return hashlib.sha256(
+        json.dumps(
+            _json_value(receipt.to_mapping()),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def _validate_entries(entries: tuple[JournalEntry, ...]) -> None:

@@ -20,10 +20,21 @@ from asterion.control.session_context import (
     SESSION_CONTEXT_OPERATIONS,
     SessionContextCommand,
 )
+from asterion.operation.protocol import OperationTransaction
 from asterion.protocol_ordering import is_sorted_unique_scalar_strings
 
 
 RLM_OPERATIONS = frozenset({"rlm.child.delete", "rlm.child.message", "rlm.child.spawn"})
+OPERATION_IDS = frozenset(
+    {
+        "operation.auth",
+        "operation.controlled-update-restart",
+        "operation.doctor",
+        "operation.model-selection",
+        "operation.settings-keybindings",
+        "operation.telemetry-usage",
+    }
+)
 
 
 class AuthorityError(ValueError):
@@ -159,7 +170,11 @@ class AuthorityEnvelope:
             raise AuthorityError("authority portfolio is invalid")
         operations = tuple(self.allowed_operations)
         if any(
-            operation not in ACTION_KINDS | SESSION_CONTEXT_OPERATIONS | RLM_OPERATIONS
+            operation
+            not in ACTION_KINDS
+            | SESSION_CONTEXT_OPERATIONS
+            | RLM_OPERATIONS
+            | OPERATION_IDS
             for operation in operations
         ) or not is_sorted_unique_scalar_strings(list(operations)):
             raise AuthorityError("authority operations are invalid")
@@ -274,8 +289,7 @@ class SessionContextDecision:
             or IDENTIFIER.fullmatch(self.reason) is None
             or len(self.command_digest) != 64
             or any(
-                character not in "0123456789abcdef"
-                for character in self.command_digest
+                character not in "0123456789abcdef" for character in self.command_digest
             )
             or (not admitted and self.reservation is not None)
             or (
@@ -308,6 +322,52 @@ class SessionContextSettlement:
             raise AuthorityError("session context settlement is invalid")
 
 
+@dataclass(frozen=True)
+class OperationDecision:
+    """One exact authority decision for an operation transaction."""
+
+    operation_id: str
+    authority_id: str
+    authority_revision: int
+    transaction_digest: str
+    feature_id: str
+    status: str
+    reason: str
+
+    def __post_init__(self) -> None:
+        if (
+            OPAQUE_ID.fullmatch(self.operation_id) is None
+            or OPAQUE_ID.fullmatch(self.authority_id) is None
+            or self.feature_id not in OPERATION_IDS
+            or self.status not in {"admitted", "rejected"}
+            or IDENTIFIER.fullmatch(self.reason) is None
+            or len(self.transaction_digest) != 64
+            or any(value not in "0123456789abcdef" for value in self.transaction_digest)
+        ):
+            raise AuthorityError("operation decision is invalid")
+        _require_positive_integer(
+            self.authority_revision, "operation decision revision"
+        )
+
+
+@dataclass(frozen=True)
+class OperationSettlement:
+    """A definitive, public-safe operation receipt settlement."""
+
+    operation_id: str
+    receipt_id: str
+    receipt_digest: str
+
+    def __post_init__(self) -> None:
+        if (
+            OPAQUE_ID.fullmatch(self.operation_id) is None
+            or OPAQUE_ID.fullmatch(self.receipt_id) is None
+            or len(self.receipt_digest) != 64
+            or any(value not in "0123456789abcdef" for value in self.receipt_digest)
+        ):
+            raise AuthorityError("operation settlement is invalid")
+
+
 class AuthorityLedger:
     """Evaluate without mutation, then reserve and settle exactly once."""
 
@@ -321,6 +381,8 @@ class AuthorityLedger:
         self._receipts: dict[str, ActionReceipt] = {}
         self._context_reservations: dict[str, SessionContextDecision] = {}
         self._context_settlements: dict[str, SessionContextSettlement] = {}
+        self._operation_reservations: dict[str, OperationDecision] = {}
+        self._operation_settlements: dict[str, OperationSettlement] = {}
         self._frozen = False
 
     @property
@@ -363,6 +425,14 @@ class AuthorityLedger:
     ) -> Mapping[str, SessionContextSettlement]:
         return MappingProxyType(dict(self._context_settlements))
 
+    @property
+    def reserved_operation_ids(self) -> tuple[str, ...]:
+        return tuple(sorted(self._operation_reservations))
+
+    @property
+    def operation_settlements(self) -> Mapping[str, OperationSettlement]:
+        return MappingProxyType(dict(self._operation_settlements))
+
     def remaining_budget(self, *, now_ms: int) -> RemainingBudget:
         """Return the exact conservative capacity after usage and reservations."""
 
@@ -373,12 +443,16 @@ class AuthorityLedger:
         committed = _add_usage(self.usage, self._reserved_usage())
         limit = envelope.budget_limit
         return RemainingBudget(
-            controller_tokens=max(0, limit.controller_tokens - committed.controller_tokens),
+            controller_tokens=max(
+                0, limit.controller_tokens - committed.controller_tokens
+            ),
             application_tokens=max(
                 0, limit.application_tokens - committed.application_tokens
             ),
             child_tokens=max(0, limit.child_tokens - committed.child_tokens),
-            aggregate_tokens=max(0, limit.aggregate_tokens - committed.aggregate_tokens),
+            aggregate_tokens=max(
+                0, limit.aggregate_tokens - committed.aggregate_tokens
+            ),
             cost_micros=max(0, limit.cost_micros - committed.cost_micros),
             deadline_ms=max(
                 0,
@@ -399,6 +473,8 @@ class AuthorityLedger:
             and self._receipts == other._receipts
             and self._context_reservations == other._context_reservations
             and self._context_settlements == other._context_settlements
+            and self._operation_reservations == other._operation_reservations
+            and self._operation_settlements == other._operation_settlements
         )
 
     @classmethod
@@ -411,12 +487,22 @@ class AuthorityLedger:
             | ProviderUsageReport
             | SessionContextDecision
             | SessionContextSettlement
+            | OperationDecision
+            | OperationSettlement
         ],
     ) -> AuthorityLedger:
         """Build a frozen ledger from an already validated ordered journal."""
 
         ledger = cls(envelope)
         for operation in operations:
+            if isinstance(operation, OperationSettlement):
+                ledger.settle_operation(operation.operation_id, operation)
+                continue
+            if isinstance(operation, OperationDecision):
+                if operation.status != "admitted":
+                    raise AuthorityError("recovered operation decision is invalid")
+                ledger.reserve_operation(operation)
+                continue
             if isinstance(operation, ProviderUsageReport):
                 ledger.record_provider_usage(operation)
                 continue
@@ -485,7 +571,81 @@ class AuthorityLedger:
         ledger._receipts = dict(self._receipts)
         ledger._context_reservations = dict(self._context_reservations)
         ledger._context_settlements = dict(self._context_settlements)
+        ledger._operation_reservations = dict(self._operation_reservations)
+        ledger._operation_settlements = dict(self._operation_settlements)
         return ledger
+
+    def evaluate_operation(
+        self, transaction: OperationTransaction, *, now_ms: int
+    ) -> OperationDecision:
+        """Evaluate one closed operation transaction without mutation."""
+
+        if not isinstance(transaction, OperationTransaction):
+            raise AuthorityError("operation transaction is invalid")
+        _require_nonnegative_integer(now_ms, "operation evaluation time")
+        digest = operation_transaction_digest(transaction)
+        if self._envelope.cancelled:
+            return self._operation_rejected(transaction, digest, "authority-cancelled")
+        if (
+            transaction.authority_id != self._envelope.authority_id
+            or transaction.authority_revision != self._envelope.revision
+        ):
+            return self._operation_rejected(
+                transaction, digest, "authority-revision-mismatch"
+            )
+        if now_ms >= self._envelope.expires_at_ms:
+            return self._operation_rejected(transaction, digest, "authority-expired")
+        if transaction.feature_id not in self._envelope.allowed_operations:
+            return self._operation_rejected(
+                transaction, digest, "operation-not-authorized"
+            )
+        return OperationDecision(
+            transaction.operation_id,
+            self._envelope.authority_id,
+            self._envelope.revision,
+            digest,
+            transaction.feature_id,
+            "admitted",
+            "authorized",
+        )
+
+    def reserve_operation(self, decision: OperationDecision) -> None:
+        self._ensure_mutable()
+        if not isinstance(decision, OperationDecision) or decision.status != "admitted":
+            raise AuthorityError("operation reservation is invalid")
+        existing = self._operation_reservations.get(decision.operation_id)
+        if existing is not None:
+            if existing != decision:
+                raise AuthorityError("operation reservation conflicts")
+            return
+        if decision.operation_id in self._operation_settlements:
+            raise AuthorityError("operation is already settled")
+        if (
+            decision.authority_id != self._envelope.authority_id
+            or decision.authority_revision != self._envelope.revision
+            or decision.feature_id not in self._envelope.allowed_operations
+        ):
+            raise AuthorityError("operation authority revision is stale")
+        self._operation_reservations[decision.operation_id] = decision
+
+    def settle_operation(
+        self, operation_id: str, settlement: OperationSettlement
+    ) -> None:
+        self._ensure_mutable()
+        if (
+            not isinstance(settlement, OperationSettlement)
+            or settlement.operation_id != operation_id
+        ):
+            raise AuthorityError("operation settlement is invalid")
+        existing = self._operation_settlements.get(operation_id)
+        if existing is not None:
+            if existing != settlement:
+                raise AuthorityError("operation settlement conflicts")
+            return
+        if operation_id not in self._operation_reservations:
+            raise AuthorityError("operation reservation is unavailable")
+        del self._operation_reservations[operation_id]
+        self._operation_settlements[operation_id] = settlement
 
     def evaluate_session_context(
         self,
@@ -508,9 +668,7 @@ class AuthorityLedger:
         if now_ms >= self._envelope.expires_at_ms:
             return self._context_rejected(command, digest, "authority-expired")
         if command.operation not in self._envelope.allowed_operations:
-            return self._context_rejected(
-                command, digest, "operation-not-authorized"
-            )
+            return self._context_rejected(command, digest, "operation-not-authorized")
         reservation = None
         if command.operation in SESSION_CONTEXT_MODEL_OPERATIONS:
             budget = command.payload.get("budget")
@@ -519,8 +677,7 @@ class AuthorityLedger:
             reservation = BudgetRequest.from_mapping(budget)
             if (
                 reservation.deadline_ms > self._envelope.max_action_deadline_ms
-                or now_ms + reservation.deadline_ms
-                > self._envelope.expires_at_ms
+                or now_ms + reservation.deadline_ms > self._envelope.expires_at_ms
             ):
                 return self._context_rejected(
                     command, digest, "deadline-not-authorized"
@@ -760,7 +917,9 @@ class AuthorityLedger:
         if not _monotonic(self._reported_usage, report.usage):
             raise AuthorityError("provider usage is not monotonic")
         effective = _effective_usage(report.usage, self._usage)
-        if not _fits(_add_usage(effective, self._reserved_usage()), self._envelope.budget_limit):
+        if not _fits(
+            _add_usage(effective, self._reserved_usage()), self._envelope.budget_limit
+        ):
             raise AuthorityError("provider usage exceeds authority")
 
     def record_provider_usage(self, report: ProviderUsageReport) -> None:
@@ -833,6 +992,19 @@ class AuthorityLedger:
             reservation=None,
         )
 
+    def _operation_rejected(
+        self, transaction: OperationTransaction, digest: str, reason: str
+    ) -> OperationDecision:
+        return OperationDecision(
+            transaction.operation_id,
+            self._envelope.authority_id,
+            self._envelope.revision,
+            digest,
+            transaction.feature_id,
+            "rejected",
+            reason,
+        )
+
     def _rejected(
         self, action_id: str, proposal_digest: str, reason: str
     ) -> AdmissionDecision:
@@ -875,6 +1047,26 @@ def session_context_command_digest(command: SessionContextCommand) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def operation_transaction_digest(transaction: OperationTransaction) -> str:
+    if not isinstance(transaction, OperationTransaction):
+        raise AuthorityError("operation transaction is invalid")
+    encoded = json.dumps(
+        _json_value(transaction.to_mapping()),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _json_value(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {str(key): _json_value(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_json_value(item) for item in value]
+    return value
+
+
 def _validate_budget_values(value: object, label: str) -> None:
     for field in (
         "controller_tokens",
@@ -900,8 +1092,11 @@ def _monotonic(previous: BudgetUsage, current: BudgetUsage) -> bool:
     return all(
         getattr(current, field) >= getattr(previous, field)
         for field in (
-            "controller_tokens", "application_tokens", "child_tokens",
-            "aggregate_tokens", "cost_micros",
+            "controller_tokens",
+            "application_tokens",
+            "child_tokens",
+            "aggregate_tokens",
+            "cost_micros",
         )
     )
 
