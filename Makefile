@@ -33,6 +33,7 @@ ASTERION_PRIME_MAX_COST_MICROS ?=
 .PHONY: test.prime-client-protocols.provider-free
 .PHONY: test.prime-client-interactive.provider-free
 .PHONY: test.prime-client-export-share.provider-free
+.PHONY: test.prime-client-parity.provider-free
 
 help:
 	@echo "provider-free setup (network/disk; Agent operations 0; Judge operations 0): setup setup-pi setup-resources-basic setup-resources-benchmark"
@@ -232,6 +233,15 @@ test.prime-client-export-share.provider-free:
 	$(UV_BIN) run python -m unittest -v \
 		tests.test_client_export_share \
 		tests.test_prime_client_export_share
+
+test.prime-client-parity.provider-free:
+	$(UV_BIN) run python -m unittest -v \
+		tests.test_prime_client_parity \
+		tests.test_prime_parity_ledger \
+		tests.test_check_prime_parity
+	$(UV_BIN) run python tools/check_prime_parity.py \
+		--features interface.sdk,interface.cli-interactive,interface.rpc,interface.acp,interface.json-stream,interface.headless-print,interface.tui-commands,interface.tui-extension-ui,interface.export-share \
+		--provider asterion.prime-gateway
 
 prime-verify-bounded:
 	$(UV_BIN) run python tools/verify_prime_loop.py --level bounded --source-root "$(ASTERION_PRIME_SOURCE_ROOT)" --authority "$(ASTERION_PRIME_AUTHORITY)" --max-cost-micros "$(ASTERION_PRIME_MAX_COST_MICROS)"

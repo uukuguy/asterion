@@ -125,6 +125,15 @@ EXPECTED_PROVIDER_FREE_PRIME_FEATURE_IDS = (
     "harness.scope-isolation",
     "harness.skill-descriptions",
     "harness.subagent-specifications",
+    "interface.acp",
+    "interface.cli-interactive",
+    "interface.export-share",
+    "interface.headless-print",
+    "interface.json-stream",
+    "interface.rpc",
+    "interface.sdk",
+    "interface.tui-commands",
+    "interface.tui-extension-ui",
     "session.delivery",
     "session.fork-clone",
     "session.persistence-naming",
@@ -465,6 +474,38 @@ class TestPrimeParityLedger(unittest.TestCase):
         }
 
         self.assertEqual(statuses, {"missing"})
+
+    def test_client_interface_promotion_leaves_native_and_operations_missing(self) -> None:
+        ledger = validate_parity_ledger(_fixture("prime-agent-0.7.1.json"))
+        features = ledger["features"]
+        assert isinstance(features, tuple)
+        for feature in features:
+            if not isinstance(feature, Mapping):
+                continue
+            feature_id = str(feature["feature_id"])
+            if not feature_id.startswith(("interface.", "operation.")):
+                continue
+            results = {
+                str(result["provider_id"]): result
+                for result in feature["provider_results"]
+                if isinstance(result, Mapping)
+            }
+            if feature_id.startswith("interface."):
+                with self.subTest(feature_id=feature_id, provider="native"):
+                    self.assertEqual(results["asterion.native"]["status"], "missing")
+                with self.subTest(feature_id=feature_id, provider="prime"):
+                    self.assertEqual(
+                        results["asterion.prime-gateway"]["status"],
+                        "provider-free-pass",
+                    )
+            if (
+                feature["domain_id"] == "interfaces.operations"
+                and feature_id.startswith("operation.")
+            ):
+                with self.subTest(feature_id=feature_id):
+                    self.assertEqual(
+                        results["asterion.prime-gateway"]["status"], "missing"
+                    )
 
     def test_exhaustive_prime_inventory_is_exact_closed_and_honest(self) -> None:
         source = _fixture("prime-agent-0.7.1.json")

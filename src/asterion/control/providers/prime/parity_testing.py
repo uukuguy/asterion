@@ -28,6 +28,14 @@ from asterion.control.providers.prime.harness_parity_testing import (  # noqa: F
     build_prime_harness_observations,
     register_prime_harness_scenarios,
 )
+from asterion.control.providers.prime.client_parity_testing import (  # noqa: F401
+    PRIME_CLIENT_PACKAGE_FEATURES,
+    PRIME_CLIENT_SCENARIO_IDS,
+    PrimeClientParityError,
+    PrimeClientScenarioObservation,
+    build_prime_client_observations,
+    register_prime_client_scenarios,
+)
 
 
 PHASE1_PRIME_SCENARIO_IDS = (
