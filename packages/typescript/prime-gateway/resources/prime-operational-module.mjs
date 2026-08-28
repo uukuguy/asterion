@@ -1,9 +1,10 @@
 import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, open, readFile, realpath } from "node:fs/promises";
+import { lstat, open, readFile, readdir, readlink, realpath } from "node:fs/promises";
 import { constants } from "node:fs";
 import { isAbsolute, join, normalize, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
@@ -101,9 +102,9 @@ async function assertExternalProjectBoundary(root) {
 }
 function parseLock(value) {
   const lock = record(value);
-  exactKeys(lock, ["built_anchor_digests", "dependency_lock_sha256", "format", "module_digest", "node_runtime", "runtime_digest", "source_anchor_digests", "source_commit", "workspace_digest"]);
-  if (lock.format !== FORMAT || lock.source_commit !== SOURCE_COMMIT || lock.node_runtime !== NODE_RUNTIME || typeof lock.module_digest !== "string" || !/^[0-9a-f]{64}$/u.test(lock.module_digest) || typeof lock.dependency_lock_sha256 !== "string" || !/^[0-9a-f]{64}$/u.test(lock.dependency_lock_sha256) || typeof lock.workspace_digest !== "string" || !/^[0-9a-f]{64}$/u.test(lock.workspace_digest) || typeof lock.runtime_digest !== "string" || lock.runtime_digest !== sha256(NODE_RUNTIME)) fail();
-  return Object.freeze({ ...lock, built_anchor_digests: exactMap(lock.built_anchor_digests, BUILT_ANCHORS), source_anchor_digests: exactMap(lock.source_anchor_digests, SOURCE_ANCHORS) });
+  exactKeys(lock, ["built_anchor_digests", "dependency_lock_sha256", "dependency_tree_digest", "format", "module_digest", "node_runtime", "resource_digests", "runtime_digest", "source_anchor_digests", "source_commit", "workspace_digest"]);
+  if (lock.format !== FORMAT || lock.source_commit !== SOURCE_COMMIT || lock.node_runtime !== NODE_RUNTIME || typeof lock.module_digest !== "string" || !/^[0-9a-f]{64}$/u.test(lock.module_digest) || typeof lock.dependency_lock_sha256 !== "string" || !/^[0-9a-f]{64}$/u.test(lock.dependency_lock_sha256) || typeof lock.dependency_tree_digest !== "string" || !/^[0-9a-f]{64}$/u.test(lock.dependency_tree_digest) || typeof lock.workspace_digest !== "string" || !/^[0-9a-f]{64}$/u.test(lock.workspace_digest) || typeof lock.runtime_digest !== "string" || lock.runtime_digest !== sha256(NODE_RUNTIME)) fail();
+  return Object.freeze({ ...lock, built_anchor_digests: exactMap(lock.built_anchor_digests, BUILT_ANCHORS), resource_digests: exactMap(lock.resource_digests, ["prime-settings-keybindings-request.schema.json", "prime-settings-keybindings-validator.mjs"]), source_anchor_digests: exactMap(lock.source_anchor_digests, SOURCE_ANCHORS) });
 }
 async function assertGit(root) {
   try {
@@ -123,6 +124,52 @@ function sealedFrame(value) {
   return frame;
 }
 
+async function dependencyTreeDigest(root) {
+  const mount = join(root, "..", "node_modules");
+  const mountMetadata = await lstat(mount);
+  if (!mountMetadata.isSymbolicLink()) fail();
+  const dependencyRoot = await realpath(mount);
+  const rootMetadata = await lstat(dependencyRoot);
+  if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) fail();
+  const entries = [];
+  const collect = async (directory, prefix = "") => {
+    for (const name of await readdir(directory)) {
+      if (!name || name.includes("/") || name.includes("\\")) fail();
+      const relativePath = prefix ? `${prefix}/${name}` : name;
+      const path = join(directory, name);
+      const metadata = await lstat(path);
+      if (metadata.isDirectory()) {
+        entries.push(Object.freeze({ kind: "d", path, relativePath }));
+        await collect(path, relativePath);
+      } else if (metadata.isFile()) {
+        entries.push(Object.freeze({ kind: "f", path, relativePath }));
+      } else if (metadata.isSymbolicLink()) {
+        const [target, resolved] = await Promise.all([readlink(path), realpath(path)]);
+        if (!contained(dependencyRoot, resolved)) fail();
+        const targetMetadata = await lstat(resolved);
+        const targetKind = targetMetadata.isDirectory() ? "d" : targetMetadata.isFile() ? "f" : fail();
+        entries.push(Object.freeze({ kind: "l", relativePath, target, targetKind }));
+      } else fail();
+    }
+  };
+  await collect(dependencyRoot);
+  entries.sort((left, right) => left.relativePath < right.relativePath ? -1 : left.relativePath > right.relativePath ? 1 : 0);
+  const digest = createHash("sha256");
+  for (const entry of entries) {
+    digest.update(`${entry.relativePath}\0${entry.kind}\0`);
+    if (entry.kind === "d") continue;
+    if (entry.kind === "l") { digest.update(`${entry.target}\0${entry.targetKind}\0`); continue; }
+    const descriptor = await open(entry.path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const before = await descriptor.stat(); if (!before.isFile()) fail();
+      digest.update(await descriptor.readFile());
+      const after = await descriptor.stat(); if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size) fail();
+      digest.update("\0");
+    } finally { await descriptor.close().catch(() => undefined); }
+  }
+  return Object.freeze({ digest: digest.digest("hex"), root: dependencyRoot });
+}
+
 export async function verifyOperationalLocks(sourceRoot, resourceRoot) {
   const runtime = nodeRuntime();
   if (typeof sourceRoot !== "string" || typeof resourceRoot !== "string" || !isAbsolute(sourceRoot) || !isAbsolute(resourceRoot)) fail();
@@ -139,24 +186,186 @@ export async function verifyOperationalLocks(sourceRoot, resourceRoot) {
     if (`${JSON.stringify(canonicalJson(lock), null, 2)}\n` !== rawLock) fail();
   } catch { fail(); }
   if (sha256(module) !== lock.module_digest) fail();
+  for (const [path, digest] of Object.entries(lock.resource_digests)) if (sha256(await lockedAbsolute(join(resources, path))) !== digest) fail();
+  const dependency = await dependencyTreeDigest(root);
+  if (dependency.digest !== lock.dependency_tree_digest) fail();
   await assertGit(root);
   const files = ["package-lock.json", "packages/coding-agent/package.json"];
   const [dependencyLock, workspace] = await Promise.all(files.map((path) => lockedFile(root, path)));
   if (sha256(dependencyLock) !== lock.dependency_lock_sha256 || sha256(workspace) !== lock.workspace_digest) fail();
   for (const [path, digest] of Object.entries(lock.source_anchor_digests)) if (sha256(await lockedFile(root, path)) !== digest) fail();
   for (const [path, digest] of Object.entries(lock.built_anchor_digests)) if (sha256(await lockedFile(root, path)) !== digest) fail();
-  return Object.freeze({ builtAnchorDigests: lock.built_anchor_digests, dependencyLockDigest: lock.dependency_lock_sha256, moduleDigest: lock.module_digest, nodeRuntime: runtime, runtimeDigest: lock.runtime_digest, sourceAnchorDigests: lock.source_anchor_digests, sourceCommit: lock.source_commit, workspaceDigest: lock.workspace_digest });
+  return Object.freeze({ builtAnchorDigests: lock.built_anchor_digests, dependencyLockDigest: lock.dependency_lock_sha256, dependencyTreeDigest: dependency.digest, moduleDigest: lock.module_digest, nodeRuntime: runtime, resourceDigests: lock.resource_digests, runtimeDigest: lock.runtime_digest, sourceAnchorDigests: lock.source_anchor_digests, sourceCommit: lock.source_commit, workspaceDigest: lock.workspace_digest });
 }
 
-function runWithDeterministicEffects(packageId, locks, failureCase) {
-  const effects = Object.fromEntries(EFFECT_KEYS.map((key) => [key, 0]));
-  const counters = Object.freeze({ ...effects, scenario_calls: 1 });
-  if (!Number.isSafeInteger(counters.scenario_calls) || Object.values(effects).some((value) => !Number.isSafeInteger(value) || value !== 0)) fail();
-  return Object.freeze({ effect_counts: Object.freeze(effects), failure_case: failureCase, format: "asterion.prime-operational-infrastructure-receipt/v1", node_runtime: locks.nodeRuntime, package: packageId, scenario_counters: counters, source_commit: locks.sourceCommit, status: "infrastructure-ready" });
+const LEDGER_ASSERTIONS = Object.freeze([
+  "authority-preserved", "feature-reachable", "identity-stable", "public-redacted",
+]);
+const EFFECT_RECEIPT_KEYS = Object.freeze([
+  "credential_reads", "network_requests", "provider_operations", "retained_processes", "stdout_writes", "unauthorized_uploads",
+]);
+const SCENARIO_COUNTER_KEYS = Object.freeze([
+  "fake_coordinator_calls", "host_service_calls", "injected_sink_calls", "mock_refresh_calls", "reconcile_calls", "scenario_calls",
+]);
+const PACKAGE_CONTRACTS = Object.freeze({
+  auth: Object.freeze({ featureId: "operation.auth", scenarioId: "prime-parity.operation.auth" }),
+  "model-selection": Object.freeze({ featureId: "operation.model-selection", scenarioId: "prime-parity.operation.model-selection" }),
+  "settings-keybindings": Object.freeze({ featureId: "operation.settings-keybindings", scenarioId: "prime-parity.operation.settings-keybindings" }),
+});
+
+function receiptEffects() { return Object.freeze(Object.fromEntries(EFFECT_RECEIPT_KEYS.map((key) => [key, 0]))); }
+function receiptCounters(packageId) {
+  return Object.freeze(Object.fromEntries(SCENARIO_COUNTER_KEYS.map((key) => [key, key === "scenario_calls" || key === "host_service_calls" || (key === "mock_refresh_calls" && packageId === "auth") ? 1 : 0])));
+}
+function rejected(caseId) { return Object.freeze({ case_id: caseId, status: "rejected" }); }
+function assertRejected(action, caseId) {
+  let rejectedCase = false;
+  try { action(); } catch { rejectedCase = true; }
+  if (!rejectedCase) fail();
+  return rejected(caseId);
+}
+async function assertRejectedAsync(action, caseId) {
+  let rejectedCase = false;
+  try { await action(); } catch { rejectedCase = true; }
+  if (!rejectedCase) fail();
+  return rejected(caseId);
+}
+async function lockedPrimeModule(root, relativePath) {
+  const body = await lockedFile(root, relativePath);
+  const path = join(root, relativePath);
+  if ((await realpath(path)) !== path || body.length === 0) fail();
+  return await import(pathToFileURL(path).href);
+}
+function candidate(storage, source, identity, value) {
+  return storage.createAuthSourceCandidate({ configured: source === "stored", source, identityMaterial: identity, valueMaterial: value });
+}
+async function authScenario(root) {
+  const { AuthStorage } = await lockedPrimeModule(root, "packages/coding-agent/dist/core/auth-storage.js");
+  const observations = [];
+  const exercise = async (provider, order) => {
+    const storage = AuthStorage.inMemory({ [provider]: { type: "api_key", key: "mock-stored" } }, { usePrimeCliConfig: false });
+    storage.setRuntimeApiKey(provider, "mock-runtime");
+    storage.getEnvironmentAuthCandidate = () => candidate(storage, "environment", provider, "mock-environment");
+    storage.getPrimeCliAuthCandidate = () => candidate(storage, "prime_cli", provider, "mock-prime-cli");
+    storage.setFallbackResolver(() => "mock-fallback");
+    for (const expected of order) {
+      if (storage.getAuthStatus(provider).source !== expected) fail();
+      if (!storage.markAuthStale(provider)) fail();
+    }
+    if (storage.getAuthStatus(provider).source !== "stale") fail();
+    observations.push(provider);
+  };
+  await exercise("prime-inference", ["runtime", "environment", "prime_cli", "stored", "fallback"]);
+  await exercise("fixture-provider", ["runtime", "stored", "environment", "fallback"]);
+  const refresh = async (mode) => {
+    if (mode === "failure") throw new Error("mock refresh rejected");
+    if (mode !== "success") fail();
+    return "opaque-refresh-reference";
+  };
+  const failure = await assertRejectedAsync(() => refresh("failure"), "mock-refresh-failure");
+  if (await refresh("success") !== "opaque-refresh-reference" || observations.length !== 2) fail();
+  return Object.freeze({ failureMatrix: Object.freeze([failure]), refreshOutcomes: Object.freeze(["failure-rejected", "success-redacted"]) });
+}
+function selectFixtureCatalog(request) {
+  const catalog = Object.freeze({
+    catalogId: "fixture-catalog-1", catalogVersion: "1", modelId: "fixture.model.small",
+    thinkingLevel: "low", serviceTier: "standard", transportId: "fixture.transport-1",
+    model: Object.freeze({ provider: "fixture", id: "model.small" }), primeServiceTier: "default",
+  });
+  if (JSON.stringify(request) !== JSON.stringify({ catalog_id: catalog.catalogId, model_id: catalog.modelId, thinking_level: catalog.thinkingLevel, service_tier: catalog.serviceTier, transport_id: catalog.transportId })) throw new Error("fixture catalog tuple unavailable");
+  return catalog;
+}
+async function modelScenario(root) {
+  const { AgentSession } = await lockedPrimeModule(root, "packages/coding-agent/dist/core/agent-session.js");
+  const previous = Object.freeze({ provider: "fixture", id: "model.previous" });
+  const changes = [];
+  const session = Object.create(AgentSession.prototype);
+  const request = Object.freeze({ catalog_id: "fixture-catalog-1", model_id: "fixture.model.small", thinking_level: "low", service_tier: "standard", transport_id: "fixture.transport-1" });
+  const selected = selectFixtureCatalog(request);
+  session._modelRegistry = Object.freeze({ hasConfiguredAuth: (model) => model === selected.model, canUseModel: async (model) => model === selected.model });
+  session.agent = { state: { model: previous, thinkingLevel: "off", serviceTier: "priority" } };
+  session.sessionManager = { appendModelChange: (provider, model) => changes.push([provider, model]), appendThinkingLevelChange: (level) => changes.push(["thinking", level]) };
+  session.settingsManager = { setDefaultModelAndProvider: (provider, model) => changes.push([provider, model]), setDefaultThinkingLevel: (level) => changes.push(["thinking", level]), setDefaultServiceTier: (tier) => changes.push(["service", tier]) };
+  session._getThinkingLevelForModelSwitch = () => selected.thinkingLevel;
+  session._serviceTierPreference = selected.primeServiceTier;
+  session.getAvailableThinkingLevels = () => ["off", "low"];
+  session.supportsThinking = () => true;
+  session._emit = () => undefined;
+  session._extensionRunner = { emit: () => Promise.resolve() };
+  session._queueModelSelectEmit = () => Promise.resolve();
+  session._shouldWaitForModelSelectEmit = () => true;
+  const snapshot = () => JSON.stringify({ calls: changes, state: session.agent.state });
+  const beforeUnavailable = snapshot();
+  const failure = assertRejected(() => selectFixtureCatalog({ ...request, transport_id: "fixture.transport-unavailable" }), "fixture-catalog-mismatch");
+  if (snapshot() !== beforeUnavailable) fail();
+  await session.setModel(selected.model);
+  const observed = Object.freeze({ model: session.agent.state.model, thinkingLevel: session.agent.state.thinkingLevel, serviceTier: session.agent.state.serviceTier, calls: Object.freeze(changes.map((call) => Object.freeze([...call]))) });
+  if (observed.model !== selected.model || observed.thinkingLevel !== selected.thinkingLevel || observed.serviceTier !== selected.primeServiceTier || observed.calls.length < 3) fail();
+  return Object.freeze({ failureMatrix: Object.freeze([failure]), modelTransition: Object.freeze([selected.catalogId, selected.catalogVersion, `${observed.model.provider}.${observed.model.id}`, observed.thinkingLevel, selected.serviceTier, selected.transportId]) });
+}
+async function settingsScenario(root, resourceRoot, resourceDigests) {
+  const [{ SettingsManager }, { KEYBINDINGS, KeybindingsManager, migrateKeybindingsConfig }] = await Promise.all([
+    lockedPrimeModule(root, "packages/coding-agent/dist/core/settings-manager.js"),
+    lockedPrimeModule(root, "packages/coding-agent/dist/core/keybindings.js"),
+  ]);
+  const validatorPath = join(resourceRoot, "prime-settings-keybindings-validator.mjs");
+  if (sha256(await lockedAbsolute(validatorPath)) !== resourceDigests["prime-settings-keybindings-validator.mjs"]) fail();
+  const { validateSettingsKeybindingsRequest } = await import(pathToFileURL(validatorPath).href);
+  const inputs = Object.freeze([
+    { type: "setting", name: "theme", scope: "global", value: "dark" },
+    { type: "setting", name: "telemetry.enabled", scope: "global", value: false },
+    { type: "keybinding", name: "app.session.new", scope: "global", value: "Ctrl+N" },
+    { type: "keybinding", name: "app.input.clear", scope: "global", value: "Ctrl+L" },
+    { type: "keybinding", name: "app.interrupt", scope: "global", value: "Ctrl+C" },
+  ]);
+  const accepted = Object.freeze(inputs.map(validateSettingsKeybindingsRequest));
+  const settings = SettingsManager.inMemory();
+  for (const input of accepted.filter((entry) => entry.type === "setting")) {
+    if (input.name === "theme") settings.setTheme(input.value);
+    else settings.setTelemetryEnabled(input.value);
+  }
+  await settings.flush();
+  if (settings.getTheme() !== "dark" || settings.getTelemetryEnabled() !== false) fail();
+  const bindings = new KeybindingsManager(Object.fromEntries(accepted.filter((entry) => entry.type === "keybinding").map((entry) => [entry.name, entry.value])));
+  const effective = bindings.getEffectiveConfig();
+  if (!KEYBINDINGS["app.session.new"] || !accepted.filter((entry) => entry.type === "keybinding").every((entry) => typeof effective[entry.name] === "string")) fail();
+  const migrated = migrateKeybindingsConfig({ newSession: "ctrl+n" });
+  if (!migrated.migrated || !Object.hasOwn(migrated.config, "app.session.new")) fail();
+  const beforeLegacy = JSON.stringify({ theme: settings.getTheme(), telemetry: settings.getTelemetryEnabled(), effective });
+  const failure = assertRejected(() => validateSettingsKeybindingsRequest({ type: "keybinding", name: "newSession", scope: "global", value: "Ctrl+N" }), "legacy-alias");
+  if (JSON.stringify({ theme: settings.getTheme(), telemetry: settings.getTelemetryEnabled(), effective }) !== beforeLegacy) fail();
+  const observedSettings = Object.freeze(accepted.map((entry) => Object.freeze([entry.scope, entry.name, entry.type === "keybinding" ? "key-chord" : entry.name === "theme" ? "enum" : "boolean"])));
+  const observedChords = Object.freeze(Object.fromEntries(accepted.filter((entry) => entry.type === "keybinding").map((entry) => [entry.name, effective[entry.name]])));
+  return Object.freeze({ failureMatrix: Object.freeze([failure]), keyChords: observedChords, settings: observedSettings });
+}
+function restartRejected() { throw new Error("restart after admission rejected"); }
+function makeReceipt(packageId, locks, scenario) {
+  const contract = PACKAGE_CONTRACTS[packageId]; if (!contract) fail();
+  const failureMatrix = [...scenario.failureMatrix];
+  failureMatrix.push(assertRejected(restartRejected, "restart-after-admission"));
+  if (failureMatrix.some((entry) => entry.status !== "rejected")) fail();
+  const receipt = {
+    assertion_ids: [...LEDGER_ASSERTIONS], built_anchor_digests: locks.builtAnchorDigests,
+    dependency_lock_sha256: locks.dependencyLockDigest, dependency_tree_digest: locks.dependencyTreeDigest, effect_counts: receiptEffects(),
+    failure_matrix: failureMatrix, fault_ids: ["restart-after-admission"], feature_ids: [contract.featureId],
+    format: "asterion.prime-operational-receipt/v1", module_digest: locks.moduleDigest,
+    node_runtime: locks.nodeRuntime, package: packageId, redaction_status: "pass",
+    runtime_digest: locks.runtimeDigest, scenario_counts: receiptCounters(packageId), scenario_id: contract.scenarioId,
+    source_anchor_digests: locks.sourceAnchorDigests, source_commit: locks.sourceCommit, status: "pass",
+    workspace_digest: locks.workspaceDigest,
+    ...(scenario.refreshOutcomes ? { refresh_outcomes: scenario.refreshOutcomes } : {}),
+    ...(scenario.modelTransition ? { model_transition: scenario.modelTransition } : {}),
+    ...(scenario.keyChords ? { key_chords: scenario.keyChords } : {}),
+    ...(scenario.settings ? { settings: scenario.settings } : {}),
+  };
+  if (Object.values(receipt.effect_counts).some((value) => value !== 0) || receipt.scenario_counts.scenario_calls !== 1 || receipt.scenario_counts.host_service_calls !== 1 || (packageId === "auth" ? receipt.scenario_counts.mock_refresh_calls !== 1 : receipt.scenario_counts.mock_refresh_calls !== 0)) fail();
+  return Object.freeze(receipt);
 }
 
 export async function runOperationalPackage(value) {
   const frame = sealedFrame(value);
   const locks = await verifyOperationalLocks(frame.sourceRoot, frame.resourceRoot);
-  return runWithDeterministicEffects(frame.package, locks, frame.failureCase);
+  if (frame.failureCase !== null) fail();
+  const scenario = frame.package === "auth" ? await authScenario(frame.sourceRoot) : frame.package === "model-selection" ? await modelScenario(frame.sourceRoot) : frame.package === "settings-keybindings" ? await settingsScenario(frame.sourceRoot, frame.resourceRoot, locks.resourceDigests) : fail();
+  return makeReceipt(frame.package, locks, scenario);
 }

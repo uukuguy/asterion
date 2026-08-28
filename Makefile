@@ -250,6 +250,7 @@ test.prime-operational-auth.provider-free:
 		tests.test_operation_auth \
 		tests.test_prime_operational_auth
 	npm --prefix packages/typescript/asterion-runtime test
+	npm --prefix packages/typescript/prime-gateway test -- test/operational-interface.test.mjs
 
 test.prime-operational-harness.provider-free:
 	$(UV_BIN) run python -m unittest -v \
@@ -283,6 +284,7 @@ test.prime-operational-model-selection.provider-free:
 		tests.test_operation_model_selection \
 		tests.test_prime_operational_model_selection
 	npm --prefix packages/typescript/asterion-runtime test
+	npm --prefix packages/typescript/prime-gateway test -- test/operational-interface.test.mjs
 
 .PHONY: test.prime-operational-settings-keybindings.provider-free
 test.prime-operational-settings-keybindings.provider-free:
@@ -290,6 +292,7 @@ test.prime-operational-settings-keybindings.provider-free:
 		tests.test_operation_settings \
 		tests.test_prime_operational_settings
 	npm --prefix packages/typescript/asterion-runtime test
+	npm --prefix packages/typescript/prime-gateway test -- test/operational-interface.test.mjs
 
 prime-verify-bounded:
 	$(UV_BIN) run python tools/verify_prime_loop.py --level bounded --source-root "$(ASTERION_PRIME_SOURCE_ROOT)" --authority "$(ASTERION_PRIME_AUTHORITY)" --max-cost-micros "$(ASTERION_PRIME_MAX_COST_MICROS)"

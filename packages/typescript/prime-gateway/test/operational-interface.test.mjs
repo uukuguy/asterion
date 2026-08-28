@@ -22,7 +22,10 @@ test("operational loader admits only the checked-in locked resource module", asy
   assert.equal(createHash("sha256").update(bundle).digest("hex"), PRIME_OPERATIONAL_BUNDLE_DIGEST);
   assert.equal(createHash("sha256").update(lock).digest("hex"), PRIME_OPERATIONAL_MODULE_LOCK_DIGEST);
   const binding = await loadPrimeOperationalModule(paths);
+  assert.deepEqual(Object.keys(binding.module).sort(), ["runOperationalPackage", "verifyOperationalLocks"]);
   assert.equal(typeof binding.module.runOperationalPackage, "function");
+  assert.equal(typeof binding.module.verifyOperationalLocks, "function");
+  assert.ok(Object.isFrozen(binding.module));
 });
 
 test("operational loader rejects a drifted resource before import", async () => {

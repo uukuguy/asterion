@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -202,7 +203,9 @@ class OperationalHarnessLocks:
     runtime_digest: str
     module_digest: str
     dependency_lock_digest: str
+    dependency_tree_digest: str
     workspace_digest: str
+    resource_digests: Mapping[str, str]
     source_anchor_digests: Mapping[str, str]
     built_anchor_digests: Mapping[str, str]
 
@@ -373,9 +376,11 @@ def _load_operational_harness_locks(resource_root: Path) -> OperationalHarnessLo
         if not isinstance(value, dict) or set(value) != {
             "built_anchor_digests",
             "dependency_lock_sha256",
+            "dependency_tree_digest",
             "format",
             "module_digest",
             "node_runtime",
+            "resource_digests",
             "runtime_digest",
             "source_anchor_digests",
             "source_commit",
@@ -384,9 +389,14 @@ def _load_operational_harness_locks(resource_root: Path) -> OperationalHarnessLo
             raise TypeError
         source = _parse_digest_mapping(value["source_anchor_digests"])
         built = _parse_digest_mapping(value["built_anchor_digests"])
+        resource = _parse_digest_mapping(value["resource_digests"])
         if (
             tuple(source) != PRIME_OPERATIONAL_SOURCE_ANCHORS
             or tuple(built) != PRIME_OPERATIONAL_BUILT_ANCHORS
+            or tuple(resource) != (
+                "prime-settings-keybindings-request.schema.json",
+                "prime-settings-keybindings-validator.mjs",
+            )
             or value["format"] != OPERATIONAL_MODULE_LOCK_FORMAT
             or value["source_commit"] != PINNED_PRIME_COMMIT
             or value["node_runtime"] != "v22.23.2"
@@ -394,6 +404,7 @@ def _load_operational_harness_locks(resource_root: Path) -> OperationalHarnessLo
                 isinstance(value[key], str) and _SHA256.fullmatch(value[key])
                 for key in (
                     "dependency_lock_sha256",
+                    "dependency_tree_digest",
                     "module_digest",
                     "runtime_digest",
                     "workspace_digest",
@@ -410,7 +421,9 @@ def _load_operational_harness_locks(resource_root: Path) -> OperationalHarnessLo
             runtime_digest=value["runtime_digest"],
             module_digest=value["module_digest"],
             dependency_lock_digest=value["dependency_lock_sha256"],
+            dependency_tree_digest=value["dependency_tree_digest"],
             workspace_digest=value["workspace_digest"],
+            resource_digests=resource,
             source_anchor_digests=source,
             built_anchor_digests=built,
         )
@@ -469,6 +482,9 @@ def verify_operational_locks(
         _verify_locked_file_beneath(
             root, "packages/coding-agent/package.json", locks.workspace_digest
         )
+        for relative, digest in locks.resource_digests.items():
+            _verify_locked_file_beneath(resources, relative, digest)
+        _verify_operational_dependency_tree(root, locks.dependency_tree_digest)
         for relative, digest in locks.source_anchor_digests.items():
             _verify_locked_file_beneath(root, relative, digest)
         for relative, digest in locks.built_anchor_digests.items():
@@ -1179,6 +1195,80 @@ def _verify_locked_file_beneath(root: Path, relative: str, digest: str) -> Path:
         return resolved
     except (OSError, RuntimeError, ValueError):
         raise PrimeSetupError("Prime ecosystem module is invalid") from None
+
+
+def _operational_dependency_tree_digest(root: Path) -> str:
+    """Content-address the exact parent dependency mount before any Prime import."""
+
+    try:
+        mount = root.parent / "node_modules"
+        if not mount.is_symlink():
+            raise OSError
+        dependency_root = mount.resolve(strict=True)
+        if not dependency_root.is_dir() or dependency_root.is_symlink():
+            raise OSError
+        entries: list[tuple[str, str, Path | str, str | None]] = []
+
+        def collect(directory: Path, prefix: str = "") -> None:
+            for child in sorted(directory.iterdir(), key=lambda item: item.name):
+                if not child.name or "/" in child.name or "\\" in child.name:
+                    raise OSError
+                relative = f"{prefix}/{child.name}" if prefix else child.name
+                metadata = child.lstat()
+                if stat.S_ISDIR(metadata.st_mode):
+                    entries.append((relative, "d", child, None))
+                    collect(child, relative)
+                elif stat.S_ISREG(metadata.st_mode):
+                    entries.append((relative, "f", child, None))
+                elif stat.S_ISLNK(metadata.st_mode):
+                    target = os.readlink(child)
+                    resolved = child.resolve(strict=True)
+                    resolved.relative_to(dependency_root)
+                    target_metadata = resolved.lstat()
+                    if stat.S_ISDIR(target_metadata.st_mode):
+                        target_kind = "d"
+                    elif stat.S_ISREG(target_metadata.st_mode):
+                        target_kind = "f"
+                    else:
+                        raise OSError
+                    entries.append((relative, "l", target, target_kind))
+                else:
+                    raise OSError
+
+        collect(dependency_root)
+        digest = hashlib.sha256()
+        for relative, kind, target, target_kind in sorted(entries, key=lambda item: item[0]):
+            digest.update(f"{relative}\0{kind}\0".encode("utf-8"))
+            if kind == "d":
+                continue
+            if kind == "l":
+                assert isinstance(target, str) and target_kind is not None
+                digest.update(f"{target}\0{target_kind}\0".encode("utf-8"))
+                continue
+            assert isinstance(target, Path)
+            descriptor = os.open(target, os.O_RDONLY | os.O_NOFOLLOW)
+            try:
+                before = os.fstat(descriptor)
+                if not stat.S_ISREG(before.st_mode):
+                    raise OSError
+                while chunk := os.read(descriptor, 1024 * 1024):
+                    digest.update(chunk)
+                after = os.fstat(descriptor)
+                if (before.st_dev, before.st_ino, before.st_size) != (
+                    after.st_dev, after.st_ino, after.st_size
+                ):
+                    raise OSError
+                digest.update(b"\0")
+            finally:
+                os.close(descriptor)
+        return digest.hexdigest()
+    except (OSError, RuntimeError, ValueError):
+        raise PrimeSetupError("Prime operational dependency tree is invalid") from None
+
+
+def _verify_operational_dependency_tree(root: Path, expected_digest: str) -> None:
+    if _operational_dependency_tree_digest(root) != expected_digest:
+        raise PrimeSetupError("Prime operational dependency tree is invalid")
 
 
 def _resolve_locked_bundle_import(bundle_path: Path, specifier: str) -> Path:

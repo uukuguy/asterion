@@ -10,9 +10,14 @@
     "packages/coding-agent/dist/package-manager-cli.js": "2f8472b8d9de974123de3584630b92285b9ebf980d1614891980049c9752ca3c"
   },
   "dependency_lock_sha256": "39ee303bca10c0933cf917275613c8f44099f50de1650a5c356e7cda02b701e8",
+  "dependency_tree_digest": "874f48a650a1ea7d12e4b9ecfc4ce750515c1ea0642e297f43cb2c8ea9dd4a76",
   "format": "asterion.prime-operational-module-lock/v1",
-  "module_digest": "ab667efab62011ca2bf69b8b4debebbde7b04501c37000771db5ae2b5823387a",
+  "module_digest": "54d794454de24c5bec140ee0f4d5b946df829337d9ae43c9b1711b7971d5bc3d",
   "node_runtime": "v22.23.2",
+  "resource_digests": {
+    "prime-settings-keybindings-request.schema.json": "24cf569b51f0e3c1cf54d8dc3898333ac80eb062ce0f10bffb6945e31d46760a",
+    "prime-settings-keybindings-validator.mjs": "7d5e15ec89e70802f32265eefa2925786abec8f6f77b5ad950e08509e1073254"
+  },
   "runtime_digest": "ea7cd4333f84cb10727d2feeba58ddfd177c9ae35601f505e346e085280a00b6",
   "source_anchor_digests": {
     "packages/coding-agent/src/core/agent-session.ts": "44d66f879ac71e4fe1e520b19f7d1073e5311f62373ef62dd5dbee97f4f0b5e0",

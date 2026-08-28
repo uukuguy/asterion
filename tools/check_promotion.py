@@ -18,6 +18,7 @@ if __package__:
         PrimeArtifactLock,
         PrimeSetupError,
         load_prime_artifact_lock,
+        _resolve_operational_node,
         resolve_prime_ecosystem_module,
         verify_prime_checkout,
     )
@@ -26,6 +27,7 @@ else:
         PrimeArtifactLock,
         PrimeSetupError,
         load_prime_artifact_lock,
+        _resolve_operational_node,
         resolve_prime_ecosystem_module,
         verify_prime_checkout,
     )
@@ -552,6 +554,8 @@ def _run_prime_binding_command(command: tuple[str, ...], cwd: Path) -> None:
         for key in ("HOME", "LANG", "LC_ALL", "LC_CTYPE", "PATH", "TMPDIR")
         if (value := os.environ.get(key)) is not None
     }
+    node = _resolve_operational_node()
+    environment["PATH"] = f"{node.parent}:{environment.get('PATH', '')}"
     try:
         completed = subprocess.run(
             command,

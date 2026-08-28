@@ -20,8 +20,39 @@ function canonicalLock(value) {
 function argumentsFrame(values) {
   if (values.length !== 6 || values[0] !== "--resource-root" || values[2] !== "--source-root" || values[4] !== "--package") fail();
   const [, resourceRoot, , sourceRoot, , packageId] = values;
-  if (!isAbsolute(resourceRoot) || !isAbsolute(sourceRoot) || !["auth", "doctor", "model-selection", "settings-keybindings", "telemetry", "update-restart"].includes(packageId)) fail();
+  if (!isAbsolute(resourceRoot) || !isAbsolute(sourceRoot) || !["auth", "model-selection", "settings-keybindings"].includes(packageId)) fail();
   return Object.freeze({ packageId, resourceRoot, sourceRoot });
+}
+const EFFECT_KEYS = Object.freeze(["credential_reads", "network_requests", "provider_operations", "retained_processes", "stdout_writes", "unauthorized_uploads"]);
+const COUNTER_KEYS = Object.freeze(["fake_coordinator_calls", "host_service_calls", "injected_sink_calls", "mock_refresh_calls", "reconcile_calls", "scenario_calls"]);
+const ASSERTIONS = Object.freeze(["authority-preserved", "feature-reachable", "identity-stable", "public-redacted"]);
+const CONTRACTS = Object.freeze({
+  auth: Object.freeze({ feature: "operation.auth", scenario: "prime-parity.operation.auth", extra: ["refresh_outcomes"], failures: ["mock-refresh-failure", "restart-after-admission"] }),
+  "model-selection": Object.freeze({ feature: "operation.model-selection", scenario: "prime-parity.operation.model-selection", extra: ["model_transition"], failures: ["fixture-catalog-mismatch", "restart-after-admission"] }),
+  "settings-keybindings": Object.freeze({ feature: "operation.settings-keybindings", scenario: "prime-parity.operation.settings-keybindings", extra: ["key_chords", "settings"], failures: ["legacy-alias", "restart-after-admission"] }),
+});
+function exactKeys(value, expected) {
+  if (typeof value !== "object" || value === null || Array.isArray(value) || Object.keys(value).sort().join("\0") !== [...expected].sort().join("\0")) fail();
+}
+function assertReceipt(receipt, packageId, lock) {
+  const contract = CONTRACTS[packageId]; if (!contract) fail();
+  exactKeys(receipt, [
+    "assertion_ids", "built_anchor_digests", "dependency_lock_sha256", "dependency_tree_digest", "effect_counts", "failure_matrix", "fault_ids", "feature_ids", "format", "module_digest", "node_runtime", "package", "redaction_status", "runtime_digest", "scenario_counts", "scenario_id", "source_anchor_digests", "source_commit", "status", "workspace_digest", ...contract.extra,
+  ]);
+  if (receipt.format !== "asterion.prime-operational-receipt/v1" || receipt.package !== packageId || receipt.status !== "pass" || receipt.redaction_status !== "pass" || receipt.scenario_id !== contract.scenario || JSON.stringify(receipt.feature_ids) !== JSON.stringify([contract.feature]) || JSON.stringify(receipt.assertion_ids) !== JSON.stringify(ASSERTIONS) || JSON.stringify(receipt.fault_ids) !== JSON.stringify(["restart-after-admission"])) fail();
+  exactKeys(receipt.effect_counts, EFFECT_KEYS);
+  if (Object.values(receipt.effect_counts).some((value) => !Number.isSafeInteger(value) || value !== 0)) fail();
+  exactKeys(receipt.scenario_counts, COUNTER_KEYS);
+  for (const key of COUNTER_KEYS) {
+    const expected = key === "scenario_calls" || key === "host_service_calls" || (key === "mock_refresh_calls" && packageId === "auth") ? 1 : 0;
+    if (receipt.scenario_counts[key] !== expected) fail();
+  }
+  if (receipt.dependency_tree_digest !== lock.dependency_tree_digest) fail();
+  if (JSON.stringify(receipt.failure_matrix) !== JSON.stringify(contract.failures.map((case_id) => ({ case_id, status: "rejected" })))) fail();
+  if (packageId === "settings-keybindings" && canonical(receipt.key_chords) !== canonical({ "app.input.clear": "Ctrl+L", "app.interrupt": "Ctrl+C", "app.session.new": "Ctrl+N" })) fail();
+  if (packageId === "settings-keybindings" && JSON.stringify(receipt.settings) !== JSON.stringify([["global", "theme", "enum"], ["global", "telemetry.enabled", "boolean"], ["global", "app.session.new", "key-chord"], ["global", "app.input.clear", "key-chord"], ["global", "app.interrupt", "key-chord"]])) fail();
+  if (packageId === "auth" && JSON.stringify(receipt.refresh_outcomes) !== JSON.stringify(["failure-rejected", "success-redacted"])) fail();
+  if (packageId === "model-selection" && JSON.stringify(receipt.model_transition) !== JSON.stringify(["fixture-catalog-1", "1", "fixture.model.small", "low", "standard", "fixture.transport-1"])) fail();
 }
 
 async function main() {
@@ -54,12 +85,7 @@ async function main() {
     resourceRoot,
     sourceRoot: await realpath(frame.sourceRoot),
   }));
-  if (
-    receipt.format !== "asterion.prime-operational-infrastructure-receipt/v1" ||
-    receipt.package !== frame.packageId || receipt.status !== "infrastructure-ready" ||
-    Object.values(receipt.effect_counts).some((value) => value !== 0) ||
-    receipt.scenario_counters.scenario_calls !== 1
-  ) fail();
+  assertReceipt(receipt, frame.packageId, lock);
   process.stdout.write(`${canonical(receipt)}\n`);
 }
 
